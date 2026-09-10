@@ -128,12 +128,29 @@ function settingMap(rows: Array<{ key: string; value: string }>) {
   return Object.fromEntries(rows.map((row) => [row.key, row.value]));
 }
 
-async function setSetting(accountId: string, key: string, value: unknown) {
+/**
+ * One upsert for every key in `values`.
+ *
+ * This used to be a `setSetting(accountId, key, value)` called once per key,
+ * awaited in series. A Settings save sends the whole object, so a single PUT
+ * became ~30 sequential Netlify->Supabase round trips at ~217 ms each (the
+ * figure booking-core measures): comfortably past the 10 s function limit, and
+ * the failure mode was the worst possible one -- the rows written before the
+ * timeout stayed written, while the caller got an HTML error page instead of
+ * the new settings and so never refreshed. A toggle would take effect on the
+ * send path while the screen still read "Off".
+ *
+ * settingsUpsertRows already takes a whole key/value object, so the batch is
+ * one request and the write is all-or-nothing.
+ */
+async function writeSettings(accountId: string, values: Record<string, unknown>) {
+  const rows = settingsUpsertRows(accountId, values, nowIso());
+  if (!rows.length) return;
   await supabase("settings", {
     method: "POST",
     query: SETTINGS_UPSERT_QUERY,
     prefer: "resolution=merge-duplicates,return=minimal",
-    body: settingsUpsertRows(accountId, { [key]: value }, nowIso()),
+    body: rows,
   });
 }
 
@@ -180,51 +197,59 @@ async function readAdminSettings(accountId: string) {
 }
 
 async function writeAdminSettings(accountId: string, settings: any) {
-  if (hasOwn(settings, "emailNotificationsEnabled")) await setSetting(accountId, "emailNotificationsEnabled", settings?.emailNotificationsEnabled ? "true" : "false");
-  if (hasOwn(settings, "notificationEmail")) await setSetting(accountId, "notificationEmail", cleanEmail(settings?.notificationEmail, ""));
-  if (hasOwn(settings, "coachEmail")) await setSetting(accountId, "coachEmail", cleanEmail(settings?.coachEmail, ""));
-  if (hasOwn(settings, "replyToEmail")) await setSetting(accountId, "replyToEmail", cleanEmail(settings?.replyToEmail, ""));
-  if (hasOwn(settings, "googleReviewUrl")) await setSetting(accountId, "googleReviewUrl", cleanUrl(settings?.googleReviewUrl, ""));
-  if (hasOwn(settings, "notificationFromName")) await setSetting(accountId, "notificationFromName", cleanString(settings?.notificationFromName, "", 120));
-  if (hasOwn(settings, "notificationSubjectLine")) await setSetting(accountId, "notificationSubjectLine", cleanString(settings?.notificationSubjectLine, "", 180));
+  // Collected, then written in one upsert below. Staging is deliberate: a
+  // partial save is what let the reminder toggle fire without the screen ever
+  // agreeing that it was on.
+  const pending: Record<string, unknown> = {};
+  const stage = (key: string, value: unknown) => {
+    pending[key] = value;
+  };
+  if (hasOwn(settings, "emailNotificationsEnabled")) stage("emailNotificationsEnabled", settings?.emailNotificationsEnabled ? "true" : "false");
+  if (hasOwn(settings, "notificationEmail")) stage("notificationEmail", cleanEmail(settings?.notificationEmail, ""));
+  if (hasOwn(settings, "coachEmail")) stage("coachEmail", cleanEmail(settings?.coachEmail, ""));
+  if (hasOwn(settings, "replyToEmail")) stage("replyToEmail", cleanEmail(settings?.replyToEmail, ""));
+  if (hasOwn(settings, "googleReviewUrl")) stage("googleReviewUrl", cleanUrl(settings?.googleReviewUrl, ""));
+  if (hasOwn(settings, "notificationFromName")) stage("notificationFromName", cleanString(settings?.notificationFromName, "", 120));
+  if (hasOwn(settings, "notificationSubjectLine")) stage("notificationSubjectLine", cleanString(settings?.notificationSubjectLine, "", 180));
   if (hasOwn(settings, "notificationDelaySeconds")) {
     const delaySeconds = Number(settings?.notificationDelaySeconds ?? 30);
-    await setSetting(accountId, "notificationDelaySeconds", String(Number.isFinite(delaySeconds) ? Math.max(30, Math.min(3600, delaySeconds)) : 30));
+    stage("notificationDelaySeconds", String(Number.isFinite(delaySeconds) ? Math.max(30, Math.min(3600, delaySeconds)) : 30));
   }
   if (hasOwn(settings, "minBookingNoticeMinutes")) {
-    await setSetting(accountId, "minBookingNoticeMinutes", String(cleanMinBookingNoticeMinutes(settings?.minBookingNoticeMinutes)));
+    stage("minBookingNoticeMinutes", String(cleanMinBookingNoticeMinutes(settings?.minBookingNoticeMinutes)));
   }
-  if (hasOwn(settings, "sendClientEmail")) await setSetting(accountId, "sendClientEmail", settings?.sendClientEmail ? "true" : "false");
-  if (hasOwn(settings, "sendCoachEmail")) await setSetting(accountId, "sendCoachEmail", settings?.sendCoachEmail ? "true" : "false");
-  if (hasOwn(settings, "sendAdminEmail")) await setSetting(accountId, "sendAdminEmail", settings?.sendAdminEmail ? "true" : "false");
-  if (hasOwn(settings, "sendLessonTypeChangeEmail")) await setSetting(accountId, "sendLessonTypeChangeEmail", settings?.sendLessonTypeChangeEmail ? "true" : "false");
-  if (hasOwn(settings, "reminderEnabled")) await setSetting(accountId, "reminderEnabled", settings?.reminderEnabled ? "true" : "false");
-  if (hasOwn(settings, "reminderLeadMinutes")) await setSetting(accountId, "reminderLeadMinutes", String(cleanReminderLeadMinutes(settings?.reminderLeadMinutes)));
-  if (hasOwn(settings, "clientEmailSubject")) await setSetting(accountId, "clientEmailSubject", cleanString(settings?.clientEmailSubject, defaultEmailTemplates.clientEmailSubject, 180));
-  if (hasOwn(settings, "clientEmailIntro")) await setSetting(accountId, "clientEmailIntro", cleanString(settings?.clientEmailIntro, defaultEmailTemplates.clientEmailIntro, 900));
-  if (hasOwn(settings, "clientEmailFooter")) await setSetting(accountId, "clientEmailFooter", modernClientEmailFooter(settings?.clientEmailFooter));
-  if (hasOwn(settings, "adminEmailSubject")) await setSetting(accountId, "adminEmailSubject", cleanString(settings?.adminEmailSubject, defaultEmailTemplates.adminEmailSubject, 180));
-  if (hasOwn(settings, "adminEmailIntro")) await setSetting(accountId, "adminEmailIntro", cleanString(settings?.adminEmailIntro, defaultEmailTemplates.adminEmailIntro, 900));
-  if (hasOwn(settings, "smsProviderName")) await setSetting(accountId, "smsProviderName", cleanString(settings?.smsProviderName, "", 80));
-  if (hasOwn(settings, "smsWebhookUrl")) await setSetting(accountId, "smsWebhookUrl", cleanString(settings?.smsWebhookUrl, "", 600));
-  if (hasOwn(settings, "smsFromNumber")) await setSetting(accountId, "smsFromNumber", cleanString(settings?.smsFromNumber, "", 80));
-  if (hasOwn(settings, "sendClientSms")) await setSetting(accountId, "sendClientSms", settings?.sendClientSms ? "true" : "false");
-  if (hasOwn(settings, "sendAdminSms")) await setSetting(accountId, "sendAdminSms", settings?.sendAdminSms ? "true" : "false");
+  if (hasOwn(settings, "sendClientEmail")) stage("sendClientEmail", settings?.sendClientEmail ? "true" : "false");
+  if (hasOwn(settings, "sendCoachEmail")) stage("sendCoachEmail", settings?.sendCoachEmail ? "true" : "false");
+  if (hasOwn(settings, "sendAdminEmail")) stage("sendAdminEmail", settings?.sendAdminEmail ? "true" : "false");
+  if (hasOwn(settings, "sendLessonTypeChangeEmail")) stage("sendLessonTypeChangeEmail", settings?.sendLessonTypeChangeEmail ? "true" : "false");
+  if (hasOwn(settings, "reminderEnabled")) stage("reminderEnabled", settings?.reminderEnabled ? "true" : "false");
+  if (hasOwn(settings, "reminderLeadMinutes")) stage("reminderLeadMinutes", String(cleanReminderLeadMinutes(settings?.reminderLeadMinutes)));
+  if (hasOwn(settings, "clientEmailSubject")) stage("clientEmailSubject", cleanString(settings?.clientEmailSubject, defaultEmailTemplates.clientEmailSubject, 180));
+  if (hasOwn(settings, "clientEmailIntro")) stage("clientEmailIntro", cleanString(settings?.clientEmailIntro, defaultEmailTemplates.clientEmailIntro, 900));
+  if (hasOwn(settings, "clientEmailFooter")) stage("clientEmailFooter", modernClientEmailFooter(settings?.clientEmailFooter));
+  if (hasOwn(settings, "adminEmailSubject")) stage("adminEmailSubject", cleanString(settings?.adminEmailSubject, defaultEmailTemplates.adminEmailSubject, 180));
+  if (hasOwn(settings, "adminEmailIntro")) stage("adminEmailIntro", cleanString(settings?.adminEmailIntro, defaultEmailTemplates.adminEmailIntro, 900));
+  if (hasOwn(settings, "smsProviderName")) stage("smsProviderName", cleanString(settings?.smsProviderName, "", 80));
+  if (hasOwn(settings, "smsWebhookUrl")) stage("smsWebhookUrl", cleanString(settings?.smsWebhookUrl, "", 600));
+  if (hasOwn(settings, "smsFromNumber")) stage("smsFromNumber", cleanString(settings?.smsFromNumber, "", 80));
+  if (hasOwn(settings, "sendClientSms")) stage("sendClientSms", settings?.sendClientSms ? "true" : "false");
+  if (hasOwn(settings, "sendAdminSms")) stage("sendAdminSms", settings?.sendAdminSms ? "true" : "false");
   if (hasOwn(settings, "notificationTemplates")) {
-    await setSetting(accountId, "notificationTemplatesJson", JSON.stringify(cleanNotificationTemplates(settings?.notificationTemplates)));
+    stage("notificationTemplatesJson", JSON.stringify(cleanNotificationTemplates(settings?.notificationTemplates)));
   }
   if (hasOwn(settings, "mapLinkLabel")) {
-    await setSetting(accountId, "mapLinkLabel", cleanString(settings?.mapLinkLabel, DEFAULT_MAP_LINK_LABEL, 40) || DEFAULT_MAP_LINK_LABEL);
+    stage("mapLinkLabel", cleanString(settings?.mapLinkLabel, DEFAULT_MAP_LINK_LABEL, 40) || DEFAULT_MAP_LINK_LABEL);
   }
   // Written key by key like everything above rather than in a loop: the
   // "every setting the API accepts is editable somewhere" test in
   // src/uiRules.test.ts finds accepted keys by scanning for these hasOwn
   // calls, and a loop would hide these four from it.
-  if (hasOwn(settings, "playerBookingEmbedUrl")) await setSetting(accountId, "playerBookingEmbedUrl", cleanPlayerBookingEmbedUrl(settings?.playerBookingEmbedUrl));
-  if (hasOwn(settings, "playerBookingEmbedLabel")) await setSetting(accountId, "playerBookingEmbedLabel", cleanPlayerBookingEmbedLabel(settings?.playerBookingEmbedLabel));
-  if (hasOwn(settings, "playerBookingEmbedIntro")) await setSetting(accountId, "playerBookingEmbedIntro", cleanPlayerBookingEmbedIntro(settings?.playerBookingEmbedIntro));
-  if (hasOwn(settings, "playerBookingEmbedHeight")) await setSetting(accountId, "playerBookingEmbedHeight", String(cleanPlayerBookingEmbedHeight(settings?.playerBookingEmbedHeight)));
-  await setSetting(accountId, "updatedAt", nowIso());
+  if (hasOwn(settings, "playerBookingEmbedUrl")) stage("playerBookingEmbedUrl", cleanPlayerBookingEmbedUrl(settings?.playerBookingEmbedUrl));
+  if (hasOwn(settings, "playerBookingEmbedLabel")) stage("playerBookingEmbedLabel", cleanPlayerBookingEmbedLabel(settings?.playerBookingEmbedLabel));
+  if (hasOwn(settings, "playerBookingEmbedIntro")) stage("playerBookingEmbedIntro", cleanPlayerBookingEmbedIntro(settings?.playerBookingEmbedIntro));
+  if (hasOwn(settings, "playerBookingEmbedHeight")) stage("playerBookingEmbedHeight", String(cleanPlayerBookingEmbedHeight(settings?.playerBookingEmbedHeight)));
+  stage("updatedAt", nowIso());
+  await writeSettings(accountId, pending);
   return readAdminSettings(accountId);
 }
 

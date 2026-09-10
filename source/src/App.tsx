@@ -5192,6 +5192,55 @@ const defaultNotificationSettings: NotificationSettings = {
   playerBookingEmbedHeight: PLAYER_BOOKING_EMBED_DEFAULT_HEIGHT,
 };
 
+/**
+ * Which settings each Settings block is allowed to write.
+ *
+ * Every notification block edits a draft cloned from the same
+ * `notificationSettings` object, and a save used to PUT that whole draft. That
+ * was survivable while every block sat behind an Edit/Save header, because only
+ * one could be open at a time. It stops being survivable now that "What sends"
+ * saves on the flip: a block opened before the flip holds a draft that still
+ * says the toggle is off, and saving it would quietly turn the toggle back off.
+ *
+ * So a block sends only the keys it owns. The write path keys off
+ * `hasOwnProperty`, so a partial body leaves everything else alone.
+ */
+const NOTIFICATION_BLOCK_KEYS = {
+  /** Settings › Email / SMS › Sender & delivery. Text, behind Edit/Save. */
+  emailSender: [
+    "notificationFromName",
+    "replyToEmail",
+    "notificationEmail",
+    "coachEmail",
+    "notificationDelaySeconds",
+    "googleReviewUrl",
+  ],
+  /** Settings › Email / SMS › What sends. Switches, saved on the flip. */
+  emailSending: [
+    "sendClientEmail",
+    "sendCoachEmail",
+    "sendAdminEmail",
+    "sendLessonTypeChangeEmail",
+    "reminderEnabled",
+    "reminderLeadMinutes",
+  ],
+  sms: ["smsProviderName", "smsWebhookUrl", "smsFromNumber", "sendClientSms", "sendAdminSms"],
+  templates: [
+    "notificationTemplates",
+    "mapLinkLabel",
+    "notificationSubjectLine",
+    "adminEmailSubject",
+    "adminEmailIntro",
+  ],
+  bookingNotice: ["minBookingNoticeMinutes"],
+  playerBookingEmbed: [
+    "playerBookingEmbedUrl",
+    "playerBookingEmbedLabel",
+    "playerBookingEmbedIntro",
+    "playerBookingEmbedHeight",
+  ],
+} satisfies Record<string, Array<keyof NotificationSettings>>;
+
 const defaultGoogleCalendarStatus: GoogleCalendarSyncStatus = {
   configured: false,
   connected: false,
@@ -5995,23 +6044,23 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   });
   const emailNotificationsEditor = useEditableBlock<NotificationSettings>({
     value: notificationSettings,
-    onSave: saveNotificationSettings,
+    onSave: (draft) => saveNotificationSettings(draft, NOTIFICATION_BLOCK_KEYS.emailSender),
   });
   const textMachineEditor = useEditableBlock<NotificationSettings>({
     value: notificationSettings,
-    onSave: saveNotificationSettings,
+    onSave: (draft) => saveNotificationSettings(draft, NOTIFICATION_BLOCK_KEYS.sms),
   });
   const messageTemplatesEditor = useEditableBlock<NotificationSettings>({
     value: notificationSettings,
-    onSave: saveNotificationSettings,
+    onSave: (draft) => saveNotificationSettings(draft, NOTIFICATION_BLOCK_KEYS.templates),
   });
   const bookingNoticeEditor = useEditableBlock<NotificationSettings>({
     value: notificationSettings,
-    onSave: saveNotificationSettings,
+    onSave: (draft) => saveNotificationSettings(draft, NOTIFICATION_BLOCK_KEYS.bookingNotice),
   });
   const playerBookingEmbedEditor = useEditableBlock<NotificationSettings>({
     value: notificationSettings,
-    onSave: saveNotificationSettings,
+    onSave: (draft) => saveNotificationSettings(draft, NOTIFICATION_BLOCK_KEYS.playerBookingEmbed),
   });
   const bookingScreenNameEditor = useEditableBlock<Record<string, string>>({
     value: bookingScreenNames,
@@ -6221,6 +6270,94 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     value: NotificationSettings[keyof NotificationSettings],
   ) {
     editor.setDraftValue((current) => ({ ...current, [field]: value }));
+  }
+
+  // Settings › Email / SMS › What sends. No Edit/Save header: a switch is not a
+  // form, and the old shared header was the reason a coach could flip the
+  // reminder on, see reminders go out, and still read "Off" on the card.
+  //
+  // Each flip PUTs only its own key and then takes the server's answer, so what
+  // the card shows is what the send path will actually do.
+  const [sendingRuleSaving, setSendingRuleSaving] = useState<keyof NotificationSettings | "">("");
+  // What the coach just clicked, held only until the server answers. Without it
+  // the switch is bound to the saved value, so a click would visibly snap back
+  // and sit there for the length of the round trip before flipping — which is a
+  // smaller version of the exact confusion this card exists to fix.
+  const [sendingRulePending, setSendingRulePending] = useState<Partial<NotificationSettings>>({});
+  const [sendingRuleSaved, setSendingRuleSaved] = useState<keyof NotificationSettings | "">("");
+  const [sendingRuleError, setSendingRuleError] = useState("");
+  const sendingRuleSavedTimeoutRef = useRef<number | null>(null);
+
+  useEffect(
+    () => () => {
+      if (sendingRuleSavedTimeoutRef.current !== null) window.clearTimeout(sendingRuleSavedTimeoutRef.current);
+    },
+    [],
+  );
+
+  async function commitSendingRule(field: keyof NotificationSettings, patch: Partial<NotificationSettings>) {
+    if (sendingRuleSaving) return;
+    if (sendingRuleSavedTimeoutRef.current !== null) window.clearTimeout(sendingRuleSavedTimeoutRef.current);
+    setSendingRuleSaving(field);
+    setSendingRulePending(patch);
+    setSendingRuleError("");
+    try {
+      await saveNotificationSettings(
+        { ...notificationSettings, ...patch },
+        Object.keys(patch) as Array<keyof NotificationSettings>,
+      );
+      setSendingRuleSaved(field);
+      sendingRuleSavedTimeoutRef.current = window.setTimeout(() => setSendingRuleSaved(""), 1600);
+    } catch (error) {
+      // saveNotificationSettings has already toasted; this is the message that
+      // stays on the row that failed, so the switch is not left looking saved.
+      setSendingRuleError(error instanceof Error ? error.message : "Could not save this setting.");
+    } finally {
+      // Cleared either way: on success the server's answer is already in
+      // notificationSettings, and on failure the switch must go back to telling
+      // the truth rather than staying where it was clicked.
+      setSendingRulePending({});
+      setSendingRuleSaving("");
+    }
+  }
+
+  /** The switch position: what was just clicked while it saves, else what is stored. */
+  function sendingRuleChecked(field: keyof NotificationSettings) {
+    const pending = sendingRulePending[field];
+    return typeof pending === "boolean" ? pending : Boolean(notificationSettings[field]);
+  }
+
+  // The reminder lead time is two number inputs rather than a switch, so it
+  // commits when the coach leaves the field instead of on every keystroke.
+  // It lives beside its toggle rather than in the form block: "send a reminder"
+  // and "how long before" are one decision, and splitting them across two cards
+  // with different save rules is how the screen got confusing in the first place.
+  const [reminderLeadDraft, setReminderLeadDraft] = useState<number | null>(null);
+  const reminderLeadMinutes = reminderLeadDraft ?? notificationSettings.reminderLeadMinutes;
+
+  function commitReminderLead() {
+    const next = reminderLeadDraft;
+    if (next === null) return;
+    if (next === notificationSettings.reminderLeadMinutes) {
+      setReminderLeadDraft(null);
+      return;
+    }
+    void commitSendingRule("reminderLeadMinutes", { reminderLeadMinutes: next }).finally(() =>
+      setReminderLeadDraft(null),
+    );
+  }
+
+  /** The inline "Saving…/Saved" that stands in for this card's missing Save button. */
+  function sendingRuleStatus(field: keyof NotificationSettings) {
+    if (sendingRuleSaving === field) return <em className="sending-rule-state">Saving…</em>;
+    if (sendingRuleSaved === field)
+      return (
+        <em className="sending-rule-state is-saved" aria-live="polite">
+          <Check size={13} />
+          Saved
+        </em>
+      );
+    return null;
   }
 
   useEffect(() => {
@@ -7924,7 +8061,21 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           statusText,
         };
       }
-      const text = await response.text();
+      // Not JSON. On Netlify that means the platform answered instead of the
+      // function -- a gateway timeout or a crash -- and the body is a full HTML
+      // error page. Pasting 280 characters of markup into the settings card is
+      // what "a big netlify error" looked like, and it tells the coach nothing.
+      const text = (await response.text()).trim();
+      const isHtml = /^<(?:!doctype|html)\b/i.test(text);
+      if (isHtml) {
+        return {
+          message:
+            response.status === 504 || response.status === 502
+              ? "The server took too long to answer, so it is not clear whether this saved. Reload the page to see what stuck."
+              : "The server returned an error page instead of a result.",
+          statusText,
+        };
+      }
       return { message: text ? text.slice(0, 280) : fallback, statusText };
     } catch {
       return { message: fallback, statusText };
@@ -17616,7 +17767,17 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     setCalendarSaveError("");
   }
 
-  async function saveNotificationSettings(draft = notificationSettings): Promise<NotificationSettings> {
+  /**
+   * PUT the notification settings.
+   *
+   * `keys` narrows the body to the settings the caller owns; without it the
+   * whole object goes, which is still what the blocks that own a whole screen
+   * do. See NOTIFICATION_BLOCK_KEYS for why the narrowing matters.
+   */
+  async function saveNotificationSettings(
+    draft = notificationSettings,
+    keys?: ReadonlyArray<keyof NotificationSettings>,
+  ): Promise<NotificationSettings> {
     const saveVersion = ++settingsSaveVersionRef.current;
     beginAdminSave("settings");
     const isCurrentSave = () => settingsSaveVersionRef.current === saveVersion;
@@ -17626,7 +17787,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       const response = await fetch("/api/admin-settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(draft),
+        body: JSON.stringify(
+          keys ? Object.fromEntries(keys.map((key) => [key, draft[key]])) : draft,
+        ),
       });
       if (response.status === 401) {
         setAuthStatus("guest");
@@ -29392,16 +29555,23 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 </details>
               </SettingsGroup>
 
-              {/* Settings › Email / SMS › Email. How email leaves the building:
-                  who it comes from, who it goes to, and when. What it says is
+              {/* Settings › Email / SMS › Sender & delivery. Who email comes
+                  from, who it goes to, and how long it waits. What it says is
                   in Notifications › Templates and not here — the sender name
                   and the reply-to address used to sit inside a card called
                   "Email template", which is how one screen ended up owning both
-                  halves of the question. */}
-              <SettingsGroup id="email-notifications" section="email-sms" title="Email" className="notification-card">
+                  halves of the question.
+
+                  *Whether* anything sends is the next card down. This one is a
+                  form and keeps its Edit/Save; that card is switches and saves
+                  on the flip. They were one block until a coach turned the
+                  reminder on, watched reminders go out, and still read "Off"
+                  here — a half-written save that the shared header had no way
+                  to show. */}
+              <SettingsGroup id="email-notifications" section="email-sms" title="Sender & delivery" className="notification-card">
                 <EditableSettingsBlock
                   id="email-notifications-block"
-                  title="Email"
+                  title="Sender & delivery"
                   status={emailNotificationsEditor.status}
                   dirty={emailNotificationsEditor.dirty}
                   errorMessage={emailNotificationsEditor.errorMessage}
@@ -29411,24 +29581,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 >
                 <div className="settings-summary-grid">
                   <span>
+                    <strong>{notificationSettings.notificationFromName || "Not set"}</strong>
+                    from
+                  </span>
+                  <span>
+                    <strong>{notificationSettings.replyToEmail || coachAccount.contactEmail || "Not set"}</strong>
+                    reply-to
+                  </span>
+                  <span>
                     <strong>{notificationSettings.notificationDelaySeconds}s</strong>
                     delay
-                  </span>
-                  <span>
-                    <strong>{notificationSettings.sendClientEmail ? "On" : "Off"}</strong>
-                    customer
-                  </span>
-                  <span>
-                    <strong>{notificationSettings.sendCoachEmail ? "On" : "Off"}</strong>
-                    coach
-                  </span>
-                  <span>
-                    <strong>{notificationSettings.sendAdminEmail ? "On" : "Off"}</strong>
-                    admin
-                  </span>
-                  <span>
-                    <strong>{notificationSettings.reminderEnabled ? "On" : "Off"}</strong>
-                    reminder
                   </span>
                 </div>
                 <details className="settings-subsection">
@@ -29524,135 +29686,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 </details>
                 <details className="settings-subsection">
                   <summary className="settings-subsection-title">
-                    <Check size={18} />
-                    <div>
-                      <span>Send rules</span>
-                      <strong>
-                        {[
-                          notificationSettings.sendClientEmail && "Customer",
-                          notificationSettings.sendCoachEmail && "Coach",
-                          notificationSettings.sendAdminEmail && "Admin",
-                        ]
-                          .filter(Boolean)
-                          .join(" and ") || "Off"}
-                      </strong>
-                    </div>
-                  </summary>
-                  <label className="settings-toggle">
-                    <input
-                      checked={emailNotificationsDraft.sendClientEmail}
-                      disabled={emailNotificationsIsLocked}
-                      onChange={(event) => updateNotificationBlockDraft(emailNotificationsEditor, "sendClientEmail", event.target.checked)}
-                      type="checkbox"
-                    />
-                    <span>Send client confirmation email</span>
-                  </label>
-                  <label className="settings-toggle">
-                    <input
-                      checked={emailNotificationsDraft.sendCoachEmail}
-                      disabled={emailNotificationsIsLocked}
-                      onChange={(event) => updateNotificationBlockDraft(emailNotificationsEditor, "sendCoachEmail", event.target.checked)}
-                      type="checkbox"
-                    />
-                    <span>Send coach booking alert</span>
-                  </label>
-                  <label className="settings-toggle">
-                    <input
-                      checked={emailNotificationsDraft.sendAdminEmail}
-                      disabled={emailNotificationsIsLocked}
-                      onChange={(event) => updateNotificationBlockDraft(emailNotificationsEditor, "sendAdminEmail", event.target.checked)}
-                      type="checkbox"
-                    />
-                    <span>Send admin booking alert</span>
-                  </label>
-                  <label className="settings-toggle">
-                    <input
-                      checked={emailNotificationsDraft.sendLessonTypeChangeEmail}
-                      disabled={emailNotificationsIsLocked}
-                      onChange={(event) =>
-                        updateNotificationBlockDraft(emailNotificationsEditor, "sendLessonTypeChangeEmail", event.target.checked)
-                      }
-                      type="checkbox"
-                    />
-                    <span>Email when a lesson type changes</span>
-                  </label>
-                  <p className="field-help">
-                    Off by default. Switching a booking between lesson types on the lesson card stays silent, so
-                    tidying your own calendar doesn't mail the client. Real reschedules still send either way.
-                  </p>
-                </details>
-                <details className="settings-subsection">
-                  <summary className="settings-subsection-title">
-                    <Mail size={18} />
-                    <div>
-                      <span>Lesson reminder</span>
-                      <strong>
-                        {notificationSettings.reminderEnabled
-                          ? `${reminderLeadLabel(notificationSettings.reminderLeadMinutes)} before`
-                          : "Off"}
-                      </strong>
-                    </div>
-                  </summary>
-                  <label className="settings-toggle">
-                    <input
-                      checked={emailNotificationsDraft.reminderEnabled}
-                      disabled={emailNotificationsIsLocked}
-                      onChange={(event) => updateNotificationBlockDraft(emailNotificationsEditor, "reminderEnabled", event.target.checked)}
-                      type="checkbox"
-                    />
-                    <span>Send clients a reminder email before their lesson</span>
-                  </label>
-                  <div className="settings-field-row">
-                    <label className="settings-field">
-                      <span>Days before</span>
-                      <input
-                        value={Math.floor(emailNotificationsDraft.reminderLeadMinutes / 1440)}
-                        readOnly={emailNotificationsIsLocked}
-                        min={0}
-                        max={14}
-                        inputMode="numeric"
-                        type="number"
-                        onChange={(event) =>
-                          updateNotificationBlockDraft(
-                            emailNotificationsEditor,
-                            "reminderLeadMinutes",
-                            reminderLeadMinutesFrom(
-                              clamp(Number(event.target.value || 0), 0, 14),
-                              Math.round((emailNotificationsDraft.reminderLeadMinutes % 1440) / 60),
-                            ),
-                          )
-                        }
-                      />
-                    </label>
-                    <label className="settings-field">
-                      <span>Hours before</span>
-                      <input
-                        value={Math.round((emailNotificationsDraft.reminderLeadMinutes % 1440) / 60)}
-                        readOnly={emailNotificationsIsLocked}
-                        min={0}
-                        max={23}
-                        inputMode="numeric"
-                        type="number"
-                        onChange={(event) =>
-                          updateNotificationBlockDraft(
-                            emailNotificationsEditor,
-                            "reminderLeadMinutes",
-                            reminderLeadMinutesFrom(
-                              Math.floor(emailNotificationsDraft.reminderLeadMinutes / 1440),
-                              clamp(Number(event.target.value || 0), 0, 23),
-                            ),
-                          )
-                        }
-                      />
-                    </label>
-                  </div>
-                  <p className="field-help">
-                    Sent once per lesson, to the client only. A lesson booked inside the reminder window skips the
-                    reminder — the confirmation email they just received already has the details.
-                  </p>
-                </details>
-                <details className="settings-subsection">
-                  <summary className="settings-subsection-title">
                     <ExternalLink size={18} />
                     <div>
                       <span>Google review link</span>
@@ -29703,6 +29736,135 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   </button>
                 </details>
                 </EditableSettingsBlock>
+              </SettingsGroup>
+
+              {/* Settings › Email / SMS › What sends. Deliberately not an
+                  EditableSettingsBlock: there is no Edit, no Cancel and no Save
+                  here, because a switch already is the decision. Each row saves
+                  itself and then renders whatever the server sent back, so the
+                  card cannot drift from the send path the way the old shared
+                  block did. */}
+              <SettingsGroup id="email-sending-rules" section="email-sms" title="What sends" className="notification-card">
+                <section className="sending-rules" id="email-sending-rules-block">
+                  <div className="sending-rules-head">
+                    <span>What sends</span>
+                    <em>Each switch saves on its own — there is nothing to press.</em>
+                  </div>
+                  <label className="settings-toggle sending-rule">
+                    <input
+                      checked={sendingRuleChecked("sendClientEmail")}
+                      disabled={sendingRuleSaving !== ""}
+                      onChange={(event) => void commitSendingRule("sendClientEmail", { sendClientEmail: event.target.checked })}
+                      type="checkbox"
+                    />
+                    <span>Send client confirmation email</span>
+                    {sendingRuleStatus("sendClientEmail")}
+                  </label>
+                  <label className="settings-toggle sending-rule">
+                    <input
+                      checked={sendingRuleChecked("sendCoachEmail")}
+                      disabled={sendingRuleSaving !== ""}
+                      onChange={(event) => void commitSendingRule("sendCoachEmail", { sendCoachEmail: event.target.checked })}
+                      type="checkbox"
+                    />
+                    <span>Send coach booking alert</span>
+                    {sendingRuleStatus("sendCoachEmail")}
+                  </label>
+                  <label className="settings-toggle sending-rule">
+                    <input
+                      checked={sendingRuleChecked("sendAdminEmail")}
+                      disabled={sendingRuleSaving !== ""}
+                      onChange={(event) => void commitSendingRule("sendAdminEmail", { sendAdminEmail: event.target.checked })}
+                      type="checkbox"
+                    />
+                    <span>Send admin booking alert</span>
+                    {sendingRuleStatus("sendAdminEmail")}
+                  </label>
+                  <label className="settings-toggle sending-rule">
+                    <input
+                      checked={sendingRuleChecked("sendLessonTypeChangeEmail")}
+                      disabled={sendingRuleSaving !== ""}
+                      onChange={(event) =>
+                        void commitSendingRule("sendLessonTypeChangeEmail", {
+                          sendLessonTypeChangeEmail: event.target.checked,
+                        })
+                      }
+                      type="checkbox"
+                    />
+                    <span>Email when a lesson type changes</span>
+                    {sendingRuleStatus("sendLessonTypeChangeEmail")}
+                  </label>
+                  <p className="field-help">
+                    Off by default. Switching a booking between lesson types on the lesson card stays silent, so
+                    tidying your own calendar doesn't mail the client. Real reschedules still send either way.
+                  </p>
+
+                  <label className="settings-toggle sending-rule">
+                    <input
+                      checked={sendingRuleChecked("reminderEnabled")}
+                      disabled={sendingRuleSaving !== ""}
+                      onChange={(event) => void commitSendingRule("reminderEnabled", { reminderEnabled: event.target.checked })}
+                      type="checkbox"
+                    />
+                    <span>Send clients a reminder email before their lesson</span>
+                    {sendingRuleStatus("reminderEnabled")}
+                  </label>
+                  {notificationSettings.reminderEnabled && (
+                    <>
+                      <div className="settings-field-row">
+                        <label className="settings-field">
+                          <span>Days before</span>
+                          <input
+                            value={Math.floor(reminderLeadMinutes / 1440)}
+                            min={0}
+                            max={14}
+                            inputMode="numeric"
+                            type="number"
+                            onBlur={commitReminderLead}
+                            onChange={(event) =>
+                              setReminderLeadDraft(
+                                reminderLeadMinutesFrom(
+                                  clamp(Number(event.target.value || 0), 0, 14),
+                                  Math.round((reminderLeadMinutes % 1440) / 60),
+                                ),
+                              )
+                            }
+                          />
+                        </label>
+                        <label className="settings-field">
+                          <span>Hours before</span>
+                          <input
+                            value={Math.round((reminderLeadMinutes % 1440) / 60)}
+                            min={0}
+                            max={23}
+                            inputMode="numeric"
+                            type="number"
+                            onBlur={commitReminderLead}
+                            onChange={(event) =>
+                              setReminderLeadDraft(
+                                reminderLeadMinutesFrom(
+                                  Math.floor(reminderLeadMinutes / 1440),
+                                  clamp(Number(event.target.value || 0), 0, 23),
+                                ),
+                              )
+                            }
+                          />
+                        </label>
+                      </div>
+                      <p className="field-help">
+                        Currently {reminderLeadLabel(notificationSettings.reminderLeadMinutes)} before the lesson.
+                        Saved when you leave the box. Sent once per lesson, to the client only — a lesson booked
+                        inside the reminder window skips it, because the confirmation they just received already has
+                        the details.
+                      </p>
+                    </>
+                  )}
+                  {sendingRuleError ? (
+                    <p className="workspace-save-error" role="alert">
+                      {sendingRuleError}
+                    </p>
+                  ) : null}
+                </section>
               </SettingsGroup>
 
               {/* Settings › Email / SMS › SMS. The provider wiring only. The

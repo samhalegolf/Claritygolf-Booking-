@@ -493,11 +493,20 @@ test("every notification setting the API accepts is editable somewhere", () => {
   assert.ok(accepted.length > 10, "writeAdminSettings not found — has admin-settings.mts been restructured?");
 
   const app = readFileSync(path.join(SRC, "App.tsx"), "utf8");
-  // The binding is `updateNotificationBlockDraft(someEditor, "field", value)`,
-  // often wrapped across lines by the formatter.
-  const bound = new Set(
-    [...app.matchAll(/updateNotificationBlockDraft\(\s*[A-Za-z]+,\s*"([A-Za-z]+)"/gs)].map((match) => match[1]),
-  );
+  // Two binding shapes, because a setting reaches the server two ways.
+  //
+  //   updateNotificationBlockDraft(someEditor, "field", value)
+  //     stages an edit in a block that has an Edit/Save header;
+  //   commitSendingRule("field", { field: value })
+  //     saves on the spot, for the switches in "What sends" that have no
+  //     Save button to press.
+  //
+  // Both are "editable somewhere", which is what this test is about. Either is
+  // often wrapped across lines by the formatter, hence the /s.
+  const bound = new Set([
+    ...[...app.matchAll(/updateNotificationBlockDraft\(\s*[A-Za-z]+,\s*"([A-Za-z]+)"/gs)].map((match) => match[1]),
+    ...[...app.matchAll(/commitSendingRule\(\s*"([A-Za-z]+)"/gs)].map((match) => match[1]),
+  ]);
 
   /** Stored and sent, but with no input on purpose. The reason is the value. */
   const notEditable: Record<string, string> = {

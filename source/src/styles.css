@@ -3226,7 +3226,11 @@ button {
   min-height: 34px;
 }
 
-.editable-settings-saved {
+/* Scoped to its container, not left as a bare class: this badge is a <span>
+   inside a .data-card, and `.data-card span` is 0-1-1 with a green single-class
+   rule at 0-1-0 losing to it outright. Defining --success was only half the
+   fix — the colour was being dropped twice over. */
+.editable-settings-block-actions .editable-settings-saved {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -3238,6 +3242,86 @@ button {
 .editable-settings-block-body {
   display: grid;
   gap: 12px;
+}
+
+/* Settings › Email / SMS › What sends.
+ *
+ * Shaped like .editable-settings-block on purpose — it sits directly under one
+ * — but it has no header actions, because nothing here is pending. Every text
+ * colour is scoped under .sending-rules rather than set on a bare class: these
+ * mount inside a .data-card, whose `.data-card p/span/em` rules are 0-1-1 and
+ * beat a single class outright. */
+.sending-rules {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel) 82%, var(--panel-soft));
+}
+
+.sending-rules .sending-rules-head {
+  display: grid;
+  gap: 2px;
+  min-height: 38px;
+  align-content: center;
+  margin-bottom: 4px;
+}
+
+.sending-rules .sending-rules-head span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.sending-rules .sending-rules-head em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+/* The switch row carries its own result where a Save button would have been. */
+.sending-rules .settings-toggle.sending-rule {
+  gap: 10px;
+}
+
+/* `.data-card span` is 0-1-1 and drops every span in here to 12px muted — the
+   colour meant for a caption, applied to the sentence that IS this card. These
+   labels are the content, so they read as body text. Scoped to .sending-rules:
+   the same span rule catches every settings toggle in the app, and quietly
+   restyling all of them is not this change's business. */
+.sending-rules .settings-toggle.sending-rule > span {
+  color: var(--text);
+  font-size: 14px;
+}
+
+.sending-rules .sending-rule-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.sending-rules .sending-rule-state.is-saved {
+  /* Reads --c-* directly, which is the direction the compatibility layer on
+     .app-shell is meant to shrink in. --success now resolves too. */
+  color: var(--c-success-text);
+}
+
+/* A flip is in flight: every other switch is inert until it lands, so two
+   half-saved rules can never race each other onto the same screen. */
+.sending-rules .settings-toggle input:disabled + span {
+  opacity: 0.72;
+}
+
+.sending-rules .settings-field-row {
+  margin-top: 4px;
 }
 
 .settings-field input:read-only,
@@ -4410,6 +4494,14 @@ button {
   --primary-text: var(--c-accent-text);
   --danger: var(--c-danger);
   --danger-soft: #fff1ed;
+  /* --success was missing from this list until 2026-09-11, so every
+     `color: var(--success)` was dropped at computed-value time and the element
+     inherited body text instead: .editable-settings-saved, the "Saved" badge on
+     every settings block, had never once rendered green. The token test only
+     walks --c-* and --dark-* names, so nothing caught it.
+     No dark twin needed — --c-success-text is swapped by both dark triggers in
+     tokens.css, so this alias follows the theme on its own. */
+  --success: var(--c-success-text);
   --success-soft: #eaf8ed;
   --grid-bg: #eef1ea;
   --grid-line: #dce2d7;
@@ -12752,6 +12844,7 @@ button {
 .settings-page .brand-vein-card,
 .settings-page .editable-settings-block,
 .settings-page .editable-settings-block-body,
+.settings-page .sending-rules,
 .settings-page .booking-page-settings,
 .settings-page .account-settings-groups,
 .settings-page .storage-card,
