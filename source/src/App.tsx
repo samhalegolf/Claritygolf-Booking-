@@ -5658,6 +5658,35 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const [invoiceIssueState, setInvoiceIssueState] = useState<"idle" | "saving">("idle");
   const [invoiceSendState, setInvoiceSendState] = useState<"idle" | "sending">("idle");
   const [clarityPayState, setClarityPayState] = useState<"idle" | "loading">("idle");
+  // "Include payment link" beside the send buttons: the emailed invoice carries
+  // a Clarity Pay link the client can pay from. A send preference, not a
+  // property of any one invoice, so it deliberately survives resetInvoiceDraft -
+  // a coach who bills this way bills every invoice this way.
+  //
+  // It arrives ticked once we know Clarity Pay is actually configured (see the
+  // effect below), which is why it starts false: the honest default before the
+  // answer is back is "no link", not a tick that might have to be taken away.
+  const [includePaymentLink, setIncludePaymentLink] = useState(false);
+  const [clarityPayConfigured, setClarityPayConfigured] = useState(false);
+  // Set the moment the coach touches the toggle, so arriving Clarity Pay config
+  // never overrides a choice they have already made on this screen.
+  const paymentLinkChosenRef = useRef(false);
+  // The lessons a save was refused over: which booking, and which invoice is
+  // holding it. Set from the server's 409 so the warning can name them, and so
+  // "Publish anyway" can repeat the exact save that was refused.
+  const [bookingConflicts, setBookingConflicts] = useState<Array<{
+    bookingId: string;
+    invoiceNumber: string;
+  }>>([]);
+  const [conflictRetryMode, setConflictRetryMode] = useState<"draft" | "publish" | "publish-send">("publish");
+
+  // Tick "Include payment link" once we hear back that Clarity Pay is set up.
+  // Only ever ticks it on, and only while the coach has not touched it: turning
+  // it off has to stick, and the arriving config must not quietly re-tick it.
+  useEffect(() => {
+    if (!clarityPayConfigured || paymentLinkChosenRef.current) return;
+    setIncludePaymentLink(true);
+  }, [clarityPayConfigured]);
   const [recentInvoices, setRecentInvoices] = useState<BillingInvoiceRecord[]>([]);
   // The full invoice list backs the dedicated Invoices tab (loaded lazily when
   // that tab opens); the Dashboard keeps showing recentInvoices unchanged.
@@ -15427,8 +15456,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       return;
     }
     if (!response.ok) throw new Error(await readApiFailure(response, "Could not load payment methods."));
-    const data = (await response.json()) as { paymentMethods?: PosPaymentMethod[] };
+    const data = (await response.json()) as {
+      paymentMethods?: PosPaymentMethod[];
+      clarityPayConfigured?: boolean;
+    };
     setPosPaymentMethods(Array.isArray(data.paymentMethods) ? data.paymentMethods : []);
+    setClarityPayConfigured(data.clarityPayConfigured === true);
   }
 
   function posRangeQuery() {
@@ -16526,6 +16559,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     setOpenedInvoiceSentAt("");
     setActiveInvoiceAmountPaid(0);
     setReviseSource(null);
+    setBookingConflicts([]);
     setInvoiceEditing(true);
     setSelectedDiscountPresetId("");
     setDiscountEditing(false);
@@ -16622,6 +16656,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setDatesEditing(false);
       setNewInvoiceCustomer(null);
       setReviseSource(null);
+      setBookingConflicts([]);
       setActiveInvoiceId(String(invoice.id || record.id));
       setEditingInvoiceNumber(String(invoice.invoiceNumber || record.invoiceNumber));
       setOpenedInvoiceStatus((invoice.status as BillingInvoiceStatus) || "draft");
@@ -16691,22 +16726,71 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
       cache: "no-store",
-      body: JSON.stringify({}),
+      body: JSON.stringify({ includePaymentLink }),
     });
     if (response.status === 401) {
       setAuthStatus("guest");
       throw new Error("Admin login required");
     }
-    const data = (await response.json().catch(() => null)) as { recipient?: string; message?: string } | null;
+    const data = (await response.json().catch(() => null)) as
+      | { recipient?: string; message?: string; paymentLinkUrl?: string }
+      | null;
     if (!response.ok) throw new Error(data?.message || (await readApiFailure(response, "Could not send invoice.")));
-    return data?.recipient || "";
+    // paymentLinkUrl comes back empty when the toggle was off, and also when
+    // there was nothing left to pay - the toast says which happened rather than
+    // claiming a link went out that didn't.
+    return { recipient: data?.recipient || "", paymentLinkUrl: data?.paymentLinkUrl || "" };
+  }
+
+  // What the billing API answers a refused save with. `conflicts` is only on a
+  // BOOKING_ALREADY_INVOICED 409 and names each lesson and the invoice holding
+  // it, which is what the warning below turns into something readable.
+  type InvoiceSaveFailure = {
+    error?: string;
+    message?: string;
+    conflicts?: Array<{ bookingId?: string; invoiceNumber?: string }>;
+  };
+
+  // Turn a refusal into the standing warning beside the buttons. Anything that
+  // isn't a booking conflict clears it - a stale list of lessons next to an
+  // unrelated error would send the coach after the wrong problem.
+  function noteBookingConflicts(data: InvoiceSaveFailure | null, mode: "draft" | "publish" | "publish-send") {
+    if (data?.error !== "BOOKING_ALREADY_INVOICED") {
+      setBookingConflicts([]);
+      return;
+    }
+    // Re-read the markers: the conflict is the server telling us our picture of
+    // what is invoiced is out of date.
+    void fetchInvoicedBookingIds(completedAppointments.map((item) => item.id));
+    setConflictRetryMode(mode);
+    setBookingConflicts(
+      (data.conflicts || [])
+        .map((conflict) => ({
+          bookingId: String(conflict?.bookingId || ""),
+          invoiceNumber: String(conflict?.invoiceNumber || ""),
+        }))
+        .filter((conflict) => conflict.bookingId),
+    );
+  }
+
+  // Name a conflicting lesson the way the coach would recognise it: the line as
+  // it reads on this invoice, with its service date. Falls back to the calendar
+  // item, and then to something honest rather than a bare uuid.
+  function bookingConflictLabel(bookingId: string) {
+    const line = invoiceDraft.lines.find((entry) => entry.source === "booking_snapshot" && entry.sourceId === bookingId);
+    if (line?.description.trim()) {
+      return line.serviceDate ? `${line.description.trim()} (${line.serviceDate})` : line.description.trim();
+    }
+    const item = items.find((entry) => entry.id === bookingId);
+    if (item) return `${item.title}${item.client ? ` - ${item.client}` : ""}`;
+    return "A lesson on this invoice";
   }
 
   // Save the current invoice. "draft" keeps it a draft; "publish" commits it
   // (status sent, not emailed); "publish-send" also emails the PDF. An existing
   // draft is updated in place; a new invoice or a revision creates a fresh one
   // (and, when revising a committed invoice, voids the original).
-  async function commitInvoice(mode: "draft" | "publish" | "publish-send") {
+  async function commitInvoice(mode: "draft" | "publish" | "publish-send", { force = false } = {}) {
     const { hasLines, body } = invoiceApiBody();
     if (!hasLines) {
       setToast({ message: "Add at least one invoice line first." });
@@ -16733,15 +16817,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           credentials: "same-origin",
           headers: { "Content-Type": "application/json" },
           cache: "no-store",
-          body: JSON.stringify(body),
+          body: JSON.stringify({ ...body, forceBookingLinks: force }),
         });
         if (response.status === 401) {
           setAuthStatus("guest");
           throw new Error("Admin login required");
         }
-        const data = (await response.json().catch(() => null)) as { error?: string; message?: string } | null;
+        const data = (await response.json().catch(() => null)) as InvoiceSaveFailure | null;
         if (!response.ok) {
-          if (data?.error === "BOOKING_ALREADY_INVOICED") void fetchInvoicedBookingIds(completedAppointments.map((item) => item.id));
+          noteBookingConflicts(data, mode);
           throw new Error(data?.message || (await readApiFailure(response, "Could not save invoice.")));
         }
       } else {
@@ -16770,6 +16854,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             invoicePrefix: invoiceSettings.prefix,
             invoiceNumber: number,
             status: "draft",
+            forceBookingLinks: force,
             ...body,
           }),
         });
@@ -16777,9 +16862,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           setAuthStatus("guest");
           throw new Error("Admin login required");
         }
-        const data = (await response.json().catch(() => null)) as { id?: string; invoiceNumber?: string; error?: string; message?: string } | null;
+        const data = (await response.json().catch(() => null)) as
+          | (InvoiceSaveFailure & { id?: string; invoiceNumber?: string })
+          | null;
         if (!response.ok) {
-          if (data?.error === "BOOKING_ALREADY_INVOICED") void fetchInvoicedBookingIds(completedAppointments.map((item) => item.id));
+          noteBookingConflicts(data, mode);
           throw new Error(data?.message || (await readApiFailure(response, "Could not save invoice.")));
         }
         id = data?.id || "";
@@ -16799,11 +16886,26 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       if (mode !== "draft") await patchInvoiceStatus(id, "sent");
       let sentAt = "";
       let recipient = "";
+      let paidLink = "";
+      let sendFailure = "";
       if (mode === "publish-send") {
-        recipient = await sendInvoiceById(id);
-        sentAt = new Date().toISOString();
+        try {
+          const sent = await sendInvoiceById(id);
+          recipient = sent.recipient;
+          paidLink = sent.paymentLinkUrl;
+          sentAt = new Date().toISOString();
+        } catch (sendError) {
+          // The invoice is written and published by this point - only the email
+          // failed, and a payment link the coach asked for but Clarity Pay could
+          // not mint is the likeliest reason. Do NOT rethrow: the editor has to
+          // land on the saved invoice either way, or it keeps thinking it holds
+          // an unsaved one and the next Publish writes a second copy. The toast
+          // carries the failure instead.
+          sendFailure = sendError instanceof Error ? sendError.message : "Could not send invoice.";
+        }
       }
 
+      setBookingConflicts([]);
       setActiveInvoiceId(id);
       setEditingInvoiceNumber(number);
       setOpenedInvoiceStatus(mode === "draft" ? "draft" : "sent");
@@ -16812,12 +16914,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setReviseSource(null);
       setInvoiceEditing(false);
       setToast({
-        message:
-          mode === "draft"
+        message: sendFailure
+          ? `${number} was published, but the email did not send. ${sendFailure}`
+          : mode === "draft"
             ? `${number} saved as a draft.`
             : mode === "publish"
               ? `${number} published.`
-              : `${number} published and emailed${recipient ? ` to ${recipient}` : ""}.`,
+              : `${number} published and emailed${recipient ? ` to ${recipient}` : ""}${
+                  paidLink ? " with a payment link" : ""
+                }.`,
       });
       void fetchRecentInvoices();
       void fetchInvoicedBookingIds(completedAppointments.map((item) => item.id));
@@ -16872,10 +16977,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     }
     setInvoiceSendState("sending");
     try {
-      const recipient = await sendInvoiceById(activeInvoiceId);
+      const { recipient, paymentLinkUrl } = await sendInvoiceById(activeInvoiceId);
       setOpenedInvoiceStatus("sent");
       setOpenedInvoiceSentAt(new Date().toISOString());
-      setToast({ message: `${activeInvoiceNumber} emailed${recipient ? ` to ${recipient}` : ""}.` });
+      setToast({
+        message: `${activeInvoiceNumber} emailed${recipient ? ` to ${recipient}` : ""}${
+          paymentLinkUrl ? " with a payment link" : ""
+        }.`,
+      });
       void fetchRecentInvoices();
     } catch (error) {
       setToast({ message: error instanceof Error ? error.message : "Could not send invoice." });
@@ -24916,6 +25025,23 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         {openedInvoiceStatus === "draft" || openedInvoiceStatus === "void" ? "Delete" : "Void"}
                       </button>
                     )}
+                    {/* Beside the send buttons because that is what it changes:
+                        the emailed invoice carries a Clarity Pay link. Hidden
+                        once the invoice is settled - there is nothing left to
+                        pay, and the server would not mint a link anyway. */}
+                    {openedInvoiceStatus !== "paid" && openedInvoiceStatus !== "void" && (
+                      <label className="ip-pay-toggle" title="Email a Clarity Pay link with this invoice so the client can pay it online">
+                        <input
+                          checked={includePaymentLink}
+                          onChange={(event) => {
+                            paymentLinkChosenRef.current = true;
+                            setIncludePaymentLink(event.target.checked);
+                          }}
+                          type="checkbox"
+                        />
+                        <span>Include payment link</span>
+                      </label>
+                    )}
                     {invoiceEditing ? (
                       isRevisingInvoice ? (
                         <>
@@ -25000,6 +25126,50 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       </>
                     )}
                   </div>
+                  {/* A refused save, named. The server sends back which booking
+                      is on which invoice; without this the coach is told
+                      "already invoiced" and left to open every invoice they
+                      have to find out which lesson and which one. */}
+                  {bookingConflicts.length > 0 && (
+                    <div className="ip-conflict" role="alert">
+                      <p className="ip-conflict-head">
+                        {bookingConflicts.length === 1
+                          ? "This lesson is already on another invoice:"
+                          : `These ${bookingConflicts.length} lessons are already on other invoices:`}
+                      </p>
+                      <ul>
+                        {bookingConflicts.map((conflict) => (
+                          <li key={conflict.bookingId}>
+                            {bookingConflictLabel(conflict.bookingId)}
+                            {conflict.invoiceNumber ? ` - on ${conflict.invoiceNumber}` : ""}
+                          </li>
+                        ))}
+                      </ul>
+                      <div className="ip-conflict-actions">
+                        <button
+                          className="outline-button"
+                          disabled={invoiceIssueState === "saving"}
+                          onClick={() => void commitInvoice(conflictRetryMode, { force: true })}
+                          type="button"
+                        >
+                          {invoiceIssueState === "saving"
+                            ? "Saving..."
+                            : conflictRetryMode === "draft"
+                              ? "Save anyway"
+                              : "Publish anyway"}
+                        </button>
+                        <button className="text-button" onClick={() => setBookingConflicts([])} type="button">
+                          Dismiss
+                        </button>
+                      </div>
+                      <p className="ip-conflict-note">
+                        Publishing anyway moves {bookingConflicts.length === 1 ? "this lesson" : "these lessons"} onto
+                        this invoice. {bookingConflicts.length === 1 ? "The invoice" : "The invoices"} named above
+                        {bookingConflicts.length === 1 ? " keeps" : " keep"} the line and the total already billed -
+                        void {bookingConflicts.length === 1 ? "it" : "them"} if this is a re-bill.
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 <div className="ip-grid">

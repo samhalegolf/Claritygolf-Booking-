@@ -877,6 +877,9 @@ function invoiceRowToApi(row: Record<string, unknown>, items: Array<Record<strin
     reference: row.reference || "",
     sentAt: row.sent_at || null,
     paidAt: row.paid_at || null,
+    // The Clarity Pay link emailed with this invoice, once one has been minted.
+    paymentLinkUrl: row.payment_link_url || "",
+
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     items: items.map((item) => ({
@@ -984,11 +987,35 @@ export async function bookingLinkOwners(accountId: string, bookingIds: string[])
   });
 }
 
+// Drop every link these bookings currently hold, whoever holds it. Used two
+// ways: to clear links a voided invoice left behind (automatic - a withdrawn
+// invoice claims nothing), and to carry out an explicit "publish anyway", where
+// the coach has been shown exactly which lessons move and off which invoice.
+async function releaseBookingLinks(
+  accountId: string,
+  owners: Array<{ bookingId: string; invoiceId: string }>,
+) {
+  if (!owners.length) return;
+  const bookings = [...new Set(owners.map((owner) => owner.bookingId))]
+    .map((id) => `"${id.replace(/"/g, '\\"')}"`)
+    .join(",");
+  const invoices = [...new Set(owners.map((owner) => owner.invoiceId))]
+    .map((id) => `"${id.replace(/"/g, "")}"`)
+    .join(",");
+  await supabase("billing_booking_invoice_links", {
+    method: "DELETE",
+    query: `account_id=eq.${encodeFilter(accountId)}&booking_id=in.(${bookings})&invoice_id=in.(${encodeURIComponent(invoices)})`,
+  });
+}
+
 export async function createBookingLinks(
   accountId: string,
   invoiceId: string,
   bookingIds: string[],
-  { rollbackInvoiceOnConflict = true }: { rollbackInvoiceOnConflict?: boolean } = {},
+  {
+    rollbackInvoiceOnConflict = true,
+    force = false,
+  }: { rollbackInvoiceOnConflict?: boolean; force?: boolean } = {},
 ) {
   if (!bookingIds.length) return;
   const rows = bookingIds.map((bookingId) => ({
@@ -1009,20 +1036,16 @@ export async function createBookingLinks(
       // invoice is not a claim on anything - that invoice was withdrawn, so the
       // lesson is billable again. Clear those and retry; only a link on a live
       // invoice is a real conflict.
+      // A failed lookup must not read as "nothing is in the way": with no owners
+      // to reason about, the only safe answer is the plain refusal below.
       const owners = await bookingLinkOwners(accountId, bookingIds).catch(() => []);
-      const blocking = owners.filter((owner) => owner.invoiceId !== invoiceId && !owner.voided);
-      const stale = owners.filter((owner) => owner.invoiceId !== invoiceId && owner.voided);
-      if (!blocking.length && stale.length) {
-        const staleBookings = [...new Set(stale.map((owner) => owner.bookingId))]
-          .map((id) => `"${id.replace(/"/g, '\\"')}"`)
-          .join(",");
-        const staleInvoices = [...new Set(stale.map((owner) => owner.invoiceId))]
-          .map((id) => `"${id.replace(/"/g, "")}"`)
-          .join(",");
-        await supabase("billing_booking_invoice_links", {
-          method: "DELETE",
-          query: `account_id=eq.${encodeFilter(accountId)}&booking_id=in.(${staleBookings})&invoice_id=in.(${encodeURIComponent(staleInvoices)})`,
-        });
+      const held = owners.filter((owner) => owner.invoiceId !== invoiceId);
+      const blocking = held.filter((owner) => !owner.voided);
+      // Voided links always go. "force" says the coach saw the list of live
+      // invoices these lessons sit on and chose to move them anyway.
+      const releasable = force ? held : held.filter((owner) => owner.voided);
+      if (releasable.length && (force || !blocking.length)) {
+        await releaseBookingLinks(accountId, releasable);
         try {
           await insert();
           return;
@@ -1044,16 +1067,28 @@ export async function createBookingLinks(
           query: `id=eq.${encodeFilter(invoiceId)}&account_id=eq.${encodeFilter(accountId)}`,
         }).catch(() => {});
       }
-      // Name the invoice holding the lesson. "Already invoiced" on its own
-      // leaves the coach hunting; the number tells them what to void.
+      // Which lessons, and on which invoice. "Already invoiced" on its own
+      // leaves the coach hunting through every invoice they have ever issued;
+      // the caller turns `conflicts` into a list they can read and act on, and
+      // a "publish anyway" that comes back with force set.
       const numbers = [...new Set(blocking.map((owner) => owner.invoiceNumber).filter(Boolean))];
       throw Object.assign(
         new Error(
           numbers.length
-            ? `One or more of these lessons is already on ${numbers.join(", ")}. Void that invoice to bill them again.`
+            ? `${blocking.length === 1 ? "One lesson is" : `${blocking.length} lessons are`} already on ${numbers.join(", ")}.`
             : "One or more of these bookings has already been invoiced.",
         ),
-        { status: 409, code: "BOOKING_ALREADY_INVOICED" },
+        {
+          status: 409,
+          code: "BOOKING_ALREADY_INVOICED",
+          details: {
+            conflicts: blocking.map((owner) => ({
+              bookingId: owner.bookingId,
+              invoiceId: owner.invoiceId,
+              invoiceNumber: owner.invoiceNumber,
+            })),
+          },
+        },
       );
     }
     throw error;
@@ -1217,7 +1252,11 @@ async function createInvoice(accountId: string, body: Record<string, unknown>) {
       .filter((item) => item.sourceType === "booking" && item.sourceId)
       .map((item) => String(item.sourceId)),
   )];
-  await createBookingLinks(accountId, invoiceId, bookingIds);
+  // forceBookingLinks: the coach was shown which lessons are on which invoice
+  // and chose to move them onto this one anyway.
+  await createBookingLinks(accountId, invoiceId, bookingIds, {
+    force: body?.forceBookingLinks === true,
+  });
 
   return getInvoiceWithItems(accountId, invoiceId);
 }
@@ -1307,7 +1346,10 @@ async function updateInvoiceDraft(accountId: string, id: string, body: Record<st
       .filter((item) => item.sourceType === "booking" && item.sourceId)
       .map((item) => String(item.sourceId)),
   )];
-  await createBookingLinks(accountId, id, bookingIds, { rollbackInvoiceOnConflict: false });
+  await createBookingLinks(accountId, id, bookingIds, {
+    rollbackInvoiceOnConflict: false,
+    force: body?.forceBookingLinks === true,
+  });
 
   return getInvoiceWithItems(accountId, id);
 }
@@ -1903,6 +1945,7 @@ interface InvoiceApi {
   reference: string;
   sentAt: string | null;
   paidAt: string | null;
+  paymentLinkUrl: string;
   createdAt: unknown;
   updatedAt: unknown;
   items: Array<{
@@ -2214,7 +2257,7 @@ function pdfFilename(invoice: InvoiceApi) {
   return `${String(invoice.invoiceNumber || "invoice").replace(/[^A-Za-z0-9._-]/g, "_")}.pdf`;
 }
 
-async function sendInvoice(accountId: string, id: string, body: Record<string, unknown>) {
+async function sendInvoice(accountId: string, id: string, body: Record<string, unknown>, origin: string) {
   const invoice = await getInvoiceWithItems(accountId, id);
   if (!invoice) throw Object.assign(new Error("Invoice not found."), { status: 404 });
   const to = cleanString(body?.email, "", 180) || cleanString(invoice.customerEmail, "", 180);
@@ -2223,6 +2266,16 @@ async function sendInvoice(accountId: string, id: string, body: Record<string, u
   }
 
   const branding = await resolveInvoiceBranding(accountId);
+
+  // Minted before the email is built, and deliberately not caught: the coach
+  // asked for a payment link, so an invoice that goes out without one - looking
+  // for all the world like it went out with one - is the wrong failure. Nothing
+  // has been emailed at this point, so the send is safe to retry or to repeat
+  // with the toggle off.
+  const payUrl = body?.includePaymentLink === true
+    ? await resolveInvoicePaymentLink(accountId, invoice, branding, origin)
+    : "";
+
   const pdf = await renderInvoicePdf(invoice, branding);
   const subject = `Invoice ${invoice.invoiceNumber} from ${branding.businessName}`;
   const bodyLines = [
@@ -2230,6 +2283,9 @@ async function sendInvoice(accountId: string, id: string, body: Record<string, u
     "",
     `Please find attached invoice ${invoice.invoiceNumber} for ${formatMoney(invoice.total, invoice.currency)}.`,
     invoice.dueDate ? `Due: ${invoice.dueDate}` : "",
+    // The plain-text part carries the URL itself - the HTML button below is the
+    // same link, and a text-only client must not be left with no way to pay.
+    payUrl ? `Pay online: ${payUrl}` : "",
     branding.paymentInstructions,
     branding.bankAccount ? `Bank account: ${branding.bankAccount}` : "",
     "",
@@ -2237,9 +2293,24 @@ async function sendInvoice(accountId: string, id: string, body: Record<string, u
     branding.businessName,
   ].filter((line) => line !== undefined && line !== null) as string[];
   const plain = bodyLines.filter(Boolean).join("\n");
+  const payButton = payUrl
+    ? `<p style="margin:16px 0"><a href="${escapeHtml(payUrl)}" ` +
+      `style="display:inline-block;padding:11px 20px;background:#1a1c1f;color:#ffffff;` +
+      `text-decoration:none;font-weight:600;border-radius:4px">` +
+      // No amount on the button. A link minted against a part-paid invoice
+      // charges what is outstanding, and a reused link charges what it was
+      // minted for - neither is reliably the total printed above it.
+      `Pay invoice ${escapeHtml(String(invoice.invoiceNumber))}</a></p>`
+    : "";
   const html =
     `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#1a1c1f">` +
-    bodyLines.map((line) => (line === "" ? "<br/>" : `<p style="margin:0 0 8px">${escapeHtml(line)}</p>`)).join("") +
+    bodyLines
+      // The URL line is replaced by the button in the HTML part; showing both
+      // reads as two different ways to pay.
+      .filter((line) => !payUrl || line !== `Pay online: ${payUrl}`)
+      .map((line) => (line === "" ? "<br/>" : `<p style="margin:0 0 8px">${escapeHtml(line)}</p>`))
+      .join("") +
+    payButton +
     `</div>`;
 
   const emailResult = await emailInvoicePdf(
@@ -2265,7 +2336,13 @@ async function sendInvoice(accountId: string, id: string, body: Record<string, u
     prefer: "return=minimal",
   });
 
-  return { invoice: await getInvoiceWithItems(accountId, id), emailed: true, emailId: emailResult.id, recipient: to };
+  return {
+    invoice: await getInvoiceWithItems(accountId, id),
+    emailed: true,
+    emailId: emailResult.id,
+    recipient: to,
+    paymentLinkUrl: payUrl,
+  };
 }
 
 // --- Clarity Pay (Stripe Checkout) -------------------------------------------
@@ -2380,6 +2457,94 @@ async function createInvoiceCheckout(accountId: string, id: string, req: Request
     successUrl: `${origin}/?pay=success&invoice=${encodeURIComponent(invoiceNumber)}`,
     cancelUrl: `${origin}/?pay=cancel&invoice=${encodeURIComponent(invoiceNumber)}`,
   });
+}
+
+// A Stripe *payment link* for an invoice total.
+//
+// Deliberately not a Checkout Session, which is what the "Clarity Pay" button
+// opens. A session is created and clicked in the same minute, so its 24-hour
+// expiry never shows; a link emailed with an invoice on 7-day terms would be
+// dead before most clients opened it. A payment link does not expire.
+//
+// completed_sessions limit 1 is the other half of that: an invoice is payable
+// once, and a link sitting in an inbox forever must not become a second way to
+// charge someone who has already paid.
+async function createStripePaymentLink(input: {
+  amount: number;
+  currency: string;
+  productName: string;
+  productDescription?: string;
+  metadata?: Record<string, string>;
+  redirectUrl: string;
+}) {
+  const amountInCents = Math.round((Number(input.amount) || 0) * 100);
+  if (amountInCents <= 0) {
+    throw Object.assign(new Error("Amount must be greater than zero to take a payment."), { status: 400 });
+  }
+
+  // A payment link needs a Price object, unlike a session's inline price_data.
+  // product_data creates the product in the same call, so this stays one trip.
+  const priceParams = new URLSearchParams();
+  priceParams.set("currency", String(input.currency || "NZD").toLowerCase());
+  priceParams.set("unit_amount", String(amountInCents));
+  priceParams.set("product_data[name]", input.productName);
+  const price = await stripeRequest("prices", { method: "POST", params: priceParams });
+  if (!price?.id) throw Object.assign(new Error("Stripe did not return a price."), { status: 502 });
+
+  const params = new URLSearchParams();
+  params.set("line_items[0][price]", String(price.id));
+  params.set("line_items[0][quantity]", "1");
+  params.set("restrictions[completed_sessions][limit]", "1");
+  params.set("after_completion[type]", "redirect");
+  params.set("after_completion[redirect][url]", input.redirectUrl);
+  for (const [key, value] of Object.entries(input.metadata || {})) {
+    if (!value) continue;
+    params.set(`metadata[${key}]`, value);
+    // The link's own metadata does not reach the PaymentIntent, and the
+    // PaymentIntent is what a bank reconciliation has in hand. Set both.
+    params.set(`payment_intent_data[metadata][${key}]`, value);
+  }
+
+  const link = await stripeRequest("payment_links", { method: "POST", params });
+  if (!link?.url) throw Object.assign(new Error("Stripe did not return a payment link."), { status: 502 });
+  return { url: String(link.url), paymentLinkId: String(link.id || "") };
+}
+
+// The invoice's payment link, minted on first use and kept from then on.
+//
+// Returns "" rather than throwing when there is nothing to pay - a zero-total
+// or already-settled invoice still emails, it just goes without a Pay button.
+// A Stripe failure DOES throw: the coach asked for a payment link, so sending
+// the invoice without one silently is not an answer. sendInvoice calls this
+// before the email goes out, so a failure here costs nothing but a retry.
+export async function resolveInvoicePaymentLink(
+  accountId: string,
+  invoice: InvoiceApi,
+  branding: InvoiceBranding,
+  origin: string,
+) {
+  const existing = cleanString(invoice.paymentLinkUrl, "", 600);
+  if (existing) return existing;
+
+  const outstanding = round2((Number(invoice.total) || 0) - (Number(invoice.amountPaid) || 0));
+  if (outstanding <= 0 || invoice.status === "paid" || invoice.status === "void") return "";
+
+  const invoiceNumber = String(invoice.invoiceNumber);
+  const { url, paymentLinkId } = await createStripePaymentLink({
+    amount: outstanding,
+    currency: String(invoice.currency || "NZD"),
+    productName: `Invoice ${invoiceNumber} - ${branding.businessName}`,
+    metadata: { invoice_id: String(invoice.id), account_id: accountId, invoice_number: invoiceNumber },
+    redirectUrl: `${origin}/?pay=success&invoice=${encodeURIComponent(invoiceNumber)}`,
+  });
+
+  await supabase("billing_invoices", {
+    method: "PATCH",
+    query: `id=eq.${encodeFilter(invoice.id)}&account_id=eq.${encodeFilter(accountId)}`,
+    body: { payment_link_url: url, payment_link_id: paymentLinkId, updated_at: nowIso() },
+    prefer: "return=minimal",
+  });
+  return url;
 }
 
 async function invoicePdfResponse(accountId: string, id: string) {
@@ -2674,7 +2839,13 @@ async function listPaymentMethods(accountId: string) {
       });
     }
   }
-  return { paymentMethods: rows.map(paymentMethodRowToApi) };
+  return {
+    paymentMethods: rows.map(paymentMethodRowToApi),
+    // The Clarity Pay row is seeded for every account whether or not Stripe is
+    // wired up, so its presence proves nothing. This is the real answer, and it
+    // is what decides whether "Include payment link" arrives ticked.
+    clarityPayConfigured: Boolean(env("STRIPE_SECRET_KEY")),
+  };
 }
 
 async function createPaymentMethod(accountId: string, body: Record<string, unknown>) {
@@ -3940,7 +4111,7 @@ export default async function handler(req: Request) {
     // invoices/:id handlers, which would otherwise treat "id/send" as the id.
     if (action.startsWith("invoices/") && action.endsWith("/send") && req.method === "POST") {
       const invoiceId = action.slice("invoices/".length, -"/send".length);
-      return json(await sendInvoice(accountId, invoiceId, await parseBody(req)));
+      return json(await sendInvoice(accountId, invoiceId, await parseBody(req), new URL(req.url).origin));
     }
     if (action.startsWith("invoices/") && action.endsWith("/pdf") && req.method === "GET") {
       const invoiceId = action.slice("invoices/".length, -"/pdf".length);
@@ -4029,6 +4200,9 @@ export default async function handler(req: Request) {
       {
         error: (error as { code?: string })?.code || "billing_api_error",
         message: error instanceof Error ? error.message : "Billing request failed.",
+        // Structured detail a caller can act on rather than only display - the
+        // booking/invoice conflicts behind a 409, for one.
+        ...((error as { details?: Record<string, unknown> })?.details || {}),
       },
       httpStatus,
     );

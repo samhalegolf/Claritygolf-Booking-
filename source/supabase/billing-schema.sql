@@ -45,6 +45,12 @@ create table if not exists public.billing_invoices (
   internal_note text,
   reference text,
   tax_inclusive boolean not null default false,
+  -- Added by database/migrations/20260910000100_invoice_payment_link.
+  -- The Clarity Pay link emailed with this invoice. Minted once and kept, so a
+  -- resend reuses the link already in the client's inbox rather than opening a
+  -- second live way to pay the same invoice.
+  payment_link_url text,
+  payment_link_id text,
   sent_at timestamptz,
   paid_at timestamptz,
   created_at timestamptz not null default now(),

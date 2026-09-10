@@ -8383,6 +8383,82 @@ button {
   flex-wrap: wrap;
 }
 
+/* A refused save, spelled out: which lessons, on which invoice, and a way
+   through it. Full-width so it sits under the button row rather than squeezing
+   into it - it is prose the coach has to read, not another control. */
+.ip-actionbar .ip-conflict {
+  flex-basis: 100%;
+  margin: 4px 0 0;
+  padding: 12px 14px;
+  border: 1px solid var(--c-border);
+  border-left: 3px solid var(--c-danger);
+  background: var(--c-surface-soft);
+}
+
+.ip-actionbar .ip-conflict p {
+  margin: 0;
+  font-size: var(--c-size-secondary);
+  color: var(--c-text-body);
+}
+
+/* Qualified with p: the .ip-conflict p rule above is 0-2-1 and would otherwise
+   outrank a bare .ip-conflict-head, flattening the three text weights into one. */
+.ip-actionbar .ip-conflict p.ip-conflict-head {
+  font-weight: 600;
+  color: var(--c-text);
+}
+
+.ip-actionbar .ip-conflict ul {
+  margin: 7px 0 0;
+  padding-left: 18px;
+}
+
+.ip-actionbar .ip-conflict li {
+  font-size: var(--c-size-secondary);
+  color: var(--c-text-body);
+  line-height: 1.5;
+}
+
+.ip-actionbar .ip-conflict-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 11px;
+}
+
+.ip-actionbar .ip-conflict p.ip-conflict-note {
+  margin-top: 9px;
+  color: var(--c-text-soft);
+}
+
+/* "Include payment link", sitting in the button row rather than on the sheet:
+   it changes what the send buttons beside it do, not what the invoice says.
+   Scoped through .ip-actionbar so the span rule outranks the 0-1-1 descendant
+   rules (.data-card span and friends) that would otherwise win. */
+.ip-actionbar .ip-pay-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-right: 2px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.ip-actionbar .ip-pay-toggle input {
+  margin: 0;
+  accent-color: var(--c-accent);
+  cursor: pointer;
+}
+
+.ip-actionbar .ip-pay-toggle span {
+  font-size: var(--c-size-secondary);
+  color: var(--c-text-soft);
+}
+
+.ip-actionbar .ip-pay-toggle input:checked + span {
+  color: var(--c-text);
+}
+
 .ip-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 328px;

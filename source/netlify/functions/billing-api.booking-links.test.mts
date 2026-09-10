@@ -35,7 +35,7 @@ type Fixture = {
  * insert/delete links. The unique index is modelled too - an insert onto a
  * booking that already has a link 409s, exactly as Postgres would.
  */
-function stubSupabase(fixture: Fixture) {
+function stubSupabase(fixture: Fixture, options: { failLinkReads?: boolean } = {}) {
   const deletes: string[] = [];
   const original = globalThis.fetch;
   process.env.SUPABASE_URL = "https://stub.supabase.co";
@@ -55,6 +55,7 @@ function stubSupabase(fixture: Fixture) {
     };
 
     if (table === "billing_booking_invoice_links" && method === "GET") {
+      if (options.failLinkReads) return new Response('{"message":"boom"}', { status: 500 });
       const wanted = inList("booking_id") || [];
       const rows: Row[] = [];
       for (const bookingId of wanted) {
@@ -154,15 +155,71 @@ test("a lesson held by a live invoice still blocks, and the refusal names it", a
   try {
     await assert.rejects(
       createBookingLinks("acct-1", "inv-new", ["booking-1"], { rollbackInvoiceOnConflict: false }),
-      (error: Error & { code?: string; status?: number }) => {
+      (error: Error & { code?: string; status?: number; details?: { conflicts?: unknown[] } }) => {
         assert.equal(error.code, "BOOKING_ALREADY_INVOICED");
         assert.equal(error.status, 409);
         assert.match(error.message, /SHG-0101/, "the coach is told which invoice to void");
+        // The warning beside the buttons is built from this: without it the
+        // coach is told "already invoiced" and left to find out which lesson.
+        assert.deepEqual(error.details?.conflicts, [
+          { bookingId: "booking-1", invoiceId: "inv-live", invoiceNumber: "SHG-0101" },
+        ]);
         return true;
       },
     );
     assert.equal(data.links.get("booking-1"), "inv-live", "the live claim is untouched");
     assert.equal(stub.deletes.length, 0, "nothing is cleared on a real conflict");
+  } finally {
+    stub.restore();
+  }
+});
+
+test("force moves a lesson off a live invoice - and only when asked", async () => {
+  const data = fixture([["booking-1", "inv-live"]], [["inv-live", "SHG-0101", "sent"]]);
+  const stub = stubSupabase(data);
+  try {
+    await createBookingLinks("acct-1", "inv-new", ["booking-1"], {
+      rollbackInvoiceOnConflict: false,
+      force: true,
+    });
+    assert.equal(data.links.get("booking-1"), "inv-new", "publish anyway carries the lesson across");
+    assert.match(stub.deletes[0], /account_id=eq\.acct-1/, "the release stays inside the account");
+  } finally {
+    stub.restore();
+  }
+});
+
+test("force does not reach past the bookings being saved", async () => {
+  const data = fixture(
+    [["booking-1", "inv-live"], ["booking-other", "inv-live"]],
+    [["inv-live", "SHG-0101", "sent"]],
+  );
+  const stub = stubSupabase(data);
+  try {
+    await createBookingLinks("acct-1", "inv-new", ["booking-1"], {
+      rollbackInvoiceOnConflict: false,
+      force: true,
+    });
+    assert.equal(
+      data.links.get("booking-other"),
+      "inv-live",
+      "a lesson that is not on this invoice keeps its claim, same invoice or not",
+    );
+  } finally {
+    stub.restore();
+  }
+});
+
+test("a lookup that fails refuses the save rather than clearing links blindly", async () => {
+  const data = fixture([["booking-1", "inv-live"]], [["inv-live", "SHG-0101", "sent"]]);
+  const stub = stubSupabase(data, { failLinkReads: true });
+  try {
+    await assert.rejects(
+      createBookingLinks("acct-1", "inv-new", ["booking-1"], { rollbackInvoiceOnConflict: false, force: true }),
+      (error: Error & { code?: string }) => error.code === "BOOKING_ALREADY_INVOICED",
+    );
+    assert.equal(data.links.get("booking-1"), "inv-live");
+    assert.equal(stub.deletes.length, 0, "nothing is released on a guess");
   } finally {
     stub.restore();
   }
