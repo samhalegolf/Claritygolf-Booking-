@@ -174,6 +174,54 @@ test("a lesson held by a live invoice still blocks, and the refusal names it", a
   }
 });
 
+test("a revision takes its lessons from the invoice it replaces, voided or not", async () => {
+  // The failure this exists for: revise a published invoice, and every lesson
+  // carried over is refused because the invoice being replaced still holds it.
+  // The refusal named the very invoice the coach was replacing, which reads as
+  // the system arguing with itself. Note the source is still "sent" here - the
+  // point is that this no longer depends on a void landing first.
+  const data = fixture(
+    [["booking-1", "inv-old"], ["booking-2", "inv-old"]],
+    [["inv-old", "SHG-0414", "sent"]],
+  );
+  const stub = stubSupabase(data);
+  try {
+    await createBookingLinks("acct-1", "inv-new", ["booking-1", "booking-2"], {
+      replacesInvoiceId: "inv-old",
+    });
+    assert.equal(data.links.get("booking-1"), "inv-new");
+    assert.equal(data.links.get("booking-2"), "inv-new");
+  } finally {
+    stub.restore();
+  }
+});
+
+test("replacing one invoice does not take lessons from a different one", async () => {
+  const data = fixture(
+    [["booking-1", "inv-old"], ["booking-2", "inv-other"]],
+    [["inv-old", "SHG-0414", "sent"], ["inv-other", "SHG-0415", "sent"]],
+  );
+  const stub = stubSupabase(data);
+  try {
+    await assert.rejects(
+      createBookingLinks("acct-1", "inv-new", ["booking-1", "booking-2"], {
+        rollbackInvoiceOnConflict: false,
+        replacesInvoiceId: "inv-old",
+      }),
+      (error: Error & { details?: { conflicts?: Array<{ invoiceNumber?: string }> } }) => {
+        // Only the unrelated invoice is named - the one being replaced was
+        // never in the coach's way.
+        assert.deepEqual(error.details?.conflicts?.map((c) => c.invoiceNumber), ["SHG-0415"]);
+        return true;
+      },
+    );
+    assert.equal(data.links.get("booking-1"), "inv-old", "a refused save moves nothing");
+    assert.equal(stub.deletes.length, 0);
+  } finally {
+    stub.restore();
+  }
+});
+
 test("force moves a lesson off a live invoice - and only when asked", async () => {
   const data = fixture([["booking-1", "inv-live"]], [["inv-live", "SHG-0101", "sent"]]);
   const stub = stubSupabase(data);

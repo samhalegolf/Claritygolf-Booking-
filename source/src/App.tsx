@@ -5671,13 +5671,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   // Set the moment the coach touches the toggle, so arriving Clarity Pay config
   // never overrides a choice they have already made on this screen.
   const paymentLinkChosenRef = useRef(false);
-  // The lessons a save was refused over: which booking, and which invoice is
-  // holding it. Set from the server's 409 so the warning can name them, and so
-  // "Publish anyway" can repeat the exact save that was refused.
-  const [bookingConflicts, setBookingConflicts] = useState<Array<{
-    bookingId: string;
-    invoiceNumber: string;
-  }>>([]);
+  // A save refused because lessons are already invoiced. `conflicts` names each
+  // booking and the invoice holding it when the server says; `message` is what
+  // it said. The panel shows on the refusal itself, NOT on having a list to
+  // print - a server that sends no detail must still leave a way through, or
+  // the coach is stuck with an error and no override.
+  const [bookingConflict, setBookingConflict] = useState<{
+    message: string;
+    conflicts: Array<{ bookingId: string; invoiceNumber: string }>;
+  } | null>(null);
   const [conflictRetryMode, setConflictRetryMode] = useState<"draft" | "publish" | "publish-send">("publish");
 
   // Tick "Include payment link" once we hear back that Clarity Pay is set up.
@@ -16559,7 +16561,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     setOpenedInvoiceSentAt("");
     setActiveInvoiceAmountPaid(0);
     setReviseSource(null);
-    setBookingConflicts([]);
+    setBookingConflict(null);
     setInvoiceEditing(true);
     setSelectedDiscountPresetId("");
     setDiscountEditing(false);
@@ -16656,7 +16658,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setDatesEditing(false);
       setNewInvoiceCustomer(null);
       setReviseSource(null);
-      setBookingConflicts([]);
+      setBookingConflict(null);
       setActiveInvoiceId(String(invoice.id || record.id));
       setEditingInvoiceNumber(String(invoice.invoiceNumber || record.invoiceNumber));
       setOpenedInvoiceStatus((invoice.status as BillingInvoiceStatus) || "draft");
@@ -16756,21 +16758,22 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   // unrelated error would send the coach after the wrong problem.
   function noteBookingConflicts(data: InvoiceSaveFailure | null, mode: "draft" | "publish" | "publish-send") {
     if (data?.error !== "BOOKING_ALREADY_INVOICED") {
-      setBookingConflicts([]);
+      setBookingConflict(null);
       return;
     }
     // Re-read the markers: the conflict is the server telling us our picture of
     // what is invoiced is out of date.
     void fetchInvoicedBookingIds(completedAppointments.map((item) => item.id));
     setConflictRetryMode(mode);
-    setBookingConflicts(
-      (data.conflicts || [])
+    setBookingConflict({
+      message: String(data.message || "Some of these lessons are already on another invoice."),
+      conflicts: (data.conflicts || [])
         .map((conflict) => ({
           bookingId: String(conflict?.bookingId || ""),
           invoiceNumber: String(conflict?.invoiceNumber || ""),
         }))
         .filter((conflict) => conflict.bookingId),
-    );
+    });
   }
 
   // Name a conflicting lesson the way the coach would recognise it: the line as
@@ -16855,6 +16858,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             invoiceNumber: number,
             status: "draft",
             forceBookingLinks: force,
+            // Says outright that this invoice replaces that one, so the server
+            // moves its lessons across instead of refusing the save over the
+            // invoice being revised. Does not depend on the void above having
+            // landed first.
+            replacesInvoiceId: reviseSource?.id || "",
             ...body,
           }),
         });
@@ -16905,7 +16913,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         }
       }
 
-      setBookingConflicts([]);
+      setBookingConflict(null);
       setActiveInvoiceId(id);
       setEditingInvoiceNumber(number);
       setOpenedInvoiceStatus(mode === "draft" ? "draft" : "sent");
@@ -25130,21 +25138,19 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       is on which invoice; without this the coach is told
                       "already invoiced" and left to open every invoice they
                       have to find out which lesson and which one. */}
-                  {bookingConflicts.length > 0 && (
+                  {bookingConflict && (
                     <div className="ip-conflict" role="alert">
-                      <p className="ip-conflict-head">
-                        {bookingConflicts.length === 1
-                          ? "This lesson is already on another invoice:"
-                          : `These ${bookingConflicts.length} lessons are already on other invoices:`}
-                      </p>
-                      <ul>
-                        {bookingConflicts.map((conflict) => (
-                          <li key={conflict.bookingId}>
-                            {bookingConflictLabel(conflict.bookingId)}
-                            {conflict.invoiceNumber ? ` - on ${conflict.invoiceNumber}` : ""}
-                          </li>
-                        ))}
-                      </ul>
+                      <p className="ip-conflict-head">{bookingConflict.message}</p>
+                      {bookingConflict.conflicts.length > 0 && (
+                        <ul>
+                          {bookingConflict.conflicts.map((conflict) => (
+                            <li key={conflict.bookingId}>
+                              {bookingConflictLabel(conflict.bookingId)}
+                              {conflict.invoiceNumber ? ` - on ${conflict.invoiceNumber}` : ""}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                       <div className="ip-conflict-actions">
                         <button
                           className="outline-button"
@@ -25158,15 +25164,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                               ? "Save anyway"
                               : "Publish anyway"}
                         </button>
-                        <button className="text-button" onClick={() => setBookingConflicts([])} type="button">
+                        <button className="text-button" onClick={() => setBookingConflict(null)} type="button">
                           Dismiss
                         </button>
                       </div>
                       <p className="ip-conflict-note">
-                        Publishing anyway moves {bookingConflicts.length === 1 ? "this lesson" : "these lessons"} onto
-                        this invoice. {bookingConflicts.length === 1 ? "The invoice" : "The invoices"} named above
-                        {bookingConflicts.length === 1 ? " keeps" : " keep"} the line and the total already billed -
-                        void {bookingConflicts.length === 1 ? "it" : "them"} if this is a re-bill.
+                        Publishing anyway moves these lessons onto this invoice. Any invoice named above keeps the
+                        line and the total already billed - void it if this is a re-bill.
                       </p>
                     </div>
                   )}

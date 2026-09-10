@@ -1015,7 +1015,8 @@ export async function createBookingLinks(
   {
     rollbackInvoiceOnConflict = true,
     force = false,
-  }: { rollbackInvoiceOnConflict?: boolean; force?: boolean } = {},
+    replacesInvoiceId = "",
+  }: { rollbackInvoiceOnConflict?: boolean; force?: boolean; replacesInvoiceId?: string } = {},
 ) {
   if (!bookingIds.length) return;
   const rows = bookingIds.map((bookingId) => ({
@@ -1040,12 +1041,22 @@ export async function createBookingLinks(
       // to reason about, the only safe answer is the plain refusal below.
       const owners = await bookingLinkOwners(accountId, bookingIds).catch(() => []);
       const held = owners.filter((owner) => owner.invoiceId !== invoiceId);
-      const blocking = held.filter((owner) => !owner.voided);
-      // Voided links always go. "force" says the coach saw the list of live
-      // invoices these lessons sit on and chose to move them anyway.
-      const releasable = force ? held : held.filter((owner) => owner.voided);
-      if (releasable.length && (force || !blocking.length)) {
-        await releaseBookingLinks(accountId, releasable);
+      // Three ways a link stops being a claim on a lesson:
+      //
+      //   replacesInvoiceId - this invoice IS the revision of that one, so its
+      //     lessons are moving here by definition. Stated outright rather than
+      //     inferred from the old invoice having been voided first: that made
+      //     the whole revise flow hang on a status write landing before this
+      //     one, and a revision refused over the very invoice it replaces is
+      //     the most confusing refusal the billing screen can produce.
+      //   voided - a withdrawn invoice bills nobody.
+      //   force - the coach was shown the list and chose to move them anyway.
+      const releasable = (owner: { voided: boolean; invoiceId: string }) =>
+        force || owner.voided || (replacesInvoiceId !== "" && owner.invoiceId === replacesInvoiceId);
+      const blocking = held.filter((owner) => !releasable(owner));
+      const release = held.filter(releasable);
+      if (release.length && !blocking.length) {
+        await releaseBookingLinks(accountId, release);
         try {
           await insert();
           return;
@@ -1256,6 +1267,9 @@ async function createInvoice(accountId: string, body: Record<string, unknown>) {
   // and chose to move them onto this one anyway.
   await createBookingLinks(accountId, invoiceId, bookingIds, {
     force: body?.forceBookingLinks === true,
+    // The invoice this one is issued to replace, when the coach revised a
+    // published invoice. Its lessons come across without a fight.
+    replacesInvoiceId: cleanString(body?.replacesInvoiceId, "", 160),
   });
 
   return getInvoiceWithItems(accountId, invoiceId);
