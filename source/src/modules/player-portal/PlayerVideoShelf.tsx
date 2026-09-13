@@ -51,11 +51,19 @@ function formatSize(bytes?: number) {
   return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.max(1, Math.round(mb))} MB`;
 }
 
-/** A coach-device transfer is something the coach put in the cloud for them; a
- *  player submission is their own video coming back to a device that has never
- *  held it -- a new phone, or one whose local library was cleared. */
+/** A coach-return is a video the coach deliberately sent back, annotated. A
+ *  coach-device transfer is the coach's own library sync that happens to be
+ *  filed under this player. A submission is their own video coming back to a
+ *  device that has never held it -- a new phone, or one whose local library was
+ *  cleared. Only the first of the three is something they are waiting for. */
 function cloudVideoLabel(transfer: ClarityCloudImportTransfer) {
+  if (transfer.direction === "coach-return") return "Your coach sent this back";
   return transfer.direction === "coach-device" ? "From your coach" : "You sent this";
+}
+
+/** A return the player has not opened yet. The dot the portal counts. */
+function isUnseenReturn(transfer: ClarityCloudImportTransfer) {
+  return transfer.direction === "coach-return" && !transfer.playerSeenAt;
 }
 
 // The coach-side label speaks in Clarity Cloud and Drive terms. A player only
@@ -326,11 +334,15 @@ export function PlayerVideoShelf({
             const downloading = downloadingIds.has(transfer.savedVideoId);
             const title = transfer.savedVideo?.title || "Swing video";
             const size = formatSize(transfer.video?.sizeBytes || transfer.expectedSizeBytes);
+            const unseen = isUnseenReturn(transfer);
+            const coachNote = transfer.direction === "coach-return" ? transfer.coachMessage : "";
             return (
               // Not deletable and so never shaken: this video lives in the
               // coach's Drive, and this phone is only borrowing a view of it.
               <li
-                className="player-portal-video-tile player-portal-video-tile-cloud"
+                className={`player-portal-video-tile player-portal-video-tile-cloud${
+                  transfer.direction === "coach-return" ? " is-coach-return" : ""
+                }${unseen ? " is-unseen" : ""}`}
                 key={transfer.savedVideoId}
               >
                 {/* The tile and the pill both download -- the tile because it
@@ -353,7 +365,14 @@ export function PlayerVideoShelf({
                 <div className="player-portal-video-meta">
                   <strong>{title}</strong>
                   <span>{formatDate(transfer.savedVideo?.createdAt || transfer.readyToImportAt)}</span>
-                  <span>{[cloudVideoLabel(transfer), size].filter(Boolean).join(" · ")}</span>
+                  <span>
+                    {[unseen ? "New" : "", cloudVideoLabel(transfer), size]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </span>
+                  {coachNote && (
+                    <span className="player-portal-video-coach-note">“{coachNote}”</span>
+                  )}
                 </div>
                 <button
                   className="player-portal-video-action"

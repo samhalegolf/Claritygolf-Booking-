@@ -562,7 +562,7 @@ function EditableSettingsBlock({
   );
 }
 
-type LessonFormat = "private" | "group" | "package";
+type LessonFormat = "private" | "group" | "package" | "video-review";
 type GroupServiceSchedule = {
   dayOfWeek: number;
   startMinutes: number;
@@ -572,7 +572,7 @@ type GroupServiceSchedule = {
 type PriceMode = "session" | "per-person";
 type PackageCoverageMode = "upfront" | "lesson-by-lesson";
 type BookingStatus = "booked" | "completed" | "cancelled" | "no_show";
-type ServiceEditorFormat = "private" | "group" | "custom-group" | "package";
+type ServiceEditorFormat = "private" | "group" | "custom-group" | "package" | "video-review";
 
 type Service = {
   id: string;
@@ -597,6 +597,8 @@ type Service = {
   packageAllowance?: number;
   packageCoverageMode?: PackageCoverageMode;
   packageCoversServiceId?: string;
+  /** Video reviews only: days between booking and the clip being owed back. */
+  reviewTurnaroundDays?: number;
   bookingScreenIds?: string[];
   customGroup?: boolean;
   customGroupEnabled?: boolean;
@@ -808,12 +810,21 @@ function isScheduledGroupService(service?: Partial<Service> | null) {
   return Boolean(service?.lessonFormat === "group" && !isCustomGroupService(service));
 }
 
+/** An asynchronous video review: booked without a time, owed back by a date. */
+function isVideoReviewService(service?: Partial<Service> | null) {
+  return Boolean(service?.lessonFormat === "video-review");
+}
+
+const DEFAULT_REVIEW_TURNAROUND_DAYS = 3;
+const MAX_REVIEW_TURNAROUND_DAYS = 30;
+
 function isAppointmentStyleService(service?: Partial<Service> | null) {
   return Boolean(service && service.lessonFormat !== "package" && !isScheduledGroupService(service));
 }
 
 function serviceEditorFormat(service?: Partial<Service> | null): ServiceEditorFormat {
   if (service?.lessonFormat === "package") return "package";
+  if (service?.lessonFormat === "video-review") return "video-review";
   if (isCustomGroupService(service)) return "custom-group";
   if (service?.lessonFormat === "group") return "group";
   return "private";
@@ -822,6 +833,7 @@ function serviceEditorFormat(service?: Partial<Service> | null): ServiceEditorFo
 function serviceFormatLabel(service?: Partial<Service> | null) {
   const format = serviceEditorFormat(service);
   if (format === "package") return "Package";
+  if (format === "video-review") return "Video review";
   if (format === "custom-group") return "Custom group";
   if (format === "group") return "Group";
   return "Private";
@@ -4087,11 +4099,20 @@ function cleanService(service?: Partial<Service>, index = 0): Service {
     service?.lessonFormat === "package" ||
     (!service?.lessonFormat && String(service?.id || "").startsWith("package-"));
   const lessonFormat: LessonFormat =
-    looksLikePackage ? "package" : service?.lessonFormat === "group" ? "group" : "private";
+    looksLikePackage
+      ? "package"
+      : service?.lessonFormat === "group"
+        ? "group"
+        : service?.lessonFormat === "video-review"
+          ? "video-review"
+          : "private";
+  const videoReview = lessonFormat === "video-review";
   const customGroup = lessonFormat === "group" && hasCustomGroupFlag(service);
-  const cleanCapacity = customGroup
-    ? clamp(Math.round(capacity || DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS), DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS, DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS)
-    : clamp(Math.round(capacity), lessonFormat === "group" ? 2 : 1, 24);
+  const cleanCapacity = videoReview
+    ? 1
+    : customGroup
+      ? clamp(Math.round(capacity || DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS), DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS, DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS)
+      : clamp(Math.round(capacity), lessonFormat === "group" ? 2 : 1, 24);
   const rawMinParticipants = Number.isFinite(Number(service?.minParticipants))
     ? Number(service?.minParticipants)
     : customGroup
@@ -4137,6 +4158,16 @@ function cleanService(service?: Partial<Service>, index = 0): Service {
       lessonFormat === "package" && typeof service?.packageCoversServiceId === "string"
         ? service.packageCoversServiceId.trim().slice(0, 120)
         : undefined,
+    reviewTurnaroundDays: videoReview
+      ? clamp(
+          Math.round(
+            Number(service?.reviewTurnaroundDays ?? fallback.reviewTurnaroundDays ?? DEFAULT_REVIEW_TURNAROUND_DAYS) ||
+              DEFAULT_REVIEW_TURNAROUND_DAYS,
+          ),
+          1,
+          MAX_REVIEW_TURNAROUND_DAYS,
+        )
+      : undefined,
     groupSchedule,
     bookingScreenIds,
     customGroup: customGroup || undefined,
@@ -4716,6 +4747,7 @@ type ServiceNumberField =
   | "duration"
   | "price"
   | "packageAllowance"
+  | "reviewTurnaroundDays"
   | "baseParticipants"
   | "basePrice"
   | "extraPersonPrice";
@@ -4724,6 +4756,11 @@ const SERVICE_NUMBER_LIMITS: Record<ServiceNumberField, { min: number; max: numb
   duration: { min: 15, max: 240, fallback: 60 },
   price: { min: 0, max: 100000, fallback: 0 },
   packageAllowance: { min: 1, max: 100, fallback: 5 },
+  reviewTurnaroundDays: {
+    min: 1,
+    max: MAX_REVIEW_TURNAROUND_DAYS,
+    fallback: DEFAULT_REVIEW_TURNAROUND_DAYS,
+  },
   baseParticipants: {
     min: DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS,
     max: DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS,
@@ -12338,6 +12375,79 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       });
   }
 
+  /**
+   * Sends a saved video out to the player it is filed under -- the annotated
+   * clip coming back the other way down the same pipe their swing arrived on.
+   *
+   * Deliberately a separate action from "send to my other computer" rather
+   * than a side effect of it. The coach's library syncs constantly and is
+   * filed under player ids throughout; if syncing were the same gesture as
+   * returning, every laptop that came online would email a client. So the
+   * intent is stated here, carried as a flag, and re-checked on the server
+   * against portal_players -- which is also what stops a video being addressed
+   * to someone with nowhere to watch it.
+   */
+  async function sendSavedVideoToPlayer(item: SavedVideoItem, personId: string) {
+    const store = savedVideoLibraryRef.current;
+    if (!store) {
+      setToast({ message: "Saved video library is unavailable in this browser." });
+      return;
+    }
+    const portalPlayer = portalPlayers.find(
+      (entry) => entry.personId === personId && entry.status !== "disabled",
+    );
+    if (!portalPlayer) {
+      setToast({ message: "Give this player portal access first — that is where they watch it." });
+      return;
+    }
+    const cloudReason = clarityCloudTransferBlockReason(clarityCloudHealth);
+    if (cloudReason) {
+      setToast({ message: cloudReason });
+      return;
+    }
+    // null is Cancel, "" is an empty note deliberately sent. They are
+    // different answers and only the first one aborts.
+    const note = window.prompt("Send this video to the player. Add a note (optional):", "");
+    if (note === null) return;
+
+    setUploadingSavedVideoIds((current) => new Set(current).add(item.savedVideoId));
+    setToast({ message: "Sending to player..." });
+    try {
+      await saveSavedVideoToCloud(item.savedVideoId, store, {
+        onProgress: () => refreshSavedVideoLibrary(),
+        returnToPlayer: true,
+        returnToPersonId: personId,
+        message: note.trim(),
+      });
+      refreshSavedVideoLibrary();
+      await refreshClarityCloudImports();
+      setToast({ message: "Sent. They get an email, and it is in their portal Videos." });
+    } catch (error) {
+      refreshSavedVideoLibrary();
+      const code =
+        typeof error === "object" && error && "code" in error
+          ? String((error as { code?: unknown }).code || "")
+          : "";
+      // eslint-disable-next-line no-console
+      console.warn("clarity_cloud_return_failed", {
+        safeErrorCode: code || "CLARITY_CLOUD_RETURN_FAILED",
+        savedVideoId: item.savedVideoId,
+      });
+      setToast({
+        message:
+          error instanceof Error && error.message
+            ? error.message
+            : "Could not send that video. Your device copy is safe.",
+      });
+    } finally {
+      setUploadingSavedVideoIds((current) => {
+        const next = new Set(current);
+        next.delete(item.savedVideoId);
+        return next;
+      });
+    }
+  }
+
   async function sendSavedVideoToPrimaryComputer(item: SavedVideoItem) {
     try {
       await startSavedVideoCloudTransfers([item], { openSettingsOnConfigurationIssue: true });
@@ -13967,10 +14077,34 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           packageCoverageMode: current.packageCoverageMode === "lesson-by-lesson" ? "lesson-by-lesson" : "upfront",
         };
       }
+      if (format === "video-review") {
+        // Public on purpose, unlike a package: a review is a thing a player
+        // books. What it does not get is a capacity, a schedule or a price
+        // per head -- it is one swing, looked at once.
+        return {
+          ...current,
+          lessonFormat: "video-review",
+          customGroup: false,
+          customGroupEnabled: false,
+          groupSchedule: undefined,
+          capacity: 1,
+          minParticipants: 1,
+          priceMode: "session",
+          baseParticipants: undefined,
+          basePrice: undefined,
+          extraPersonPrice: undefined,
+          reviewTurnaroundDays: clamp(
+            Math.round(Number(current.reviewTurnaroundDays) || DEFAULT_REVIEW_TURNAROUND_DAYS),
+            1,
+            MAX_REVIEW_TURNAROUND_DAYS,
+          ),
+        };
+      }
       if (format === "private") {
         return {
           ...current,
           lessonFormat: "private",
+          reviewTurnaroundDays: undefined,
           customGroup: false,
           customGroupEnabled: false,
           groupSchedule: undefined,
@@ -19608,6 +19742,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     <option value="private">Private lesson</option>
                     <option value="group">Group lesson</option>
                     <option value="custom-group">Custom group lesson</option>
+                    <option value="video-review">Video review (no set time)</option>
                     <option value="package">Package</option>
                   </select>
                 </label>
@@ -19893,6 +20028,28 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   />
                 </label>
               </div>
+              {serviceEditor.lessonFormat === "video-review" && (
+                <div className="service-form-row">
+                  <label className="settings-field">
+                    <span>Turnaround (days)</span>
+                    <input
+                      value={serviceNumberInputValue("reviewTurnaroundDays")}
+                      min={1}
+                      max={MAX_REVIEW_TURNAROUND_DAYS}
+                      step={1}
+                      inputMode="numeric"
+                      onChange={(event) => updateServiceNumberDraft("reviewTurnaroundDays", event.target.value)}
+                      onBlur={() => commitServiceNumberDraft("reviewTurnaroundDays")}
+                      type="number"
+                    />
+                    <p className="field-help">
+                      A review has no appointment time. Booking one puts it on your calendar on the day
+                      it is due back, at the end of that day, so it sits with the rest of that day's work.
+                      Duration is how long you expect to spend on it.
+                    </p>
+                  </label>
+                </div>
+              )}
               {serviceEditor.lessonFormat === "package" && (
                 <div className="service-form-row">
                   <label className="settings-field">
@@ -24215,6 +24372,27 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                                           {sendLabel}
                                                         </button>
                                                       ) : null}
+                                                      {cloudOperational &&
+                                                      portalPlayers.some(
+                                                        (entry) =>
+                                                          entry.personId === notesWorkspaceClient.id &&
+                                                          entry.status !== "disabled",
+                                                      ) ? (
+                                                        <button
+                                                          type="button"
+                                                          role="menuitem"
+                                                          onClick={() => {
+                                                            closeMenu();
+                                                            void sendSavedVideoToPlayer(
+                                                              video,
+                                                              notesWorkspaceClient.id,
+                                                            );
+                                                          }}
+                                                        >
+                                                          <Send size={14} />
+                                                          Send to player
+                                                        </button>
+                                                      ) : null}
                                                       {canPause ? (
                                                         <button
                                                           type="button"
@@ -24349,9 +24527,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                         // unseen dot until you open it.
                                         const isSubmission = transfer.direction === "player-submission";
                                         const isUnseen = isSubmission && !transfer.coachSeenAt;
+                                        // A return is the coach's own outgoing video. It carries
+                                        // the mirror of the dot above -- whether the player has
+                                        // opened it -- which is the only thing the coach cannot
+                                        // find out any other way.
+                                        const isReturn = transfer.direction === "coach-return";
                                         return (
                                           <article
-                                            className={`player-video-card is-cloud-only${isSubmission ? " is-player-submission" : ""}${isUnseen ? " is-unseen" : ""}`}
+                                            className={`player-video-card is-cloud-only${isSubmission ? " is-player-submission" : ""}${isReturn ? " is-coach-return" : ""}${isUnseen ? " is-unseen" : ""}`}
                                             key={savedVideoId}
                                           >
                                             <button
@@ -24382,6 +24565,17 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                               {isSubmission && transfer.playerMessage && (
                                                 <span className="player-video-submission-note">
                                                   “{transfer.playerMessage}”
+                                                </span>
+                                              )}
+                                              {isReturn && (
+                                                <span className="player-video-submission-meta">
+                                                  Sent to {notesWorkspaceClient.name} ·{" "}
+                                                  {transfer.playerSeenAt ? "opened" : "not opened yet"}
+                                                </span>
+                                              )}
+                                              {isReturn && transfer.coachMessage && (
+                                                <span className="player-video-submission-note">
+                                                  “{transfer.coachMessage}”
                                                 </span>
                                               )}
                                             </div>

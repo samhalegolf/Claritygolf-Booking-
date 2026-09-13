@@ -14436,3 +14436,20 @@ button {
     padding-right: var(--c-space-5);
   }
 }
+
+/* A review has no times to choose, so step 2 of the booking flow states the
+   turnaround instead of offering a picker. Deliberately not a card: there is
+   nothing here to press, and a box would promise there was (Rule 01). */
+.booking-review-turnaround {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--c-text-soft);
+}
+
+.booking-review-turnaround strong {
+  color: var(--c-text);
+}

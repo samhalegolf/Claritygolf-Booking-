@@ -474,3 +474,94 @@ test("publicTransferSession exposes guest provenance but never the view token", 
   assert.ok(!("coachViewTokenHash" in wire), "the coach view token hash must never reach a client");
   assert.ok(!("resumableSessionUrl" in wire), "the resumable session url is secret");
 });
+
+const coachReturnRow = {
+  version: 1,
+  transfer_id: "transfer-return-1",
+  saved_video_id: "saved-video-return-1",
+  account_id: "sam-hale-golf",
+  provider_id: "google-drive",
+  catalogue_status: "ready_to_import",
+  player_id: "person-1",
+  lesson_id: "lesson-1",
+  analysis_id: "analysis-1",
+  status: "ready",
+  expected_size_bytes: 4096,
+  checksum_sha256: "e".repeat(64),
+  accepted_offset_bytes: 4096,
+  chunk_size_bytes: defaultChunkSizeBytes,
+  drive_asset_folder_id: "folder-return-1",
+  resumable_session_url: "https://example.invalid/session",
+  resumable_session_created_at: "2026-09-14T00:00:00.000Z",
+  direction: "coach-return",
+  coach_message: "Watch your left wrist at the top.",
+  returned_to_portal_player_id: "portal-1",
+  returned_at: "2026-09-14T00:05:00.000Z",
+  player_seen_at: null,
+  created_at: "2026-09-14T00:00:00.000Z",
+  updated_at: "2026-09-14T00:05:00.000Z",
+};
+
+test("a coach-return row survives the rowToSession -> sessionToRow round trip", () => {
+  const session = rowToSession(coachReturnRow);
+  assert.equal(session.direction, "coach-return", "a return must not be read back as coach-device");
+  assert.equal(session.coachMessage, "Watch your left wrist at the top.");
+  assert.equal(session.returnedToPortalPlayerId, "portal-1");
+  assert.equal(session.playerSeenAt, undefined, "an unopened return has no player dot");
+
+  const roundTripped = sessionToRow(session);
+  assert.equal(roundTripped.direction, "coach-return", "a return must not be written back as coach-device");
+  assert.equal(roundTripped.returned_to_portal_player_id, "portal-1");
+  assert.equal(roundTripped.player_seen_at, null);
+  assert.equal(roundTripped.coach_message, "Watch your left wrist at the top.");
+});
+
+test("return columns never leak onto a coach-device transfer", () => {
+  // Same reasoning as the guest columns: a deploy that lands ahead of the
+  // migration would otherwise 400 every write the coach's own library makes.
+  const coachRow = sessionToRow(
+    rowToSession({
+      ...coachReturnRow,
+      direction: "coach-device",
+      coach_message: null,
+      returned_to_portal_player_id: null,
+      returned_at: null,
+    }),
+  );
+  assert.equal(coachRow.direction, "coach-device");
+  assert.ok(!("coach_message" in coachRow), "coach-device rows must not carry return columns");
+  assert.ok(!("player_seen_at" in coachRow), "coach-device rows must not carry return columns");
+  assert.ok(
+    !("returned_to_portal_player_id" in coachRow),
+    "coach-device rows must not carry return columns",
+  );
+});
+
+test("publicTransferSession carries the player's dot but keeps the directions apart", () => {
+  const wire = publicTransferSession(rowToSession(coachReturnRow)) as Record<string, unknown>;
+  assert.equal(wire.direction, "coach-return");
+  assert.equal(wire.coachMessage, "Watch your left wrist at the top.");
+  assert.equal(wire.playerSeenAt, undefined);
+
+  // The two dots are mirror images and must never be confused for one another:
+  // coachSeenAt is the coach's record of an incoming submission, playerSeenAt
+  // the player's record of an outgoing return. A return carries no coach dot.
+  assert.equal(wire.coachSeenAt, undefined, "a return must not carry the coach's unread dot");
+
+  const submission = publicTransferSession(
+    rowToSession({
+      ...coachReturnRow,
+      direction: "player-submission",
+      coach_message: null,
+      returned_to_portal_player_id: null,
+      returned_at: null,
+      player_seen_at: null,
+      coach_seen_at: "2026-09-14T01:00:00.000Z",
+      player_message: "Here is my 7 iron.",
+    }),
+  ) as Record<string, unknown>;
+  assert.equal(submission.direction, "player-submission");
+  assert.equal(submission.coachSeenAt, "2026-09-14T01:00:00.000Z");
+  assert.equal(submission.playerSeenAt, undefined, "a submission must not carry the player's dot");
+  assert.equal(submission.coachMessage, undefined);
+});

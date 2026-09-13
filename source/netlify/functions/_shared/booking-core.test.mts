@@ -8,7 +8,9 @@ import {
   publicAppointmentContactQuery,
   publicAppointmentReadQuery,
   publicSlotCalendarItemsQuery,
+  publicBookableServices,
   publicBookingSlots,
+  normalizeServices,
   readPublicSlotContext,
   readPublicSlotItemsForWeek,
 } from "../booking-core.mts";
@@ -963,4 +965,73 @@ test("saving an account leaves the coach's custom fields as they were typed", ()
     { id: "field-new", label: "", value: "", placement: "footer" },
     { id: "field-odd", label: "Ref", value: "A1", placement: "header" },
   ]);
+});
+
+
+const reviewServiceId = "swing-review";
+
+function reviewService(overrides = {}) {
+  return service({
+    id: reviewServiceId,
+    name: "Swing Review",
+    duration: 30,
+    lessonFormat: "video-review",
+    reviewTurnaroundDays: 3,
+    ...overrides,
+  });
+}
+
+test("a video review is bookable but is offered no times", () => {
+  const state = calendarState({
+    services: [service(), reviewService()],
+  });
+  const payload = publicBookingSlots(state, { week: testWeek });
+
+  // It has to stay in the catalogue -- a player books it like anything else.
+  assert.ok(
+    publicBookableServices(state.services).some((entry) => entry.id === reviewServiceId),
+    "a review must still be publicly bookable",
+  );
+  assert.ok(payload.services[reviewServiceId], "a review must appear in the slots payload");
+  assert.deepEqual(
+    payload.services[reviewServiceId].slots,
+    [],
+    "a review has no times to choose: its deadline is derived at booking",
+  );
+  // And the ordinary lesson beside it is unaffected.
+  assert.ok(
+    payload.services[serviceId].slots.length > 0,
+    "excluding reviews must not silence a normal lesson's availability",
+  );
+});
+
+test("the review format survives normalisation and carries a clamped turnaround", () => {
+  const [normalised] = normalizeServices([reviewService({ reviewTurnaroundDays: 5 })], accountId);
+  assert.equal(normalised.lessonFormat, "video-review", "the format must not fall back to private");
+  assert.equal(normalised.reviewTurnaroundDays, 5);
+  assert.equal(normalised.capacity, 1, "a review is one swing, looked at once");
+  assert.equal(normalised.priceMode, "session");
+  assert.equal(normalised.visibility, "public", "unlike a package, a review is something a player books");
+
+  const [tooLong] = normalizeServices([reviewService({ reviewTurnaroundDays: 999 })], accountId);
+  assert.equal(tooLong.reviewTurnaroundDays, 30, "turnaround is capped");
+  // A number out of range is clamped, not replaced: the coach typed something,
+  // and the nearest legal answer is closer to what they meant than a default.
+  const [tooShort] = normalizeServices([reviewService({ reviewTurnaroundDays: 0 })], accountId);
+  assert.equal(tooShort.reviewTurnaroundDays, 1, "a zero-day turnaround clamps to one day");
+  // A missing or unparseable one has nothing to clamp, so it takes the default.
+  const [missing] = normalizeServices([reviewService({ reviewTurnaroundDays: undefined })], accountId);
+  assert.equal(missing.reviewTurnaroundDays, 3, "an unset turnaround takes the default");
+});
+
+test("turnaround never leaks onto a lesson type that has no turnaround", () => {
+  const [normalPrivate] = normalizeServices(
+    [service({ reviewTurnaroundDays: 7 } as Record<string, unknown>)],
+    accountId,
+  );
+  assert.equal(
+    normalPrivate.reviewTurnaroundDays,
+    undefined,
+    "a private lesson must not carry a review deadline nothing reads",
+  );
 });

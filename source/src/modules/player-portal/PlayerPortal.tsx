@@ -43,6 +43,7 @@ import {
   fetchGuestStatus,
   importSavedVideoFromClarityCloud,
   listClarityCloudImportTransfers,
+  markClarityCloudReturnSeen,
   registerGuestSender,
   removeSavedVideoCloudTransfer,
   saveSavedVideoToCloud,
@@ -76,6 +77,8 @@ const BookingWidget = lazy(() => import("../public-booking/PublicBookingApp"));
 type Booking = {
   id: string;
   serviceName?: string;
+  /** "video-review" is a deadline, not a time to turn up at. */
+  lessonFormat?: string;
   duration: number;
   week: number;
   day: number;
@@ -138,6 +141,10 @@ function formatMinutes(minutes: number) {
   return mins === 0 ? `${hour12} ${period}` : `${hour12}:${String(mins).padStart(2, "0")} ${period}`;
 }
 
+function isReviewBooking(booking: Booking) {
+  return booking.lessonFormat === "video-review";
+}
+
 function formatBookingWhen(booking: Booking) {
   const date = slotDate(booking.week, booking.day, booking.start);
   const dateLabel = date.toLocaleDateString(undefined, {
@@ -145,6 +152,10 @@ function formatBookingWhen(booking: Booking) {
     month: "short",
     day: "numeric",
   });
+  // A review's slot is the day the coach owes it back. Printing the hour it
+  // happens to sit on would read as an appointment to attend, which is the one
+  // thing it is not.
+  if (isReviewBooking(booking)) return `Back with you by ${dateLabel}`;
   return `${dateLabel} · ${formatMinutes(booking.start)}–${formatMinutes(booking.start + booking.duration)}`;
 }
 
@@ -430,6 +441,18 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
     return cloudVideos.filter((transfer) => !onDevice.has(transfer.savedVideoId));
   }, [cloudVideos, savedVideos]);
 
+  // Videos the coach has sent back that this player has not opened yet.
+  // Counted off the full cloud list rather than the missing one: the number is
+  // "how much is waiting for you", and that does not change because one of
+  // them happens to already be on this phone.
+  const unseenReturnCount = useMemo(
+    () =>
+      cloudVideos.filter(
+        (transfer) => transfer.direction === "coach-return" && !transfer.playerSeenAt,
+      ).length,
+    [cloudVideos],
+  );
+
   const downloadFromCloud = useCallback(
     async (savedVideoId: string) => {
       if (!savedVideoLibrary || downloadingIds.has(savedVideoId)) return;
@@ -440,6 +463,14 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
         // The scope also settles the receipt -- pulling a copy is a read, and
         // a receipt would schedule the coach's Drive original for deletion.
         await importSavedVideoFromClarityCloud(savedVideoId, savedVideoLibrary, { scope: "player" });
+        // Pulling a returned video down is the player acting on it, which is
+        // the same gesture the coach's side treats as "seen". Only returns
+        // carry a player dot; the call is a no-op on anything else and its
+        // failure is deliberately not allowed to fail the download.
+        const pulled = cloudVideos.find((transfer) => transfer.savedVideoId === savedVideoId);
+        if (pulled?.direction === "coach-return" && !pulled.playerSeenAt) {
+          await markClarityCloudReturnSeen(savedVideoId);
+        }
         await refreshSavedVideos();
         await refreshCloudVideos();
       } catch (error) {
@@ -454,7 +485,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
         });
       }
     },
-    [downloadingIds, refreshCloudVideos, refreshSavedVideos, savedVideoLibrary],
+    [cloudVideos, downloadingIds, refreshCloudVideos, refreshSavedVideos, savedVideoLibrary],
   );
 
   async function handleSignOut() {
@@ -805,8 +836,14 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
     [expandedPracticeId, practice],
   );
 
-  const nextLesson = upcomingBookings[0] || null;
-  const laterLessons = upcomingBookings.slice(1);
+  // Reviews are pulled out of the lesson list entirely. "Next lesson" has to
+  // mean a time to be somewhere; a review that happens to be due sooner than
+  // the next lesson would otherwise take that card and tell the player to turn
+  // up to nothing.
+  const upcomingLessons = useMemo(() => upcomingBookings.filter((b) => !isReviewBooking(b)), [upcomingBookings]);
+  const upcomingReviews = useMemo(() => upcomingBookings.filter(isReviewBooking), [upcomingBookings]);
+  const nextLesson = upcomingLessons[0] || null;
+  const laterLessons = upcomingLessons.slice(1);
 
   const mostRecentVideo = useMemo(() => {
     if (!savedVideos.length) return null;
@@ -1028,11 +1065,13 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                         >
                           <span className="player-portal-home-card-title">Videos</span>
                           <span className="player-portal-home-card-sub">
-                            {missingCloudVideos.length
-                              ? `${missingCloudVideos.length} to download`
-                              : mostRecentVideo
-                                ? `Last saved ${formatDate(mostRecentVideo.capturedAt || mostRecentVideo.createdAt)}`
-                                : "No videos yet"}
+                            {unseenReturnCount
+                              ? `${unseenReturnCount} new from your coach`
+                              : missingCloudVideos.length
+                                ? `${missingCloudVideos.length} to download`
+                                : mostRecentVideo
+                                  ? `Last saved ${formatDate(mostRecentVideo.capturedAt || mostRecentVideo.createdAt)}`
+                                  : "No videos yet"}
                           </span>
                         </button>
                         <button
@@ -1068,6 +1107,25 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                       <p className="player-portal-empty">No upcoming lessons booked.</p>
                     )}
                   </section>
+
+                  {/* Reviews sit above the booking tabs, not inside them. A
+                      player who has sent a swing and is waiting on it wants one
+                      answer -- when -- and it is not on the same axis as
+                      "which lesson shall I book". */}
+                  {upcomingReviews.length > 0 && (
+                    <section className="player-portal-section">
+                      <h2>Video reviews</h2>
+                      <ul className="player-portal-list">
+                        {upcomingReviews.map((review) => (
+                          <li key={review.id}>
+                            <strong>{review.serviceName || "Video review"}</strong>
+                            <span>{formatBookingWhen(review)}</span>
+                            <em>Send your swing from Videos if you have not already.</em>
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  )}
 
                   <div className="player-portal-pill-toggle" role="tablist" aria-label="Lessons view">
                     <button

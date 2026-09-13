@@ -1239,3 +1239,38 @@
   justify-content: flex-end;
   margin-top: 10px;
 }
+
+/* A video the coach sent back.
+ *
+ * Marked with a line and a coloured first line of meta, not a box or a badge
+ * (Rule 01: boxes only where you can press). The tile is already pressable and
+ * already says "Download"; what is being added is that this one is theirs to
+ * watch rather than one more copy of something they sent. */
+.player-portal-video-tile-cloud.is-coach-return .player-portal-video-meta strong {
+  color: var(--pt-text);
+}
+
+.player-portal-video-tile-cloud.is-coach-return.is-unseen .player-portal-video-media-cloud {
+  box-shadow: inset 0 0 0 2px var(--pt-accent);
+}
+
+/* "New · Your coach sent this back · 24 MB" -- the whole line goes accent
+   while it is unread, and falls back to muted once opened. Colour is the only
+   difference, so it survives the tile being any size. */
+.player-portal-video-tile-cloud.is-coach-return.is-unseen .player-portal-video-meta span:nth-of-type(2) {
+  color: var(--pt-accent);
+  font-weight: 600;
+}
+
+/* The coach's note. Allowed to wrap to two lines -- it is the one piece of
+   writing on this screen and clipping it to one line would lose the point. */
+.player-portal-video-coach-note {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: normal;
+  font-size: 12px;
+  font-style: italic;
+  color: var(--pt-text-soft);
+}

@@ -730,11 +730,17 @@ type PublicTransferSession = {
    * 'player-submission' means a portal player sent this in, rather than it
    * being the coach's own library syncing between their devices.
    * 'guest-submission' means someone with no account did.
+   * 'coach-return' means the coach deliberately sent this one back out.
    */
   direction?: VideoTransferDirection;
   submittedByName?: string;
   playerMessage?: string;
   coachSeenAt?: string;
+  /** Coach returns only: the note that came with it, and the player's own dot. */
+  coachMessage?: string;
+  playerSeenAt?: string;
+  returnedToPortalPlayerId?: string;
+  returnedAt?: string;
   /** Guest submissions only. */
   guestSenderId?: string;
   submittedByEmail?: string;
@@ -820,7 +826,11 @@ const applyTransferSessionToCloud = (
  */
 export type VideoTransferScope = "coach" | "player" | "guest";
 
-export type VideoTransferDirection = "coach-device" | "player-submission" | "guest-submission";
+export type VideoTransferDirection =
+  | "coach-device"
+  | "player-submission"
+  | "guest-submission"
+  | "coach-return";
 
 const transferUrl = (scope: VideoTransferScope, ...segments: string[]) =>
   [
@@ -1067,6 +1077,14 @@ export const saveSavedVideoToCloud = async (
     platform?: string;
     scope?: VideoTransferScope;
     message?: string;
+    /**
+     * Coach scope only: send this video to the player it is filed under rather
+     * than syncing it to the coach's own other devices. The server re-resolves
+     * the person against portal_players and refuses if they have no portal, so
+     * this flag asks for a return -- it does not grant one.
+     */
+    returnToPlayer?: boolean;
+    returnToPersonId?: string;
   } = {}
 ): Promise<SavedVideoItem> => {
   const scope: VideoTransferScope = options.scope || "coach";
@@ -1078,7 +1096,11 @@ export const saveSavedVideoToCloud = async (
   if (!blob) {
     throw new SavedVideoCloudError("SAVED_VIDEO_SOURCE_MISSING", "Saved video source was not found.");
   }
-  if (item.cloud?.status === "ready") return item;
+  // Already in the cloud means there is nothing to upload -- but a return is
+  // not an upload, it is an act of addressing. The server turns the existing
+  // row into one and notifies the player, so this short-circuit has to let a
+  // return through or the coach's send would do nothing at all.
+  if (item.cloud?.status === "ready" && !options.returnToPlayer) return item;
 
   const checksumSha256 = item.source.checksumSha256 || (await calculateBlobSha256(blob));
   if (!checksumSha256) {
@@ -1106,8 +1128,15 @@ export const saveSavedVideoToCloud = async (
     };
     const uploadSessionRequest = {
       ...buildVideoUploadSessionRequest(working, blob, checksumSha256, sourceDevice),
-      // Only a player sends one: a short note to the coach alongside the video.
+      // A note alongside the video: the player's to the coach on the way in,
+      // the coach's to the player on the way back.
       ...(options.message ? { message: options.message } : {}),
+      ...(options.returnToPlayer
+        ? {
+            returnToPlayer: true,
+            returnToPersonId: options.returnToPersonId || working.playerId,
+          }
+        : {}),
     };
     const sessionResponse = await apiFetch(transferUrl(scope, savedVideoId, "session"), {
       method: "POST",
@@ -1316,6 +1345,23 @@ export const markClarityCloudSubmissionSeen = async (savedVideoId: string): Prom
     // Coach scope on purpose: "seen" is the coach's unread dot. There is no
     // player route for it and there should not be one.
     await apiFetch(transferUrl("coach", savedVideoId, "seen"), {
+      method: "POST",
+      headers: { Accept: "application/json" },
+    });
+  } catch {
+    // The dot reappearing is a smaller problem than an error dialog.
+  }
+};
+
+/**
+ * Clears the unseen marker on a video the coach returned. Player scope: this is
+ * the player's own dot, and the coach route deliberately refuses to touch it.
+ * Best effort, for the same reason the coach's equivalent is -- the video is
+ * already open, and an error dialog would be worse than the dot coming back.
+ */
+export const markClarityCloudReturnSeen = async (savedVideoId: string): Promise<void> => {
+  try {
+    await apiFetch(transferUrl("player", savedVideoId, "seen"), {
       method: "POST",
       headers: { Accept: "application/json" },
     });

@@ -49,7 +49,11 @@ type TransferStatus =
 
 export type ClarityCloudProviderId = "google-drive";
 
-export type TransferDirection = "coach-device" | "player-submission" | "guest-submission";
+export type TransferDirection =
+  | "coach-device"
+  | "player-submission"
+  | "guest-submission"
+  | "coach-return";
 
 /** Set only for player submissions; forced from the session, never the body. */
 export type PlayerSubmission = {
@@ -69,6 +73,21 @@ export type GuestSubmission = {
   playerId: string;
   name: string;
   email: string;
+  message: string;
+};
+
+/**
+ * Set only for coach returns; the coach names a person, and everything here is
+ * resolved from that person's portal_players row rather than from the body.
+ * The player never authorises this upload -- the coach does -- so the only
+ * thing the player's side contributes is proof they have portal access at all.
+ */
+export type CoachReturn = {
+  /** Forced onto the manifest so the return lands in that player's imports. */
+  playerId: string;
+  portalPlayerId: string;
+  playerEmail: string;
+  playerName: string;
   message: string;
 };
 
@@ -279,14 +298,23 @@ export type VideoTransferSession = {
    * 'coach-device' is the original flow: the coach's library syncing to their
    * own Drive and back down to another of their devices. 'player-submission'
    * is a portal player sending a video in. 'guest-submission' is someone with
-   * no account at all doing the same. Same engine, same Drive account -- only
-   * the credential that authorised the upload differs.
+   * no account at all doing the same. 'coach-return' is the coach sending an
+   * annotated video back out to a player. Same engine, same Drive account --
+   * what differs is the credential that authorised it and who is waiting.
    */
   direction?: TransferDirection;
   submittedByPortalPlayerId?: string;
   submittedByName?: string;
   playerMessage?: string;
   coachSeenAt?: string;
+  /**
+   * Coach returns only, and the mirror image of the three above: the note the
+   * coach sent back, whether the player has opened it, and who it went to.
+   */
+  coachMessage?: string;
+  playerSeenAt?: string;
+  returnedToPortalPlayerId?: string;
+  returnedAt?: string;
   /** Guest submissions only: the guest_senders row that authorised this. */
   guestSenderId?: string;
   submittedByEmail?: string;
@@ -783,6 +811,10 @@ export function publicTransferSession(session: VideoTransferSession) {
     submittedByName: session.submittedByName,
     playerMessage: session.playerMessage,
     coachSeenAt: session.coachSeenAt,
+    coachMessage: session.coachMessage,
+    playerSeenAt: session.playerSeenAt,
+    returnedToPortalPlayerId: session.returnedToPortalPlayerId,
+    returnedAt: session.returnedAt,
     // Deliberately no coachViewTokenHash: it never leaves the server.
     guestSenderId: session.guestSenderId,
     submittedByEmail: session.submittedByEmail,
@@ -1633,11 +1665,17 @@ export function rowToSession(row: any): VideoTransferSession {
         ? "player-submission"
         : row.direction === "guest-submission"
           ? "guest-submission"
-          : "coach-device",
+          : row.direction === "coach-return"
+            ? "coach-return"
+            : "coach-device",
     submittedByPortalPlayerId: row.submitted_by_portal_player_id || undefined,
     submittedByName: row.submitted_by_name || undefined,
     playerMessage: row.player_message || undefined,
     coachSeenAt: row.coach_seen_at || undefined,
+    coachMessage: row.coach_message || undefined,
+    playerSeenAt: row.player_seen_at || undefined,
+    returnedToPortalPlayerId: row.returned_to_portal_player_id || undefined,
+    returnedAt: row.returned_at || undefined,
     guestSenderId: row.guest_sender_id || undefined,
     submittedByEmail: row.submitted_by_email || undefined,
     coachViewTokenHash: row.coach_view_token_hash || undefined,
@@ -1700,6 +1738,17 @@ export function sessionToRow(session: VideoTransferSession) {
           coach_view_token_hash: session.coachViewTokenHash || null,
           coach_view_expires_at: session.coachViewExpiresAt || null,
           claimed_at: session.claimedAt || null,
+        }
+      : {}),
+    // Same reasoning as the guest columns above: emitted only for the rows
+    // that have them, so a deploy that lands before the migration cannot
+    // break every unrelated transfer write with an unknown-column rejection.
+    ...(session.direction === "coach-return" || session.returnedToPortalPlayerId
+      ? {
+          coach_message: session.coachMessage || null,
+          player_seen_at: session.playerSeenAt || null,
+          returned_to_portal_player_id: session.returnedToPortalPlayerId || null,
+          returned_at: session.returnedAt || null,
         }
       : {}),
     ready_to_import_at: session.readyToImportAt || null,
@@ -1812,7 +1861,8 @@ async function handleSession(
   savedVideoId: string,
   diagnostics: ProviderDiagnostics = {},
   submission: PlayerSubmission | null = null,
-  guest: GuestSubmission | null = null
+  guest: GuestSubmission | null = null,
+  coachReturn: CoachReturn | null = null
 ) {
   if (req.method === "GET") {
     const session = await readTransferSession(accountId, savedVideoId);
@@ -1828,6 +1878,11 @@ async function handleSession(
   // Same rule for a guest, and it matters more: they have no person record at
   // all, and the client sends a placeholder id.
   if (guest) savedVideo.playerId = guest.playerId;
+  // A return is addressed to a person, and the id it is filed under is what
+  // decides whose portal it shows up in. The coach's local copy may be filed
+  // under an email- or phone-derived id, so the canonical person id resolved
+  // from portal_players wins over whatever the body carried.
+  if (coachReturn) savedVideo.playerId = coachReturn.playerId;
   const submissionFields = submission
     ? {
         direction: "player-submission" as const,
@@ -1846,12 +1901,43 @@ async function handleSession(
           submittedByEmail: guest.email,
           playerMessage: guest.message || cleanString(body?.message, "", 600),
         }
-      : { direction: "coach-device" as const };
+      : coachReturn
+        ? {
+            direction: "coach-return" as const,
+            returnedToPortalPlayerId: coachReturn.portalPlayerId,
+            coachMessage: coachReturn.message || cleanString(body?.message, "", 600),
+          }
+        : { direction: "coach-device" as const };
   const existing = await readTransferSession(accountId, savedVideoId);
   const sourceMatchesExisting = Boolean(
     existing && existing.expectedSizeBytes === video.sizeBytes && existing.checksumSha256 === video.checksumSha256
   );
   if (existing?.status === "ready" && sourceMatchesExisting) {
+    // The bytes are already up. For an ordinary sync that is the whole answer,
+    // but a coach asking to return a video they had already synced would
+    // otherwise get a silent no-op: the row stays 'coach-device', no dot
+    // appears, and no email goes out.
+    //
+    // Converting is only ever allowed from the coach's own library sync. A
+    // submission row is the player's video coming in, and rewriting one into a
+    // return would relabel their upload as the coach's reply.
+    if (coachReturn && existing.direction !== "coach-return") {
+      if (existing.direction === "player-submission" || existing.direction === "guest-submission") {
+        throw new TransferError(
+          "CLARITY_CLOUD_PROVIDER_FAILED",
+          "That video was sent in by a player. Save your annotated copy and send that back instead.",
+          409,
+        );
+      }
+      const converted = await patchTransferSession(existing, {
+        direction: "coach-return",
+        returnedToPortalPlayerId: coachReturn.portalPlayerId,
+        coachMessage: coachReturn.message || cleanString(body?.message, "", 600),
+        playerId: coachReturn.playerId,
+      });
+      const delivered = await deliverCoachReturn(converted);
+      return json({ ok: true, status: "ready", session: publicTransferSession(delivered), ...publicTransferSession(delivered) });
+    }
     return json({ ok: true, status: "ready", session: publicTransferSession(existing), ...publicTransferSession(existing) });
   }
   // "verifying" must be resumable: a failed finalize leaves the row in
@@ -1960,7 +2046,11 @@ async function handleSession(
         createdAt: now,
         updatedAt: now,
       });
-      return json({ ok: true, status: "ready", session: publicTransferSession(ready), ...publicTransferSession(ready) });
+      // The bytes were already in Drive, so finalize never runs and the
+      // notification would never fire. A return reaching "ready" is the event,
+      // not the route it arrived by.
+      const delivered = await deliverCoachReturn(ready);
+      return json({ ok: true, status: "ready", session: publicTransferSession(delivered), ...publicTransferSession(delivered) });
     }
   }
 
@@ -2205,6 +2295,11 @@ async function handleFinalize(
       console.warn("video_transfer:submission_notify_failed", redactForLogs(error?.message || error));
     });
   }
+  // A return is the coach handing work back. The player is the one waiting,
+  // and unlike the coach they have no console open to notice.
+  if (ready.direction === "coach-return") {
+    await deliverCoachReturn(ready);
+  }
   // A guest submission is ephemeral and its recipient has no app open, so it
   // needs two more things than a player's: a clock, and a link that works
   // without a login. Both are set here rather than at session-create -- an
@@ -2402,6 +2497,12 @@ async function handleImportReceipt(req: Request, accountId: string, savedVideoId
     );
   }
   const now = new Date();
+  // A coach-device transfer is retired once the coach's own device has taken
+  // custody of it. A return is not: the coach importing their own returned
+  // clip onto a second device says nothing about whether the player has
+  // downloaded it, and scheduling cleanup here would start a clock on
+  // somebody else's video.
+  const schedulesCleanup = session.direction !== "coach-return";
   const cleanupAfter = new Date(now.getTime() + 1000 * 60 * 60 * 24 * 7).toISOString();
   const receipt = {
     version: 1,
@@ -2425,9 +2526,13 @@ async function handleImportReceipt(req: Request, accountId: string, savedVideoId
     destinationPlatform: receipt.platform || undefined,
     importedAt: now.toISOString(),
     importVerifiedAt: receipt.verifiedAt,
-    cleanupScheduledAt: now.toISOString(),
-    cleanupAfter,
-    cleanupStatus: "scheduled",
+    ...(schedulesCleanup
+      ? {
+          cleanupScheduledAt: now.toISOString(),
+          cleanupAfter,
+          cleanupStatus: "scheduled" as const,
+        }
+      : {}),
     importReceiptJson: JSON.stringify(receipt),
     lastErrorCode: undefined,
     lastErrorMessage: undefined,
@@ -2453,6 +2558,151 @@ async function handleImportReceipt(req: Request, accountId: string, savedVideoId
  * sends. Both are best effort -- a failed email must never fail an upload that
  * has already landed in Drive.
  */
+/**
+ * Resolves the person a coach is returning a video to.
+ *
+ * A return may only ever be addressed to someone who already has portal
+ * access, because the portal is the only place they could watch it. That is
+ * also the authorisation check: the coach is proven by requireCoachActor, and
+ * portal_players is scoped to their account, so a person id belonging to
+ * another business resolves to nothing rather than to somebody else's client.
+ *
+ * A disabled portal player is refused rather than silently accepted. Revoking
+ * access signs them out everywhere; filing a video for them to never see is
+ * worse than saying so.
+ */
+async function readPortalPlayerForReturn(accountId: string, personId: string) {
+  if (!accountId || !personId) return null;
+  const rows = await supabase("portal_players", {
+    query:
+      `select=id,person_id,email,status&account_id=eq.${encodeURIComponent(accountId)}` +
+      `&person_id=eq.${encodeURIComponent(personId)}&limit=1`,
+  }).catch(() => []);
+  const row = rows[0];
+  if (!row) return null;
+  if (cleanString(row.status, "", 40) === "disabled") return null;
+  let name = "";
+  const people = await supabase("people", {
+    query: `select=name&id=eq.${encodeURIComponent(personId)}&account_id=eq.${encodeURIComponent(accountId)}&limit=1`,
+  }).catch(() => []);
+  name = cleanString(people[0]?.name, "", 180);
+  return {
+    portalPlayerId: cleanString(row.id, "", 80),
+    playerId: cleanString(row.person_id, "", 160),
+    playerEmail: cleanString(row.email, "", 180).toLowerCase(),
+    playerName: name,
+  };
+}
+
+/**
+ * Reads "this upload is a return" off a coach's request body, or answers null
+ * for the ordinary library sync that every other coach upload is.
+ *
+ * Deliberately explicit: nothing here infers a return from the fact that a
+ * saved video happens to carry a player's id. The coach's whole library is
+ * filed under player ids, and treating that as intent would email a player
+ * every time their coach's laptop synced.
+ */
+async function resolveCoachReturn(req: Request, accountId: string): Promise<CoachReturn | null> {
+  const body = (await req.clone().json().catch(() => ({}))) as any;
+  if (body?.returnToPlayer !== true) return null;
+  const personId = cleanString(
+    body?.returnToPersonId || body?.savedVideo?.playerId || body?.playerId,
+    "",
+    160,
+  );
+  const target = personId ? await readPortalPlayerForReturn(accountId, personId) : null;
+  if (!target) {
+    throw new TransferError(
+      "CLARITY_CLOUD_PROVIDER_FAILED",
+      "That player does not have portal access, so they have nowhere to watch this. Give them portal access first.",
+      409,
+    );
+  }
+  return { ...target, message: cleanString(body?.message, "", 600) };
+}
+
+/**
+ * Marks a return delivered and tells the player once.
+ *
+ * `returnedAt` is the idempotence key rather than a flag on the send path: a
+ * retried finalize, a resumed upload and the already-in-Drive fast path all
+ * arrive here, and a player should be told once about one video.
+ */
+async function deliverCoachReturn(session: VideoTransferSession): Promise<VideoTransferSession> {
+  if (session.direction !== "coach-return" || session.returnedAt) return session;
+  const delivered = await patchTransferSession(session, { returnedAt: new Date().toISOString() });
+  await notifyPlayerOfCoachReturn(delivered).catch((error: any) => {
+    console.warn("video_transfer:return_notify_failed", redactForLogs(error?.message || error));
+  });
+  return delivered;
+}
+
+/**
+ * Emails the player that their coach has sent a video back.
+ *
+ * Unlike the coach's own alerts this goes to a real client address, so the
+ * recipient is read from portal_players rather than from an env var, and the
+ * body carries no video link -- the bytes live in the coach's Drive and are
+ * only ever reachable through an authenticated portal session.
+ */
+async function notifyPlayerOfCoachReturn(session: VideoTransferSession) {
+  const accountId = cleanString(session.accountId, "", 120);
+  const portalPlayerId = cleanString(session.returnedToPortalPlayerId, "", 80);
+  if (!portalPlayerId) return;
+  const rows = await supabase("portal_players", {
+    query:
+      `select=email&id=eq.${encodeURIComponent(portalPlayerId)}` +
+      `&account_id=eq.${encodeURIComponent(accountId)}&limit=1`,
+  }).catch(() => []);
+  const to = cleanString(rows[0]?.email, "", 180);
+  const apiKey = env("RESEND_API_KEY");
+  const siteUrl =
+    env("URL") || env("DEPLOY_PRIME_URL") || env("CLARITY_SITE_URL", "https://claritygolf.app");
+  const subject = "Your coach sent you a video";
+  const message = cleanString(session.coachMessage, "", 600);
+  const lines = [
+    "Your coach has sent a video back to your player portal.",
+    message ? `\nTheir note: ${message}` : "",
+    `\nSign in and open Videos to watch it: ${siteUrl}`,
+  ].filter(Boolean);
+
+  if (apiKey && to) {
+    await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "Idempotency-Key": `coach-return-${session.transferId}`,
+      },
+      body: JSON.stringify({
+        from: env("CLARITY_EMAIL_FROM", "Clarity Golf <onboarding@resend.dev>"),
+        to: [to],
+        subject,
+        text: lines.join("\n"),
+      }),
+    });
+  }
+
+  await supabase("notification_history", {
+    method: "POST",
+    prefer: "return=minimal",
+    body: {
+      id: randomUUID(),
+      account_id: accountId,
+      person_key: session.playerId,
+      recipient: to || "",
+      subject,
+      kind: "coach_video_return",
+      status: apiKey && to ? "sent" : "skipped",
+      provider: "resend",
+      created_at: new Date().toISOString(),
+    },
+  }).catch(() => {
+    // A log, not a dependency of the return.
+  });
+}
+
 async function notifyCoachOfPlayerSubmission(session: VideoTransferSession) {
   // The transfer session names the business whose coach is being notified.
   const accountId = cleanString(session.accountId, "", 120);
@@ -2917,6 +3167,23 @@ async function handlePlayerVideoRoute(
     return json({ error: "not_found", message: "Video not found for this player." }, 404);
   }
 
+  // Opening a returned video clears its unseen dot in the portal.
+  //
+  // The one write a player is allowed to make to a row they did not create,
+  // and it is narrow in both directions: only on a coach-return, and only to
+  // player_seen_at. A player must never be able to reach coach_seen_at -- that
+  // dot is the coach's record of what they have watched, and letting the
+  // sender clear it would let a player mark their own submission read.
+  if (req.method === "POST" && sub[1] === "seen") {
+    if (owned.direction !== "coach-return") {
+      return json({ error: "not_found", message: "Video not found for this player." }, 404);
+    }
+    const seen = await patchTransferSession(owned, {
+      playerSeenAt: owned.playerSeenAt || new Date().toISOString(),
+    });
+    return json({ ok: true, session: publicTransferSession(seen) });
+  }
+
   if (req.method === "PUT" && (sub[1] === "chunk" || sub[1] === "upload")) {
     return await handleChunk(req, accountId, savedVideoId, googleDriveProviderAdapter("", settings, diagnostics));
   }
@@ -3151,11 +3418,12 @@ async function routeVideoTransferRequest(
       const body = await req.clone().json().catch(() => ({})) as any;
       const savedVideoId = cleanString(body?.savedVideoId || body?.savedVideo?.savedVideoId, "", 160);
       if (!savedVideoId) throw new TransferError("DRIVE_UPLOAD_VERIFY_FAILED", "Saved video id is required.", 400);
+      const coachReturn = await resolveCoachReturn(req, accountId);
       const accessToken = await ensureDriveReady(accountId, diagnostics);
       // NOTE: every route below must use `return await` so rejections are caught
       // by this try/catch. A bare `return somePromise` escapes the try block and
       // crashes the function process (Netlify then returns an opaque 502).
-      return await handleSession(req, accountId, accessToken, settings, googleDriveProviderAdapter(accessToken, settings, diagnostics), savedVideoId, diagnostics);
+      return await handleSession(req, accountId, accessToken, settings, googleDriveProviderAdapter(accessToken, settings, diagnostics), savedVideoId, diagnostics, null, null, coachReturn);
     }
     if (req.method === "GET" && parts[0] === "imports") {
       const accessToken = await ensureDriveReady(accountId, diagnostics);
@@ -3163,8 +3431,9 @@ async function routeVideoTransferRequest(
       return await handleImportList(accountId, googleDriveProviderAdapter(accessToken, settings, diagnostics), playerId || undefined);
     }
     if ((req.method === "POST" || req.method === "GET") && parts[1] === "session") {
+      const coachReturn = req.method === "POST" ? await resolveCoachReturn(req, accountId) : null;
       const accessToken = req.method === "POST" ? await ensureDriveReady(accountId, diagnostics) : "";
-      return await handleSession(req, accountId, accessToken, settings, googleDriveProviderAdapter(accessToken, settings, diagnostics), parts[0], diagnostics);
+      return await handleSession(req, accountId, accessToken, settings, googleDriveProviderAdapter(accessToken, settings, diagnostics), parts[0], diagnostics, null, null, coachReturn);
     }
     if (req.method === "PUT" && (parts[1] === "chunk" || parts[1] === "upload")) {
       return await handleChunk(req, accountId, parts[0], googleDriveProviderAdapter("", settings, diagnostics));
@@ -3187,6 +3456,12 @@ async function routeVideoTransferRequest(
     if (req.method === "POST" && parts[1] === "seen") {
       const session = await readTransferSession(accountId, parts[0]);
       if (!session) return json({ error: "not_found", message: "Transfer not found." }, 404);
+      // coach_seen_at is the coach's dot on an incoming submission. A return is
+      // outgoing and carries the player's dot instead, so this route leaves it
+      // alone rather than quietly marking the wrong column.
+      if (session.direction === "coach-return") {
+        return json({ ok: true, session: publicTransferSession(session) });
+      }
       const seen = await patchTransferSession(session, {
         coachSeenAt: session.coachSeenAt || new Date().toISOString(),
       });

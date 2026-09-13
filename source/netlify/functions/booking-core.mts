@@ -17,6 +17,7 @@ import { inferBookingAction, notifyBookingEvent, sendCoachPushForBooking } from 
 import { cancelOptixBayForCalendarItem, cancelOptixCustomerBooking } from "./_shared/optix-cancel.mts";
 import { autoBookResourceForNewBooking, rebookResourceAfterReschedule } from "./_shared/optix-book-resource.mts";
 import { bayBookingMatchesSlot } from "./_shared/optix-reconcile.mts";
+import { calendarSlot, MINUTES_IN_DAY } from "./_shared/calendar-slot.mts";
 import { planExternalReschedule, sameSlot } from "./_shared/external-reschedule.mts";
 import { legacyOriginalWorkspaceId, defaultCalendarSlug } from "./_shared/account.mts";
 import {
@@ -330,6 +331,89 @@ function isScheduledGroupService(service) {
   return Boolean(service?.lessonFormat === "group" && !isCustomGroupService(service));
 }
 
+/**
+ * An asynchronous video review: the player books it, sends a swing, and the
+ * coach returns an annotated clip within the turnaround.
+ *
+ * It is a lesson format rather than a flag on a normal lesson because the one
+ * thing it does not have is a time. Everything else a lesson has -- a price, a
+ * duration of the coach's work, notes, a pass that can pay for it, a place in
+ * the client's history -- it has unchanged, and that is exactly why it still
+ * gets a calendar item. The slot it lands on is the deadline, not an
+ * appointment.
+ */
+function isVideoReviewService(service) {
+  return Boolean(service?.lessonFormat === "video-review");
+}
+
+/** Default working days between booking a review and owing it back. */
+const VIDEO_REVIEW_DEFAULT_TURNAROUND_DAYS = 3;
+const VIDEO_REVIEW_MAX_TURNAROUND_DAYS = 30;
+/**
+ * Where a review sits when the coach has no availability that day. 8pm is the
+ * calendar's own default end hour, so the card lands inside the rendered grid
+ * rather than below it.
+ */
+const VIDEO_REVIEW_FALLBACK_DAY_END_MINUTES = 20 * 60;
+
+function cleanReviewTurnaroundDays(value, fallback = VIDEO_REVIEW_DEFAULT_TURNAROUND_DAYS) {
+  const days = Number(value);
+  if (!Number.isFinite(days)) return fallback;
+  return Math.max(1, Math.min(VIDEO_REVIEW_MAX_TURNAROUND_DAYS, Math.round(days)));
+}
+
+/**
+ * Where a review's deadline lands on the calendar grid.
+ *
+ * The date is the booking moment plus the turnaround. The time is the end of
+ * that day's work, so the card reads as "owed by close of play" rather than
+ * pretending to be an appointment at some invented hour -- and it ends exactly
+ * where the coach's day does.
+ *
+ * Reviews already due that day stack backwards from there, one duration at a
+ * time, so a day with three of them shows three cards in a row instead of one
+ * card with two hidden underneath it.
+ */
+function videoReviewDueSlot(service, accountState, coachId, timezone) {
+  const duration = Math.max(15, Math.round(Number(service?.duration) || 30));
+  const turnaround = cleanReviewTurnaroundDays(service?.reviewTurnaroundDays);
+  const dueAt = new Date(Date.now() + turnaround * 86_400_000);
+  // Same rule the rest of the clock maths follows: an unusable timezone falls
+  // back to UTC loudly rather than throwing inside a booking the player has
+  // already paid attention to.
+  let grid;
+  try {
+    grid = calendarSlot(dueAt.toISOString(), timezone);
+  } catch {
+    console.warn("booking_core:invalid_timezone_falling_back_to_utc", { timeZone: timezone });
+    grid = calendarSlot(dueAt.toISOString(), FALLBACK_TIME_ZONE);
+  }
+  const { week, day } = grid;
+  const fallbackCoachId = defaultCoachProfileFromAccount().id;
+  const windows = (accountState?.availability?.[day] || []).filter(
+    (window) => (window.coachId || fallbackCoachId) === (coachId || fallbackCoachId),
+  );
+  const dayEnd = windows.length
+    ? Math.max(...windows.map((window) => Number(window.end) || 0))
+    : VIDEO_REVIEW_FALLBACK_DAY_END_MINUTES;
+  // Count what is already owed on this day so the next one sits beside it.
+  const reviewServiceIds = new Set(
+    (accountState?.services || []).filter(isVideoReviewService).map((entry) => entry.id),
+  );
+  const alreadyDue = (accountState?.items || []).filter(
+    (item) =>
+      Number(item.week ?? 0) === week &&
+      Number(item.day) === day &&
+      !isInactiveForConflict(item) &&
+      reviewServiceIds.has(item.serviceId),
+  ).length;
+  const start = Math.max(
+    0,
+    Math.min(MINUTES_IN_DAY - duration, dayEnd - duration * (alreadyDue + 1)),
+  );
+  return { week, day, start, duration, dueAt: dueAt.toISOString() };
+}
+
 function customGroupBaseParticipants(service) {
   return cleanPositiveInteger(
     service?.baseParticipants,
@@ -641,11 +725,20 @@ function cleanService(service, index = 0, accountId = "") {
     service?.lessonFormat === "package" ||
     (!service?.lessonFormat && String(service?.id || "").startsWith("package-"));
   const lessonFormat =
-    looksLikePackage ? "package" : service?.lessonFormat === "group" ? "group" : "private";
+    looksLikePackage
+      ? "package"
+      : service?.lessonFormat === "group"
+        ? "group"
+        : service?.lessonFormat === "video-review"
+          ? "video-review"
+          : "private";
+  const videoReview = lessonFormat === "video-review";
   const customGroup = lessonFormat === "group" && hasCustomGroupFlag(service);
-  const cleanCapacity = customGroup
-    ? Math.max(CUSTOM_GROUP_DEFAULTS.minParticipants, Math.min(CUSTOM_GROUP_DEFAULTS.maxParticipants, Math.round(capacity || CUSTOM_GROUP_DEFAULTS.maxParticipants)))
-    : Math.max(lessonFormat === "group" ? 2 : 1, Math.min(24, Math.round(capacity)));
+  const cleanCapacity = videoReview
+    ? 1
+    : customGroup
+      ? Math.max(CUSTOM_GROUP_DEFAULTS.minParticipants, Math.min(CUSTOM_GROUP_DEFAULTS.maxParticipants, Math.round(capacity || CUSTOM_GROUP_DEFAULTS.maxParticipants)))
+      : Math.max(lessonFormat === "group" ? 2 : 1, Math.min(24, Math.round(capacity)));
   const rawMinParticipants = Number.isFinite(Number(service?.minParticipants))
     ? Number(service.minParticipants)
     : customGroup
@@ -701,6 +794,11 @@ function cleanService(service, index = 0, accountId = "") {
     packageCoverageMode: lessonFormat === "package" ? packageCoverageMode : undefined,
     packageCoversServiceId:
       lessonFormat === "package" ? cleanString(service?.packageCoversServiceId, "", 120) || undefined : undefined,
+    // A review is one player's swing, reviewed once. Carrying a turnaround on
+    // any other format would be a number nothing reads.
+    reviewTurnaroundDays: videoReview
+      ? cleanReviewTurnaroundDays(service?.reviewTurnaroundDays, fallback.reviewTurnaroundDays)
+      : undefined,
     bookingScreenIds,
     customGroup: customGroup || undefined,
     customGroupEnabled: customGroup || undefined,
@@ -7757,7 +7855,13 @@ function bookingEmailVariables({ appointment, service, account, coach = null }) 
     coach: coach?.name || account.coachName || account.businessName,
     service: service?.name || "Golf Lesson",
     date: formatBookingDate(itemWeek(appointment), appointment.day),
-    time: formatRange(appointment.start, appointment.duration),
+    // A review's slot is a deadline, so the clock range it happens to occupy
+    // is not a time to be anywhere. The templates are the coach's to edit, so
+    // {{time}} keeps working -- it just stops naming an hour that means
+    // nothing. {{date}}, the part that does mean something, is unchanged.
+    time: isVideoReviewService(service)
+      ? "end of day"
+      : formatRange(appointment.start, appointment.duration),
     venue: location?.name || account.venueName,
     location: location?.name || account.venueName,
     locationShortName: location?.shortName || location?.name || account.venueShortName || account.venueName,
@@ -9970,7 +10074,12 @@ export function publicBookingSlots(state, options = {}) {
       ...filteredAccountState,
       items: publicSlotRelevantResourceItems(requestedWeekItems, service, accountState),
     };
-    const serviceSlots = publicSlotsForService(serviceState, service, week, ignoreId);
+    // A review is bookable but has no times: its deadline is derived at
+    // booking, not chosen from availability. Answering with the coach's open
+    // hours would offer the player a choice that means nothing.
+    const serviceSlots = isVideoReviewService(service)
+      ? []
+      : publicSlotsForService(serviceState, service, week, ignoreId);
     servicesById[service.id] = { serviceId: service.id, week, slots: serviceSlots.map((slot) => ({ ...slot })) };
   }
   // safeJsonStringify deliberately rejects shared references, so retain the
@@ -10093,21 +10202,31 @@ async function createPublicBooking(accountId: string, payload: Record<string, an
       { status: 400 },
     );
   }
+  // A review is booked without a time, so there is no time to validate. The
+  // client sends none and any it did send is ignored rather than trusted --
+  // the deadline is the server's to set, not the player's to choose.
+  const isReview = isVideoReviewService(service);
   if (
-    !Number.isInteger(week) ||
-    !Number.isInteger(day) ||
-    !Number.isInteger(start) ||
-    day < 0 ||
-    day > 6
+    !isReview &&
+    (!Number.isInteger(week) ||
+      !Number.isInteger(day) ||
+      !Number.isInteger(start) ||
+      day < 0 ||
+      day > 6)
   ) {
     throw Object.assign(new Error("Choose a valid appointment time."), {
       status: 400,
     });
   }
 
-  const slot = { week, day, start, duration: service.duration };
   const serviceCoachId = service.coachId || defaultCoachId(accountState.coaches || []);
   const serviceLocationId = serviceLocation(service, accountState.locations || [], accountState.account).id;
+  const reviewDue = isReview
+    ? videoReviewDueSlot(service, accountState, serviceCoachId, accountTimeZone())
+    : null;
+  const slot = reviewDue
+    ? { week: reviewDue.week, day: reviewDue.day, start: reviewDue.start, duration: reviewDue.duration }
+    : { week, day, start, duration: service.duration };
   const rejectionBase = {
     serviceId: service.id,
     serviceName: service.name,
@@ -10116,7 +10235,11 @@ async function createPublicBooking(accountId: string, payload: Record<string, an
     locationId: serviceLocationId,
     itemCount: accountState.items.length,
   };
-  if (isScheduledGroupService(service)) {
+  if (isReview) {
+    // Nothing to check. A review does not hold a slot against anyone: two due
+    // the same afternoon is a workload, not a double booking, and refusing the
+    // second would be refusing work the coach has capacity to do.
+  } else if (isScheduledGroupService(service)) {
     if (!isGroupServiceSlotMatch(service, slot)) {
       throw publicSlotUnavailableError({ ...rejectionBase, reason: "group_schedule_mismatch" });
     }
@@ -10217,12 +10340,16 @@ async function createPublicBooking(accountId: string, payload: Record<string, an
     title: client,
     phone,
     email,
-    note: "Booked from public booking page.",
+    note: reviewDue
+      ? `Video review booked from public booking page. Due back ${formatBookingDate(reviewDue.week, reviewDue.day)}.`
+      : "Booked from public booking page.",
     location,
     ...(customGroup || {}),
   };
   const nextState = await writePublicBookingAppointment(accountId, state, appointment, context, {
-    autoBookResource: true,
+    // A review occupies no bay. Auto-booking a resource for one would hold a
+    // hitting bay empty for half an hour on a day nobody is coming in.
+    autoBookResource: !isReview,
     sendConfirmation: true,
     coachPush: true,
   });
@@ -10431,10 +10558,15 @@ function normalizeRescheduleContact(value) {
 }
 
 function publicRescheduleItem(item, serviceList = defaultServices) {
+  const service = (serviceList || []).find((candidate) => candidate.id === item.serviceId);
   return {
     id: item.id,
     serviceId: item.serviceId || "",
     serviceName: serviceName(item.serviceId, serviceList),
+    // The portal and the reschedule page both have to know that a video review
+    // is a deadline rather than an appointment: one renders it differently,
+    // the other must not offer to move it.
+    lessonFormat: service?.lessonFormat || "private",
     duration: item.duration,
     week: itemWeek(item),
     day: item.day,
@@ -10657,6 +10789,15 @@ async function reschedulePublicBooking(accountId: string, payload: Record<string
   const itemsWithoutOriginal = relevantResourceItems.filter(
     (item) => item.id !== appointment.id,
   );
+  // A review has no appointment time, so there is nothing to move. Letting one
+  // through here would drop it onto a real slot and turn a deadline into an
+  // appointment nobody is attending.
+  if (isVideoReviewService(service)) {
+    throw Object.assign(
+      new Error("A video review has no appointment time to change. Contact your coach about the turnaround."),
+      { status: 409 },
+    );
+  }
   if (
     !service ||
     !service.active ||
