@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { mapAkahuTransaction } from "./akahu.mts";
+import { creditPostdatesInvoice, isNonCustomerCredit, mapAkahuTransaction } from "./akahu.mts";
 
 function txn(overrides: Record<string, any> = {}) {
   return {
@@ -49,4 +49,78 @@ test("zero amount is treated as incoming, and missing fields are null not undefi
   assert.equal(row.merchant_name, null);
   assert.equal(row.meta_reference, null);
   assert.equal(row.akahu_account_id, null);
+});
+
+// --- auto-reconcile guards ---------------------------------------------------
+// Regression cover for four credits that auto-applied to the wrong invoice on
+// amount alone: a Stripe payout booked as Tony Shaw's $1,200 invoice, and three
+// own-account transfers booked as customer payments.
+
+function credit(overrides: Record<string, any> = {}) {
+  return {
+    id: "trans_credit",
+    date: "2026-09-11",
+    amount: 1200,
+    direction: "in",
+    type: "CREDIT",
+    description: "Direct Credit SHG-0424 The Range Indoo",
+    meta_particulars: "SHG-0424",
+    meta_code: null,
+    meta_reference: null,
+    ...overrides,
+  };
+}
+
+function invoice(overrides: Partial<Record<string, any>> = {}) {
+  return {
+    id: "inv-1",
+    invoice_number: "SHG-0424",
+    customer_name: "Tony Shaw",
+    total: 1200,
+    amount_paid: 0,
+    status: "sent",
+    issue_date: "2026-09-10",
+    ...overrides,
+  } as any;
+}
+
+test("a Stripe payout is not a customer credit", () => {
+  const payout = credit({
+    description: "Direct Credit STRIPE TRF 6BOJMSVD Stripe Payments",
+    meta_particulars: null,
+    meta_reference: "STRIPE",
+  });
+  assert.equal(isNonCustomerCredit(payout), true);
+});
+
+test("an own-account transfer is not a customer credit", () => {
+  const transfer = credit({
+    description: "TRANSFER FROM S J HALE - 06",
+    type: "TRANSFER",
+    meta_particulars: null,
+  });
+  assert.equal(isNonCustomerCredit(transfer), true);
+});
+
+test("Akahu's TRANSFER type alone marks a credit as internal", () => {
+  assert.equal(isNonCustomerCredit(credit({ type: "TRANSFER", description: "Payment" })), true);
+});
+
+test("an ordinary customer credit is not filtered", () => {
+  assert.equal(isNonCustomerCredit(credit()), false);
+  assert.equal(isNonCustomerCredit(credit({ description: "Bill Payment Coaching Golf HQ" })), false);
+});
+
+test("a credit dated before the invoice was issued cannot pay it", () => {
+  assert.equal(creditPostdatesInvoice(credit({ date: "2026-03-04" }), invoice()), false);
+});
+
+test("same-day and later credits can pay an invoice", () => {
+  assert.equal(creditPostdatesInvoice(credit({ date: "2026-09-10" }), invoice()), true);
+  assert.equal(creditPostdatesInvoice(credit({ date: "2026-09-11" }), invoice()), true);
+});
+
+test("a missing date on either side is not treated as payable", () => {
+  assert.equal(creditPostdatesInvoice(credit({ date: null }), invoice()), false);
+  assert.equal(creditPostdatesInvoice(credit(), invoice({ issue_date: "" })), false);
 });

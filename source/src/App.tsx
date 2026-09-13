@@ -189,6 +189,7 @@ import type {
   InvoiceLine,
   InvoiceDraft,
   BillingInvoiceStatus,
+  InvoicePaymentSource,
   BillingInvoiceRecord,
   BillingRevenueBucket,
   BillingRevenueReport,
@@ -5688,6 +5689,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const [invoiceEditing, setInvoiceEditing] = useState(true);
   const [openedInvoiceStatus, setOpenedInvoiceStatus] = useState<"" | BillingInvoiceStatus>("");
   const [openedInvoiceSentAt, setOpenedInvoiceSentAt] = useState("");
+  // Provenance for a "Paid" badge: when it was marked paid, and the bank credit
+  // behind it when the Akahu reconciler matched one. Without this the badge is
+  // the only signal a coach gets, and a mis-matched credit is indistinguishable
+  // from a real payment.
+  const [openedInvoicePaidAt, setOpenedInvoicePaidAt] = useState("");
+  const [openedInvoicePayment, setOpenedInvoicePayment] = useState<InvoicePaymentSource | null>(null);
   const [activeInvoiceAmountPaid, setActiveInvoiceAmountPaid] = useState(0);
   const [reviseSource, setReviseSource] = useState<{
     id: string;
@@ -16844,6 +16851,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     setEditingInvoiceNumber("");
     setOpenedInvoiceStatus("");
     setOpenedInvoiceSentAt("");
+    setOpenedInvoicePaidAt("");
+    setOpenedInvoicePayment(null);
     setActiveInvoiceAmountPaid(0);
     setReviseSource(null);
     setBookingConflict(null);
@@ -16948,6 +16957,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setEditingInvoiceNumber(String(invoice.invoiceNumber || record.invoiceNumber));
       setOpenedInvoiceStatus((invoice.status as BillingInvoiceStatus) || "draft");
       setOpenedInvoiceSentAt(typeof invoice.sentAt === "string" ? invoice.sentAt : "");
+      setOpenedInvoicePaidAt(typeof invoice.paidAt === "string" ? invoice.paidAt : "");
+      setOpenedInvoicePayment((invoice.paymentSource as InvoicePaymentSource | null | undefined) ?? null);
       setActiveInvoiceAmountPaid(Number(invoice.amountPaid) || 0);
       // Open read-only (a view for drafts, a preview for committed invoices); the
       // Edit button unlocks it.
@@ -17254,6 +17265,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     setEditingInvoiceNumber(invoiceNumber);
     setOpenedInvoiceStatus("");
     setOpenedInvoiceSentAt("");
+    setOpenedInvoicePaidAt("");
+    setOpenedInvoicePayment(null);
     setInvoiceEditing(true);
     setToast({ message: `Editing as a new invoice (${invoiceNumber}); the original is voided when you save.` });
   }
@@ -17376,6 +17389,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       // revising this invoice reads the amount back to restore it if the
       // replacement fails to save.
       setActiveInvoiceAmountPaid(invoiceTotal);
+      // Marked by hand, so there is no bank credit to point at.
+      setOpenedInvoicePaidAt(new Date().toISOString());
+      setOpenedInvoicePayment(null);
       setToast({ message: `${activeInvoiceNumber} marked paid.` });
       void fetchRecentInvoices();
     } catch (error) {
@@ -25491,6 +25507,26 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       </>
                     )}
                   </div>
+                  {/* Where a "Paid" came from. A bank-matched invoice will show
+                      nothing in Stripe - the money arrived by transfer - so the
+                      credit is named here, and a mis-match is visible instead of
+                      hiding behind the badge. */}
+                  {openedInvoiceStatus === "paid" && (
+                    <div className="ip-payment-source">
+                      <span className="ip-payment-head">
+                        Paid{openedInvoicePaidAt ? ` ${formatDateForDisplay(openedInvoicePaidAt.slice(0, 10))}` : ""}
+                        {openedInvoicePayment ? " · matched to a bank credit" : " · marked paid manually"}
+                      </span>
+                      {openedInvoicePayment && (
+                        <span className="ip-payment-detail">
+                          {openedInvoicePayment.date ? `${formatDateForDisplay(openedInvoicePayment.date)} · ` : ""}
+                          {formatMoney(openedInvoicePayment.amount, invoiceSettings.currency)} ·{" "}
+                          {openedInvoicePayment.description || "Bank credit"}
+                          {openedInvoicePayment.reference ? ` · ${openedInvoicePayment.reference}` : ""}
+                        </span>
+                      )}
+                    </div>
+                  )}
                   {/* A refused save, named. The server sends back which booking
                       is on which invoice; without this the coach is told
                       "already invoiced" and left to open every invoice they

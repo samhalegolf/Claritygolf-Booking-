@@ -187,6 +187,24 @@ export type BillingInvoiceRecord = {
   // Set once the invoice has actually been emailed. status "sent" without this =
   // Published (committed but not emailed).
   sentAt?: string | null;
+  // When the invoice was marked paid, and where that came from. reconciledLocally
+  // means a bank credit was matched to it by the Akahu reconciler rather than the
+  // money arriving through Stripe/Clarity Pay - so Stripe will show nothing.
+  paidAt?: string | null;
+  reconciledLocally?: boolean;
+  // The matched bank credit. Only populated on single-invoice reads
+  // (GET /api/billing/invoices/:id), never on list responses.
+  paymentSource?: InvoicePaymentSource | null;
+};
+
+// The bank credit behind a locally reconciled invoice.
+export type InvoicePaymentSource = {
+  kind: "bank";
+  txnId: string;
+  date: string | null;
+  amount: number;
+  description: string;
+  reference: string | null;
 };
 
 // Shape returned by GET /api/billing/reports/revenue.

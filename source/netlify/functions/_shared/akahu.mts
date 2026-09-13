@@ -402,7 +402,7 @@ export async function approveManyBankExpenseCandidates(
 // only — nothing is ever pushed back to Stripe. The Stripe invoice sync honours
 // the reconciled_locally flag (see stripe-billing.mts) so it can't undo this.
 
-type ReconcileInvoice = {
+export type ReconcileInvoice = {
   id: string;
   invoice_number: string;
   customer_name: string | null;
@@ -449,13 +449,47 @@ function scoreCreditMatches(txn: Record<string, any>, invoices: ReconcileInvoice
   return scored;
 }
 
+// Credits that are money arriving from ourselves, not from a customer: an
+// own-account transfer, or a Stripe payout (the daily settlement of card
+// takings, which the charge mirror in stripe-billing.mts already books as
+// revenue). Their amounts collide with invoice totals like any other credit, so
+// without this an unrelated $1,200 payout silently "pays" a $1,200 invoice.
+// They stay in the candidate list as suggestions - only auto-apply is blocked.
+const PAYOUT_REFERENCE_RE = /\bstripe\b|\bpaypal\b|\bwindcave\b|\bpoli\b|\bafterpay\b/;
+const OWN_TRANSFER_RE = /\btransfer (from|to)\b|\binternal transfer\b/;
+
+export function isNonCustomerCredit(txn: Record<string, any>) {
+  const text = creditReferenceText(txn);
+  if (PAYOUT_REFERENCE_RE.test(text)) return true;
+  if (OWN_TRANSFER_RE.test(text)) return true;
+  // Akahu's own enrichment: TRANSFER is an internal move between the user's
+  // accounts, never a customer paying an invoice.
+  if (String(txn.type || "").toUpperCase() === "TRANSFER") return true;
+  return false;
+}
+
+/** A credit cannot pay an invoice that did not exist when it landed. Compared
+ *  on date only (bank dates have no time) and inclusive, so same-day is fine. */
+export function creditPostdatesInvoice(txn: Record<string, any>, invoice: ReconcileInvoice) {
+  const credit = String(txn.date || "").slice(0, 10);
+  const issued = String(invoice.issue_date || "").slice(0, 10);
+  if (!credit || !issued) return false;
+  return credit >= issued;
+}
+
 /** Auto-apply only when a single unambiguous invoice matches: one reference
- *  hit (invoice numbers are unique), else one and only one exact-amount hit. */
-function pickAutoMatch(scored: ScoredMatch[]): ScoredMatch | null {
+ *  hit (invoice numbers are unique), else one and only one exact-amount hit.
+ *
+ *  A reference hit is trusted on its own - the payer typed our invoice number,
+ *  so neither guard below applies. An amount-only hit is a guess, and is only
+ *  auto-applied when the credit could actually be this customer paying: not one
+ *  of our own payouts/transfers, and not dated before the invoice was issued. */
+function pickAutoMatch(txn: Record<string, any>, scored: ScoredMatch[]): ScoredMatch | null {
   const refMatches = scored.filter((s) => s.refMatch);
   if (refMatches.length === 1) return refMatches[0];
   if (refMatches.length === 0) {
-    const amountMatches = scored.filter((s) => s.amountMatch);
+    if (isNonCustomerCredit(txn)) return null;
+    const amountMatches = scored.filter((s) => s.amountMatch && creditPostdatesInvoice(txn, s.invoice));
     if (amountMatches.length === 1) return amountMatches[0];
   }
   return null;
@@ -488,7 +522,7 @@ export async function listReconcileCandidates(accountId: string) {
   }
   return credits.map((txn) => {
     const scored = scoreCreditMatches(txn, invoices);
-    const auto = pickAutoMatch(scored);
+    const auto = pickAutoMatch(txn, scored);
     return {
       id: txn.id,
       date: txn.date,

@@ -877,6 +877,11 @@ function invoiceRowToApi(row: Record<string, unknown>, items: Array<Record<strin
     reference: row.reference || "",
     sentAt: row.sent_at || null,
     paidAt: row.paid_at || null,
+    // Where a "paid" came from. reconciledLocally = matched to a bank credit by
+    // the Akahu reconciler rather than paid through Stripe/Clarity Pay; the
+    // credit itself is attached as paymentSource by getInvoiceWithItems.
+    reconciledLocally: row.reconciled_locally === true,
+    paymentSource: null as InvoicePaymentSource | null,
     // The Clarity Pay link emailed with this invoice, once one has been minted.
     paymentLinkUrl: row.payment_link_url || "",
 
@@ -934,6 +939,42 @@ async function listInvoices(accountId: string, url: URL) {
   return { invoices: rows.map((row: Record<string, unknown>) => invoiceRowToApi(row)) };
 }
 
+type InvoicePaymentSource = {
+  kind: "bank";
+  txnId: string;
+  date: string | null;
+  amount: number;
+  description: string;
+  reference: string | null;
+};
+
+// The bank credit a locally reconciled invoice was matched to. Only fetched for
+// invoices that actually carry a match, so the common path keeps its round trip
+// count; without it a "Paid" badge has no visible provenance at all.
+async function invoicePaymentSource(row: Record<string, unknown>): Promise<InvoicePaymentSource | null> {
+  const txnId = cleanString(row?.reconciled_bank_txn_id, "", 120);
+  if (!txnId) return null;
+  const rows = (await supabase("bank_transactions", {
+    query:
+      `select=id,date,amount,description,meta_particulars,meta_code,meta_reference` +
+      `&id=eq.${encodeFilter(txnId)}&limit=1`,
+  })) as Array<Record<string, unknown>>;
+  const txn = rows[0];
+  if (!txn) return null;
+  return {
+    kind: "bank",
+    txnId,
+    date: cleanString(txn.date, "", 40) || null,
+    amount: round2(Math.abs(Number(txn.amount) || 0)),
+    description: cleanString(txn.description, "", 300),
+    reference:
+      [txn.meta_particulars, txn.meta_code, txn.meta_reference]
+        .map((part) => cleanString(part, "", 80))
+        .filter(Boolean)
+        .join(" ") || null,
+  };
+}
+
 async function getInvoiceWithItems(accountId: string, id: string) {
   const rows = await supabase("billing_invoices", {
     query: `select=*&id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}&limit=1`,
@@ -943,7 +984,9 @@ async function getInvoiceWithItems(accountId: string, id: string) {
   const items = await supabase("billing_invoice_items", {
     query: `select=*&invoice_id=eq.${encodeFilter(id)}&order=created_at.asc`,
   });
-  return invoiceRowToApi(row, items) as unknown as InvoiceApi;
+  const api = invoiceRowToApi(row, items) as Record<string, unknown>;
+  api.paymentSource = await invoicePaymentSource(row);
+  return api as unknown as InvoiceApi;
 }
 
 // The link rows for these bookings, each tagged with the status of the invoice
