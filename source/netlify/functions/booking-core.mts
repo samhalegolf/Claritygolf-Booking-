@@ -8650,6 +8650,10 @@ async function requireAdmin(req) {
 // there is one session mechanism in this app rather than two.
 
 const portalInviteDays = 14;
+// A reset link is one the player asked for a minute ago, so it does not get the
+// invite's two-week life: an hour is long enough to find the email on a phone
+// and short enough that the link is not a standing key to the account.
+const portalResetMinutes = 60;
 
 function supabaseAuthConfig() {
   const { url, key } = supabaseStorageConfig();
@@ -8801,6 +8805,29 @@ async function readPortalPlayerByAuthUser(authUserId, accountId) {
   return rowToPortalPlayer(rows[0]);
 }
 
+/**
+ * The email is the only thing a signed-out player can offer, so this is what
+ * "forgot password" has to look up. Scoped to the account for the same reason
+ * the login is: portal access is access to one business.
+ *
+ * Disabled rows are excluded here rather than left to readPortalInvite. A
+ * player whose access was revoked should get no email at all, not an email
+ * carrying a link that dies when they open it.
+ */
+async function readPortalPlayerByEmail(rawEmail, accountId) {
+  const email = cleanEmail(rawEmail, "");
+  if (!email || !accountId) return null;
+  await ensurePlayerSessionsTable();
+  const rows = await db().sql`
+    SELECT * FROM portal_players
+    WHERE LOWER(email) = LOWER(${email})
+      AND account_id = ${accountId}
+      AND status <> 'disabled'
+    LIMIT 1
+  `;
+  return rowToPortalPlayer(rows[0]);
+}
+
 async function readPortalPlayerById(portalPlayerId) {
   if (!portalPlayerId) return null;
   await ensurePlayerSessionsTable();
@@ -8946,24 +8973,36 @@ async function verifyPortalPlayerLogin(rawEmail, password, accountId) {
 // Supabase's link redirects through GoTrue and hands the browser a Supabase
 // session, which is exactly what this design avoids. Issuing our own token
 // keeps the flow the same shape as the existing admin password reset, and
-// means "resend invite" and a future player "forgot password" are the same
-// code path.
+// means "resend invite" and player "forgot password" are one code path: both
+// issue a portal_players token, both land on /api/portal/set-password, and the
+// only difference is how long the token lives and what the email says.
 
-function portalInviteUrl(req, token) {
+function portalInviteUrl(req, token, variant = "invite") {
   const origin = env("CLARITY_APP_URL", new URL(req.url).origin).replace(/\/$/, "");
   const url = new URL(origin || new URL(req.url).origin);
   url.searchParams.set("portalInvite", token);
+  // Wording only -- the token and the route behind it are identical either way.
+  // Without it a reset link introduces itself as an invitation from a coach the
+  // player has been with for a year.
+  if (variant === "reset") url.searchParams.set("portalReset", "1");
   return url.toString();
 }
 
-async function issuePortalInvite(portalPlayerId) {
+async function issuePortalInvite(portalPlayerId, variant = "invite") {
   const token = randomBytes(32).toString("base64url");
-  const expiresAt = new Date(Date.now() + portalInviteDays * 24 * 60 * 60 * 1000).toISOString();
+  const isReset = variant === "reset";
+  const expiresAt = new Date(
+    Date.now() +
+      (isReset ? portalResetMinutes * 60 * 1000 : portalInviteDays * 24 * 60 * 60 * 1000),
+  ).toISOString();
   await db().sql`
     UPDATE portal_players
     SET invite_token_hash = ${hashToken(token)},
         invite_expires_at = ${expiresAt},
-        invited_at = NOW(),
+        -- A reset is not a new invitation. Stamping invited_at would lose the
+        -- date the coach actually granted access, which is what Player Profiles
+        -- reports back to them.
+        invited_at = CASE WHEN ${isReset}::boolean THEN invited_at ELSE NOW() END,
         updated_at = NOW()
     WHERE id = ${portalPlayerId}
   `;
@@ -8971,57 +9010,102 @@ async function issuePortalInvite(portalPlayerId) {
 }
 
 /**
- * One invite email with two variants. They are deliberately near-identical: the
- * Caddy version adds a line and a second link, and says the same login works
- * for both. Keeping them one template stops this becoming a second
- * communications system.
+ * One portal email, three axes. The Caddy version adds a line and a second
+ * link and says the same login works for both; the reset version drops the
+ * welcome and says the player asked for this. Keeping them one template stops
+ * this becoming a second communications system.
+ *
+ * Pure and exported so the copy can be checked without a database or an email
+ * provider -- in particular that a reset never claims the coach set up an
+ * account, and never offers a Caddy pass it did not issue.
  */
-async function sendPortalInviteEmail({ accountId, req, email, name, token, withCaddyPass }) {
-  const account = await readCoachAccount(accountId);
-  const businessName = account.businessName || "Clarity Golf";
-  const coachName = account.coachName || businessName;
-  const inviteUrl = portalInviteUrl(req, token);
-  const caddyUrl = caddyAppUrl();
-  const greeting = name ? `Hi ${escapeHtml(name.split(/\s+/)[0])},` : "Hi,";
-  const subject = withCaddyPass
-    ? `Your ${businessName} player portal and Clarity Caddy pass`
-    : `Your ${businessName} player portal`;
+export function portalInviteEmailContent({
+  businessName,
+  coachName,
+  name,
+  linkUrl,
+  caddyUrl,
+  withCaddyPass = false,
+  variant = "invite",
+}) {
+  const isReset = variant === "reset";
+  const greeting = name ? `Hi ${escapeHtml(String(name).split(/\s+/)[0])},` : "Hi,";
+  const heading = isReset ? "Reset your password" : "Welcome to the Clarity Player Portal";
+  const opening = isReset
+    ? `Someone asked to reset the password for your ${businessName} player portal.`
+    : `${coachName} has set up a player portal account for you. Set a password to see your lessons, your lesson notes and your videos, and to book your next session.`;
+  const buttonLabel = isReset ? "Choose a new password" : "Set your password";
+  // A pass is only ever issued alongside a fresh invite, so a reset says
+  // nothing about Caddy even if the flag were somehow passed.
+  const mentionCaddy = withCaddyPass && !isReset;
+  const expiry = isReset
+    ? `This link expires in ${portalResetMinutes} minutes.`
+    : `This link expires in ${portalInviteDays} days.`;
+  // The line that matters on a reset nobody asked for. An invite has no
+  // equivalent: ignoring it is already the whole remedy.
+  const ignoreLine = isReset
+    ? "If you did not ask for this, ignore this email. Your password will not change."
+    : "";
+
+  const subject = isReset
+    ? `Reset your ${businessName} player portal password`
+    : mentionCaddy
+      ? `Your ${businessName} player portal and Clarity Caddy pass`
+      : `Your ${businessName} player portal`;
 
   const html = `
     <div style="font-family:Arial,sans-serif;line-height:1.5;color:#111">
-      <h2>Welcome to the Clarity Player Portal</h2>
+      <h2>${escapeHtml(heading)}</h2>
       <p>${greeting}</p>
-      <p>${escapeHtml(coachName)} has set up a player portal account for you. Set a password to see your lessons, your lesson notes and your videos, and to book your next session.</p>
-      ${withCaddyPass ? `<p><strong>You also have a Clarity Caddy pass.</strong> The same login works for both.</p>` : ""}
-      <p><a href="${escapeHtml(inviteUrl)}" style="display:inline-block;background:#07100a;color:#fff;padding:12px 16px;text-decoration:none;border-radius:6px">Set your password</a></p>
+      <p>${escapeHtml(opening)}</p>
+      ${mentionCaddy ? `<p><strong>You also have a Clarity Caddy pass.</strong> The same login works for both.</p>` : ""}
+      <p><a href="${escapeHtml(linkUrl)}" style="display:inline-block;background:#07100a;color:#fff;padding:12px 16px;text-decoration:none;border-radius:6px">${escapeHtml(buttonLabel)}</a></p>
       <p>If the button does not work, paste this link into your browser:</p>
-      <p><a href="${escapeHtml(inviteUrl)}">${escapeHtml(inviteUrl)}</a></p>
-      ${withCaddyPass ? `<p>Clarity Caddy: <a href="${escapeHtml(caddyUrl)}">${escapeHtml(caddyUrl)}</a></p>` : ""}
-      <p>This link expires in ${portalInviteDays} days.</p>
+      <p><a href="${escapeHtml(linkUrl)}">${escapeHtml(linkUrl)}</a></p>
+      ${mentionCaddy ? `<p>Clarity Caddy: <a href="${escapeHtml(caddyUrl)}">${escapeHtml(caddyUrl)}</a></p>` : ""}
+      <p>${escapeHtml(expiry)}</p>
+      ${ignoreLine ? `<p>${escapeHtml(ignoreLine)}</p>` : ""}
     </div>
   `;
-  const textBody = [
-    "Welcome to the Clarity Player Portal",
+  const text = [
+    heading,
     "",
-    `${coachName} has set up a player portal account for you.`,
-    withCaddyPass ? "You also have a Clarity Caddy pass. The same login works for both." : "",
+    opening,
+    mentionCaddy ? "You also have a Clarity Caddy pass. The same login works for both." : "",
     "",
-    "Set a password to see your lessons, lesson notes and videos, and to book your next session:",
-    inviteUrl,
-    withCaddyPass ? `\nClarity Caddy: ${caddyUrl}` : "",
+    isReset ? "Choose a new password:" : "Set a password to see your lessons, lesson notes and videos, and to book your next session:",
+    linkUrl,
+    mentionCaddy ? `\nClarity Caddy: ${caddyUrl}` : "",
     "",
-    `This link expires in ${portalInviteDays} days.`,
+    expiry,
+    ignoreLine,
   ]
     .filter((line) => line !== "")
     .join("\n");
+
+  return { subject, html, text };
+}
+
+async function sendPortalInviteEmail({ accountId, req, email, name, token, withCaddyPass, variant = "invite" }) {
+  const account = await readCoachAccount(accountId);
+  const businessName = account.businessName || "Clarity Golf";
+  const { subject, html, text } = portalInviteEmailContent({
+    businessName,
+    coachName: account.coachName || businessName,
+    name: cleanString(name, "", 180),
+    linkUrl: portalInviteUrl(req, token, variant),
+    caddyUrl: caddyAppUrl(),
+    withCaddyPass,
+    variant,
+  });
 
   return sendEmail({
     accountId,
     to: email,
     subject,
     html,
-    text: textBody,
-    idempotencyKey: `portal-invite-${hashToken(token).slice(0, 24)}`,
+    text,
+    idempotencyKey: `portal-${variant}-${hashToken(token).slice(0, 24)}`,
   });
 }
 
@@ -9142,6 +9226,41 @@ async function grantPortalAccess({ req, personId, accountId, includeCaddyPass = 
     // configured or bounces. It is single-use and time limited.
     inviteUrl: emailResult?.sent ? "" : portalInviteUrl(req, invite.token),
   };
+}
+
+/**
+ * The player half of "forgot password".
+ *
+ * Deliberately the invite machinery with a different label on it: same token
+ * column, same expiry column, same /api/portal/set-password route at the other
+ * end. Nothing here creates access -- a person who was never given a portal
+ * gets nothing, because a reset is not a way in.
+ *
+ * Returns null when there is no portal player for that address, so the caller
+ * can answer identically either way.
+ */
+async function issuePortalPasswordReset({ req, email, accountId }) {
+  const portalPlayer = await readPortalPlayerByEmail(email, accountId);
+  if (!portalPlayer) return null;
+  // Pre-dates the auth link, or the row was written before ensureSupabaseAuthUser
+  // ran. There is no credential to reset, so this is the coach's to fix by
+  // re-granting access rather than something to paper over with a dead link.
+  if (!portalPlayer.authUserId) {
+    console.warn("portal_players:reset_without_auth_user", portalPlayer.id);
+    return null;
+  }
+
+  const reset = await issuePortalInvite(portalPlayer.id, "reset");
+  const contact = await portalPlayerContact(portalPlayer);
+  const emailResult = await sendPortalInviteEmail({
+    accountId: portalPlayer.accountId,
+    req,
+    email: portalPlayer.email,
+    name: contact.name,
+    token: reset.token,
+    variant: "reset",
+  });
+  return { portalPlayer, sent: Boolean(emailResult?.sent), reason: cleanString(emailResult?.reason, "", 80) };
 }
 
 async function revokePortalAccess({ portalPlayerId, accountId }) {
@@ -11509,12 +11628,42 @@ async function routeBookingApiRequest(
             502,
           );
         }
+      } else {
+        // Not an admin, so try the player portal. This used to stop at the line
+        // above, which meant every player reset returned "sent" and sent
+        // nothing -- the screen said the mail was on its way and it never was.
+        //
+        // Players are looked up second because the admin table is the smaller,
+        // older set: an address in both is the coach, and the coach login is
+        // the one that opens the workspace.
+        //
+        // A request that cannot name a business is not an error here, just a
+        // lookup with nowhere to look: once a second business goes live,
+        // resolvePublicAccountId needs a ?business= slug, and a coach resetting
+        // their own password on the bare domain must not start getting a 404
+        // from a route that answered them fine the day before.
+        const playerAccountId = await resolvePublicAccountId(req).catch(() => "");
+        const playerReset = playerAccountId
+          ? await issuePortalPasswordReset({
+              req,
+              email: body.email || "",
+              accountId: playerAccountId,
+            })
+          : null;
+        if (playerReset && !playerReset.sent) {
+          return json(
+            {
+              ok: false,
+              message: "Could not send the reset email. Try again in a minute.",
+            },
+            502,
+          );
+        }
       }
 
       return json({
         ok: true,
-        message:
-          "If that email matches an admin account, a reset link has been sent.",
+        message: "If that email matches an account, a reset link has been sent.",
       });
     }
 
