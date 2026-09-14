@@ -812,6 +812,156 @@
   100% { opacity: 0; transform: scale(1.35); box-shadow: 0 0 0 18px rgba(255, 255, 255, 0); }
 }
 
+/* The capture in flight.
+ *
+ * Positioned over the pixels it was taken from -- the whole frame, or just the
+ * crop -- and animated from there into the composer's thumbnail by
+ * VideoWorkspace, which is the only place that knows where the composer ended
+ * up. transform-origin decides what the measured scale means, so it is set
+ * here and assumed there. */
+.video-capture-lift {
+  position: absolute;
+  z-index: 6;
+  pointer-events: none;
+  object-fit: cover;
+  transform-origin: top left;
+  will-change: transform;
+  border-radius: 4px;
+  box-shadow: 0 18px 38px rgba(3, 6, 15, 0.55);
+}
+
+.video-capture-lift.is-cutout {
+  border-radius: 3px;
+  outline: 1px solid rgba(119, 255, 224, 0.55);
+  outline-offset: 0;
+}
+
+/* What the crop left behind. Reads as a hole in the frame for as long as the
+ * piece is in the air, then closes. */
+.video-capture-cutout {
+  position: absolute;
+  z-index: 4;
+  pointer-events: none;
+  border: 1px dashed rgba(119, 255, 224, 0.5);
+  background: rgba(4, 8, 18, 0.72);
+  border-radius: 3px;
+  animation: va-cutout-close 520ms ease-out both;
+}
+
+@keyframes va-cutout-close {
+  0% { opacity: 1; }
+  70% { opacity: 0.85; }
+  100% { opacity: 0; }
+}
+
+/* The composer.
+ *
+ * A capture and the sentence it was taken for, in one place, while the frame
+ * behind it is still the frame that prompted it. It is the only thing on the
+ * picture with a Save, because it is the only thing on the picture that is not
+ * saved yet. */
+.snapshot-composer {
+  position: absolute;
+  z-index: 7;
+  width: 156px;
+  max-width: calc(100% - 24px);
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(87, 229, 156, 0.38);
+  background: linear-gradient(150deg, rgba(18, 28, 50, 0.96), rgba(11, 17, 31, 0.95));
+  box-shadow: 0 18px 40px rgba(3, 6, 15, 0.58);
+  color: var(--va-text);
+  animation: va-composer-arrive 320ms ease-out both;
+}
+
+.snapshot-composer.is-corner {
+  right: 12px;
+  bottom: 12px;
+}
+
+@keyframes va-composer-arrive {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+.snapshot-composer-dismiss {
+  position: absolute;
+  top: 4px;
+  right: 5px;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(8, 13, 26, 0.7);
+  color: var(--va-muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.snapshot-composer-dismiss:hover {
+  color: var(--va-text);
+  background: rgba(20, 30, 52, 0.9);
+}
+
+.snapshot-composer-thumb {
+  display: block;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 169, 222, 0.4);
+  background: rgba(5, 9, 20, 0.9);
+}
+
+.snapshot-composer-meta {
+  font-size: 10px;
+  color: var(--va-muted);
+}
+
+.snapshot-composer-note {
+  width: var(--c-w-prose, 100%);
+  min-height: 54px;
+  resize: vertical;
+  border-radius: 8px;
+  border: 1px solid rgba(145, 165, 210, 0.3);
+  background: rgba(5, 10, 22, 0.78);
+  color: var(--va-text);
+  padding: 6px 7px;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.snapshot-composer-note:focus {
+  outline: 2px solid rgba(87, 229, 156, 0.5);
+  outline-offset: 1px;
+}
+
+.snapshot-composer-save {
+  border: 1px solid rgba(87, 229, 156, 0.55);
+  border-radius: 9px;
+  background: linear-gradient(155deg, rgba(35, 86, 66, 0.95), rgba(20, 46, 38, 0.95));
+  color: var(--va-accent);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.snapshot-composer-save:hover {
+  border-color: rgba(87, 229, 156, 0.8);
+  background: linear-gradient(155deg, rgba(45, 106, 80, 0.98), rgba(26, 58, 47, 0.98));
+}
+
+.snapshot-composer-save:focus-visible {
+  outline: 2px solid rgba(87, 229, 156, 0.6);
+  outline-offset: 2px;
+}
+
 .focus-window {
   position: fixed;
   right: 16px;
@@ -1149,6 +1299,48 @@
 .focus-artifact-note textarea:focus {
   outline: 2px solid rgba(145, 191, 255, 0.45);
   outline-offset: 1px;
+}
+
+/* A filed note, shown as what it is: a sentence, not a field. */
+.focus-artifact-note-text {
+  margin: 0;
+  min-width: 180px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--va-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.focus-artifact-note-text.is-empty {
+  color: var(--va-muted);
+  font-style: italic;
+}
+
+.focus-artifact-edit {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(145, 165, 210, 0.26);
+  border-radius: 8px;
+  background: rgba(12, 20, 38, 0.6);
+  color: var(--va-muted);
+  padding: 0;
+  cursor: pointer;
+}
+
+.focus-artifact-edit:hover,
+.focus-artifact-edit:focus-visible {
+  outline: 0;
+  color: var(--va-accent);
+  border-color: rgba(87, 229, 156, 0.5);
+  background: rgba(18, 38, 34, 0.7);
+}
+
+.focus-artifact-edit-icon {
+  width: 15px;
+  height: 15px;
 }
 
 .focus-artifact-title {

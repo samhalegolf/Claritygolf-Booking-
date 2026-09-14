@@ -182,10 +182,12 @@ export function FocusWindow({
   const trackMouseLeave = useCallback(() => onHoverChange?.(false), [onHoverChange]);
   const doNothing = useCallback(() => undefined, []);
 
+  // A capture no longer lands in the analysis on its own -- it opens a note
+  // beside the crop and is filed from there, so the wording stops at "taken".
   const screenshotButtonText = screenshotStatus === "saving"
-    ? "Saving..."
+    ? "Capturing..."
     : screenshotStatus === "success"
-      ? "Saved"
+      ? "Captured"
       : screenshotStatus === "error"
         ? "Retry"
         : "Screenshot";
@@ -201,12 +203,12 @@ export function FocusWindow({
       return;
     }
 
-    setFeedback("saving", "Saving snapshot...");
+    setFeedback("saving", "Capturing crop...");
     try {
       const imageDataUrl = canvasRef.current ? canvasRef.current.toDataURL("image/png") : "";
       const result = await Promise.resolve(onScreenshot(imageDataUrl));
       if (result.ok) {
-        setFeedback("success", "Snapshot saved.");
+        setFeedback("success", "Add your note, then Save.");
         return;
       }
       setFeedback("error", result.error || "Could not capture snapshot.");

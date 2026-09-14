@@ -3,6 +3,7 @@ import React, {
   DragEvent,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -16,7 +17,14 @@ import { FocusSnapshot, VideoAnalysis } from "./models/Analysis";
 import { StatusBar } from "./components/StatusBar";
 import { Timeline } from "./components/Timeline";
 import { VideoCanvas } from "./components/VideoCanvas";
-import { IconBack, IconCamera, IconRecord, IconSettings, IconUpload } from "./components/VideoIcons";
+import {
+  IconBack,
+  IconCamera,
+  IconEdit,
+  IconRecord,
+  IconSettings,
+  IconUpload,
+} from "./components/VideoIcons";
 import {
   PlayerActionBar,
   PlayerToolRail,
@@ -118,6 +126,49 @@ const SNAPSHOT_STORAGE_WARNING_LIMIT = 12;
 const SNAPSHOT_PREVIEW_WIDTH = 88;
 const SNAPSHOT_PREVIEW_HEIGHT = 50;
 const DEFAULT_PLAYER_ID = "player-demo-1";
+/**
+ * The box the freshly-captured frame shrinks into, in the composer.
+ *
+ * A box rather than a width: a tall crop -- a player from head to knee, which
+ * is most of what a coach selects -- would otherwise make the composer taller
+ * than the picture it is sitting on.
+ */
+const COMPOSER_THUMB_WIDTH = 132;
+const COMPOSER_THUMB_HEIGHT = 96;
+const CAPTURE_LIFT_DURATION = 520;
+
+/**
+ * A capture that has been taken but not yet filed.
+ *
+ * A screenshot on its own is half a note -- the coach took it because of
+ * something they were about to say. So the capture lands in a composer next to
+ * the picture it came from, holding the thumbnail and the note field together,
+ * and only reaches the strip at the bottom once they press Save. Until then it
+ * is not in the analysis at all, so an accidental capture costs a dismiss
+ * rather than a delete.
+ */
+type SnapshotDraft = {
+  snapshot: FocusSnapshot;
+  note: string;
+  /**
+   * Where on the frame the capture came from, normalised to the canvas shell.
+   * An area crop anchors the composer beside its own selection; a full frame
+   * has no anchor and sits in the bottom-right corner of the picture.
+   */
+  anchor: FocusAreaRect | null;
+  /** Width / height of the captured image, so the thumbnail keeps its shape. */
+  aspect: number;
+};
+
+/** The captured pixels in flight, between the frame and the composer thumb. */
+type CaptureLift = {
+  id: number;
+  side: ComparisonSide;
+  imageDataUrl: string;
+  /** Source rect on the canvas shell, normalised. The cut-out, for an area. */
+  rect: FocusAreaRect;
+  isCutout: boolean;
+};
 type SaveStatus = "idle" | "saving" | "sending" | "downloading" | "saved" | "error";
 /**
  * A capture session on one side of the workspace.
@@ -538,8 +589,21 @@ export function VideoWorkspace({
   const [focusSelectionDraft, setFocusSelectionDraft] = useState<FocusAreaRect | null>(null);
   const [focusAreaRect, setFocusAreaRect] = useState<FocusAreaRect | null>(null);
   const [focusArtifactExpandedId, setFocusArtifactExpandedId] = useState<string | null>(null);
+  const [focusArtifactEditingId, setFocusArtifactEditingId] = useState<string | null>(null);
   const [captureAnimation, setCaptureAnimation] = useState<{ side: ComparisonSide; id: number } | null>(null);
   const captureAnimationTimerRef = useRef<number | null>(null);
+  const [snapshotDraft, setSnapshotDraft] = useState<SnapshotDraft | null>(null);
+  const [captureLift, setCaptureLift] = useState<CaptureLift | null>(null);
+  const captureLiftRef = useRef<HTMLImageElement | null>(null);
+  const composerThumbRef = useRef<HTMLImageElement | null>(null);
+  const composerNoteRef = useRef<HTMLTextAreaElement | null>(null);
+  const composerRef = useRef<HTMLDivElement | null>(null);
+
+  /** Throw away an unfiled capture. Declared here so Back can reach it. */
+  const discardSnapshotDraft = useCallback(() => {
+    setSnapshotDraft(null);
+    setCaptureLift(null);
+  }, []);
   const [leftMetadataReady, setLeftMetadataReady] = useState(false);
   const [rightMetadataReady, setRightMetadataReady] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
@@ -1900,6 +1964,12 @@ export function VideoWorkspace({
   // focus palette -> close focus window -> compare back to single -> explicit
   // app navigation callback.
   const handleBackAction = useCallback(() => {
+    // An unfiled capture is the newest thing on screen, so Back discards it
+    // first -- the same order the coach built it in.
+    if (snapshotDraft) {
+      discardSnapshotDraft();
+      return;
+    }
     if (activeDrawing.isDrawingActionActive) {
       activeDrawing.cancel();
       return;
@@ -1933,16 +2003,19 @@ export function VideoWorkspace({
     activeDrawing,
     buildNavigationContext,
     comparisonMode,
+    discardSnapshotDraft,
     focusPaletteOpen,
     showFocusWindow,
     focusSelectionMode,
     clearFocusSelection,
     onNavigateBack,
     playerId,
+    snapshotDraft,
     updateMode,
   ]);
 
   const canGoBack =
+    Boolean(snapshotDraft) ||
     activeDrawing.isDrawingActionActive ||
     Boolean(focusSelectionMode) ||
     focusPaletteOpen ||
@@ -2004,9 +2077,174 @@ export function VideoWorkspace({
     []
   );
 
+  /** Write a finished capture into the side's analysis. */
+  const fileSnapshot = useCallback(
+    (snapshot: FocusSnapshot, note: string) => {
+      const store = snapshot.side === "left" ? leftStore : rightStore;
+      store.updateAnalysis({
+        focusSnapshots: [
+          ...(store.analysis.focusSnapshots || []),
+          { ...snapshot, note: note.trim() },
+        ],
+      });
+    },
+    [leftStore, rightStore]
+  );
+
+  /**
+   * Hold a fresh capture next to the picture it came from.
+   *
+   * Capturing again while one is still open files the open one rather than
+   * throwing away whatever has been typed into it -- a second capture is the
+   * coach moving on, not undoing.
+   */
+  const stageSnapshotDraft = useCallback(
+    (snapshot: FocusSnapshot, anchor: FocusAreaRect | null, aspect: number) => {
+      setSnapshotDraft((pending) => {
+        if (pending) {
+          fileSnapshot(pending.snapshot, pending.note);
+        }
+        return { snapshot, note: "", anchor, aspect: aspect > 0 ? aspect : 16 / 9 };
+      });
+      setCaptureLift({
+        id: Date.now(),
+        side: snapshot.side,
+        imageDataUrl: snapshot.imageDataUrl,
+        rect: anchor || { x: 0, y: 0, width: 1, height: 1 },
+        isCutout: Boolean(anchor),
+      });
+    },
+    [fileSnapshot]
+  );
+
+  const commitSnapshotDraft = useCallback(() => {
+    if (!snapshotDraft) {
+      return;
+    }
+    fileSnapshot(snapshotDraft.snapshot, snapshotDraft.note);
+    setSnapshotDraft(null);
+    setCaptureLift(null);
+    setFocusArtifactEditingId(null);
+    setFocusArtifactExpandedId(null);
+  }, [fileSnapshot, snapshotDraft]);
+
+  const draftId = snapshotDraft?.snapshot.id;
+
+  /**
+   * Keep the composer inside the picture.
+   *
+   * Where it wants to be is decided by the crop, and a crop low on the frame
+   * or hard against an edge would push it out of the shell, which clips. So it
+   * is placed by the crop and then nudged back in by however much it overhangs
+   * -- measured, because the height depends on the shape of what was captured.
+   *
+   * Before the flight, not after: the capture is animated into this thumbnail,
+   * and it has to be where it is going to stay before that distance is taken.
+   */
+  useLayoutEffect(() => {
+    const composer = composerRef.current;
+    if (!composer) {
+      return;
+    }
+    composer.style.removeProperty("transform");
+    const shell = composer.offsetParent as HTMLElement | null;
+    if (!shell) {
+      return;
+    }
+    const shellRect = shell.getBoundingClientRect();
+    const rect = composer.getBoundingClientRect();
+    const margin = 8;
+    let shiftX = 0;
+    let shiftY = 0;
+    if (rect.bottom > shellRect.bottom - margin) {
+      shiftY = shellRect.bottom - margin - rect.bottom;
+    }
+    if (rect.top + shiftY < shellRect.top + margin) {
+      shiftY = shellRect.top + margin - rect.top;
+    }
+    if (rect.right > shellRect.right - margin) {
+      shiftX = shellRect.right - margin - rect.right;
+    }
+    if (rect.left + shiftX < shellRect.left + margin) {
+      shiftX = shellRect.left + margin - rect.left;
+    }
+    if (shiftX || shiftY) {
+      composer.style.transform = `translate(${Math.round(shiftX)}px, ${Math.round(shiftY)}px)`;
+    }
+  }, [draftId]);
+
+  // The composer exists to be typed into, so it arrives with the caret in it.
+  useEffect(() => {
+    if (!draftId) {
+      return;
+    }
+    composerNoteRef.current?.focus();
+  }, [draftId]);
+
+  /**
+   * The capture flies from the frame into the composer's thumbnail.
+   *
+   * Measured rather than declared: the composer sits wherever the crop put it,
+   * so the distance and the amount to shrink by are only knowable once both
+   * ends are on screen. It lifts a little first, then reduces -- the picture
+   * coming off the frame and settling into the note.
+   */
+  useEffect(() => {
+    if (!captureLift) {
+      return undefined;
+    }
+    const liftElement = captureLiftRef.current;
+    if (!liftElement) {
+      return undefined;
+    }
+    let cancelled = false;
+    const settle = () => {
+      if (cancelled) return;
+      setCaptureLift((current) => (current && current.id === captureLift.id ? null : current));
+    };
+    if (typeof liftElement.animate !== "function") {
+      const timer = window.setTimeout(settle, CAPTURE_LIFT_DURATION);
+      return () => {
+        cancelled = true;
+        window.clearTimeout(timer);
+      };
+    }
+    const from = liftElement.getBoundingClientRect();
+    const target = composerThumbRef.current?.getBoundingClientRect();
+    const scale = target && from.width > 0 ? target.width / from.width : 0.25;
+    const deltaX = target ? target.left - from.left : 0;
+    const deltaY = target ? target.top - from.top : 0;
+    const animation = liftElement.animate(
+      [
+        { offset: 0, transform: "translate(0px, 0px) scale(1)", opacity: 1 },
+        {
+          offset: 0.28,
+          transform: `translate(${-from.width * 0.03}px, ${-from.height * 0.05}px) scale(1.06)`,
+          opacity: 1,
+        },
+        {
+          offset: 1,
+          transform: `translate(${deltaX}px, ${deltaY}px) scale(${scale})`,
+          opacity: 0.9,
+        },
+      ],
+      {
+        duration: CAPTURE_LIFT_DURATION,
+        easing: "cubic-bezier(0.22, 0.68, 0.24, 1)",
+        fill: "forwards",
+      }
+    );
+    animation.addEventListener("finish", settle);
+    return () => {
+      cancelled = true;
+      animation.cancel();
+    };
+  }, [captureLift]);
+
   const removeFocusSnapshot = useCallback(
     (side: ComparisonSide, snapshotId: string) => {
       setFocusArtifactExpandedId((current) => (current === snapshotId ? null : current));
+      setFocusArtifactEditingId((current) => (current === snapshotId ? null : current));
       if (side === "left") {
         const nextSnapshots = (leftStore.analysis.focusSnapshots || []).filter(
           (snapshot) => snapshot.id !== snapshotId
@@ -2066,6 +2304,7 @@ export function VideoWorkspace({
     leftStore.updateAnalysis({ focusSnapshots: [] });
     rightStore.updateAnalysis({ focusSnapshots: [] });
     setFocusArtifactExpandedId(null);
+    setFocusArtifactEditingId(null);
   }, [focusSnapshotStats.total, leftStore, rightStore]);
 
   const downloadFocusSnapshot = useCallback((snapshot: FocusSnapshot) => {
@@ -2225,11 +2464,13 @@ export function VideoWorkspace({
         createdAt: new Date().toISOString(),
       };
 
-      activeStore.updateAnalysis({
-        focusSnapshots: [...(activeStore.analysis.focusSnapshots || []), snapshot],
-      });
-      setFocusArtifactExpandedId(snapshot.id);
-      playCaptureAnimation(focusWindowSide);
+      // The crop lifts out of the frame it was taken from and lands in a
+      // composer beside it. Nothing is written to the analysis until Save.
+      stageSnapshotDraft(
+        snapshot,
+        { ...focusAreaRect },
+        sourceCrop.sourceCropRect.width / Math.max(1, sourceCrop.sourceCropRect.height)
+      );
 
       return { ok: true };
     },
@@ -2243,12 +2484,12 @@ export function VideoWorkspace({
       leftStore,
       playerVideoLeft,
       playerVideoRight,
-      playCaptureAnimation,
       rightPlayback,
       rightDrawing,
       rightOverlayDimensions,
       rightStore,
       resolvedPlayerId,
+      stageSnapshotDraft,
     ]
   );
 
@@ -2285,9 +2526,10 @@ export function VideoWorkspace({
       imageDataUrl,
       createdAt: new Date().toISOString(),
     };
-    store.updateAnalysis({ focusSnapshots: [...(store.analysis.focusSnapshots || []), snapshot] });
-    setFocusArtifactExpandedId(snapshot.id);
+    // A whole frame gets the shutter as well as the lift -- the flash says the
+    // picture was taken, the lift says where it went.
     playCaptureAnimation(side);
+    stageSnapshotDraft(snapshot, null, width / Math.max(1, height));
   }, [
     effectiveActiveSide,
     leftDrawing,
@@ -2302,6 +2544,7 @@ export function VideoWorkspace({
     rightOverlayDimensions,
     rightPlayback,
     rightStore,
+    stageSnapshotDraft,
   ]);
 
   const beginAreaCapture = useCallback(() => {
@@ -2786,6 +3029,139 @@ export function VideoWorkspace({
     [onSaveNote]
   );
 
+  const toRectStyle = (rect: FocusAreaRect): React.CSSProperties => ({
+    left: `${rect.x * 100}%`,
+    top: `${rect.y * 100}%`,
+    width: `${rect.width * 100}%`,
+    height: `${rect.height * 100}%`,
+  });
+
+  /**
+   * Sit the composer beside the crop, on whichever side has the room.
+   *
+   * Beside and not over: the coach is writing about what is still on the frame
+   * behind it, and a panel parked on top of the selection hides the thing the
+   * note is about.
+   */
+  const toComposerAnchorStyle = (anchor: FocusAreaRect): React.CSSProperties => {
+    const gapPercent = 2;
+    const leftEdge = clamp(anchor.x, 0, 1) * 100;
+    const rightEdge = clamp(anchor.x + anchor.width, 0, 1) * 100;
+    const style: React.CSSProperties = {
+      top: `${Math.min(clamp(anchor.y, 0, 1) * 100, 58)}%`,
+    };
+    if (rightEdge <= 58) {
+      style.left = `${rightEdge + gapPercent}%`;
+    } else {
+      style.right = `${Math.min(100 - leftEdge + gapPercent, 72)}%`;
+    }
+    return style;
+  };
+
+  const renderSnapshotComposer = (draft: SnapshotDraft) => {
+    const { snapshot, anchor, aspect, note } = draft;
+    const safeAspect = clamp(aspect, 0.45, 3.2);
+    const thumbWidth =
+      safeAspect >= COMPOSER_THUMB_WIDTH / COMPOSER_THUMB_HEIGHT
+        ? COMPOSER_THUMB_WIDTH
+        : Math.round(COMPOSER_THUMB_HEIGHT * safeAspect);
+    const thumbHeight = Math.round(thumbWidth / safeAspect);
+    return (
+      <div
+        ref={composerRef}
+        className={`snapshot-composer ${anchor ? "is-beside" : "is-corner"}`}
+        style={anchor ? toComposerAnchorStyle(anchor) : undefined}
+        role="group"
+        aria-label="New screenshot note"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <button
+          type="button"
+          className="snapshot-composer-dismiss"
+          onClick={discardSnapshotDraft}
+          aria-label="Discard this capture"
+          title="Discard this capture"
+        >
+          ×
+        </button>
+        <img
+          ref={composerThumbRef}
+          className="snapshot-composer-thumb"
+          src={snapshot.imageDataUrl}
+          alt={`Capture at ${toFixedTime(snapshot.currentTime)}`}
+          style={{ width: thumbWidth, height: thumbHeight }}
+        />
+        <div className="snapshot-composer-meta">
+          {toFixedTime(snapshot.currentTime)} • f {snapshot.currentFrame} •{" "}
+          {getSideLabel(snapshot.side)}
+        </div>
+        <textarea
+          ref={composerNoteRef}
+          className="snapshot-composer-note"
+          value={note}
+          rows={3}
+          placeholder="What are you looking at here?"
+          aria-label="Note for this capture"
+          onChange={(event) => {
+            const nextNote = event.target.value;
+            setSnapshotDraft((current) => (current ? { ...current, note: nextNote } : current));
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              discardSnapshotDraft();
+              return;
+            }
+            // Enter alone stays a newline -- a note runs to more than one line
+            // more often than it is finished in one.
+            if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+              event.preventDefault();
+              commitSnapshotDraft();
+            }
+          }}
+        />
+        <button type="button" className="snapshot-composer-save" onClick={commitSnapshotDraft}>
+          Save
+        </button>
+      </div>
+    );
+  };
+
+  /** The capture in flight, and the composer it is flying into. */
+  const renderCaptureLayer = (side: ComparisonSide) => {
+    const lift = captureLift && captureLift.side === side ? captureLift : null;
+    const draft = snapshotDraft && snapshotDraft.snapshot.side === side ? snapshotDraft : null;
+    if (!lift && !draft) {
+      return null;
+    }
+    return (
+      <>
+        {lift ? (
+          <React.Fragment key={lift.id}>
+            {/* What the crop left behind, so an area capture reads as a piece
+                being lifted out of the frame rather than a copy of it. */}
+            {lift.isCutout ? (
+              <div
+                className="video-capture-cutout"
+                style={toRectStyle(lift.rect)}
+                aria-hidden="true"
+              />
+            ) : null}
+            <img
+              ref={captureLiftRef}
+              className={`video-capture-lift ${lift.isCutout ? "is-cutout" : ""}`}
+              src={lift.imageDataUrl}
+              style={toRectStyle(lift.rect)}
+              alt=""
+              aria-hidden="true"
+            />
+          </React.Fragment>
+        ) : null}
+        {draft ? renderSnapshotComposer(draft) : null}
+      </>
+    );
+  };
+
   const renderVideoCard = (
     side: ComparisonSide,
     overlayDimensions: { width: number; height: number },
@@ -3181,6 +3557,7 @@ export function VideoWorkspace({
               <span />
             </div>
           ) : null}
+          {renderCaptureLayer(side)}
           <PlayerToolRailToggle
             open={toolRailOpen}
             onToggle={() => setToolRailOpen((previous) => !previous)}
@@ -3615,48 +3992,89 @@ export function VideoWorkspace({
                     {toFixedTime(snapshot.currentTime)} • f {snapshot.currentFrame} •{" "}
                     {getSideLabel(snapshot.side)}
                   </div>
-                  <label className="focus-artifact-note">
-                    <span>Notes</span>
-                    <textarea
-                      value={snapshot.note || ""}
-                      placeholder="Add a note about this position…"
-                      rows={2}
-                      onChange={(event) =>
-                        updateFocusSnapshotNote(snapshot.side, snapshot.id, event.target.value)
-                      }
-                    />
-                  </label>
+                  {/* Filed, not still being written. The note reads as text
+                      until somebody asks to change it -- a strip of open
+                      textareas looks like a form nobody has finished. */}
+                  {focusArtifactEditingId === snapshot.id ? (
+                    <label className="focus-artifact-note">
+                      <span>Notes</span>
+                      <textarea
+                        value={snapshot.note || ""}
+                        placeholder="Add a note about this position…"
+                        rows={2}
+                        autoFocus
+                        onChange={(event) =>
+                          updateFocusSnapshotNote(snapshot.side, snapshot.id, event.target.value)
+                        }
+                        onKeyDown={(event) => {
+                          if (event.key === "Escape") {
+                            event.preventDefault();
+                            setFocusArtifactEditingId(null);
+                          }
+                        }}
+                      />
+                    </label>
+                  ) : (
+                    <p
+                      className={`focus-artifact-note-text ${
+                        snapshot.note ? "" : "is-empty"
+                      }`}
+                    >
+                      {snapshot.note || "No note"}
+                    </p>
+                  )}
                 </div>
                 <div className="focus-artifact-actions">
-                  <a
-                    className="focus-artifact-action"
-                    href={snapshot.imageDataUrl}
-                    download={toDownloadFileName(snapshot)}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      downloadFocusSnapshot(snapshot);
-                    }}
-                  >
-                    Download
-                  </a>
-                  <button
-                    type="button"
-                    className="focus-artifact-action"
-                    onClick={() => renameFocusSnapshot(snapshot.side, snapshot.id)}
-                    aria-label={`Rename focus snapshot ${snapshot.title}`}
-                    title="Rename snapshot"
-                  >
-                    Rename
-                  </button>
-                  <button
-                    type="button"
-                    className="focus-artifact-action focus-artifact-action--danger"
-                    onClick={() => removeFocusSnapshot(snapshot.side, snapshot.id)}
-                    aria-label={`Delete focus snapshot ${snapshot.title}`}
-                    title="Delete snapshot"
-                  >
-                    Delete
-                  </button>
+                  {focusArtifactEditingId === snapshot.id ? (
+                    <>
+                      <button
+                        type="button"
+                        className="focus-artifact-action"
+                        onClick={() => setFocusArtifactEditingId(null)}
+                      >
+                        Done
+                      </button>
+                      <a
+                        className="focus-artifact-action"
+                        href={snapshot.imageDataUrl}
+                        download={toDownloadFileName(snapshot)}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          downloadFocusSnapshot(snapshot);
+                        }}
+                      >
+                        Download
+                      </a>
+                      <button
+                        type="button"
+                        className="focus-artifact-action"
+                        onClick={() => renameFocusSnapshot(snapshot.side, snapshot.id)}
+                        aria-label={`Rename focus snapshot ${snapshot.title}`}
+                        title="Rename snapshot"
+                      >
+                        Rename
+                      </button>
+                      <button
+                        type="button"
+                        className="focus-artifact-action focus-artifact-action--danger"
+                        onClick={() => removeFocusSnapshot(snapshot.side, snapshot.id)}
+                        aria-label={`Delete focus snapshot ${snapshot.title}`}
+                        title="Delete snapshot"
+                      >
+                        Delete
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      className="focus-artifact-edit"
+                      onClick={() => setFocusArtifactEditingId(snapshot.id)}
+                      aria-label={`Edit note for ${snapshot.title}`}
+                      title="Edit note"
+                    >
+                      <IconEdit className="focus-artifact-edit-icon" />
+                    </button>
+                  )}
                 </div>
               </article>
             ))

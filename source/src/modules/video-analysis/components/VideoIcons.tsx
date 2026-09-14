@@ -204,3 +204,10 @@ export const IconFocusTrackBeta = ({ className }: IconProps) => (
     <path d="M8.5 17c.7-2.2 2-3.2 3.5-3.2s2.8 1 3.5 3.2" />
   </Svg>
 );
+
+export const IconEdit = ({ className }: IconProps) => (
+  <Svg className={className}>
+    <path d="M4 20h4l10-10a2.4 2.4 0 0 0-3.4-3.4L4.6 16.6 4 20Z" />
+    <path d="M14.2 7.4 16.6 9.8" />
+  </Svg>
+);
