@@ -1541,11 +1541,12 @@ type ClientProfileTab = "bookings" | "notes" | "notifications" | "transactions";
 type ClientTransactionRow =
   | { kind: "sale"; date: string; sale: PosTransaction }
   | { kind: "invoice"; date: string; invoice: BillingInvoiceRecord };
-/* The eight sections of a player profile. The first three are the coach's
+/* The nine sections of a player profile. The first four are the coach's
  * daily reads and sit on the bar; the last five are the record and live behind
  * its toggle -- see .player-tool-tabs.is-expanded. */
 type PlayerProfileTool =
   | "bookings"
+  | "reviews"
   | "videos"
   | "practice"
   | "notes"
@@ -1569,13 +1570,17 @@ type PlayerPracticeSummary = {
   expiryType: string;
   expiryDate: string | null;
   hasVideo: boolean;
+  linkedVideoId: string;
+  content: string;
+  status: string;
 };
 
-/* The bar itself, in order. Split into the three that are always on it and the
+/* The bar itself, in order. Split into the four that are always on it and the
  * five behind the toggle -- SECONDARY_PLAYER_TOOLS below is derived from the
  * second list so the two can never drift apart. */
 const PRIMARY_PLAYER_TOOL_TABS = [
   { id: "bookings", label: "Bookings", Icon: CalendarDays },
+  { id: "reviews", label: "Swing reviews", Icon: ImagePlus },
   { id: "videos", label: "Videos", Icon: Video },
   { id: "practice", label: "Practice", Icon: ClipboardList },
 ] as const satisfies ReadonlyArray<{ id: PlayerProfileTool; label: string; Icon: typeof CalendarDays }>;
@@ -5541,6 +5546,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const [playerPracticeLoadState, setPlayerPracticeLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   /** The Practice tab lists blocks; this flips it to the module's own composer. */
   const [playerPracticeComposer, setPlayerPracticeComposer] = useState(false);
+  const [openSwingReviewId, setOpenSwingReviewId] = useState<string | null>(null);
   const [playerTransactions, setPlayerTransactions] = useState<ClientTransactionRow[]>([]);
   const [playerTransactionsLoadState, setPlayerTransactionsLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [selectedId, setSelectedId] = useState("");
@@ -5559,6 +5565,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     playerName: string;
     savedVideoId?: string;
     startRecording?: boolean;
+    lessonId?: string;
+    lessonTitle?: string;
   } | null>(null);
   const [playerProfilesLocal, setPlayerProfilesLocal] = useState<PlayerProfilesLocalState>(() => ({
     manualIds: [],
@@ -9487,7 +9495,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
    * because they are the ones that stop counting the moment the player walks
    * in, so a coach reviewing before a lesson needs to see them without
    * counting rows. */
-  const playerPracticeExpiringCount = playerPracticeBlocks.filter(
+  const activePlayerPracticeBlocks = playerPracticeBlocks.filter((block) => block.status === "active");
+  const playerPracticeExpiringCount = activePlayerPracticeBlocks.filter(
     (block) => block.expiryType === "next_lesson",
   ).length;
   const playerToolNotifications = useMemo(() => {
@@ -9649,6 +9658,55 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       detail: parts.join(" · "),
     };
   }, [playerToolCloudVideos, playerToolLegacyVideoRecords, playerToolVideos, playerUnseenSubmissions]);
+
+  const playerSwingReviewGroups = useMemo(() => {
+    const reviewVideos = playerToolVideos.filter((video) => video.lessonId?.startsWith("swing-review-"));
+    const reviewCloudVideos = playerToolCloudVideos.filter((transfer) =>
+      transfer.savedVideo?.lessonId?.startsWith("swing-review-"),
+    );
+    const reviewIds = new Set([
+      ...reviewVideos.map((video) => video.lessonId || ""),
+      ...reviewCloudVideos.map((transfer) => transfer.savedVideo?.lessonId || ""),
+      ...notesWorkspaceLessonNotes
+        .map((note) => note.lessonId)
+        .filter((id) => id.startsWith("swing-review-")),
+    ]);
+    return [...reviewIds]
+      .filter(Boolean)
+      .map((id) => {
+        const videos = reviewVideos.filter((video) => video.lessonId === id);
+        const cloudVideos = reviewCloudVideos.filter((transfer) => transfer.savedVideo?.lessonId === id);
+        const notes = notesWorkspaceLessonNotes.filter((note) => note.lessonId === id);
+        const videoIds = new Set(videos.map((video) => video.savedVideoId));
+        const practice = playerPracticeBlocks.filter(
+          (block) => block.linkedVideoId && videoIds.has(block.linkedVideoId),
+        );
+        const at = [
+          ...videos.map((video) => video.capturedAt || video.createdAt),
+          ...cloudVideos.map((video) => video.savedVideo?.createdAt || ""),
+          ...notes.map((note) => note.createdAt),
+        ].filter(Boolean).sort().at(-1) || "";
+        return {
+          id,
+          at,
+          videos,
+          cloudVideos,
+          notes,
+          practice,
+          screenshots: videos.flatMap((video) =>
+            (video.analysisSnapshot.focusSnapshots || []).map((snapshot) => ({
+              ...snapshot,
+              savedVideoId: video.savedVideoId,
+              videoTitle: video.title,
+            })),
+          ),
+          analysisNotes: videos.flatMap((video) =>
+            (video.analysisSnapshot.notes || []).map((note) => ({ ...note, videoTitle: video.title })),
+          ),
+        };
+      })
+      .sort((left, right) => right.at.localeCompare(left.at));
+  }, [notesWorkspaceLessonNotes, playerPracticeBlocks, playerToolCloudVideos, playerToolVideos]);
 
   const linkedLessonVideoIds = useMemo(() => {
     const ids = new Set<string>();
@@ -12138,17 +12196,31 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     name: string;
     savedVideoId?: string;
     startRecording?: boolean;
+    lessonId?: string;
+    lessonTitle?: string;
   }) {
     setVideoContext({
       playerId: client.id,
       playerName: client.name,
       savedVideoId: client.savedVideoId,
       startRecording: client.startRecording,
+      lessonId: client.lessonId,
+      lessonTitle: client.lessonTitle,
     });
     setActiveView("video");
     closeClientModal();
     setQuickCreate(null);
     closeCalendarDetails();
+  }
+
+  function startSwingReviewForClient(client: Pick<Person, "id" | "name" | "email" | "phone">) {
+    const startedAt = new Date();
+    openVideoAnalysisForClient({
+      id: preferredVideoPlayerId(client, videoPlayerIds),
+      name: client.name,
+      lessonId: `swing-review-${startedAt.getTime()}`,
+      lessonTitle: `Swing review · ${startedAt.toLocaleDateString()}`,
+    });
   }
 
   // Straight from a booking into a fresh camera recording for that player.
@@ -12229,7 +12301,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     if (context.hasPlayerContext && context.playerId) {
       selectPlayerProfileTool(
         { id: context.playerId, name: context.playerName || context.playerId },
-        "videos",
+        context.lessonId?.startsWith("swing-review-") ? "reviews" : "videos",
       );
       setActiveView("players");
       return;
@@ -18856,7 +18928,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
    * to the module's defaults rather than to a neutral grey. */
   useEffect(() => {
     const playerId = notesContext?.playerId || "";
-    if (playerProfileTool !== "practice" || !playerId) return;
+    if ((playerProfileTool !== "practice" && playerProfileTool !== "reviews") || !playerId) return;
     let cancelled = false;
     setPlayerPracticeLoadState("loading");
     void (async () => {
@@ -18871,7 +18943,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         const typeById = new Map(types.map((type) => [type.id, type]));
         setPlayerPracticeBlocks(
           snapshot.blocks
-            .filter((block) => block.status === "active")
             .map((block) => {
               const meta = typeById.get(block.blockType);
               return {
@@ -18885,6 +18956,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 expiryType: block.expiryType,
                 expiryDate: block.expiryDate,
                 hasVideo: Boolean(block.linkedVideoId),
+                linkedVideoId: block.linkedVideoId || "",
+                content: block.content,
+                status: block.status,
               };
             }),
         );
@@ -18906,6 +18980,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     setPlayerPracticeLoadState("idle");
     setPlayerTransactions([]);
     setPlayerTransactionsLoadState("idle");
+    setOpenSwingReviewId(null);
   }, [notesContext?.playerId]);
 
   // A customer cell that opens the client's profile when the transaction is
@@ -19066,6 +19141,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     client: Pick<Person, "id" | "name"> | null | undefined,
     text: string,
     source: LessonNoteSource = "typed",
+    link: { lessonId?: string; title?: string } = {},
   ): Promise<boolean> {
     const cleanBody = text.trim();
     if (!client || !cleanBody) return false;
@@ -19079,7 +19155,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           note: {
             playerId: client.id,
             playerName: client.name,
-            title: source === "voice" ? "Voice lesson note" : "Lesson note",
+            lessonId: link.lessonId || "",
+            title: link.title || (source === "voice" ? "Voice lesson note" : "Lesson note"),
             body: cleanBody,
             source,
           },
@@ -23621,6 +23698,130 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                   )}
                                 </div>
                               </div>
+                            ) : playerToolExpanded && playerProfileTool === "reviews" ? (
+                              <div className="player-tool-body">
+                                <div className="player-tool-card">
+                                  <div className="player-tool-card-header">
+                                    <div>
+                                      <strong>Swing reviews</strong>
+                                      <span>
+                                        {playerSwingReviewGroups.length} review
+                                        {playerSwingReviewGroups.length === 1 ? "" : "s"} · videos, screenshot notes and practice
+                                      </span>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      className="primary-button"
+                                      onClick={() => startSwingReviewForClient(notesWorkspaceClient)}
+                                    >
+                                      <ImagePlus size={15} />
+                                      New swing review
+                                    </button>
+                                  </div>
+                                  {playerPracticeLoadState === "loading" ? (
+                                    <Loading what="swing reviews" className="player-tool-card-empty" />
+                                  ) : playerSwingReviewGroups.length ? (
+                                    playerSwingReviewGroups.map((review) => {
+                                      const expanded = openSwingReviewId === review.id;
+                                      const totalItems =
+                                        review.videos.length +
+                                        review.cloudVideos.length +
+                                        review.notes.length +
+                                        review.analysisNotes.length +
+                                        review.screenshots.length +
+                                        review.practice.length;
+                                      return (
+                                        <article className={`swing-review-record${expanded ? " is-expanded" : ""}`} key={review.id}>
+                                          <button
+                                            type="button"
+                                            className="swing-review-record-toggle"
+                                            aria-expanded={expanded}
+                                            onClick={() => setOpenSwingReviewId(expanded ? null : review.id)}
+                                          >
+                                            <span className="player-tool-row-when">
+                                              {profileWhenParts(review.at).day || "Review"}
+                                              {profileWhenParts(review.at).time ? <><br /><span>{profileWhenParts(review.at).time}</span></> : null}
+                                            </span>
+                                            <span className="player-tool-row-main">
+                                              <strong>Swing review</strong>
+                                              <span>{totalItems} item{totalItems === 1 ? "" : "s"} in this review file</span>
+                                            </span>
+                                            {expanded ? <ChevronUp size={17} /> : <ChevronDown size={17} />}
+                                          </button>
+                                          {expanded ? (
+                                            <div className="swing-review-record-body">
+                                              {review.videos.map((video) => (
+                                                <button
+                                                  type="button"
+                                                  className="swing-review-video"
+                                                  key={video.savedVideoId}
+                                                  onClick={() => openVideoAnalysisForClient({
+                                                    id: preferredVideoPlayerId(notesWorkspaceClient, videoPlayerIds),
+                                                    name: notesWorkspaceClient.name,
+                                                    savedVideoId: video.savedVideoId,
+                                                    lessonId: review.id,
+                                                    lessonTitle: "Swing review",
+                                                  })}
+                                                >
+                                                  {video.thumbnailDataUrl ? <img src={video.thumbnailDataUrl} alt="" /> : <Video size={22} />}
+                                                  <span><strong>{video.title}</strong><small>Review video</small></span>
+                                                </button>
+                                              ))}
+                                              {review.cloudVideos.map((video) => (
+                                                <button
+                                                  type="button"
+                                                  className="swing-review-video"
+                                                  key={video.savedVideoId || video.savedVideo?.savedVideoId}
+                                                  onClick={() => openVideoAnalysisForClient({
+                                                    id: preferredVideoPlayerId(notesWorkspaceClient, videoPlayerIds),
+                                                    name: notesWorkspaceClient.name,
+                                                    savedVideoId: video.savedVideoId || video.savedVideo?.savedVideoId,
+                                                    lessonId: review.id,
+                                                    lessonTitle: "Swing review",
+                                                  })}
+                                                >
+                                                  <Cloud size={22} />
+                                                  <span><strong>{video.savedVideo?.title || "Cloud video"}</strong><small>Clarity Cloud</small></span>
+                                                </button>
+                                              ))}
+                                              {review.screenshots.length ? (
+                                                <div className="swing-review-screenshots">
+                                                  {review.screenshots.map((snapshot) => (
+                                                    <figure key={`${snapshot.savedVideoId}-${snapshot.id}`}>
+                                                      {snapshot.imageDataUrl ? <img src={snapshot.imageDataUrl} alt={snapshot.title} /> : <div className="swing-review-image-missing"><ImagePlus size={20} /></div>}
+                                                      <figcaption>
+                                                        <strong>{snapshot.title}</strong>
+                                                        <span>{snapshot.note || `Captured at ${snapshot.currentTime.toFixed(2)}s`}</span>
+                                                      </figcaption>
+                                                    </figure>
+                                                  ))}
+                                                </div>
+                                              ) : null}
+                                              {[...review.notes.map((note) => ({ id: note.id, text: note.body, label: note.title })), ...review.analysisNotes.map((note) => ({ id: note.id, text: note.text, label: note.videoTitle }))].map((note) => (
+                                                <div className="swing-review-note" key={note.id}>
+                                                  <FileText size={15} />
+                                                  <div><strong>{note.label || "Review note"}</strong><p>{note.text}</p></div>
+                                                </div>
+                                              ))}
+                                              {review.practice.map((block) => (
+                                                <div className="swing-review-note is-practice" key={block.id}>
+                                                  <ClipboardList size={15} />
+                                                  <div><strong>{block.title}</strong><p>{block.content}</p><span>{block.status} · {block.dose}</span></div>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          ) : null}
+                                        </article>
+                                      );
+                                    })
+                                  ) : (
+                                    <div className="player-tool-card-empty">
+                                      <p>No swing reviews yet.</p>
+                                      <span>Start one to keep its videos, screenshot notes and practice together.</span>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
                             ) : playerToolExpanded && playerProfileTool === "emails" ? (
                               <div className="player-tool-body">
                                 <div className="player-tool-card">
@@ -23986,8 +24187,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                       <div>
                                         <strong>Practice</strong>
                                         <span>
-                                          {playerPracticeBlocks.length} active block
-                                          {playerPracticeBlocks.length === 1 ? "" : "s"}
+                                          {activePlayerPracticeBlocks.length} active block
+                                          {activePlayerPracticeBlocks.length === 1 ? "" : "s"}
                                           {playerPracticeExpiringCount
                                             ? ` · ${playerPracticeExpiringCount} expiring next lesson`
                                             : ""}
@@ -24005,8 +24206,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                       <Loading what="practice" className="player-tool-card-empty" />
                                     ) : playerPracticeLoadState === "error" ? (
                                       <p className="player-tool-card-empty">Could not load practice for this player.</p>
-                                    ) : playerPracticeBlocks.length ? (
-                                      playerPracticeBlocks.map((block) => (
+                                    ) : activePlayerPracticeBlocks.length ? (
+                                      activePlayerPracticeBlocks.map((block) => (
                                         <div className="player-tool-row is-practice" key={block.id}>
                                           <span
                                             className="player-tool-row-tone"
@@ -24758,6 +24959,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               <VideoAnalysisPage
                 playerId={videoContext?.playerId}
                 playerName={videoContext?.playerName}
+                lessonId={videoContext?.lessonId}
+                lessonTitle={videoContext?.lessonTitle}
                 savedVideoId={videoContext?.savedVideoId}
                 autoStartLiveRecording={videoContext?.startRecording}
                 savedVideoLibrary={savedVideoLibraryRef.current}
@@ -24770,6 +24973,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     videoContext ? { id: videoContext.playerId, name: videoContext.playerName } : null,
                     text,
                     "voice",
+                    { lessonId: videoContext?.lessonId, title: videoContext?.lessonTitle },
                   )
                 }
                 onOpenCloudSettings={() => {

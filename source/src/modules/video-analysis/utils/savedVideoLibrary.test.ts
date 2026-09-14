@@ -168,6 +168,8 @@ const savedVideoWithLargeImages = async () => {
         playerId: "player-1",
         analysisId: "analysis-1",
         title: "Focus",
+        note: "Keep the chest over the ball.",
+        captureKind: "area",
         side: "left",
         currentTime: 1.25,
         currentFrame: 38,
@@ -472,6 +474,8 @@ describe("saved video library", () => {
     assert.equal(compact.analysis.markers[0]?.time, 0);
     assert.equal("thumbnail" in compact.analysis.markers[0], false);
     assert.equal(compact.analysis.focusSnapshots[0]?.currentTime, 1.25);
+    assert.equal(compact.analysis.focusSnapshots[0]?.note, "Keep the chest over the ball.");
+    assert.equal(compact.analysis.focusSnapshots[0]?.captureKind, "area");
     assert.deepEqual(compact.analysis.focusSnapshots[0]?.cropRect, { x: 0.1, y: 0.2, width: 0.3, height: 0.4 });
     assert.equal("imageDataUrl" in compact.analysis.focusSnapshots[0], false);
   });

@@ -91,6 +91,20 @@ const IconStepForward = () => (
   </svg>
 );
 
+const IconSnapshot = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+    <path d="M4 8.5h3l1.5-2h7l1.5 2h3v10H4v-10Z" strokeLinejoin="round" />
+    <circle cx="12" cy="13.5" r="3.2" />
+  </svg>
+);
+
+const IconSnapshotArea = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+    <path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" strokeLinecap="round" />
+    <rect x="8" y="8" width="8" height="8" rx="1" strokeDasharray="2 2" />
+  </svg>
+);
+
 export type PlayerToolRailProps = {
   open: boolean;
   selectedTool: DrawingTool;
@@ -101,6 +115,8 @@ export type PlayerToolRailProps = {
   canClear: boolean;
   /** Coach-only. The player has no focus palette, so this stays unset there. */
   onFocusOpen?: () => void;
+  onCaptureFrame?: () => void;
+  onCaptureArea?: () => void;
 };
 
 /**
@@ -120,6 +136,8 @@ export function PlayerToolRail({
   onClear,
   canClear,
   onFocusOpen,
+  onCaptureFrame,
+  onCaptureArea,
 }: PlayerToolRailProps) {
   return (
     <div
@@ -172,6 +190,17 @@ export function PlayerToolRail({
             <IconFocus />
           </button>
         </>
+      ) : null}
+      {onCaptureFrame || onCaptureArea ? <span className="va-rail-rule" aria-hidden="true" /> : null}
+      {onCaptureFrame ? (
+        <button type="button" className="va-rail-btn" aria-label="Capture full frame" title="Capture full frame (Enter)" onClick={onCaptureFrame}>
+          <IconSnapshot />
+        </button>
+      ) : null}
+      {onCaptureArea ? (
+        <button type="button" className="va-rail-btn" aria-label="Capture selected area" title="Select an area to capture" onClick={onCaptureArea}>
+          <IconSnapshotArea />
+        </button>
       ) : null}
     </div>
   );

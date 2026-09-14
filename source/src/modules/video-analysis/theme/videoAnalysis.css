@@ -1088,6 +1088,37 @@
   gap: 4px;
 }
 
+.focus-artifact-note {
+  display: grid;
+  gap: 3px;
+  min-width: 180px;
+}
+
+.focus-artifact-note span {
+  color: #8ca6d0;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.focus-artifact-note textarea {
+  width: var(--c-w-prose, 100%);
+  min-height: 42px;
+  resize: vertical;
+  border: 1px solid rgba(145, 165, 210, 0.26);
+  border-radius: 7px;
+  background: rgba(5, 10, 22, 0.7);
+  color: #eef4ff;
+  padding: 6px 7px;
+  font: inherit;
+  line-height: 1.35;
+}
+
+.focus-artifact-note textarea:focus {
+  outline: 2px solid rgba(145, 191, 255, 0.45);
+  outline-offset: 1px;
+}
+
 .focus-artifact-title {
   font-size: 11px;
   color: #f0f5ff;

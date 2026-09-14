@@ -105,6 +105,42 @@ const drawObject = (
   ctx.restore();
 };
 
+/** Captures the current review frame with the coach's drawn overlays. */
+export const captureAnalysisFrame = (
+  frame: AnalysisRecorderFrame,
+  crop?: { x: number; y: number; width: number; height: number }
+) => {
+  const { video, objects, overlay } = frame;
+  if (!video || video.readyState < 2 || !video.videoWidth || !video.videoHeight) return "";
+  const sourceWidth = video.videoWidth;
+  const sourceHeight = video.videoHeight;
+  const sourceCrop = crop || { x: 0, y: 0, width: sourceWidth, height: sourceHeight };
+  const maxWidth = 1280;
+  const scale = Math.min(1, maxWidth / Math.max(1, sourceCrop.width));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(sourceCrop.width * scale));
+  canvas.height = Math.max(1, Math.round(sourceCrop.height * scale));
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return "";
+  ctx.drawImage(
+    video,
+    sourceCrop.x,
+    sourceCrop.y,
+    sourceCrop.width,
+    sourceCrop.height,
+    0,
+    0,
+    canvas.width,
+    canvas.height
+  );
+  ctx.save();
+  ctx.translate(-sourceCrop.x * scale, -sourceCrop.y * scale);
+  const strokeScale = overlay.width > 0 ? (sourceWidth * scale) / overlay.width : scale;
+  objects.forEach((object) => drawObject(ctx, object, sourceWidth * scale, sourceHeight * scale, strokeScale));
+  ctx.restore();
+  return canvas.toDataURL("image/jpeg", 0.86);
+};
+
 export class AnalysisViewRecorder {
   private canvas: HTMLCanvasElement | null = null;
   private ctx: CanvasRenderingContext2D | null = null;

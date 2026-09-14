@@ -754,9 +754,9 @@
 
 /* --- Player profile tab bar (Claude Design handoff, Aug 2026) -------------
  *
- * Eight tabs, but a coach opening a profile is nearly always after one of
- * three: what's booked, what was filmed, what was set to practise. So the bar
- * shows those three and parks the record-keeping five — Notes, Emails,
+ * Nine tabs, but a coach opening a profile is nearly always after one of
+ * four: what's booked, the review record, what was filmed, what was set to
+ * practise. So the bar shows those four and parks the record-keeping five — Notes, Emails,
  * Transactions, Passes, Portals — behind a toggle. The bar squares off its
  * corners when expanded because at two rows a 999px pill reads as a lozenge
  * with a hole in it rather than as a track.
@@ -874,6 +874,133 @@
 .player-tool-row-actions {
   display: flex;
   gap: 6px;
+}
+
+.swing-review-record {
+  border-bottom: 1px solid var(--c-border-soft);
+}
+
+.swing-review-record-toggle {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 13px 14px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.swing-review-record-toggle:hover,
+.swing-review-record-toggle:focus-visible,
+.swing-review-record.is-expanded .swing-review-record-toggle {
+  background: var(--c-surface-soft);
+  outline: 0;
+}
+
+.swing-review-record-body {
+  display: grid;
+  gap: 10px;
+  padding: 4px 14px 16px 124px;
+}
+
+.swing-review-video {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface-soft);
+  color: var(--c-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.swing-review-video img,
+.swing-review-image-missing {
+  width: 72px;
+  height: 44px;
+  object-fit: cover;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  background: var(--c-brick-blank);
+}
+
+.swing-review-video span,
+.swing-review-video small {
+  display: block;
+}
+
+.swing-review-video small,
+.swing-review-note span {
+  margin-top: 3px;
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+}
+
+.swing-review-screenshots {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+.swing-review-screenshots figure {
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface-soft);
+}
+
+.swing-review-screenshots img,
+.swing-review-screenshots .swing-review-image-missing {
+  width: 100%;
+  height: 104px;
+  object-fit: cover;
+  border-radius: 0;
+}
+
+.swing-review-screenshots figcaption {
+  display: grid;
+  gap: 3px;
+  padding: 8px;
+}
+
+.swing-review-screenshots figcaption span {
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+  white-space: pre-wrap;
+}
+
+.swing-review-note {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 9px;
+  padding: 10px;
+  border-left: 3px solid var(--c-accent);
+  background: var(--c-surface-soft);
+}
+
+.swing-review-note.is-practice {
+  border-left-color: var(--c-success-text);
+}
+
+.swing-review-note p {
+  margin: 3px 0 0;
+  color: var(--c-text-soft);
+  white-space: pre-wrap;
+}
+
+@media (max-width: 700px) {
+  .swing-review-record-body {
+    padding-left: 14px;
+  }
 }
 
 /* Practice rows lead with the block type's own colour rather than a date —

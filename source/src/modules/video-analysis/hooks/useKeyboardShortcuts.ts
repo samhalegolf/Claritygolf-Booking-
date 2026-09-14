@@ -16,6 +16,8 @@ interface KeyboardOptions {
   onRedo: () => void;
   onDelete: () => void;
   onCancel: () => void;
+  /** Enter is intentionally the capture key: Space remains play/pause. */
+  onCapture?: () => void;
 }
 
 interface RepeatState {
@@ -37,6 +39,7 @@ export function useKeyboardShortcuts({
   onRedo,
   onDelete,
   onCancel,
+  onCapture,
 }: KeyboardOptions) {
   const repeatRef = useRef<RepeatState | null>(null);
   const shiftRef = useRef(false);
@@ -140,6 +143,12 @@ export function useKeyboardShortcuts({
         return;
       }
       switch (event.code) {
+        case "Enter":
+          if (onCapture && !event.repeat) {
+            event.preventDefault();
+            onCapture();
+          }
+          break;
         case "Space":
           event.preventDefault();
           onPlayPause();
@@ -220,6 +229,7 @@ export function useKeyboardShortcuts({
     hasNudgeMode,
     clearRepeat,
     onCancel,
+    onCapture,
     startRepeat,
     onDelete,
     onNextFrame,

@@ -72,6 +72,7 @@ import { TimelineEngine } from "./engines/TimelineEngine";
 import { ClarityVoiceTextPanel } from "../clarity-voice/ClarityVoiceTextPanel";
 import {
   AnalysisViewRecorder,
+  captureAnalysisFrame,
   getPreferredRecordingMimeType,
   getRecordingFileName,
   type AnalysisRecorderFrame,
@@ -2020,11 +2021,23 @@ export function VideoWorkspace({
     [leftStore, rightStore]
   );
 
+  const updateFocusSnapshotNote = useCallback(
+    (side: ComparisonSide, snapshotId: string, note: string) => {
+      const activeStore = side === "left" ? leftStore : rightStore;
+      activeStore.updateAnalysis({
+        focusSnapshots: (activeStore.analysis.focusSnapshots || []).map((snapshot) =>
+          snapshot.id === snapshotId ? { ...snapshot, note } : snapshot
+        ),
+      });
+    },
+    [leftStore, rightStore]
+  );
+
   const clearAllFocusSnapshots = useCallback(() => {
     if (!focusSnapshotStats.total) {
       return;
     }
-    const message = `Clear all ${focusSnapshotStats.total} Focus snapshots? This cannot be undone.`;
+    const message = `Clear all ${focusSnapshotStats.total} screenshot notes? This cannot be undone.`;
     if (!window.confirm(message)) {
       return;
     }
@@ -2052,6 +2065,8 @@ export function VideoWorkspace({
       const activePlayback = isLeft ? leftPlayback : rightPlayback;
       const sourceVideo = isLeft ? playerVideoLeft : playerVideoRight;
       const sourceVideoElement = isLeft ? leftVideoRef.current : rightVideoRef.current;
+      const sourceDrawing = isLeft ? leftDrawing : rightDrawing;
+      const sourceOverlay = isLeft ? leftOverlayDimensions : rightOverlayDimensions;
 
       if (!sourceVideo || !sourceVideoElement) {
         return { ok: false, error: "Source video is not available." };
@@ -2128,6 +2143,22 @@ export function VideoWorkspace({
         // Fall through to preview capture.
       }
 
+      // Prefer the composited frame so the screenshot preserves any lines,
+      // angles or circles the coach has drawn over the swing.
+      const annotatedImage = captureAnalysisFrame(
+        { video: sourceVideoElement, objects: sourceDrawing.objects, overlay: sourceOverlay },
+        sourceCrop.sourceCropRect
+      );
+      if (isDataUrl(annotatedImage)) {
+        imageDataUrl = annotatedImage;
+        sourceImageMeta = createSourceImageMeta(
+          sourceCrop.sourceWidth,
+          sourceCrop.sourceHeight,
+          sourceCrop.sourceCropRect,
+          true
+        );
+      }
+
       if (!isDataUrl(imageDataUrl) && isDataUrl(previewImageDataUrl)) {
         imageDataUrl = previewImageDataUrl;
         sourceImageMeta = createSourceImageMeta(
@@ -2153,6 +2184,8 @@ export function VideoWorkspace({
         playerId: resolvedPlayerId,
         analysisId: activeStore.analysis.id,
         title: "Focus snapshot",
+        note: "",
+        captureKind: "area",
         side: focusWindowSide,
         sourceVideoId: sourceVideo.id,
         sourceVideoTitle: sourceVideo.title,
@@ -2181,14 +2214,76 @@ export function VideoWorkspace({
       focusWindowMode,
       focusWindowSide,
       leftPlayback,
+      leftDrawing,
+      leftOverlayDimensions,
       leftStore,
       playerVideoLeft,
       playerVideoRight,
       rightPlayback,
+      rightDrawing,
+      rightOverlayDimensions,
       rightStore,
       resolvedPlayerId,
     ]
   );
+
+  const captureFullFrame = useCallback(() => {
+    const side = effectiveActiveSide;
+    const video = side === "left" ? playerVideoLeft : playerVideoRight;
+    const playback = side === "left" ? leftPlayback : rightPlayback;
+    const store = side === "left" ? leftStore : rightStore;
+    const drawing = side === "left" ? leftDrawing : rightDrawing;
+    const videoElement = side === "left" ? leftVideoRef.current : rightVideoRef.current;
+    const overlay = side === "left" ? leftOverlayDimensions : rightOverlayDimensions;
+    if (!video || !videoElement) return;
+    const imageDataUrl = captureAnalysisFrame({ video: videoElement, objects: drawing.objects, overlay });
+    if (!imageDataUrl) return;
+    const safeTime = Number.isFinite(playback.currentTime) ? playback.currentTime : 0;
+    const safeFps = video.fps || playback.frameRate || FRAME_RATE_DEFAULT;
+    const width = videoElement.videoWidth || video.width || 1;
+    const height = videoElement.videoHeight || video.height || 1;
+    const snapshot: FocusSnapshot = {
+      id: createId(`frame-${side}`),
+      playerId: resolvedPlayerId,
+      analysisId: store.analysis.id,
+      title: "Frame capture",
+      note: "",
+      captureKind: "frame",
+      side,
+      sourceVideoId: video.id,
+      sourceVideoTitle: video.title,
+      sourceVideoMeta: { fps: video.fps, duration: video.duration, width: video.width, height: video.height },
+      sourceImageMeta: createSourceImageMeta(width, height, { x: 0, y: 0, width, height }, true),
+      currentTime: safeTime,
+      currentFrame: Math.max(0, Math.round(safeTime * safeFps)),
+      cropRect: { x: 0, y: 0, width: 1, height: 1 },
+      imageDataUrl,
+      createdAt: new Date().toISOString(),
+    };
+    store.updateAnalysis({ focusSnapshots: [...(store.analysis.focusSnapshots || []), snapshot] });
+    setFocusArtifactExpandedId(snapshot.id);
+  }, [
+    effectiveActiveSide,
+    leftDrawing,
+    leftOverlayDimensions,
+    leftPlayback,
+    leftStore,
+    playerVideoLeft,
+    playerVideoRight,
+    resolvedPlayerId,
+    rightDrawing,
+    rightOverlayDimensions,
+    rightPlayback,
+    rightStore,
+  ]);
+
+  const beginAreaCapture = useCallback(() => {
+    clearFocusSelection();
+    setFocusSelectionMode("area");
+    setFocusSelectionSide(effectiveActiveSide);
+    setShowFocusWindow(false);
+    setFocusPaletteOpen(false);
+  }, [clearFocusSelection, effectiveActiveSide]);
 
   const reselectAreaFocus = useCallback(() => {
     clearFocusSelection();
@@ -2248,6 +2343,7 @@ export function VideoWorkspace({
     },
     drawingLayerHasFocus: isDrawingKeyboardFocus,
     onCancel: handleBackAction,
+    onCapture: workspaceHasVideo && !isPlayerVariant ? captureFullFrame : undefined,
   });
 
   const saveableSides = useMemo(() => {
@@ -3068,6 +3164,8 @@ export function VideoWorkspace({
             onFocusOpen={
               isPlayerVariant ? undefined : () => setFocusPaletteOpen((previous) => !previous)
             }
+            onCaptureFrame={isPlayerVariant ? undefined : captureFullFrame}
+            onCaptureArea={isPlayerVariant ? undefined : beginAreaCapture}
           />
         </div>
         <Timeline
@@ -3408,14 +3506,13 @@ export function VideoWorkspace({
         />
       ) : null}
 
-      {/* Focus snapshots are made with the focus palette, which is a coach
-          tool. On the player's screen the strip was a permanently empty
-          200px panel below the fold. */}
+      {/* Screenshot notes belong to the saved analysis snapshot, so they stay
+          attached to the review video. */}
       {workspaceHasVideo && !isPlayerVariant ? (
         <div className="focus-artifacts">
           <div className="focus-artifacts-title">
             <span className="focus-artifacts-title-text">
-              Focus snapshots
+              Screenshot notes
               <span>{focusSnapshotStats.total}</span>
             </span>
             {focusSnapshotStats.total ? (
@@ -3424,7 +3521,7 @@ export function VideoWorkspace({
                 className="focus-artifacts-clear"
                 onClick={clearAllFocusSnapshots}
               >
-                Clear all snapshots
+                Clear all
               </button>
             ) : null}
           </div>
@@ -3486,6 +3583,17 @@ export function VideoWorkspace({
                     {toFixedTime(snapshot.currentTime)} • f {snapshot.currentFrame} •{" "}
                     {getSideLabel(snapshot.side)}
                   </div>
+                  <label className="focus-artifact-note">
+                    <span>Notes</span>
+                    <textarea
+                      value={snapshot.note || ""}
+                      placeholder="Add a note about this position…"
+                      rows={2}
+                      onChange={(event) =>
+                        updateFocusSnapshotNote(snapshot.side, snapshot.id, event.target.value)
+                      }
+                    />
+                  </label>
                 </div>
                 <div className="focus-artifact-actions">
                   <a
@@ -3521,7 +3629,7 @@ export function VideoWorkspace({
               </article>
             ))
           ) : (
-            <div className="focus-artifacts-empty">No snapshots saved yet.</div>
+            <div className="focus-artifacts-empty">Use the rail camera buttons or press Enter to capture.</div>
           )}
         </div>
       </div>

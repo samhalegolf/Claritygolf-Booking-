@@ -29,6 +29,9 @@ export interface FocusSnapshot {
   playerId: string;
   analysisId: string;
   title: string;
+  /** A screenshot is a visual note; this is the coach's explanation beside it. */
+  note?: string;
+  captureKind?: "frame" | "area";
   side: ComparisonSide;
   sourceVideoId?: string;
   sourceVideoTitle?: string;
