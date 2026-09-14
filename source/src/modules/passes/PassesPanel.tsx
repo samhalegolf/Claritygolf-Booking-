@@ -65,11 +65,16 @@ export type PassGrant = {
   credits: number;
   expiryMonths: number;
   note: string;
+  coversServiceIds: string[];
 };
+
+export type CoverableService = { id: string; name: string };
 
 export type PassesPanelProps = {
   passes: Pass[];
   templates: PassTemplate[];
+  /** What a free-form grant can be pointed at. Packages are not in this list. */
+  coverableServices: CoverableService[];
   loadState: "idle" | "loading" | "loaded" | "error";
   granting: boolean;
   onGrant: (grant: PassGrant) => void;
@@ -141,6 +146,7 @@ function ledgerLines(pass: Pass) {
 export function PassesPanel({
   passes,
   templates,
+  coverableServices,
   loadState,
   granting,
   onGrant,
@@ -154,6 +160,7 @@ export function PassesPanel({
   const [credits, setCredits] = useState("1");
   const [expiryMonths, setExpiryMonths] = useState(12);
   const [note, setNote] = useState("");
+  const [covers, setCovers] = useState<string[]>([]);
 
   const template = useMemo(
     () => templates.find((entry) => entry.serviceId === templateId),
@@ -179,6 +186,7 @@ export function PassesPanel({
     setCredits("1");
     setExpiryMonths(12);
     setNote("");
+    setCovers([]);
   }
 
   function submit() {
@@ -189,11 +197,17 @@ export function PassesPanel({
       credits: count,
       expiryMonths,
       note: note.trim(),
+      // A template brings its own coverage; the server uses that and ignores
+      // this. It only matters for a free-form grant.
+      coversServiceIds: templateId ? [] : covers,
     });
     resetForm();
   }
 
-  const canSubmit = !granting && (Boolean(templateId) || name.trim().length > 0);
+  // A free-form pass that covers nothing can never be spent, so the form will
+  // not let one be created. A template supplies its own coverage.
+  const canSubmit =
+    !granting && (Boolean(templateId) || (name.trim().length > 0 && covers.length > 0));
 
   return (
     <div className="pass-panel">
@@ -229,6 +243,34 @@ export function PassesPanel({
                 placeholder="Goodwill credit"
               />
             </label>
+          )}
+
+          {!templateId && (
+            <div className="pass-field pass-field-wide">
+              <span>Use for</span>
+              <div className="pass-coverage">
+                {coverableServices.length ? (
+                  coverableServices.map((service) => (
+                    <label className="pass-coverage-option" key={service.id}>
+                      <input
+                        type="checkbox"
+                        checked={covers.includes(service.id)}
+                        onChange={(event) =>
+                          setCovers((current) =>
+                            event.target.checked
+                              ? [...current, service.id]
+                              : current.filter((id) => id !== service.id),
+                          )
+                        }
+                      />
+                      {service.name}
+                    </label>
+                  ))
+                ) : (
+                  <span className="pass-coverage-empty">No services to cover yet.</span>
+                )}
+              </div>
+            </div>
           )}
 
           <label className="pass-field">

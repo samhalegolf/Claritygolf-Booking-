@@ -17,8 +17,11 @@ import {
   grantPass,
   isCompatiblePass,
   normaliseGrant,
+  passOptionsForService,
   passTemplatesFromServices,
   readPassesForPerson,
+  reservePassCredit,
+  reversePassRedemption,
   spendOrder,
 } from "./passes.mts";
 
@@ -338,4 +341,146 @@ test("a grant rolls back rather than leaving a pass with no credits", async (t) 
     issued.some((entry) => entry.text === "ROLLBACK"),
     "a pass that could not be funded is not left behind",
   );
+});
+
+// --- Spending: what the checkout is allowed to offer ------------------------
+
+function pass(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "pass-1",
+    personId: "person-1",
+    name: "5 Lesson Package",
+    templateServiceId: "package-5",
+    coversServiceIds: ["lesson-60"],
+    creditsAvailable: 3,
+    creditsAllocated: 5,
+    creditsRedeemed: 2,
+    nextExpiry: null,
+    expiresAt: null,
+    status: "active",
+    source: "manual",
+    note: "",
+    issuedAt: "2026-09-01T00:00:00.000Z",
+    allocations: [],
+    redemptions: [],
+    ...overrides,
+  } as Parameters<typeof passOptionsForService>[0][number];
+}
+
+test("a pass that covers the service and has credits can pay", () => {
+  const [option] = passOptionsForService([pass()], "lesson-60", "60 Minute Lesson");
+  assert.equal(option.covered, true);
+  assert.equal(option.creditsAvailable, 3);
+});
+
+test("a pass for something else is offered but refused, with the reason on it", () => {
+  // Shown rather than hidden: "why isn't his pass showing up" is a support
+  // question you otherwise ask yourself with nothing on screen to answer it.
+  const [option] = passOptionsForService([pass()], "lesson-45", "45 Minute Lesson");
+  assert.equal(option.covered, false);
+  assert.equal(option.reason, "Covers something else");
+});
+
+test("a pass with coverage but no credits left cannot pay", () => {
+  const [option] = passOptionsForService([pass({ creditsAvailable: 0, status: "exhausted" })], "lesson-60");
+  assert.equal(option.covered, false);
+  assert.equal(option.reason, "No credits left");
+});
+
+test("a pass covering nothing covers nothing, rather than everything", () => {
+  // The dangerous reading of an empty list is "unrestricted", which would let a
+  // swing-review credit pay for a 60-minute lesson.
+  const [option] = passOptionsForService([pass({ coversServiceIds: [] })], "lesson-60");
+  assert.equal(option.covered, false);
+  assert.equal(option.reason, "No covered service set");
+});
+
+test("void and expired passes are not offered at all", () => {
+  const options = passOptionsForService(
+    [pass({ id: "a", status: "void" }), pass({ id: "b", status: "expired" })],
+    "lesson-60",
+  );
+  assert.deepEqual(options, []);
+});
+
+// --- Spending: taking the credit -------------------------------------------
+
+const RESERVE = { accountId: ACCOUNT, passId: "pass-1", bookingId: "booking-1", actorId: "coach@example.test" };
+
+test("a pass cannot settle anything that is not a booking", async (t) => {
+  const issued = fakeDatabase(() => []);
+  t.after(() => setDatabaseForTests(null));
+  await assert.rejects(reservePassCredit({ ...RESERVE, bookingId: "" }), /booking/i);
+  assert.equal(issued.length, 0, "refused before touching the database");
+});
+
+test("taking a credit locks the pass and lets the database pick the allocation", async (t) => {
+  const issued = fakeDatabase((text) => {
+    if (text.includes("FOR UPDATE")) return [{ id: "pass-1" }];
+    if (text.includes("INSERT INTO public.pass_redemptions")) return [{ id: "red-1", allocation_id: "alloc-aug" }];
+    return [];
+  });
+  t.after(() => setDatabaseForTests(null));
+
+  const reserved = await reservePassCredit(RESERVE);
+  assert.deepEqual(reserved, { redemptionId: "red-1", allocationId: "alloc-aug" });
+
+  const lock = issued.find((entry) => entry.text.includes("FOR UPDATE"));
+  assert.ok(lock, "the pass row is locked first -- two tills must not both read '1 left'");
+  assert.ok(lock.values.includes(ACCOUNT));
+
+  const insert = issued.find((entry) => entry.text.includes("INSERT INTO public.pass_redemptions"));
+  assert.ok(insert);
+  assert.match(
+    insert.text,
+    /ORDER BY a\.expires_at NULLS LAST, a\.available_from/,
+    "oldest-expiring credit first, so fresh credits are not spent while old ones expire",
+  );
+  assert.match(insert.text, /a\.is_live/, "expired allocations cannot pay");
+  assert.match(insert.text, /p\.status = 'active'/, "a voided pass cannot pay");
+  assert.ok(issued.some((entry) => entry.text === "COMMIT"));
+});
+
+test("no spendable credit is a refusal, not a redemption of nothing", async (t) => {
+  const issued = fakeDatabase((text) => (text.includes("FOR UPDATE") ? [{ id: "pass-1" }] : []));
+  t.after(() => setDatabaseForTests(null));
+
+  await assert.rejects(reservePassCredit(RESERVE), (error: { status?: number; code?: string }) => {
+    assert.equal(error.status, 409);
+    assert.equal(error.code, "no_credits");
+    return true;
+  });
+  assert.ok(issued.some((entry) => entry.text === "ROLLBACK"));
+});
+
+test("a booking already settled on a pass cannot take a second credit", async (t) => {
+  // The partial unique index firing. Two coaches on two devices settling the
+  // same lesson is the case; the second one gets told, rather than the pass
+  // quietly going down by two.
+  fakeDatabase((text) => {
+    if (text.includes("FOR UPDATE")) return [{ id: "pass-1" }];
+    if (text.includes("INSERT INTO public.pass_redemptions")) {
+      throw Object.assign(new Error("duplicate key value violates unique constraint"), { code: "23505" });
+    }
+    return [];
+  });
+  t.after(() => setDatabaseForTests(null));
+
+  await assert.rejects(reservePassCredit(RESERVE), (error: { status?: number; code?: string }) => {
+    assert.equal(error.status, 409);
+    assert.equal(error.code, "already_redeemed");
+    return true;
+  });
+});
+
+test("a reversal never deletes the line it reverses", async (t) => {
+  const issued = fakeDatabase(() => [{ id: "red-1" }]);
+  t.after(() => setDatabaseForTests(null));
+
+  assert.equal(await reversePassRedemption(ACCOUNT, "red-1", "Lesson cancelled", "coach@example.test"), true);
+  const [update] = issued;
+  assert.match(update.text, /UPDATE public\.pass_redemptions/);
+  assert.match(update.text, /reversed_at = NOW\(\)/);
+  assert.match(update.text, /reversed_at IS NULL/, "reversing twice must not overwrite the first reason");
+  assert.ok(!issued.some((entry) => /DELETE/i.test(entry.text)));
 });

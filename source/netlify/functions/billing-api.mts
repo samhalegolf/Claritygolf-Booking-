@@ -4,6 +4,11 @@ import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { defaultCalendarSlug } from "./_shared/account.mts";
 import { requireCoachActor } from "./_shared/coach-auth.mts";
 import { settingsSelectQuery } from "./_shared/settings-scope.mts";
+import {
+  attachRedemptionToSale,
+  reversePassRedemption,
+  reservePassCredit,
+} from "./_shared/passes.mts";
 
 // Billing is a new, isolated top-level app section. This function owns its
 // own tables (billing_products_services, billing_invoices,
@@ -14,6 +19,13 @@ import { settingsSelectQuery } from "./_shared/settings-scope.mts";
 // depend on booking/calendar code, per the billing build plan's "protected
 // rules" (billing may read completed bookings/account settings, but does not
 // own booking creation, completion, or calendar state).
+//
+// _shared/passes.mts is the one exception, and it does not breach that rule:
+// the pass tables are not billing's and not booking's, and this file never
+// touches them except through that module. A sale settled by a pass has to take
+// the credit and write the receipt as one decision, so something has to know
+// both -- and the alternative, teaching the pass engine to write into
+// billing_pos_transactions, would put billing's tables in someone else's hands.
 
 const sessionCookieName = "clarity_session";
 
@@ -2842,6 +2854,51 @@ const DEFAULT_PAYMENT_METHODS = [
   { name: "Coupon", kind: "custom", settles_immediately: true, sort_order: 50 },
 ];
 
+// The method a lesson lands on when a pass covered it. Unlike the rest of this
+// list it is not something a coach rings up: the Passes block in the checkout
+// selects it, and the sale it produces is always 0 with listed_amount carrying
+// what the lesson would have cost.
+const PASS_METHOD = {
+  name: "Pass",
+  kind: "pass",
+  settles_immediately: true,
+  sort_order: 60,
+};
+
+/**
+ * Make sure this account has the Pass method.
+ *
+ * The seed above only runs when an account has *no* payment methods at all, so
+ * a method added to that list later never reaches an account that already has
+ * one -- which is every account by now. (The same gap is why COUPON_METHOD_NAME
+ * below is dead code: the Coupon row it names was added to the seed after the
+ * fact and no existing account was ever given one.)
+ *
+ * Passes cannot be spent without this row, so it is topped up explicitly rather
+ * than left to a seed that will not fire.
+ */
+async function ensurePassPaymentMethod(accountId: string, rows: Record<string, unknown>[]) {
+  if (rows.some((row) => row.kind === "pass")) return rows;
+  const row = {
+    id: randomUUID(),
+    account_id: accountId,
+    ...PASS_METHOD,
+    active: true,
+    created_at: nowIso(),
+    updated_at: nowIso(),
+  };
+  try {
+    await supabase("billing_payment_methods", { method: "POST", body: [row], prefer: "return=minimal" });
+    return [...rows, row];
+  } catch (error) {
+    // Another request got there first. Its row is just as good as ours.
+    if ((error as { supabaseStatus?: number })?.supabaseStatus !== 409) throw error;
+    return supabase("billing_payment_methods", {
+      query: `select=*&account_id=eq.${encodeFilter(accountId)}&order=sort_order.asc,name.asc`,
+    });
+  }
+}
+
 // Name of the seeded method above. Matched by name because the row is seeded
 // per account and has no stable id.
 const COUPON_METHOD_NAME = "Coupon";
@@ -2850,7 +2907,7 @@ function paymentMethodRowToApi(row: Record<string, unknown>) {
   return {
     id: String(row.id ?? ""),
     name: String(row.name ?? ""),
-    kind: row.kind === "clarity_pay" ? "clarity_pay" : "custom",
+    kind: row.kind === "clarity_pay" || row.kind === "pass" ? String(row.kind) : "custom",
     settlesImmediately: row.settles_immediately !== false,
     sortOrder: Number(row.sort_order) || 0,
     active: row.active !== false,
@@ -2896,6 +2953,7 @@ async function listPaymentMethods(accountId: string) {
       });
     }
   }
+  rows = await ensurePassPaymentMethod(accountId, rows);
   return {
     paymentMethods: rows.map(paymentMethodRowToApi),
     // The Clarity Pay row is seeded for every account whether or not Stripe is
@@ -2940,7 +2998,10 @@ function posRowToApi(row: Record<string, unknown>) {
     status: String(row.status ?? "paid"),
     paymentMethodId: String(row.payment_method_id ?? ""),
     paymentMethodName: String(row.payment_method_name ?? ""),
-    paymentMethodKind: row.payment_method_kind === "clarity_pay" ? "clarity_pay" : "custom",
+    paymentMethodKind:
+      row.payment_method_kind === "clarity_pay" || row.payment_method_kind === "pass"
+        ? String(row.payment_method_kind)
+        : "custom",
     description: String(row.description ?? ""),
     amount: Number(row.amount) || 0,
     listedAmount: row.listed_amount === null || row.listed_amount === undefined ? null : Number(row.listed_amount),
@@ -3354,7 +3415,6 @@ async function createPosTransaction(accountId: string, body: Record<string, unkn
   // given - but a basket no longer needs one typed in.
   const requestedAmount = round2(cleanNumber(body?.amount, 0, { min: 0 }));
   const amount = requestedAmount > 0 ? requestedAmount : itemsTotal;
-  if (amount <= 0) throw Object.assign(new Error("Enter an amount greater than zero."), { status: 400 });
 
   const description =
     cleanString(body?.description, "", 300) ||
@@ -3366,6 +3426,17 @@ async function createPosTransaction(accountId: string, body: Record<string, unkn
   const method = methods.find((entry) => entry.id === methodId);
   if (!method) throw Object.assign(new Error("Choose a payment method."), { status: 400 });
   if (!method.active) throw Object.assign(new Error(`${method.name} is no longer available.`), { status: 400 });
+
+  // A pass settles the sale without money moving, so the row is written at 0
+  // and `amount` stops being the thing that has to be positive -- what has to
+  // be positive is the value being covered, which lands in listed_amount.
+  const settledByPass = method.kind === "pass";
+  if (!settledByPass && amount <= 0) {
+    throw Object.assign(new Error("Enter an amount greater than zero."), { status: 400 });
+  }
+  if (settledByPass && amount <= 0) {
+    throw Object.assign(new Error("A pass can only settle a lesson with a price."), { status: 400 });
+  }
 
   // Clarity Pay starts pending and only becomes paid once Stripe confirms it.
   // Manual methods are recorded by a human who just took the money, so they are
@@ -3396,6 +3467,24 @@ async function createPosTransaction(accountId: string, body: Record<string, unkn
     }
   }
 
+  // Same shape as the coupon reservation above, and the same reasoning: taking
+  // the credit is the part that can legitimately fail -- no credits left, the
+  // pass expired between the till reading it and pressing pay, another till
+  // settled this booking a second ago -- and failing here is a refused sale
+  // rather than a receipt somebody has to unpick afterwards.
+  //
+  // Which credit gets spent is decided in there, not here: oldest-expiring
+  // first, under a lock on the pass.
+  let reservedCredit: { redemptionId: string; allocationId: string } | null = null;
+  if (settledByPass) {
+    reservedCredit = await reservePassCredit({
+      accountId,
+      passId: cleanString(body?.passId, "", 120),
+      bookingId: cleanString(body?.bookingId, "", 160),
+      actorId: cleanString(body?.actorId, "", 160),
+    });
+  }
+
   const row = {
     id: randomUUID(),
     account_id: accountId,
@@ -3407,14 +3496,19 @@ async function createPosTransaction(accountId: string, body: Record<string, unkn
     payment_method_name: method.name,
     payment_method_kind: method.kind,
     description,
-    amount,
+    amount: settledByPass ? 0 : amount,
     // For a basket the list price is what the items add up to, so a counter
     // discount on a bag of gear stays visible the same way it does on a lesson.
-    listed_amount: listedAmountRaw === null || listedAmountRaw === undefined || listedAmountRaw === ""
-      ? itemsTotal > 0
-        ? itemsTotal
-        : null
-      : round2(cleanNumber(listedAmountRaw, 0, { min: 0 })),
+    // listed_amount already means "what it would have cost" and is already read
+    // that way by the takings report, so a pass sale reuses it rather than
+    // adding a column: 0 taken, `amount` worth of value delivered.
+    listed_amount: settledByPass
+      ? amount
+      : listedAmountRaw === null || listedAmountRaw === undefined || listedAmountRaw === ""
+        ? itemsTotal > 0
+          ? itemsTotal
+          : null
+        : round2(cleanNumber(listedAmountRaw, 0, { min: 0 })),
     currency: cleanString(body?.currency, await resolveDefaultCurrency(accountId), 10),
     customer_id: cleanString(body?.customerId, "", 160)
       || await resolveCustomerIdByEmail(accountId, body?.customerEmail),
@@ -3446,8 +3540,23 @@ async function createPosTransaction(accountId: string, body: Record<string, unkn
       if (couponId && couponAmount > 0) {
         await restoreCouponValue(accountId, couponId, couponAmount).catch(() => null);
       }
+      // Same for the credit. Reversed rather than deleted: the ledger keeps the
+      // evidence that it was taken and given back, which is the difference
+      // between a balance that explains itself and one that is merely correct.
+      if (reservedCredit) {
+        await reversePassRedemption(
+          accountId,
+          reservedCredit.redemptionId,
+          "Sale could not be recorded",
+          cleanString(body?.actorId, "", 160),
+        ).catch(() => null);
+      }
       throw error;
     }
+  }
+
+  if (reservedCredit) {
+    await attachRedemptionToSale(accountId, reservedCredit.redemptionId, String(row.id));
   }
 
   if (couponId && couponAmount > 0) {

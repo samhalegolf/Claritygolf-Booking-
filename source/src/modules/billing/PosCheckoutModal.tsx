@@ -14,8 +14,8 @@ import { Loading } from "../shared/Loading";
 // POS-#### receipt number and is never summed into invoice revenue or aging.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Check, CreditCard, ExternalLink, Minus, Plus, RotateCcw, X } from "lucide-react";
-import type { BillingCatalogItem, PosCheckoutContext, PosPaymentMethod, PosTransaction } from "./types";
+import { AlertTriangle, Check, CreditCard, ExternalLink, Minus, Plus, RotateCcw, Ticket, X } from "lucide-react";
+import type { BillingCatalogItem, PassOption, PosCheckoutContext, PosPaymentMethod, PosTransaction } from "./types";
 import { postPosJson, renderQrSvg, usePosPaymentPoll } from "./posCheckoutPoll";
 import { addToBasket, basketTotal, describeBasket, isLowStock, lineTotal, round2, setBasketQuantity } from "./stockMath";
 import type { BasketLine } from "./stockMath";
@@ -42,6 +42,11 @@ export function PosCheckoutModal({
   const [methods, setMethods] = useState<PosPaymentMethod[]>([]);
   const [methodsLoaded, setMethodsLoaded] = useState(false);
   const [methodId, setMethodId] = useState("");
+
+  // Passes this customer holds. Only ever fetched for a booking: a pass settles
+  // a lesson, and there is no booking to settle on a counter sale.
+  const [passOptions, setPassOptions] = useState<PassOption[]>([]);
+  const [passId, setPassId] = useState("");
 
   const [description, setDescription] = useState(context.description);
   // Held as a string so the field can be cleared and retyped without the value
@@ -104,7 +109,10 @@ export function PosCheckoutModal({
         if (cancelled) return;
         const active = (data.paymentMethods || []).filter((method) => method.active);
         setMethods(active);
-        setMethodId((current) => current || active[0]?.id || "");
+        // The pass method is never picked from the grid -- it is what the Use
+        // pass block selects -- so it is not offered as a way to pay by hand.
+        // Choosing it without a pass would write a $0 sale settled by nothing.
+        setMethodId((current) => current || active.find((method) => method.kind !== "pass")?.id || "");
       } catch (loadError) {
         if (!cancelled) setError(loadError instanceof Error ? loadError.message : "Could not load payment methods.");
       } finally {
@@ -115,6 +123,31 @@ export function PosCheckoutModal({
       cancelled = true;
     };
   }, []);
+
+  // What this customer could pay with instead of money. The server decides
+  // which passes cover this service -- the till is not allowed an opinion about
+  // what a credit may buy.
+  useEffect(() => {
+    const personId = context.customerId || "";
+    if (!personId || !context.bookingId || !context.serviceId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch(
+          `/api/passes?personId=${encodeURIComponent(personId)}&serviceId=${encodeURIComponent(context.serviceId || "")}`,
+          { credentials: "same-origin", cache: "no-store" },
+        );
+        if (!response.ok) return;
+        const data = (await response.json()) as { options?: PassOption[] };
+        if (!cancelled) setPassOptions(Array.isArray(data.options) ? data.options : []);
+      } catch {
+        // No passes offered this time; paying by any other method still works.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [context.customerId, context.bookingId, context.serviceId]);
 
   // Products are optional to the flow, so a failed load leaves the picker empty
   // rather than blocking a sale that may not involve any stock at all.
@@ -163,7 +196,15 @@ export function PosCheckoutModal({
   );
 
   async function takePayment() {
-    if (!selectedMethod) {
+    // Paying with a pass swaps the method out from under the grid: the sale is
+    // recorded against the Pass method, not whatever was highlighted before.
+    const passMethod = methods.find((method) => method.kind === "pass") || null;
+    const payingMethod = passId ? passMethod : selectedMethod;
+    if (passId && !passMethod) {
+      setError("This account has no Pass payment method yet. Reopen the checkout and try again.");
+      return;
+    }
+    if (!payingMethod) {
       setError("Choose a payment method.");
       return;
     }
@@ -193,7 +234,8 @@ export function PosCheckoutModal({
               unitPrice: line.unitPrice,
             })),
             currency,
-            paymentMethodId: selectedMethod.id,
+            paymentMethodId: payingMethod.id,
+            passId,
             customerId: context.customerId || "",
             customerName: customerName.trim(),
             customerEmail: customerEmail.trim(),
@@ -207,7 +249,7 @@ export function PosCheckoutModal({
       setTransaction(sale);
       onCompleted(sale);
 
-      if (selectedMethod.kind !== "clarity_pay") {
+      if (payingMethod.kind !== "clarity_pay") {
         setStage("done");
         return;
       }
@@ -431,19 +473,63 @@ export function PosCheckoutModal({
               </div>
             </div>
 
+            {passOptions.length > 0 && (
+              <div className="settings-field">
+                <label>Passes</label>
+                <div className="pos-pass-list">
+                  {passOptions.map((option) => (
+                    <button
+                      key={option.passId}
+                      type="button"
+                      className={`pos-pass-option${option.passId === passId ? " active" : ""}`}
+                      disabled={!option.covered}
+                      aria-pressed={option.passId === passId}
+                      onClick={() => setPassId((current) => (current === option.passId ? "" : option.passId))}
+                    >
+                      <span className="pos-pass-name">
+                        <Ticket size={15} />
+                        {option.name}
+                      </span>
+                      <span className="pos-pass-meta">
+                        {option.covered
+                          ? `${option.creditsAvailable} of ${option.creditsAllocated} left` +
+                            (option.nextExpiry
+                              ? ` · expires ${new Date(option.nextExpiry).toLocaleDateString(undefined, {
+                                  day: "numeric",
+                                  month: "short",
+                                  year: "numeric",
+                                })}`
+                              : "")
+                          : option.reason}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                {passId ? (
+                  <p className="field-help">
+                    One credit will be used. The lesson is recorded as settled at {formatMoney(amount, currency)} of value,
+                    with nothing taken.
+                  </p>
+                ) : null}
+              </div>
+            )}
+
             <div className="settings-field">
-              <label>Payment method</label>
+              <label>{passId ? "Payment method (not used)" : "Payment method"}</label>
               {!methodsLoaded && <Loading what="payment methods" className="field-help" />}
               {methodsLoaded && !methods.length && (
                 <p className="field-help">No payment methods yet - add one under Billing &gt; Settings.</p>
               )}
               <div className="pos-method-grid">
-                {methods.map((method) => (
+                {methods.filter((method) => method.kind !== "pass").map((method) => (
                   <button
                     key={method.id}
                     type="button"
-                    className={`pos-method-button${method.id === methodId ? " active" : ""}`}
-                    onClick={() => setMethodId(method.id)}
+                    className={`pos-method-button${method.id === methodId && !passId ? " active" : ""}`}
+                    onClick={() => {
+                      setPassId("");
+                      setMethodId(method.id);
+                    }}
                   >
                     {method.kind === "clarity_pay" && <CreditCard size={15} />}
                     {method.name}
@@ -467,12 +553,19 @@ export function PosCheckoutModal({
               <button className="outline-button" onClick={closeModal} type="button">
                 Cancel
               </button>
-              <button className="primary-button" disabled={busy || !selectedMethod} onClick={takePayment} type="button">
+              <button
+                className="primary-button"
+                disabled={busy || (!selectedMethod && !passId)}
+                onClick={takePayment}
+                type="button"
+              >
                 {busy
                   ? "Working..."
-                  : selectedMethod?.kind === "clarity_pay"
-                    ? `Charge ${amountValid ? formatMoney(amount, currency) : ""}`.trim()
-                    : `Record ${amountValid ? formatMoney(amount, currency) : "payment"}`}
+                  : passId
+                    ? "Use pass"
+                    : selectedMethod?.kind === "clarity_pay"
+                      ? `Charge ${amountValid ? formatMoney(amount, currency) : ""}`.trim()
+                      : `Record ${amountValid ? formatMoney(amount, currency) : "payment"}`}
               </button>
             </div>
           </>

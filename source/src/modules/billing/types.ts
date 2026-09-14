@@ -308,7 +308,9 @@ export type BillingExpenseCategory = {
 
 // "clarity_pay" is the Stripe-backed method (exactly one per account, seeded by
 // the backend). Everything else is a manual method the coach defines.
-export type PosPaymentMethodKind = "clarity_pay" | "custom";
+// "pass" settles a sale from an entitlement rather than money: the row is
+// written at 0 with listed_amount carrying what it would have cost.
+export type PosPaymentMethodKind = "clarity_pay" | "custom" | "pass";
 
 export type PosPaymentMethod = {
   id: string;
@@ -415,6 +417,22 @@ export type PosCheckoutContext = {
   customerName?: string;
   customerEmail?: string;
   bookingId?: string;
+  /** What is being sold, so the checkout can tell which passes cover it. */
+  serviceId?: string;
+  serviceName?: string;
+};
+
+// One pass as the checkout sees it. `covered` is the server's answer to "can
+// this pay for this booking"; `reason` is what to show when it cannot.
+export type PassOption = {
+  passId: string;
+  name: string;
+  creditsAvailable: number;
+  creditsAllocated: number;
+  expiresAt: string | null;
+  nextExpiry: string | null;
+  covered: boolean;
+  reason: string;
 };
 
 // Shape returned by /api/billing/expenses. Not linked to invoices/bookings -

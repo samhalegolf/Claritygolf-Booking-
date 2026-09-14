@@ -494,3 +494,196 @@ export async function voidPass(
 
   return { passes: await readPassesForPerson(accountId, String(existing.person_id || "")) };
 }
+
+// ---------------------------------------------------------------------------
+// Spending
+// ---------------------------------------------------------------------------
+
+export type PassOption = {
+  passId: string;
+  name: string;
+  creditsAvailable: number;
+  creditsAllocated: number;
+  expiresAt: string | null;
+  nextExpiry: string | null;
+  /** Does this pass cover the service being settled? */
+  covered: boolean;
+  /** Why it cannot pay, ready to show greyed beside it. */
+  reason: string;
+};
+
+/**
+ * What a checkout should offer, and what it should grey out.
+ *
+ * Passes that exist but do not cover this service are returned too, with the
+ * reason attached. Hiding them turns "why isn't his pass showing up?" into a
+ * support question with no answer on screen; showing them greyed answers it
+ * before it is asked.
+ *
+ * A pass with no coverage at all covers nothing. That is deliberate: coverage
+ * is what a pass *is*, and treating an empty list as "anything" would let a
+ * swing-review credit quietly pay for a 60-minute lesson.
+ */
+export function passOptionsForService(
+  passes: PassView[],
+  serviceId: string,
+  serviceName = "",
+): PassOption[] {
+  const wanted = text(serviceId, 120);
+  return passes
+    .filter((pass) => pass.status === "active" || pass.status === "exhausted")
+    .map((pass) => {
+      const covered = Boolean(wanted) && pass.coversServiceIds.includes(wanted);
+      let reason = "";
+      if (!pass.coversServiceIds.length) reason = "No covered service set";
+      else if (!covered) reason = "Covers something else";
+      else if (pass.creditsAvailable < 1) reason = "No credits left";
+      return {
+        passId: pass.id,
+        name: pass.name,
+        creditsAvailable: pass.creditsAvailable,
+        creditsAllocated: pass.creditsAllocated,
+        expiresAt: pass.expiresAt,
+        nextExpiry: pass.nextExpiry,
+        covered: covered && pass.creditsAvailable >= 1,
+        reason: reason || (serviceName ? `Covers ${serviceName}` : ""),
+      };
+    });
+}
+
+export type ReservedCredit = { redemptionId: string; allocationId: string };
+
+/**
+ * Take a credit for a booking, or refuse.
+ *
+ * Three things have to be true at once and none of them can be decided by the
+ * browser: the pass is still spendable, it still has a credit, and this booking
+ * has not already taken one. So the balance the till was showing is never
+ * trusted -- it is recomputed here, inside a transaction, and the pass row is
+ * locked first.
+ *
+ * The lock is what makes two tills safe. Without it both could read "1 credit
+ * left" from the balances view, both insert, and the allocation goes negative
+ * with nothing to say which sale was the wrong one. Locking the pass serialises
+ * every redemption against it; the contention is one row, held for one insert.
+ *
+ * Choosing the allocation is the server's job too, and it always takes the one
+ * that expires first -- otherwise a fresh month's credits get spent while
+ * August's quietly expire unused.
+ */
+export async function reservePassCredit(input: {
+  accountId: string;
+  passId: string;
+  bookingId: string;
+  credits?: number;
+  actorId?: string;
+}): Promise<ReservedCredit> {
+  const accountId = text(input.accountId, 120);
+  const passId = text(input.passId, 120);
+  const bookingId = text(input.bookingId, 160);
+  const credits = Math.max(1, Math.min(MAX_CREDITS, Math.round(Number(input.credits) || 1)));
+  if (!accountId) fail("No account.", 403, "forbidden");
+  if (!passId) fail("Which pass?");
+  if (!bookingId) fail("A pass can only settle a booking.", 400, "booking_required");
+
+  const client = await db().pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const held = await client.query(
+      `SELECT id FROM public.passes WHERE id = $1 AND account_id = $2 FOR UPDATE`,
+      [passId, accountId],
+    );
+    if (!held.rows.length) {
+      await client.query("ROLLBACK");
+      fail("That pass was not found.", 404, "not_found");
+    }
+
+    // One statement, so the allocation that is chosen is the allocation that is
+    // written. The unique index on (booking_id) where reversed_at is null is
+    // what catches the same booking being settled twice.
+    const reserved = await client.query(
+      `INSERT INTO public.pass_redemptions (
+         id, account_id, pass_id, allocation_id, booking_id, credits, redeemed_at, redeemed_by, created_at
+       )
+       SELECT $1, $2, $3, a.allocation_id, $4, $5, NOW(), $6, NOW()
+       FROM public.pass_allocation_balances a
+       JOIN public.passes p ON p.id = a.pass_id AND p.account_id = a.account_id
+       WHERE a.pass_id = $3
+         AND a.account_id = $2
+         AND a.is_live
+         AND a.credits_available >= $5
+         AND p.status = 'active'
+         AND (p.expires_at IS NULL OR p.expires_at > NOW())
+         AND (p.starts_at IS NULL OR p.starts_at <= NOW())
+       ORDER BY a.expires_at NULLS LAST, a.available_from
+       LIMIT 1
+       RETURNING id, allocation_id`,
+      [`red-${randomUUID()}`, accountId, passId, bookingId, credits, text(input.actorId, 160)],
+    );
+
+    if (!reserved.rows.length) {
+      await client.query("ROLLBACK");
+      fail("That pass has no credits left to spend.", 409, "no_credits");
+    }
+
+    await client.query("COMMIT");
+    return {
+      redemptionId: String(reserved.rows[0].id),
+      allocationId: String(reserved.rows[0].allocation_id),
+    };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => null);
+    // 23505 is a unique violation: the partial index on booking_id fired, so
+    // this booking already holds a live credit. That is a double-tap or a
+    // second till, not an error worth a stack trace.
+    if ((error as { code?: string })?.code === "23505") {
+      fail("That booking has already been settled with a pass.", 409, "already_redeemed");
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/** Record which $0 sale a redemption settled, once that sale exists. */
+export async function attachRedemptionToSale(
+  accountId: string,
+  redemptionId: string,
+  posTransactionId: string,
+): Promise<void> {
+  await db().sql`
+    UPDATE public.pass_redemptions
+    SET pos_transaction_id = ${text(posTransactionId, 160)}
+    WHERE id = ${text(redemptionId, 120)} AND account_id = ${text(accountId, 120)}
+  `;
+}
+
+/**
+ * Give a credit back.
+ *
+ * Reversal, never deletion: the credit returns because the row stops counting,
+ * and the row itself stays as the record that it was once taken. That is what
+ * lets a balance explain a refund instead of just being smaller.
+ *
+ * Used both when a sale fails after the credit was reserved, and when a lesson
+ * that was settled on a pass is later cancelled.
+ */
+export async function reversePassRedemption(
+  accountId: string,
+  redemptionId: string,
+  reason: string,
+  actorId = "",
+): Promise<boolean> {
+  const rows = await db().sql`
+    UPDATE public.pass_redemptions
+    SET reversed_at = NOW(),
+        reversal_reason = ${text(reason, 300)},
+        reversed_by = ${text(actorId, 160)}
+    WHERE id = ${text(redemptionId, 120)}
+      AND account_id = ${text(accountId, 120)}
+      AND reversed_at IS NULL
+    RETURNING id
+  `;
+  return (rows as unknown[]).length > 0;
+}

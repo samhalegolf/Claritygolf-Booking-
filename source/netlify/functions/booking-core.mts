@@ -22,6 +22,7 @@ import { planExternalReschedule, sameSlot } from "./_shared/external-reschedule.
 import { legacyOriginalWorkspaceId, defaultCalendarSlug } from "./_shared/account.mts";
 import {
   grantPass,
+  passOptionsForService,
   passTemplatesFromServices,
   readPassesForPerson,
   voidPass,
@@ -12632,9 +12633,26 @@ async function routeBookingApiRequest(
       if (!personId) {
         return json({ error: "invalid", message: "A person id is required." }, 400);
       }
+      const passes = await readPassesForPerson(requestContext.accountId, personId);
+      // A checkout asks about one service, and whether a pass covers it is the
+      // server's answer to give -- the browser must not be deciding what a
+      // credit is allowed to buy.
+      const serviceId = cleanString(url.searchParams.get("serviceId"), "", 120);
+      const service = serviceId
+        ? (state.services || []).find((entry) => entry.id === serviceId)
+        : null;
       return json({
-        passes: await readPassesForPerson(requestContext.accountId, personId),
+        passes,
         templates: passTemplatesFromServices(state.services),
+        // Everything a pass could be told to cover, so a free-form grant can
+        // say what it is for. Packages are excluded: a pass that covers a pass
+        // is not a thing.
+        coverableServices: (state.services || [])
+          .filter((entry) => entry.lessonFormat !== "package" && entry.active !== false)
+          .map((entry) => ({ id: entry.id, name: entry.name })),
+        ...(serviceId
+          ? { options: passOptionsForService(passes, serviceId, service?.name || "") }
+          : {}),
       });
     }
 

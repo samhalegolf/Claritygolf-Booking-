@@ -73,7 +73,7 @@ import { Loading, loadingLabel } from "./modules/shared/Loading";
 import { cleanPeople as cleanPeopleWith, type PeopleImportDiagnostic, type Person } from "./modules/clients/clientsModel";
 import { isUnauthorizedClientsError, loadClients, replaceClients, resetClients, useClientsState } from "./modules/clients/clientsStore";
 import type { ClientsPanel as ClientsPanelComponent } from "./modules/clients/ClientsPanel";
-import type { Pass, PassGrant, PassTemplate } from "./modules/passes/PassesPanel";
+import type { CoverableService, Pass, PassGrant, PassTemplate } from "./modules/passes/PassesPanel";
 import {
   cleanLessonNotes as cleanLessonNotesWith,
   type LessonNote,
@@ -5543,6 +5543,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const [clientProfileTab, setClientProfileTab] = useState<ClientProfileTab>("bookings");
   const [clientPasses, setClientPasses] = useState<Pass[]>([]);
   const [passTemplates, setPassTemplates] = useState<PassTemplate[]>([]);
+  const [passCoverableServices, setPassCoverableServices] = useState<CoverableService[]>([]);
   const [clientPassesLoadState, setClientPassesLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [passGranting, setPassGranting] = useState(false);
   const [clientTransactions, setClientTransactions] = useState<ClientTransactionRow[]>([]);
@@ -17451,6 +17452,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       customerName: item.client || "",
       customerEmail: item.email || "",
       bookingId: item.id,
+      // What is being sold, so the checkout can ask which passes cover it.
+      serviceId: service?.id || item.serviceId || "",
+      serviceName: service?.name || "",
     });
   }
 
@@ -18942,9 +18946,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         return;
       }
       if (!response.ok) throw new Error(await readApiFailure(response, "Could not load passes."));
-      const data = (await response.json()) as { passes?: Pass[]; templates?: PassTemplate[] };
+      const data = (await response.json()) as {
+        passes?: Pass[];
+        templates?: PassTemplate[];
+        coverableServices?: CoverableService[];
+      };
       setClientPasses(Array.isArray(data.passes) ? data.passes : []);
       setPassTemplates(Array.isArray(data.templates) ? data.templates : []);
+      setPassCoverableServices(Array.isArray(data.coverableServices) ? data.coverableServices : []);
       setClientPassesLoadState("loaded");
     } catch (error) {
       setClientPassesLoadState("error");
@@ -31312,6 +31321,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         <PassesPanel
                           passes={clientPasses}
                           templates={passTemplates}
+                          coverableServices={passCoverableServices}
                           loadState={clientPassesLoadState}
                           granting={passGranting}
                           onGrant={(grant) => void grantClientPass(grant)}
