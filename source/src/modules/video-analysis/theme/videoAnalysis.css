@@ -780,6 +780,38 @@
   z-index: 3;
 }
 
+.video-capture-flash {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  background: rgba(255, 255, 255, 0);
+  animation: va-shutter-flash 480ms ease-out both;
+}
+
+.video-capture-flash span {
+  width: 54px;
+  height: 54px;
+  border: 2px solid rgba(255, 255, 255, 0.92);
+  border-radius: 50%;
+  box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.42);
+  animation: va-shutter-ring 480ms ease-out both;
+}
+
+@keyframes va-shutter-flash {
+  0% { background: rgba(255, 255, 255, 0); }
+  16% { background: rgba(255, 255, 255, 0.46); }
+  100% { background: rgba(255, 255, 255, 0); }
+}
+
+@keyframes va-shutter-ring {
+  0% { opacity: 0; transform: scale(0.72); }
+  20% { opacity: 1; transform: scale(0.9); }
+  100% { opacity: 0; transform: scale(1.35); box-shadow: 0 0 0 18px rgba(255, 255, 255, 0); }
+}
+
 .focus-window {
   position: fixed;
   right: 16px;
@@ -1670,6 +1702,47 @@
 .va-rail-btn:disabled {
   opacity: 0.35;
   cursor: default;
+}
+
+.va-capture-tool {
+  position: relative;
+  width: 40px;
+  height: 40px;
+}
+
+.va-capture-area {
+  position: absolute;
+  left: 100%;
+  top: 0;
+  border: 1px solid rgba(233, 240, 255, 0.2);
+  background: rgba(8, 12, 22, 0.92);
+  backdrop-filter: blur(8px);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 150ms ease, left 150ms ease, visibility 150ms;
+}
+
+.va-capture-tool:hover .va-capture-area,
+.va-capture-tool:focus-within .va-capture-area {
+  opacity: 1;
+  visibility: visible;
+  left: calc(100% + 7px);
+}
+
+.va-capture-tool:hover .va-capture-main,
+.va-capture-tool:focus-within .va-capture-main {
+  background: rgba(233, 240, 255, 0.12);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .video-capture-flash,
+  .video-capture-flash span {
+    animation-duration: 1ms;
+  }
+
+  .va-capture-area {
+    transition: none;
+  }
 }
 
 /* A separator is a line. It was never a reason for a second container. */

@@ -538,6 +538,8 @@ export function VideoWorkspace({
   const [focusSelectionDraft, setFocusSelectionDraft] = useState<FocusAreaRect | null>(null);
   const [focusAreaRect, setFocusAreaRect] = useState<FocusAreaRect | null>(null);
   const [focusArtifactExpandedId, setFocusArtifactExpandedId] = useState<string | null>(null);
+  const [captureAnimation, setCaptureAnimation] = useState<{ side: ComparisonSide; id: number } | null>(null);
+  const captureAnimationTimerRef = useRef<number | null>(null);
   const [leftMetadataReady, setLeftMetadataReady] = useState(false);
   const [rightMetadataReady, setRightMetadataReady] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
@@ -1982,6 +1984,26 @@ export function VideoWorkspace({
     []
   );
 
+  const playCaptureAnimation = useCallback((side: ComparisonSide) => {
+    if (captureAnimationTimerRef.current !== null) {
+      window.clearTimeout(captureAnimationTimerRef.current);
+    }
+    setCaptureAnimation({ side, id: Date.now() });
+    captureAnimationTimerRef.current = window.setTimeout(() => {
+      setCaptureAnimation(null);
+      captureAnimationTimerRef.current = null;
+    }, 520);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (captureAnimationTimerRef.current !== null) {
+        window.clearTimeout(captureAnimationTimerRef.current);
+      }
+    },
+    []
+  );
+
   const removeFocusSnapshot = useCallback(
     (side: ComparisonSide, snapshotId: string) => {
       setFocusArtifactExpandedId((current) => (current === snapshotId ? null : current));
@@ -2206,6 +2228,8 @@ export function VideoWorkspace({
       activeStore.updateAnalysis({
         focusSnapshots: [...(activeStore.analysis.focusSnapshots || []), snapshot],
       });
+      setFocusArtifactExpandedId(snapshot.id);
+      playCaptureAnimation(focusWindowSide);
 
       return { ok: true };
     },
@@ -2219,6 +2243,7 @@ export function VideoWorkspace({
       leftStore,
       playerVideoLeft,
       playerVideoRight,
+      playCaptureAnimation,
       rightPlayback,
       rightDrawing,
       rightOverlayDimensions,
@@ -2262,6 +2287,7 @@ export function VideoWorkspace({
     };
     store.updateAnalysis({ focusSnapshots: [...(store.analysis.focusSnapshots || []), snapshot] });
     setFocusArtifactExpandedId(snapshot.id);
+    playCaptureAnimation(side);
   }, [
     effectiveActiveSide,
     leftDrawing,
@@ -2270,6 +2296,7 @@ export function VideoWorkspace({
     leftStore,
     playerVideoLeft,
     playerVideoRight,
+    playCaptureAnimation,
     resolvedPlayerId,
     rightDrawing,
     rightOverlayDimensions,
@@ -3149,6 +3176,11 @@ export function VideoWorkspace({
             }}
           />
           {hasSelectionDraft ? <div className="focus-selection-overlay" style={draftStyle || undefined} /> : null}
+          {captureAnimation?.side === side ? (
+            <div className="video-capture-flash" key={captureAnimation.id} aria-hidden="true">
+              <span />
+            </div>
+          ) : null}
           <PlayerToolRailToggle
             open={toolRailOpen}
             onToggle={() => setToolRailOpen((previous) => !previous)}

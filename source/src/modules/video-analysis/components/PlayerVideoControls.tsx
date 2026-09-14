@@ -193,14 +193,28 @@ export function PlayerToolRail({
       ) : null}
       {onCaptureFrame || onCaptureArea ? <span className="va-rail-rule" aria-hidden="true" /> : null}
       {onCaptureFrame ? (
-        <button type="button" className="va-rail-btn" aria-label="Capture full frame" title="Capture full frame (Enter)" onClick={onCaptureFrame}>
-          <IconSnapshot />
-        </button>
-      ) : null}
-      {onCaptureArea ? (
-        <button type="button" className="va-rail-btn" aria-label="Capture selected area" title="Select an area to capture" onClick={onCaptureArea}>
-          <IconSnapshotArea />
-        </button>
+        <div className="va-capture-tool">
+          <button
+            type="button"
+            className="va-rail-btn va-capture-main"
+            aria-label="Capture full frame"
+            title="Capture full frame (Enter)"
+            onClick={onCaptureFrame}
+          >
+            <IconSnapshot />
+          </button>
+          {onCaptureArea ? (
+            <button
+              type="button"
+              className="va-rail-btn va-capture-area"
+              aria-label="Choose an area to capture"
+              title="Choose an area to capture"
+              onClick={onCaptureArea}
+            >
+              <IconSnapshotArea />
+            </button>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );
