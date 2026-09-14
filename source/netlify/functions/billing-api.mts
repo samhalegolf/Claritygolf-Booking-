@@ -6,9 +6,12 @@ import { requireCoachActor } from "./_shared/coach-auth.mts";
 import { settingsSelectQuery } from "./_shared/settings-scope.mts";
 import {
   attachRedemptionToSale,
+  grantPass,
+  passTemplatesFromServices,
   reversePassRedemption,
   reservePassCredit,
 } from "./_shared/passes.mts";
+import type { PassSource, PassTemplate } from "./_shared/passes.mts";
 
 // Billing is a new, isolated top-level app section. This function owns its
 // own tables (billing_products_services, billing_invoices,
@@ -349,6 +352,112 @@ async function lessonTypeItems(accountId: string, taxRate: number) {
     .map((service) => lessonTypeToCatalogItem(service, taxRate))
     .filter((item) => item.name)
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Which lesson types are pass templates.
+ *
+ * Reads servicesJson exactly as lessonTypeItems does. Deliberately NOT filtered
+ * on active/archived: a package that has since been retired from the catalogue
+ * still has to issue the pass somebody paid for.
+ */
+async function passTemplatesForAccount(accountId: string): Promise<PassTemplate[]> {
+  const rows = await supabase("settings", {
+    query: settingsSelectQuery(accountId, {
+      select: "value",
+      filters: [`key=eq.${encodeFilter("servicesJson")}`, "limit=1"],
+    }),
+  });
+  try {
+    return passTemplatesFromServices(rows[0]?.value ? JSON.parse(rows[0].value) : null);
+  } catch {
+    console.error("billing_api:services_json_unparseable_for_passes");
+    return [];
+  }
+}
+
+/**
+ * Issue the passes a paid purchase bought.
+ *
+ * Whether a line is a pass is decided by looking the service up in the
+ * catalogue, not by the label the line carries. The UI already loses that label
+ * on the way in -- the invoice editor collapses its own "package_sale" source
+ * to the generic "product" before it reaches the server (billingSourceType,
+ * src/App.tsx) -- so a rule that trusted it would issue nothing at all.
+ *
+ * Failures never undo the purchase. The money has been taken; a pass that did
+ * not write is a sale the coach can fix with a manual grant, which is a far
+ * better outcome than a refused payment.
+ */
+export async function issuePassesForPurchase(
+  accountId: string,
+  lines: Array<{ serviceId: string; quantity: number; ref: string }>,
+  buyer: { personId: string; name: string },
+  source: PassSource,
+  note: string,
+) {
+  if (!lines.length) return [] as string[];
+  const templates = await passTemplatesForAccount(accountId);
+  if (!templates.length) return [] as string[];
+
+  const issued: string[] = [];
+  for (const line of lines) {
+    const template = templates.find((entry) => entry.serviceId === line.serviceId);
+    if (!template) continue;
+    try {
+      const result = await grantPass(
+        {
+          personId: buyer.personId,
+          templateServiceId: template.serviceId,
+          // Two of the same package on one docket is twice the credits, not two
+          // cards: the allowance is multiplied and the merge below folds it into
+          // whatever they already hold.
+          credits: template.credits * Math.max(1, line.quantity),
+          note,
+          source,
+          // One reference per line, not per sale: a docket can legitimately
+          // carry two different packages, and they must not collide.
+          sourceRef: line.ref,
+          allowUnassigned: true,
+        },
+        templates,
+        { accountId, actorId: "system" },
+      );
+      if (!result.duplicate) issued.push(template.name);
+    } catch (error) {
+      console.error("billing_api:pass_issue_failed", accountId, line.ref, error);
+    }
+  }
+  return issued;
+}
+
+/** The package lines on a POS sale, keyed so a replay cannot re-issue them. */
+export function passLinesFromPosItems(
+  transactionId: string,
+  items: Array<{ productId: string; quantity: number }>,
+) {
+  return items
+    .filter((item) => item.productId.startsWith(LESSON_ITEM_PREFIX))
+    .map((item) => ({
+      serviceId: item.productId.slice(LESSON_ITEM_PREFIX.length),
+      quantity: item.quantity,
+      ref: `pos:${transactionId}:${item.productId}`,
+    }));
+}
+
+/** Issue for a POS sale that has just become paid. */
+async function issuePassesForPosSale(
+  accountId: string,
+  row: Record<string, unknown>,
+  items: Array<{ productId: string; quantity: number }>,
+) {
+  return issuePassesForPurchase(
+    accountId,
+    passLinesFromPosItems(String(row.id ?? ""), items),
+    { personId: cleanString(row.customer_id, "", 160), name: cleanString(row.customer_name, "", 140) },
+    "clarity_pos",
+    `Sold on ${cleanString(row.receipt_number, "", 60)}`,
+  );
 }
 
 async function listProducts(accountId: string) {
@@ -1453,6 +1562,10 @@ async function updateInvoiceStatus(accountId: string, id: string, body: Record<s
     prefer: "return=representation",
   });
   if (!rows.length) throw Object.assign(new Error("Invoice not found."), { status: 404 });
+  // A paid invoice containing a package line is a package someone bought.
+  if (nextStatus === "paid") {
+    await issuePassesForInvoice(accountId, id, rows[0] as Record<string, unknown>);
+  }
   if (nextStatus === "paid" && body?.amountPaid === undefined) {
     // Default "mark paid" to the invoice total unless a partial amount was given.
     const full = await supabase("billing_invoices", {
@@ -1464,6 +1577,42 @@ async function updateInvoiceStatus(accountId: string, id: string, body: Record<s
     return getInvoiceWithItems(accountId, id) ?? invoiceRowToApi(full[0]);
   }
   return getInvoiceWithItems(accountId, id);
+}
+
+/**
+ * Issue the passes a paid invoice bought.
+ *
+ * The line's own source label cannot be used: the editor collapses its
+ * "package_sale" source to the generic "product" before saving
+ * (billingSourceType, src/App.tsx), so by the time a line reaches the database
+ * a package looks exactly like a glove. What survives is source_id, which holds
+ * the bare lesson-type id -- and whether that id names a package is a question
+ * the service catalogue can answer.
+ */
+async function issuePassesForInvoice(accountId: string, invoiceId: string, invoice: Record<string, unknown>) {
+  const items = await supabase("billing_invoice_items", {
+    query: `select=id,source_type,source_id,quantity&invoice_id=eq.${encodeFilter(invoiceId)}&account_id=eq.${encodeFilter(accountId)}`,
+  });
+  const lines = (items as Array<Record<string, unknown>>)
+    .filter((item) => cleanString(item.source_id, "", 160))
+    .map((item) => ({
+      serviceId: cleanString(item.source_id, "", 160),
+      quantity: Math.max(1, Math.round(cleanNumber(item.quantity, 1, { min: 1, max: 999 }))),
+      // Keyed on the line, not the invoice: an invoice can carry two different
+      // packages, and marking it paid twice must not double either.
+      ref: `invoice:${invoiceId}:${cleanString(item.id, "", 160)}`,
+    }));
+
+  return issuePassesForPurchase(
+    accountId,
+    lines,
+    {
+      personId: cleanString(invoice.customer_id, "", 160),
+      name: cleanString(invoice.customer_name, "", 140),
+    },
+    "clarity_invoice",
+    `Invoiced on ${cleanString(invoice.invoice_number, "", 60)}`,
+  );
 }
 
 // --- Booking / invoice link lookups ------------------------------------------
@@ -3575,9 +3724,14 @@ async function createPosTransaction(accountId: string, body: Record<string, unkn
   // Cash and Eftpos are paid the moment they are recorded, so the stock leaves
   // the shelf now. Clarity Pay and On account wait for their status change.
   if (status === "paid") await syncPosStock(accountId, String(row.id), status);
+  // And so does the pass. Only once the money is in: a pending Clarity Pay
+  // session is not a purchase, and credits handed out before it clears are
+  // credits handed out for nothing.
+  const issuedPasses = status === "paid" ? await issuePassesForPosSale(accountId, row, items) : [];
 
   return {
     issuedCoupons,
+    issuedPasses,
     transaction: {
       ...posRowToApi(row),
       items: items.map((item) => ({
@@ -3614,8 +3768,23 @@ async function updatePosTransactionStatus(accountId: string, id: string, body: R
   await syncPosStock(accountId, id, status);
   await syncPosCoupon(accountId, rows[0] as Record<string, unknown>, status);
   const items = (await posItemsForTransactions(accountId, [id]))[id] || [];
+  // Marking an On account sale paid is the moment the package was bought. Safe
+  // to press twice: issuing is keyed on the sale and its line.
+  //
+  // Note what is NOT here: refunding or voiding does not take a pass back. A
+  // credit already spent is a lesson that happened, and quietly removing an
+  // entitlement someone may have made plans around is worse than a coach
+  // voiding it deliberately from the client's profile.
+  const issuedPasses =
+    status === "paid"
+      ? await issuePassesForPosSale(
+          accountId,
+          rows[0] as Record<string, unknown>,
+          items as Array<{ productId: string; quantity: number }>,
+        )
+      : [];
   const refreshed = (await getPosTransaction(accountId, id)) || { ...posRowToApi(rows[0]), items };
-  return { transaction: refreshed };
+  return { transaction: refreshed, issuedPasses };
 }
 
 // Clarity Pay at the counter: create a Stripe Checkout session for this sale.
@@ -3686,7 +3855,21 @@ async function syncPosCheckout(accountId: string, id: string) {
   await syncPosStock(accountId, id, "paid");
   if (updated.length) await syncPosCoupon(accountId, updated[0] as Record<string, unknown>, "paid");
   const items = (await posItemsForTransactions(accountId, [id]))[id] || [];
-  return { transaction: updated.length ? { ...posRowToApi(updated[0]), items } : transaction, paid: true };
+  // Stripe has confirmed, so the package is bought. This poll runs every few
+  // seconds while the QR is on screen and keeps running after the sale clears,
+  // which is exactly why issuing is idempotent rather than guarded by a flag.
+  const issuedPasses = updated.length
+    ? await issuePassesForPosSale(
+        accountId,
+        updated[0] as Record<string, unknown>,
+        items as Array<{ productId: string; quantity: number }>,
+      )
+    : [];
+  return {
+    transaction: updated.length ? { ...posRowToApi(updated[0]), items } : transaction,
+    paid: true,
+    issuedPasses,
+  };
 }
 
 // bookingId -> the sale that settled it. Drives the "paid at POS" badge on

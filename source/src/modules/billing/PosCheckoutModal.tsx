@@ -221,10 +221,13 @@ export function PosCheckoutModal({
     try {
       // If the sale was already created and only the Stripe step failed, reuse
       // it. Pressing Charge again must not mint a second receipt number.
-      const sale =
-        transaction ||
-        (
-          (await postPosJson("/api/billing/pos/transactions", {
+      //
+      // The response carries more than the sale: ringing a package up issues a
+      // pass, and the coach should hear that from the till rather than find out
+      // later on the client's profile.
+      const created = transaction
+        ? null
+        : ((await postPosJson("/api/billing/pos/transactions", {
             description: description.trim(),
             amount,
             listedAmount,
@@ -242,12 +245,19 @@ export function PosCheckoutModal({
             bookingId: context.bookingId || "",
             source: context.source,
             note: note.trim(),
-          })) as { transaction?: PosTransaction }
-        ).transaction;
+          })) as { transaction?: PosTransaction; issuedPasses?: string[] });
 
+      const sale = transaction || created?.transaction;
       if (!sale) throw new Error("Payment could not be recorded.");
       setTransaction(sale);
       onCompleted(sale);
+      if (created?.issuedPasses?.length) {
+        onToast(
+          created.issuedPasses.length === 1
+            ? `${created.issuedPasses[0]} added to their profile.`
+            : `${created.issuedPasses.join(", ")} added to their profile.`,
+        );
+      }
 
       if (payingMethod.kind !== "clarity_pay") {
         setStage("done");

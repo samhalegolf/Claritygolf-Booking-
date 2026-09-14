@@ -27,8 +27,31 @@ import { getDatabase } from "./database.mts";
 
 const db = getDatabase;
 
-/** Where a manual grant can come from. Wider sources arrive with steps 5-6. */
-export type PassSource = "manual";
+/**
+ * Where a pass came from, and what keeps it funded.
+ *
+ * The source never changes how a credit behaves -- that is the point of owning
+ * one entitlement shape. It decides only what can be traced back, and (with
+ * sourceRef) what makes issuing the same purchase twice impossible.
+ */
+export type PassSource =
+  | "manual"
+  | "clarity_pos"
+  | "clarity_invoice"
+  | "clarity_checkout"
+  | "optix"
+  | "stripe_subscription"
+  | "promotion";
+
+const PASS_SOURCES: PassSource[] = [
+  "manual",
+  "clarity_pos",
+  "clarity_invoice",
+  "clarity_checkout",
+  "optix",
+  "stripe_subscription",
+  "promotion",
+];
 
 export type PassAllocationView = {
   id: string;
@@ -83,6 +106,18 @@ export type PassGrantInput = {
   note?: unknown;
   /** Default true: fold into a compatible pass the person already holds. */
   merge?: unknown;
+  source?: unknown;
+  /**
+   * What paid for this, as an id the source can be traced back to -- a receipt
+   * number, an invoice line. Issuing is idempotent on it, so a retried webhook
+   * or a double-tapped Mark paid cannot mint the same credits twice.
+   */
+  sourceRef?: unknown;
+  /**
+   * Allow a pass with no owner. A purchase always has one; an external sale may
+   * not, and a pass sitting unassigned is better than one attached to a guess.
+   */
+  allowUnassigned?: unknown;
 };
 
 /** What a `lessonFormat: "package"` service says about the pass it sells. */
@@ -212,6 +247,8 @@ export type NormalisedGrant = {
   expiresAt: string | null;
   note: string;
   merge: boolean;
+  source: PassSource;
+  sourceRef: string;
 };
 
 /**
@@ -225,7 +262,7 @@ export type NormalisedGrant = {
  */
 export function normaliseGrant(input: PassGrantInput, templates: PassTemplate[]): NormalisedGrant {
   const personId = text(input?.personId, 160);
-  if (!personId) fail("A pass has to belong to somebody.");
+  if (!personId && input?.allowUnassigned !== true) fail("A pass has to belong to somebody.");
 
   const templateServiceId = text(input?.templateServiceId, 120);
   const template = templateServiceId
@@ -260,6 +297,8 @@ export function normaliseGrant(input: PassGrantInput, templates: PassTemplate[])
     expiresAt: expiryMonths ? monthsFromNow(expiryMonths) : null,
     note: text(input?.note, 600),
     merge: input?.merge !== false,
+    source: PASS_SOURCES.includes(input?.source as PassSource) ? (input.source as PassSource) : "manual",
+    sourceRef: text(input?.sourceRef, 200),
   };
 }
 
@@ -387,7 +426,7 @@ export async function grantPass(
   input: PassGrantInput,
   templates: PassTemplate[],
   actor: PassActor,
-): Promise<{ passes: PassView[]; merged: boolean }> {
+): Promise<{ passes: PassView[]; merged: boolean; duplicate: boolean }> {
   const grant = normaliseGrant(input, templates);
   const { accountId } = actor;
   if (!accountId) fail("No account.", 403, "forbidden");
@@ -411,12 +450,12 @@ export async function grantPass(
       await client.query(
         `INSERT INTO public.passes (
            id, account_id, person_id, name, template_service_id, covers_service_ids,
-           issued_at, expires_at, status, source, allocation_mode, credits_per_period,
-           rollover_policy, note, created_by, created_at, updated_at
+           issued_at, expires_at, status, source, source_ref, allocation_mode,
+           credits_per_period, rollover_policy, note, created_by, created_at, updated_at
          ) VALUES (
-           $1, $2, $3, $4, $5, $6,
-           NOW(), $7, 'active', 'manual', 'one_off', $8,
-           'rollover', $9, $10, NOW(), NOW()
+           $1, $2, NULLIF($3, ''), $4, $5, $6,
+           NOW(), $7, 'active', $8, NULLIF($9, ''), 'one_off',
+           $10, 'rollover', $11, $12, NOW(), NOW()
          )`,
         [
           passId,
@@ -426,6 +465,8 @@ export async function grantPass(
           grant.templateServiceId,
           grant.coversServiceIds,
           grant.expiresAt,
+          grant.source,
+          grant.sourceRef,
           grant.credits,
           grant.note,
           actor.actorId,
@@ -436,8 +477,8 @@ export async function grantPass(
     await client.query(
       `INSERT INTO public.pass_allocations (
          id, account_id, pass_id, credits, available_from, expires_at,
-         source, note, created_by, created_at
-       ) VALUES ($1, $2, $3, $4, NOW(), $5, 'manual', $6, $7, NOW())`,
+         source, source_ref, note, created_by, created_at
+       ) VALUES ($1, $2, $3, $4, NOW(), $5, $6, NULLIF($7, ''), $8, $9, NOW())`,
       [
         `alloc-${randomUUID()}`,
         accountId,
@@ -447,6 +488,8 @@ export async function grantPass(
         // so adding credits can never quietly extend or shorten what is already
         // there. A fresh pass and its first allocation share one date.
         compatible ? compatible.expiresAt : grant.expiresAt,
+        grant.source,
+        grant.sourceRef,
         grant.note,
         actor.actorId,
       ],
@@ -455,6 +498,18 @@ export async function grantPass(
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");
+    // 23505 on this path means the unique index on (account_id, pass_id, source,
+    // source_ref) fired: these exact credits have already been issued for this
+    // exact purchase. A Stripe webhook redelivered, a Mark paid double-tapped, a
+    // sync re-run. Not an error -- the desired state already exists, and the
+    // whole reason issuing carries a reference is so this is cheap to say.
+    if ((error as { code?: string })?.code === "23505") {
+      return {
+        passes: await readPassesForPerson(accountId, grant.personId),
+        merged: Boolean(compatible),
+        duplicate: true,
+      };
+    }
     throw error;
   } finally {
     client.release();
@@ -463,6 +518,7 @@ export async function grantPass(
   return {
     passes: await readPassesForPerson(accountId, grant.personId),
     merged: Boolean(compatible),
+    duplicate: false,
   };
 }
 

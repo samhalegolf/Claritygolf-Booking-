@@ -160,6 +160,7 @@ export function SellScreen({
   // Codes minted by this sale (a voucher product was rung up). Read out on the
   // done screen so they can be written on the card before it leaves.
   const [issuedCoupons, setIssuedCoupons] = useState<BillingCoupon[]>([]);
+  const [issuedPasses, setIssuedPasses] = useState<string[]>([]);
 
   const searchRef = useRef<HTMLInputElement | null>(null);
 
@@ -250,6 +251,7 @@ export function SellScreen({
   }
 
   function resetSale() {
+    setIssuedPasses([]);
     setLines([]);
     setCustomerId("");
     setCustomerName("");
@@ -418,11 +420,19 @@ export function SellScreen({
             customerName: customerName.trim(),
             customerEmail: customerEmail.trim(),
             source: "counter",
-          })) as { transaction?: PosTransaction; issuedCoupons?: BillingCoupon[] });
+          })) as {
+            transaction?: PosTransaction;
+            issuedCoupons?: BillingCoupon[];
+            issuedPasses?: string[];
+          });
 
       const created = sale || response?.transaction;
       if (!created) throw new Error("The sale could not be recorded.");
       if (response?.issuedCoupons?.length) setIssuedCoupons(response.issuedCoupons);
+      // Selling a package puts credits under the customer's name without anyone
+      // asking for it. Saying so is the difference between that feeling
+      // automatic and feeling like nothing happened.
+      if (response?.issuedPasses?.length) setIssuedPasses(response.issuedPasses);
       setSale(created);
       onSaleCompleted(created);
 
@@ -974,6 +984,13 @@ export function SellScreen({
                     ))}
                     <em>Write these on the card before it goes out the door.</em>
                   </div>
+                )}
+                {issuedPasses.length > 0 && (
+                  <p className="field-help">
+                    {issuedPasses.length === 1
+                      ? `${issuedPasses[0]} is now on their profile.`
+                      : `${issuedPasses.join(", ")} are now on their profile.`}
+                  </p>
                 )}
                 {sale.status === "pending" && (
                   <p className="field-help">
