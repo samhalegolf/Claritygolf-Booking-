@@ -6398,6 +6398,89 @@ function deferOptixBayRebook(accountId: string, calendarItemIds, netlifyContext 
   }
 }
 
+/**
+ * How many freshly created appointments one save may auto-book.
+ *
+ * A normal save creates one booking. Generating a term of group sessions, or
+ * importing, can create dozens at once, and each one is an Optix round trip of
+ * up to 25 seconds run one after another. Past this many the save is treated
+ * as bulk work: nothing is auto-booked and the coach books what they want from
+ * the cards, rather than the function running for twenty minutes in the
+ * background against a rate-limited API.
+ */
+const OPTIX_AUTO_BOOK_MAX_PER_SAVE = 25;
+
+/**
+ * Appointments this save brought into existence that should get a bay booked.
+ *
+ * Deliberately narrow. An appointment qualifies only when it is new to this
+ * account's calendar, still live, and Clarity's own:
+ *
+ * - Already present before the save → not a creation. Editing a note must not
+ *   book a bay, and a moved lesson is deferOptixBayRebook's job.
+ * - Cancelled or no-show → nobody is coming; holding a bay for one is the
+ *   opposite of what auto-book is for.
+ * - `origin` other than clarity → an imported Optix lesson IS the customer's
+ *   own Optix booking. It already holds its resource there, and booking a
+ *   second one against it would double-hold the bay.
+ * - A video review → a deadline, not an appointment. Booking a bay for one
+ *   would hold a hitting bay empty on a day nobody is coming in. Same reason
+ *   the public booking path passes `autoBookResource: !isReview`.
+ *
+ * The lesson type's own Auto-book tick is NOT checked here: that lives in the
+ * account's settings, and autoBookResourceForNewBooking reads it per booking.
+ */
+function newlyCreatedAutoBookableAppointments(
+  previousItemsById: Map<any, any>,
+  items: any[],
+  services: any[],
+) {
+  const serviceById = new Map((services || []).map((service) => [service.id, service]));
+  return (items || []).filter(
+    (item) =>
+      item?.kind === "appointment" &&
+      !previousItemsById.has(item.id) &&
+      !isInactiveForConflict(item) &&
+      (item.origin || "clarity") === "clarity" &&
+      !isVideoReviewService(serviceById.get(item.serviceId)),
+  );
+}
+
+/**
+ * Book Optix bays for lessons the coach just created on the calendar.
+ *
+ * The counterpart of the auto-book that already runs for client bookings
+ * (schedulePublicBookingSideEffects). A lesson type with Auto-book ticked
+ * should get its bay whichever door the booking came through — the client's
+ * public page or the coach typing it straight onto the calendar — and until
+ * now only the first door was wired up.
+ *
+ * Deferred like the Google sync and the bay rebook: autoBookResourceForNewBooking
+ * costs an Optix round trip of up to 25 seconds, and a calendar save must not
+ * wait on it. Never throws, and returns immediately for lesson types without
+ * the tick, so callers pass every new appointment without checking settings.
+ */
+function deferOptixAutoBook(accountId: string, appointments: any[], netlifyContext = null) {
+  const pending = (appointments || []).filter(Boolean);
+  if (!pending.length) return;
+  if (pending.length > OPTIX_AUTO_BOOK_MAX_PER_SAVE) {
+    console.warn("optix_auto_book_skipped_bulk_save", {
+      accountId,
+      created: pending.length,
+      limit: OPTIX_AUTO_BOOK_MAX_PER_SAVE,
+    });
+    return;
+  }
+  const task = (async () => {
+    for (const appointment of pending) {
+      await autoBookResourceForNewBooking(accountId, appointment.id, appointment.serviceId);
+    }
+  })().catch((error) => console.error("optix_auto_book_deferred_failed", error));
+  if (netlifyContext && typeof netlifyContext.waitUntil === "function") {
+    netlifyContext.waitUntil(task);
+  }
+}
+
 /** True when a saved appointment occupies a different slot than before. */
 function appointmentSlotChanged(previousItem, item) {
   if (!previousItem || !item || item.kind !== "appointment") return false;
@@ -6520,6 +6603,15 @@ async function writeCalendarState(accountId: string, nextState: Record<string, a
     items
       .filter((item) => appointmentSlotChanged(previousItemsById.get(item.id), item))
       .map((item) => item.id),
+    netlifyContext,
+  );
+  // Lessons the coach just created get the same Auto-book treatment a client
+  // booking gets. Runs after the rebook scheduling above and never overlaps
+  // with it: an appointment is either new to this save or it already existed,
+  // never both.
+  deferOptixAutoBook(
+    accountId,
+    newlyCreatedAutoBookableAppointments(previousItemsById, items, current.services),
     netlifyContext,
   );
   const updatedAt = nowIso();

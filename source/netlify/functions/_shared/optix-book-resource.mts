@@ -5,7 +5,10 @@ import {
   type ClarityOptixAppointment,
   type OptixSyncRecord,
 } from "./optix-reconcile.mts";
-import { reconcileOptixAppointmentWithAutoSelect } from "./optix-auto-select.mts";
+import {
+  moveOptixBookingInPlace,
+  reconcileOptixAppointmentWithAutoSelect,
+} from "./optix-auto-select.mts";
 import { cancelOptixBayForCalendarItem } from "./optix-cancel.mts";
 import { notifyBookingEvent } from "../notification-engine.mts";
 
@@ -338,19 +341,26 @@ export async function bookOneResource(accountId: string, calendarItemId: string)
 
 export type BayRebookOutcome = {
   moved: boolean;
+  /** How the bay got to the new slot, for logs and for the panel's wording. */
+  method?: "amended" | "unchanged" | "rebooked";
   skipped?: "no_synced_bay";
   error?: string;
 };
 
 /**
- * Move a lesson's bay booking after the lesson itself was rescheduled:
- * cancel the old Optix bay booking, then book a fresh one at the new slot.
+ * Move a lesson's bay booking after the lesson itself was rescheduled.
  *
- * Cancel-then-rebook rather than amending the live booking in place — cancel
- * and create are the two Optix operations Clarity already exercises in
- * production (the delete path and the Book resource button), and the rebook
- * re-runs bay auto-select, so a lesson moved to a time where its original bay
- * is busy lands in another free bay instead of failing.
+ * Two steps, cheapest first:
+ *
+ * 1. **Amend in place.** Send Optix the booking it already holds, with the new
+ *    times and the same bay. One round trip, the bay is never let go, the
+ *    customer keeps the same Optix booking reference, and a refusal changes
+ *    nothing — there is no window in which the lesson has no bay.
+ * 2. **Cancel and rebook.** Only when Optix refuses the amend, which in
+ *    practice means that bay is taken at the new time. Releasing the bay first
+ *    lets the rebook re-run auto-select, so the lesson lands in another free
+ *    bay instead of failing outright. This is the slower path and the only one
+ *    that can change which bay the lesson holds.
  *
  * Never throws — this runs as a deferred side effect after the reschedule
  * response has gone out. If the cancel is refused, the rebook is NOT
@@ -378,6 +388,56 @@ export async function rebookResourceAfterReschedule(
         errorCode: existing?.errorCode || "",
       });
       return { moved: false, skipped: "no_synced_bay" };
+    }
+    // Ask Optix to move the booking it already holds before releasing it.
+    // An amend is one round trip, keeps the same bay and the same Optix
+    // booking reference, and cannot strand the lesson with no bay at all --
+    // if Optix refuses, nothing has changed yet. It refuses mainly when that
+    // bay is taken at the new time, which is precisely the case where the
+    // cancel-and-rebook below earns its two round trips by finding another.
+    //
+    // Wrapped whole: a failure reading the appointment, the environment or the
+    // lesson-type config must degrade to the old behaviour, not replace a
+    // working rebook with an exception.
+    try {
+      const appointment = await readAppointment(accountId, cleanId);
+      if (appointment) {
+        const moved = await moveOptixBookingInPlace({
+          appointment,
+          existing,
+          config: readOptixReconcileConfig(env),
+          bookingType: await readBookingTypeConfig(
+            accountId,
+            String(appointment.serviceId || (appointment as any).service_id || ""),
+          ),
+        });
+        if (moved.moved === true) {
+          // `unchanged` means the lesson's slot produced the same Optix
+          // request it already holds -- a save that touched something other
+          // than the time. Nothing to write, nothing to tell Optix.
+          if (!moved.unchanged) await saveSyncRecord(moved.record);
+          console.info("optix_bay_moved_in_place", {
+            calendarItemId: cleanId,
+            optixBookingId: moved.record.optixBookingId,
+            resourceId: moved.record.resourceId,
+            unchanged: moved.unchanged,
+          });
+          return { moved: true, method: moved.unchanged ? "unchanged" : "amended" };
+        }
+        console.warn("optix_bay_move_in_place_refused", {
+          calendarItemId: cleanId,
+          resourceId: existing.resourceId,
+          errorCode: moved.code,
+          error: moved.message.slice(0, 300),
+          next: "cancel_and_rebook",
+        });
+      }
+    } catch (error) {
+      console.error("optix_bay_move_in_place_errored", {
+        calendarItemId: cleanId,
+        error: error instanceof Error ? error.message.slice(0, 300) : String(error || "").slice(0, 300),
+        next: "cancel_and_rebook",
+      });
     }
     let cancelled = false;
     try {
@@ -416,7 +476,7 @@ export async function rebookResourceAfterReschedule(
         newOptixBookingId: (outcome as { result?: OptixSyncRecord }).result?.optixBookingId || "",
         newResourceId: (outcome as { result?: OptixSyncRecord }).result?.resourceId || "",
       });
-      return { moved: true };
+      return { moved: true, method: "rebooked" };
     }
     console.error("optix_bay_rebook_after_reschedule_failed", {
       calendarItemId: cleanId,

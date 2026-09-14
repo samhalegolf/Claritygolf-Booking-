@@ -761,11 +761,15 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
             <section className="integration-resource-profile">
               <div className="integration-resource-heading">
                 <div>
-                  <h3>Auto-book after client bookings</h3>
+                  <h3>Auto-book {resourceWord}s</h3>
                   <p>
-                    Ticked lesson types get a {resourceWord} booked automatically once a client booking lands on the
-                    calendar. Needs a profile above; if none is free the booking still goes ahead and the card shows
-                    no {resourceWord}.
+                    Ticked lesson types get a {resourceWord} booked automatically once the booking lands on the
+                    calendar — whether a client booked it themselves or you added it to the calendar. Needs a profile
+                    above; if none is free the booking still goes ahead and the card shows no {resourceWord}.
+                  </p>
+                  <p>
+                    Rescheduling moves the {resourceWord} too: the booking is moved in Optix where it can be, and
+                    only released and rebooked in another {resourceWord} when that one is taken at the new time.
                   </p>
                 </div>
               </div>
