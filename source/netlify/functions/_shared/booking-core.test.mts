@@ -11,6 +11,7 @@ import {
   publicBookableServices,
   publicBookingSlots,
   normalizeServices,
+  portalInviteEmailContent,
   readPublicSlotContext,
   readPublicSlotItemsForWeek,
 } from "../booking-core.mts";
@@ -1034,4 +1035,110 @@ test("turnaround never leaks onto a lesson type that has no turnaround", () => {
     undefined,
     "a private lesson must not carry a review deadline nothing reads",
   );
+});
+
+// --- Portal password reset -------------------------------------------------
+//
+// "Forgot password" for a player reuses the invite token, so the only thing
+// keeping the two apart is this template. A reset that reads like an invite
+// tells a player of a year that their coach has just signed them up, and --
+// worse -- can promise a Clarity Caddy pass nobody issued.
+
+const portalEmailBase = {
+  businessName: "Sam Hale Golf",
+  coachName: "Sam Hale",
+  name: "Jordan Fisher",
+  linkUrl: "https://book.example.com/?portalInvite=tok&portalReset=1",
+  caddyUrl: "https://caddy.example.com",
+};
+
+test("a portal reset email never reads like a new invitation", () => {
+  const reset = portalInviteEmailContent({ ...portalEmailBase, variant: "reset" });
+
+  assert.match(reset.subject, /reset/i);
+  assert.doesNotMatch(
+    reset.subject,
+    /welcome/i,
+    "the subject line is the half a player reads in the notification",
+  );
+  for (const body of [reset.html, reset.text]) {
+    assert.doesNotMatch(
+      body,
+      /has set up a player portal account/,
+      "a reset is not the coach creating an account",
+    );
+    assert.match(body, /Someone asked to reset the password/);
+    assert.match(
+      body,
+      /did not ask for this/,
+      "an unrequested reset has to tell the reader it is safe to ignore",
+    );
+  }
+  // The same URL, spelled for each medium: escaped in the markup so the query
+  // string's & does not truncate the href, raw in the plain-text part where an
+  // entity would be pasted into the address bar literally.
+  assert.ok(
+    reset.html.includes(portalEmailBase.linkUrl.replace(/&/g, "&amp;")),
+    "the html link must be entity-escaped",
+  );
+  assert.ok(reset.text.includes(portalEmailBase.linkUrl), "the text link must be raw");
+});
+
+test("an invite email is unchanged by the reset variant existing", () => {
+  const invite = portalInviteEmailContent({ ...portalEmailBase, variant: "invite" });
+
+  assert.match(invite.subject, /player portal/i);
+  assert.match(invite.html, /Welcome to the Clarity Player Portal/);
+  assert.match(invite.html, /Sam Hale<\/p>|Sam Hale has set up/);
+  assert.doesNotMatch(
+    invite.text,
+    /did not ask for this/,
+    "nobody asked for an invite either, but ignoring it is already the remedy",
+  );
+});
+
+test("the two variants carry their own expiry, not each other's", () => {
+  const invite = portalInviteEmailContent({ ...portalEmailBase, variant: "invite" });
+  const reset = portalInviteEmailContent({ ...portalEmailBase, variant: "reset" });
+
+  assert.match(invite.text, /expires in 14 days/);
+  assert.match(reset.text, /expires in 60 minutes/);
+  assert.doesNotMatch(reset.text, /days/, "an hour-long link must not advertise a fortnight");
+});
+
+test("a reset never offers a Caddy pass, even when asked to", () => {
+  // withCaddyPass is only ever true on a fresh grant that actually issued one.
+  // Passing it here is the mistake the template has to absorb rather than
+  // forward to the player as a pass they do not have.
+  const reset = portalInviteEmailContent({
+    ...portalEmailBase,
+    variant: "reset",
+    withCaddyPass: true,
+  });
+
+  assert.doesNotMatch(reset.subject, /Caddy/);
+  assert.doesNotMatch(reset.html, /Caddy/);
+  assert.doesNotMatch(reset.text, /Caddy/);
+
+  const invite = portalInviteEmailContent({
+    ...portalEmailBase,
+    variant: "invite",
+    withCaddyPass: true,
+  });
+  assert.match(invite.subject, /Clarity Caddy pass/);
+  assert.ok(invite.html.includes(portalEmailBase.caddyUrl));
+});
+
+test("a coach or business name cannot carry markup into the email", () => {
+  const nasty = portalInviteEmailContent({
+    ...portalEmailBase,
+    businessName: "<script>alert(1)</script>",
+    coachName: "<img src=x onerror=alert(1)>",
+    name: "<b>Jordan</b>",
+    variant: "invite",
+  });
+
+  assert.doesNotMatch(nasty.html, /<script>/);
+  assert.doesNotMatch(nasty.html, /<img /);
+  assert.doesNotMatch(nasty.html, /<b>Jordan/);
 });

@@ -68,6 +68,11 @@ export default function LoginScreen({ onSignedIn, onCancel }: LoginScreenProps) 
 
   const [resetToken] = useState(() => searchParam("reset"));
   const [inviteToken] = useState(() => searchParam("portalInvite"));
+  // A player reset arrives on the invite token and the invite route -- the
+  // server issues one kind of portal token. This flag only changes what the
+  // screen calls it, so someone who has been a player for a year is not told
+  // their coach has just set them up.
+  const [isPortalReset] = useState(() => searchParam("portalReset") === "1");
   const [mode, setMode] = useState<AuthMode>(() =>
     searchParam("portalInvite") ? "invite" : searchParam("reset") ? "reset" : "login",
   );
@@ -88,6 +93,13 @@ export default function LoginScreen({ onSignedIn, onCancel }: LoginScreenProps) 
   const [inviteState, setInviteState] = useState<"checking" | "valid" | "invalid">("checking");
   const [inviteEmail, setInviteEmail] = useState("");
 
+  // A reset link runs out in an hour, so "expired" is the common case here
+  // rather than the rare one, and telling the player to ask their coach would
+  // be pointless advice for something they can redo themselves.
+  const expiredMessage = isPortalReset
+    ? "That reset link has expired. Go back to sign in and request a new one."
+    : "That invite link has expired. Ask your coach to send a new one.";
+
   // An invite link is only worth showing a form for if the token is still good.
   const checkInvite = useCallback(async () => {
     if (!inviteToken) return;
@@ -105,13 +117,15 @@ export default function LoginScreen({ onSignedIn, onCancel }: LoginScreenProps) 
         setInviteEmail(data.email || "");
       } else {
         setInviteState("invalid");
-        setError(data?.message || "That invite link has expired. Ask your coach to send a new one.");
+        // The server's message names an invite, because that is the only thing
+        // the token table knows about. On a reset this screen knows better.
+        setError(isPortalReset ? expiredMessage : data?.message || expiredMessage);
       }
     } catch {
       setInviteState("invalid");
       setError("Could not reach the booking server.");
     }
-  }, [inviteToken]);
+  }, [inviteToken, isPortalReset, expiredMessage]);
 
   useEffect(() => {
     void checkInvite();
@@ -220,9 +234,16 @@ export default function LoginScreen({ onSignedIn, onCancel }: LoginScreenProps) 
         ok?: boolean;
         email?: string;
         message?: string;
+        error?: string;
       };
       if (!response.ok || !data.ok) {
-        setError(data.message || "Could not set that password.");
+        // Same substitution as checkInvite: the server only knows the token as
+        // an invite, so a reset relabels the one message that says so.
+        setError(
+          data.error === "invalid_token"
+            ? expiredMessage
+            : data.message || "Could not set that password.",
+        );
         return;
       }
       const session = await login(data.email || inviteEmail, newPassword);
@@ -241,7 +262,9 @@ export default function LoginScreen({ onSignedIn, onCancel }: LoginScreenProps) 
       : mode === "reset"
         ? "New Password"
         : mode === "invite"
-          ? "Player Portal"
+          ? isPortalReset
+            ? "Password Reset"
+            : "Player Portal"
           : "Sign In";
 
   const heading =
@@ -250,7 +273,9 @@ export default function LoginScreen({ onSignedIn, onCancel }: LoginScreenProps) 
       : mode === "reset"
         ? "Reset password"
         : mode === "invite"
-          ? "Set your password"
+          ? isPortalReset
+            ? "Choose a new password"
+            : "Set your password"
           : "Welcome back";
 
   const lead =
@@ -260,8 +285,8 @@ export default function LoginScreen({ onSignedIn, onCancel }: LoginScreenProps) 
         ? "Choose a new password for Clarity Golf Booking."
         : mode === "invite"
           ? inviteEmail
-            ? `Choose a password for ${inviteEmail}.`
-            : "Choose a password for your player portal."
+            ? `Choose a ${isPortalReset ? "new " : ""}password for ${inviteEmail}.`
+            : `Choose a ${isPortalReset ? "new " : ""}password for your player portal.`
           : "Sign in to your Clarity Golf account.";
 
   const onSubmit =
@@ -286,7 +311,9 @@ export default function LoginScreen({ onSignedIn, onCancel }: LoginScreenProps) 
       : mode === "reset"
         ? "Save New Password"
         : mode === "invite"
-          ? "Set Password And Sign In"
+          ? isPortalReset
+            ? "Save Password And Sign In"
+            : "Set Password And Sign In"
           : "Sign In";
 
   return (
