@@ -1885,6 +1885,108 @@ button {
   margin-top: 5px;
 }
 
+/* Passes tab on a client profile.
+ *
+ * Deliberately thin: the pass rows reuse .profile-history-row, so only the
+ * grant form and the ledger under each pass need rules of their own. Both are
+ * scoped under .profile-history-panel / .pass-panel, because the row's own
+ * `.profile-history-row span` (0-1-1) outranks a bare single-class colour rule
+ * and would otherwise win. */
+.pass-panel {
+  display: grid;
+  gap: var(--c-space-2);
+  padding: var(--c-space-3);
+  /* Without this the rows stretch: a grid's default align-content shares any
+     leftover height out across auto-sized rows, so each pass grew by a slice of
+     whatever space the profile panel had spare and the gaps between passes
+     changed depending on how many there were. */
+  align-content: start;
+}
+
+.pass-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--c-space-2);
+}
+
+.pass-grant-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--c-space-2);
+  padding: var(--c-space-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-card);
+  background: var(--c-surface-soft);
+}
+
+.pass-grant-form .pass-panel-actions {
+  grid-column: 1 / -1;
+}
+
+.pass-field {
+  display: grid;
+  gap: var(--c-space-1);
+  min-width: 0;
+}
+
+.pass-field-wide {
+  grid-column: 1 / -1;
+}
+
+.pass-field > span {
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+}
+
+/* Form controls do not inherit the page font anywhere in this stylesheet --
+ * each panel opts in, and a panel that forgets switches to the browser's
+ * default mid-sentence. */
+.pass-field input,
+.pass-field select {
+  font: inherit;
+  min-width: 0;
+  height: var(--c-h-control);
+  padding: 0 var(--c-space-2);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  color: var(--c-text);
+}
+
+.pass-panel .pass-row strong {
+  display: flex;
+  align-items: center;
+  gap: var(--c-space-1);
+}
+
+.pass-panel .pass-row em {
+  display: grid;
+  gap: var(--c-space-1);
+  justify-items: end;
+  text-align: right;
+}
+
+/* The ledger: every allocation and redemption behind the number to its right.
+ * Small and quiet -- it is the answer to "why does she have three", not the
+ * first thing to read. */
+.pass-panel .pass-ledger {
+  margin: var(--c-space-2) 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 2px;
+}
+
+.pass-panel .pass-ledger-line {
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+}
+
+.pass-panel .pass-ledger-reversed {
+  text-decoration: line-through;
+  color: var(--c-text-disabled);
+}
+
 .lesson-notes-panel {
   display: grid;
   gap: 14px;

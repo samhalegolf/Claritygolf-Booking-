@@ -21,6 +21,12 @@ import { calendarSlot, MINUTES_IN_DAY } from "./_shared/calendar-slot.mts";
 import { planExternalReschedule, sameSlot } from "./_shared/external-reschedule.mts";
 import { legacyOriginalWorkspaceId, defaultCalendarSlug } from "./_shared/account.mts";
 import {
+  grantPass,
+  passTemplatesFromServices,
+  readPassesForPerson,
+  voidPass,
+} from "./_shared/passes.mts";
+import {
   requireCoachActor,
   resolveMembershipForAuthUser,
   sessionRoleForMembership,
@@ -12608,6 +12614,55 @@ async function routeBookingApiRequest(
       assertAccountFeature(requestContext.account, "clients");
       const blockId = cleanString(url.searchParams.get("id"), "", 120);
       return json(await archivePracticeBlock(blockId, requestContext));
+    }
+
+    // Passes -- the coach's side. The engine itself is in _shared/passes.mts;
+    // what lives here is only the route, the account resolution and the feature
+    // gate, so that the credit arithmetic stays somewhere typed.
+    //
+    // The GET answers with the templates as well as the passes. A pass template
+    // is a `package` service inside the settings blob, so working out which
+    // services qualify is a server-side decision, and returning it here saves
+    // the profile a second round trip on a cold instance.
+    if (req.method === "GET" && pathname === "/api/passes") {
+      const state = await readSettingsState(await currentAccountId(req));
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountFeature(requestContext.account, "clients");
+      const personId = cleanString(url.searchParams.get("personId"), "", 160);
+      if (!personId) {
+        return json({ error: "invalid", message: "A person id is required." }, 400);
+      }
+      return json({
+        passes: await readPassesForPerson(requestContext.accountId, personId),
+        templates: passTemplatesFromServices(state.services),
+      });
+    }
+
+    if (req.method === "POST" && pathname === "/api/passes") {
+      const body = await parseBody(req);
+      const state = await readSettingsState(await currentAccountId(req));
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountFeature(requestContext.account, "clients");
+      const result = await grantPass(body.grant || body, passTemplatesFromServices(state.services), {
+        accountId: requestContext.accountId,
+        actorId: requestContext.userId || requestContext.user?.email || "",
+      });
+      return json(result, 201);
+    }
+
+    if (req.method === "DELETE" && pathname === "/api/passes") {
+      const state = await readSettingsState(await currentAccountId(req));
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountFeature(requestContext.account, "clients");
+      const result = await voidPass(
+        cleanString(url.searchParams.get("id"), "", 120),
+        cleanString(url.searchParams.get("reason"), "", 300),
+        {
+          accountId: requestContext.accountId,
+          actorId: requestContext.userId || requestContext.user?.email || "",
+        },
+      );
+      return json(result);
     }
 
     // Presets and "used often" suggestions -- what the composer offers before

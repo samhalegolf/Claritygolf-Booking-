@@ -73,6 +73,7 @@ import { Loading, loadingLabel } from "./modules/shared/Loading";
 import { cleanPeople as cleanPeopleWith, type PeopleImportDiagnostic, type Person } from "./modules/clients/clientsModel";
 import { isUnauthorizedClientsError, loadClients, replaceClients, resetClients, useClientsState } from "./modules/clients/clientsStore";
 import type { ClientsPanel as ClientsPanelComponent } from "./modules/clients/ClientsPanel";
+import type { Pass, PassGrant, PassTemplate } from "./modules/passes/PassesPanel";
 import {
   cleanLessonNotes as cleanLessonNotesWith,
   type LessonNote,
@@ -295,6 +296,12 @@ const ClientsPanel = lazy(() =>
 // including the ones whose plan has no billing at all; now each arrives when
 // it is first drawn. The maths and types they share with the workspace stay
 // static -- they are small, and the calendar needs them for the Paid marker.
+// The Passes tab on a client profile. Loaded on demand like the rest: most
+// visits to a profile are about a booking or a note, not an entitlement.
+const PassesPanel = lazy(() =>
+  import("./modules/passes/PassesPanel").then((module) => ({ default: module.PassesPanel })),
+);
+
 const SellScreen = lazy(() => import("./modules/billing/SellScreen").then((module) => ({ default: module.SellScreen })));
 const ProductsPanel = lazy(() => import("./modules/billing/ProductsPanel").then((module) => ({ default: module.ProductsPanel })));
 const CouponsPanel = lazy(() => import("./modules/billing/CouponsPanel").then((module) => ({ default: module.CouponsPanel })));
@@ -1534,7 +1541,7 @@ type RescheduleLookupCredentials = RescheduleForm & {
 
 type SavedBookingLogin = BookingForm;
 
-type ClientProfileTab = "bookings" | "notes" | "notifications" | "transactions";
+type ClientProfileTab = "bookings" | "notes" | "notifications" | "transactions" | "passes";
 
 // One row of a client's money history: a counter/Optix sale, or an invoice
 // they were billed on (or included in, for a bulk invoice).
@@ -5534,6 +5541,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const [clientEditor, setClientEditor] = useState<ClientEditor>(emptyClientEditor);
   const [clientSaveState, setClientSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [clientProfileTab, setClientProfileTab] = useState<ClientProfileTab>("bookings");
+  const [clientPasses, setClientPasses] = useState<Pass[]>([]);
+  const [passTemplates, setPassTemplates] = useState<PassTemplate[]>([]);
+  const [clientPassesLoadState, setClientPassesLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+  const [passGranting, setPassGranting] = useState(false);
   const [clientTransactions, setClientTransactions] = useState<ClientTransactionRow[]>([]);
   const [clientTransactionsLoadState, setClientTransactionsLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [notesContext, setNotesContext] = useState<{ playerId: string; playerName: string } | null>(null);
@@ -18913,6 +18924,82 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientProfileTab, selectedClientId]);
 
+  /* The Passes tab.
+   *
+   * Every one of these reads the server's answer back rather than adjusting a
+   * local number, and the grant/void writes return the refreshed list for the
+   * same reason: a balance is derived from the ledger, so the only honest place
+   * to learn one is the server that just wrote to it. */
+  async function fetchClientPasses(personId: string) {
+    setClientPassesLoadState("loading");
+    try {
+      const response = await fetch(`/api/passes?personId=${encodeURIComponent(personId)}`, {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        return;
+      }
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not load passes."));
+      const data = (await response.json()) as { passes?: Pass[]; templates?: PassTemplate[] };
+      setClientPasses(Array.isArray(data.passes) ? data.passes : []);
+      setPassTemplates(Array.isArray(data.templates) ? data.templates : []);
+      setClientPassesLoadState("loaded");
+    } catch (error) {
+      setClientPassesLoadState("error");
+      setToast({ message: error instanceof Error ? error.message : "Could not load passes." });
+    }
+  }
+
+  async function grantClientPass(grant: PassGrant) {
+    if (!selectedClientId) return;
+    setPassGranting(true);
+    try {
+      const response = await fetch("/api/passes", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...grant, personId: selectedClientId }),
+      });
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not give that pass."));
+      const data = (await response.json()) as { passes?: Pass[]; merged?: boolean };
+      setClientPasses(Array.isArray(data.passes) ? data.passes : []);
+      setClientPassesLoadState("loaded");
+      setToast({
+        message: data.merged
+          ? `Added ${grant.credits} to their existing pass.`
+          : `${grant.name || "Pass"} given.`,
+      });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not give that pass." });
+    } finally {
+      setPassGranting(false);
+    }
+  }
+
+  async function voidClientPass(pass: Pass) {
+    if (!window.confirm(`Void ${pass.name}? Credits already used stay on the record.`)) return;
+    try {
+      const response = await fetch(`/api/passes?id=${encodeURIComponent(pass.id)}`, {
+        method: "DELETE",
+        credentials: "same-origin",
+      });
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not void that pass."));
+      const data = (await response.json()) as { passes?: Pass[] };
+      setClientPasses(Array.isArray(data.passes) ? data.passes : []);
+      setToast({ message: `${pass.name} voided.` });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not void that pass." });
+    }
+  }
+
+  useEffect(() => {
+    if (clientProfileTab !== "passes" || !selectedClientId || selectedClientId.startsWith("appointment-")) return;
+    void fetchClientPasses(selectedClientId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientProfileTab, selectedClientId]);
+
   useEffect(() => {
     const playerId = notesContext?.playerId || "";
     if (playerProfileTool !== "transactions" || !playerId || playerId.startsWith("appointment-")) return;
@@ -31137,6 +31224,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     <CreditCard size={16} />
                     Transactions
                   </button>
+                  <button
+                    className={clientProfileTab === "passes" ? "active" : ""}
+                    onClick={() => setClientProfileTab("passes")}
+                    role="tab"
+                    type="button"
+                    aria-selected={clientProfileTab === "passes"}
+                  >
+                    <Ticket size={16} />
+                    Passes
+                  </button>
                 </div>
 
                 <div className="profile-history-panel">
@@ -31207,6 +31304,25 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         </div>
                       )}
                     </div>
+                  ) : clientProfileTab === "passes" ? (
+                    selectedClient && selectedClient.id.startsWith("appointment-") ? (
+                      <p>Save this booking contact as a client before giving them a pass.</p>
+                    ) : (
+                      <Suspense fallback={<Loading what="passes" />}>
+                        <PassesPanel
+                          passes={clientPasses}
+                          templates={passTemplates}
+                          loadState={clientPassesLoadState}
+                          granting={passGranting}
+                          onGrant={(grant) => void grantClientPass(grant)}
+                          onVoid={(pass) => void voidClientPass(pass)}
+                          onRetry={() => selectedClientId && void fetchClientPasses(selectedClientId)}
+                          serviceName={(serviceId) =>
+                            services.find((service) => service.id === serviceId)?.name || serviceId
+                          }
+                        />
+                      </Suspense>
+                    )
                   ) : clientProfileTab === "notifications" ? (
                     selectedClientNotifications.length ? (
                       selectedClientNotifications.map((notification) => (

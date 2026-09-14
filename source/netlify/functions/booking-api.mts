@@ -52,6 +52,7 @@ export const config: Config = {
     "/api/optix-webhook",
     "/api/people",
     "/api/people/import",
+    "/api/passes",
     "/api/people/import-lite",
     "/api/people/migrate",
     "/api/practice-blocks",
