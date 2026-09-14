@@ -21,8 +21,10 @@ import {
   passTemplatesFromServices,
   readPassesForPerson,
   reservePassCredit,
+  reverseRedemptionsForBooking,
   reversePassRedemption,
   spendOrder,
+  sweepReturnableCredits,
 } from "./passes.mts";
 
 type Issued = { text: string; values: unknown[] };
@@ -197,8 +199,12 @@ test("reading a person's passes filters by account in the SQL, not afterwards", 
 
   await readPassesForPerson(ACCOUNT, "person-1");
 
-  assert.equal(issued.length, 1, "one round trip, not one per ledger table");
-  const [query] = issued;
+  // The sweep, then the read. The read itself stays a single statement: the
+  // allocations and redemptions come back aggregated beside their pass rather
+  // than as a follow-up query per ledger table.
+  const reads = issued.filter((entry) => entry.text.startsWith("SELECT"));
+  assert.equal(reads.length, 1, "one round trip, not one per ledger table");
+  const [query] = reads;
   assert.match(query.text, /FROM public\.pass_balances/);
   assert.match(query.text, /b\.account_id = \$\d/, "the account filter is in the statement");
   assert.ok(query.values.includes(ACCOUNT));
@@ -483,4 +489,84 @@ test("a reversal never deletes the line it reverses", async (t) => {
   assert.match(update.text, /reversed_at = NOW\(\)/);
   assert.match(update.text, /reversed_at IS NULL/, "reversing twice must not overwrite the first reason");
   assert.ok(!issued.some((entry) => /DELETE/i.test(entry.text)));
+});
+
+// --- Giving credits back ----------------------------------------------------
+
+test("the sweep returns credits whose booking is gone, cancelled, or no longer a lesson", async (t) => {
+  const issued = fakeDatabase(() => [{ id: "red-1" }]);
+  t.after(() => setDatabaseForTests(null));
+
+  assert.equal(await sweepReturnableCredits(ACCOUNT), 1);
+  const [sweep] = issued;
+  assert.match(sweep.text, /UPDATE public\.pass_redemptions/);
+  assert.match(sweep.text, /c\.id IS NULL/, "deleted booking");
+  assert.match(sweep.text, /c\.status = 'cancelled'/, "cancelled lesson");
+  assert.match(sweep.text, /c\.kind <> 'appointment'/, "a cancelled group session becomes a block");
+  assert.match(sweep.text, /r\.reversed_at IS NULL/, "an already-reversed line is left alone");
+  assert.ok(sweep.values.includes(ACCOUNT), "scoped to one account, in the SQL");
+});
+
+test("a no-show keeps the credit spent", async (t) => {
+  const issued = fakeDatabase(() => []);
+  t.after(() => setDatabaseForTests(null));
+
+  await sweepReturnableCredits(ACCOUNT);
+  assert.ok(
+    !issued[0].text.includes("no_show"),
+    "charging for a no-show is standard; returning the credit quietly costs the coach money",
+  );
+});
+
+test("a completed lesson keeps the credit spent", async (t) => {
+  const issued = fakeDatabase(() => []);
+  t.after(() => setDatabaseForTests(null));
+
+  await sweepReturnableCredits(ACCOUNT);
+  assert.ok(!issued[0].text.includes("'completed'"), "a delivered lesson was paid for");
+});
+
+test("reading a balance sweeps first, so a cancelled lesson's credit is never shown as spent", async (t) => {
+  const issued = fakeDatabase(() => []);
+  t.after(() => setDatabaseForTests(null));
+
+  await readPassesForPerson(ACCOUNT, "person-1");
+
+  assert.equal(issued.length, 2, "the sweep, then the read");
+  assert.match(issued[0].text, /UPDATE public\.pass_redemptions/, "sweep runs before the read");
+  assert.match(issued[1].text, /FROM public\.pass_balances/);
+});
+
+test("deleting a booking returns its credit in the caller's own transaction", async (t) => {
+  // Given the open client, not a fresh one: a delete that commits while the
+  // reversal fails strands a credit against a booking that no longer exists.
+  const calls: { text: string; values: unknown[] }[] = [];
+  const client = {
+    async query(text: string, values: unknown[] = []) {
+      calls.push({ text: text.replace(/\s+/g, " ").trim(), values });
+      return { rows: [{ id: "red-1" }] };
+    },
+  };
+  t.after(() => setDatabaseForTests(null));
+
+  const returned = await reverseRedemptionsForBooking(client, ACCOUNT, "booking-1", "Booking deleted", "coach");
+  assert.equal(returned, 1);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].text, /reversed_at = NOW\(\)/);
+  assert.match(calls[0].text, /reversed_at IS NULL/, "a credit already returned is not returned twice");
+  assert.ok(calls[0].values.includes(ACCOUNT) && calls[0].values.includes("booking-1"));
+});
+
+test("a booking that never used a pass is not a special case", async (t) => {
+  const client = { async query() { return { rows: [] }; } };
+  t.after(() => setDatabaseForTests(null));
+  assert.equal(await reverseRedemptionsForBooking(client, ACCOUNT, "booking-9", "Booking deleted"), 0);
+});
+
+test("a reversal with no booking id touches nothing at all", async (t) => {
+  let called = false;
+  const client = { async query() { called = true; return { rows: [] }; } };
+  t.after(() => setDatabaseForTests(null));
+  assert.equal(await reverseRedemptionsForBooking(client, ACCOUNT, "", "Booking deleted"), 0);
+  assert.equal(called, false, "an empty id must never become an unfiltered update");
 });

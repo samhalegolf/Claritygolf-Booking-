@@ -1708,6 +1708,8 @@ type CalendarStateSaveResponse = {
   googleCalendarSync?: Partial<GoogleCalendarSyncStatus> & { ok?: boolean; error?: string };
   syncKey?: string;
   warnings?: string[];
+  /** Things that went right but the coach should know about -- a returned pass credit. */
+  notices?: string[];
 };
 
 type LessonCompleteResponse = {
@@ -19709,6 +19711,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         setCalendarFeedStatus("connected");
         setCalendarSaveStatus("saved");
         setCalendarSaveError("");
+        // Deleting a lesson someone paid for with a pass hands the credit back.
+        // Silence would leave the coach unsure whether it had, and checking
+        // means opening the client's profile.
+        const notice = (verifyData.notices || data.notices || []).find(
+          (candidate) => typeof candidate === "string" && candidate.trim(),
+        );
+        if (notice) setToast({ message: notice });
         window.setTimeout(() => {
           if (calendarSaveVersionRef.current === saveVersion) setCalendarSaveStatus("idle");
         }, 1800);

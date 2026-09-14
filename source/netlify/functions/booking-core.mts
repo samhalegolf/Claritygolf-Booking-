@@ -25,6 +25,7 @@ import {
   passOptionsForService,
   passTemplatesFromServices,
   readPassesForPerson,
+  reverseRedemptionsForBooking,
   voidPass,
 } from "./_shared/passes.mts";
 import {
@@ -6806,6 +6807,7 @@ async function deleteCalendarItemById(accountId: string, id, context = null, net
     assertCanWriteCalendarItem(context, existingItem, existingItem, current);
   }
 
+  let passCreditsReturned = 0;
   const client = await db().pool.connect();
   try {
     await client.query("BEGIN");
@@ -6813,6 +6815,19 @@ async function deleteCalendarItemById(accountId: string, id, context = null, net
     // this booking belongs to the caller's business; the destructive statement
     // says so too, so an id alone can never delete another business's row even
     // if a check above is ever refactored away.
+    // A deleted booking cannot hold a pass credit, so the credit goes back
+    // here rather than on whatever read happens to come next. In the same
+    // transaction as the delete on purpose: committing one without the other
+    // is how a credit ends up stranded against a lesson that no longer exists.
+    //
+    // No prompt, unlike a cancellation -- there is nothing left to charge for.
+    passCreditsReturned = await reverseRedemptionsForBooking(
+      client,
+      accountId,
+      cleanId,
+      "Booking deleted",
+      context?.userId || "",
+    );
     await client.query("DELETE FROM calendar_items WHERE id = $1 AND account_id = $2", [cleanId, accountId]);
     const verifyRows = queryRows(
       await client.query(
@@ -6882,12 +6897,18 @@ async function deleteCalendarItemById(accountId: string, id, context = null, net
     );
   }
   const deleteWarnings = [optixBayWarning, optixCustomerCancelWarning].filter(Boolean);
+  const passNotice = passCreditsReturned
+    ? passCreditsReturned === 1
+      ? "That lesson was paid with a pass. The credit has been returned."
+      : `That lesson was paid with a pass. ${passCreditsReturned} credits have been returned.`
+    : "";
   return {
     ...nextState,
     items: context ? nextState.items.filter((item) => canReadCalendarItem(context, item, nextState)) : nextState.items,
     updatedAt,
     googleCalendarSync,
     ...(deleteWarnings.length ? { warnings: deleteWarnings } : {}),
+    ...(passNotice ? { notices: [passNotice] } : {}),
   };
 }
 

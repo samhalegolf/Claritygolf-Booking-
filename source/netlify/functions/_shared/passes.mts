@@ -337,6 +337,10 @@ function rowToPass(row: Record<string, unknown>): PassView {
  */
 export async function readPassesForPerson(accountId: string, personId: string): Promise<PassView[]> {
   if (!accountId || !personId) return [];
+  // Before answering, give back anything whose booking has since gone. Every
+  // surface that shows a balance goes through here, so this is the one place
+  // that guarantees a cancelled lesson's credit is never shown as spent.
+  await sweepReturnableCredits(accountId);
   const rows = await db().sql`
     SELECT
       b.*,
@@ -686,4 +690,93 @@ export async function reversePassRedemption(
     RETURNING id
   `;
   return (rows as unknown[]).length > 0;
+}
+
+// ---------------------------------------------------------------------------
+// Giving credits back
+// ---------------------------------------------------------------------------
+
+/** A pg client, so a reversal can join a transaction that is already open. */
+type SqlClient = { query: (text: string, values?: unknown[]) => Promise<{ rows: unknown[] }> };
+
+/**
+ * Return every credit whose booking no longer deserves it.
+ *
+ * A live redemption should not outlive the thing it paid for. Three states mean
+ * it has:
+ *
+ *   * the booking row is gone      -- deleted outright
+ *   * status = 'cancelled'         -- called off
+ *   * kind is no longer 'appointment'
+ *
+ * The third covers cancelling a group session, which does not set a status: the
+ * session row becomes a block (isCancelledGroupSessionLike, booking-core.mts:
+ * 3100). A credit against something that is no longer a lesson is a credit
+ * against nothing.
+ *
+ * A no-show is deliberately NOT in that list. Charging for one is standard, and
+ * defaulting to "credit returned" quietly costs the coach money; making that a
+ * choice is a settings question rather than a code branch, and not this step's.
+ *
+ * Run on read rather than hooked onto each way a booking can end. There are
+ * several of those -- the admin delete, the player's own cancel, a status
+ * change, a bulk state write that drops a row -- and the failure mode of
+ * missing one is a credit the customer paid for and cannot spend, discovered at
+ * the counter weeks later. A sweep cannot be bypassed by a write path nobody
+ * remembered, and it is the same lazy-on-read shape practice blocks already use
+ * for expiry (expirePracticeBlocksDue, booking-core.mts:4001).
+ *
+ * The cost is one UPDATE that normally matches nothing, on a path that was
+ * already going to query.
+ */
+export async function sweepReturnableCredits(accountId: string): Promise<number> {
+  if (!accountId) return 0;
+  const rows = await db().sql`
+    UPDATE public.pass_redemptions r
+    SET reversed_at = NOW(),
+        reversal_reason = CASE
+          WHEN c.id IS NULL THEN 'Booking deleted'
+          WHEN c.status = 'cancelled' THEN 'Lesson cancelled'
+          ELSE 'Booking is no longer a lesson'
+        END,
+        reversed_by = 'system'
+    FROM public.pass_redemptions self
+    LEFT JOIN public.calendar_items c
+      ON c.id = self.booking_id AND c.account_id = self.account_id
+    WHERE r.id = self.id
+      AND r.account_id = ${accountId}
+      AND r.reversed_at IS NULL
+      AND r.booking_id IS NOT NULL
+      AND (c.id IS NULL OR c.status = 'cancelled' OR c.kind <> 'appointment')
+    RETURNING r.id
+  `;
+  return (rows as unknown[]).length;
+}
+
+/**
+ * Give back whatever one booking took, now rather than on the next read.
+ *
+ * Takes an open client so the credit returns in the same transaction as the
+ * delete that caused it: a delete that commits while the reversal fails would
+ * leave a credit stranded against a booking that no longer exists, which is
+ * precisely what the sweep above then has to clean up. Doing both at once means
+ * it never has to.
+ */
+export async function reverseRedemptionsForBooking(
+  client: SqlClient,
+  accountId: string,
+  bookingId: string,
+  reason: string,
+  actorId = "",
+): Promise<number> {
+  const id = text(bookingId, 160);
+  if (!accountId || !id) return 0;
+  const result = await client.query(
+    `UPDATE public.pass_redemptions
+     SET reversed_at = NOW(), reversal_reason = $3, reversed_by = $4
+     WHERE account_id = $1 AND booking_id = $2 AND reversed_at IS NULL
+     RETURNING id`,
+    [accountId, id, text(reason, 300) || "Booking deleted", text(actorId, 160)],
+  );
+  return result.rows.length;
 }
