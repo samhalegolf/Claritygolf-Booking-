@@ -9342,17 +9342,33 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     return ids;
   }, [lessonNotes]);
 
-  // A client becomes a player profile when they have a lesson note, a stored
-  // video, or were manually added. Booking notes do not promote profiles.
+  // Granting portal access is the coach saying "this is one of my players", and
+  // unlike the manual list it is recorded on the server. It has to promote a
+  // profile on its own: the video and manual signals below are device-local, so
+  // a player whose profile rested on either dropped off the list the moment the
+  // coach opened the app on another device or cleared site data, even though
+  // their videos, practice blocks and login were all still on the server.
+  const portalPlayerIds = useMemo(() => {
+    const ids = new Set<string>();
+    portalPlayers.forEach((entry) => {
+      if (entry.personId) ids.add(entry.personId);
+    });
+    return ids;
+  }, [portalPlayers]);
+
+  // A client becomes a player profile when they have a lesson note, portal
+  // access, a stored video, or were manually added. Booking notes do not
+  // promote profiles.
   const playerProfiles = useMemo(() => {
     const manual = new Set(playerProfilesLocal.manualIds);
     return clients.filter(
       (client) =>
         hasAnyProfileId(lessonNotePlayerIds, client) ||
+        portalPlayerIds.has(client.id) ||
         hasAnyProfileId(videoPlayerIds, client) ||
         manual.has(client.id),
     );
-  }, [clients, lessonNotePlayerIds, playerProfilesLocal.manualIds, videoPlayerIds]);
+  }, [clients, lessonNotePlayerIds, playerProfilesLocal.manualIds, portalPlayerIds, videoPlayerIds]);
 
   const quickClientInput = {
     name: quickClientSearch,
