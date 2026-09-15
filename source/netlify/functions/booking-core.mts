@@ -2119,7 +2119,7 @@ async function ensureCoreTables() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `;
-  await ddl.run();
+  await ddl.run(db().pool);
 }
 
 async function ensureAuthTables() {
@@ -2196,7 +2196,7 @@ async function ensureAuthTables() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `;
-  await ddl.run();
+  await ddl.run(db().pool);
 }
 
 async function ensureAuthReady() {
@@ -2458,7 +2458,7 @@ async function ensureNotificationHistoryTable() {
       received_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `;
-  await ddl.run();
+  await ddl.run(db().pool);
 }
 
 // Self-creating like the notification tables above -- the player portal is
@@ -2532,7 +2532,10 @@ async function ensurePlayerSessionsTable() {
     CREATE INDEX IF NOT EXISTS portal_players_invite_token_idx
     ON portal_players (invite_token_hash)
   `;
-  await ddl.run();
+  // Through the same handle as every other statement, rather than reaching for
+  // the pool directly: setDatabaseForTests exists to stand in for the database,
+  // and DDL that bypasses it makes this whole surface untestable.
+  await ddl.run(db().pool);
   // Only once the statements have actually landed: marking it ready first would
   // let a failed run leave every later call skipping the creation it needs.
   playerSessionsTableReady = true;
@@ -3873,7 +3876,7 @@ async function ensurePracticeBlocksTable() {
   ddl.sql`CREATE INDEX IF NOT EXISTS practice_blocks_player_history_idx ON practice_blocks (account_id, player_id, created_at DESC)`;
   ddl.sql`CREATE INDEX IF NOT EXISTS practice_blocks_player_active_idx ON practice_blocks (account_id, player_id) WHERE status = 'active'`;
   ddl.sql`CREATE INDEX IF NOT EXISTS practice_blocks_expiry_sweep_idx ON practice_blocks (account_id, expiry_date) WHERE status = 'active' AND expiry_date IS NOT NULL`;
-  await ddl.run();
+  await ddl.run(db().pool);
   practiceBlocksTableReady = true;
 }
 
@@ -4264,7 +4267,7 @@ async function ensurePracticeBlockPresetsTable() {
   // The save path's ON CONFLICT target -- must exist before any preset is
   // saved, not just before the migration is applied by hand.
   ddl.sql`CREATE UNIQUE INDEX IF NOT EXISTS practice_block_presets_title_key ON practice_block_presets (account_id, lower(title))`;
-  await ddl.run();
+  await ddl.run(db().pool);
   practiceBlockPresetsTableReady = true;
 }
 
@@ -8929,17 +8932,22 @@ async function destroyPortalPlayerSessions(portalPlayerId) {
 }
 
 /**
- * Signs a player in against Supabase Auth. Returns the session identity, or
- * null when the credentials are wrong or the auth user has no active portal
- * access for this account -- the two are deliberately indistinguishable to the
- * caller so the login response cannot be used to probe who has an account.
+ * The portal half of a login, for an auth user whose password /api/auth/login
+ * has already checked.
+ *
+ * The password check is deliberately NOT in here. Coach and player share one
+ * auth store, so there is exactly one password to verify and no way to tell
+ * the two apart by verifying it twice -- this used to re-run the same Supabase
+ * password grant the caller had just run, on an identity it had already
+ * confirmed. What makes someone a player is the portal_players row, and that
+ * is what this looks for.
+ *
+ * Returns null when the auth user has no active portal access for this
+ * account, so the caller cannot use the login response to probe who has one.
  */
-async function verifyPortalPlayerLogin(rawEmail, password, accountId) {
+async function portalPlayerSessionIdentity(authUserId, rawEmail, accountId) {
   const email = cleanEmail(rawEmail, "");
-  if (!email || !password || !accountId) return null;
-
-  const authUserId = await verifySupabaseAuthPassword(email, password);
-  if (!authUserId) return null;
+  if (!authUserId || !accountId) return null;
 
   const portalPlayer = await readPortalPlayerByAuthUser(authUserId, accountId);
   if (!portalPlayer || portalPlayer.status === "disabled") return null;
@@ -8965,6 +8973,31 @@ async function verifyPortalPlayerLogin(rawEmail, password, accountId) {
     authUserId,
     portalPlayerId: portalPlayer.id,
   };
+}
+
+/** Mints a player session and answers with it. */
+async function playerSessionResponse(player, req) {
+  const session = await createPlayerSession(player);
+  return json(
+    {
+      authenticated: true,
+      role: "player",
+      email: player.email,
+      name: player.name,
+      expiresAt: session.expiresAt,
+      // Only to a client that has said it cannot hold the cookie. The cookie is
+      // still set either way, so the web is unchanged.
+      ...(wantsTokenAuth(req) ? { token: session.token } : {}),
+    },
+    200,
+    {
+      "Set-Cookie": playerCookieHeader(
+        session.token,
+        req,
+        playerSessionDays * 24 * 60 * 60,
+      ),
+    },
+  );
 }
 
 // --- Portal invites --------------------------------------------------------
@@ -9394,7 +9427,7 @@ async function ensureGuestSendersTable() {
     CREATE INDEX IF NOT EXISTS guest_senders_account_created_idx
     ON guest_senders (account_id, created_at DESC)
   `;
-  await ddl.run();
+  await ddl.run(db().pool);
   guestSendersTableReady = true;
 }
 
@@ -11538,8 +11571,24 @@ async function routeBookingApiRequest(
         const authUserId = coachAuthUserId || (await findCoachAuthUserId(loginEmail));
         const membership = authUserId ? await resolveMembershipForAuthUser(authUserId) : null;
         if (!membership) {
-          // Authenticated is not authorised. Without a membership row there is
-          // no account to act in, and there is deliberately no default one.
+          // Authenticated is not authorised -- but "no membership" is the
+          // normal shape of a PLAYER, not only of a coach without a workspace.
+          //
+          // verifyCoachAuthPassword is an alias of verifySupabaseAuthPassword,
+          // the same grant the portal uses, so every portal player passes the
+          // check above. Returning 403 here sent them away with "this login is
+          // not attached to a business workspace yet" and left the player
+          // branch below unreachable for anyone whose password was right.
+          const playerAccountId = await resolvePublicAccountId(req).catch(() => "");
+          const portalPlayer = coachAuthUserId
+            ? await portalPlayerSessionIdentity(coachAuthUserId, loginEmail, playerAccountId)
+            : null;
+          if (portalPlayer) {
+            return playerSessionResponse(portalPlayer, req);
+          }
+          // Genuinely nothing to sign in to: a coach whose workspace was never
+          // created, and not a player either. There is deliberately no default
+          // account to fall back on.
           return json(
             {
               error: "membership_required",
@@ -11569,31 +11618,9 @@ async function routeBookingApiRequest(
         );
       }
 
-      const player = await verifyPortalPlayerLogin(body.email || "", body.password || "", await resolvePublicAccountId(req));
-      if (player) {
-        const session = await createPlayerSession(player);
-        return json(
-          {
-            authenticated: true,
-            role: "player",
-            email: player.email,
-            name: player.name,
-            expiresAt: session.expiresAt,
-            // Only to a client that has said it cannot hold the cookie. The
-            // cookie is still set either way, so the web is unchanged.
-            ...(wantsTokenAuth(req) ? { token: session.token } : {}),
-          },
-          200,
-          {
-            "Set-Cookie": playerCookieHeader(
-              session.token,
-              req,
-              playerSessionDays * 24 * 60 * 60,
-            ),
-          },
-        );
-      }
-
+      // No second player attempt here. It used to re-verify the same password
+      // that just failed both checks above, against the same auth store, and
+      // could only fail again.
       return json({ error: "invalid_login", message: "Email or password is incorrect." }, 401);
     }
 
