@@ -13,11 +13,17 @@
  *
  * Full typechecking is not possible yet -- booking-core carries 217 type-shape
  * errors from a decade of untyped parameters, which is a cleanup of its own.
- * But the one class of error that is always a real bug, TS2304 "Cannot find
- * name", is already at zero, so it can be held there while the rest waits.
+ * But the handful of codes that are never a style question and always a crash
+ * are already at zero, so they can be held there while the rest waits.
  *
- * Deliberately narrow. If this starts failing on something that is not an
- * undefined identifier, the filter below is wrong, not the code.
+ * The second one on the list was added the hard way. A refactor moved a const
+ * below the code that read it, which is a temporal dead zone error -- and the
+ * player portal answered every profile load with "Cannot access \'heldPasses\'
+ * before initialization" until somebody opened it. tsc knows this as TS2448
+ * and would have said so on the spot.
+ *
+ * Deliberately narrow. If this starts failing on something that is not one of
+ * the codes below, the filter is wrong, not the code.
  */
 
 import assert from "node:assert/strict";
@@ -29,13 +35,28 @@ import test from "node:test";
 const functionsDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 const projectRoot = join(functionsDir, "..", "..");
 
+/**
+ * Errors that are never a matter of taste.
+ *
+ * Each of these means the code cannot run, not that its types are loose --
+ * which is why they can be held at zero in files carrying hundreds of
+ * type-shape complaints.
+ */
+const ALWAYS_A_CRASH: Array<{ code: string; meaning: string }> = [
+  { code: "TS2304", meaning: "Cannot find name -- a ReferenceError on a live route" },
+  { code: "TS2448", meaning: "Used before its declaration -- a temporal dead zone crash" },
+  { code: "TS2454", meaning: "Used before being assigned" },
+  { code: "TS2552", meaning: "Cannot find name (did you mean...) -- a typo" },
+  { code: "TS2349", meaning: "This expression is not callable" },
+];
+
 /** The route owners nothing else typechecks. */
 const UNCHECKED_ROUTE_FILES = [
   "netlify/functions/booking-core.mts",
   "netlify/functions/billing-api.mts",
 ];
 
-test("no route file calls a name that is not defined or imported", () => {
+test("no route file contains an error that is always a crash", () => {
   let output = "";
   try {
     execFileSync(
@@ -59,15 +80,16 @@ test("no route file calls a name that is not defined or imported", () => {
     output = String((error as { stdout?: string }).stdout || "");
   }
 
-  const undefinedNames = output
+  const crashes = output
     .split("\n")
-    .filter((line) => line.includes("error TS2304"))
+    .filter((line) => ALWAYS_A_CRASH.some((entry) => line.includes(`error ${entry.code}`)))
     .map((line) => line.trim());
 
   assert.deepEqual(
-    undefinedNames,
+    crashes,
     [],
-    "These call something that does not exist. In a file nothing typechecks, " +
-      `that is a ReferenceError on a live route, not a build error:\n  ${undefinedNames.join("\n  ")}`,
+    "These cannot run. In files nothing typechecks, that is a crash on a live " +
+      `route rather than a build error:\n  ${crashes.join("\n  ")}\n\n` +
+      `Watched codes:\n  ${ALWAYS_A_CRASH.map((entry) => `${entry.code} — ${entry.meaning}`).join("\n  ")}`,
   );
 });

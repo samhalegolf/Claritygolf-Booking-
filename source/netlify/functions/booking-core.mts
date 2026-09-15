@@ -9709,6 +9709,29 @@ async function readPlayerProfile(session) {
    * which key is in play reaches the player; they are buying from the coach
    * either way.
    */
+  /* What they have already paid for.
+   *
+   * Keyed on the resolved person id alone, not the candidate set the notes use
+   * above: a pass is written against a real people.id by whatever took the
+   * money, so there are no historical id forms to chase. No person id means no
+   * passes rather than an unfiltered read.
+   *
+   * playerPassViews, not the coach's PassView: see the allow-list in
+   * passes.mts. Service names are resolved here because this is where the
+   * catalogue already is -- the player has no way to look an id up.
+   */
+  // Read once and used twice -- for the player's own pass list and for what
+  // may pay for a review. readPassesForPerson sweeps returnable credits before
+  // answering, so calling it twice is two writes and two reads on the landing
+  // screen, at roughly 217ms per round trip on a cold instance.
+  const heldPasses = session.personId
+    ? await readPassesForPerson(accountId, session.personId)
+    : [];
+  const passes = playerPassViews(
+    heldPasses,
+    new Map(serviceList.map((service) => [service.id, service.name])),
+  );
+
   const stripeStatus = stripeCredentialStatus(settingsMap[STRIPE_SECRET_SETTING]);
   const currency = playerShopCurrency(settingsMap);
   const shop = stripeStatus.configured ? playerShopItems(serviceList, currency) : [];
@@ -9736,29 +9759,6 @@ async function readPlayerProfile(session) {
         canBuy: stripeStatus.configured && reviewService.price > 0,
       }
     : null;
-
-  /* What they have already paid for.
-   *
-   * Keyed on the resolved person id alone, not the candidate set the notes use
-   * above: a pass is written against a real people.id by whatever took the
-   * money, so there are no historical id forms to chase. No person id means no
-   * passes rather than an unfiltered read.
-   *
-   * playerPassViews, not the coach's PassView: see the allow-list in
-   * passes.mts. Service names are resolved here because this is where the
-   * catalogue already is -- the player has no way to look an id up.
-   */
-  // Read once and used twice -- for the player's own pass list and for what
-  // may pay for a review. readPassesForPerson sweeps returnable credits before
-  // answering, so calling it twice is two writes and two reads on the landing
-  // screen, at roughly 217ms per round trip on a cold instance.
-  const heldPasses = session.personId
-    ? await readPassesForPerson(accountId, session.personId)
-    : [];
-  const passes = playerPassViews(
-    heldPasses,
-    new Map(serviceList.map((service) => [service.id, service.name])),
-  );
 
   return {
     player: {
