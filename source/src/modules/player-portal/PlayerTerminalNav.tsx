@@ -13,6 +13,7 @@ export type PlayerTerminalDestination =
   | "home"
   | "lessons"
   | "reviews"
+  | "passes"
   | "practice"
   | "notes"
   | "videos"
@@ -28,6 +29,10 @@ type NavLink = {
 // it does for that reason -- it is the sitting itself, and the three after it
 // are the pieces that sitting produced, each also reachable on its own.
 //
+// Passes follows Reviews rather than sitting near the end, because what a
+// player holds is the answer to "can I book another one" -- a question asked
+// while looking at the first two, not while reading old notes.
+//
 // "book" is not in this list: it only exists for a business that has
 // configured an outside booking widget, and it is named by that business
 // rather than by us, so it is appended from `externalBooking` below.
@@ -35,6 +40,7 @@ const NAV_LINKS: NavLink[] = [
   { id: "home", label: "Home" },
   { id: "lessons", label: "Lessons" },
   { id: "reviews", label: "Reviews" },
+  { id: "passes", label: "Passes" },
   { id: "practice", label: "Practice" },
   { id: "notes", label: "Notes" },
   { id: "videos", label: "Videos" },
@@ -47,6 +53,7 @@ const NAV_LINKS: NavLink[] = [
 const GUEST_HIDDEN: ReadonlySet<PlayerTerminalDestination> = new Set([
   "lessons",
   "reviews",
+  "passes",
   "practice",
 ]);
 

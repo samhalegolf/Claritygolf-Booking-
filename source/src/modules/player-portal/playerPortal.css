@@ -1602,3 +1602,211 @@
   font-size: 14px;
   color: var(--pt-text-body);
 }
+
+/* --- The home dashboard ---------------------------------------------------
+ *
+ * Four answers before any navigation: when am I next on, has anything
+ * arrived, what have I got left, what am I meant to be practising. Each is a
+ * way into the tab that owns it, so the grid is buttons rather than panels.
+ * ------------------------------------------------------------------------ */
+.player-portal-dashboard {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.player-portal-dash-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--pt-border-soft);
+  border-radius: 12px;
+  background: var(--pt-surface-soft);
+  color: var(--pt-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.player-portal-dash-card.is-wide {
+  grid-column: 1 / -1;
+}
+
+/* Something the coach sent that has not been opened. The same accent border
+   the video shelf uses for the same meaning. */
+.player-portal-dash-card.is-unseen {
+  border-color: var(--pt-accent);
+}
+
+.player-portal-dash-label {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--pt-muted);
+}
+
+.player-portal-dash-card strong {
+  font-size: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.player-portal-dash-card span:not(.player-portal-dash-label) {
+  font-size: 13px;
+  color: var(--pt-text-soft);
+}
+
+/* --- Booking history ----------------------------------------------------- */
+.player-portal-history {
+  border: 1px solid var(--pt-border-soft);
+  border-radius: 10px;
+  background: var(--pt-surface-soft);
+  overflow: hidden;
+}
+
+.player-portal-history.is-open {
+  border-color: var(--pt-border);
+  background: var(--pt-surface);
+}
+
+.player-portal-history-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 0;
+  background: transparent;
+  color: var(--pt-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.player-portal-history-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.player-portal-history-head strong {
+  font-size: 15px;
+}
+
+.player-portal-history-head span {
+  font-size: 13px;
+  color: var(--pt-text-soft);
+}
+
+.player-portal-history-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 14px 14px;
+}
+
+.player-portal-history-fact {
+  font-size: 13px;
+  color: var(--pt-text-soft);
+}
+
+.player-portal-history-note {
+  padding: 10px 12px;
+  border: 1px solid var(--pt-border-soft);
+  border-radius: 9px;
+  background: var(--pt-surface-soft);
+}
+
+.player-portal-history-note strong {
+  font-size: 14px;
+}
+
+.player-portal-history-note p {
+  margin: 2px 0 0;
+  font-size: 14px;
+  color: var(--pt-text-body);
+  white-space: pre-wrap;
+}
+
+/* --- Asking for a swing review ------------------------------------------- */
+.player-portal-review-hero {
+  padding: 16px;
+  border: 1px solid var(--pt-border);
+  border-radius: 12px;
+  background: var(--pt-surface);
+}
+
+/* The second toggle inside Book now. Quieter than the one above it, because
+   it is a choice within a choice and must not read as its equal. */
+.player-portal-pill-toggle.is-inner {
+  font-size: 13px;
+}
+
+.swing-review-picker {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: none;
+}
+
+.swing-review-picker::-webkit-scrollbar {
+  display: none;
+}
+
+.swing-review-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+  width: 96px;
+  padding: 6px;
+  border: 1px solid var(--pt-border-soft);
+  border-radius: 10px;
+  background: var(--pt-surface-soft);
+  color: var(--pt-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.swing-review-pick.is-chosen {
+  border-color: var(--pt-accent);
+  background: var(--pt-surface);
+}
+
+.swing-review-pick img,
+.swing-review-pick-blank {
+  width: 100%;
+  height: 58px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: var(--pt-hover);
+}
+
+.swing-review-pick small {
+  font-size: 11px;
+  color: var(--pt-text-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* What is about to be sent, restated on the paying screen. A player should
+   never be asked to pay for something they can no longer see. */
+.swing-review-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--pt-border-soft);
+  border-radius: 10px;
+  background: var(--pt-surface-soft);
+  font-size: 14px;
+  color: var(--pt-text-body);
+}

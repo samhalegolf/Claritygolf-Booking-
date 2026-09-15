@@ -28,6 +28,9 @@ import {
 } from "./PlayerBookingEmbed";
 import { formatClock, formatDate } from "./format";
 import { groupSwingReviews } from "./swingReviews";
+import { SwingReviewFlow, type ReviewOffer, type SwingReviewDraft } from "./SwingReviewFlow";
+import { stashReviewDraft, takeReviewDraft } from "./reviewDraftStore";
+import { recentActivity } from "./recentActivity";
 import "../practice/practice.css";
 import { PracticeWall } from "../practice/PracticeWall";
 import {
@@ -96,11 +99,21 @@ type Note = {
   /** The sitting this note was taken in. Present on a note the coach typed
    *  during a swing review, which is how the Reviews tab finds it again. */
   lessonId?: string;
+  /** The booking this note was taken against, when there was one. */
+  calendarItemId?: string;
   createdAt?: string;
   updatedAt?: string;
 };
 
-type PortalTab = "home" | "lessons" | "reviews" | "practice" | "notes" | "videos" | "book";
+type PortalTab =
+  | "home"
+  | "lessons"
+  | "reviews"
+  | "passes"
+  | "practice"
+  | "notes"
+  | "videos"
+  | "book";
 
 type PracticeExpiryType = "next_lesson" | "set_date" | "none";
 type PracticeStatus = "active" | "completed" | "expired" | "archived";
@@ -263,6 +276,15 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   const [shop, setShop] = useState<ShopItem[]>([]);
   /** Which item is mid-purchase, so only its own button goes quiet. */
   const [buyingId, setBuyingId] = useState("");
+  const [reviewOffer, setReviewOffer] = useState<ReviewOffer | null>(null);
+  /** The New Swing Review screen, which takes over the tab while it is up. */
+  const [reviewFlowOpen, setReviewFlowOpen] = useState(false);
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [reviewError, setReviewError] = useState("");
+  /** Which half of Lessons is showing, and which way its Book toggle is set. */
+  const [lessonsView, setLessonsView] = useState<"book" | "past">("book");
+  const [bookMode, setBookMode] = useState<"in-person" | "review">("in-person");
+  const [openBookingId, setOpenBookingId] = useState("");
   const [purchaseNote, setPurchaseNote] = useState("");
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileError, setProfileError] = useState("");
@@ -349,6 +371,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
         practiceBlockTypes?: PracticeTypeMeta[];
         passes?: PlayerPass[];
         shop?: ShopItem[];
+        review?: ReviewOffer | null;
         bookingEmbed?: PlayerBookingEmbedConfig;
       };
       if (!res.ok) throw new Error(data?.message || "We couldn't load your profile.");
@@ -363,6 +386,9 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
       // Empty when the business has no card payments set up, which is the
       // server's answer rather than something the portal works out.
       setShop(Array.isArray(data.shop) ? data.shop : []);
+      // Null when the coach sells no video review, or sells more than one and
+      // the catalogue cannot say which is "the" review.
+      setReviewOffer(data.review || null);
       setBookingEmbed(isPlayerBookingEmbedConfigured(data.bookingEmbed) ? data.bookingEmbed : null);
       if (data.player?.email) setPlayerEmail(data.player.email);
       if (data.player?.name) setPlayerName(data.player.name);
@@ -624,8 +650,21 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
         if (cancelled) return;
         if (data.ok && Array.isArray(data.passes)) {
           setPasses(data.passes);
+          // They were half-way through a review when they went to pay. The
+          // credit is theirs now either way, so a draft that did not survive
+          // costs the typing and nothing else.
+          const draft = takeReviewDraft();
+          if (draft) {
+            setPurchaseNote("Paid. Sending your review…");
+            await loadProfile();
+            await submitReview(
+              { notes: draft.notes, savedVideoId: draft.savedVideoId },
+              "",
+            );
+            return;
+          }
           setPurchaseNote("Paid. It is on your account now.");
-          setTab("lessons");
+          setTab("passes");
           return;
         }
         setPurchaseNote(
@@ -909,6 +948,88 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
     [isGuest, sendToCoach],
   );
 
+  /* Send a swing review, paid for with a credit.
+   *
+   * Three things have to happen and only the first is this app's own: the
+   * booking and its deadline, the credit, and the note all land server-side in
+   * one request. The video follows separately, because bytes do not belong in
+   * a JSON route -- and it is stamped with the review's lesson id first, which
+   * is the whole reason the coach's swing review screen shows the video and
+   * the note as one sitting rather than two unrelated arrivals.
+   *
+   * The upload is deliberately not awaited before the screen closes. It can
+   * take minutes on a bay's wifi, and the request itself is already safely
+   * recorded; the Videos shelf shows the progress, as it does for any other
+   * send. */
+  const submitReview = useCallback(
+    async (draft: SwingReviewDraft, passId: string) => {
+      setReviewBusy(true);
+      setReviewError("");
+      try {
+        const response = await apiFetch("/api/player/reviews", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            notes: draft.notes,
+            hasVideo: Boolean(draft.savedVideoId),
+            passId,
+          }),
+        });
+        const data = (await response.json().catch(() => ({}))) as {
+          ok?: boolean;
+          message?: string;
+          lessonId?: string;
+        };
+        if (!response.ok || !data.ok) {
+          throw new Error(data?.message || "Could not send that review.");
+        }
+
+        if (draft.savedVideoId && savedVideoLibrary && data.lessonId) {
+          try {
+            const item = await savedVideoLibrary.getItem(draft.savedVideoId);
+            if (item) {
+              await savedVideoLibrary.putItem({ ...item, lessonId: data.lessonId });
+              await refreshSavedVideos();
+            }
+          } catch {
+            // The review still stands without the link; it just arrives as a
+            // note and a loose video rather than as one sitting.
+          }
+          void sendToCoach(draft.savedVideoId);
+        }
+
+        setReviewFlowOpen(false);
+        setPurchaseNote("Sent. Your coach has it.");
+        await loadProfile();
+        setTab("reviews");
+      } catch (error) {
+        setReviewError(
+          error instanceof Error ? error.message : "Could not send that review.",
+        );
+      } finally {
+        setReviewBusy(false);
+      }
+    },
+    [loadProfile, refreshSavedVideos, savedVideoLibrary, sendToCoach],
+  );
+
+  /* Buy a review when they hold no credit.
+   *
+   * Deliberately the same checkout as anything else on the shelf: paying for a
+   * review buys a review credit, and the credit is then spent on the request.
+   * One payment path, one notion of paid, and a purchase that survives a
+   * dropped connection as a credit they still own.
+   *
+   * The draft is stashed first because Stripe takes the page. */
+  const buyReview = useCallback(
+    async (draft: SwingReviewDraft) => {
+      if (!reviewOffer) return;
+      stashReviewDraft(draft);
+      await buyShopItem(reviewOffer.serviceId);
+    },
+    [buyShopItem, reviewOffer],
+  );
+
   const startGuestNoteDraft = useCallback(() => {
     setEditingNoteId(null);
     setNoteDraftTitle("");
@@ -1011,6 +1132,27 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
         .sort()
         .at(0) || "",
     [passes],
+  );
+
+  /* The one line the home screen leads with. Derived from what is already
+     loaded -- see recentActivity.ts -- rather than from a feed nothing writes. */
+  const latestActivity = useMemo(
+    () =>
+      isGuest
+        ? null
+        : recentActivity({
+            unseenReturns: unseenReturnCount,
+            newestReturnAt:
+              cloudVideos.find((transfer) => transfer.direction === "coach-return")?.readyToImportAt || "",
+            practice,
+            notes,
+            passes: passes.map((pass) => ({
+              name: pass.name,
+              issuedAt: pass.issuedAt,
+              creditsAvailable: pass.creditsAvailable,
+            })),
+          }),
+    [cloudVideos, isGuest, notes, passes, practice, unseenReturnCount],
   );
 
   /** What's outstanding -- the portal's Practice landing view leads with this. */
@@ -1174,7 +1316,21 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
             </p>
           )}
 
-          {profileError ? (
+          {reviewFlowOpen && reviewOffer ? (
+            <SwingReviewFlow
+              review={reviewOffer}
+              savedVideos={savedVideos}
+              busy={reviewBusy}
+              error={reviewError}
+              onRecord={startRecording}
+              onRedeem={(draft, passId) => void submitReview(draft, passId)}
+              onBuy={(draft) => void buyReview(draft)}
+              onCancel={() => {
+                setReviewFlowOpen(false);
+                setReviewError("");
+              }}
+            />
+          ) : profileError ? (
             <div className="player-portal-profile-error">
               <p className="player-portal-error-line" role="alert">
                 {profileError}
@@ -1187,6 +1343,91 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
             <>
               {tab === "home" && (
                 <section className="player-portal-home">
+                  {/* The four things a player opens the portal to find out,
+                      before any navigation: when am I next on, has anything
+                      arrived, what have I got left, what am I meant to be
+                      practising. Each one is also a way in to the tab that
+                      owns it. */}
+                  {!isGuest && (
+                    <div className="player-portal-dashboard">
+                      <button
+                        type="button"
+                        className="player-portal-dash-card is-wide"
+                        onClick={() => navigateTerminal("lessons")}
+                      >
+                        <span className="player-portal-dash-label">Next up</span>
+                        {profileLoading && !bookings.length ? (
+                          <strong>Loading…</strong>
+                        ) : nextLesson ? (
+                          <>
+                            <strong>{nextLesson.serviceName || "Lesson"}</strong>
+                            <span>{formatBookingWhen(nextLesson)}</span>
+                          </>
+                        ) : (
+                          <>
+                            <strong>Nothing booked</strong>
+                            <span>Tap to book a lesson or a swing review</span>
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        className={`player-portal-dash-card${latestActivity?.unseen ? " is-unseen" : ""}`}
+                        onClick={() => navigateTerminal(latestActivity?.tab || "reviews")}
+                      >
+                        <span className="player-portal-dash-label">Latest</span>
+                        {latestActivity ? (
+                          <>
+                            <strong>{latestActivity.label}</strong>
+                            {formatDate(latestActivity.at) && <span>{formatDate(latestActivity.at)}</span>}
+                          </>
+                        ) : (
+                          <>
+                            <strong>Nothing new</strong>
+                            <span>Send your coach a swing</span>
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        className="player-portal-dash-card"
+                        onClick={() => navigateTerminal("passes")}
+                      >
+                        <span className="player-portal-dash-label">Balance</span>
+                        <strong>
+                          {spendableCredits
+                            ? `${spendableCredits} credit${spendableCredits === 1 ? "" : "s"}`
+                            : "No credits"}
+                        </strong>
+                        <span>
+                          {spendableCredits && nextPassExpiry && formatDate(nextPassExpiry)
+                            ? `Use by ${formatDate(nextPassExpiry)}`
+                            : "Tap to buy lessons or a review"}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        className="player-portal-dash-card is-wide"
+                        onClick={() => navigateTerminal("practice")}
+                      >
+                        <span className="player-portal-dash-label">Practice</span>
+                        <strong>
+                          {activePractice.length
+                            ? `${activePractice.length} to work on`
+                            : "Nothing set"}
+                        </strong>
+                        <span>
+                          {activePractice.length
+                            ? activePractice[0].title
+                            : "Your coach adds these after a lesson"}
+                        </span>
+                      </button>
+                    </div>
+                  )}
+
                   <div className="player-portal-home-grid">
                     {isGuest ? (
                       <>
@@ -1364,127 +1605,6 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                     </section>
                   )}
 
-                  {/* What the coach sells, directly above the passes it adds
-                      to. Buying and holding are the same subject -- "how many
-                      have I got, and can I get more" -- and splitting them
-                      across two screens makes the second one hard to find.
-
-                      Absent entirely when the business has not set up card
-                      payments: the server sends an empty shop, and a "Buy"
-                      button that cannot take money is worse than no button. */}
-                  {shop.length > 0 && (
-                    <section className="player-portal-section">
-                      <h2>{passes.length ? "Buy more" : "Buy lessons or a review"}</h2>
-                      <p className="player-portal-lead">
-                        Paid for here, straight onto your account. Book it whenever you like.
-                      </p>
-                      <ul className="player-portal-list">
-                        {shop.map((item) => (
-                          <li className="player-portal-shop-item" key={item.serviceId}>
-                            <div className="player-portal-shop-main">
-                              <strong>{item.name}</strong>
-                              <span>
-                                {item.credits === 1
-                                  ? "1 credit"
-                                  : `${item.credits} credits`}
-                                {item.description ? ` · ${item.description}` : ""}
-                              </span>
-                            </div>
-                            <button
-                              className="player-portal-primary player-portal-shop-buy"
-                              type="button"
-                              disabled={Boolean(buyingId)}
-                              onClick={() => void buyShopItem(item.serviceId)}
-                            >
-                              {buyingId === item.serviceId
-                                ? "Opening…"
-                                : `${item.currency} ${item.price.toFixed(2)}`}
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    </section>
-                  )}
-
-                  {/* Passes sit above the booking toggle for the same reason
-                      the reviews do: "how many have I got left" is the question
-                      a player asks immediately before booking, and answering it
-                      after they have picked a slot is answering it too late.
-
-                      Everything is shown, not just what is spendable. A pass
-                      that has run out or timed out is the answer to "why can't
-                      I book on my pass" -- hiding it turns that into a message
-                      to the coach. */}
-                  {passes.length > 0 && (
-                    <section className="player-portal-section">
-                      <h2>Your passes</h2>
-                      {spendableCredits > 0 && (
-                        <p className="player-portal-lead">
-                          {spendableCredits === 1
-                            ? "1 lesson paid for and ready to book."
-                            : `${spendableCredits} lessons paid for and ready to book.`}
-                          {nextPassExpiry && formatDate(nextPassExpiry)
-                            ? ` Use them by ${formatDate(nextPassExpiry)}.`
-                            : ""}
-                        </p>
-                      )}
-                      <ul className="player-portal-list">
-                        {passes.map((pass) => {
-                          // The line is "can I book on this right now", not
-                          // "is it used up". A pass that has not started yet is
-                          // as unbookable as one that ran out, and styling it
-                          // like a live balance is the version of this screen
-                          // that gets someone turned away at the bay.
-                          const spendable = pass.status === "active";
-                          return (
-                            <li
-                              className={`player-portal-pass${spendable ? "" : " is-inactive"}`}
-                              key={pass.id}
-                            >
-                              <div className="player-portal-pass-head">
-                                <strong>{pass.name}</strong>
-                                <span className="player-portal-pass-count">
-                                  {passBalanceLabel(pass)}
-                                </span>
-                              </div>
-                              <span className="player-portal-pass-meta">
-                                {[
-                                  pass.creditsAllocated
-                                    ? `${pass.creditsRedeemed} of ${pass.creditsAllocated} used`
-                                    : "",
-                                  pass.covers.length ? `Covers ${pass.covers.join(", ")}` : "",
-                                ]
-                                  .filter(Boolean)
-                                  .join(" · ")}
-                              </span>
-                              {pass.expiresAt && formatDate(pass.expiresAt) && (
-                                <span className="player-portal-pass-meta">
-                                  {pass.status === "expired" ? "Expired" : "Expires"}{" "}
-                                  {formatDate(pass.expiresAt)}
-                                </span>
-                              )}
-                              {/* Where the credits went. Dates only: naming the
-                                  lesson would mean a join the portal does not
-                                  have, and "used on these days" is enough to
-                                  settle a disagreement about the balance. */}
-                              {pass.history.length > 0 && (
-                                <span className="player-portal-pass-meta">
-                                  Used{" "}
-                                  {pass.history
-                                    .map((entry) => formatDate(entry.redeemedAt))
-                                    .filter(Boolean)
-                                    .slice(0, 4)
-                                    .join(", ")}
-                                  {pass.history.length > 4 ? "…" : ""}
-                                </span>
-                              )}
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    </section>
-                  )}
-
                   <div className="player-portal-pill-toggle" role="tablist" aria-label="Lessons view">
                     <button
                       type="button"
@@ -1493,7 +1613,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                       className={lessonsSubtab === "book" ? "active" : ""}
                       onClick={() => setLessonsSubtab("book")}
                     >
-                      Book
+                      Book now
                     </button>
                     <button
                       type="button"
@@ -1502,37 +1622,152 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                       className={lessonsSubtab === "upcoming" ? "active" : ""}
                       onClick={() => setLessonsSubtab("upcoming")}
                     >
-                      Upcoming
+                      Past bookings
                     </button>
                   </div>
 
                   {lessonsSubtab === "book" ? (
-                    <div className="player-portal-inline-booking">
-                      <Suspense fallback={<Loading what="booking" className="player-portal-empty" />}>
-                        <BookingWidget
-                          customer={{ name: playerName, email: playerEmail, phone: playerPhone }}
-                          onBookingComplete={() => void loadProfile()}
-                        />
-                      </Suspense>
-                    </div>
+                    <>
+                      {/* Two ways to book the same coach's time, so they are one
+                          control rather than two places. In person is the
+                          default because it is what most people came for; the
+                          review is the same pathway as the Reviews tab's hero,
+                          not a second version of it. */}
+                      {reviewOffer && (
+                        <div
+                          className="player-portal-pill-toggle is-inner"
+                          role="tablist"
+                          aria-label="What to book"
+                        >
+                          <button
+                            type="button"
+                            role="tab"
+                            aria-selected={bookMode === "in-person"}
+                            className={bookMode === "in-person" ? "active" : ""}
+                            onClick={() => setBookMode("in-person")}
+                          >
+                            In person
+                          </button>
+                          <button
+                            type="button"
+                            role="tab"
+                            aria-selected={bookMode === "review"}
+                            className={bookMode === "review" ? "active" : ""}
+                            onClick={() => setBookMode("review")}
+                          >
+                            Swing review
+                          </button>
+                        </div>
+                      )}
+
+                      {bookMode === "review" && reviewOffer ? (
+                        <section className="player-portal-section player-portal-review-hero">
+                          <h2>Swing review</h2>
+                          <p className="player-portal-lead">
+                            Send a swing or a question — no time to turn up to. Back with you
+                            within {reviewOffer.turnaroundDays} day
+                            {reviewOffer.turnaroundDays === 1 ? "" : "s"}.
+                          </p>
+                          <button
+                            className="player-portal-primary"
+                            type="button"
+                            onClick={() => {
+                              setReviewError("");
+                              setReviewFlowOpen(true);
+                            }}
+                          >
+                            Start a swing review
+                          </button>
+                        </section>
+                      ) : (
+                        <div className="player-portal-inline-booking">
+                          <Suspense fallback={<Loading what="booking" className="player-portal-empty" />}>
+                            <BookingWidget
+                              customer={{ name: playerName, email: playerEmail, phone: playerPhone }}
+                              onBookingComplete={() => void loadProfile()}
+                            />
+                          </Suspense>
+                        </div>
+                      )}
+                    </>
                   ) : (
                     <>
                       {laterLessons.length > 0 && (
                         <section className="player-portal-section">
-                          <h2>Upcoming lessons</h2>
+                          <h2>Still to come</h2>
                           <ul className="player-portal-list">{laterLessons.map(renderBooking)}</ul>
                         </section>
                       )}
 
+                      {/* The record, newest first, each one opening to
+                          everything known about it. A flat list that shows only
+                          a name and a date makes a player ask their coach what
+                          a lesson was; the detail is already here. */}
                       {pastBookings.length > 0 && (
-                        <details className="player-portal-past">
-                          <summary>Past lessons ({pastBookings.length})</summary>
-                          <ul className="player-portal-list">{pastBookings.slice(0, 20).map(renderBooking)}</ul>
-                        </details>
+                        <section className="player-portal-section">
+                          <h2>Past bookings</h2>
+                          <ul className="player-portal-list">
+                            {pastBookings.map((booking) => {
+                              const open = booking.id === openBookingId;
+                              const review = isReviewBooking(booking);
+                              return (
+                                <li
+                                  className={`player-portal-history${open ? " is-open" : ""}`}
+                                  key={booking.id}
+                                >
+                                  <button
+                                    type="button"
+                                    className="player-portal-history-toggle"
+                                    aria-expanded={open}
+                                    onClick={() => setOpenBookingId(open ? "" : booking.id)}
+                                  >
+                                    <span className="player-portal-history-head">
+                                      <strong>{booking.serviceName || "Lesson"}</strong>
+                                      <span>{formatBookingWhen(booking)}</span>
+                                    </span>
+                                    <span aria-hidden="true">{open ? "\u2013" : "+"}</span>
+                                  </button>
+                                  {open && (
+                                    <div className="player-portal-history-body">
+                                      {review && (
+                                        <span className="player-portal-history-fact">
+                                          Swing review — no time to turn up to
+                                        </span>
+                                      )}
+                                      {booking.location?.name && (
+                                        <span className="player-portal-history-fact">
+                                          {booking.location.name}
+                                        </span>
+                                      )}
+                                      {booking.client && (
+                                        <span className="player-portal-history-fact">
+                                          Booked as {booking.client}
+                                        </span>
+                                      )}
+                                      {/* Notes taken against this booking.
+                                          Matched on the id the note carries,
+                                          not on the day -- two lessons in one
+                                          afternoon would otherwise each show
+                                          the other's notes. */}
+                                      {sortedNotes
+                                        .filter((note) => note.calendarItemId === booking.id)
+                                        .map((note) => (
+                                          <div className="player-portal-history-note" key={note.id}>
+                                            <strong>{note.title || "Lesson note"}</strong>
+                                            {note.body && <p>{note.body}</p>}
+                                          </div>
+                                        ))}
+                                    </div>
+                                  )}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </section>
                       )}
 
                       {!laterLessons.length && !pastBookings.length && !profileLoading && (
-                        <p className="player-portal-empty">No other lessons yet.</p>
+                        <p className="player-portal-empty">No bookings yet.</p>
                       )}
                     </>
                   )}
@@ -1634,8 +1869,43 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
               )}
 
               {tab === "reviews" && !isGuest && (
+                <>
+                  {/* The hero is asking for a new one, not reading old ones.
+                      A player opens this tab far more often to send a swing
+                      than to re-read a review from three weeks ago, so the
+                      history sits underneath rather than in front. */}
+                  {reviewOffer && (
+                    <section className="player-portal-section player-portal-review-hero">
+                      <h2>New swing review</h2>
+                      <p className="player-portal-lead">
+                        Send a swing or a question. Back with you within{" "}
+                        {reviewOffer.turnaroundDays} day
+                        {reviewOffer.turnaroundDays === 1 ? "" : "s"}.
+                      </p>
+                      <button
+                        className="player-portal-primary"
+                        type="button"
+                        onClick={() => {
+                          setReviewError("");
+                          setReviewFlowOpen(true);
+                        }}
+                      >
+                        Start a swing review
+                      </button>
+                      <p className="player-portal-empty">
+                        {reviewOffer.passOptions.length
+                          ? `${reviewOffer.passOptions[0].creditsAvailable} credit${
+                              reviewOffer.passOptions[0].creditsAvailable === 1 ? "" : "s"
+                            } ready to use`
+                          : reviewOffer.canBuy
+                            ? `${reviewOffer.currency} ${reviewOffer.price.toFixed(2)} each`
+                            : "Ask your coach about credits"}
+                      </p>
+                    </section>
+                  )}
+
                 <section className="player-portal-section">
-                  <h2>Swing reviews</h2>
+                  <h2>Past reviews</h2>
                   {/* One sitting with the coach, kept whole: the videos they
                       worked on, the screenshots they marked up, what they wrote
                       and what they set you to practise. The same pieces are
@@ -1811,6 +2081,142 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                     <p className="player-portal-empty">No swing reviews yet.</p>
                   )}
                 </section>
+                </>
+              )}
+
+              {tab === "passes" && !isGuest && (
+                <>
+                  {/* What they hold and what they can get, on one screen.
+                      They are the same subject -- "what am I able to book" --
+                      and the question is asked in both directions at once. */}
+                  {/* Passes sit above the booking toggle for the same reason
+                      the reviews do: "how many have I got left" is the question
+                      a player asks immediately before booking, and answering it
+                      after they have picked a slot is answering it too late.
+
+                      Everything is shown, not just what is spendable. A pass
+                      that has run out or timed out is the answer to "why can't
+                      I book on my pass" -- hiding it turns that into a message
+                      to the coach. */}
+                  {passes.length > 0 && (
+                    <section className="player-portal-section">
+                      <h2>Your passes</h2>
+                      {spendableCredits > 0 && (
+                        <p className="player-portal-lead">
+                          {spendableCredits === 1
+                            ? "1 lesson paid for and ready to book."
+                            : `${spendableCredits} lessons paid for and ready to book.`}
+                          {nextPassExpiry && formatDate(nextPassExpiry)
+                            ? ` Use them by ${formatDate(nextPassExpiry)}.`
+                            : ""}
+                        </p>
+                      )}
+                      <ul className="player-portal-list">
+                        {passes.map((pass) => {
+                          // The line is "can I book on this right now", not
+                          // "is it used up". A pass that has not started yet is
+                          // as unbookable as one that ran out, and styling it
+                          // like a live balance is the version of this screen
+                          // that gets someone turned away at the bay.
+                          const spendable = pass.status === "active";
+                          return (
+                            <li
+                              className={`player-portal-pass${spendable ? "" : " is-inactive"}`}
+                              key={pass.id}
+                            >
+                              <div className="player-portal-pass-head">
+                                <strong>{pass.name}</strong>
+                                <span className="player-portal-pass-count">
+                                  {passBalanceLabel(pass)}
+                                </span>
+                              </div>
+                              <span className="player-portal-pass-meta">
+                                {[
+                                  pass.creditsAllocated
+                                    ? `${pass.creditsRedeemed} of ${pass.creditsAllocated} used`
+                                    : "",
+                                  pass.covers.length ? `Covers ${pass.covers.join(", ")}` : "",
+                                ]
+                                  .filter(Boolean)
+                                  .join(" · ")}
+                              </span>
+                              {pass.expiresAt && formatDate(pass.expiresAt) && (
+                                <span className="player-portal-pass-meta">
+                                  {pass.status === "expired" ? "Expired" : "Expires"}{" "}
+                                  {formatDate(pass.expiresAt)}
+                                </span>
+                              )}
+                              {/* Where the credits went. Dates only: naming the
+                                  lesson would mean a join the portal does not
+                                  have, and "used on these days" is enough to
+                                  settle a disagreement about the balance. */}
+                              {pass.history.length > 0 && (
+                                <span className="player-portal-pass-meta">
+                                  Used{" "}
+                                  {pass.history
+                                    .map((entry) => formatDate(entry.redeemedAt))
+                                    .filter(Boolean)
+                                    .slice(0, 4)
+                                    .join(", ")}
+                                  {pass.history.length > 4 ? "…" : ""}
+                                </span>
+                              )}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </section>
+                  )}
+
+                  {/* What the coach sells, directly above the passes it adds
+                      to. Buying and holding are the same subject -- "how many
+                      have I got, and can I get more" -- and splitting them
+                      across two screens makes the second one hard to find.
+
+                      Absent entirely when the business has not set up card
+                      payments: the server sends an empty shop, and a "Buy"
+                      button that cannot take money is worse than no button. */}
+                  {shop.length > 0 && (
+                    <section className="player-portal-section">
+                      <h2>{passes.length ? "Buy more" : "Buy lessons or a review"}</h2>
+                      <p className="player-portal-lead">
+                        Paid for here, straight onto your account. Book it whenever you like.
+                      </p>
+                      <ul className="player-portal-list">
+                        {shop.map((item) => (
+                          <li className="player-portal-shop-item" key={item.serviceId}>
+                            <div className="player-portal-shop-main">
+                              <strong>{item.name}</strong>
+                              <span>
+                                {item.credits === 1
+                                  ? "1 credit"
+                                  : `${item.credits} credits`}
+                                {item.description ? ` · ${item.description}` : ""}
+                              </span>
+                            </div>
+                            <button
+                              className="player-portal-primary player-portal-shop-buy"
+                              type="button"
+                              disabled={Boolean(buyingId)}
+                              onClick={() => void buyShopItem(item.serviceId)}
+                            >
+                              {buyingId === item.serviceId
+                                ? "Opening…"
+                                : `${item.currency} ${item.price.toFixed(2)}`}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  )}
+
+                  {!passes.length && !shop.length && (
+                    <p className="player-portal-empty">
+                      Nothing here yet. Passes your coach gives you, and anything you buy, show up
+                      on this screen.
+                    </p>
+                  )}
+                </>
               )}
 
               {tab === "practice" && !isGuest && (

@@ -21,6 +21,12 @@ import { calendarSlot, MINUTES_IN_DAY } from "./_shared/calendar-slot.mts";
 import { planExternalReschedule, sameSlot } from "./_shared/external-reschedule.mts";
 import { legacyOriginalWorkspaceId, defaultCalendarSlug } from "./_shared/account.mts";
 import {
+  findReviewService,
+  newSwingReviewLessonId,
+  reviewDraftVerdict,
+  reviewPaymentOptions,
+} from "./_shared/swing-review.mts";
+import {
   checkoutSourceRef,
   findPlayerShopItem,
   playerShopItems,
@@ -42,6 +48,7 @@ import {
   playerPassViews,
   readPassesForPerson,
   readUnassignedPasses,
+  reservePassCredit,
   reverseRedemptionsForBooking,
   suggestPassTemplate,
   voidPass,
@@ -9661,6 +9668,10 @@ async function readPlayerProfile(session) {
       // arrive as loose notes; it grants no access the note itself doesn't,
       // because the player is already being handed the note.
       lessonId: note.lessonId,
+      // Which booking it was taken against, when it was taken against one.
+      // The portal's booking history matches on this rather than on the day,
+      // so a note never appears under the wrong lesson.
+      calendarItemId: note.calendarItemId,
       createdAt: note.createdAt,
       updatedAt: note.updatedAt,
     }));
@@ -9699,9 +9710,32 @@ async function readPlayerProfile(session) {
    * either way.
    */
   const stripeStatus = stripeCredentialStatus(settingsMap[STRIPE_SECRET_SETTING]);
-  const shop = stripeStatus.configured
-    ? playerShopItems(serviceList, playerShopCurrency(settingsMap))
-    : [];
+  const currency = playerShopCurrency(settingsMap);
+  const shop = stripeStatus.configured ? playerShopItems(serviceList, currency) : [];
+
+  /* Everything the New Swing Review screen needs to decide what it can offer.
+   *
+   * Which passes may pay for a review is worked out here rather than in the
+   * browser, for the same reason the checkout is priced here: the portal
+   * should be asking "what may I do", not deciding it. It also keeps the
+   * player's pass view free of catalogue ids -- the portal never has to match
+   * a coverage list against a service id to know whether a credit fits.
+   */
+  const reviewService = findReviewService(serviceList);
+  const review = reviewService
+    ? {
+        serviceId: reviewService.id,
+        name: reviewService.name,
+        price: reviewService.price,
+        currency,
+        turnaroundDays: reviewService.turnaroundDays,
+        /** Empty means they must buy one -- or that the coach sells none. */
+        passOptions: reviewPaymentOptions(heldPasses, reviewService.id),
+        /** False when the business cannot take a card, so the screen offers a
+         *  credit or nothing rather than a button that cannot charge. */
+        canBuy: stripeStatus.configured && reviewService.price > 0,
+      }
+    : null;
 
   /* What they have already paid for.
    *
@@ -9714,12 +9748,17 @@ async function readPlayerProfile(session) {
    * passes.mts. Service names are resolved here because this is where the
    * catalogue already is -- the player has no way to look an id up.
    */
-  const passes = session.personId
-    ? playerPassViews(
-        await readPassesForPerson(accountId, session.personId),
-        new Map(serviceList.map((service) => [service.id, service.name])),
-      )
+  // Read once and used twice -- for the player's own pass list and for what
+  // may pay for a review. readPassesForPerson sweeps returnable credits before
+  // answering, so calling it twice is two writes and two reads on the landing
+  // screen, at roughly 217ms per round trip on a cold instance.
+  const heldPasses = session.personId
+    ? await readPassesForPerson(accountId, session.personId)
     : [];
+  const passes = playerPassViews(
+    heldPasses,
+    new Map(serviceList.map((service) => [service.id, service.name])),
+  );
 
   return {
     player: {
@@ -9737,6 +9776,7 @@ async function readPlayerProfile(session) {
     practiceBlockTypes,
     passes,
     shop,
+    review,
     bookingEmbed,
   };
 }
@@ -12065,6 +12105,165 @@ async function routeBookingApiRequest(
       }
       const body = await parseBody(req);
       return json(await completePracticeBlockForPlayer(body?.id, session));
+    }
+
+    /* --- Asking for a swing review ---------------------------------------
+     *
+     * Creates an ordinary booking. The pass schema is explicit that this is
+     * what a review is -- a booking of a video-review service, with a
+     * server-set deadline instead of a slot -- so this route composes existing
+     * machinery rather than adding a parallel notion of "a review":
+     *
+     *   createPublicBooking  the booking and its turnaround deadline
+     *   reservePassCredit    the credit, taken atomically against that booking
+     *   upsertLessonNote     what the player wants looked at, filed under the
+     *                        review's lesson id so the coach's swing review
+     *                        screen gathers it with the video
+     *
+     * The video is not here. It goes up through the transfer pipeline from the
+     * player's device, carrying the same lesson id this returns, because the
+     * bytes should not pass through a JSON route.
+     */
+    if (req.method === "POST" && pathname === "/api/player/reviews") {
+      const session = await readPlayerSession(playerSessionTokenFromRequest(req));
+      if (!session) {
+        return json({ error: "unauthorized", message: "Player login required." }, 401);
+      }
+      if (!session.personId) {
+        return json(
+          { error: "no_profile", message: "Your coach needs to finish setting up your profile." },
+          409,
+        );
+      }
+      const accountId = cleanSlug(session.accountId, "");
+      if (!accountId) throw missingAccountScope("player_review");
+
+      const body = await parseBody(req);
+      const notes = cleanString(body?.notes, "", 4000);
+      const hasVideo = body?.hasVideo === true;
+
+      const verdict = reviewDraftVerdict({ notes, hasVideo });
+      if (!verdict.ok) return json({ error: "empty_review", message: verdict.reason }, 400);
+
+      const state = await readPublicCatalogState(accountId);
+      const service = findReviewService(
+        (state.services || []).filter((entry) =>
+          recordBelongsToAccount(entry, publicWorkspaceAccount(state).id),
+        ),
+      );
+      if (!service) {
+        return json(
+          {
+            error: "no_review_service",
+            message: "Your coach does not offer video reviews yet.",
+          },
+          409,
+        );
+      }
+
+      // Which credit is being spent is named by the caller, but whether it may
+      // be spent is decided here and then again, atomically, inside
+      // reservePassCredit. The pre-check exists only so the common failure --
+      // no credits at all -- costs a 402 rather than an orphaned booking.
+      const passId = cleanString(body?.passId, "", 120);
+      const options = reviewPaymentOptions(
+        await readPassesForPerson(accountId, session.personId),
+        service.id,
+      );
+      const chosen = passId
+        ? options.find((option) => option.passId === passId)
+        : options[0];
+      if (!chosen) {
+        return json(
+          {
+            error: "payment_required",
+            message: "You have no review credits left.",
+            serviceId: service.id,
+            price: service.price,
+          },
+          402,
+        );
+      }
+
+      const lessonId = newSwingReviewLessonId();
+      // createPublicBooking wants a name, and the session carries only an
+      // email. Read it from the person the session already resolves to rather
+      // than asking the player to retype it into a form they have no reason to
+      // see.
+      const personRows = (await db().sql`
+        SELECT name FROM people
+        WHERE account_id = ${accountId} AND id = ${session.personId}
+        LIMIT 1
+      `) as Record<string, unknown>[];
+      const fullName =
+        cleanString(personRows[0]?.name, "", 180) ||
+        cleanString(session.email, "", 180).split("@")[0] ||
+        "Player";
+      const [firstName, ...rest] = fullName.split(/\s+/);
+      const booking = await createPublicBooking(
+        accountId,
+        {
+          serviceId: service.id,
+          firstName,
+          lastName: rest.join(" ") || firstName,
+          email: session.email || "",
+          phone: session.phone || "",
+        },
+        context,
+      );
+      const bookingId = cleanString(booking?.appointment?.id, "", 160);
+
+      /* From here the booking exists and the player is committed.
+       *
+       * A reservation that fails now is the race this cannot prevent: two
+       * devices spending the last credit at the same moment. The booking is
+       * deliberately left standing rather than unwound -- it is a real request
+       * the coach can see and settle at the till, which is a better outcome
+       * than a review that silently never happened. It is logged loudly
+       * because it should be rare.
+       */
+      try {
+        await reservePassCredit({
+          accountId,
+          passId: chosen.passId,
+          bookingId,
+          actorId: session.personId,
+        });
+      } catch (error) {
+        console.error("player_review:credit_lost_race", accountId, bookingId, error);
+        return json(
+          {
+            error: "credit_unavailable",
+            message:
+              "Your review was booked but the credit could not be taken. Your coach will sort it out.",
+            bookingId,
+            lessonId,
+          },
+          409,
+        );
+      }
+
+      if (notes) {
+        await upsertLessonNote(
+          {
+            playerId: session.personId,
+            playerName: fullName,
+            lessonId,
+            title: "What I would like looked at",
+            body: notes,
+            source: "typed",
+          },
+          accountId,
+        );
+      }
+
+      return json({
+        ok: true,
+        bookingId,
+        lessonId,
+        service: { id: service.id, name: service.name, turnaroundDays: service.turnaroundDays },
+        ...(await readPlayerProfile(session)),
+      });
     }
 
     /* --- Buying, as the player -------------------------------------------
