@@ -9,15 +9,24 @@
 // Clarity Caddy is deliberately absent. It is a different product, and its one
 // way in is the card on the home route -- a permanent link in the bar would put
 // "leave here" next to every screen in the terminal.
-export type PlayerTerminalDestination = "home" | "lessons" | "practice" | "notes" | "videos" | "book";
+export type PlayerTerminalDestination =
+  | "home"
+  | "lessons"
+  | "reviews"
+  | "practice"
+  | "notes"
+  | "videos"
+  | "book";
 
 type NavLink = {
   id: PlayerTerminalDestination;
   label: string;
 };
 
-// Practice sits next to Lessons because that is the order of the thing: a
-// lesson happens, practice comes out of it, notes and videos are the record.
+// The order of the thing: a lesson happens, the coach reviews it, practice
+// comes out of that, and notes and videos are the record. Reviews sits where
+// it does for that reason -- it is the sitting itself, and the three after it
+// are the pieces that sitting produced, each also reachable on its own.
 //
 // "book" is not in this list: it only exists for a business that has
 // configured an outside booking widget, and it is named by that business
@@ -25,10 +34,21 @@ type NavLink = {
 const NAV_LINKS: NavLink[] = [
   { id: "home", label: "Home" },
   { id: "lessons", label: "Lessons" },
+  { id: "reviews", label: "Reviews" },
   { id: "practice", label: "Practice" },
   { id: "notes", label: "Notes" },
   { id: "videos", label: "Videos" },
 ];
+
+// Lessons -- and booking with it -- doesn't exist for a guest at all, and
+// neither does practice or reviews: prescribed practice and swing reviews both
+// come from a coach, and a guest has not got one yet. Not shown-but-locked,
+// just not here: there is nothing behind any of them to show.
+const GUEST_HIDDEN: ReadonlySet<PlayerTerminalDestination> = new Set([
+  "lessons",
+  "reviews",
+  "practice",
+]);
 
 export type PlayerTerminalNavProps = {
   /** Null while a child workspace owns the screen, so no link reads as current. */
@@ -58,13 +78,7 @@ export function PlayerTerminalNav({
   onSignIn,
   externalBooking,
 }: PlayerTerminalNavProps) {
-  // Lessons -- and booking with it -- doesn't exist for a guest at all, and
-  // neither does practice: prescribed practice comes from a coach, and a guest
-  // has not got one yet. Not shown-but-locked, just not here: there is nothing
-  // behind either of them to show.
-  const baseLinks = guest
-    ? NAV_LINKS.filter((link) => link.id !== "lessons" && link.id !== "practice")
-    : NAV_LINKS;
+  const baseLinks = guest ? NAV_LINKS.filter((link) => !GUEST_HIDDEN.has(link.id)) : NAV_LINKS;
 
   // Last in the bar, and only when there is one. A guest never gets it either:
   // the config arrives with the player profile, and a guest has no account to

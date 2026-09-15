@@ -26,7 +26,8 @@ import {
   isPlayerBookingEmbedConfigured,
   type PlayerBookingEmbedConfig,
 } from "./PlayerBookingEmbed";
-import { formatDate } from "./format";
+import { formatClock, formatDate } from "./format";
+import { groupSwingReviews } from "./swingReviews";
 import "../practice/practice.css";
 import { PracticeWall } from "../practice/PracticeWall";
 import {
@@ -92,11 +93,14 @@ type Note = {
   title?: string;
   body?: string;
   playerName?: string;
+  /** The sitting this note was taken in. Present on a note the coach typed
+   *  during a swing review, which is how the Reviews tab finds it again. */
+  lessonId?: string;
   createdAt?: string;
   updatedAt?: string;
 };
 
-type PortalTab = "home" | "lessons" | "practice" | "notes" | "videos" | "book";
+type PortalTab = "home" | "lessons" | "reviews" | "practice" | "notes" | "videos" | "book";
 
 type PracticeExpiryType = "next_lesson" | "set_date" | "none";
 type PracticeStatus = "active" | "completed" | "expired" | "archived";
@@ -216,6 +220,8 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileError, setProfileError] = useState("");
   const [expandedPracticeId, setExpandedPracticeId] = useState<string | null>(null);
+  /** Which swing review is open. Empty means the list, which is how it lands. */
+  const [openReviewId, setOpenReviewId] = useState("");
   const [completingPracticeId, setCompletingPracticeId] = useState<string | null>(null);
   const [practiceVideos, setPracticeVideos] = useState<ClarityCloudImportTransfer[]>([]);
   // The business's outside booking widget, if it runs one. Null until the
@@ -501,6 +507,9 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   const navigateTerminal = useCallback((destination: PlayerTerminalDestination) => {
     setRecording(false);
     setOpenVideoId("");
+    // Leaving Reviews shuts the review that was open, so coming back lands on
+    // the list rather than mid-way inside whatever was read last.
+    setOpenReviewId("");
     setTab(destination);
   }, []);
 
@@ -822,6 +831,23 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
     [notes],
   );
 
+  /* Swing reviews, assembled out of the four lists that are already on this
+     screen. Nothing is fetched for them: a review is a lesson id stamped on
+     notes, videos and practice the portal has anyway, so this is a regrouping
+     of what is here rather than a new source of truth. See swingReviews.ts. */
+  const swingReviews = useMemo(
+    () => (isGuest ? [] : groupSwingReviews({ savedVideos, cloudVideos, notes, practice })),
+    [cloudVideos, isGuest, notes, practice, savedVideos],
+  );
+
+  /* A review holding a returned video the player has not opened. Counted off
+     the reviews rather than the raw transfer list so the dot on the Reviews
+     card and the reviews themselves can never disagree. */
+  const unseenReviewCount = useMemo(
+    () => swingReviews.filter((review) => review.unseen).length,
+    [swingReviews],
+  );
+
   /** What's outstanding -- the portal's Practice landing view leads with this. */
   const activePractice = useMemo(() => practice.filter((block) => block.status === "active"), [practice]);
 
@@ -881,7 +907,11 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   // a tab with no link in the bar and nothing in it is worse than being home.
   useEffect(() => {
     if (tab === "book" && !bookingEmbed) setTab("home");
-  }, [bookingEmbed, tab]);
+    // Reviews come from a coach, so a guest has no link to it in the bar. A
+    // deep link or a stale tab could still land on it; home is the honest
+    // answer rather than an empty screen with no way out of it.
+    if (tab === "reviews" && isGuest) setTab("home");
+  }, [bookingEmbed, isGuest, tab]);
 
   // Every screen in the terminal wears the same bar, including the ones that
   // take the whole viewport.
@@ -1030,6 +1060,24 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                               : nextLesson
                                 ? formatBookingWhen(nextLesson)
                                 : "No upcoming lessons"}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          className="player-portal-home-card"
+                          onClick={() => navigateTerminal("reviews")}
+                        >
+                          <span className="player-portal-home-card-title">Swing reviews</span>
+                          <span className="player-portal-home-card-sub">
+                            {(profileLoading || cloudLoading) && !swingReviews.length
+                              ? "Loading\u2026"
+                              : unseenReviewCount
+                                ? `${unseenReviewCount} new from your coach`
+                                : swingReviews.length
+                                  ? formatDate(swingReviews[0].at)
+                                    ? `Last one ${formatDate(swingReviews[0].at)}`
+                                    : `${swingReviews.length} review${swingReviews.length === 1 ? "" : "s"}`
+                                  : "Nothing reviewed yet"}
                           </span>
                         </button>
                         <button
@@ -1271,6 +1319,186 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                     </ul>
                   ) : (
                     !addingNote && <p className="player-portal-empty">No notes yet.</p>
+                  )}
+                </section>
+              )}
+
+              {tab === "reviews" && !isGuest && (
+                <section className="player-portal-section">
+                  <h2>Swing reviews</h2>
+                  {/* One sitting with the coach, kept whole: the videos they
+                      worked on, the screenshots they marked up, what they wrote
+                      and what they set you to practise. The same pieces are
+                      each reachable on their own tab -- this is the only place
+                      they are back together. */}
+                  <p className="player-portal-lead">
+                    {swingReviews.length
+                      ? "Everything from one sitting with your coach, kept together."
+                      : "When your coach reviews your swing, the whole sitting lands here."}
+                  </p>
+
+                  {(profileLoading || cloudLoading) && !swingReviews.length ? (
+                    <Loading what="your swing reviews" className="player-portal-empty" />
+                  ) : swingReviews.length ? (
+                    <ul className="player-portal-list">
+                      {swingReviews.map((review) => {
+                        const expanded = review.id === openReviewId;
+                        return (
+                          <li
+                            className={`player-portal-review${expanded ? " is-expanded" : ""}${
+                              review.unseen ? " is-unseen" : ""
+                            }`}
+                            key={review.id}
+                          >
+                            <button
+                              type="button"
+                              className="player-portal-review-toggle"
+                              aria-expanded={expanded}
+                              onClick={() => setOpenReviewId(expanded ? "" : review.id)}
+                            >
+                              <span className="player-portal-review-head">
+                                <strong>
+                                  Swing review
+                                  {review.unseen && (
+                                    <span
+                                      className="player-portal-review-dot"
+                                      aria-label="Not opened yet"
+                                    />
+                                  )}
+                                </strong>
+                                <span>
+                                  {[
+                                    formatDate(review.at),
+                                    `${review.itemCount} item${review.itemCount === 1 ? "" : "s"}`,
+                                  ]
+                                    .filter(Boolean)
+                                    .join(" · ")}
+                                </span>
+                              </span>
+                              <span aria-hidden="true">{expanded ? "\u2013" : "+"}</span>
+                            </button>
+
+                            {expanded && (
+                              <div className="player-portal-review-body">
+                                {review.coachMessage && (
+                                  <p className="player-portal-review-message">
+                                    {review.coachMessage}
+                                  </p>
+                                )}
+
+                                {review.videos.map((video) => (
+                                  <button
+                                    type="button"
+                                    className="player-portal-review-video"
+                                    key={video.savedVideoId}
+                                    onClick={() => setOpenVideoId(video.savedVideoId)}
+                                  >
+                                    {video.thumbnailDataUrl ? (
+                                      <img src={video.thumbnailDataUrl} alt="" />
+                                    ) : (
+                                      <span className="player-portal-review-video-blank" />
+                                    )}
+                                    <span>
+                                      <strong>{video.title}</strong>
+                                      <small>Watch</small>
+                                    </span>
+                                  </button>
+                                ))}
+
+                                {/* In the cloud, not on this phone. Pulling it
+                                    down is also what clears its dot -- the same
+                                    gesture the Videos shelf treats as seen. */}
+                                {review.cloudVideos.map((transfer) => (
+                                  <button
+                                    type="button"
+                                    className="player-portal-review-video is-cloud"
+                                    key={transfer.savedVideoId}
+                                    disabled={downloadingIds.has(transfer.savedVideoId)}
+                                    onClick={() => void downloadFromCloud(transfer.savedVideoId)}
+                                  >
+                                    <span className="player-portal-review-video-blank" />
+                                    <span>
+                                      <strong>{transfer.savedVideo?.title || "Video"}</strong>
+                                      <small>
+                                        {downloadingIds.has(transfer.savedVideoId)
+                                          ? "Downloading\u2026"
+                                          : "Download to watch"}
+                                      </small>
+                                    </span>
+                                  </button>
+                                ))}
+
+                                {/* A screenshot the coach marked up. The picture
+                                    is stripped on upload, so one that came over
+                                    the cloud arrives as its words and the second
+                                    it was taken at -- which the video above can
+                                    still be wound to. */}
+                                {review.screenshots.length > 0 && (
+                                  <ul className="player-portal-review-shots">
+                                    {review.screenshots.map((shot) => (
+                                      <li key={`${shot.savedVideoId}-${shot.id}`}>
+                                        {shot.imageDataUrl ? (
+                                          <img src={shot.imageDataUrl} alt={shot.title} />
+                                        ) : (
+                                          <span className="player-portal-review-shot-time">
+                                            {formatClock(shot.currentTime)}
+                                          </span>
+                                        )}
+                                        <div>
+                                          <strong>{shot.title}</strong>
+                                          {shot.note && <p>{shot.note}</p>}
+                                        </div>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                )}
+
+                                {review.analysisNotes.map((note) => (
+                                  <div className="player-portal-review-note" key={note.id}>
+                                    <strong>{formatClock(note.time)}</strong>
+                                    <p>{note.text}</p>
+                                  </div>
+                                ))}
+
+                                {review.notes.map((note) => (
+                                  <div className="player-portal-review-note" key={note.id}>
+                                    <strong>{note.title || "Lesson note"}</strong>
+                                    {note.body && <p>{note.body}</p>}
+                                  </div>
+                                ))}
+
+                                {/* Practice set out of this review. It lives on
+                                    the Practice wall -- this is a way in, not a
+                                    second copy, so completing it stays in the
+                                    one place that can. */}
+                                {review.practice.map((block) => (
+                                  <button
+                                    type="button"
+                                    className="player-portal-review-note is-practice"
+                                    key={block.id}
+                                    onClick={() => {
+                                      setExpandedPracticeId(block.id);
+                                      navigateTerminal("practice");
+                                    }}
+                                  >
+                                    <strong>{block.title}</strong>
+                                    <small>Open on your practice wall</small>
+                                  </button>
+                                ))}
+
+                                {review.itemCount === 0 && (
+                                  <p className="player-portal-empty">
+                                    Your coach has started this one. Nothing in it yet.
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : (
+                    <p className="player-portal-empty">No swing reviews yet.</p>
                   )}
                 </section>
               )}

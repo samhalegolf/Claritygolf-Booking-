@@ -1274,3 +1274,226 @@
   font-style: italic;
   color: var(--pt-text-soft);
 }
+
+/* --- Swing reviews --------------------------------------------------------
+ *
+ * One sitting with the coach, kept whole. The row is the same card as a
+ * booking or a note -- a review is another thing on the pile until it is
+ * opened, and only then does it become a screen's worth of material.
+ * ------------------------------------------------------------------------ */
+.player-portal-review {
+  border: 1px solid var(--pt-border-soft);
+  border-radius: 10px;
+  background: var(--pt-surface-soft);
+  overflow: hidden;
+}
+
+.player-portal-review.is-expanded {
+  border-color: var(--pt-border);
+  background: var(--pt-surface);
+}
+
+.player-portal-review-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 0;
+  background: transparent;
+  color: var(--pt-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.player-portal-review-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.player-portal-review-head strong {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 15px;
+}
+
+.player-portal-review-head span {
+  font-size: 13px;
+  color: var(--pt-text-soft);
+}
+
+/* The dot only ever means one thing in the portal: your coach sent something
+   back and you have not opened it. Same mark as the video shelf's. */
+.player-portal-review-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--pt-accent);
+  flex-shrink: 0;
+}
+
+.player-portal-review-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 14px 14px;
+}
+
+/* What the coach typed when they sent it. It is the one thing in a review
+   addressed to the player rather than about the swing, so it leads. */
+.player-portal-review-message {
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 2px solid var(--pt-accent);
+  border-radius: 0 8px 8px 0;
+  background: var(--pt-surface-soft);
+  font-size: 14px;
+  color: var(--pt-text-body);
+  white-space: pre-wrap;
+}
+
+.player-portal-review-video {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border: 1px solid var(--pt-border-soft);
+  border-radius: 9px;
+  background: var(--pt-surface);
+  color: var(--pt-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.player-portal-review-video:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.player-portal-review-video img,
+.player-portal-review-video-blank {
+  width: 56px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  object-fit: cover;
+  background: var(--pt-hover);
+}
+
+.player-portal-review-video span {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.player-portal-review-video strong {
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-portal-review-video small {
+  font-size: 12px;
+  color: var(--pt-muted);
+}
+
+.player-portal-review-shots {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.player-portal-review-shots li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.player-portal-review-shots img {
+  width: 76px;
+  flex-shrink: 0;
+  border: 1px solid var(--pt-border-soft);
+  border-radius: 8px;
+  background: var(--pt-hover);
+}
+
+/* The stand-in for a screenshot whose picture did not travel: the second it
+   was taken at, which is a real way back into the video rather than a broken
+   frame pretending to be one. */
+.player-portal-review-shot-time {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 76px;
+  min-height: 44px;
+  flex-shrink: 0;
+  border: 1px dashed var(--pt-border);
+  border-radius: 8px;
+  color: var(--pt-muted);
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.player-portal-review-shots strong {
+  display: block;
+  font-size: 14px;
+}
+
+.player-portal-review-shots p {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--pt-text-body);
+  white-space: pre-wrap;
+}
+
+.player-portal-review-note {
+  display: block;
+  width: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--pt-border-soft);
+  border-radius: 9px;
+  background: var(--pt-surface);
+  color: var(--pt-text);
+  font: inherit;
+  text-align: left;
+}
+
+.player-portal-review-note strong {
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.player-portal-review-note p {
+  margin: 2px 0 0;
+  font-size: 14px;
+  color: var(--pt-text-body);
+  white-space: pre-wrap;
+}
+
+/* A way through to the practice wall, not a second copy of the block: the
+   dashes say this one is a door rather than a thing. Its second line is a
+   <small> because the row is a <button>, and a <p> inside one is not markup a
+   browser is obliged to keep in one piece. */
+.player-portal-review-note.is-practice {
+  cursor: pointer;
+  border-style: dashed;
+}
+
+.player-portal-review-note.is-practice small {
+  display: block;
+  margin-top: 2px;
+  color: var(--pt-muted);
+  font-size: 13px;
+}

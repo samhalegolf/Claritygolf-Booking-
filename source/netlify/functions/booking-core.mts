@@ -9580,6 +9580,11 @@ async function readPlayerProfile(session) {
       title: note.title,
       body: note.body,
       playerName: note.playerName,
+      // The note's sitting, and the only thing tying a swing review together
+      // -- the portal groups on it. Dropping it here is what made a review
+      // arrive as loose notes; it grants no access the note itself doesn't,
+      // because the player is already being handed the note.
+      lessonId: note.lessonId,
       createdAt: note.createdAt,
       updatedAt: note.updatedAt,
     }));
