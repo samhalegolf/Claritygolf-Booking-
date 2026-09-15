@@ -1754,7 +1754,7 @@ button {
 .client-profile-note-block p {
   margin: 0;
   padding: 0;
-  color: var(--body);
+  color: var(--text);
 }
 
 .client-history {
@@ -1826,7 +1826,7 @@ button {
   padding: 8px 11px;
   border: 1px solid var(--border);
   background: var(--panel-soft);
-  color: var(--body);
+  color: var(--text);
   font: inherit;
   font-weight: 750;
   cursor: pointer;
@@ -2114,7 +2114,7 @@ button {
   margin: 0;
   padding: 0;
   white-space: pre-wrap;
-  color: var(--body);
+  color: var(--text);
 }
 
 .lesson-note-card .outline-button {
@@ -4621,6 +4621,16 @@ button {
   --primary: var(--c-accent);
   --primary-soft: #142019;
   --primary-text: var(--c-accent-text);
+  /* Text on a fill that is dark in BOTH themes, as opposed to --primary-text,
+     which is text on --primary and correctly inverts with it.
+     .primary-button and the surfaces below borrow the brand fill but hardcode
+     it near-black, so when --primary-text flipped to near-black in dark they
+     became dark text on a near-black button -- "Save", "Issue pass" and every
+     other primary action, unreadable. Splitting the two names is
+     what stops the fix from turning `background: var(--primary); color:
+     var(--primary-text)` -- which .theme-switch > span.active and
+     .axis-cycle-button.is-squashed both use correctly -- into white on white. */
+  --on-brand-fill: var(--c-accent-text);
   --danger: var(--c-danger);
   --danger-soft: #fff1ed;
   /* --success was missing from this list until 2026-09-11, so every
@@ -4681,6 +4691,11 @@ button {
      shadows that have to be heavier, gradients, and the lesson-colour
      fallbacks that read as holes rather than cards against near-black. */
   --panel-glass: rgba(9, 17, 12, 0.9);
+  /* Text on the fixed dark brand fill. See the alias block for what separates
+     this from --primary-text: the surfaces reading it are dark in both themes,
+     so their text has to stay light while the palette inverts around it.
+     --c-accent is already the light half of the pair here. */
+  --on-brand-fill: var(--c-accent);
   --primary-soft: #101b14;
   --danger-soft: rgba(255, 98, 80, 0.13);
   --success-soft: rgba(31, 211, 109, 0.08);
@@ -4765,7 +4780,7 @@ button {
   overflow: hidden;
   border-color: transparent;
   background: transparent;
-  color: var(--primary-text);
+  color: var(--on-brand-fill);
   box-shadow: none;
 }
 
@@ -4898,7 +4913,7 @@ button {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 40%),
     linear-gradient(180deg, color-mix(in srgb, var(--coach-primary) 8%, #111), #030604);
-  color: var(--primary-text);
+  color: var(--on-brand-fill);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.14),
     0 10px 24px rgba(0, 0, 0, 0.16);
@@ -5137,7 +5152,7 @@ button {
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--coach-primary) 8%, rgba(255, 255, 255, 0.06)), transparent 44%),
     linear-gradient(180deg, color-mix(in srgb, var(--coach-accent) 90%, #18231c), #060a07);
-  color: var(--primary-text);
+  color: var(--on-brand-fill);
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
 }
 
@@ -5480,7 +5495,7 @@ button {
   background:
     linear-gradient(135deg, color-mix(in srgb, var(--coach-primary) 7%, transparent), transparent 45%),
     linear-gradient(180deg, color-mix(in srgb, var(--coach-accent) 84%, #101811), #040705);
-  color: var(--primary-text);
+  color: var(--on-brand-fill);
 }
 
 .booking-brand strong {
@@ -5519,7 +5534,7 @@ button {
 
 .service-picker .selected-service em,
 .service-picker .selected-service small {
-  color: color-mix(in srgb, var(--primary-text) 78%, var(--coach-primary));
+  color: color-mix(in srgb, var(--on-brand-fill) 78%, var(--coach-primary));
 }
 
 .embed-panel {
@@ -5783,12 +5798,12 @@ button {
   border-radius: 8px;
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--coach-primary) 18%, #111), #050805);
-  color: var(--primary-text);
+  color: var(--on-brand-fill);
 }
 
 .toast button {
   border-radius: 7px;
-  background: var(--primary-text);
+  background: var(--on-brand-fill);
   color: #07100a;
 }
 

@@ -70,6 +70,129 @@ test("every token referenced is a token that exists", () => {
   assert.deepEqual(dangling, [], `Undefined tokens:\n  ${dangling.join("\n  ")}`);
 });
 
+/**
+ * Every custom property a stylesheet reads is one somebody sets.
+ *
+ * The test above only walks --c-* and --dark-* names, which is how two of
+ * these have already shipped. The first was --success, missing from the alias
+ * list until 2026-09-11, so the settings "Saved" badge had never once rendered
+ * green. The second was --primary-text in dark: it inverted with the palette
+ * while the primary button stayed dark in both themes, leaving "Save" as
+ * near-black text on a near-black fill.
+ *
+ * Both are the same failure, and it is a silent one. An undefined custom
+ * property makes its declaration invalid at computed-value time, so the
+ * declaration is dropped and the element falls back to whatever cascaded
+ * before it -- which usually looks *almost* right, which is why nobody files
+ * it.
+ *
+ * Only references with NO fallback are failed. `var(--x, #fff)` where --x is
+ * never set is not a bug: it renders the fallback, every time, by design.
+ * There are a handful of those (--surface, --line, --surface-2,
+ * --surface-muted, --accent) left over from older palettes -- dead intent, but
+ * dead intent that renders correctly, and deleting them is a separate tidy-up
+ * from catching the ones that break.
+ */
+
+/**
+ * Set from JavaScript, not from a stylesheet.
+ *
+ * These are the legitimate exceptions: values that cannot live in CSS because
+ * they come from the account's saved settings or from a live measurement. Each
+ * is named with the file that sets it, and the test below checks that file
+ * still does -- an allow-list nobody re-checks is how a genuine break gets
+ * waved through.
+ */
+const SET_FROM_JS: Array<{ name: string; setBy: string }> = [
+  // The coach's brand colours, applied inline to .app-shell (App.tsx
+  // brandStyle) and re-applied pre-auth from localStorage (LoginScreen.tsx).
+  { name: "--coach-primary", setBy: "App.tsx" },
+  { name: "--coach-secondary", setBy: "App.tsx" },
+  { name: "--coach-accent", setBy: "App.tsx" },
+  { name: "--coach-neutral", setBy: "App.tsx" },
+  // The video workspace's own palette, applied by its theme module.
+  { name: "--va-bg", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-text", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-muted", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-accent", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-accent-glow", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-border", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-panel-soft", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-marker", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-danger", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-radius-md", setBy: "videoAnalysisTheme.ts" },
+  // Live measurements: where a tile flew from, how far a band is scrolled.
+  { name: "--dock-fly-x", setBy: "App.tsx" },
+  { name: "--dock-fly-y", setBy: "App.tsx" },
+  { name: "--band-offset", setBy: "App.tsx" },
+  { name: "--tile-dx", setBy: "PlayerVideoShelf.tsx" },
+  { name: "--tile-dy", setBy: "PlayerVideoShelf.tsx" },
+];
+// Not here on purpose: --playhead-pos. It is read once, as
+// `width: var(--playhead-pos, 0%)`, and set by nothing at all -- so the
+// playhead sits permanently at 0%. That is dead code rather than a dropped
+// declaration (the fallback renders), which is why the test below leaves it
+// alone and this comment records it instead.
+
+/**
+ * The calendar colours a coach picks, published as `--<field>-set` names.
+ *
+ * Built by interpolation in calendarColorVariables() (App.tsx), so no source
+ * file contains the literal name and the check below cannot look for one.
+ * Matched by shape instead.
+ */
+const JS_SET_PATTERNS = [/^--[a-z0-9-]+-set$/];
+
+// sourceFiles() is declared further down, beside the disclosure test that was
+// the first to need it. Function declarations hoist, so it is usable here.
+
+test("every custom property a stylesheet reads is one somebody sets", () => {
+  const defined = new Set<string>();
+  for (const file of files) {
+    for (const match of read(file).matchAll(/(--[a-z0-9-]+)\s*:/g)) defined.add(match[1]);
+  }
+  const allowed = new Set(SET_FROM_JS.map((entry) => entry.name));
+
+  const dangling: string[] = [];
+  for (const file of files) {
+    // The character after the name decides the verdict: ")" is a bare read and
+    // breaks when undefined, "," means a fallback follows and it does not.
+    for (const match of read(file).matchAll(/var\(\s*(--[a-z0-9-]+)\s*([,)])/g)) {
+      const [, name, next] = match;
+      if (next === ",") continue;
+      if (defined.has(name) || allowed.has(name)) continue;
+      if (JS_SET_PATTERNS.some((pattern) => pattern.test(name))) continue;
+      dangling.push(`${rel(file)} → var(${name}) is read but never set`);
+    }
+  }
+  assert.deepEqual(
+    [...new Set(dangling)].sort(),
+    [],
+    `These declarations are dropped at computed-value time:\n  ${[...new Set(dangling)].sort().join("\n  ")}\n` +
+      "Define the property, give the var() a fallback, or add it to SET_FROM_JS " +
+      "with the file that sets it.",
+  );
+});
+
+test("every allow-listed property is still set from JavaScript", () => {
+  const sources = sourceFiles(SRC).map((file) => ({ name: path.basename(file), text: read(file) }));
+  const stale: string[] = [];
+  for (const { name, setBy } of SET_FROM_JS) {
+    const owner = sources.find((file) => file.name === setBy);
+    if (!owner) {
+      stale.push(`${name}: ${setBy} no longer exists`);
+      continue;
+    }
+    if (!owner.text.includes(name)) stale.push(`${name}: ${setBy} no longer sets it`);
+  }
+  assert.deepEqual(
+    stale,
+    [],
+    "An allow-list nobody re-checks is how a real break gets waved through. " +
+      `Either restore the assignment or drop the entry:\n  ${stale.join("\n  ")}`,
+  );
+});
+
 test("nothing transitions transform on a button", () => {
   const offenders: string[] = [];
   for (const file of files) {
