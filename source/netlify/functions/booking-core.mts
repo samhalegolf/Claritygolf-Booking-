@@ -21,6 +21,19 @@ import { calendarSlot, MINUTES_IN_DAY } from "./_shared/calendar-slot.mts";
 import { planExternalReschedule, sameSlot } from "./_shared/external-reschedule.mts";
 import { legacyOriginalWorkspaceId, defaultCalendarSlug } from "./_shared/account.mts";
 import {
+  checkoutSourceRef,
+  findPlayerShopItem,
+  playerShopItems,
+} from "./_shared/player-shop.mts";
+import {
+  createStripeCheckoutSession,
+  isStripeSecretShaped,
+  resolveStripeCredential,
+  retrieveStripeCheckoutSession,
+  stripeCredentialStatus,
+  STRIPE_SECRET_SETTING,
+} from "./_shared/stripe.mts";
+import {
   assignPass,
   grantPass,
   issuedSourceRefs,
@@ -9610,6 +9623,13 @@ async function claimGuestSubmissions({ guestSenderId, personId, portalPlayerId, 
   }
 }
 
+/** The account's billing currency, for the portal's price labels. Parsed from
+ *  the same settings blob the invoice editor writes, so a coach changes it in
+ *  one place and the shop follows. */
+function playerShopCurrency(settingsMap: Record<string, string>) {
+  return cleanInvoiceSettings(safeJsonParse(settingsMap.accountInvoiceSettingsJson, {})).currency;
+}
+
 async function readPlayerProfile(session) {
   const accountId = cleanSlug(session?.accountId, "");
   if (!accountId) throw missingAccountScope("player_profile");
@@ -9663,7 +9683,25 @@ async function readPlayerProfile(session) {
   // straight from settings rather than off `state`: readPublicCatalogState is
   // the shape the *public* booking page gets, and this belongs to a signed-in
   // player's portal, not to it.
-  const bookingEmbed = playerBookingEmbedForPortal(await readSettingsMap(accountId));
+  const settingsMap = await readSettingsMap(accountId);
+  const bookingEmbed = playerBookingEmbedForPortal(settingsMap);
+
+  /* The shop, and whether it can take a card.
+   *
+   * Read off the same settings map as the booking embed rather than with a
+   * second query: a cold instance pays roughly 217ms per database round trip,
+   * and this is the landing screen.
+   *
+   * `configured` is the account's own answer, not the platform's -- a business
+   * with its own Stripe key can sell whether or not Clarity has one, and one
+   * relying on the platform's cannot sell if it is missing. Nothing about
+   * which key is in play reaches the player; they are buying from the coach
+   * either way.
+   */
+  const stripeStatus = stripeCredentialStatus(settingsMap[STRIPE_SECRET_SETTING]);
+  const shop = stripeStatus.configured
+    ? playerShopItems(serviceList, playerShopCurrency(settingsMap))
+    : [];
 
   /* What they have already paid for.
    *
@@ -9698,6 +9736,7 @@ async function readPlayerProfile(session) {
     practice,
     practiceBlockTypes,
     passes,
+    shop,
     bookingEmbed,
   };
 }
@@ -12028,6 +12067,161 @@ async function routeBookingApiRequest(
       return json(await completePracticeBlockForPlayer(body?.id, session));
     }
 
+    /* --- Buying, as the player -------------------------------------------
+     *
+     * The first place in this app where a customer, rather than a coach, moves
+     * money. Two routes, and the split is deliberate: creating a session takes
+     * no money and can be retried freely, while confirming one hands out a real
+     * spendable entitlement and must be safe to call repeatedly.
+     *
+     * What the player buys is always a pass. That is not a workaround -- it is
+     * the pass system doing its job, and it means a card payment lands in the
+     * same ledger as a counter sale, spends through the same checkout, and
+     * reverses through the same reversal.
+     */
+    if (req.method === "POST" && pathname === "/api/player/checkout") {
+      const session = await readPlayerSession(playerSessionTokenFromRequest(req));
+      if (!session) {
+        return json({ error: "unauthorized", message: "Player login required." }, 401);
+      }
+      if (!session.personId) {
+        return json(
+          {
+            error: "no_profile",
+            message: "Your coach needs to finish setting up your profile before you can buy.",
+          },
+          409,
+        );
+      }
+      const accountId = cleanSlug(session.accountId, "");
+      if (!accountId) throw missingAccountScope("player_checkout");
+
+      const body = await parseBody(req);
+      const state = await readPublicCatalogState(accountId);
+      const settingsMap = await readSettingsMap(accountId);
+      const credential = resolveStripeCredential(settingsMap[STRIPE_SECRET_SETTING]);
+
+      // Priced from the catalogue on the server, never from the request. The
+      // browser sends which thing, not what it costs.
+      const item = findPlayerShopItem(
+        playerShopItems(
+          (state.services || []).filter((service) =>
+            recordBelongsToAccount(service, publicWorkspaceAccount(state).id),
+          ),
+          playerShopCurrency(settingsMap),
+        ),
+        body?.serviceId,
+      );
+      if (!item) {
+        return json({ error: "not_for_sale", message: "That is not for sale." }, 400);
+      }
+
+      const origin = new URL(req.url).origin;
+      const checkout = await createStripeCheckoutSession(credential, {
+        amount: item.price,
+        currency: item.currency,
+        productName: item.name,
+        productDescription:
+          item.credits === 1 ? "1 credit" : `${item.credits} credits`,
+        customerEmail: session.email || "",
+        clientReferenceId: session.personId,
+        // Read back on confirm and checked against the session doing the
+        // confirming. Without this a player could take somebody else's session
+        // id and have the credits land on their own account.
+        metadata: {
+          account_id: accountId,
+          person_id: session.personId,
+          service_id: item.serviceId,
+        },
+        // The portal is the root app, chosen by the session's role -- there is
+        // no /portal path to come back to.
+        successUrl: `${origin}/?purchase={CHECKOUT_SESSION_ID}`,
+        cancelUrl: `${origin}/?purchase=cancelled`,
+      });
+      return json({ url: checkout.url, sessionId: checkout.sessionId });
+    }
+
+    /* Bank a finished checkout.
+     *
+     * A poll, not a webhook: the player is coming back from Stripe with the
+     * session id in the URL and the portal asks until it is paid. That makes
+     * idempotency the whole design rather than an afterthought -- issuing is
+     * keyed on the session id through the unique index on
+     * (account_id, source, source_ref), so calling this a hundred times issues
+     * one pass.
+     *
+     * A webhook would be the belt to this braces and is the obvious next
+     * addition; it would call exactly this code path.
+     */
+    if (req.method === "POST" && pathname === "/api/player/checkout/confirm") {
+      const session = await readPlayerSession(playerSessionTokenFromRequest(req));
+      if (!session) {
+        return json({ error: "unauthorized", message: "Player login required." }, 401);
+      }
+      const accountId = cleanSlug(session.accountId, "");
+      if (!accountId) throw missingAccountScope("player_checkout_confirm");
+
+      const body = await parseBody(req);
+      const sessionId = cleanString(body?.sessionId, "", 180);
+      if (!sessionId) return json({ error: "invalid", message: "Which purchase?" }, 400);
+
+      const settingsMap = await readSettingsMap(accountId);
+      const credential = resolveStripeCredential(settingsMap[STRIPE_SECRET_SETTING]);
+      const paid = await retrieveStripeCheckoutSession(credential, sessionId);
+
+      // Whose purchase this was is Stripe's answer, not the caller's. Both
+      // halves are checked: the account stops one business banking another's
+      // session, the person stops a player banking somebody else's.
+      if (paid.metadata?.account_id !== accountId || paid.metadata?.person_id !== session.personId) {
+        return json({ error: "not_found", message: "That purchase was not found." }, 404);
+      }
+      if (!paid.paid) {
+        return json({ ok: false, status: paid.expired ? "expired" : "pending" });
+      }
+
+      const state = await readPublicCatalogState(accountId);
+      const services = (state.services || []).filter((service) =>
+        recordBelongsToAccount(service, publicWorkspaceAccount(state).id),
+      );
+      const item = findPlayerShopItem(
+        playerShopItems(services, playerShopCurrency(settingsMap)),
+        paid.metadata?.service_id,
+      );
+      if (!item) {
+        // Paid for something the catalogue no longer sells. The money is real,
+        // so this is a job for a human rather than a silent drop.
+        console.error("player_checkout:item_gone", accountId, sessionId);
+        return json(
+          {
+            ok: false,
+            status: "needs_coach",
+            message: "Your payment went through. Your coach will add this to your account.",
+          },
+          202,
+        );
+      }
+
+      await grantPass(
+        {
+          personId: session.personId,
+          // A package brings its own coverage from the catalogue; a single
+          // review has none to bring, so it is granted free-form covering
+          // itself.
+          ...(item.kind === "package"
+            ? { templateServiceId: item.serviceId }
+            : { name: item.name, coversServiceIds: item.coversServiceIds }),
+          credits: item.credits,
+          source: "clarity_checkout",
+          sourceRef: checkoutSourceRef(sessionId),
+          note: `Bought in the player portal`,
+        },
+        passTemplatesFromServices(services),
+        { accountId, actorId: session.personId },
+      );
+
+      return json({ ok: true, status: "paid", ...(await readPlayerProfile(session)) });
+    }
+
     // The player's own view of Clarity Caddy. Deliberately not the coach deep
     // link: that one names a player for a coach to open, and hands a coach's
     // view to whoever holds it. A player opens Caddy as themselves, so all this
@@ -12992,6 +13186,55 @@ async function readPassInbox(accountId: string, services) {
     })),
   };
 }
+
+    /* --- Card payments: whose Stripe account this business uses -----------
+     *
+     * Its own route rather than a field on the settings payload, for two
+     * reasons. A secret key must never travel in the same body as a pile of
+     * notification toggles -- a block that PUTs a stale whole-object draft
+     * would wipe it. And the read has to be asymmetric: this answers with a
+     * status and a masked tail, never with the key, so there is no shape of
+     * response that could leak it into a browser.
+     *
+     * Leaving the field empty is how a business goes back to being billed
+     * through the platform's account. That is a real choice, not a failure to
+     * configure, so clearing is allowed and says so.
+     */
+    if (req.method === "GET" && pathname === "/api/payments/stripe") {
+      const state = await readSettingsState(await currentAccountId(req));
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountFeature(requestContext.account, "invoicing");
+      const settingsMap = await readSettingsMap(requestContext.accountId);
+      return json({ stripe: stripeCredentialStatus(settingsMap[STRIPE_SECRET_SETTING]) });
+    }
+
+    if (req.method === "PUT" && pathname === "/api/payments/stripe") {
+      const body = await parseBody(req);
+      const state = await readSettingsState(await currentAccountId(req));
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountFeature(requestContext.account, "invoicing");
+      const accountId = requestContext.accountId;
+
+      const raw = cleanString(body?.secretKey, "", 200);
+      if (raw && !isStripeSecretShaped(raw)) {
+        return json(
+          {
+            error: "invalid_key",
+            message:
+              "That does not look like a Stripe secret key. It starts sk_ or rk_ — " +
+              "a key starting pk_ is the publishable one and cannot take payments.",
+          },
+          400,
+        );
+      }
+
+      await setSettingsBulk(accountId, { [STRIPE_SECRET_SETTING]: raw });
+      const settingsMap = await readSettingsMap(accountId);
+      return json({
+        stripe: stripeCredentialStatus(settingsMap[STRIPE_SECRET_SETTING]),
+        cleared: !raw,
+      });
+    }
 
     if (req.method === "GET" && pathname === "/api/passes/inbox") {
       const state = await readSettingsState(await currentAccountId(req));

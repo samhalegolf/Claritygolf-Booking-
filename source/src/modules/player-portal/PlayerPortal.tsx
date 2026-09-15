@@ -149,6 +149,19 @@ type PlayerPass = {
   history: Array<{ id: string; redeemedAt: string; bookingId: string | null }>;
 };
 
+/** Something the coach sells that a player can buy for themselves. Every one
+ *  of them resolves to a pass -- see _shared/player-shop.mts. */
+type ShopItem = {
+  serviceId: string;
+  name: string;
+  description: string;
+  price: number;
+  currency: string;
+  credits: number;
+  coversServiceIds: string[];
+  kind: "package" | "video-review";
+};
+
 type CaddyAccess = {
   appUrl: string;
   connected: boolean;
@@ -247,6 +260,10 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   const [practice, setPractice] = useState<PracticeItem[]>([]);
   const [practiceBlockTypes, setPracticeBlockTypes] = useState<PracticeTypeMeta[]>([]);
   const [passes, setPasses] = useState<PlayerPass[]>([]);
+  const [shop, setShop] = useState<ShopItem[]>([]);
+  /** Which item is mid-purchase, so only its own button goes quiet. */
+  const [buyingId, setBuyingId] = useState("");
+  const [purchaseNote, setPurchaseNote] = useState("");
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileError, setProfileError] = useState("");
   const [expandedPracticeId, setExpandedPracticeId] = useState<string | null>(null);
@@ -331,6 +348,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
         practice?: PracticeItem[];
         practiceBlockTypes?: PracticeTypeMeta[];
         passes?: PlayerPass[];
+        shop?: ShopItem[];
         bookingEmbed?: PlayerBookingEmbedConfig;
       };
       if (!res.ok) throw new Error(data?.message || "We couldn't load your profile.");
@@ -342,6 +360,9 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
       // edited them and both ends fall back to the same defaults.
       setPracticeBlockTypes(Array.isArray(data.practiceBlockTypes) ? data.practiceBlockTypes : []);
       setPasses(Array.isArray(data.passes) ? data.passes : []);
+      // Empty when the business has no card payments set up, which is the
+      // server's answer rather than something the portal works out.
+      setShop(Array.isArray(data.shop) ? data.shop : []);
       setBookingEmbed(isPlayerBookingEmbedConfigured(data.bookingEmbed) ? data.bookingEmbed : null);
       if (data.player?.email) setPlayerEmail(data.player.email);
       if (data.player?.name) setPlayerName(data.player.name);
@@ -535,6 +556,94 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
     if (!caddy?.appUrl) return;
     window.open(caddy.appUrl, "_blank", "noopener,noreferrer");
   }, [caddy]);
+
+  /* Buy something.
+   *
+   * The price is not sent -- only which item. The server reprices from the
+   * catalogue, because a price that came from the browser is a price the
+   * browser can change. */
+  const buyShopItem = useCallback(async (serviceId: string) => {
+    setBuyingId(serviceId);
+    setPurchaseNote("");
+    try {
+      const response = await apiFetch("/api/player/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ serviceId }),
+      });
+      const data = (await response.json().catch(() => ({}))) as { url?: string; message?: string };
+      if (!response.ok || !data.url) {
+        throw new Error(data?.message || "Could not start that purchase.");
+      }
+      // Stripe owns the next screen. Replacing rather than opening a tab keeps
+      // the back button meaningful on a phone.
+      window.location.assign(data.url);
+    } catch (error) {
+      setPurchaseNote(
+        error instanceof Error ? error.message : "Could not start that purchase.",
+      );
+      setBuyingId("");
+    }
+  }, []);
+
+  /* Coming back from Stripe.
+   *
+   * The session id arrives in the URL. Confirming is a poll and is safe to run
+   * repeatedly -- issuing is keyed on that id -- so a refresh mid-purchase
+   * cannot buy the credits twice.
+   *
+   * The URL is cleaned either way: a session id left in the address bar is
+   * something a player can bookmark, share, or re-trigger by reloading. */
+  useEffect(() => {
+    if (isGuest) return;
+    const params = new URLSearchParams(window.location.search);
+    const purchase = params.get("purchase");
+    if (!purchase) return;
+
+    window.history.replaceState(null, "", window.location.pathname);
+    if (purchase === "cancelled") {
+      setPurchaseNote("Purchase cancelled — nothing was charged.");
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      setPurchaseNote("Finishing your purchase…");
+      try {
+        const response = await apiFetch("/api/player/checkout/confirm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId: purchase }),
+        });
+        const data = (await response.json().catch(() => ({}))) as {
+          ok?: boolean;
+          status?: string;
+          message?: string;
+          passes?: PlayerPass[];
+        };
+        if (cancelled) return;
+        if (data.ok && Array.isArray(data.passes)) {
+          setPasses(data.passes);
+          setPurchaseNote("Paid. It is on your account now.");
+          setTab("lessons");
+          return;
+        }
+        setPurchaseNote(
+          data.message ||
+            (data.status === "pending"
+              ? "Your payment is still going through. Give it a moment and refresh."
+              : "We could not confirm that purchase. Your coach can sort it out."),
+        );
+      } catch {
+        if (!cancelled) {
+          setPurchaseNote("We could not confirm that purchase. Your coach can sort it out.");
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isGuest]);
 
   const navigateTerminal = useCallback((destination: PlayerTerminalDestination) => {
     setRecording(false);
@@ -1059,6 +1168,12 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
             </div>
           )}
 
+          {purchaseNote && (
+            <p className="player-portal-purchase-note" role="status">
+              {purchaseNote}
+            </p>
+          )}
+
           {profileError ? (
             <div className="player-portal-profile-error">
               <p className="player-portal-error-line" role="alert">
@@ -1243,6 +1358,48 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                             <strong>{review.serviceName || "Video review"}</strong>
                             <span>{formatBookingWhen(review)}</span>
                             <em>Send your swing from Videos if you have not already.</em>
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  )}
+
+                  {/* What the coach sells, directly above the passes it adds
+                      to. Buying and holding are the same subject -- "how many
+                      have I got, and can I get more" -- and splitting them
+                      across two screens makes the second one hard to find.
+
+                      Absent entirely when the business has not set up card
+                      payments: the server sends an empty shop, and a "Buy"
+                      button that cannot take money is worse than no button. */}
+                  {shop.length > 0 && (
+                    <section className="player-portal-section">
+                      <h2>{passes.length ? "Buy more" : "Buy lessons or a review"}</h2>
+                      <p className="player-portal-lead">
+                        Paid for here, straight onto your account. Book it whenever you like.
+                      </p>
+                      <ul className="player-portal-list">
+                        {shop.map((item) => (
+                          <li className="player-portal-shop-item" key={item.serviceId}>
+                            <div className="player-portal-shop-main">
+                              <strong>{item.name}</strong>
+                              <span>
+                                {item.credits === 1
+                                  ? "1 credit"
+                                  : `${item.credits} credits`}
+                                {item.description ? ` · ${item.description}` : ""}
+                              </span>
+                            </div>
+                            <button
+                              className="player-portal-primary player-portal-shop-buy"
+                              type="button"
+                              disabled={Boolean(buyingId)}
+                              onClick={() => void buyShopItem(item.serviceId)}
+                            >
+                              {buyingId === item.serviceId
+                                ? "Opening…"
+                                : `${item.currency} ${item.price.toFixed(2)}`}
+                            </button>
                           </li>
                         ))}
                       </ul>

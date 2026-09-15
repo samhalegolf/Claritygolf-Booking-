@@ -12,6 +12,15 @@ import {
   reservePassCredit,
 } from "./_shared/passes.mts";
 import type { PassSource, PassTemplate } from "./_shared/passes.mts";
+import {
+  createStripeCheckoutSession as createStripeCheckoutSessionWith,
+  resolveStripeCredential,
+  retrieveStripeCheckoutSession as retrieveStripeCheckoutSessionWith,
+  stripeCredentialStatus,
+  stripeRequest as stripeRequestWith,
+  STRIPE_SECRET_SETTING,
+} from "./_shared/stripe.mts";
+import type { StripeCheckoutInput } from "./_shared/stripe.mts";
 
 // Billing is a new, isolated top-level app section. This function owns its
 // own tables (billing_products_services, billing_invoices,
@@ -2571,89 +2580,42 @@ async function sendInvoice(accountId: string, id: string, body: Record<string, u
 // Uses the Stripe REST API directly (form-encoded) so no SDK is required.
 // Requires STRIPE_SECRET_KEY in the environment.
 
-function stripeSecret() {
-  const secret = env("STRIPE_SECRET_KEY");
-  if (!secret) {
-    throw Object.assign(new Error("Clarity Pay is not configured yet (missing Stripe key)."), {
-      status: 503,
-      code: "STRIPE_NOT_CONFIGURED",
-    });
-  }
-  return secret;
+/**
+ * This account's Stripe key, if it has one of its own.
+ *
+ * Read through billing's own settings helper rather than booking-core's, per
+ * the protected rule at the top of this file. Missing is the normal case
+ * today and is not an error -- resolveStripeCredential falls back to the
+ * platform key and says which it used.
+ */
+async function accountStripeSecret(accountId: string): Promise<string> {
+  const rows = await supabase("settings", {
+    query: settingsSelectQuery(accountId, {
+      select: "value",
+      filters: [`key=eq.${encodeFilter(STRIPE_SECRET_SETTING)}`, "limit=1"],
+    }),
+  }).catch(() => [] as Array<Record<string, unknown>>);
+  return String(rows[0]?.value || "").trim();
 }
 
-async function stripeRequest(path: string, options: { method?: string; params?: URLSearchParams } = {}) {
-  const secret = stripeSecret();
-  const method = options.method || "GET";
-  const query = method === "GET" && options.params ? `?${options.params.toString()}` : "";
-  const response = await fetch(`https://api.stripe.com/v1/${path}${query}`, {
-    method,
-    headers: {
-      Authorization: `Bearer ${secret}`,
-      ...(method === "GET" ? {} : { "Content-Type": "application/x-www-form-urlencoded" }),
-    },
-    ...(method === "GET" ? {} : { body: (options.params || new URLSearchParams()).toString() }),
-  });
-  const text = await response.text();
-  if (!response.ok) {
-    throw Object.assign(new Error(`Stripe ${method} ${path} failed (${response.status}): ${text.slice(0, 300)}`), {
-      status: 502,
-      code: "STRIPE_ERROR",
-    });
-  }
-  return text ? JSON.parse(text) : {};
+async function stripeFor(accountId: string) {
+  return resolveStripeCredential(await accountStripeSecret(accountId));
 }
 
-type StripeCheckoutInput = {
-  // Major units (12.50), not cents - converted here so no caller has to remember.
-  amount: number;
-  currency: string;
-  productName: string;
-  productDescription?: string;
-  customerEmail?: string;
-  clientReferenceId?: string;
-  metadata?: Record<string, string>;
-  successUrl: string;
-  cancelUrl: string;
-};
-
-async function createStripeCheckoutSession(input: StripeCheckoutInput) {
-  const amountInCents = Math.round((Number(input.amount) || 0) * 100);
-  if (amountInCents <= 0) {
-    throw Object.assign(new Error("Amount must be greater than zero to take a payment."), { status: 400 });
-  }
-
-  const params = new URLSearchParams();
-  params.set("mode", "payment");
-  params.set("success_url", input.successUrl);
-  params.set("cancel_url", input.cancelUrl);
-  if (input.clientReferenceId) params.set("client_reference_id", input.clientReferenceId);
-  for (const [key, value] of Object.entries(input.metadata || {})) {
-    if (value) params.set(`metadata[${key}]`, value);
-  }
-  if (input.customerEmail) params.set("customer_email", input.customerEmail);
-  // A single line for the whole total keeps the charged amount identical to our
-  // record (no per-line rounding drift; tax is already reflected in the total).
-  params.set("line_items[0][quantity]", "1");
-  params.set("line_items[0][price_data][currency]", String(input.currency || "NZD").toLowerCase());
-  params.set("line_items[0][price_data][unit_amount]", String(amountInCents));
-  params.set("line_items[0][price_data][product_data][name]", input.productName);
-  if (input.productDescription) {
-    params.set("line_items[0][price_data][product_data][description]", input.productDescription);
-  }
-
-  const session = await stripeRequest("checkout/sessions", { method: "POST", params });
-  if (!session.url) throw Object.assign(new Error("Stripe did not return a checkout URL."), { status: 502 });
-  return { url: session.url as string, sessionId: (session.id as string) || "" };
+async function stripeRequest(
+  accountId: string,
+  path: string,
+  options: { method?: string; params?: URLSearchParams } = {},
+) {
+  return stripeRequestWith(await stripeFor(accountId), path, options);
 }
 
-async function retrieveStripeCheckoutSession(sessionId: string) {
-  const session = await stripeRequest(`checkout/sessions/${encodeURIComponent(sessionId)}`);
-  return {
-    paid: session?.payment_status === "paid",
-    expired: session?.status === "expired",
-    paymentIntentId: typeof session?.payment_intent === "string" ? (session.payment_intent as string) : "",
-  };
+async function createStripeCheckoutSession(accountId: string, input: StripeCheckoutInput) {
+  return createStripeCheckoutSessionWith(await stripeFor(accountId), input);
+}
+
+async function retrieveStripeCheckoutSession(accountId: string, sessionId: string) {
+  return retrieveStripeCheckoutSessionWith(await stripeFor(accountId), sessionId);
 }
 
 async function createInvoiceCheckout(accountId: string, id: string, req: Request) {
@@ -2664,7 +2626,7 @@ async function createInvoiceCheckout(accountId: string, id: string, req: Request
   const origin = new URL(req.url).origin;
   const invoiceNumber = String(invoice.invoiceNumber);
 
-  return createStripeCheckoutSession({
+  return createStripeCheckoutSession(accountId, {
     amount: Number(invoice.total) || 0,
     currency: String(invoice.currency || "NZD"),
     productName: `Invoice ${invoiceNumber} - ${branding.businessName}`,
@@ -2694,7 +2656,7 @@ async function createStripePaymentLink(input: {
   productDescription?: string;
   metadata?: Record<string, string>;
   redirectUrl: string;
-}) {
+}, accountId: string) {
   const amountInCents = Math.round((Number(input.amount) || 0) * 100);
   if (amountInCents <= 0) {
     throw Object.assign(new Error("Amount must be greater than zero to take a payment."), { status: 400 });
@@ -2706,7 +2668,7 @@ async function createStripePaymentLink(input: {
   priceParams.set("currency", String(input.currency || "NZD").toLowerCase());
   priceParams.set("unit_amount", String(amountInCents));
   priceParams.set("product_data[name]", input.productName);
-  const price = await stripeRequest("prices", { method: "POST", params: priceParams });
+  const price = await stripeRequest(accountId, "prices", { method: "POST", params: priceParams });
   if (!price?.id) throw Object.assign(new Error("Stripe did not return a price."), { status: 502 });
 
   const params = new URLSearchParams();
@@ -2723,7 +2685,7 @@ async function createStripePaymentLink(input: {
     params.set(`payment_intent_data[metadata][${key}]`, value);
   }
 
-  const link = await stripeRequest("payment_links", { method: "POST", params });
+  const link = await stripeRequest(accountId, "payment_links", { method: "POST", params });
   if (!link?.url) throw Object.assign(new Error("Stripe did not return a payment link."), { status: 502 });
   return { url: String(link.url), paymentLinkId: String(link.id || "") };
 }
@@ -2754,7 +2716,7 @@ export async function resolveInvoicePaymentLink(
     productName: `Invoice ${invoiceNumber} - ${branding.businessName}`,
     metadata: { invoice_id: String(invoice.id), account_id: accountId, invoice_number: invoiceNumber },
     redirectUrl: `${origin}/?pay=success&invoice=${encodeURIComponent(invoiceNumber)}`,
-  });
+  }, accountId);
 
   await supabase("billing_invoices", {
     method: "PATCH",
@@ -3108,7 +3070,11 @@ async function listPaymentMethods(accountId: string) {
     // The Clarity Pay row is seeded for every account whether or not Stripe is
     // wired up, so its presence proves nothing. This is the real answer, and it
     // is what decides whether "Include payment link" arrives ticked.
-    clarityPayConfigured: Boolean(env("STRIPE_SECRET_KEY")),
+    //
+    // Asked per account rather than of the environment: a business with its own
+    // Stripe key is configured even if the platform has none, and one relying
+    // on the platform's is not configured if that key is missing.
+    clarityPayConfigured: stripeCredentialStatus(await accountStripeSecret(accountId)).configured,
   };
 }
 
@@ -3802,7 +3768,7 @@ async function createPosCheckout(accountId: string, id: string, req: Request) {
   const origin = new URL(req.url).origin;
   const receiptNumber = String(transaction.receiptNumber);
 
-  const session = await createStripeCheckoutSession({
+  const session = await createStripeCheckoutSession(accountId, {
     amount: transaction.amount,
     currency: String(transaction.currency),
     productName: `${transaction.description} - ${branding.businessName}`,
@@ -3838,7 +3804,7 @@ async function syncPosCheckout(accountId: string, id: string) {
   const sessionId = cleanString(rows[0]?.stripe_session_id, "", 200);
   if (!sessionId) return { transaction, paid: false };
 
-  const session = await retrieveStripeCheckoutSession(sessionId);
+  const session = await retrieveStripeCheckoutSession(accountId, sessionId);
   if (!session.paid) return { transaction, paid: false, expired: session.expired };
 
   const updated = await supabase("billing_pos_transactions", {
@@ -4307,12 +4273,12 @@ async function voucherProducts(accountId: string) {
   return rows as Array<Record<string, unknown>>;
 }
 
-async function stripePriceIdsForProduct(productId: string) {
+async function stripePriceIdsForProduct(accountId: string, productId: string) {
   // Only Stripe-synced catalog rows have Stripe product ids; a hand-made one
   // has a UUID and there is nothing to ask Stripe about.
   if (!/^prod_/.test(productId)) return [];
   try {
-    const response = (await stripeRequest("prices", {
+    const response = (await stripeRequest(accountId, "prices", {
       method: "GET",
       params: new URLSearchParams({ product: productId, limit: "100" }),
     })) as { data?: Array<{ id?: string }> };
@@ -4331,7 +4297,7 @@ async function stripeCouponCandidates(accountId: string, url: URL) {
   const nameToProduct = new Map<string, Record<string, unknown>>();
   for (const product of products) {
     nameToProduct.set(String(product.name ?? "").trim().toLowerCase(), product);
-    for (const priceId of await stripePriceIdsForProduct(String(product.id ?? ""))) {
+    for (const priceId of await stripePriceIdsForProduct(accountId, String(product.id ?? ""))) {
       priceToProduct.set(priceId, product);
     }
   }

@@ -1555,3 +1555,50 @@
 .player-portal-pass.is-inactive .player-portal-pass-meta {
   color: var(--pt-muted);
 }
+
+/* --- Buying -------------------------------------------------------------- */
+.player-portal-shop-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--pt-border-soft);
+  border-radius: 10px;
+  background: var(--pt-surface-soft);
+}
+
+.player-portal-shop-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.player-portal-shop-main strong {
+  font-size: 15px;
+}
+
+.player-portal-shop-main span {
+  font-size: 13px;
+  color: var(--pt-text-soft);
+}
+
+/* The price IS the button. A row with a price on one side and a "Buy" on the
+   other makes a player read twice to find out what it costs. */
+.player-portal-shop-buy {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Where a player lands coming back from Stripe, so it sits at the top of the
+   card rather than inside whichever section they happened to leave from. */
+.player-portal-purchase-note {
+  margin: 0 0 4px;
+  padding: 10px 12px;
+  border-left: 2px solid var(--pt-accent);
+  border-radius: 0 8px 8px 0;
+  background: var(--pt-surface-soft);
+  font-size: 14px;
+  color: var(--pt-text-body);
+}

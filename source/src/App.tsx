@@ -5565,6 +5565,17 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     templates: PassTemplate[];
   }>({ waitingToIssue: [], waitingForOwner: [], templates: [] });
   const [passInboxLoadState, setPassInboxLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+  /* Whose Stripe account this business's money lands in. The key itself never
+     comes back from the server -- only whether there is one, its last four,
+     and whether it is a test key. */
+  const [stripeStatus, setStripeStatus] = useState<{
+    configured: boolean;
+    mode: "account" | "platform" | "none";
+    maskedTail: string;
+    testMode: boolean;
+  } | null>(null);
+  const [stripeKeyDraft, setStripeKeyDraft] = useState("");
+  const [stripeSaving, setStripeSaving] = useState(false);
   /** Which row is mid-write, so only that row's buttons go quiet. */
   const [passInboxBusyId, setPassInboxBusyId] = useState("");
   const [clientTransactions, setClientTransactions] = useState<ClientTransactionRow[]>([]);
@@ -15954,6 +15965,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       });
     }
     if (billingSection === "transactions") void fetchPosTransactions();
+    if (billingSection === "settings" && !stripeStatus) void fetchStripeStatus();
   }
 
   async function setPosTransactionStatus(id: string, status: PosTransaction["status"]) {
@@ -18992,6 +19004,42 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
    * failing on a second click. */
   const passInboxCount =
     passInbox.waitingToIssue.length + passInbox.waitingForOwner.length;
+
+  async function fetchStripeStatus() {
+    try {
+      const response = await fetch("/api/payments/stripe", { credentials: "same-origin" });
+      if (!response.ok) return;
+      const data = (await response.json()) as { stripe?: typeof stripeStatus };
+      if (data.stripe) setStripeStatus(data.stripe);
+    } catch {
+      // A settings card that cannot read its own status is not worth a toast.
+    }
+  }
+
+  async function saveStripeKey(secretKey: string) {
+    setStripeSaving(true);
+    try {
+      const response = await fetch("/api/payments/stripe", {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ secretKey }),
+      });
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not save that key."));
+      const data = (await response.json()) as { stripe?: typeof stripeStatus; cleared?: boolean };
+      if (data.stripe) setStripeStatus(data.stripe);
+      setStripeKeyDraft("");
+      setToast({
+        message: data.cleared
+          ? "Your Stripe key was removed. Payments go through Clarity again."
+          : "Stripe connected. Payments now land in your own account.",
+      });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not save that key." });
+    } finally {
+      setStripeSaving(false);
+    }
+  }
 
   async function fetchPassInbox() {
     setPassInboxLoadState((current) => (current === "loaded" ? current : "loading"));
@@ -27653,6 +27701,90 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
             {billingSection === "settings" && (
               <div className="billing-dashboard">
+                <article className="data-card">
+                  <div className="data-card-header">
+                    <div>
+                      <span>Card payments</span>
+                      <h2>
+                        {stripeStatus?.mode === "account"
+                          ? "Your own Stripe account"
+                          : stripeStatus?.configured
+                            ? "Through Clarity"
+                            : "Not set up"}
+                      </h2>
+                    </div>
+                    <CreditCard size={24} />
+                  </div>
+                  {/* The one fact that matters here is whose bank account the
+                      money reaches, so it is the heading rather than a detail
+                      further down. */}
+                  <p className="field-help">
+                    {stripeStatus?.mode === "account" ? (
+                      <>
+                        Card payments — the till, invoice links and anything a player buys in
+                        their portal — go straight to your Stripe account
+                        {stripeStatus.maskedTail ? ` (key ending ${stripeStatus.maskedTail})` : ""}.
+                        Clarity never touches the money.
+                        {stripeStatus.testMode
+                          ? " This is a test key, so no real money moves."
+                          : ""}
+                      </>
+                    ) : stripeStatus?.configured ? (
+                      <>
+                        You have not connected your own Stripe, so payments are taken through
+                        Clarity's account and passed on to you. Add your own key below and they
+                        will go straight to you instead.
+                      </>
+                    ) : (
+                      <>
+                        No card payments are possible yet. Add your Stripe secret key to take
+                        payments at the till, on invoice links, and in the player portal.
+                      </>
+                    )}
+                  </p>
+                  <div className="settings-field-row">
+                    <div className="settings-field">
+                      <label htmlFor="stripe-secret-key">Stripe secret key</label>
+                      <input
+                        id="stripe-secret-key"
+                        type="password"
+                        autoComplete="off"
+                        placeholder={
+                          stripeStatus?.mode === "account"
+                            ? "Paste a new key to replace it"
+                            : "sk_live_… or rk_live_…"
+                        }
+                        value={stripeKeyDraft}
+                        onChange={(event) => setStripeKeyDraft(event.target.value)}
+                      />
+                    </div>
+                    <button
+                      className="primary-button"
+                      type="button"
+                      disabled={stripeSaving || !stripeKeyDraft.trim()}
+                      onClick={() => void saveStripeKey(stripeKeyDraft.trim())}
+                    >
+                      {stripeSaving ? "Saving…" : "Connect"}
+                    </button>
+                    {stripeStatus?.mode === "account" && (
+                      <button
+                        className="outline-button"
+                        type="button"
+                        disabled={stripeSaving}
+                        onClick={() => void saveStripeKey("")}
+                      >
+                        Disconnect
+                      </button>
+                    )}
+                  </div>
+                  <p className="field-help">
+                    Use a <strong>restricted</strong> key where you can — it only needs Checkout
+                    sessions (write) and Payment links (write). A key starting <code>pk_</code> is
+                    the publishable one and cannot take payments. The key is stored on your
+                    account and is never shown again once saved.
+                  </p>
+                </article>
+
                 <article className="data-card">
                   <div className="data-card-header">
                     <div>
