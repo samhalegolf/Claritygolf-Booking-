@@ -212,13 +212,19 @@
   --c-brick-blank-border: var(--dark-brick-blank-border);
 }
 
-/* --- Dark, trigger two: the player's own device setting --------------------
- * Deliberately NOT the same mechanism. A client opens the portal once on a
+/* --- Dark, trigger two: the player's device, unless they say otherwise ------
+ * Deliberately NOT the coach's mechanism. A client opens the portal once on a
  * phone we know nothing about, so the reader's OS preference decides — not a
- * setting saved on somebody else's device. Same values, different question. */
+ * setting saved on somebody else's device.
+ *
+ * The :not() is what lets trigger three below exist. Without it, a player who
+ * deliberately chose light on a phone set to dark would be overruled by their
+ * own operating system, and the switch would look broken in exactly the case
+ * somebody bothered to use it. */
 @media (prefers-color-scheme: dark) {
-  .player-terminal,
-  .player-portal {
+  .player-terminal:not([data-portal-theme="light"]),
+  .player-terminal:not([data-portal-theme="light"]) .player-portal {
+    color-scheme: dark;
     --c-page: var(--dark-page);
     --c-surface: var(--dark-surface);
     --c-surface-soft: var(--dark-surface-soft);
@@ -245,6 +251,41 @@
     --c-brick-blank: var(--dark-brick-blank);
     --c-brick-blank-border: var(--dark-brick-blank-border);
   }
+}
+
+/* --- Dark, trigger three: the player asked for it ---------------------------
+ * Set from the switch in the portal's own header and remembered on that
+ * device. It beats the OS preference in both directions, which is the point of
+ * offering it: the two blocks above answer "what does this device prefer", and
+ * this one answers "what did this person choose". */
+.player-terminal[data-portal-theme="dark"],
+.player-terminal[data-portal-theme="dark"] .player-portal {
+  color-scheme: dark;
+    --c-page: var(--dark-page);
+    --c-surface: var(--dark-surface);
+    --c-surface-soft: var(--dark-surface-soft);
+    --c-border: var(--dark-border);
+    --c-border-soft: var(--dark-border-soft);
+    --c-text: var(--dark-text);
+    --c-text-body: var(--dark-text-body);
+    --c-text-soft: var(--dark-text-soft);
+    --c-muted: var(--dark-muted);
+    --c-hover: var(--dark-hover);
+    --c-active: var(--dark-active);
+    --c-accent: var(--dark-accent);
+    --c-accent-text: var(--dark-accent-text);
+    --c-danger: var(--dark-danger);
+    --c-error-text: var(--dark-error-text);
+    --c-success-text: var(--dark-success-text);
+  --c-info-text: var(--dark-info-text);
+    --c-pencil: var(--dark-pencil);
+    --c-pencil-hover: var(--dark-pencil-hover);
+    --c-text-disabled: var(--dark-text-disabled);
+      --c-success-wash: var(--dark-success-wash);
+    --c-danger-wash: var(--dark-danger-wash);
+    --c-mortar: var(--dark-mortar);
+    --c-brick-blank: var(--dark-brick-blank);
+    --c-brick-blank-border: var(--dark-brick-blank-border);
 }
 
 /* --- Density ---------------------------------------------------------------

@@ -73,6 +73,15 @@ export type PlayerTerminalNavProps = {
   /** The business's outside booking widget, when it has configured one. Null
    *  means the link is not in the bar at all -- there is nothing behind it. */
   externalBooking?: { label: string } | null;
+  /** What the screen is showing, and how to flip it. Present for everyone --
+   *  a guest reads the same screens and gets the same choice. */
+  theme: "light" | "dark";
+  onToggleTheme: () => void;
+  /** Credits on hand, shown beside the record button so the answer to "can I
+   *  book another one" is on every screen rather than one tab away. Null for a
+   *  guest, who holds none and has no coach to hold them with. */
+  balance?: { credits: number } | null;
+  onOpenBalance?: () => void;
 };
 
 export function PlayerTerminalNav({
@@ -84,6 +93,10 @@ export function PlayerTerminalNav({
   guest,
   onSignIn,
   externalBooking,
+  theme,
+  onToggleTheme,
+  balance,
+  onOpenBalance,
 }: PlayerTerminalNavProps) {
   const baseLinks = guest ? NAV_LINKS.filter((link) => !GUEST_HIDDEN.has(link.id)) : NAV_LINKS;
 
@@ -131,6 +144,31 @@ export function PlayerTerminalNav({
         </nav>
 
         <div className="player-terminal-nav-menu">
+          {!back && balance && (
+            <button
+              type="button"
+              className="player-terminal-nav-balance"
+              title="Your passes"
+              onClick={onOpenBalance}
+            >
+              <span>Balance</span>
+              <strong>
+                {balance.credits} credit{balance.credits === 1 ? "" : "s"}
+              </strong>
+            </button>
+          )}
+          {/* Stays visible inside the video workspace too: a player who opens a
+              video at night is exactly the person who wants to dim the screen,
+              and that is the one place the rest of this bar goes away. */}
+          <button
+            type="button"
+            className="player-terminal-nav-theme"
+            aria-label={theme === "dark" ? "Switch to light" : "Switch to dark"}
+            title={theme === "dark" ? "Switch to light" : "Switch to dark"}
+            onClick={onToggleTheme}
+          >
+            <span aria-hidden="true">{theme === "dark" ? "\u2600" : "\u263D"}</span>
+          </button>
           {!back && (
             <button
               type="button"

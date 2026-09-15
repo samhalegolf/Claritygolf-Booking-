@@ -33,16 +33,29 @@
 /* The terminal fills the page, so the document behind it has to agree --
    otherwise overscrolling on a phone flashes the light default through.
    This one reads --dark-page rather than --c-page because it sits on :root,
-   outside the .player-terminal selector the dark swap applies to. */
+   outside the .player-terminal selector the dark swap applies to.
+
+   All three follow the same rule as the token blocks in tokens.css: the
+   device decides unless the player has said otherwise, and their choice wins
+   in both directions. Miss the overscroll colour out of that and a player who
+   picked light on a dark phone gets a black flash at the top of every scroll. */
 :root:has(.player-terminal) {
   color-scheme: light dark;
   background: var(--c-page);
 }
 
 @media (prefers-color-scheme: dark) {
-  :root:has(.player-terminal) {
+  :root:has(.player-terminal:not([data-portal-theme="light"])) {
     background: var(--dark-page);
   }
+}
+
+:root:has(.player-terminal[data-portal-theme="dark"]) {
+  background: var(--dark-page);
+}
+
+:root:has(.player-terminal[data-portal-theme="light"]) {
+  background: var(--c-page);
 }
 
 .player-portal {
@@ -1610,9 +1623,9 @@
  * way into the tab that owns it, so the grid is buttons rather than panels.
  * ------------------------------------------------------------------------ */
 .player-portal-dashboard {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
   margin-bottom: 4px;
 }
 
@@ -1809,4 +1822,352 @@
   background: var(--pt-surface-soft);
   font-size: 14px;
   color: var(--pt-text-body);
+}
+
+/* The light/dark switch, and the balance beside it. Both live in the bar so
+   they are on every screen: the first is wanted most at night, when the rest
+   of the portal is the last thing somebody wants to navigate. */
+.player-terminal-nav-theme {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--pt-border);
+  border-radius: 999px;
+  background: var(--pt-surface);
+  color: var(--pt-text-soft);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.player-terminal-nav-theme:hover {
+  background: var(--pt-hover);
+  color: var(--pt-text);
+}
+
+.player-terminal-nav-balance {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  flex-shrink: 0;
+  min-height: 40px;
+  padding: 4px 12px;
+  border: 1px solid var(--pt-border);
+  border-radius: 9px;
+  background: var(--pt-surface);
+  color: var(--pt-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.player-terminal-nav-balance span {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--pt-muted);
+  line-height: 1.2;
+}
+
+.player-terminal-nav-balance strong {
+  font-size: 15px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+/* The bar is tight on a phone and the balance is the least urgent thing on it
+   -- the Passes tab is two taps away either way. */
+@media (max-width: 560px) {
+  .player-terminal-nav-balance {
+    display: none;
+  }
+}
+
+/* --- Home, v2 layout ------------------------------------------------------
+ *
+ * A hero and three panels. Each panel previews its tab rather than counting
+ * it: a number tells a player nothing they can act on, while the practice wall
+ * and the video tiles are recognisable at a glance and answer "what is on
+ * there" without a tap.
+ * ------------------------------------------------------------------------ */
+.player-portal-next-up {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  width: 100%;
+  padding: 16px 20px;
+  border: 1px solid var(--pt-border);
+  border-radius: 12px;
+  background: var(--pt-surface);
+  color: var(--pt-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.player-portal-next-up-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.player-portal-next-up-main strong {
+  font-size: 18px;
+}
+
+/* Right-aligned on a wide row and left-aligned once it wraps: a lone
+   right-aligned line under a left-aligned heading reads as a mistake. */
+.player-portal-next-up-when {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: right;
+}
+
+.player-portal-next-up-when span {
+  font-size: 14px;
+  color: var(--pt-text-body);
+}
+
+.player-portal-next-up-when em {
+  font-size: 13px;
+  font-style: normal;
+  color: var(--pt-muted);
+}
+
+@media (max-width: 560px) {
+  .player-portal-next-up-when {
+    text-align: left;
+  }
+}
+
+/* Two columns when there is room, one when there is not. Driven by the
+   panels' own minimum rather than a breakpoint, so a narrow desktop window
+   behaves like a wide phone, which is what it is. */
+.player-portal-panels {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  align-items: stretch;
+}
+
+.player-portal-panel-column {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.player-portal-panel {
+  box-sizing: border-box;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  border: 1px solid var(--pt-border);
+  border-radius: 12px;
+  background: var(--pt-surface);
+}
+
+/* The 320px basis belongs to the row, where it is a width and decides when the
+   two columns stop fitting. Left on the panel itself it is also read down the
+   column -- where flex-basis means HEIGHT -- and an empty Practice panel grows
+   into a tall empty box. */
+.player-portal-panels > .player-portal-panel,
+.player-portal-panels > .player-portal-panel-column {
+  flex: 1 1 320px;
+}
+
+.player-portal-panel-column > .player-portal-panel {
+  flex: 0 0 auto;
+}
+
+.player-portal-panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.player-portal-panel-head h2 {
+  margin: 0;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 800;
+  color: var(--pt-muted);
+}
+
+.player-portal-panel-head span {
+  font-size: 13px;
+  color: var(--pt-text-soft);
+}
+
+.player-portal-panel-more {
+  align-self: flex-start;
+  min-height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--pt-border);
+  border-radius: 999px;
+  background: var(--pt-surface);
+  color: var(--pt-text);
+  font: inherit;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.player-portal-panel-more:hover {
+  background: var(--pt-hover);
+}
+
+.player-portal-video-preview {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 14px 10px;
+}
+
+.player-portal-video-preview button {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--pt-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.player-portal-video-preview-media {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  overflow: hidden;
+  border: 1px solid var(--pt-border);
+  border-radius: 12px;
+  background: var(--pt-hover);
+}
+
+.player-portal-video-preview-media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Dashed means it is still in the cloud -- the same language the Videos shelf
+   uses, so the two screens cannot teach different things. */
+.player-portal-video-preview-media.is-cloud {
+  border-style: dashed;
+  background: transparent;
+}
+
+.player-portal-video-preview strong {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-portal-video-preview small {
+  font-size: 12px;
+  color: var(--pt-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-portal-activity {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.player-portal-activity button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--pt-border-soft);
+  border-radius: 10px;
+  background: var(--pt-surface-soft);
+  color: var(--pt-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.player-portal-activity button.is-unseen {
+  border-color: var(--pt-accent);
+}
+
+.player-portal-activity-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.player-portal-activity-main > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.player-portal-activity-main strong {
+  font-size: 14px;
+}
+
+.player-portal-activity-main small {
+  font-size: 12px;
+  color: var(--pt-muted);
+}
+
+/* Transparent unless unseen, so every row keeps the same indent and the dot
+   reads as a mark rather than as a bullet. */
+.player-portal-activity-dot {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: transparent;
+}
+
+.player-portal-activity button.is-unseen .player-portal-activity-dot {
+  background: var(--pt-accent);
+}
+
+.player-portal-activity-at {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--pt-muted);
+}
+
+/* Home is the one screen that is a dashboard rather than a document.
+ *
+ * Its panels carry their own borders, so the card's frame around them would be
+ * a box inside a box; and its two columns need the room the 560px reading
+ * measure deliberately denies every other tab. Both changes are scoped here
+ * rather than applied to the card, because a note or a booking form at 1100px
+ * is a worse screen, not a wider one. */
+.player-portal-card.is-wide {
+  width: min(1100px, 100%);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }

@@ -30,7 +30,16 @@ import { formatClock, formatDate } from "./format";
 import { groupSwingReviews } from "./swingReviews";
 import { SwingReviewFlow, type ReviewOffer, type SwingReviewDraft } from "./SwingReviewFlow";
 import { stashReviewDraft, takeReviewDraft } from "./reviewDraftStore";
-import { recentActivity } from "./recentActivity";
+import { recentActivityList } from "./recentActivity";
+import {
+  effectiveTheme,
+  portalThemeAttribute,
+  readPortalTheme,
+  systemPrefersDark,
+  togglePortalTheme,
+  writePortalTheme,
+  type PortalTheme,
+} from "./portalTheme";
 import "../practice/practice.css";
 import { PracticeWall } from "../practice/PracticeWall";
 import {
@@ -131,6 +140,15 @@ type PracticeItem = {
   linkedVideoId: string | null;
   status: PracticeStatus;
   completedAt: string | null;
+};
+
+/** Where an activity row goes, in the words on the bar. */
+const ACTIVITY_TAB_LABELS: Record<string, string> = {
+  reviews: "Reviews",
+  practice: "Practice",
+  notes: "Notes",
+  videos: "Videos",
+  passes: "Passes",
 };
 
 /* What the big number on a pass says.
@@ -285,6 +303,10 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   const [lessonsView, setLessonsView] = useState<"book" | "past">("book");
   const [bookMode, setBookMode] = useState<"in-person" | "review">("in-person");
   const [openBookingId, setOpenBookingId] = useState("");
+  /* Light or dark. "system" until the player touches the switch, which is why
+     it is a real state rather than the absence of one -- see portalTheme.ts. */
+  const [theme, setTheme] = useState<PortalTheme>(readPortalTheme);
+  const [prefersDark, setPrefersDark] = useState(systemPrefersDark);
   const [purchaseNote, setPurchaseNote] = useState("");
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileError, setProfileError] = useState("");
@@ -683,6 +705,30 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
       cancelled = true;
     };
   }, [isGuest]);
+
+  useEffect(() => {
+    // Only matters while the choice is "system", but the listener is cheap and
+    // unconditional avoids re-subscribing every time the theme changes.
+    let query: MediaQueryList;
+    try {
+      query = window.matchMedia("(prefers-color-scheme: dark)");
+    } catch {
+      return;
+    }
+    const onChange = (event: MediaQueryListEvent) => setPrefersDark(event.matches);
+    query.addEventListener("change", onChange);
+    return () => query.removeEventListener("change", onChange);
+  }, []);
+
+  const shownTheme = effectiveTheme(theme, prefersDark);
+
+  const toggleTheme = useCallback(() => {
+    setTheme((current) => {
+      const next = togglePortalTheme(current, prefersDark);
+      writePortalTheme(next);
+      return next;
+    });
+  }, [prefersDark]);
 
   const navigateTerminal = useCallback((destination: PlayerTerminalDestination) => {
     setRecording(false);
@@ -1136,11 +1182,11 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
 
   /* The one line the home screen leads with. Derived from what is already
      loaded -- see recentActivity.ts -- rather than from a feed nothing writes. */
-  const latestActivity = useMemo(
+  const activityFeed = useMemo(
     () =>
       isGuest
-        ? null
-        : recentActivity({
+        ? []
+        : recentActivityList({
             unseenReturns: unseenReturnCount,
             newestReturnAt:
               cloudVideos.find((transfer) => transfer.direction === "coach-return")?.readyToImportAt || "",
@@ -1235,12 +1281,16 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
       guest={isGuest}
       onSignIn={onRequestSignIn}
       externalBooking={bookingEmbed ? { label: bookingEmbed.label } : null}
+      theme={shownTheme}
+      onToggleTheme={toggleTheme}
+      balance={isGuest || !spendableCredits ? null : { credits: spendableCredits }}
+      onOpenBalance={() => navigateTerminal("passes")}
     />
   );
 
   if (recording || openVideoId) {
     return (
-      <div className="player-terminal">
+      <div className="player-terminal" data-portal-theme={portalThemeAttribute(theme)}>
         {renderNav(null, { label: "Videos", onBack: () => closeWorkspace() })}
         <div
           className={`player-portal player-portal-video-host${leavingWorkspace ? " is-leaving" : ""}`}
@@ -1276,7 +1326,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   );
 
   return (
-    <div className="player-terminal">
+    <div className="player-terminal" data-portal-theme={portalThemeAttribute(theme)}>
       {renderNav(tab)}
       {/* No `capture` attribute on purpose: with it iOS goes straight to the
           camera, without it the player gets the sheet -- Photo Library, Take
@@ -1289,7 +1339,11 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
         onChange={handleRecordInputChange}
       />
       <div className="player-portal">
-        <div className="player-portal-card">
+        <div
+          className={`player-portal-card${
+            tab === "home" && !isGuest && !reviewFlowOpen ? " is-wide" : ""
+          }`}
+        >
           <h1>{isGuest ? "Welcome" : playerName ? `Hi, ${playerName.split(/\s+/)[0]}` : "Your profile"}</h1>
           {playerEmail && <p className="player-portal-lead">{playerEmail}</p>}
 
@@ -1343,88 +1397,173 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
             <>
               {tab === "home" && (
                 <section className="player-portal-home">
-                  {/* The four things a player opens the portal to find out,
-                      before any navigation: when am I next on, has anything
-                      arrived, what have I got left, what am I meant to be
-                      practising. Each one is also a way in to the tab that
-                      owns it. */}
+                  {/* Home, per the Player Portal v2 layout.
+                      One hero and three panels: what is next, what has
+                      happened, what to practise, what is on the phone. Each
+                      panel is a preview of its tab rather than a summary of
+                      it -- a count tells a player nothing they can act on,
+                      and the wall and the tiles are recognisable at a glance.
+
+                      Two columns on a wide screen, one on a phone, by wrapping
+                      rather than by a breakpoint: the panels have a natural
+                      minimum and the layout follows it. */}
                   {!isGuest && (
                     <div className="player-portal-dashboard">
                       <button
                         type="button"
-                        className="player-portal-dash-card is-wide"
+                        className="player-portal-next-up"
                         onClick={() => navigateTerminal("lessons")}
                       >
-                        <span className="player-portal-dash-label">Next up</span>
-                        {profileLoading && !bookings.length ? (
-                          <strong>Loading…</strong>
-                        ) : nextLesson ? (
-                          <>
-                            <strong>{nextLesson.serviceName || "Lesson"}</strong>
-                            <span>{formatBookingWhen(nextLesson)}</span>
-                          </>
-                        ) : (
-                          <>
-                            <strong>Nothing booked</strong>
-                            <span>Tap to book a lesson or a swing review</span>
-                          </>
-                        )}
-                      </button>
-
-                      <button
-                        type="button"
-                        className={`player-portal-dash-card${latestActivity?.unseen ? " is-unseen" : ""}`}
-                        onClick={() => navigateTerminal(latestActivity?.tab || "reviews")}
-                      >
-                        <span className="player-portal-dash-label">Latest</span>
-                        {latestActivity ? (
-                          <>
-                            <strong>{latestActivity.label}</strong>
-                            {formatDate(latestActivity.at) && <span>{formatDate(latestActivity.at)}</span>}
-                          </>
-                        ) : (
-                          <>
-                            <strong>Nothing new</strong>
-                            <span>Send your coach a swing</span>
-                          </>
-                        )}
-                      </button>
-
-                      <button
-                        type="button"
-                        className="player-portal-dash-card"
-                        onClick={() => navigateTerminal("passes")}
-                      >
-                        <span className="player-portal-dash-label">Balance</span>
-                        <strong>
-                          {spendableCredits
-                            ? `${spendableCredits} credit${spendableCredits === 1 ? "" : "s"}`
-                            : "No credits"}
-                        </strong>
-                        <span>
-                          {spendableCredits && nextPassExpiry && formatDate(nextPassExpiry)
-                            ? `Use by ${formatDate(nextPassExpiry)}`
-                            : "Tap to buy lessons or a review"}
+                        <span className="player-portal-next-up-main">
+                          <span className="player-portal-dash-label">Next up</span>
+                          <strong>
+                            {profileLoading && !bookings.length
+                              ? "Loading…"
+                              : nextLesson
+                                ? nextLesson.serviceName || "Lesson"
+                                : "Nothing booked"}
+                          </strong>
+                        </span>
+                        <span className="player-portal-next-up-when">
+                          <span>
+                            {nextLesson
+                              ? formatBookingWhen(nextLesson)
+                              : "Book a lesson or a swing review"}
+                          </span>
+                          {nextLesson?.location?.name && <em>{nextLesson.location.name}</em>}
                         </span>
                       </button>
 
-                      <button
-                        type="button"
-                        className="player-portal-dash-card is-wide"
-                        onClick={() => navigateTerminal("practice")}
-                      >
-                        <span className="player-portal-dash-label">Practice</span>
-                        <strong>
-                          {activePractice.length
-                            ? `${activePractice.length} to work on`
-                            : "Nothing set"}
-                        </strong>
-                        <span>
-                          {activePractice.length
-                            ? activePractice[0].title
-                            : "Your coach adds these after a lesson"}
-                        </span>
-                      </button>
+                      <div className="player-portal-panels">
+                        <div className="player-portal-panel-column">
+                          <section className="player-portal-panel">
+                            <div className="player-portal-panel-head">
+                              <h2>Practice</h2>
+                              <span>
+                                {activePractice.length
+                                  ? `${activePractice.length} to work on`
+                                  : "Nothing set"}
+                              </span>
+                            </div>
+                            {practice.length ? (
+                              <PracticeWall
+                                blocks={practice}
+                                types={practiceTypes}
+                                openId={null}
+                                onOpen={() => navigateTerminal("practice")}
+                                emptyNote=""
+                              />
+                            ) : (
+                              <p className="player-portal-empty">
+                                Your coach adds these after a lesson.
+                              </p>
+                            )}
+                            <button
+                              className="player-portal-panel-more"
+                              type="button"
+                              onClick={() => navigateTerminal("practice")}
+                            >
+                              Open Practice
+                            </button>
+                          </section>
+
+                          <section className="player-portal-panel">
+                            <div className="player-portal-panel-head">
+                              <h2>Videos</h2>
+                              <span>
+                                {[
+                                  savedVideos.length
+                                    ? `${savedVideos.length} on this device`
+                                    : "",
+                                  missingCloudVideos.length
+                                    ? `${missingCloudVideos.length} to download`
+                                    : "",
+                                ]
+                                  .filter(Boolean)
+                                  .join(" · ") || "Nothing yet"}
+                              </span>
+                            </div>
+                            {savedVideos.length || missingCloudVideos.length ? (
+                              <div className="player-portal-video-preview">
+                                {savedVideos.slice(0, 3).map((video) => (
+                                  <button
+                                    type="button"
+                                    key={video.savedVideoId}
+                                    onClick={() => setOpenVideoId(video.savedVideoId)}
+                                  >
+                                    <span className="player-portal-video-preview-media">
+                                      {video.thumbnailDataUrl && (
+                                        <img src={video.thumbnailDataUrl} alt="" />
+                                      )}
+                                    </span>
+                                    <strong>{video.title}</strong>
+                                    <small>{formatDate(video.capturedAt || video.createdAt)}</small>
+                                  </button>
+                                ))}
+                                {/* A dashed tile is one still in the cloud --
+                                    the same language the Videos shelf uses for
+                                    the same thing. */}
+                                {missingCloudVideos.slice(0, 1).map((transfer) => (
+                                  <button
+                                    type="button"
+                                    key={transfer.savedVideoId}
+                                    onClick={() => navigateTerminal("videos")}
+                                  >
+                                    <span className="player-portal-video-preview-media is-cloud" />
+                                    <strong>{transfer.savedVideo?.title || "From your coach"}</strong>
+                                    <small>Tap to download</small>
+                                  </button>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="player-portal-empty">Film a swing to get started.</p>
+                            )}
+                            <button
+                              className="player-portal-panel-more"
+                              type="button"
+                              onClick={() => navigateTerminal("videos")}
+                            >
+                              Open Videos
+                            </button>
+                          </section>
+                        </div>
+
+                        <section className="player-portal-panel">
+                          <div className="player-portal-panel-head">
+                            <h2>Recent activity</h2>
+                            <span>
+                              {unseenReturnCount ? `${unseenReturnCount} new` : "Up to date"}
+                            </span>
+                          </div>
+                          {activityFeed.length ? (
+                            <div className="player-portal-activity">
+                              {activityFeed.map((item) => (
+                                <button
+                                  type="button"
+                                  key={`${item.tab}-${item.label}`}
+                                  className={item.unseen ? "is-unseen" : ""}
+                                  onClick={() => navigateTerminal(item.tab)}
+                                >
+                                  <span className="player-portal-activity-main">
+                                    <span className="player-portal-activity-dot" aria-hidden="true" />
+                                    <span>
+                                      <strong>{item.label}</strong>
+                                      <small>{ACTIVITY_TAB_LABELS[item.tab]}</small>
+                                    </span>
+                                  </span>
+                                  <span className="player-portal-activity-at">
+                                    {formatDate(item.at)}
+                                  </span>
+                                </button>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="player-portal-empty">
+                              Nothing yet. Send your coach a swing and it will show up here.
+                            </p>
+                          )}
+                        </section>
+                      </div>
                     </div>
                   )}
 

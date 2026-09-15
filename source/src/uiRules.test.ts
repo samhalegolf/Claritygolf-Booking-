@@ -227,21 +227,28 @@ test("nothing transitions transform on a button", () => {
   );
 });
 
-test("both dark triggers map the same set of tokens", () => {
-  // There are two, deliberately: the coach's saved toggle and the player's OS
-  // preference. Two blocks means they can drift, and a token missing from one
-  // of them keeps its light value on that surface — invisible until somebody
-  // opens the portal at night. Written once, so check it once.
+test("every dark trigger maps the same set of tokens", () => {
+  // There are three, deliberately: the coach's saved toggle, the player's OS
+  // preference, and the player's own switch in the portal header. Three blocks
+  // means they can drift, and a token missing from one of them keeps its light
+  // value on that surface — invisible until somebody opens the portal at
+  // night. Written once each, so check them against each other.
   const tokens = readFileSync(TOKENS, "utf8");
-  const mapped = [...tokens.matchAll(/\{([^}]*--c-[a-z0-9-]+:\s*var\(--dark-[^}]*)\}/g)].map(
+  const blocks = [...tokens.matchAll(/\{([^}]*--c-[a-z0-9-]+:\s*var\(--dark-[^}]*)\}/g)].map(
     (block) => new Set([...block[1].matchAll(/(--c-[a-z0-9-]+):\s*var\(/g)].map((m) => m[1])),
   );
-  assert.equal(mapped.length, 2, "expected exactly two dark trigger blocks");
-  const [first, second] = mapped;
-  const missing = [
-    ...[...first].filter((name) => !second.has(name)).map((name) => `${name} missing from the media-query block`),
-    ...[...second].filter((name) => !first.has(name)).map((name) => `${name} missing from the .theme-dark block`),
-  ];
+  assert.ok(blocks.length >= 2, `expected at least two dark trigger blocks, found ${blocks.length}`);
+
+  // Compared against the union rather than pairwise: with more than two, "which
+  // one is wrong" is answered by "the one that is short", and naming the token
+  // is more useful than naming a pair.
+  const everyToken = new Set(blocks.flatMap((block) => [...block]));
+  const missing: string[] = [];
+  blocks.forEach((block, index) => {
+    for (const name of everyToken) {
+      if (!block.has(name)) missing.push(`dark block ${index + 1} is missing ${name}`);
+    }
+  });
   assert.deepEqual(missing, [], missing.join("\n  "));
 });
 

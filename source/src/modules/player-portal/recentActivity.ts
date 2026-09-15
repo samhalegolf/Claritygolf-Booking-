@@ -8,8 +8,9 @@
  * still unread on another, and so it cannot drift out of step with the thing
  * it describes.
  *
- * One line, not a list. The home screen's job is to say whether anything is
- * waiting; the tab it points at is where the detail lives.
+ * A short list, newest first, each row a way into the tab that owns it. The
+ * home screen's job is to say what has happened since they last looked; the
+ * tab it points at is where the detail lives.
  */
 
 export type ActivityItem = {
@@ -33,15 +34,17 @@ type Sources = {
 const at = (value?: string) => String(value || "");
 
 /**
- * The single most recent thing worth mentioning.
+ * Everything worth mentioning, newest first.
  *
- * An unopened coach return wins outright, regardless of date: it is the only
- * one of the four that is waiting on the player rather than simply having
- * happened. Everything else is ordered by when it happened.
+ * An unopened coach return leads regardless of date: it is the only one of
+ * these that is waiting on the player rather than simply having happened.
+ * Everything else is ordered by when it happened.
  */
-export function recentActivity(sources: Sources): ActivityItem | null {
+export function recentActivityList(sources: Sources, limit = 5): ActivityItem[] {
+  const rows: ActivityItem[] = [];
+
   if (sources.unseenReturns > 0) {
-    return {
+    rows.push({
       tab: "videos",
       label:
         sources.unseenReturns === 1
@@ -49,7 +52,7 @@ export function recentActivity(sources: Sources): ActivityItem | null {
           : `Your coach sent ${sources.unseenReturns} videos back`,
       at: at(sources.newestReturnAt),
       unseen: true,
-    };
+    });
   }
 
   const candidates: ActivityItem[] = [];
@@ -92,12 +95,17 @@ export function recentActivity(sources: Sources): ActivityItem | null {
 
   // Undated entries sort last: a thing that cannot say when it happened should
   // not be able to claim it happened most recently.
-  return (
-    candidates.sort((a, b) => {
-      if (!a.at && !b.at) return 0;
-      if (!a.at) return 1;
-      if (!b.at) return -1;
-      return b.at.localeCompare(a.at);
-    })[0] || null
-  );
+  candidates.sort((a, b) => {
+    if (!a.at && !b.at) return 0;
+    if (!a.at) return 1;
+    if (!b.at) return -1;
+    return b.at.localeCompare(a.at);
+  });
+
+  return [...rows, ...candidates].slice(0, Math.max(1, limit));
+}
+
+/** The single most recent thing, for surfaces with room for one line. */
+export function recentActivity(sources: Sources): ActivityItem | null {
+  return recentActivityList(sources, 1)[0] || null;
 }
