@@ -402,7 +402,14 @@ export type PosSummary = {
   // method's total in byMethod, and shown there as its own "Coupons redeemed"
   // row - paidTotal remains the full value of what went out the door.
   couponTotal?: number;
-  byMethod: Array<{ paymentMethodName: string; count: number; total: number }>;
+  /* Lessons delivered on a pass over the range, and what they would have been
+     charged at. Deliberately not money: the revenue was recognised when the
+     pass was sold, so counting the lesson too would double it. The Pass row in
+     byMethod is $0 for the same reason -- nothing was tendered -- and this is
+     what that row delivered. */
+  passCount?: number;
+  passValue?: number;
+  byMethod: Array<{ paymentMethodName: string; kind?: string; count: number; total: number }>;
 };
 
 // What the checkout modal needs to open a sale. Everything is optional except

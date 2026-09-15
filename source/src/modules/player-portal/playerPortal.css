@@ -1497,3 +1497,61 @@
   color: var(--pt-muted);
   font-size: 13px;
 }
+
+/* --- Passes ---------------------------------------------------------------
+ *
+ * What the player has already paid for. The balance is the loud part because
+ * it is the only thing they came to read; the rest is there to settle a
+ * disagreement about it.
+ * ------------------------------------------------------------------------ */
+.player-portal-pass {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px 14px;
+  border: 1px solid var(--pt-border-soft);
+  border-radius: 10px;
+  background: var(--pt-surface-soft);
+}
+
+/* Spent, timed out, or not started yet. Still on the list -- it is the answer
+   to "why can't I book on my pass" -- but none of the three can be booked
+   against today, so none of them looks like a balance. */
+.player-portal-pass.is-inactive {
+  border-style: dashed;
+  background: transparent;
+}
+
+.player-portal-pass-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.player-portal-pass-head strong {
+  font-size: 15px;
+  min-width: 0;
+}
+
+.player-portal-pass-count {
+  flex-shrink: 0;
+  font-size: 15px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--pt-accent);
+}
+
+.player-portal-pass.is-inactive .player-portal-pass-count {
+  font-weight: 700;
+  color: var(--pt-muted);
+}
+
+.player-portal-pass-meta {
+  font-size: 13px;
+  color: var(--pt-text-soft);
+}
+
+.player-portal-pass.is-inactive .player-portal-pass-meta {
+  color: var(--pt-muted);
+}

@@ -21,11 +21,16 @@ import { calendarSlot, MINUTES_IN_DAY } from "./_shared/calendar-slot.mts";
 import { planExternalReschedule, sameSlot } from "./_shared/external-reschedule.mts";
 import { legacyOriginalWorkspaceId, defaultCalendarSlug } from "./_shared/account.mts";
 import {
+  assignPass,
   grantPass,
+  issuedSourceRefs,
   passOptionsForService,
   passTemplatesFromServices,
+  playerPassViews,
   readPassesForPerson,
+  readUnassignedPasses,
   reverseRedemptionsForBooking,
+  suggestPassTemplate,
   voidPass,
 } from "./_shared/passes.mts";
 import {
@@ -1940,6 +1945,20 @@ function corsHeaders(req) {
 
 function db() {
   return getDatabase();
+}
+
+/**
+ * Does this table exist?
+ *
+ * Some tables here are created by a migration rather than by ensureSchema(), so
+ * a database that has never run one is missing them without being broken. A
+ * reader that assumes otherwise turns "this account has no Optix" into a 500.
+ */
+async function tableExists(table: string) {
+  const rows = (await db().sql`
+    SELECT to_regclass(${`public.${table}`}) AS name
+  `) as Record<string, unknown>[];
+  return Boolean(rows[0]?.name);
 }
 
 async function setSetting(accountId: string, key: string, value: unknown) {
@@ -4879,7 +4898,9 @@ async function mergePeople(rawSurvivorId, rawLoserId, fieldOverrides = {}, accou
     // Both tables below are created outside ensureSchema() — one by a migration,
     // one lazily on first player login — so a database that has never needed
     // them is not an error and must not abort the merge.
-    const tableExists = async (table) =>
+    // Same question as the module-level tableExists(), asked on the pooled
+    // client this transaction is already holding rather than on a new one.
+    const tableExistsHere = async (table) =>
       Boolean(
         queryRows(await client.query("SELECT to_regclass($1) AS name", [`public.${table}`]))[0]?.name,
       );
@@ -4887,7 +4908,7 @@ async function mergePeople(rawSurvivorId, rawLoserId, fieldOverrides = {}, accou
     // processStoredExternalEvent() prefers that value over the calendar item. Left
     // behind, the next inbound event would write the deleted loser id straight
     // back onto the booking and silently undo this merge.
-    if (await tableExists("external_booking_links")) {
+    if (await tableExistsHere("external_booking_links")) {
       const relinked = await client.query(
         "UPDATE external_booking_links SET person_id = $1, updated_at = NOW() WHERE person_id = $2 RETURNING external_booking_id",
         [survivorId, loserId],
@@ -4898,7 +4919,7 @@ async function mergePeople(rawSurvivorId, rawLoserId, fieldOverrides = {}, accou
     // which is what selects the portal's lesson notes. The notes move to the
     // survivor below, so a session left on the loser id would show the customer
     // an empty notes list until their next sign-in. No updated_at on this table.
-    if (await tableExists("player_sessions")) {
+    if (await tableExistsHere("player_sessions")) {
       await client.query(
         "UPDATE player_sessions SET person_id = $1 WHERE person_id = $2",
         [survivorId, loserId],
@@ -4910,7 +4931,7 @@ async function mergePeople(rawSurvivorId, rawLoserId, fieldOverrides = {}, accou
     // so leaving them behind does not fail loudly: the purchase would simply
     // point at a deleted person id and drop out of the client's history with
     // nothing to show it had ever been linked.
-    if (await tableExists("optix_pass_purchases")) {
+    if (await tableExistsHere("optix_pass_purchases")) {
       await client.query(
         "UPDATE optix_pass_purchases SET person_id = $1, updated_at = NOW() WHERE person_id = $2",
         [survivorId, loserId],
@@ -5001,7 +5022,9 @@ async function hardDeletePerson(personId: string, accountId: string) {
     // ensureSchema() (a migration and a lazy first-login create respectively),
     // so a database that has never needed them is not an error -- same guard
     // mergePeople uses above.
-    const tableExists = async (table) =>
+    // Same question as the module-level tableExists(), asked on the pooled
+    // client this transaction is already holding rather than on a new one.
+    const tableExistsHere = async (table) =>
       Boolean(
         queryRows(await client.query("SELECT to_regclass($1) AS name", [`public.${table}`]))[0]?.name,
       );
@@ -5013,13 +5036,13 @@ async function hardDeletePerson(personId: string, accountId: string) {
       "DELETE FROM practice_blocks WHERE account_id = $1 AND player_id = $2",
       [cleanAccountId, cleanPersonId],
     );
-    if (await tableExists("video_transfer_sessions")) {
+    if (await tableExistsHere("video_transfer_sessions")) {
       await client.query(
         "DELETE FROM video_transfer_sessions WHERE account_id = $1 AND player_id = $2",
         [cleanAccountId, cleanPersonId],
       );
     }
-    if (await tableExists("player_sessions")) {
+    if (await tableExistsHere("player_sessions")) {
       await client.query(
         "DELETE FROM player_sessions WHERE account_id = $1 AND person_id = $2",
         [cleanAccountId, cleanPersonId],
@@ -9642,6 +9665,24 @@ async function readPlayerProfile(session) {
   // player's portal, not to it.
   const bookingEmbed = playerBookingEmbedForPortal(await readSettingsMap(accountId));
 
+  /* What they have already paid for.
+   *
+   * Keyed on the resolved person id alone, not the candidate set the notes use
+   * above: a pass is written against a real people.id by whatever took the
+   * money, so there are no historical id forms to chase. No person id means no
+   * passes rather than an unfiltered read.
+   *
+   * playerPassViews, not the coach's PassView: see the allow-list in
+   * passes.mts. Service names are resolved here because this is where the
+   * catalogue already is -- the player has no way to look an id up.
+   */
+  const passes = session.personId
+    ? playerPassViews(
+        await readPassesForPerson(accountId, session.personId),
+        new Map(serviceList.map((service) => [service.id, service.name])),
+      )
+    : [];
+
   return {
     player: {
       // The person id matters to the portal: videos recorded there are filed
@@ -9656,6 +9697,7 @@ async function readPlayerProfile(session) {
     notes,
     practice,
     practiceBlockTypes,
+    passes,
     bookingEmbed,
   };
 }
@@ -12856,6 +12898,197 @@ async function routeBookingApiRequest(
           ? { options: passOptionsForService(passes, serviceId, service?.name || "") }
           : {}),
       });
+    }
+
+/* --- The Pass Inbox ------------------------------------------------------
+ *
+ * Two queues that look the same on screen and are not the same problem.
+ *
+ *   Waiting to be issued  An external sale that classified as a lesson pass
+ *                         and has produced no pass. Somebody paid and holds
+ *                         nothing. What is missing is which package it was --
+ *                         the sale names a product, not a credit count.
+ *
+ *   Waiting for an owner   A pass that exists and belongs to nobody. What is
+ *                         missing is a person.
+ *
+ * Neither is resolved automatically, and the reason is the same in both cases:
+ * the payload cannot answer it, so a machine answering it is a machine
+ * guessing. What this does instead is pre-fill the guess and make pressing the
+ * button cheap.
+ */
+async function readPassInbox(accountId: string, services) {
+  const templates = passTemplatesFromServices(services);
+  const purchases = (await tableExists("optix_pass_purchases"))
+    ? ((await db().sql`
+        SELECT id, provider, sale_number, member_name, member_email, person_id,
+               person_link_source, item_name, quantity, amount_cents, currency,
+               purchased_at, classification
+        FROM public.optix_pass_purchases
+        WHERE account_id = ${accountId}
+          AND classification IN ('pass', 'unknown')
+        ORDER BY purchased_at DESC
+        LIMIT 100
+      `) as Record<string, unknown>[])
+    : [];
+
+  // Asked of the passes table rather than tracked on the purchase, so the
+  // inbox and the unique index that actually prevents double-issuing can never
+  // disagree about what has been issued.
+  const issued = await issuedSourceRefs(
+    accountId,
+    "optix",
+    purchases.map((row) => `optix:${String(row.id || "")}`),
+  );
+
+  const people = new Map<string, string>();
+  const personIds = [...new Set(purchases.map((row) => String(row.person_id || "")).filter(Boolean))];
+  if (personIds.length) {
+    const rows = (await db().sql`
+      SELECT id, name FROM people WHERE account_id = ${accountId} AND id = ANY(${personIds})
+    `) as Record<string, unknown>[];
+    for (const row of rows) people.set(String(row.id), String(row.name || ""));
+  }
+
+  return {
+    templates,
+    waitingToIssue: purchases
+      .filter((row) => !issued.has(`optix:${String(row.id || "")}`))
+      .map((row) => {
+        const itemName = cleanString(row.item_name, "", 200);
+        const suggestion = suggestPassTemplate(itemName, templates);
+        const personId = cleanString(row.person_id, "", 160);
+        return {
+          id: String(row.id || ""),
+          provider: cleanString(row.provider, "optix", 40),
+          saleNumber: cleanString(row.sale_number, "", 60),
+          itemName,
+          quantity: Number(row.quantity || 1) || 1,
+          amountCents: row.amount_cents === null ? null : Number(row.amount_cents),
+          currency: cleanString(row.currency, "", 10),
+          purchasedAt: cleanString(row.purchased_at, "", 80),
+          buyerName: cleanString(row.member_name, "", 180),
+          buyerEmail: cleanString(row.member_email, "", 200),
+          personId,
+          personName: people.get(personId) || "",
+          // How the buyer was tied to that person, so "matched on a name" is
+          // never mistaken on screen for "matched on an email".
+          personLinkSource: cleanString(row.person_link_source, "", 20),
+          classification: cleanString(row.classification, "unknown", 20),
+          suggestedTemplateServiceId: suggestion.template?.serviceId || "",
+          suggestedTemplateName: suggestion.template?.name || "",
+          suggestionConfidence: suggestion.confidence,
+        };
+      }),
+    waitingForOwner: (await readUnassignedPasses(accountId)).map((pass) => ({
+      id: pass.id,
+      name: pass.name,
+      creditsAvailable: pass.creditsAvailable,
+      creditsAllocated: pass.creditsAllocated,
+      expiresAt: pass.nextExpiry || pass.expiresAt,
+      source: pass.source,
+      note: pass.note,
+      issuedAt: pass.issuedAt,
+    })),
+  };
+}
+
+    if (req.method === "GET" && pathname === "/api/passes/inbox") {
+      const state = await readSettingsState(await currentAccountId(req));
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountFeature(requestContext.account, "clients");
+      return json(await readPassInbox(requestContext.accountId, state.services));
+    }
+
+    /* Turn an external purchase into a pass.
+     *
+     * The template is named by the caller, never inferred here. readPassInbox
+     * suggests one and says how confident it is; committing that suggestion is
+     * a click, because a wrong template issues real spendable credits for the
+     * wrong number of lessons and nothing downstream can tell.
+     *
+     * The purchase's own id is the source ref, so the unique index makes a
+     * double-tap -- or two coaches on the same queue -- idempotent rather than
+     * a second pass.
+     */
+    if (req.method === "POST" && pathname === "/api/passes/inbox") {
+      const body = await parseBody(req);
+      const state = await readSettingsState(await currentAccountId(req));
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountFeature(requestContext.account, "clients");
+      const accountId = requestContext.accountId;
+      const purchaseId = cleanString(body?.purchaseId, "", 120);
+      if (!purchaseId) return json({ error: "invalid", message: "Which purchase?" }, 400);
+      if (!(await tableExists("optix_pass_purchases"))) {
+        return json({ error: "not_found", message: "That purchase was not found." }, 404);
+      }
+
+      const rows = (await db().sql`
+        SELECT id, item_name, quantity, person_id, member_name, classification
+        FROM public.optix_pass_purchases
+        WHERE id = ${purchaseId} AND account_id = ${accountId}
+        LIMIT 1
+      `) as Record<string, unknown>[];
+      const purchase = rows[0];
+      if (!purchase) return json({ error: "not_found", message: "That purchase was not found." }, 404);
+
+      // "Not a pass" is how a wrong guess by the keyword classifier gets
+      // corrected without a code change, and how a bay-time top-up leaves the
+      // queue. It writes the correction back to the purchase, which is where
+      // the classifier's own output lives.
+      if (cleanString(body?.action, "", 20) === "dismiss") {
+        await db().sql`
+          UPDATE public.optix_pass_purchases
+          SET classification = 'not_pass', is_pass = FALSE, updated_at = NOW()
+          WHERE id = ${purchaseId} AND account_id = ${accountId}
+        `;
+        return json(await readPassInbox(accountId, state.services));
+      }
+
+      const templates = passTemplatesFromServices(state.services);
+      const templateServiceId = cleanString(body?.templateServiceId, "", 120);
+      const template = templates.find((entry) => entry.serviceId === templateServiceId);
+      if (!template) {
+        return json(
+          { error: "invalid", message: "Pick which package this sale was, so the credits are right." },
+          400,
+        );
+      }
+
+      await grantPass(
+        {
+          // The buyer was resolved when the purchase was recorded. Null is
+          // legitimate and lands in the other half of this queue rather than
+          // blocking the issue -- the entitlement is real either way.
+          personId: cleanString(purchase.person_id, "", 160) || "",
+          templateServiceId: template.serviceId,
+          credits: template.credits * Math.max(1, Number(purchase.quantity || 1) || 1),
+          source: "optix",
+          sourceRef: `optix:${purchaseId}`,
+          note: `Optix sale · ${cleanString(purchase.item_name, "", 200)}`,
+          allowUnassigned: true,
+        },
+        templates,
+        { accountId, actorId: requestContext.userId || requestContext.user?.email || "" },
+      );
+
+      return json(await readPassInbox(accountId, state.services));
+    }
+
+    if (req.method === "POST" && pathname === "/api/passes/attach") {
+      const body = await parseBody(req);
+      const state = await readSettingsState(await currentAccountId(req));
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountFeature(requestContext.account, "clients");
+      await assignPass(
+        cleanString(body?.passId, "", 120),
+        cleanString(body?.personId, "", 160),
+        {
+          accountId: requestContext.accountId,
+          actorId: requestContext.userId || requestContext.user?.email || "",
+        },
+      );
+      return json(await readPassInbox(requestContext.accountId, state.services));
     }
 
     if (req.method === "POST" && pathname === "/api/passes") {

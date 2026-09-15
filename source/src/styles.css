@@ -14674,3 +14674,150 @@ button {
 .booking-review-turnaround strong {
   color: var(--c-text);
 }
+
+/* --- Pass Inbox -----------------------------------------------------------
+ *
+ * Two queues, one row shape. Each row is a fact on the left and the single
+ * decision it is waiting on to the right, because every row here is blocked on
+ * exactly one thing -- which package, or which person -- and offering a second
+ * control would imply there was a second question.
+ * ------------------------------------------------------------------------ */
+.pass-inbox {
+  display: grid;
+  gap: var(--c-space-4);
+  align-content: start;
+}
+
+.pass-inbox-section {
+  display: grid;
+  gap: var(--c-space-2);
+  align-content: start;
+}
+
+.pass-inbox-section > header h3 {
+  margin: 0;
+  font-size: var(--c-size-body);
+}
+
+.pass-inbox-section > header p {
+  margin: var(--c-space-1) 0 0;
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+  max-width: var(--c-w-prose);
+}
+
+.pass-inbox-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--c-space-3);
+  padding: var(--c-space-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-card);
+  background: var(--c-surface-soft);
+}
+
+.pass-inbox-row-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 260px;
+}
+
+.pass-inbox-row-main strong {
+  font-size: var(--c-size-body);
+}
+
+.pass-inbox-row-main span,
+.pass-inbox-row-main em {
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+  font-style: normal;
+}
+
+/* Everything the payload could not prove: a name-only match, a buyer nobody
+   recognised, a product the classifier never claimed was a pass. The colour is
+   the whole warning -- these rows are the ones worth reading twice. */
+/* Scoped through the row rather than left as a bare class: the rule above
+   colours every em in the row, and a single class loses to it on specificity.
+   The first version of this was silently grey. */
+.pass-inbox-row-main .pass-inbox-row-caution {
+  color: var(--c-danger);
+}
+
+.pass-inbox-row-actions {
+  display: grid;
+  gap: var(--c-space-1);
+  justify-items: stretch;
+  flex: 0 1 auto;
+}
+
+.pass-inbox-field {
+  display: grid;
+  gap: var(--c-space-1);
+  min-width: 0;
+}
+
+.pass-inbox-field > span {
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+}
+
+.pass-inbox-field select {
+  font: inherit;
+  min-width: var(--c-w-name);
+  height: var(--c-h-control);
+  padding: 0 var(--c-space-2);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  color: var(--c-text);
+}
+
+.pass-inbox-suggestion {
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+}
+
+.pass-inbox-row-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--c-space-2);
+  margin-top: var(--c-space-1);
+}
+
+.pass-inbox-empty {
+  display: grid;
+  gap: var(--c-space-1);
+  justify-items: start;
+  padding: var(--c-space-4);
+  color: var(--c-text-soft);
+}
+
+.pass-inbox-empty p {
+  margin: 0;
+  color: var(--c-text);
+}
+
+.pass-inbox-empty span {
+  font-size: var(--c-size-meta);
+  max-width: var(--c-w-prose);
+}
+
+/* The number on a tab. Only ever rendered when it is non-zero, so it never
+   sits there saying nothing is happening. */
+.tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--c-accent);
+  color: var(--c-accent-text);
+  font-size: var(--c-size-meta);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}

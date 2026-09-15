@@ -3899,31 +3899,85 @@ async function posBookingPayments(accountId: string, bookingIds: string[]) {
   return { payments };
 }
 
+/**
+ * The arithmetic behind the counter-takings tiles.
+ *
+ * Pulled out of posSummary so the one thing here that is genuinely easy to get
+ * wrong -- what counts as money and what does not -- can be tested without a
+ * database. Three kinds of value pass through a till and only one of them is
+ * takings:
+ *
+ *   * Cash, card, bank: money, and it reconciles against a float.
+ *   * A voucher: money that came in earlier, when the voucher was sold. Netted
+ *     off the tendering method so a $100 sale settled with a $60 voucher does
+ *     not show $100 in the drawer, and reported as its own row.
+ *   * A pass credit: not money at all, in either direction. The revenue was
+ *     recognised when the pass was sold; counting the lesson too reads $180 for
+ *     $90 of actual money. The sale is $0 -- nothing was tendered -- and what
+ *     it delivered is reported beside the takings, never inside them.
+ */
+export function summarisePosTakings(
+  paid: Array<{
+    paymentMethodName?: unknown;
+    paymentMethodKind?: unknown;
+    amount?: unknown;
+    couponAmount?: unknown;
+    listedAmount?: unknown;
+  }>,
+) {
+  // The kind travels with the bucket so a reader never has to match on the
+  // name. A coach can rename "Pass" to "Passes" in Settings, and a report that
+  // string-matched it would silently start reporting nothing -- the same trap
+  // that made seeding this method as `custom` a bad idea in the first place.
+  const byMethod = new Map<
+    string,
+    { paymentMethodName: string; kind: string; count: number; total: number }
+  >();
+  const addToMethod = (name: string, amount: number, countsAsSale: boolean, kind = "custom") => {
+    if (amount <= 0 && !countsAsSale) return;
+    const bucket = byMethod.get(name) || { paymentMethodName: name, kind, count: 0, total: 0 };
+    if (countsAsSale) bucket.count += 1;
+    bucket.total = round2(bucket.total + amount);
+    byMethod.set(name, bucket);
+  };
+
+  let couponTotal = 0;
+  let passCount = 0;
+  let passValue = 0;
+  for (const entry of paid) {
+    const couponAmount = round2(cleanNumber(entry.couponAmount, 0, { min: 0 }));
+    couponTotal = round2(couponTotal + couponAmount);
+    if (entry.paymentMethodKind === "pass") {
+      passCount += 1;
+      passValue = round2(passValue + cleanNumber(entry.listedAmount, 0, { min: 0 }));
+    }
+    addToMethod(
+      String(entry.paymentMethodName ?? ""),
+      round2(cleanNumber(entry.amount, 0) - couponAmount),
+      true,
+      String(entry.paymentMethodKind || "custom"),
+    );
+  }
+  if (couponTotal > 0) addToMethod("Coupons redeemed", couponTotal, false, "coupon");
+
+  return {
+    couponTotal,
+    passCount,
+    passValue,
+    // A pass sale is $0, so it sorts last on total. That is the right place for
+    // it: the tiles above it are the ones that hold money.
+    byMethod: [...byMethod.values()].sort((a, b) => b.total - a.total),
+    paidTotal: round2(paid.reduce((sum, entry) => sum + cleanNumber(entry.amount, 0), 0)),
+  };
+}
+
 // Counter takings for a date range, split by method. Kept out of
 // reports/summary on purpose: mixing it in there is exactly the double-count
 // this whole section is designed to avoid.
 async function posSummary(accountId: string, url: URL) {
   const { transactions } = await listPosTransactions(accountId, url);
   const paid = transactions.filter((entry) => entry.status === "paid");
-  const byMethod = new Map<string, { paymentMethodName: string; count: number; total: number }>();
-  const addToMethod = (name: string, amount: number, countsAsSale: boolean) => {
-    if (amount <= 0 && !countsAsSale) return;
-    const bucket = byMethod.get(name) || { paymentMethodName: name, count: 0, total: 0 };
-    if (countsAsSale) bucket.count += 1;
-    bucket.total = round2(bucket.total + amount);
-    byMethod.set(name, bucket);
-  };
-
-  // A sale can be part voucher, part card. entry.amount is the whole sale, so
-  // the payment method only gets what was actually tendered on it - otherwise a
-  // $100 sale settled with a $60 voucher would show $100 in the cash drawer.
-  let couponTotal = 0;
-  for (const entry of paid) {
-    const couponAmount = round2(entry.couponAmount || 0);
-    couponTotal = round2(couponTotal + couponAmount);
-    addToMethod(String(entry.paymentMethodName), round2(entry.amount - couponAmount), true);
-  }
-  if (couponTotal > 0) addToMethod("Coupons redeemed", couponTotal, false);
+  const takings = summarisePosTakings(paid as Parameters<typeof summarisePosTakings>[0]);
 
   return {
     currency: paid[0]?.currency || (await resolveDefaultCurrency(accountId)),
@@ -3931,9 +3985,7 @@ async function posSummary(accountId: string, url: URL) {
     pendingCount: transactions.filter((entry) => entry.status === "pending").length,
     // The headline stays the full value of what went out the door; the method
     // breakdown underneath is what reconciles against a till float.
-    paidTotal: round2(paid.reduce((sum, entry) => sum + entry.amount, 0)),
-    couponTotal,
-    byMethod: [...byMethod.values()].sort((a, b) => b.total - a.total),
+    ...takings,
   };
 }
 

@@ -120,6 +120,35 @@ type PracticeItem = {
   completedAt: string | null;
 };
 
+/* What the big number on a pass says.
+ *
+ * Four states, and only one of them is a count. The other three are the
+ * reasons a count would be misleading: a pass that has not started, one that
+ * ran out, and one that timed out. Saying "0 left" for the last two is
+ * technically true and useless -- a player wants to know whether to book or to
+ * buy, and those are different answers. */
+function passBalanceLabel(pass: PlayerPass) {
+  if (pass.status === "scheduled") return "Not started";
+  if (pass.status === "expired") return "Expired";
+  if (pass.status === "exhausted" || pass.creditsAvailable < 1) return "All used";
+  return `${pass.creditsAvailable} left`;
+}
+
+/** A pass, as playerPassViews() hands it over. Deliberately not the coach's
+ *  PassView -- the note, the source and who pressed the button stay behind. */
+type PlayerPass = {
+  id: string;
+  name: string;
+  creditsAvailable: number;
+  creditsAllocated: number;
+  creditsRedeemed: number;
+  expiresAt: string | null;
+  status: "active" | "exhausted" | "expired" | "scheduled" | "void";
+  covers: string[];
+  issuedAt: string;
+  history: Array<{ id: string; redeemedAt: string; bookingId: string | null }>;
+};
+
 type CaddyAccess = {
   appUrl: string;
   connected: boolean;
@@ -217,6 +246,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   const [notes, setNotes] = useState<Note[]>([]);
   const [practice, setPractice] = useState<PracticeItem[]>([]);
   const [practiceBlockTypes, setPracticeBlockTypes] = useState<PracticeTypeMeta[]>([]);
+  const [passes, setPasses] = useState<PlayerPass[]>([]);
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileError, setProfileError] = useState("");
   const [expandedPracticeId, setExpandedPracticeId] = useState<string | null>(null);
@@ -300,6 +330,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
         notes?: Note[];
         practice?: PracticeItem[];
         practiceBlockTypes?: PracticeTypeMeta[];
+        passes?: PlayerPass[];
         bookingEmbed?: PlayerBookingEmbedConfig;
       };
       if (!res.ok) throw new Error(data?.message || "We couldn't load your profile.");
@@ -310,6 +341,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
       // object the coach is looking at. Empty means this workspace never
       // edited them and both ends fall back to the same defaults.
       setPracticeBlockTypes(Array.isArray(data.practiceBlockTypes) ? data.practiceBlockTypes : []);
+      setPasses(Array.isArray(data.passes) ? data.passes : []);
       setBookingEmbed(isPlayerBookingEmbedConfigured(data.bookingEmbed) ? data.bookingEmbed : null);
       if (data.player?.email) setPlayerEmail(data.player.email);
       if (data.player?.name) setPlayerName(data.player.name);
@@ -848,6 +880,30 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
     [swingReviews],
   );
 
+  /* Credits they can actually spend right now. Scheduled and exhausted passes
+     are still shown -- see the Lessons tab -- but neither is an answer to "can
+     I book without paying", so neither counts here. */
+  const spendableCredits = useMemo(
+    () =>
+      passes
+        .filter((pass) => pass.status === "active")
+        .reduce((sum, pass) => sum + pass.creditsAvailable, 0),
+    [passes],
+  );
+
+  /* The soonest any spendable credit goes off. Worth surfacing on its own
+     because it is the one fact about a pass that costs the player money to
+     ignore, and it is not visible from the balance. */
+  const nextPassExpiry = useMemo(
+    () =>
+      passes
+        .filter((pass) => pass.status === "active" && pass.creditsAvailable > 0 && pass.expiresAt)
+        .map((pass) => pass.expiresAt as string)
+        .sort()
+        .at(0) || "",
+    [passes],
+  );
+
   /** What's outstanding -- the portal's Practice landing view leads with this. */
   const activePractice = useMemo(() => practice.filter((block) => block.status === "active"), [practice]);
 
@@ -1062,6 +1118,24 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                                 : "No upcoming lessons"}
                           </span>
                         </button>
+                        {/* Only for a player who actually holds one. A card
+                            reading "no passes" is clutter on every home screen
+                            in the business for the sake of the few who buy
+                            them. */}
+                        {passes.length > 0 && (
+                          <button
+                            type="button"
+                            className="player-portal-home-card"
+                            onClick={() => navigateTerminal("lessons")}
+                          >
+                            <span className="player-portal-home-card-title">Your passes</span>
+                            <span className="player-portal-home-card-sub">
+                              {spendableCredits
+                                ? `${spendableCredits} lesson${spendableCredits === 1 ? "" : "s"} left`
+                                : "None left to use"}
+                            </span>
+                          </button>
+                        )}
                         <button
                           type="button"
                           className="player-portal-home-card"
@@ -1171,6 +1245,85 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                             <em>Send your swing from Videos if you have not already.</em>
                           </li>
                         ))}
+                      </ul>
+                    </section>
+                  )}
+
+                  {/* Passes sit above the booking toggle for the same reason
+                      the reviews do: "how many have I got left" is the question
+                      a player asks immediately before booking, and answering it
+                      after they have picked a slot is answering it too late.
+
+                      Everything is shown, not just what is spendable. A pass
+                      that has run out or timed out is the answer to "why can't
+                      I book on my pass" -- hiding it turns that into a message
+                      to the coach. */}
+                  {passes.length > 0 && (
+                    <section className="player-portal-section">
+                      <h2>Your passes</h2>
+                      {spendableCredits > 0 && (
+                        <p className="player-portal-lead">
+                          {spendableCredits === 1
+                            ? "1 lesson paid for and ready to book."
+                            : `${spendableCredits} lessons paid for and ready to book.`}
+                          {nextPassExpiry && formatDate(nextPassExpiry)
+                            ? ` Use them by ${formatDate(nextPassExpiry)}.`
+                            : ""}
+                        </p>
+                      )}
+                      <ul className="player-portal-list">
+                        {passes.map((pass) => {
+                          // The line is "can I book on this right now", not
+                          // "is it used up". A pass that has not started yet is
+                          // as unbookable as one that ran out, and styling it
+                          // like a live balance is the version of this screen
+                          // that gets someone turned away at the bay.
+                          const spendable = pass.status === "active";
+                          return (
+                            <li
+                              className={`player-portal-pass${spendable ? "" : " is-inactive"}`}
+                              key={pass.id}
+                            >
+                              <div className="player-portal-pass-head">
+                                <strong>{pass.name}</strong>
+                                <span className="player-portal-pass-count">
+                                  {passBalanceLabel(pass)}
+                                </span>
+                              </div>
+                              <span className="player-portal-pass-meta">
+                                {[
+                                  pass.creditsAllocated
+                                    ? `${pass.creditsRedeemed} of ${pass.creditsAllocated} used`
+                                    : "",
+                                  pass.covers.length ? `Covers ${pass.covers.join(", ")}` : "",
+                                ]
+                                  .filter(Boolean)
+                                  .join(" · ")}
+                              </span>
+                              {pass.expiresAt && formatDate(pass.expiresAt) && (
+                                <span className="player-portal-pass-meta">
+                                  {pass.status === "expired" ? "Expired" : "Expires"}{" "}
+                                  {formatDate(pass.expiresAt)}
+                                </span>
+                              )}
+                              {/* Where the credits went. Dates only: naming the
+                                  lesson would mean a join the portal does not
+                                  have, and "used on these days" is enough to
+                                  settle a disagreement about the balance. */}
+                              {pass.history.length > 0 && (
+                                <span className="player-portal-pass-meta">
+                                  Used{" "}
+                                  {pass.history
+                                    .map((entry) => formatDate(entry.redeemedAt))
+                                    .filter(Boolean)
+                                    .slice(0, 4)
+                                    .join(", ")}
+                                  {pass.history.length > 4 ? "…" : ""}
+                                </span>
+                              )}
+                            </li>
+                          );
+                        })}
                       </ul>
                     </section>
                   )}

@@ -556,6 +556,169 @@ export async function voidPass(
 }
 
 // ---------------------------------------------------------------------------
+// The Pass Inbox -- passes with nobody to belong to
+// ---------------------------------------------------------------------------
+
+/**
+ * Which package an external product is, if it can be said without guessing.
+ *
+ * An external sale names a product ("30 Minute Golf Lesson Package") and says
+ * nothing about how many credits it is worth. The package Service of the same
+ * name knows -- so the job here is only to decide whether two names are the
+ * same product, and to refuse when that is a coin flip.
+ *
+ * The rule is the one the person matcher uses, for the same reason: exactly one
+ * candidate or no answer. A wrong template does not fail loudly -- it issues a
+ * real, spendable pass for the wrong number of lessons, and the first anyone
+ * hears of it is at the counter. "unknown" costs a coach one dropdown; a wrong
+ * match costs them an argument with a customer.
+ *
+ *   exact  the names are the same once case and punctuation are set aside.
+ *   close  exactly one template's name is contained in the product's, which is
+ *          what an external catalogue with a prefix or a suffix looks like.
+ *   none   nothing matched, or more than one did.
+ */
+export type PassTemplateSuggestion = {
+  template: PassTemplate | null;
+  confidence: "exact" | "close" | "none";
+};
+
+function normaliseProductName(value: string) {
+  return text(value, 200)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+export function suggestPassTemplate(
+  itemName: string,
+  templates: PassTemplate[],
+): PassTemplateSuggestion {
+  const wanted = normaliseProductName(itemName);
+  if (!wanted) return { template: null, confidence: "none" };
+
+  const named = templates.map((template) => ({
+    template,
+    name: normaliseProductName(template.name),
+  }));
+
+  const exact = named.filter((entry) => entry.name && entry.name === wanted);
+  if (exact.length === 1) return { template: exact[0].template, confidence: "exact" };
+  // Two templates sharing a name is a catalogue problem, not something to
+  // resolve by picking one.
+  if (exact.length > 1) return { template: null, confidence: "none" };
+
+  const contained = named.filter(
+    (entry) => entry.name && (wanted.includes(entry.name) || entry.name.includes(wanted)),
+  );
+  if (contained.length === 1) return { template: contained[0].template, confidence: "close" };
+  return { template: null, confidence: "none" };
+}
+
+/**
+ * Everything issued that has no owner.
+ *
+ * A pass reaches this state when whatever paid for it could not be tied to a
+ * person with confidence -- an external sale carrying a display name and no
+ * email, or cash over the counter before the buyer was ever a client. The
+ * entitlement is real either way: somebody paid. So it is issued and it waits,
+ * rather than being guessed at or dropped.
+ *
+ * Void ones are excluded. A voided unassigned pass is a refunded purchase that
+ * never found an owner, and offering it for attachment invites attaching it.
+ */
+export async function readUnassignedPasses(accountId: string): Promise<PassView[]> {
+  if (!accountId) return [];
+  const rows = await db().sql`
+    SELECT
+      b.*,
+      p.source,
+      p.note,
+      p.issued_at,
+      COALESCE((
+        SELECT json_agg(a ORDER BY a.expires_at NULLS LAST, a.available_from)
+        FROM public.pass_allocation_balances a
+        WHERE a.pass_id = b.pass_id AND a.account_id = ${accountId}
+      ), '[]'::json) AS allocations,
+      '[]'::json AS redemptions
+    FROM public.pass_balances b
+    JOIN public.passes p ON p.id = b.pass_id AND p.account_id = ${accountId}
+    WHERE b.account_id = ${accountId}
+      AND b.person_id IS NULL
+      AND p.status <> 'void'
+    ORDER BY p.issued_at DESC
+    LIMIT 200
+  `;
+  return (rows as Record<string, unknown>[]).map(rowToPass);
+}
+
+/**
+ * Which purchases have already produced a pass.
+ *
+ * Issuing is idempotent on (account_id, source, source_ref), so this is the
+ * same key the unique index uses -- which means the inbox and the insert can
+ * never disagree about whether something has been issued. Asking the passes
+ * table is deliberate: a flag on the purchase row would be a second record of
+ * the same fact, and the two would drift the first time an issue half-failed.
+ */
+export async function issuedSourceRefs(
+  accountId: string,
+  source: PassSource,
+  refs: string[],
+): Promise<Set<string>> {
+  const wanted = [...new Set(refs.map((ref) => text(ref, 200)).filter(Boolean))];
+  if (!accountId || !wanted.length) return new Set();
+  const rows = await db().sql`
+    SELECT source_ref
+    FROM public.passes
+    WHERE account_id = ${accountId}
+      AND source = ${source}
+      AND source_ref = ANY(${wanted})
+  `;
+  return new Set((rows as Record<string, unknown>[]).map((row) => String(row.source_ref || "")));
+}
+
+/**
+ * Give an unassigned pass an owner.
+ *
+ * One direction only. Attaching is how a pass that was issued without a person
+ * finds one; moving a pass from one person to another is a different act with
+ * different consequences -- credits already spent under the old owner stay
+ * spent -- and it is not this. A pass that already belongs to somebody is
+ * refused rather than quietly reassigned.
+ */
+export async function assignPass(
+  passId: string,
+  personId: string,
+  actor: PassActor,
+): Promise<{ pass: PassView | null }> {
+  const { accountId } = actor;
+  const id = text(passId, 120);
+  const person = text(personId, 160);
+  if (!accountId) fail("No account.", 403, "forbidden");
+  if (!id) fail("Which pass?");
+  if (!person) fail("Which person is this pass for?");
+
+  const existing = await readPassRow(accountId, id);
+  if (!existing) fail("That pass was not found.", 404, "not_found");
+  if (existing.status === "void") fail("That pass is void.", 409, "void_pass");
+  if (existing.person_id) {
+    fail("That pass already belongs to somebody.", 409, "already_assigned");
+  }
+
+  await db().sql`
+    UPDATE public.passes
+    SET person_id = ${person},
+        note = TRIM(BOTH ' ' FROM COALESCE(note, '') || ${` Attached by ${text(actor.actorId, 160) || "an admin"}.`}),
+        updated_at = NOW()
+    WHERE id = ${id} AND account_id = ${accountId} AND person_id IS NULL
+  `;
+
+  const passes = await readPassesForPerson(accountId, person);
+  return { pass: passes.find((entry) => entry.id === id) || null };
+}
+
+// ---------------------------------------------------------------------------
 // Spending
 // ---------------------------------------------------------------------------
 
@@ -609,6 +772,93 @@ export function passOptionsForService(
         reason: reason || (serviceName ? `Covers ${serviceName}` : ""),
       };
     });
+}
+
+/* --- What a player is allowed to see -----------------------------------
+ *
+ * A PassView is the coach's object: it carries the note ("comped after the
+ * rained-out session"), the source, and a redeemed_by naming an admin user.
+ * None of that is the player's business, and two of the three would be
+ * actively awkward to hand over.
+ *
+ * So the portal gets its own shape rather than a filtered version of the
+ * coach's -- a filter is a list of things to remember to remove, and the day
+ * someone adds a field to PassView the portal starts leaking it. This is the
+ * opposite: an allow-list, where a new field on PassView reaches a player only
+ * when somebody writes it in here on purpose.
+ */
+
+export type PlayerPassView = {
+  id: string;
+  name: string;
+  creditsAvailable: number;
+  creditsAllocated: number;
+  creditsRedeemed: number;
+  /** The soonest any of these credits goes off, which is the one that matters. */
+  expiresAt: string | null;
+  status: PassView["status"];
+  /** Service names, not ids -- the player has no catalogue to look ids up in. */
+  covers: string[];
+  issuedAt: string;
+  /** Live redemptions only, newest first. A reversed one is a credit they got
+   *  back, and showing it as spent would be a lie about their balance. */
+  history: Array<{ id: string; redeemedAt: string; bookingId: string | null }>;
+};
+
+/**
+ * One pass, as its holder should see it.
+ *
+ * A voided pass is dropped by the caller rather than here -- see
+ * playerPassViews -- because "which passes exist for this player" is a
+ * different question from "what does this pass look like to them".
+ */
+export function playerPassView(pass: PassView, serviceNames: Map<string, string>): PlayerPassView {
+  return {
+    id: pass.id,
+    name: pass.name,
+    creditsAvailable: pass.creditsAvailable,
+    creditsAllocated: pass.creditsAllocated,
+    creditsRedeemed: pass.creditsRedeemed,
+    expiresAt: pass.nextExpiry || pass.expiresAt,
+    status: pass.status,
+    covers: pass.coversServiceIds
+      .map((id) => serviceNames.get(id) || "")
+      .filter((name) => Boolean(name)),
+    issuedAt: pass.issuedAt,
+    history: pass.redemptions
+      .filter((entry) => !entry.reversedAt)
+      .map((entry) => ({
+        id: entry.id,
+        redeemedAt: entry.redeemedAt,
+        bookingId: entry.bookingId,
+      })),
+  };
+}
+
+/**
+ * Everything a player holds, in the order they would ask about it.
+ *
+ * Spendable first, then what is merely waiting, then what is finished --
+ * because the question a player opens this to answer is almost always "how
+ * many have I got left", and a pass with credits on it is the answer.
+ *
+ * Void passes are not here at all. A voided pass is one that was refunded or
+ * taken back; it is the coach's audit trail, not the player's entitlement, and
+ * showing it invites "why does it say I have a pass I can't use?".
+ */
+export function playerPassViews(
+  passes: PassView[],
+  serviceNames: Map<string, string>,
+): PlayerPassView[] {
+  const rank: Record<string, number> = { active: 0, scheduled: 1, exhausted: 2, expired: 3 };
+  return passes
+    .filter((pass) => pass.status !== "void")
+    .map((pass) => playerPassView(pass, serviceNames))
+    .sort(
+      (left, right) =>
+        (rank[left.status] ?? 9) - (rank[right.status] ?? 9) ||
+        right.issuedAt.localeCompare(left.issuedAt),
+    );
 }
 
 export type ReservedCredit = { redemptionId: string; allocationId: string };

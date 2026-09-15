@@ -32,6 +32,7 @@ import {
   GripVertical,
   Home,
   ImagePlus,
+  Inbox,
   KeyRound,
   LayoutDashboard,
   Link2,
@@ -74,6 +75,10 @@ import { cleanPeople as cleanPeopleWith, type PeopleImportDiagnostic, type Perso
 import { isUnauthorizedClientsError, loadClients, replaceClients, resetClients, useClientsState } from "./modules/clients/clientsStore";
 import type { ClientsPanel as ClientsPanelComponent } from "./modules/clients/ClientsPanel";
 import type { CoverableService, Pass, PassGrant, PassTemplate } from "./modules/passes/PassesPanel";
+import type {
+  PassInboxPurchase,
+  PassInboxUnassigned,
+} from "./modules/passes/PassInboxPanel";
 import {
   cleanLessonNotes as cleanLessonNotesWith,
   type LessonNote,
@@ -298,6 +303,9 @@ const ClientsPanel = lazy(() =>
 // static -- they are small, and the calendar needs them for the Paid marker.
 // The Passes tab on a client profile. Loaded on demand like the rest: most
 // visits to a profile are about a booking or a note, not an entitlement.
+const PassInboxPanel = lazy(() =>
+  import("./modules/passes/PassInboxPanel").then((module) => ({ default: module.PassInboxPanel })),
+);
 const PassesPanel = lazy(() =>
   import("./modules/passes/PassesPanel").then((module) => ({ default: module.PassesPanel })),
 );
@@ -1081,6 +1089,7 @@ type BillingSection =
   | "coupons"
   | "reports"
   | "transactions"
+  | "passes"
   | "settings";
 
 // Every Billing section, as values. BILLING_SECTION_LABELS below is keyed by
@@ -1095,6 +1104,7 @@ const BILLING_SECTIONS: Exclude<BillingSection, "none">[] = [
   "coupons",
   "reports",
   "transactions",
+  "passes",
   "settings",
 ];
 
@@ -1122,6 +1132,7 @@ const BILLING_SECTION_LABELS: Record<Exclude<BillingSection, "none">, string> = 
   coupons: "Coupons",
   reports: "Reports",
   transactions: "Transaction History",
+  passes: "Pass Inbox",
   settings: "Settings",
 };
 
@@ -5548,6 +5559,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const [passCoverableServices, setPassCoverableServices] = useState<CoverableService[]>([]);
   const [clientPassesLoadState, setClientPassesLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [passGranting, setPassGranting] = useState(false);
+  const [passInbox, setPassInbox] = useState<{
+    waitingToIssue: PassInboxPurchase[];
+    waitingForOwner: PassInboxUnassigned[];
+    templates: PassTemplate[];
+  }>({ waitingToIssue: [], waitingForOwner: [], templates: [] });
+  const [passInboxLoadState, setPassInboxLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+  /** Which row is mid-write, so only that row's buttons go quiet. */
+  const [passInboxBusyId, setPassInboxBusyId] = useState("");
   const [clientTransactions, setClientTransactions] = useState<ClientTransactionRow[]>([]);
   const [clientTransactionsLoadState, setClientTransactionsLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [notesContext, setNotesContext] = useState<{ playerId: string; playerName: string } | null>(null);
@@ -18963,6 +18982,67 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     }
   }
 
+  /* The inbox, and the three things that can be done to it.
+   *
+   * All four go through the same response shape: every write answers with the
+   * whole inbox rather than a success flag, so the queue a coach is looking at
+   * is the queue the server has. Two people working the same inbox is the
+   * normal case here -- one issuing, one attaching -- and a row that has
+   * already been dealt with simply disappears on the next answer instead of
+   * failing on a second click. */
+  const passInboxCount =
+    passInbox.waitingToIssue.length + passInbox.waitingForOwner.length;
+
+  async function fetchPassInbox() {
+    setPassInboxLoadState((current) => (current === "loaded" ? current : "loading"));
+    try {
+      const response = await fetch("/api/passes/inbox", { credentials: "same-origin" });
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not load the pass inbox."));
+      applyPassInbox(await response.json());
+    } catch {
+      setPassInboxLoadState("error");
+    }
+  }
+
+  function applyPassInbox(data: unknown) {
+    const payload = (data || {}) as {
+      waitingToIssue?: PassInboxPurchase[];
+      waitingForOwner?: PassInboxUnassigned[];
+      templates?: PassTemplate[];
+    };
+    setPassInbox({
+      waitingToIssue: Array.isArray(payload.waitingToIssue) ? payload.waitingToIssue : [],
+      waitingForOwner: Array.isArray(payload.waitingForOwner) ? payload.waitingForOwner : [],
+      templates: Array.isArray(payload.templates) ? payload.templates : [],
+    });
+    setPassInboxLoadState("loaded");
+  }
+
+  async function postPassInbox(
+    path: string,
+    body: Record<string, unknown>,
+    busyId: string,
+    failure: string,
+    success: string,
+  ) {
+    setPassInboxBusyId(busyId);
+    try {
+      const response = await fetch(path, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) throw new Error(await readApiFailure(response, failure));
+      applyPassInbox(await response.json());
+      setToast({ message: success });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : failure });
+    } finally {
+      setPassInboxBusyId("");
+    }
+  }
+
   async function grantClientPass(grant: PassGrant) {
     if (!selectedClientId) return;
     setPassGranting(true);
@@ -25208,6 +25288,22 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 Transaction History
               </button>
               <button
+                className={billingSection === "passes" ? "active" : ""}
+                onClick={() => {
+                  setBillingSection("passes");
+                  void fetchPassInbox();
+                }}
+                role="tab"
+                aria-selected={billingSection === "passes"}
+                type="button"
+              >
+                <Inbox size={16} />
+                Pass Inbox
+                {/* The count is the point of the tab. An inbox you have to open
+                    to discover is empty is one nobody opens. */}
+                {passInboxCount > 0 && <span className="tab-count">{passInboxCount}</span>}
+              </button>
+              <button
                 className={billingSection === "reports" ? "active" : ""}
                 onClick={() => setBillingSection("reports")}
                 role="tab"
@@ -27288,6 +27384,68 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               </Suspense>
             )}
 
+            {billingSection === "passes" && (
+              <div className="billing-dashboard">
+                <article className="data-card wide">
+                  <div className="data-card-header">
+                    <div>
+                      <span>Pass Inbox</span>
+                      <h2>
+                        {passInboxCount === 0
+                          ? "Nothing waiting"
+                          : `${passInboxCount} waiting`}
+                      </h2>
+                    </div>
+                    <Inbox size={24} />
+                  </div>
+                  <p className="field-help">
+                    A pass sold outside Clarity arrives as a product name and a buyer, neither of
+                    which says how many credits it is worth or, always, who bought it. Nothing is
+                    issued or attached automatically — a wrong package hands somebody the wrong
+                    number of lessons, and nothing downstream can tell.
+                  </p>
+                  <Suspense fallback={<Loading what="the pass inbox" />}>
+                    <PassInboxPanel
+                      purchases={passInbox.waitingToIssue}
+                      unassigned={passInbox.waitingForOwner}
+                      templates={passInbox.templates}
+                      people={clients.map((client) => ({ id: client.id, name: client.name }))}
+                      loadState={passInboxLoadState}
+                      busyId={passInboxBusyId}
+                      onIssue={(purchaseId, templateServiceId) =>
+                        void postPassInbox(
+                          "/api/passes/inbox",
+                          { purchaseId, templateServiceId },
+                          purchaseId,
+                          "Could not issue that pass.",
+                          "Pass issued.",
+                        )
+                      }
+                      onDismiss={(purchaseId) =>
+                        void postPassInbox(
+                          "/api/passes/inbox",
+                          { purchaseId, action: "dismiss" },
+                          purchaseId,
+                          "Could not update that purchase.",
+                          "Marked as not a pass.",
+                        )
+                      }
+                      onAttach={(passId, personId) =>
+                        void postPassInbox(
+                          "/api/passes/attach",
+                          { passId, personId },
+                          passId,
+                          "Could not attach that pass.",
+                          "Pass attached.",
+                        )
+                      }
+                      onRetry={() => void fetchPassInbox()}
+                    />
+                  </Suspense>
+                </article>
+              </div>
+            )}
+
             {billingSection === "transactions" && (
               <div className="billing-dashboard billing-pos">
                 <article className="data-card">
@@ -27338,6 +27496,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           <strong>{formatMoney(entry.total, posSummary.currency)}</strong>
                           <em>
                             {entry.count} sale{entry.count === 1 ? "" : "s"}
+                            {/* A Pass row is $0 and always will be -- the money
+                                came in when the pass was sold. Without this the
+                                tile reads as sales that took nothing; with it,
+                                it reads as lessons delivered against money
+                                already banked. Matched on kind, not on the name,
+                                which a coach can edit. */}
+                            {entry.kind === "pass" && posSummary.passValue
+                              ? ` · ${formatMoney(posSummary.passValue, posSummary.currency)} delivered`
+                              : ""}
                           </em>
                         </div>
                       ))}
