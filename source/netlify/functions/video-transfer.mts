@@ -22,7 +22,7 @@ import {
 } from "./_shared/google-provider.mts";
 import { requireCoachActor } from "./_shared/coach-auth.mts";
 import { deliverEmail } from "./_shared/email-delivery.mts";
-import { canonicalPhoneKey } from "./_shared/phone.mts";
+import { canonicalPhoneKey, cleanPhoneCountry } from "./_shared/phone.mts";
 
 // Player portal sessions (see booking-core.mts). Player video routes are scoped
 // to the player's own player_id; the admin transfer surface is untouched.
@@ -726,7 +726,7 @@ function playerVideoBase64(value: string) {
 
 // Mirrors playerProfileIdCandidates in booking-core.mts so a session's stored
 // player_id (whatever historical form it took) matches this player.
-function playerVideoIdCandidates(scope: PlayerScope): Set<string> {
+function playerVideoIdCandidates(scope: PlayerScope, country: string): Set<string> {
   const ids = new Set<string>();
   if (scope.personId) ids.add(scope.personId);
   if (scope.email) {
@@ -737,7 +737,7 @@ function playerVideoIdCandidates(scope: PlayerScope): Set<string> {
       ids.add(`email-${encoded.replace(/=+$/, "")}`);
     }
   }
-  const canonicalPhone = canonicalPhoneKey(scope.phone);
+  const canonicalPhone = canonicalPhoneKey(scope.phone, cleanPhoneCountry(country));
   if (canonicalPhone) ids.add(`phone-${canonicalPhone}`);
   return ids;
 }
@@ -3058,7 +3058,9 @@ async function handlePlayerVideoRoute(
     throw Object.assign(new Error("This player session is not attached to a business."), { status: 403 });
   }
   const settings = await readSettings(accountId);
-  const candidates = playerVideoIdCandidates(scope);
+  // The business's own country, from its own settings -- not a module-level
+  // value left behind by whichever business this warm instance served last.
+  const candidates = playerVideoIdCandidates(scope, settings.accountCountry);
 
   if (req.method === "GET" && sub[0] === "imports") {
     const accessToken = await ensureDriveReady(accountId, diagnostics);

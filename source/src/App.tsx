@@ -95,16 +95,21 @@ import {
   useLessonNotesState,
 } from "./modules/player-profiles/lessonNotesStore";
 import {
-  canonicalPhoneKey as sharedCanonicalPhoneKey,
   cleanPhoneCountry,
+  phoneCountryOptions,
+} from "../netlify/functions/_shared/phone.mts";
+// The country itself is held per page here, not in the shared module -- see
+// that file for why the server cannot have one.
+import {
+  activeCurrency,
+  activeLocale,
+  canonicalPhoneKey as sharedCanonicalPhoneKey,
   dialCodeFor,
   formatPhoneForDisplay,
-  getActivePhoneCountry,
+  getActiveCountry,
   isValidPhone,
-  phoneCountryOptions,
-  setActivePhoneCountry,
-} from "../netlify/functions/_shared/phone.mts";
-import { activeCurrency, activeLocale } from "../netlify/functions/_shared/locale.mts";
+  setActiveCountry,
+} from "./lib/activeCountry";
 import { CoachProfilePanel } from "./modules/profile/CoachProfilePanel";
 import type { ProfileInternalJob, ProfileTarget } from "./modules/profile/CoachProfilePanel";
 import {
@@ -5473,7 +5478,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   // two numbers belong to the same person, which is what produced duplicate
   // contacts and the failed saves.
   useEffect(() => {
-    setActivePhoneCountry(coachAccount.country);
+    setActiveCountry(coachAccount.country);
   }, [coachAccount.country]);
   const [workspaceAccounts, setWorkspaceAccounts] = useState<WorkspaceAccount[]>(() =>
     bootstrap?.accounts ?? cleanWorkspaceAccounts(getStoredWorkspaceAccounts(), getStoredCoachAccount()),

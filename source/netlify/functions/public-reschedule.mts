@@ -3,8 +3,6 @@ import { resolvePublicAccount } from "./_shared/coach-auth.mts";
 import { settingsSelectQuery } from "./_shared/settings-scope.mts";
 
 import { handlePublicRescheduleRequest } from "./booking-core.mts";
-import { activeLocale } from "./_shared/locale.mts";
-import { setActivePhoneCountry } from "./_shared/phone.mts";
 
 const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
 const millisecondsPerDay = 24 * 60 * 60 * 1000;
@@ -109,7 +107,11 @@ function bookingNoticeLabel(minutes: number) {
 function zonedNowParts(timezone: string) {
   const zone = cleanString(timezone, defaultTimezone, 80) || defaultTimezone;
   try {
-    const parts = new Intl.DateTimeFormat(activeLocale(), {
+    // Every field below is requested numerically and read back by `type`, so the
+    // locale changes nothing about the answer -- it is pinned to en-GB purely so
+    // the formatter is deterministic rather than following whichever business
+    // the instance served last.
+    const parts = new Intl.DateTimeFormat("en-GB", {
       timeZone: zone,
       year: "numeric",
       month: "2-digit",
@@ -152,9 +154,6 @@ async function assertRescheduleIsFuture(req: Request) {
   if (!Number.isInteger(week) || !Number.isInteger(day) || !Number.isInteger(start) || day < 0 || day > 6) return;
 
   const settings = await readBookingRuleSettings(req);
-  // Resolve the workspace's country before any date is formatted, so this
-  // lambda formats dates the coach's way rather than New Zealand's.
-  setActivePhoneCountry((settings as any).accountCountry);
   const minBookingNoticeMinutes = cleanMinBookingNoticeMinutes(settings.minBookingNoticeMinutes ?? env("CLARITY_MIN_BOOKING_NOTICE_MINUTES", String(defaultMinBookingNoticeMinutes)));
   const timezone = settings.accountTimezone || env("CLARITY_TIMEZONE", defaultTimezone);
   if (!slotIsBeforeMinimumNotice({ week, day, start }, timezone, minBookingNoticeMinutes)) return;

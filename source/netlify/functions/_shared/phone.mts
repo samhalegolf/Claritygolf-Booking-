@@ -21,10 +21,14 @@ import {
   type CountryCode,
 } from "libphonenumber-js";
 
-// The country a bare national number (no leading +) is assumed to belong to.
-// Override per deployment with CLARITY_PHONE_COUNTRY, or per workspace with the
-// account's country setting, which is threaded in as the `country` argument.
+// The country a bare national number (no leading +) is assumed to belong to
+// when a caller has none -- a last resort, not a default anybody should rely on.
+// Every function below takes the country explicitly; it comes from the account's
+// own settings, and cleanPhoneCountry lands here only when that is unusable.
 export const FALLBACK_PHONE_COUNTRY: CountryCode = "NZ";
+
+/** Re-exported so callers can type a country without importing libphonenumber. */
+export type { CountryCode };
 
 export function isPhoneCountry(value: unknown): value is CountryCode {
   const code = String(value ?? "").trim().toUpperCase();
@@ -45,22 +49,19 @@ export function cleanPhoneCountry(
   return isPhoneCountry(fallbackCode) ? fallbackCode : FALLBACK_PHONE_COUNTRY;
 }
 
-// The workspace's home country, held here so the pure key-building helpers on
-// both sides can stay callable without threading a country argument through
-// every call site. The server sets this while seeding; the frontend sets it
-// when the account loads. Both then agree on what a bare "0274637700" means —
-// which is the whole point, since disagreeing is what produced duplicate
-// contacts in the first place.
-let activeCountry: CountryCode = FALLBACK_PHONE_COUNTRY;
-
-export function setActivePhoneCountry(value: unknown): CountryCode {
-  activeCountry = cleanPhoneCountry(value);
-  return activeCountry;
-}
-
-export function getActivePhoneCountry(): CountryCode {
-  return activeCountry;
-}
+// There used to be a module-level `activeCountry` here, set by whichever code
+// path last read an account's settings and defaulted into by every function
+// below. On the frontend that is fine: one browser, one workspace, one page. On
+// the server it is not, because a Netlify instance stays warm and serves many
+// businesses. Whatever the previous request set was still in place for the next
+// one, so a request that formatted a number or a date without first re-reading
+// settings used the last business's country -- and a US coach's "07/08" is a NZ
+// coach's 8 July. Nothing in the app noticed, because the value was always
+// plausible.
+//
+// The country is now an argument, always, with no ambient fallback to be stale.
+// The browser's per-page equivalent lives in src/lib/activeCountry.ts, where a
+// single mutable value is the correct model.
 
 // Strip everything a human or a spreadsheet might have decorated the number
 // with, while preserving a leading +. Excel writes text cells with a leading
@@ -114,7 +115,7 @@ function heuristicKey(value: unknown, country: CountryCode): string {
  */
 export function canonicalPhoneKey(
   value: unknown,
-  country: CountryCode = getActivePhoneCountry(),
+  country: CountryCode,
 ): string {
   const parsed = parse(value, cleanPhoneCountry(country));
   if (parsed?.number) return parsed.number; // E.164, e.g. +64274637700
@@ -124,7 +125,7 @@ export function canonicalPhoneKey(
 /** Canonical storage form: E.164 (+64274637700), or "" when unparseable. */
 export function phoneToE164(
   value: unknown,
-  country: CountryCode = getActivePhoneCountry(),
+  country: CountryCode,
 ): string {
   const parsed = parse(value, cleanPhoneCountry(country));
   return parsed?.isValid() ? parsed.number : "";
@@ -133,7 +134,7 @@ export function phoneToE164(
 /** Human form for the UI: national when local, international when not. */
 export function formatPhoneForDisplay(
   value: unknown,
-  country: CountryCode = getActivePhoneCountry(),
+  country: CountryCode,
 ): string {
   const clean = cleanPhoneCountry(country);
   const parsed = parse(value, clean);
@@ -145,16 +146,14 @@ export function formatPhoneForDisplay(
 
 export function isValidPhone(
   value: unknown,
-  country: CountryCode = getActivePhoneCountry(),
+  country: CountryCode,
 ): boolean {
   const parsed = parse(value, cleanPhoneCountry(country));
   return Boolean(parsed?.isValid());
 }
 
-/** "+64" for the given country, or the active one. "" if unknown. */
-export function dialCodeFor(
-  country: CountryCode = getActivePhoneCountry(),
-): string {
+/** "+64" for the given country. "" if unknown. */
+export function dialCodeFor(country: CountryCode): string {
   try {
     return `+${getCountryCallingCode(cleanPhoneCountry(country))}`;
   } catch {

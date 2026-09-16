@@ -2,8 +2,8 @@ import type { Config, Context } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
 import { createHash, randomUUID } from "node:crypto";
 import { legacyOriginalWorkspaceId, defaultCalendarSlug } from "./_shared/account.mts";
-import { activeCurrency } from "./_shared/locale.mts";
-import { setActivePhoneCountry } from "./_shared/phone.mts";
+import { currencyForCountry } from "./_shared/locale.mts";
+import { FALLBACK_PHONE_COUNTRY } from "./_shared/phone.mts";
 import { bayBookingMatchesSlot } from "./_shared/optix-reconcile.mts";
 import {
   requireCoachActor,
@@ -24,7 +24,10 @@ const defaultInvoiceSettings = {
   showBillingWorkspace: true,
   prefix: "INV",
   nextNumber: 1001,
-  currency: activeCurrency(),
+  // The last-resort currency for a business whose country is unreadable. This
+  // read activeCurrency() before, which -- evaluated at module load, before any
+  // account had been read -- was always this same fallback anyway.
+  currency: currencyForCountry(FALLBACK_PHONE_COUNTRY),
   taxName: "GST",
   taxNumber: "",
   taxRate: 15,
@@ -749,9 +752,6 @@ async function readTinyCalendarShell(req: Request, requestStartedAt: number) {
   });
 
   const [settingsMap, items] = await Promise.all([readSettingsMap(actor.accountId), readItems(actor.accountId)]);
-  // Resolve the workspace's country before any date or price is formatted, so
-  // this lambda uses the coach's conventions rather than New Zealand's.
-  setActivePhoneCountry(settingValue(settingsMap, "accountCountry"));
   const account = coachAccountFromSettings(settingsMap, actor.accountId);
   const workspaceAccounts = normalizeWorkspaceAccounts(parseSettingJson(settingsMap, "workspaceAccountsJson", []), account);
   // The original workspace's seeds are its own real data; any other business

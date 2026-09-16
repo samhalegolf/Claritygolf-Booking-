@@ -77,7 +77,7 @@ import {
 } from "./_shared/sandbox.mts";
 import type { CoachActor } from "./_shared/coach-auth.mts";
 import { authSessionResponse, type WorkspaceBootstrap } from "./_shared/auth-contract.mts";
-import { activeCurrency, activeLocale, currencyForAccountSettings } from "./_shared/locale.mts";
+import { currencyForAccountSettings, currencyForCountry, localeForCountry } from "./_shared/locale.mts";
 import {
   caddyAppUrl,
   caddyConfigured,
@@ -103,8 +103,6 @@ import {
 import {
   canonicalPhoneKey,
   cleanPhoneCountry,
-  getActivePhoneCountry,
-  setActivePhoneCountry,
   FALLBACK_PHONE_COUNTRY,
 } from "./_shared/phone.mts";
 import { deliverEmail } from "./_shared/email-delivery.mts";
@@ -144,7 +142,12 @@ const defaultInvoiceSettings = {
   showBillingWorkspace: true,
   prefix: "INV",
   nextNumber: 1001,
-  currency: activeCurrency(),
+  // The last-resort currency, for a business whose country is unreadable. This
+  // read activeCurrency() before, which -- being evaluated at module load,
+  // before any account had been read -- had always been this same fallback
+  // anyway. The per-account answer comes from currencyForAccountSettings()
+  // in cleanInvoiceSettings below.
+  currency: currencyForCountry(FALLBACK_PHONE_COUNTRY),
   taxName: "GST",
   taxNumber: "",
   taxRate: 15,
@@ -599,11 +602,11 @@ function formatRange(start, duration) {
   return `${formatTime(start)}-${formatTime(start + duration)}`;
 }
 
-function formatBookingDate(week, day) {
+function formatBookingDate(week, day, country = FALLBACK_PHONE_COUNTRY) {
   const date = dateForSlot(week, day);
   return new Date(
     Date.UTC(date.year, date.month - 1, date.day),
-  ).toLocaleDateString(activeLocale(), {
+  ).toLocaleDateString(localeForCountry(country), {
     weekday: "long",
     month: "short",
     day: "numeric",
@@ -1038,7 +1041,7 @@ function cleanInvoiceLineTag(tag, index = 0) {
   };
 }
 
-function cleanInvoiceSettings(settings = {}) {
+function cleanInvoiceSettings(settings = {}, country = FALLBACK_PHONE_COUNTRY) {
   const nextNumber = Number(
     settings?.nextNumber ?? defaultInvoiceSettings.nextNumber,
   );
@@ -1079,11 +1082,10 @@ function cleanInvoiceSettings(settings = {}) {
     nextNumber: Number.isFinite(nextNumber)
       ? Math.max(0, Math.min(999999999, Math.round(nextNumber)))
       : defaultInvoiceSettings.nextNumber,
-    currency: cleanString(
-      settings?.currency,
-      defaultInvoiceSettings.currency,
-      8,
-    ).toUpperCase(),
+    // A business that has chosen a currency keeps it; one that has not gets the
+    // one its country uses, rather than New Zealand's. This is the same helper
+    // billing-api already invoices with, so the two cannot disagree.
+    currency: currencyForAccountSettings(settings?.currency, country),
     taxName: cleanString(settings?.taxName, defaultInvoiceSettings.taxName, 24),
     taxNumber: cleanString(settings?.taxNumber, "", 80),
     taxRate: Number.isFinite(taxRate)
@@ -1148,7 +1150,10 @@ function cleanCoachAccount(account) {
       account?.caddyWorkspaceUrl,
       defaults.caddyWorkspaceUrl,
     ),
-    invoiceSettings: cleanInvoiceSettings(account?.invoiceSettings),
+    invoiceSettings: cleanInvoiceSettings(
+      account?.invoiceSettings,
+      cleanPhoneCountry(account?.country, defaults.country),
+    ),
 	  };
 	}
 
@@ -2732,8 +2737,10 @@ function rowToItem(row) {
     row.bay_booked === true &&
     bayBookingMatchesSlot(
       { week: Number(row.week ?? 0), day: Number(row.day ?? 0), start: Number(row.start ?? 0), location },
+      // The lesson's own location timezone wins inside; this is only reached
+      // when it has none. A deployment constant, not another business's clock.
       Number(row.bay_start_timestamp ?? 0),
-      accountTimeZone(),
+      defaultTimeZone(),
     );
   return {
     id: row.id,
@@ -3307,23 +3314,37 @@ function defaultPhoneCountry() {
 // obviously wrong everywhere beats being silently right in one country.
 const FALLBACK_TIME_ZONE = "UTC";
 
-// The workspace's timezone, resolved once per instance in ensureSeeded and kept
-// fresh by writeCoachAccount — mirroring how the phone country is handled. This
-// exists so that no call site anywhere can fall back to a hardcoded country's
-// clock by forgetting an argument.
-let activeTimeZone = null;
-
+// There used to be a module-level `activeTimeZone` here, set from whichever
+// account was read last and reached through accountTimeZone() in a dozen
+// places. It was written to stop a call site forgetting an argument, and it did
+// -- by answering with a value that belonged to a different business.
+//
+// That matters more than the country did. Five of those call sites are slot
+// maths (isSlotInPast, slotWallTimeToUtcMillis, appointmentMinutesSinceEnd,
+// isAppointmentInPast, nowInTimeZoneParts). A stale timezone there does not
+// format a date oddly; it decides whether a lesson has already happened, which
+// is the difference between a reminder sending and not, and between a slot
+// being offered to the public and not.
+//
+// The timezone is an argument now, and the functions that need one take it with
+// no default -- so forgetting is a tsc error rather than a silently wrong hour.
+// The deployment default below is a constant, never a previous request's value.
 function defaultTimeZone() {
   return cleanString(env("CLARITY_TIMEZONE", ""), "", 80) || FALLBACK_TIME_ZONE;
 }
 
-function accountTimeZone() {
-  return activeTimeZone || defaultTimeZone();
-}
-
-function setActiveTimeZone(value) {
-  activeTimeZone = cleanString(value, "", 80) || null;
-  return accountTimeZone();
+/**
+ * The timezone a business's wall-clock times are in.
+ *
+ * One key rather than readSettingsMap(): the bulk settings read is measured in
+ * tens of kilobytes and some of these paths run per request. Mirrors
+ * accountPhoneCountry() below, for the same reason.
+ */
+async function accountTimeZoneFor(accountId: string) {
+  return (
+    cleanString(await getSetting(cleanSlug(accountId, ""), "accountTimezone"), "", 80) ||
+    defaultTimeZone()
+  );
 }
 
 // Phone numbers reach us in three shapes for the same person: the booking form
@@ -3334,11 +3355,32 @@ function setActiveTimeZone(value) {
 // through to INSERT, and collided with the account-scoped unique index on
 // lower(email) — taking the caller's entire calendar save down with it. The
 // shared module is the single source of truth the frontend uses too.
-function normalizedPersonPhone(value, country = getActivePhoneCountry()) {
-  return canonicalPhoneKey(cleanString(value, "", 80), country);
+/**
+ * The country this business's bare phone numbers belong to.
+ *
+ * One key rather than readSettingsMap(): this is called on paths that write a
+ * person, and the bulk settings read is measured in tens of kilobytes. Falls
+ * back to the deployment default, never to whatever another business set.
+ */
+async function accountPhoneCountry(accountId: string) {
+  return cleanPhoneCountry(
+    await getSetting(cleanSlug(accountId, ""), "accountCountry"),
+    defaultPhoneCountry(),
+  );
 }
 
-export function compatiblePersonMatch(candidate, rows = []) {
+function normalizedPersonPhone(value, country) {
+  return canonicalPhoneKey(cleanString(value, "", 80), cleanPhoneCountry(country, defaultPhoneCountry()));
+}
+
+/**
+ * `country` decides what a bare national number means, so it has to be the
+ * business's own -- and it used to come from a module-level value that belonged
+ * to whichever business the warm instance served last. It is an argument now.
+ * The frontend passes the same one from the same setting, which is what keeps
+ * the two sides agreeing about whether two numbers are one person.
+ */
+export function compatiblePersonMatch(candidate, rows = [], country = defaultPhoneCountry()) {
   if (!candidate || !Array.isArray(rows) || !rows.length) return null;
   // A candidate with no business matches nobody. Falling back to the original
   // workspace here would have merged a second business's client into a
@@ -3355,7 +3397,7 @@ export function compatiblePersonMatch(candidate, rows = []) {
 
   const name = normalizedPersonName(candidate.name);
   const email = normalizedPersonEmail(candidate.email);
-  const phone = normalizedPersonPhone(candidate.phone);
+  const phone = normalizedPersonPhone(candidate.phone, country);
 
   if (name && email) {
     const matches = scopedRows.filter(
@@ -3364,7 +3406,7 @@ export function compatiblePersonMatch(candidate, rows = []) {
         normalizedPersonEmail(row?.email) === email,
     );
     const exact = matches.find((row) => {
-      const existingPhone = normalizedPersonPhone(row?.phone);
+      const existingPhone = normalizedPersonPhone(row?.phone, country);
       return !phone || !existingPhone || phone === existingPhone;
     });
     if (exact) return exact;
@@ -3374,7 +3416,7 @@ export function compatiblePersonMatch(candidate, rows = []) {
     const exact = scopedRows.find(
       (row) =>
         normalizedPersonName(row?.name) === name &&
-        normalizedPersonPhone(row?.phone) === phone,
+        normalizedPersonPhone(row?.phone, country) === phone,
     );
     if (exact) return exact;
   }
@@ -3388,7 +3430,7 @@ export function compatiblePersonMatch(candidate, rows = []) {
     if (matches.length === 1) {
       const only = matches[0];
       const existingName = normalizedPersonName(only?.name);
-      const existingPhone = normalizedPersonPhone(only?.phone);
+      const existingPhone = normalizedPersonPhone(only?.phone, country);
       if (
         (!name || !existingName || name === existingName) &&
         (!phone || !existingPhone || phone === existingPhone)
@@ -3400,7 +3442,7 @@ export function compatiblePersonMatch(candidate, rows = []) {
 
   if (phone) {
     const matches = scopedRows.filter(
-      (row) => normalizedPersonPhone(row?.phone) === phone,
+      (row) => normalizedPersonPhone(row?.phone, country) === phone,
     );
     if (matches.length === 1) {
       const only = matches[0];
@@ -3421,7 +3463,7 @@ export function compatiblePersonMatch(candidate, rows = []) {
       (row) =>
         normalizedPersonName(row?.name) === name &&
         !normalizedPersonEmail(row?.email) &&
-        !normalizedPersonPhone(row?.phone),
+        !normalizedPersonPhone(row?.phone, country),
     );
     if (matches.length === 1) return matches[0];
   }
@@ -4649,6 +4691,10 @@ async function importPeople(rawPeople, source = "import", accountId: string) {
   };
   if (!Array.isArray(rawPeople)) return result;
 
+  // Read once for the whole import rather than per row: matching every incoming
+  // person against the list needs the same country, and it is this business's.
+  const phoneCountry = await accountPhoneCountry(cleanAccountId);
+
   const knownPeople = await readPeople(cleanAccountId);
   const knownById = new Map(knownPeople.map((row) => [row.id, row]));
   // Opened on the first person that actually needs writing. A full calendar save
@@ -4677,7 +4723,7 @@ async function importPeople(rawPeople, source = "import", accountId: string) {
       // before treating the fuzzy match as a fallback.
       const linkedId = cleanString(person.id, "", 120);
       const linked = linkedId && !linkedId.startsWith("appointment-") ? knownById.get(linkedId) : null;
-      const existing = linked || compatiblePersonMatch(person, knownPeople);
+      const existing = linked || compatiblePersonMatch(person, knownPeople, phoneCountry);
       const existingId = existing?.id || "";
 
       // Already matches what is stored, so the UPDATE below would write the row
@@ -4807,7 +4853,7 @@ async function updatePerson(rawPerson, accountId: string) {
   }
 
   const knownPeople = await readPeople(cleanAccountId);
-  const existing = compatiblePersonMatch(person, knownPeople);
+  const existing = compatiblePersonMatch(person, knownPeople, await accountPhoneCountry(cleanAccountId));
   const existingId = existing?.id || "";
   const personId =
     existingId ||
@@ -5354,15 +5400,6 @@ async function seedPeopleFromAppointments(accountId: string) {
 async function readStateSettingsSnapshot(accountId: string) {
   await ensureSeeded();
   const settings = await readSettingsMap(accountId);
-  // Contact matching parses bare national numbers against the workspace's
-  // country, and slot maths needs its timezone. These used to be set once at
-  // boot from the original workspace's settings, so a second business would
-  // have matched phone numbers against the first one's country. They now
-  // follow whichever account is actually being read.
-  setActivePhoneCountry(
-    cleanPhoneCountry(settingValue(settings, "accountCountry"), defaultPhoneCountry()),
-  );
-  setActiveTimeZone(settingValue(settings, "accountTimezone"));
   let syncKey = settingValue(settings, "syncKey");
   if (!syncKey) {
     syncKey = generateSyncKey();
@@ -5772,11 +5809,6 @@ async function readCoachAccount(accountId: string, settingsMap = null) {
 
 async function writeCoachAccount(accountId: string, account) {
   const clean = cleanCoachAccount(account);
-  // Keep contact matching in step with the country the coach just chose,
-  // without waiting for this instance to be recycled. In-memory, so it does not
-  // matter that it happens before the write rather than partway through it.
-  setActivePhoneCountry(clean.country);
-  setActiveTimeZone(clean.timezone);
   await setSettingsBulk(accountId, {
     accountId: clean.id,
     accountCoachName: clean.coachName,
@@ -7277,15 +7309,16 @@ function clockParts(timeZone) {
   }).formatToParts(new Date());
 }
 
-// No "Pacific/Auckland" default. This function decides what "now" is, and
+// No default at all. This function decides what "now" is, and
 // isAppointmentInPast() below uses it to decide whether a lesson has already
 // happened. A caller that forgot to pass a timezone used to silently get
 // Auckland — an 11-to-13 hour error for a coach anywhere in Europe, in the code
-// path that hides past lessons and suppresses their reminders. The workspace's
-// timezone is now resolved once (accountTimeZone) so no call site can forget it,
-// and a genuinely unusable timezone falls back to UTC loudly rather than
-// pretending the coach is in New Zealand.
-function nowInTimeZoneParts(timeZone = accountTimeZone()) {
+// path that hides past lessons and suppresses their reminders. Replacing that
+// with a module-level "current" workspace only moved the problem: a warm
+// instance handed the previous business's clock to the next one. Required
+// argument, so an omission is a type error; an unusable value still falls back
+// to UTC loudly rather than pretending the coach is in New Zealand.
+function nowInTimeZoneParts(timeZone: string) {
   let parts;
   try {
     parts = clockParts(timeZone);
@@ -7311,7 +7344,7 @@ function dateSortValue(parts) {
 // times that have already passed today (a slot starting exactly now is treated
 // as past — you can't book the instant it begins). Mirrors isAppointmentInPast
 // but works on a raw candidate rather than a stored calendar item.
-function isSlotInPast(week, day, start, timeZone = accountTimeZone()) {
+function isSlotInPast(week, day, start, timeZone: string) {
   const slotDate = slotDateParts(Number(week ?? 0), Number(day ?? 0));
   const now = nowInTimeZoneParts(timeZone);
   const slotValue = dateSortValue(slotDate);
@@ -7323,7 +7356,7 @@ function isSlotInPast(week, day, start, timeZone = accountTimeZone()) {
 // Minutes since the appointment's wall-clock end in the workspace's timezone.
 // Negative while the lesson is still in the future. Used by the debounce flush
 // to distinguish "flushed a bit late" (still send) from "genuinely stale" (drop).
-function appointmentMinutesSinceEnd(item, timeZone = accountTimeZone()) {
+function appointmentMinutesSinceEnd(item, timeZone: string) {
   const slot = slotDateParts(Number(item?.week ?? 0), Number(item?.day ?? 0));
   const now = nowInTimeZoneParts(timeZone);
   const dayDiff =
@@ -7332,7 +7365,7 @@ function appointmentMinutesSinceEnd(item, timeZone = accountTimeZone()) {
   return dayDiff * 1440 + (now.minutes - end);
 }
 
-function isAppointmentInPast(item, timeZone = accountTimeZone()) {
+function isAppointmentInPast(item, timeZone: string) {
   if (!item || item.kind !== "appointment") return false;
   const slotDate = slotDateParts(Number(item.week ?? 0), Number(item.day ?? 0));
   const now = nowInTimeZoneParts(timeZone);
@@ -7348,7 +7381,7 @@ function isAppointmentInPast(item, timeZone = accountTimeZone()) {
 // only ever compare wall-clock parts against each other. A Practice Block's
 // expiry_date is a real TIMESTAMPTZ compared against Postgres NOW(), so the
 // one slot chosen as "next lesson" needs an actual instant, not a parts label.
-function slotWallTimeToUtcMillis(week, day, start, timeZone = accountTimeZone()) {
+function slotWallTimeToUtcMillis(week, day, start, timeZone: string) {
   const { year, month, day: dayOfMonth } = slotDateParts(Number(week || 0), Number(day || 0));
   const hour = Math.floor(Number(start || 0) / 60);
   const minute = Number(start || 0) % 60;
@@ -7394,7 +7427,7 @@ async function resolveNextLessonExpiry(playerId, accountId) {
     email: person.email,
     phone: person.phone,
   });
-  const timeZone = accountTimeZone();
+  const timeZone = await accountTimeZoneFor(accountId);
   const future = items
     .filter((item) => !isInactiveForConflict(item) && !isAppointmentInPast(item, timeZone))
     .sort((a, b) => itemWeek(a) - itemWeek(b) || a.day - b.day || a.start - b.start);
@@ -7448,7 +7481,8 @@ async function processAdminNotificationDebounce(
 ) {
   if (!accountId) throw missingAccountScope("admin_notification_debounce");
   const now = Date.now();
-  const timeZone = cleanString(options.timeZone, accountTimeZone(), 80);
+  const timeZone =
+    cleanString(options.timeZone, "", 80) || (await accountTimeZoneFor(accountId));
   const queueById = new Map(
     (await readPendingAdminNotifications(accountId)).map((entry) => [
       entry.calendarItemId,
@@ -7687,7 +7721,7 @@ async function processDueLessonRemindersForAccount(accountId) {
   const settings = adminSettingsFromSettings(settingsMap);
   if (!settings.reminderEnabled) return { enabled: false, due: 0, sent: 0 };
   const leadMinutes = settings.reminderLeadMinutes;
-  const timeZone = cleanString(settingValue(settingsMap, "accountTimezone"), accountTimeZone(), 80);
+  const timeZone = cleanString(settingValue(settingsMap, "accountTimezone"), defaultTimeZone(), 80);
   const items = await readItems(accountId);
 
   const due = items.filter((item) => {
@@ -7881,7 +7915,7 @@ function bookingGoogleCalendarUrl({ appointment, service, account, rescheduleUrl
       .filter(Boolean)
       .join("\n"),
     location: bookingLocationDisplay(location),
-    ctz: location?.timezone || account.timezone || accountTimeZone(),
+    ctz: location?.timezone || account.timezone || defaultTimeZone(),
   });
   return `https://calendar.google.com/calendar/render?${params.toString()}`;
 }
@@ -9408,11 +9442,11 @@ function playerBase64(value) {
 // candidate set here lets the player see every note that belongs to them
 // regardless of which historical form its playerId took. Both padded and
 // unpadded base64 are included because legacy people ids stored it unpadded.
-function playerProfileIdCandidates({ personId, email, phone }) {
+function playerProfileIdCandidates({ personId, email, phone }, country = defaultPhoneCountry()) {
   const ids = new Set();
   const cleanId = cleanString(personId, "", 160).trim();
   const cleanEmailValue = cleanString(email, "", 180).trim().toLowerCase();
-  const cleanPhone = normalizedPersonPhone(phone);
+  const cleanPhone = normalizedPersonPhone(phone, country);
   if (cleanId) ids.add(cleanId);
   if (cleanEmailValue) {
     ids.add(cleanEmailValue);
@@ -10523,7 +10557,7 @@ function publicSlotsForService(accountState, service, week, ignoreId = "") {
   const slotTimeZone =
     cleanString(serviceLocation_?.timezone, "", 80) ||
     cleanString(accountState.account?.timezone, "", 80) ||
-    accountTimeZone();
+    defaultTimeZone();
 
   if (isScheduledGroupService(service)) {
     const schedule = service.groupSchedule;
@@ -10767,7 +10801,14 @@ async function createPublicBooking(accountId: string, payload: Record<string, an
   const serviceCoachId = service.coachId || defaultCoachId(accountState.coaches || []);
   const serviceLocationId = serviceLocation(service, accountState.locations || [], accountState.account).id;
   const reviewDue = isReview
-    ? videoReviewDueSlot(service, accountState, serviceCoachId, accountTimeZone())
+    ? videoReviewDueSlot(
+        service,
+        accountState,
+        serviceCoachId,
+        // Same precedence publicSlotsForService uses: the business's own
+        // timezone from the state already in hand, never a global.
+        cleanString(accountState.account?.timezone, "", 80) || defaultTimeZone(),
+      )
     : null;
   const slot = reviewDue
     ? { week: reviewDue.week, day: reviewDue.day, start: reviewDue.start, duration: reviewDue.duration }

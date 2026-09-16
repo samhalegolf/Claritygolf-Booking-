@@ -10,7 +10,7 @@ import {
 } from "./db.mts";
 import { recordPassPurchase } from "./purchases.mts";
 import { text } from "./payload.mts";
-import { canonicalPhoneKey } from "../phone.mts";
+import { canonicalPhoneKey, cleanPhoneCountry } from "../phone.mts";
 import { calendarSlot } from "../calendar-slot.mts";
 import { adapterFor } from "./registry.mts";
 import { isPurchaseKind } from "./types.mts";
@@ -176,9 +176,18 @@ export function findDuplicateBooking(
   candidates: ExistingBookingCandidate[],
   event: NormalizedBookingEvent,
   slot: { start: number; duration: number },
+  /**
+   * The business's country, for reading bare national numbers. Both sides of
+   * every comparison below use this one value, so the answer is consistent
+   * whatever it is -- but it has to be the business's own rather than a module
+   * value left behind by the last request, or the keys written here disagree
+   * with the keys written everywhere else.
+   */
+  country?: string,
 ): string | null {
+  const phoneCountry = cleanPhoneCountry(country);
   const email = text(event.email).toLowerCase();
-  const phoneKey = canonicalPhoneKey(event.phone);
+  const phoneKey = canonicalPhoneKey(event.phone, phoneCountry);
   const name = normalisedName([event.firstName, event.lastName].filter(Boolean).join(" "));
   const end = slot.start + slot.duration;
   for (const row of rowsOf(candidates) as ExistingBookingCandidate[]) {
@@ -188,7 +197,7 @@ export function findDuplicateBooking(
     const rowEnd = rowStart + Number(row?.duration ?? 0);
     if (rowStart >= end || slot.start >= rowEnd) continue;
     const rowEmail = text(row?.email).toLowerCase();
-    const rowPhone = canonicalPhoneKey(row?.phone);
+    const rowPhone = canonicalPhoneKey(row?.phone, phoneCountry);
     const rowName = normalisedName(row?.client);
     // Name alone is enough here, unlike customer matching: the slot is already
     // taken, so this is "is this the same lesson", not "is this the same person
@@ -202,13 +211,29 @@ export function findDuplicateBooking(
   return null;
 }
 
+/** The business's own country, for reading bare national phone numbers. */
+async function mappingPhoneCountry(mapping: IntegrationMapping): Promise<string> {
+  const rows = await integrationRequest(
+    `settings?account_id=eq.${encodeURIComponent(mapping.accountId)}&key=eq.accountCountry&select=value&limit=1`,
+  ).catch(() => []);
+  return text(rowsOf(rows)[0]?.value);
+}
+
 async function findExistingBookingForEvent(event: NormalizedBookingEvent, mapping: IntegrationMapping) {
   const slot = calendarSlot(event.startIso, event.timezone);
   const duration = Math.max(1, Math.round((Date.parse(event.endIso) - Date.parse(event.startIso)) / 60_000));
-  const rows = await integrationRequest(
-    `calendar_items?account_id=eq.${encodeURIComponent(mapping.accountId)}&kind=eq.appointment&week=eq.${slot.week}&day=eq.${slot.day}&select=id,client,email,phone,start,duration,status&limit=200`,
+  const [rows, country] = await Promise.all([
+    integrationRequest(
+      `calendar_items?account_id=eq.${encodeURIComponent(mapping.accountId)}&kind=eq.appointment&week=eq.${slot.week}&day=eq.${slot.day}&select=id,client,email,phone,start,duration,status&limit=200`,
+    ),
+    mappingPhoneCountry(mapping),
+  ]);
+  return findDuplicateBooking(
+    rowsOf(rows),
+    event,
+    { start: slot.start, duration: duration || 60 },
+    country,
   );
-  return findDuplicateBooking(rowsOf(rows), event, { start: slot.start, duration: duration || 60 });
 }
 
 /**

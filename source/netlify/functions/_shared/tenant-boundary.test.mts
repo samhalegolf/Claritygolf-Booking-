@@ -35,6 +35,14 @@ import {
   userBelongsToAccountStrict,
 } from "./coach-auth.mts";
 import { requireSandboxAccount, sandboxAccountIdFor } from "./sandbox.mts";
+import { canonicalPhoneKey, formatPhoneForDisplay } from "./phone.mts";
+import { bayBookingMatchesSlot, wallClockToUnixSeconds, datePartsForSlot } from "./optix-reconcile.mts";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { currencyForCountry, localeForCountry } from "./locale.mts";
+import * as phoneModule from "./phone.mts";
+import * as localeModule from "./locale.mts";
 import {
   availabilityFromSettings,
   calendarItemBelongsToAccount,
@@ -898,4 +906,130 @@ test("an ordinary player session alongside a coach cookie still reads as the coa
   } finally {
     restoreDatabase();
   }
+});
+
+// --- No ambient country -----------------------------------------------------
+//
+// phone.mts held a module-level `activeCountry`, set by whichever code path
+// last read an account's settings and defaulted into by every phone and date
+// helper in the app. A Netlify instance stays warm and serves many businesses,
+// so the value the previous request set was still there for the next one: a
+// request that formatted a number or a date without first re-reading settings
+// used the last business's country. Nothing noticed, because the answer was
+// always plausible -- and "07/08" is 7 August to a NZ coach and 8 July to a US
+// one, so the wrong one is a missed lesson rather than a visible error.
+//
+// The rule now is that there is nowhere for a country to go stale.
+
+test("no module holds an active country for a request to inherit", () => {
+  // Named exports rather than a grep, so this fails the moment one comes back.
+  for (const name of ["setActivePhoneCountry", "getActivePhoneCountry"]) {
+    assert.equal(
+      (phoneModule as Record<string, unknown>)[name],
+      undefined,
+      `phone.mts exports ${name} again -- a warm instance can carry one business's country into the next`,
+    );
+  }
+  for (const name of ["activeLocale", "activeCurrency"]) {
+    assert.equal(
+      (localeModule as Record<string, unknown>)[name],
+      undefined,
+      `locale.mts exports ${name} again -- it can only answer by reading an ambient country`,
+    );
+  }
+});
+
+test("two businesses formatting at once cannot see each other's country", () => {
+  // Order-independent by construction: each call carries its own country, so
+  // interleaving them changes nothing. Under the old module value, whichever
+  // ran second decided for both.
+  const nzThenUs = [
+    formatPhoneForDisplay("0274637700", "NZ"),
+    formatPhoneForDisplay("2125550123", "US"),
+  ];
+  const usThenNz = [
+    formatPhoneForDisplay("2125550123", "US"),
+    formatPhoneForDisplay("0274637700", "NZ"),
+  ];
+  assert.deepEqual(nzThenUs, [usThenNz[1], usThenNz[0]]);
+
+  assert.equal(localeForCountry("NZ"), "en-NZ");
+  assert.equal(localeForCountry("US"), "en-US");
+  assert.equal(currencyForCountry("NZ"), "NZD");
+  assert.equal(currencyForCountry("US"), "USD");
+});
+
+test("the same number in two countries is two different people", () => {
+  // The reason the country cannot be approximate. "0274637700" is a real mobile
+  // in New Zealand and something else entirely read as American, so a stale
+  // country does not merely format oddly -- it decides whether contact matching
+  // thinks two rows are one person.
+  assert.notEqual(canonicalPhoneKey("0274637700", "NZ"), canonicalPhoneKey("0274637700", "US"));
+  assert.equal(canonicalPhoneKey("+64274637700", "US"), canonicalPhoneKey("0274637700", "NZ"));
+});
+
+test("an unreadable country falls back to the deployment default, never to a neighbour", () => {
+  // The fallback is a constant. It is emphatically not "whatever was set last",
+  // which is what the module value amounted to.
+  assert.equal(localeForCountry(""), "en-NZ");
+  assert.equal(localeForCountry(undefined), "en-NZ");
+  assert.equal(localeForCountry("not-a-country"), "en-NZ");
+});
+
+// --- No ambient timezone ----------------------------------------------------
+//
+// The country's twin, and the more dangerous of the two. `activeTimeZone` in
+// booking-core.mts was set from whichever account was read last and reached
+// through accountTimeZone() in a dozen places -- five of them slot maths. A
+// stale country formats a date oddly; a stale timezone decides whether a lesson
+// has already happened, which is the difference between a reminder sending and
+// not, and between a slot being offered to the public and not.
+
+const FUNCTIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+function sourceOf(name: string) {
+  return readFileSync(join(FUNCTIONS_DIR, name), "utf8");
+}
+
+test("no module holds an active timezone for a request to inherit", () => {
+  const source = sourceOf("booking-core.mts");
+  // Comments explain why it is gone, so look for the declaration itself.
+  assert.ok(
+    !/^\s*let\s+activeTimeZone\b/m.test(source),
+    "booking-core declares activeTimeZone again -- a warm instance will carry one business's clock into the next",
+  );
+  assert.ok(
+    !/^\s*function\s+(accountTimeZone|setActiveTimeZone)\s*\(/m.test(source),
+    "booking-core defines an ambient timezone accessor again",
+  );
+});
+
+test("no shared module guesses a country's clock", () => {
+  // bayBookingMatchesSlot defaulted to "Pacific/Auckland" when an appointment
+  // carried no location timezone, so a coach in Europe had their bay compared
+  // against Auckland's clock and a booked bay read as unbooked.
+  const source = sourceOf("_shared/optix-reconcile.mts");
+  assert.ok(
+    !/defaultTimeZone\s*=\s*["']/.test(source),
+    "optix-reconcile has a hardcoded default timezone again",
+  );
+});
+
+test("the timezone argument is what decides, not the process", () => {
+  // One slot, one stored bay timestamp, two timezones. If the argument were
+  // ignored -- or came from somewhere other than this call -- these would agree.
+  const slot = { week: 8, day: 2, start: 14 * 60, location: null };
+  const aucklandStamp = wallClockToUnixSeconds({
+    ...datePartsForSlot(slot.week, slot.day),
+    minutes: slot.start,
+    timeZone: "Pacific/Auckland",
+  });
+
+  assert.equal(bayBookingMatchesSlot(slot, aucklandStamp, "Pacific/Auckland"), true);
+  assert.equal(bayBookingMatchesSlot(slot, aucklandStamp, "America/Phoenix"), false);
+
+  // And the appointment's own location still wins over the fallback, so a
+  // business with per-location timezones is unaffected by the default.
+  const atLocation = { ...slot, location: { timezone: "Pacific/Auckland" } };
+  assert.equal(bayBookingMatchesSlot(atLocation, aucklandStamp, "America/Phoenix"), true);
 });

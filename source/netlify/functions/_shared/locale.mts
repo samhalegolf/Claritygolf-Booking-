@@ -8,7 +8,7 @@
 // Isomorphic: imported by both the Netlify functions and the frontend, so it must
 // not touch `process` or any Node API.
 
-import { cleanPhoneCountry, getActivePhoneCountry } from "./phone.mts";
+import { cleanPhoneCountry } from "./phone.mts";
 
 // ISO 4217 by country. Not exhaustive — it covers the markets a golf coaching
 // business plausibly operates in, and anything unlisted falls back to USD rather
@@ -48,7 +48,7 @@ const CURRENCY_BY_COUNTRY: Record<string, string> = {
 
 const FALLBACK_CURRENCY = "USD";
 
-export function currencyForCountry(country: unknown = getActivePhoneCountry()): string {
+export function currencyForCountry(country: unknown): string {
   return CURRENCY_BY_COUNTRY[cleanPhoneCountry(country)] || FALLBACK_CURRENCY;
 }
 
@@ -66,16 +66,12 @@ export function currencyForAccountSettings(
  * so the language stays "en" and the region does the work: en-NZ gives 8/07/2026,
  * en-US gives 7/8/2026. Intl falls back sensibly for any region it does not know.
  */
-export function localeForCountry(country: unknown = getActivePhoneCountry()): string {
+export function localeForCountry(country: unknown): string {
   return `en-${cleanPhoneCountry(country)}`;
 }
 
-/** The active workspace's locale — the one nearly every caller wants. */
-export function activeLocale(): string {
-  return localeForCountry(getActivePhoneCountry());
-}
-
-/** The active workspace's currency. */
-export function activeCurrency(): string {
-  return currencyForCountry(getActivePhoneCountry());
-}
+// activeLocale() and activeCurrency() used to live here, reading the country
+// from a module-level value in phone.mts. Both are gone for the reason set out
+// there: on a warm server instance that value belonged to whichever business
+// was served last. The browser keeps the convenience -- one page, one workspace
+// -- in src/lib/activeCountry.ts. On the server, the country is an argument.

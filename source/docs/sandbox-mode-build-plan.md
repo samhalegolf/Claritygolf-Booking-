@@ -28,10 +28,23 @@ Built, with tests passing and typecheck clean:
   `player_sessions.sandbox_actor_auth_user`, the session endpoint preferring a
   handoff over the coach cookie, and Continue as player / Return to coach in the
   bar.
+- **B2** — the module-level `activeCountry` is gone from `phone.mts`, and
+  `activeLocale()` / `activeCurrency()` from `locale.mts`. Country is an argument
+  everywhere on the server, read from the account being served. The browser keeps
+  a per-page one in `src/lib/activeCountry.ts`, which is the correct model there.
+  A side effect worth having: a new business's invoice currency now defaults to
+  its own country's rather than to NZD.
+- **B2's sibling** — `activeTimeZone` is gone from `booking-core.mts` too, along
+  with `accountTimeZone()` and `setActiveTimeZone()`. The five slot-maths
+  functions (`isSlotInPast`, `slotWallTimeToUtcMillis`,
+  `appointmentMinutesSinceEnd`, `isAppointmentInPast`, `nowInTimeZoneParts`) now
+  take the timezone with **no default**, so omitting one is a type error rather
+  than a silently wrong hour. `bayBookingMatchesSlot` lost its hardcoded
+  `"Pacific/Auckland"` fallback along with it.
 
-Eleven sandbox cases added to `_shared/tenant-boundary.test.mts`.
+Eighteen cases added to `_shared/tenant-boundary.test.mts`.
 
-Still to do: **B2** (the module-global country in `phone.mts`), then M4–M9.
+Still to do: M4–M9.
 
 ---
 

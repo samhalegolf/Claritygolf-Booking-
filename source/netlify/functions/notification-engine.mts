@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { deliverEmail } from "./_shared/email-delivery.mts";
 import { settingsSelectQuery } from "./_shared/settings-scope.mts";
-import { activeLocale } from "./_shared/locale.mts";
-import { setActivePhoneCountry } from "./_shared/phone.mts";
+import { localeForCountry } from "./_shared/locale.mts";
+import { cleanPhoneCountry } from "./_shared/phone.mts";
 import { sendCoachPush, type CoachPushMessage } from "./_shared/push-notify.mts";
 import { SETTINGS_BULK_EXCLUDE_FILTER } from "./_shared/settings-keys.mts";
 
@@ -160,9 +160,6 @@ async function settingRows(accountId: string) {
 async function readSettings(accountId: string) {
   const rows = await settingRows(accountId);
   const s = Object.fromEntries(rows.map((row: any) => [row.key, row.value]));
-  // Resolve the workspace's country before any date is formatted, so this
-  // lambda formats dates the coach's way rather than New Zealand's.
-  setActivePhoneCountry(s.accountCountry);
   const siteUrl = cleanUrl(
     env("URL") || env("DEPLOY_PRIME_URL") || env("CLARITY_SITE_URL", "https://claritygolf.app"),
     "https://claritygolf.app/",
@@ -200,6 +197,10 @@ async function readSettings(accountId: string) {
     updateClientSubject: s.updateClientSubject || "Your {{service}} booking has been updated",
     updateAdminSubject: s.updateAdminSubject || "Updated booking: {{client}}",
     reminderClientSubject: s.reminderClientSubject || "Reminder: {{service}} at {{time}}",
+    // Carried on the settings object rather than parked in a module: this is a
+    // lambda serving many businesses, and the country of whichever one was read
+    // last is not this one's. Every date formatter below takes it from here.
+    country: cleanPhoneCountry(s.accountCountry),
     businessName: s.accountBusinessName || env("CLARITY_BUSINESS_NAME", ""),
     coachName: s.accountCoachName || env("CLARITY_COACH_NAME", ""),
     venueName: s.accountVenueName || env("CLARITY_VENUE_NAME", ""),
@@ -266,11 +267,11 @@ function slotDate(week = 0, day = 0) {
   return date;
 }
 
-function slotDateLabel(week = 0, day = 0) {
+function slotDateLabel(week = 0, day = 0, country = "") {
   // The slot date is a UTC-midnight instant; format it as UTC so the label is
   // the same calendar day regardless of the runtime's local timezone (Netlify
   // is UTC, but the local dev server is not).
-  return slotDate(week, day).toLocaleDateString(activeLocale(), {
+  return slotDate(week, day).toLocaleDateString(localeForCountry(country), {
     weekday: "long",
     month: "short",
     day: "numeric",
@@ -496,9 +497,9 @@ function variablesFor(action: BookingAction, appt: any, previous: any, serviceNa
       ).split(/\s+/)[0] || "",
     business: settings.businessName,
     service: serviceName,
-    date: slotDateLabel(appt.week, appt.day),
+    date: slotDateLabel(appt.week, appt.day, settings.country),
     time: rangeLabel(appt.start, appt.duration),
-    previousDate: previous ? slotDateLabel(previous.week, previous.day) : "",
+    previousDate: previous ? slotDateLabel(previous.week, previous.day, settings.country) : "",
     previousTime: previous ? rangeLabel(previous.start, previous.duration) : "",
     venue: location?.name || settings.venueName,
     location: location?.name || settings.venueName,
@@ -736,8 +737,8 @@ function bodyFor(
  * built from the same slotDate/rangeLabel the emails use so the pop-up and the
  * confirmation email can never disagree about when a lesson is.
  */
-function pushWhenLabel(week = 0, day = 0, start = 0, duration = 0) {
-  const date = slotDate(week, day).toLocaleDateString(activeLocale(), {
+function pushWhenLabel(week = 0, day = 0, start = 0, duration = 0, country = "") {
+  const date = slotDate(week, day).toLocaleDateString(localeForCountry(country), {
     weekday: "short",
     day: "numeric",
     month: "short",
@@ -759,6 +760,8 @@ export function composeCoachPushMessage(input: {
   previousAppointment?: any;
   serviceName: string;
   source?: string;
+  /** The business's country, so the date reads the coach's way. */
+  country?: string;
 }): CoachPushMessage | null {
   const { action } = input;
   if (action !== "booking" && action !== "rescheduled" && action !== "cancelled") return null;
@@ -767,7 +770,7 @@ export function composeCoachPushMessage(input: {
   const previous = input.previousAppointment ? normaliseAppointment(input.previousAppointment) : null;
   const serviceName = cleanText(input.serviceName, "Golf Lesson", 160);
   const fromOptix = String(input.source || "").startsWith("optix");
-  const when = pushWhenLabel(appt.week, appt.day, appt.start, appt.duration);
+  const when = pushWhenLabel(appt.week, appt.day, appt.start, appt.duration, input.country);
 
   const title =
     action === "cancelled"
@@ -780,7 +783,7 @@ export function composeCoachPushMessage(input: {
 
   const body =
     action === "rescheduled" && previous
-      ? `${serviceName}\nNow ${when}\nWas ${pushWhenLabel(previous.week, previous.day, previous.start, previous.duration)}`
+      ? `${serviceName}\nNow ${when}\nWas ${pushWhenLabel(previous.week, previous.day, previous.start, previous.duration, input.country)}`
       : `${serviceName}\n${when}`;
 
   return {
@@ -805,10 +808,20 @@ export async function sendCoachPushForBooking(input: {
       console.error("notification_engine:coach_push_no_account", input.appointment?.id);
       return;
     }
-    const services = await readServices(accountId);
+    const [services, settings] = await Promise.all([
+      readServices(accountId),
+      readSettings(accountId),
+    ]);
     const serviceId = cleanText(input.appointment?.serviceId || input.appointment?.service_id, "", 160);
     const service = services.find((candidate: any) => candidate.id === serviceId);
-    const message = composeCoachPushMessage({ ...input, serviceName: cleanText(service?.name, "Golf Lesson", 160) });
+    const message = composeCoachPushMessage({
+      ...input,
+      serviceName: cleanText(service?.name, "Golf Lesson", 160),
+      // This business's own country, so the pop-up's date reads the way the
+      // coach writes dates. It used to come from a module value that belonged
+      // to whoever this warm instance served last.
+      country: settings.country,
+    });
     if (!message) return;
 
     await sendCoachPush(accountId, message);

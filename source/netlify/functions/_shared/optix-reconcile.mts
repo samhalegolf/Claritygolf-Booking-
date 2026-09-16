@@ -119,7 +119,13 @@ export function bayBookingMatchesSlot(
     location?: { timezone?: string } | null;
   },
   bayStartTimestamp: number,
-  defaultTimeZone = "Pacific/Auckland",
+  /**
+   * Only reached when the appointment carries no location timezone of its own.
+   * Required, with no New Zealand default: a shared module guessing a country
+   * is how a coach in Europe gets their bay compared against Auckland's clock
+   * and a booked bay reads as unbooked.
+   */
+  defaultTimeZone: string,
 ): boolean {
   const stamp = Number(bayStartTimestamp || 0);
   if (!Number.isFinite(stamp) || stamp <= 0) return false;
