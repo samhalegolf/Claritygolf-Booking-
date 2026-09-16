@@ -589,9 +589,9 @@ button {
   display: none !important;
 }
 
-/* Eight sections, each panel filed under exactly one of them. There used to be
-   eleven, and four panels were classed onto two tabs at once — which is how
-   "Customer Experience" and "Coach Branding" ended up being the same screen.
+/* One panel per section, filed under exactly one of them. There used to be
+   eleven sections and four panels were classed onto two tabs at once — which is
+   how "Customer Experience" and "Coach Branding" ended up being the same screen.
 
    This is an allowlist over a blanket `display: none`, so a new tab that is
    not named here is invisible on every tab rather than visible on the wrong
@@ -608,7 +608,8 @@ button {
 .settings-grid.settings-tab-email-sms > .settings-email-sms,
 .settings-grid.settings-tab-account > .settings-account,
 .settings-grid.settings-tab-developer > .settings-developer,
-.settings-grid.settings-tab-admin > .settings-admin {
+.settings-grid.settings-tab-admin > .settings-admin,
+.settings-grid.settings-tab-sandbox > .settings-sandbox {
   display: grid !important;
 }
 
@@ -620,7 +621,8 @@ button {
 .settings-email-sms,
 .settings-account,
 .settings-developer,
-.settings-admin {
+.settings-admin,
+.settings-sandbox {
   grid-column: 1 / -1;
 }
 

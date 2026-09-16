@@ -59,6 +59,7 @@ import {
 import {
   requireCoachActor,
   resolveMembershipForAuthUser,
+  switchActiveAccount,
   sessionRoleForMembership,
   appUserRoleForMembership,
   resolvePublicAccount,
@@ -69,6 +70,11 @@ import {
   userBelongsToAccountStrict,
   recordBelongsToAccountStrict,
 } from "./_shared/coach-auth.mts";
+import {
+  readSandboxForAccount,
+  requireSandboxAccount,
+  sandboxAccountIdFor,
+} from "./_shared/sandbox.mts";
 import type { CoachActor } from "./_shared/coach-auth.mts";
 import { authSessionResponse, type WorkspaceBootstrap } from "./_shared/auth-contract.mts";
 import { activeCurrency, activeLocale, currencyForAccountSettings } from "./_shared/locale.mts";
@@ -101,6 +107,7 @@ import {
   setActivePhoneCountry,
   FALLBACK_PHONE_COUNTRY,
 } from "./_shared/phone.mts";
+import { deliverEmail } from "./_shared/email-delivery.mts";
 
 const sessionCookieName = "clarity_session";
 const sessionDays = 7;
@@ -314,10 +321,6 @@ function env(name, fallback = "") {
 
 function hasOwn(source, key) {
   return Object.prototype.hasOwnProperty.call(source || {}, key);
-}
-
-function emailNotificationsGloballyDisabled() {
-  return ["0", "false", "off", "disabled", "no"].includes(env("EMAIL_NOTIFICATIONS_ENABLED", "").trim().toLowerCase());
 }
 
 function nowIso() {
@@ -2154,6 +2157,10 @@ async function ensureCoreTables() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `;
+  // Which of the user's businesses this session is acting for. NULL means
+  // "their primary one", which is every session that has never switched -- so
+  // the column is additive and no existing session changes behaviour.
+  ddl.sql`ALTER TABLE admin_sessions ADD COLUMN IF NOT EXISTS active_account_id TEXT`;
   ddl.sql`
     CREATE TABLE IF NOT EXISTS admin_password_resets (
       id TEXT PRIMARY KEY,
@@ -2181,6 +2188,18 @@ async function ensureAuthTables() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
+  `;
+  // What kind of account this is: a real business, or the sandbox that shadows
+  // one. Defaulting to 'live' is what makes this additive -- every existing row
+  // is a live business and nothing about it changes.
+  ddl.sql`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'live'`;
+  ddl.sql`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS sandbox_of_account_id TEXT`;
+  // One sandbox per business, enforced by the schema rather than by a check
+  // somebody has to remember to write.
+  ddl.sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS accounts_one_sandbox_per_account
+    ON accounts (sandbox_of_account_id)
+    WHERE sandbox_of_account_id IS NOT NULL
   `;
   ddl.sql`
     CREATE TABLE IF NOT EXISTS account_memberships (
@@ -2231,6 +2250,10 @@ async function ensureAuthTables() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `;
+  // Which of the user's businesses this session is acting for. NULL means
+  // "their primary one", which is every session that has never switched -- so
+  // the column is additive and no existing session changes behaviour.
+  ddl.sql`ALTER TABLE admin_sessions ADD COLUMN IF NOT EXISTS active_account_id TEXT`;
   ddl.sql`
     CREATE TABLE IF NOT EXISTS admin_password_resets (
       id TEXT PRIMARY KEY,
@@ -2533,6 +2556,11 @@ async function ensurePlayerSessionsTable() {
   // collected at login.
   ddl.sql`ALTER TABLE player_sessions ADD COLUMN IF NOT EXISTS auth_user_id UUID`;
   ddl.sql`ALTER TABLE player_sessions ADD COLUMN IF NOT EXISTS portal_player_id TEXT`;
+  // Set only on a sandbox handoff: the coach who is driving this player. It is
+  // what makes the session distinguishable from a real player's, which is how
+  // the portal knows to offer a way back and how /api/auth/session knows to
+  // prefer it over the coach cookie sitting alongside it in the same browser.
+  ddl.sql`ALTER TABLE player_sessions ADD COLUMN IF NOT EXISTS sandbox_actor_auth_user UUID`;
   ddl.sql`ALTER TABLE player_sessions ALTER COLUMN phone DROP NOT NULL`;
   ddl.sql`
     CREATE INDEX IF NOT EXISTS idx_player_sessions_token
@@ -7793,54 +7821,6 @@ function passwordResetUrl(req, token) {
   return url.toString();
 }
 
-async function sendEmail({ accountId, to, subject, html, text, replyTo, idempotencyKey }) {
-  if (emailNotificationsGloballyDisabled()) return { sent: false, reason: "email_notifications_disabled" };
-
-  const apiKey = env("RESEND_API_KEY");
-  if (!apiKey) return { sent: false, reason: "missing_resend_key" };
-
-  const account = await readCoachAccount(accountId);
-  const businessName = account.businessName || "Clarity Golf";
-  const from = env(
-    "CLARITY_EMAIL_FROM",
-    `${businessName} <onboarding@resend.dev>`,
-  );
-  const body = {
-    from,
-    to: Array.isArray(to) ? to : [to],
-    subject,
-    html,
-    text,
-    ...(replyTo ? { reply_to: replyTo } : {}),
-  };
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    const message = await response.text().catch(() => "");
-    console.error(
-      "Resend email failed",
-      response.status,
-      message.slice(0, 500),
-    );
-    return {
-      sent: false,
-      reason: "resend_failed",
-      error: message.slice(0, 500),
-    };
-  }
-
-  const data = await response.json().catch(() => ({}));
-  return { sent: true, id: data?.id || "" };
-}
-
 async function sendPasswordResetEmail(accountId, reset, req) {
   const account = await readCoachAccount(accountId);
   const resetUrl = passwordResetUrl(req, reset.token);
@@ -7864,7 +7844,7 @@ async function sendPasswordResetEmail(accountId, reset, req) {
     "If you did not request this, you can ignore this email.",
   ].join("\n");
 
-  return sendEmail({
+  return deliverEmail({
     accountId,
     to: reset.email,
     subject: `${businessName} password reset`,
@@ -8145,7 +8125,7 @@ async function sendBookingNotifications(
   async function sendAndRecord(channel, recipient, subject, html, text, key) {
     const notificationKind = `${kind}_${channel}_email`;
     const deliveryKey = idempotencyNonce ? `${key}-${idempotencyNonce}` : key;
-    const result = await sendEmail({
+    const result = await deliverEmail({
       accountId,
       to: recipient,
       subject,
@@ -8640,7 +8620,8 @@ async function readAdminSession(token) {
     SELECT admin_sessions.user_id AS id,
            admin_sessions.auth_user_id,
            admin_users.email,
-           admin_sessions.expires_at
+           admin_sessions.expires_at,
+           admin_sessions.active_account_id
     FROM admin_sessions
     LEFT JOIN admin_users ON admin_users.id = admin_sessions.user_id
     WHERE admin_sessions.token_hash = ${hashToken(token)}
@@ -8656,6 +8637,7 @@ async function readAdminSession(token) {
     authUserId: cleanString(row.auth_user_id, "", 80),
     email: cleanEmail(row.email, ""),
     expiresAt: row.expires_at,
+    activeAccountId: cleanSlug(row.active_account_id, ""),
   };
 }
 
@@ -8915,19 +8897,28 @@ async function portalPlayerContact(portalPlayer) {
   };
 }
 
-async function createPlayerSession({ personId, email, phone, accountId, authUserId, portalPlayerId }) {
+async function createPlayerSession({
+  personId,
+  email,
+  phone,
+  accountId,
+  authUserId,
+  portalPlayerId,
+  sandboxActorAuthUser = "",
+  lifetimeMs = playerSessionDays * 24 * 60 * 60 * 1000,
+}) {
   await ensurePlayerSessionsTable();
   const token = randomBytes(32).toString("base64url");
   const tokenHash = hashToken(token);
-  const expiresAt = new Date(Date.now() + playerSessionDays * 24 * 60 * 60 * 1000).toISOString();
+  const expiresAt = new Date(Date.now() + lifetimeMs).toISOString();
   await db().sql`
     INSERT INTO player_sessions (
       id, token_hash, person_id, email, phone, account_id,
-      auth_user_id, portal_player_id, expires_at, created_at
+      auth_user_id, portal_player_id, sandbox_actor_auth_user, expires_at, created_at
     )
     VALUES (
       ${randomUUID()}, ${tokenHash}, ${personId || null}, ${email}, ${phone || null}, ${accountId || null},
-      ${authUserId || null}, ${portalPlayerId || null}, ${expiresAt}, NOW()
+      ${authUserId || null}, ${portalPlayerId || null}, ${sandboxActorAuthUser || null}, ${expiresAt}, NOW()
     )
   `;
   return { token, expiresAt };
@@ -8937,7 +8928,8 @@ async function readPlayerSession(token) {
   if (!token) return null;
   await ensurePlayerSessionsTable();
   const rows = await db().sql`
-    SELECT person_id, email, phone, account_id, auth_user_id, portal_player_id, expires_at
+    SELECT person_id, email, phone, account_id, auth_user_id, portal_player_id,
+           sandbox_actor_auth_user, expires_at
     FROM player_sessions
     WHERE token_hash = ${hashToken(token)}
   `;
@@ -8964,6 +8956,7 @@ async function readPlayerSession(token) {
     accountId: row.account_id || "",
     authUserId: cleanString(row.auth_user_id, "", 80),
     portalPlayerId,
+    sandboxActorAuthUser: cleanString(row.sandbox_actor_auth_user, "", 80),
     expiresAt: row.expires_at,
   };
 }
@@ -9181,7 +9174,7 @@ async function sendPortalInviteEmail({ accountId, req, email, name, token, withC
     variant,
   });
 
-  return sendEmail({
+  return deliverEmail({
     accountId,
     to: email,
     subject,
@@ -9856,6 +9849,123 @@ function publicWorkspaceAccount(state = {}) {
   return workspaceAccountForId(accountId, state);
 }
 
+/**
+ * Create this business's sandbox, or hand back the one it already has.
+ *
+ * A sandbox is an ordinary account, so creating one is the ordinary account
+ * creation path: insert the row, then seedSettings() gives it the same 45
+ * defaults any new business gets -- its own services, location, availability and
+ * coach profile, and none of the live account's data. That is asserted by
+ * tenant-boundary.test.mts for a new business and is true here for the same
+ * reason.
+ *
+ * Idempotent twice over: ON CONFLICT DO NOTHING on the id, and a unique index on
+ * sandbox_of_account_id. A second call returns the first sandbox rather than
+ * making another.
+ */
+async function ensureSandboxForAccount(liveAccountId: string) {
+  const parentId = cleanSlug(liveAccountId, "");
+  if (!parentId) throw missingAccountScope("ensure_sandbox");
+
+  const existing = await readSandboxForAccount(parentId);
+  if (existing) return existing;
+
+  const sandboxId = sandboxAccountIdFor(parentId);
+  const parentSettings = await readSettingsMap(parentId);
+  const parentName =
+    cleanString(settingValue(parentSettings, "accountBusinessName"), "", 120) || parentId;
+  const sandboxName = `${parentName} (Sandbox)`;
+
+  await db().sql`
+    INSERT INTO accounts (id, slug, business_name, status, kind, sandbox_of_account_id)
+    VALUES (${sandboxId}, ${sandboxId}, ${sandboxName}, 'active', 'sandbox', ${parentId})
+    ON CONFLICT (id) DO NOTHING
+  `;
+
+  await seedSettings(sandboxId);
+
+  // The plan the sandbox runs on is a copy of the live one, so entitlement
+  // checks run for real rather than being bypassed. subscriptionStatus is
+  // 'internal' -- an existing status isAccountActive() already accepts -- so the
+  // sandbox is entitled without being billed. The coach can change the plan
+  // afterwards to see what a smaller one feels like.
+  const parentWorkspace = parseSettingJson(parentSettings, "workspaceAccountsJson", []);
+  const parentEntry = Array.isArray(parentWorkspace)
+    ? parentWorkspace.find((entry) => entry?.id === parentId)
+    : null;
+  const planKey = accountPlanCatalog[parentEntry?.planKey] ? parentEntry.planKey : "solo";
+
+  await setSettingsBulk(sandboxId, {
+    accountId: sandboxId,
+    accountBusinessName: sandboxName,
+    // Start where the live business is, so the first thing a tester sees is
+    // their own configuration rather than a default one. All of it is editable.
+    accountCountry: settingValue(parentSettings, "accountCountry"),
+    accountTimezone: settingValue(parentSettings, "accountTimezone"),
+    accountCurrency: settingValue(parentSettings, "accountCurrency"),
+    workspaceAccountsJson: JSON.stringify([
+      {
+        id: sandboxId,
+        name: sandboxName,
+        slug: sandboxId,
+        planKey,
+        subscriptionStatus: "internal",
+        billingProvider: "none",
+        active: true,
+      },
+    ]),
+  });
+
+  // Two players, because "create a player" is not the workflow anyone opens the
+  // sandbox to test -- everything downstream of having one is. Bookings, passes
+  // and invoices are made through the real UI, which is the point.
+  await db().sql`
+    INSERT INTO people (id, account_id, name, email, phone, source, created_at, updated_at)
+    VALUES
+      (${`${sandboxId}-player-alex`}, ${sandboxId}, 'Alex Demo', ${`alex@${sandboxId}.test`}, '', 'sandbox_seed', NOW(), NOW()),
+      (${`${sandboxId}-player-sam`}, ${sandboxId}, 'Sam Demo', ${`sam@${sandboxId}.test`}, '', 'sandbox_seed', NOW(), NOW())
+    ON CONFLICT (id) DO NOTHING
+  `;
+
+  const created = await readSandboxForAccount(parentId);
+  if (!created) throw new Error("The sandbox workspace could not be created.");
+  return created;
+}
+
+/** The plan a sandbox is currently running on. */
+async function sandboxPlanKey(sandboxId: string): Promise<string> {
+  const settings = await readSettingsMap(sandboxId);
+  const entries = parseSettingJson(settings, "workspaceAccountsJson", []);
+  const entry = Array.isArray(entries) ? entries.find((row) => row?.id === sandboxId) : null;
+  return accountPlanCatalog[entry?.planKey] ? entry.planKey : "solo";
+}
+
+/**
+ * Change the plan a sandbox runs on.
+ *
+ * Writes the same workspaceAccountsJson entry a live account carries, so
+ * accountEntitlements() reads it through the ordinary path and every
+ * assertAccountFeature/assertAccountLimit in the app starts enforcing the new
+ * plan immediately. Nothing is bypassed and no data is removed: dropping to a
+ * smaller plan leaves anything already over the limit in place and refuses the
+ * next one, which is exactly what a real coach who downgrades experiences.
+ */
+async function setSandboxPlanKey(sandboxId: string, sandboxName: string, planKey: string) {
+  await setSettingsBulk(sandboxId, {
+    workspaceAccountsJson: JSON.stringify([
+      {
+        id: sandboxId,
+        name: sandboxName,
+        slug: sandboxId,
+        planKey,
+        subscriptionStatus: "internal",
+        billingProvider: "none",
+        active: true,
+      },
+    ]),
+  });
+}
+
 // One actor resolution per request, shared by every read on that request.
 //
 // requireCoachActor() costs a session lookup plus a membership lookup. A single
@@ -9919,8 +10029,15 @@ function unknownBusiness() {
  * timezone -- so these jobs iterate accounts instead.
  */
 async function listActiveAccountIds(): Promise<string[]> {
+  // Live businesses only. A sandbox would otherwise get real lesson reminders
+  // on the real schedule, and until the sandbox outbox exists those would leave
+  // Clarity and reach whatever address the test data happens to hold. Once
+  // outbound email is captured per account, sandboxes can join this list and
+  // reminders become testable.
   const rows = await db().sql<{ id: string }[]>`
-    SELECT id FROM accounts WHERE status = 'active' ORDER BY created_at ASC, id ASC
+    SELECT id FROM accounts
+    WHERE status = 'active' AND kind = 'live'
+    ORDER BY created_at ASC, id ASC
   `;
   return rows.map((row) => cleanSlug(row.id, "")).filter(Boolean);
 }
@@ -9943,8 +10060,14 @@ async function resolvePublicAccountId(req: Request): Promise<string> {
       if (!account) throw unknownBusiness();
       return account.id;
     }
+    // `kind = 'live'` is load-bearing, not tidiness. Creating a sandbox adds a
+    // second active account, and without this filter that alone would make the
+    // count ambiguous and 404 every existing public booking link that does not
+    // name its business.
     const rows = await db().sql`
-      SELECT id FROM accounts WHERE status = 'active' ORDER BY created_at ASC, id ASC LIMIT 2
+      SELECT id FROM accounts
+      WHERE status = 'active' AND kind = 'live'
+      ORDER BY created_at ASC, id ASC LIMIT 2
     `;
     if (rows.length === 1) return cleanSlug(rows[0].id, "");
     throw unknownBusiness();
@@ -11977,6 +12100,29 @@ async function routeBookingApiRequest(
     }
 
     if (req.method === "GET" && pathname === "/api/auth/session") {
+      // A sandbox handoff wins over the coach cookie sitting beside it.
+      //
+      // The two cookies coexist by design -- that is what lets "Return to coach"
+      // be instant rather than a logout and a login. But it means the ordinary
+      // "coach first" answer below would send the shell straight back to the
+      // workspace the coach just stepped out of. Only a handoff is preferred: a
+      // real player session with a coach cookie alongside it is still a coach,
+      // which is what happens when a coach is also a player on their own
+      // browser.
+      const handoff = await readPlayerSession(playerSessionTokenFromRequest(req));
+      if (handoff?.sandboxActorAuthUser) {
+        return json({
+          authenticated: true,
+          role: "player",
+          email: handoff.email,
+          accountId: handoff.accountId,
+          accountKind: "sandbox",
+          viewingAs: (await readPeople(handoff.accountId)).find(
+            (person) => person.id === handoff.personId,
+          )?.name || handoff.email,
+        });
+      }
+
       const session = await readAdminSession(sessionTokenFromRequest(req));
       if (session) {
         // A coach session is only useful with a workspace behind it. Reporting
@@ -11984,7 +12130,7 @@ async function routeBookingApiRequest(
         // into the app proper, where every request then answers 403 -- so the
         // session check says which business, or says there isn't one.
         const membership = session.authUserId
-          ? await resolveMembershipForAuthUser(session.authUserId)
+          ? await resolveMembershipForAuthUser(session.authUserId, session.activeAccountId)
           : null;
         if (!membership) {
           // 200, not 403. This endpoint answers "who is this request?", and the
@@ -12008,6 +12154,13 @@ async function routeBookingApiRequest(
             accountRole: membership.role,
             email: session.email,
             accountId: membership.accountId,
+            // What the shell needs to know it must draw the sandbox bar. Derived
+            // from the accounts table by the membership resolution, not from
+            // anything the client sent.
+            accountKind: membership.sandboxOfAccountId ? "sandbox" : "live",
+            ...(membership.sandboxOfAccountId
+              ? { liveAccountId: membership.sandboxOfAccountId }
+              : {}),
             workspace: await readWorkspaceBootstrap(membership),
           }),
         );
@@ -12706,6 +12859,27 @@ async function routeBookingApiRequest(
       return json(await readGuestStatus(guest));
     }
 
+    // ...and back. Only the player session is destroyed; the coach's own cookie
+    // was never touched, so the workspace returns without a login.
+    //
+    // Deliberately above the requireAdmin gate below. The handoff session is its
+    // own credential -- this route reads it, checks it really is a handoff, and
+    // ends that one session and nothing else. Putting it behind the coach gate
+    // would mean a coach whose admin session lapsed mid-handoff had no way out
+    // of the portal at all.
+    //
+    // Refusing a session with no sandbox_actor_auth_user is what stops it being
+    // a way to sign a real player out of their own portal.
+    if (req.method === "POST" && pathname === "/api/sandbox/return") {
+      const token = playerSessionTokenFromRequest(req);
+      const player = await readPlayerSession(token);
+      if (!player?.sandboxActorAuthUser) {
+        return json({ error: "not_impersonating", message: "This is not a sandbox handoff." }, 400);
+      }
+      await destroyPlayerSession(token);
+      return json({ ok: true }, 200, { "Set-Cookie": clearPlayerCookieHeader() });
+    }
+
     // Everything below this line is a private route. requireAdmin throws 401
     // without a session and 403 with a session that has no workspace
     // membership -- authenticated is not authorised -- and the thrown error
@@ -13147,6 +13321,159 @@ async function routeBookingApiRequest(
         },
         sent ? 200 : 502,
       );
+    }
+
+    // Who the coach can become. Sandbox only, and only their own sandbox --
+    // this is a read of the same people list the Clients screen shows, filtered
+    // to the account the actor already resolved to.
+    if (req.method === "GET" && pathname === "/api/sandbox/players") {
+      const actor = await currentActor(req);
+      const sandbox = await requireSandboxAccount(actor.accountId);
+      const people = await readPeople(sandbox.id);
+      return json({
+        players: people.map((person) => ({
+          id: person.id,
+          name: cleanString(person.name, "", 180),
+          email: cleanEmail(person.email, ""),
+        })),
+      });
+    }
+
+    // Coach -> player, without the email round trip.
+    //
+    // Everything a real player does to get here -- a welcome email, a link, a
+    // password -- is a communication and authentication boundary, and Sandbox
+    // replaces boundaries. What it does NOT replace is the workflow: the coach
+    // still created this person through the real screens, and the portal this
+    // opens is the real portal reading the real tables.
+    //
+    // Four checks, in this order, all server-side and all against the database:
+    //
+    //   1. a real coach session resolves                (requireCoachActor, via the gate)
+    //   2. the account it acts for IS a sandbox         (requireSandboxAccount)
+    //   3. that sandbox belongs to this coach's business
+    //   4. the person belongs to that same sandbox
+    //
+    // Check 2 is what makes this impossible in production rather than merely
+    // forbidden: a live account has no sandbox row, so there is nothing it could
+    // present that would satisfy the check. There is no sandbox flag to forge
+    // because there is no sandbox flag.
+    if (req.method === "POST" && pathname === "/api/sandbox/impersonate") {
+      const actor = await currentActor(req);
+      const sandbox = await requireSandboxAccount(actor.accountId);
+      if (!actor.sandboxOfAccountId || sandbox.sandboxOfAccountId !== actor.sandboxOfAccountId) {
+        throw forbidden("That sandbox is not yours.", "sandbox_required");
+      }
+
+      const body = await parseBody(req);
+      const personId = cleanString(body?.personId, "", 160);
+      const people = await readPeople(sandbox.id);
+      const person = people.find((candidate) => candidate.id === personId);
+      if (!person) {
+        return json({ error: "unknown_player", message: "That player is not in this sandbox." }, 404);
+      }
+
+      // Reuse the portal row when the coach has already promoted them, so the
+      // portal behaves exactly as it would for that player -- revocation checks
+      // included. A person who has never been promoted is still viewable: being
+      // promoted is a workflow to test, not a prerequisite for testing.
+      const portalPlayers = await listPortalPlayers(sandbox.id);
+      const portalPlayer = portalPlayers.find((candidate) => candidate.personId === person.id);
+
+      // Two hours, not thirty days. A handoff is something a coach is doing
+      // right now, and a forgotten one should expire rather than sit in a
+      // browser being mistaken for a real login next week.
+      const session = await createPlayerSession({
+        personId: person.id,
+        email: cleanEmail(person.email, "") || cleanEmail(portalPlayer?.email, ""),
+        phone: cleanString(person.phone, "", 80),
+        accountId: sandbox.id,
+        portalPlayerId: portalPlayer?.id || "",
+        sandboxActorAuthUser: actor.authUserId,
+        lifetimeMs: 2 * 60 * 60 * 1000,
+      });
+
+      return json(
+        { ok: true, viewingAs: cleanString(person.name, "", 180) },
+        200,
+        { "Set-Cookie": playerCookieHeader(session.token, req, 2 * 60 * 60) },
+      );
+    }
+
+    // Does this business have a sandbox, and is this session in it?
+    //
+    // Answers for the *live* business either way: asked from inside the sandbox
+    // it reports the same sandbox, so the shell does not need to know which side
+    // it is on to draw the switch.
+    if (req.method === "GET" && pathname === "/api/sandbox") {
+      const actor = await currentActor(req);
+      const parentId = actor.sandboxOfAccountId || actor.accountId;
+      const sandbox = await readSandboxForAccount(parentId);
+      return json({
+        liveAccountId: parentId,
+        inSandbox: Boolean(actor.sandboxOfAccountId),
+        sandbox: sandbox
+          ? { id: sandbox.id, name: sandbox.businessName, planKey: await sandboxPlanKey(sandbox.id) }
+          : null,
+      });
+    }
+
+    // Create it. Owners and admins only: a sandbox is a whole second workspace
+    // for the business, not a personal scratch pad, and everyone on the business
+    // shares the one that gets made.
+    if (req.method === "POST" && pathname === "/api/sandbox") {
+      const state = await readSettingsState(await currentAccountId(req));
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountAdminContext(requestContext, "You do not have permission to create a sandbox workspace.");
+      const parentId = requestContext.actor.sandboxOfAccountId || requestContext.accountId;
+      const sandbox = await ensureSandboxForAccount(parentId);
+      return json({
+        ok: true,
+        sandbox: { id: sandbox.id, name: sandbox.businessName, planKey: await sandboxPlanKey(sandbox.id) },
+      });
+    }
+
+    // The plan a sandbox runs on.
+    //
+    // The account being changed is never named by the request: it is looked up
+    // from the caller's own business, so this route can only ever reach that
+    // business's sandbox. A live account has no sandbox row to find, so its plan
+    // is not editable here -- or anywhere else in the app.
+    //
+    // Works from either side. Asked from inside the sandbox it resolves the same
+    // row, so a coach does not have to leave to change what they are testing.
+    if (req.method === "PUT" && pathname === "/api/sandbox/plan") {
+      const state = await readSettingsState(await currentAccountId(req));
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountAdminContext(requestContext, "You do not have permission to change the sandbox plan.");
+      const parentId = requestContext.actor.sandboxOfAccountId || requestContext.accountId;
+      const sandbox = await readSandboxForAccount(parentId);
+      if (!sandbox) {
+        return json({ error: "no_sandbox", message: "This business has no sandbox yet." }, 404);
+      }
+      const body = await parseBody(req);
+      const planKey = cleanString(body?.planKey, "", 40);
+      if (!accountPlanCatalog[planKey]) {
+        return json({ error: "unknown_plan", message: "That is not a plan." }, 400);
+      }
+      await setSandboxPlanKey(sandbox.id, sandbox.businessName, planKey);
+      return json({ ok: true, planKey });
+    }
+
+    // Point this session at another of the user's businesses.
+    //
+    // The account id in the body names a choice, it does not grant one:
+    // switchActiveAccount only writes it when account_memberships already says
+    // this user holds it. Everything downstream keeps reading the account off
+    // the membership, so nothing else in the app has to know this route exists.
+    if (req.method === "POST" && pathname === "/api/workspace/switch") {
+      const body = await parseBody(req);
+      const actor = await switchActiveAccount(req, cleanString(body?.accountId, "", 120));
+      return json({
+        ok: true,
+        accountId: actor.accountId,
+        accountRole: actor.role,
+      });
     }
 
     if (req.method === "GET" && pathname === "/api/coach-account") {

@@ -323,27 +323,6 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   // which is what keeps the tab out of the nav.
   const [bookingEmbed, setBookingEmbed] = useState<PlayerBookingEmbedConfig | null>(null);
 
-  // Browser Back steps through the tabs the player has actually opened rather
-  // than leaving the portal. Only the tab and its subtab are recorded: the
-  // sheets and expanded cards a tab owns are closed when Back lands, since
-  // they belong to that visit rather than to the tab itself.
-  //
-  // A tab can stop existing while the player is in the portal -- the coach
-  // clears the booking URL, or a sign-out turns them into a guest -- and the
-  // effects further down bounce them home when that happens. Back onto such a
-  // tab is refused here instead, so the hook rewrites the stale entry rather
-  // than the bounce pushing a fresh one: otherwise the next Back would land on
-  // the same dead tab again and Back would look broken.
-  useBackNavigation({
-    state: { tab, lessonsSubtab },
-    restore: (snapshot) => {
-      if (snapshot.tab === "book" && !bookingEmbed) return;
-      if (isGuest && (snapshot.tab === "reviews" || snapshot.tab === "lessons" || snapshot.tab === "practice")) return;
-      setTab(snapshot.tab);
-      setLessonsSubtab(snapshot.lessonsSubtab);
-    },
-  });
-
   // Videos live on this device first. Nothing leaves it until the player
   // presses Send to coach.
   const savedVideoLibraryRef = useRef<SavedVideoLibraryStore | null>(null);
@@ -1338,6 +1317,70 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
       onOpenBalance={() => navigateTerminal("passes")}
     />
   );
+
+  /**
+   * What is open over the tab, bottom of the stack first.
+   *
+   * The video studio counts: it takes the whole screen and the player got
+   * there from a tab, so Back belongs to it before it belongs to the tab bar.
+   * The accordions in the lists -- an expanded booking, review, or practice
+   * block -- deliberately do not: they are disclosure inside a page, and
+   * giving each one a history entry would turn Back into an undo button for
+   * scrolling.
+   */
+  const backLayers: { id: string; close: () => void }[] = [];
+  // Already leaving counts as closed. The studio stays mounted for the slide
+  // out, but a layer that lingers past its own close would read as a second
+  // thing to dismiss, and Back would eat an extra entry when the teardown
+  // finally ran.
+  if ((recording || openVideoId) && !leavingWorkspace) {
+    backLayers.push({ id: "video-studio", close: () => closeWorkspace() });
+  }
+  if (reviewFlowOpen && reviewOffer) {
+    backLayers.push({
+      id: "review-flow",
+      close: () => {
+        setReviewFlowOpen(false);
+        setReviewError("");
+      },
+    });
+  }
+  if (guestSheetVideoId) backLayers.push({ id: "guest-sheet", close: () => setGuestSheetVideoId("") });
+  const backLayerIds = backLayers.map((layer) => layer.id);
+
+  // Browser Back steps back through what the player has actually opened --
+  // closing the studio or a sheet first, then walking back through the tabs --
+  // rather than leaving the portal.
+  //
+  // Layers are recorded by name, not by content, so Back closes one but
+  // Forward does not reopen it: the video the studio was on is not carried in
+  // the entry. A Forward onto such an entry rewrites it instead.
+  //
+  // A tab can also stop existing while the player is in the portal -- the coach
+  // clears the booking URL, or a sign-out turns them into a guest -- and the
+  // effects above bounce them home when that happens. Back onto such a tab is
+  // refused here instead, so the hook rewrites the stale entry rather than the
+  // bounce pushing a fresh one: otherwise the next Back would land on the same
+  // dead tab again and Back would look broken.
+  useBackNavigation({
+    depth: (snapshot) => snapshot.layers.length,
+    state: { tab, lessonsSubtab, layers: backLayerIds },
+    restore: (snapshot) => {
+      const wanted = new Set(snapshot.layers);
+      // Topmost first: the guest sheet goes before the screen underneath it.
+      for (let index = backLayers.length - 1; index >= 0; index -= 1) {
+        if (!wanted.has(backLayers[index].id)) backLayers[index].close();
+      }
+      // Leaving the studio lands on Videos, wherever it was opened from --
+      // that is what its own Back button does, and the two should not disagree
+      // about where Back goes. Its teardown sets the tab, so this leaves it be.
+      if (backLayers.some((layer) => layer.id === "video-studio") && !wanted.has("video-studio")) return;
+      if (snapshot.tab === "book" && !bookingEmbed) return;
+      if (isGuest && (snapshot.tab === "reviews" || snapshot.tab === "lessons" || snapshot.tab === "practice")) return;
+      setTab(snapshot.tab);
+      setLessonsSubtab(snapshot.lessonsSubtab);
+    },
+  });
 
   if (recording || openVideoId) {
     return (

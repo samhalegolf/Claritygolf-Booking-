@@ -49,11 +49,29 @@ export type WorkspaceBootstrap = {
   currentUser: Record<string, unknown>;
 };
 
+/**
+ * Live business, or the sandbox that shadows one.
+ *
+ * A fourth vocabulary, and it is not a role: it says which *workspace* the
+ * session is acting in, not who the user is. The shell routes on `role` and
+ * draws the sandbox bar on this.
+ */
+export type AccountKind = "live" | "sandbox";
+
 export type AuthSessionResponse = {
   authenticated: boolean;
   role: SessionRole;
   accountRole?: AccountRole;
   accountId?: string;
+  /** Absent on older responses; treat a missing value as "live". */
+  accountKind?: AccountKind;
+  /** Sandbox sessions only: the live business this sandbox belongs to. */
+  liveAccountId?: string;
+  /**
+   * Sandbox player handoffs only: the player the coach is currently viewing as.
+   * Its presence is what tells the portal to offer a way back.
+   */
+  viewingAs?: string;
   /**
    * Coach sessions only, and best effort: the workspace the sidebar can be
    * drawn from straight away. Absent when the settings read failed -- the

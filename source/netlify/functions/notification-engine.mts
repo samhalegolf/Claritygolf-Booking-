@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { deliverEmail } from "./_shared/email-delivery.mts";
 import { settingsSelectQuery } from "./_shared/settings-scope.mts";
 import { activeLocale } from "./_shared/locale.mts";
 import { setActivePhoneCountry } from "./_shared/phone.mts";
@@ -49,31 +50,6 @@ function cleanText(value: unknown, fallback = "", max = 800) {
 function cleanEmail(value: unknown, fallback = "") {
   const email = cleanText(value, "", 180).toLowerCase();
   return email.includes("@") ? email : fallback;
-}
-
-function emailAddressFromHeader(fromHeader: string) {
-  const rawFrom = cleanText(fromHeader, "", 512);
-  if (!rawFrom) return "";
-  const matched = rawFrom.match(/^\s*(?:"[^"]*"|[^<"]*?)\s*<\s*([^>]+)\s*>\s*$/);
-  if (matched) {
-    const address = cleanEmail(matched[1], "");
-    if (address) return address;
-  }
-  return cleanEmail(rawFrom, "");
-}
-
-function quoteAddressName(name: string) {
-  const trimmed = cleanText(name, "", 160);
-  if (!trimmed) return "";
-  const sanitized = trimmed.replace(/"/g, '\\"');
-  return /[<>"]/.test(trimmed) ? `"${sanitized}"` : sanitized;
-}
-
-function formatFromHeader(name: string, fallbackAddress: string, sourceHeader: string) {
-  const address = emailAddressFromHeader(sourceHeader) || fallbackAddress;
-  if (!address) return "";
-  const quotedName = quoteAddressName(name);
-  return quotedName ? `${quotedName} <${address}>` : address;
 }
 
 function cleanUrl(value: unknown, fallback: string) {
@@ -493,82 +469,6 @@ async function recordNotification(row: any) {
   }
 }
 
-// Resend allows 2 requests/second. A booking fires client + coach + admin
-// emails back-to-back, which is exactly how the notification_history rows with
-// error "resend_failed" (HTTP 429) happened. Space consecutive sends out and
-// retry once on a 429 instead of dropping the email.
-const SEND_MIN_INTERVAL_MS = 600;
-let lastSendAt = 0;
-
-function wait(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function throttleSend() {
-  const elapsed = Date.now() - lastSendAt;
-  if (elapsed < SEND_MIN_INTERVAL_MS) await wait(SEND_MIN_INTERVAL_MS - elapsed);
-  lastSendAt = Date.now();
-}
-
-async function sendEmail(message: { accountId: string; to: string; subject: string; html: string; text: string; replyTo?: string; idempotencyKey: string }) {
-  const apiKey = env("RESEND_API_KEY");
-  if (!apiKey) return { sent: false, reason: "missing_resend_key" };
-  if (!cleanEmail(message.to)) return { sent: false, reason: "missing_recipient" };
-  const settings = await readSettings(message.accountId);
-  const rawFromHeader = env("CLARITY_EMAIL_FROM", `${settings.businessName} <onboarding@resend.dev>`);
-  // The name on the From header. Falls back to the product, never to the
-  // original business -- a second workspace was sending its booking emails
-  // signed "Sam Hale Golf".
-  const fromNameFallback =
-    cleanText(settings.coachName, "", 120) || cleanText(settings.businessName, "", 120) || "Clarity Golf";
-  const fromName = cleanText(settings.notificationFromName, "", 120) || fromNameFallback;
-  const from = formatFromHeader(
-    fromName,
-    cleanEmail(rawFromHeader, env("CLARITY_NOTIFICATION_EMAIL", "")),
-    rawFromHeader,
-  );
-  const payload = JSON.stringify({
-    from,
-    to: [message.to],
-    subject: message.subject,
-    html: message.html,
-    text: message.text,
-    ...(message.replyTo ? { reply_to: message.replyTo } : {}),
-  });
-  const attempt = async () => {
-    await throttleSend();
-    return fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "Idempotency-Key": message.idempotencyKey,
-      },
-      body: payload,
-    });
-  };
-  let response = await attempt();
-  if (response.status === 429) {
-    await wait(1200);
-    response = await attempt();
-  }
-  const responseText = await response.text().catch(() => "");
-  if (!response.ok) {
-    return {
-      sent: false,
-      reason: `resend_failed_${response.status}`,
-      error: responseText.slice(0, 1000),
-      status: response.status,
-    };
-  }
-  try {
-    const data = responseText ? JSON.parse(responseText) : {};
-    return { sent: true, id: data?.id || "" };
-  } catch {
-    return { sent: true, id: "" };
-  }
-}
-
 function actionLabels(action: BookingAction) {
   if (action === "rescheduled") return { title: "Booking rescheduled", clientSubject: "Your golf lesson has been rescheduled", adminSubject: "Booking rescheduled" };
   if (action === "cancelled") return { title: "Booking cancelled", clientSubject: "Your golf lesson has been cancelled", adminSubject: "Booking cancelled" };
@@ -962,7 +862,7 @@ export async function notifyBookingEvent(input: NotifyInput) {
       return;
     }
     const body = bodyFor(action, variant, appt, previous, serviceName, settings, variables, channel);
-    const result = await sendEmail({
+    const result = await deliverEmail({
       accountId,
       to: recipient,
       subject,
@@ -995,7 +895,7 @@ export async function notifyBookingEvent(input: NotifyInput) {
       await recordNotification({ accountId, personKey, calendarItemId: appt.id, recipient, subject: invite.subject, kind, status: "skipped", provider: "settings", error: "disabled_client_email" });
       return;
     }
-    const result = await sendEmail({
+    const result = await deliverEmail({
       accountId,
       to: recipient,
       subject: invite.subject,
@@ -1107,7 +1007,7 @@ export async function notifyBookingEvent(input: NotifyInput) {
       notified.add(recipient);
       const body = bodyFor(action, variant, appt, previous, serviceName, settings, variables, "client");
       const kind = "cancelled_attendee_email";
-      const result = await sendEmail({
+      const result = await deliverEmail({
         accountId,
         to: recipient,
         subject: subjects.client,

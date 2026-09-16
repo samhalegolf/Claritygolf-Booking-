@@ -15,6 +15,7 @@ import {
 } from "./_shared/passes.mts";
 import type { ReservedPassPayment } from "./_shared/passes.mts";
 import type { PassSource, PassTemplate } from "./_shared/passes.mts";
+import { deliverEmail } from "./_shared/email-delivery.mts";
 import { currencyForAccountSettings } from "./_shared/locale.mts";
 import {
   createStripeCheckoutSession as createStripeCheckoutSessionWith,
@@ -2510,55 +2511,51 @@ export async function renderInvoicePdf(invoice: InvoiceApi, branding: InvoiceBra
   return pdf.save();
 }
 
-// Self-contained Resend sender (billing stays isolated from booking/notification
-// code by design - see this file's header). Mirrors notification-engine.mts's
-// from-header handling and adds the invoice PDF as a base64 attachment.
-function invoiceEmailFrom(branding: InvoiceBranding) {
-  const rawFrom = env("CLARITY_EMAIL_FROM", `${branding.businessName} <onboarding@resend.dev>`);
-  if (/<[^>]+>/.test(rawFrom)) return rawFrom; // env already supplies a "Name <addr>" header
-  return `${branding.fromName || branding.businessName} <${rawFrom}>`;
-}
-
-async function emailInvoicePdf(
-  opts: { to: string; subject: string; text: string; html: string; replyTo?: string; pdf: Uint8Array; filename: string; idempotencyKey: string },
-  branding: InvoiceBranding,
-) {
-  const apiKey = env("RESEND_API_KEY");
-  if (!apiKey) {
-    throw Object.assign(new Error("Email sending is not configured (missing RESEND_API_KEY)."), {
-      status: 503,
-      code: "EMAIL_NOT_CONFIGURED",
-    });
-  }
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      "Idempotency-Key": opts.idempotencyKey,
-    },
-    body: JSON.stringify({
-      from: invoiceEmailFrom(branding),
-      to: [opts.to],
-      subject: opts.subject,
-      text: opts.text,
-      html: opts.html,
-      ...(opts.replyTo ? { reply_to: opts.replyTo } : {}),
-      attachments: [{ filename: opts.filename, content: Buffer.from(opts.pdf).toString("base64") }],
-    }),
+// Invoice email. The provider call, the From header, the throttle and the 429
+// retry all live in _shared/email-delivery.mts -- this only knows that an
+// invoice goes out with its PDF attached.
+//
+// Importing that module does not breach this file's isolation rule (see the
+// header): the rule is about not owning booking and calendar behaviour, and
+// email delivery is the same category as the _shared/stripe.mts already
+// imported here. The From header it builds is the one this file used to build
+// itself: notificationFromName, else the coach's name, else the business's.
+async function emailInvoicePdf(opts: {
+  accountId: string;
+  to: string;
+  subject: string;
+  text: string;
+  html: string;
+  replyTo?: string;
+  pdf: Uint8Array;
+  filename: string;
+  idempotencyKey: string;
+}) {
+  const result = await deliverEmail({
+    accountId: opts.accountId,
+    to: opts.to,
+    subject: opts.subject,
+    text: opts.text,
+    html: opts.html,
+    replyTo: opts.replyTo,
+    idempotencyKey: opts.idempotencyKey,
+    attachments: [{ filename: opts.filename, content: Buffer.from(opts.pdf).toString("base64") }],
   });
-  const responseText = await response.text().catch(() => "");
-  if (!response.ok) {
-    throw Object.assign(new Error(`Email send failed (${response.status}): ${responseText.slice(0, 300)}`), {
-      status: 502,
-      code: "EMAIL_SEND_FAILED",
-    });
+  // Sending an invoice is the whole point of the request, so unlike a booking
+  // confirmation a failure here is the caller's failure and has to surface.
+  if (!result.sent) {
+    if (result.reason === "missing_resend_key") {
+      throw Object.assign(new Error("Email sending is not configured (missing RESEND_API_KEY)."), {
+        status: 503,
+        code: "EMAIL_NOT_CONFIGURED",
+      });
+    }
+    throw Object.assign(
+      new Error(`Email send failed (${result.reason}): ${(result.error || "").slice(0, 300)}`),
+      { status: 502, code: "EMAIL_SEND_FAILED" },
+    );
   }
-  try {
-    return { id: (responseText ? JSON.parse(responseText)?.id : "") || "" };
-  } catch {
-    return { id: "" };
-  }
+  return { id: result.id || "" };
 }
 
 function pdfFilename(invoice: InvoiceApi) {
@@ -2621,19 +2618,17 @@ async function sendInvoice(accountId: string, id: string, body: Record<string, u
     payButton +
     `</div>`;
 
-  const emailResult = await emailInvoicePdf(
-    {
-      to,
-      subject,
-      text: plain,
-      html,
-      replyTo: branding.contactEmail || undefined,
-      pdf,
-      filename: pdfFilename(invoice),
-      idempotencyKey: `invoice-send-${id}-${Date.now()}`,
-    },
-    branding,
-  );
+  const emailResult = await emailInvoicePdf({
+    accountId,
+    to,
+    subject,
+    text: plain,
+    html,
+    replyTo: branding.contactEmail || undefined,
+    pdf,
+    filename: pdfFilename(invoice),
+    idempotencyKey: `invoice-send-${id}-${Date.now()}`,
+  });
 
   // Advance to "sent" only from draft/sent - never drag a paid/void invoice
   // backwards just because a copy was re-emailed.

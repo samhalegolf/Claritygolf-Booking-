@@ -31,8 +31,10 @@ import {
   requireCoachActor,
   resolvePublicAccount,
   sessionRoleForMembership,
+  switchActiveAccount,
   userBelongsToAccountStrict,
 } from "./coach-auth.mts";
+import { requireSandboxAccount, sandboxAccountIdFor } from "./sandbox.mts";
 import {
   availabilityFromSettings,
   calendarItemBelongsToAccount,
@@ -50,6 +52,7 @@ import {
   servicesFromSettings,
   setSettingsBulk,
   writeItems,
+  handleBookingApiRoute,
 } from "../booking-core.mts";
 
 const BUSINESS_A = "sam-hale-golf";
@@ -418,7 +421,9 @@ test("an unknown public slug resolves to nothing, never to the original business
     assert.equal(await resolvePublicAccount("no-such-business"), null);
     const read = issued.find((statement) => statement.text.includes("FROM accounts"));
     assert.ok(read, "the slug was checked against the accounts table");
-    assert.deepEqual(read!.values, ["no-such-business", "no-such-business"]);
+    // Slug, id, and the kind filter that keeps sandboxes off the public pages.
+    assert.deepEqual(read!.values, ["no-such-business", "no-such-business", "live"]);
+    assert.match(read!.text, /kind = \$3/, "the lookup is pinned to live accounts");
   } finally {
     restoreDatabase();
   }
@@ -605,4 +610,292 @@ test("no source file falls back to the original business's identity", async () =
     [],
     `these lines put the original business's identity where any workspace could read it:\n${offenders.join("\n")}`,
   );
+});
+
+
+// --- The sandbox boundary ---------------------------------------------------
+//
+// A sandbox is another business, so every test above already applies to it. What
+// these pin down is the part that is new: a sandbox has no membership row, so
+// the right to act for one is derived from the membership on the business it
+// belongs to -- and a live account can never satisfy a sandbox-only check,
+// because satisfying one means having a row that a live account does not have.
+
+const SANDBOX_B = sandboxAccountIdFor(BUSINESS_B);
+const SANDBOX_AUTH_USER = "33333333-3333-3333-3333-333333333333";
+
+/**
+ * A session switched to `activeAccountId`, whose owner holds `memberships`, and
+ * a database that knows about `sandboxes` ({ id -> parent business }).
+ */
+function sandboxFixture(options: {
+  activeAccountId?: string;
+  memberships?: { id: string; account_id: string; role: string; coach_id?: string }[];
+  sandboxes?: Record<string, string>;
+}) {
+  const memberships = options.memberships ?? [
+    { id: "m-b", account_id: BUSINESS_B, role: "coach", coach_id: "coach-b" },
+  ];
+  const sandboxes = options.sandboxes ?? { [SANDBOX_B]: BUSINESS_B };
+  return fakeDatabase((text, values) => {
+    if (text.includes("FROM admin_sessions")) {
+      return [
+        {
+          auth_user_id: SANDBOX_AUTH_USER,
+          user_id: "admin-3",
+          email: "coach@business-b.test",
+          expires_at: new Date(Date.now() + 60_000).toISOString(),
+          active_account_id: options.activeAccountId ?? null,
+        },
+      ];
+    }
+    if (text.includes("FROM account_memberships")) return memberships;
+    if (text.includes("FROM accounts")) {
+      const wanted = String(values[0] ?? "");
+      const parent = sandboxes[wanted];
+      return parent
+        ? [
+            {
+              id: wanted,
+              slug: wanted,
+              business_name: "Sandbox",
+              status: "active",
+              sandbox_of_account_id: parent,
+            },
+          ]
+        : [];
+    }
+    return [];
+  });
+}
+
+test("a session switched to the sandbox acts for the sandbox, not the live business", async () => {
+  sandboxFixture({ activeAccountId: SANDBOX_B });
+  try {
+    const actor = await requireCoachActor(sessionRequest());
+    assert.equal(actor.accountId, SANDBOX_B);
+    assert.equal(actor.sandboxOfAccountId, BUSINESS_B);
+    // The role is inherited rather than flattened to owner: a coach is a coach
+    // in the sandbox too, which is what makes permission behaviour testable.
+    assert.equal(actor.role, "coach");
+    assert.equal(actor.isOwner, false);
+  } finally {
+    restoreDatabase();
+  }
+});
+
+test("a live session is never marked as a sandbox one", async () => {
+  sandboxFixture({ activeAccountId: BUSINESS_B });
+  try {
+    const actor = await requireCoachActor(sessionRequest());
+    assert.equal(actor.accountId, BUSINESS_B);
+    assert.equal(actor.sandboxOfAccountId, undefined);
+  } finally {
+    restoreDatabase();
+  }
+});
+
+test("a sandbox belonging to another business is not reachable", async () => {
+  // The session names business A's sandbox; this user only belongs to B.
+  const otherSandbox = sandboxAccountIdFor(BUSINESS_A);
+  sandboxFixture({
+    activeAccountId: otherSandbox,
+    sandboxes: { [otherSandbox]: BUSINESS_A },
+  });
+  try {
+    const actor = await requireCoachActor(sessionRequest());
+    // Falls back to their own business rather than locking them out -- and
+    // emphatically not into someone else's sandbox.
+    assert.equal(actor.accountId, BUSINESS_B);
+    assert.equal(actor.sandboxOfAccountId, undefined);
+  } finally {
+    restoreDatabase();
+  }
+});
+
+test("losing the live membership loses the sandbox with it, in the same instant", async () => {
+  // No membership row at all: the coach was removed from the business. There is
+  // no sandbox membership left behind to keep working, because there never was
+  // one -- which is the whole reason access is derived rather than mirrored.
+  sandboxFixture({ activeAccountId: SANDBOX_B, memberships: [] });
+  try {
+    await assert.rejects(
+      () => requireCoachActor(sessionRequest()),
+      (error: any) => error?.status === 403 && error?.code === "membership_required",
+    );
+  } finally {
+    restoreDatabase();
+  }
+});
+
+test("switching to an account the user has no claim on writes nothing", async () => {
+  const issued = sandboxFixture({});
+  try {
+    await assert.rejects(
+      () => switchActiveAccount(sessionRequest(), BUSINESS_A),
+      (error: any) => error?.status === 403 && error?.code === "membership_required",
+    );
+    assert.ok(
+      !issued.some((statement) => statement.text.includes("UPDATE admin_sessions")),
+      "a refused switch leaves the session's active account alone",
+    );
+  } finally {
+    restoreDatabase();
+  }
+});
+
+test("switching to this business's sandbox is allowed and is recorded", async () => {
+  const issued = sandboxFixture({});
+  try {
+    const actor = await switchActiveAccount(sessionRequest(), SANDBOX_B);
+    assert.equal(actor.accountId, SANDBOX_B);
+    const write = issued.find((statement) => statement.text.includes("UPDATE admin_sessions"));
+    assert.ok(write, "the switch is persisted on the session");
+    assert.equal(write!.values[0], SANDBOX_B);
+  } finally {
+    restoreDatabase();
+  }
+});
+
+test("a sandbox-only capability refuses a live account", async () => {
+  // requireSandboxAccount is the gate every sandbox-only route opens with. A
+  // live business has no sandbox row, so there is nothing for it to match --
+  // not a check that could be skipped, an absence that cannot be satisfied.
+  sandboxFixture({});
+  try {
+    await assert.rejects(
+      () => requireSandboxAccount(BUSINESS_B),
+      (error: any) => error?.status === 403 && error?.code === "sandbox_required",
+    );
+    const sandbox = await requireSandboxAccount(SANDBOX_B);
+    assert.equal(sandbox.sandboxOfAccountId, BUSINESS_B);
+  } finally {
+    restoreDatabase();
+  }
+});
+
+// --- The sandbox player handoff ---------------------------------------------
+//
+// "Continue as this player" is the one capability in the app that lets one
+// person act as another, so it gets the most direct tests here: the route
+// itself, not the helpers underneath it.
+
+function coachRequest(path: string, body: unknown = {}, cookie = "clarity_session=session-token") {
+  return new Request(`https://example.test${path}`, {
+    method: "POST",
+    headers: { cookie, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+test("a coach in the live workspace cannot impersonate anybody", async () => {
+  // The live business is not a sandbox, so readSandboxAccount finds nothing and
+  // there is nothing this account could present that would change that. The
+  // refusal is an absence in the accounts table, not a policy check.
+  sandboxFixture({ activeAccountId: BUSINESS_B, sandboxes: {} });
+  try {
+    const response = await handleBookingApiRoute(
+      coachRequest("/api/sandbox/impersonate", { personId: "person-1" }),
+      "/api/sandbox/impersonate",
+    );
+    assert.equal(response.status, 403);
+    assert.equal((await response.json()).error, "sandbox_required");
+  } finally {
+    restoreDatabase();
+  }
+});
+
+test("impersonation refuses even when the live account names its own sandbox", async () => {
+  // The sandbox exists and belongs to this business -- but the session is not in
+  // it, and the account being checked is the one the membership resolved to. An
+  // id in a request body is never what decides.
+  sandboxFixture({ activeAccountId: BUSINESS_B });
+  try {
+    const response = await handleBookingApiRoute(
+      coachRequest("/api/sandbox/impersonate", { personId: "person-1", accountId: SANDBOX_B }),
+      "/api/sandbox/impersonate",
+    );
+    assert.equal(response.status, 403);
+  } finally {
+    restoreDatabase();
+  }
+});
+
+test("returning to coach refuses a session that is not a handoff", async () => {
+  // A real player's session must not be endable through this route: it is the
+  // way back from an impersonation, not a way to sign somebody out.
+  fakeDatabase((text) => {
+    if (text.includes("FROM player_sessions")) {
+      return [
+        {
+          person_id: "person-1",
+          email: "player@business-b.test",
+          account_id: BUSINESS_B,
+          portal_player_id: null,
+          sandbox_actor_auth_user: null,
+          expires_at: new Date(Date.now() + 60_000).toISOString(),
+        },
+      ];
+    }
+    return [];
+  });
+  try {
+    const response = await handleBookingApiRoute(
+      coachRequest("/api/sandbox/return", {}, "clarity_player_session=player-token"),
+      "/api/sandbox/return",
+    );
+    assert.equal(response.status, 400);
+    assert.equal((await response.json()).error, "not_impersonating");
+  } finally {
+    restoreDatabase();
+  }
+});
+
+test("an ordinary player session alongside a coach cookie still reads as the coach", async () => {
+  // A coach who is also a player on their own browser holds both cookies. Only
+  // a handoff may outrank the coach session -- otherwise signing in as a coach
+  // would land in the portal.
+  fakeDatabase((text) => {
+    if (text.includes("FROM player_sessions")) {
+      return [
+        {
+          person_id: "person-1",
+          email: "both@business-b.test",
+          account_id: BUSINESS_B,
+          portal_player_id: null,
+          sandbox_actor_auth_user: null,
+          expires_at: new Date(Date.now() + 60_000).toISOString(),
+        },
+      ];
+    }
+    if (text.includes("FROM admin_sessions")) {
+      return [
+        {
+          id: "admin-4",
+          auth_user_id: SANDBOX_AUTH_USER,
+          user_id: "admin-4",
+          email: "both@business-b.test",
+          expires_at: new Date(Date.now() + 60_000).toISOString(),
+          active_account_id: null,
+        },
+      ];
+    }
+    if (text.includes("FROM account_memberships")) {
+      return [{ id: "m-b", account_id: BUSINESS_B, role: "owner", coach_id: "coach-b" }];
+    }
+    return [];
+  });
+  try {
+    const response = await handleBookingApiRoute(
+      new Request("https://example.test/api/auth/session", {
+        headers: { cookie: "clarity_session=session-token; clarity_player_session=player-token" },
+      }),
+      "/api/auth/session",
+    );
+    const body = await response.json();
+    assert.equal(body.role, "coach");
+    assert.equal(body.accountKind, "live");
+  } finally {
+    restoreDatabase();
+  }
 });

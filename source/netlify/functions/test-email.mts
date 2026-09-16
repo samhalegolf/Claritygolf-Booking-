@@ -1,14 +1,11 @@
 import type { Config } from "@netlify/functions";
 import { randomUUID } from "node:crypto";
 import { requireCoachActor } from "./_shared/coach-auth.mts";
+import { deliverEmail, emailNotificationsGloballyDisabled } from "./_shared/email-delivery.mts";
 
 
 function env(name: string, fallback = "") {
   return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
-}
-
-function emailNotificationsGloballyDisabled() {
-  return ["0", "false", "off", "disabled", "no"].includes(env("EMAIL_NOTIFICATIONS_ENABLED", "").trim().toLowerCase());
 }
 
 function json(value: unknown, status = 200) {
@@ -95,65 +92,48 @@ export default async function handler(req: Request) {
       );
     }
 
-    const apiKey = env("RESEND_API_KEY");
-    if (!apiKey) {
-      return json({ ok: false, message: "Resend API key is missing in Netlify functions environment." }, 502);
-    }
-
-    const from = env("CLARITY_EMAIL_FROM", "Clarity Golf Booking <onboarding@resend.dev>");
     const replyTo = env("CLARITY_REPLY_TO_EMAIL", env("CLARITY_NOTIFICATION_EMAIL", ""));
     const subject = "Clarity Golf booking email test";
     const text = "This is a test email from the Clarity Golf booking system.";
     const html = `<p>${text}</p><p>If you received this, the booking system can connect to Resend.</p>`;
 
-    const response = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "Idempotency-Key": `test-email-${Date.now()}-${randomUUID()}`,
-      },
-      body: JSON.stringify({
-        from,
-        to: [recipient],
-        subject,
-        html,
-        text,
-        ...(replyTo ? { reply_to: replyTo } : {}),
-      }),
+    // Through the same sender every real email uses. A hand-rolled fetch here
+    // could pass while the actual sending path was broken, which is the one
+    // thing a test-send must not do.
+    const result = await deliverEmail({
+      accountId,
+      to: recipient,
+      subject,
+      html,
+      text,
+      replyTo: replyTo || undefined,
+      idempotencyKey: `test-email-${Date.now()}-${randomUUID()}`,
     });
 
-    const responseText = await response.text();
-    let data: any = {};
-    try {
-      data = responseText ? JSON.parse(responseText) : {};
-    } catch {
-      data = { raw: responseText };
-    }
-
-    const notificationId = randomUUID();
     await recordNotification({
-      id: notificationId,
+      id: randomUUID(),
       account_id: accountId,
       person_key: recipient,
       calendar_item_id: null,
       recipient,
       subject,
       kind: "test_client_email",
-      status: response.ok ? "sent_to_provider" : "failed",
+      status: result.sent ? "sent_to_provider" : "failed",
       provider: "resend",
-      provider_id: response.ok ? data?.id || "" : "",
-      error: response.ok ? null : JSON.stringify(data).slice(0, 1000),
+      provider_id: result.id || "",
+      error: result.sent ? null : [result.reason, result.error].filter(Boolean).join(": ").slice(0, 1000),
       created_at: new Date().toISOString(),
     });
 
-    if (!response.ok) {
+    if (!result.sent) {
+      if (result.reason === "missing_resend_key") {
+        return json({ ok: false, message: "Resend API key is missing in Netlify functions environment." }, 502);
+      }
       return json(
         {
           ok: false,
-          message: data?.message || data?.error || "Resend rejected the email.",
-          resendStatus: response.status,
-          resend: data,
+          message: result.error || "Resend rejected the email.",
+          resendStatus: result.status,
         },
         502,
       );
@@ -170,7 +150,7 @@ export default async function handler(req: Request) {
           kind: "test_client_email",
           status: "sent_to_provider",
           sent: true,
-          id: data?.id || "",
+          id: result.id || "",
         },
       ],
     });

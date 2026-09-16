@@ -11,6 +11,7 @@
 
 import { getDatabase } from "@netlify/database";
 import { LEGACY_DEFAULT_ACCOUNT_ID } from "./account.mts";
+import { LIVE_KIND, readSandboxAccount } from "./sandbox.mts";
 import type { AccountRole, AppUserRole, SessionRole } from "./auth-contract.mts";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 
@@ -86,6 +87,17 @@ export type CoachActor = {
   isOwner: boolean;
   isAdmin: boolean;
   membershipId: string;
+  /**
+   * Set only when `accountId` is a sandbox: the live business it belongs to,
+   * and the business whose membership row granted this access.
+   *
+   * Everything downstream keeps using `accountId` and stays unaware of
+   * sandboxes. This is here for the two things that do care -- the session
+   * response, so the shell can draw the sandbox bar, and the sandbox-only
+   * routes, which still re-check against the accounts table rather than trust
+   * it.
+   */
+  sandboxOfAccountId?: string;
 };
 
 // --- Supabase Auth helpers (mirrors booking-core's pattern) ---------------
@@ -178,6 +190,8 @@ export async function readAdminSessionAuthUserId(req: Request): Promise<{
   adminUserId: string;
   email: string;
   expiresAt: string;
+  /** Which of this user's accounts the session is currently acting for. "" = their primary. */
+  activeAccountId: string;
 } | null> {
   const sessionToken = parseCookies(req)[sessionCookieName] || "";
   if (!sessionToken) return null;
@@ -187,11 +201,13 @@ export async function readAdminSessionAuthUserId(req: Request): Promise<{
     user_id: string;
     email: string;
     expires_at: string;
+    active_account_id?: string;
   }[]>`
     SELECT admin_sessions.auth_user_id,
            admin_sessions.user_id,
            admin_users.email,
-           admin_sessions.expires_at
+           admin_sessions.expires_at,
+           admin_sessions.active_account_id
     FROM admin_sessions
     LEFT JOIN admin_users ON admin_users.id = admin_sessions.user_id
     WHERE admin_sessions.token_hash = ${tokenHash}
@@ -208,20 +224,33 @@ export async function readAdminSessionAuthUserId(req: Request): Promise<{
     adminUserId: cleanString(row.user_id, "", 140),
     email: cleanEmail(row.email, ""),
     expiresAt: row.expires_at,
+    activeAccountId: cleanSlug(row.active_account_id, ""),
   };
 }
 
-/**
- * The authoritative resolution step.
- *
- * Given a Supabase auth user id, looks up their active account_memberships.
- * Returns the primary (owner, else admin, else coach) membership, or null if
- * there is no active membership at all.
- */
-export async function resolveMembershipForAuthUser(
+function actorFromMembershipRow(
   authUserId: string,
-): Promise<(CoachActor & { membershipId: string }) | null> {
-  if (!authUserId) return null;
+  row: { id: string; account_id: string; role: string; coach_id?: string },
+): CoachActor & { membershipId: string } {
+  const role = (["owner", "admin", "coach"].includes(row.role as CoachRole)
+    ? row.role
+    : "coach") as CoachRole;
+  return {
+    authUserId,
+    accountId: cleanSlug(row.account_id, ""),
+    role,
+    coachId: cleanString(row.coach_id, "", 140) || undefined,
+    isOwner: role === "owner",
+    isAdmin: role === "owner" || role === "admin",
+    membershipId: cleanString(row.id, "", 140),
+  };
+}
+
+/** Every business this user can act for, primary first. */
+export async function listMembershipsForAuthUser(
+  authUserId: string,
+): Promise<(CoachActor & { membershipId: string })[]> {
+  if (!authUserId) return [];
   const rows = await db().sql<{
     id: string;
     account_id: string;
@@ -238,22 +267,67 @@ export async function resolveMembershipForAuthUser(
       WHEN 'coach' THEN 2
       ELSE 3
     END, created_at ASC
-    LIMIT 1
   `;
-  const row = rows[0];
-  if (!row) return null;
-  const role = (["owner", "admin", "coach"].includes(row.role as CoachRole)
-    ? row.role
-    : "coach") as CoachRole;
-  return {
-    authUserId,
-    accountId: cleanSlug(row.account_id, ""),
-    role,
-    coachId: cleanString(row.coach_id, "", 140) || undefined,
-    isOwner: role === "owner",
-    isAdmin: role === "owner" || role === "admin",
-    membershipId: cleanString(row.id, "", 140),
-  };
+  return rows.map((row) => actorFromMembershipRow(authUserId, row));
+}
+
+/**
+ * The authoritative resolution step.
+ *
+ * Given a Supabase auth user id, looks up their active account_memberships and
+ * returns the one this request acts for -- or null if there is no active
+ * membership at all.
+ *
+ * `preferredAccountId` is the account the session has been switched to. It is a
+ * preference and nothing more: it only wins if it matches a membership row this
+ * user actually holds, and an unrecognised one falls back to the primary
+ * (owner, else admin, else coach) rather than failing. That matters because the
+ * preference is stored on a session that outlives a membership -- a coach
+ * removed from a second business must land back in their own, not get locked
+ * out of the app.
+ *
+ * This used to be a bare `LIMIT 1` with no preference at all, so a user with two
+ * memberships got whichever sorted first and had no way to reach the other.
+ */
+export async function resolveMembershipForAuthUser(
+  authUserId: string,
+  preferredAccountId = "",
+): Promise<(CoachActor & { membershipId: string }) | null> {
+  const memberships = await listMembershipsForAuthUser(authUserId);
+  if (!memberships.length) return null;
+  const preferred = cleanSlug(preferredAccountId, "");
+  if (preferred) {
+    const matched = memberships.find((membership) => membership.accountId === preferred);
+    if (matched) return matched;
+    const sandbox = await sandboxActorFor(preferred, memberships);
+    if (sandbox) return sandbox;
+  }
+  return memberships[0];
+}
+
+/**
+ * The sandbox half of the resolution above.
+ *
+ * A sandbox has no membership row of its own, so acting for one means holding a
+ * membership on the business it belongs to. The role comes from that membership
+ * rather than being flattened to owner -- a coach is a coach in the sandbox too,
+ * which is what makes permission differences testable there.
+ *
+ * Returns null rather than throwing, so an id that is neither a membership nor a
+ * reachable sandbox falls back to the user's primary business instead of locking
+ * them out of the app.
+ */
+async function sandboxActorFor(
+  accountId: string,
+  memberships: (CoachActor & { membershipId: string })[],
+): Promise<(CoachActor & { membershipId: string }) | null> {
+  const sandbox = await readSandboxAccount(accountId);
+  if (!sandbox) return null;
+  const parent = memberships.find(
+    (membership) => membership.accountId === sandbox.sandboxOfAccountId,
+  );
+  if (!parent) return null;
+  return { ...parent, accountId: sandbox.id, sandboxOfAccountId: sandbox.sandboxOfAccountId };
 }
 
 /**
@@ -305,7 +379,7 @@ export async function requireCoachActor(req: Request): Promise<CoachActor> {
     err.code = "membership_required";
     throw err;
   }
-  const actor = await resolveMembershipForAuthUser(authUserId);
+  const actor = await resolveMembershipForAuthUser(authUserId, session.activeAccountId);
   if (!actor) {
     const err = new Error("This account has no workspace membership.") as Error & { status: number; code: string };
     err.status = 403;
@@ -313,6 +387,48 @@ export async function requireCoachActor(req: Request): Promise<CoachActor> {
     throw err;
   }
   return actor;
+}
+
+/**
+ * Point this session at one of the user's other businesses.
+ *
+ * Writes nothing unless the account resolves to a membership this user holds,
+ * so a switch is not a way to name an account -- it is a way to choose between
+ * accounts the membership table already says are theirs. Returns the actor the
+ * session now acts as.
+ */
+export async function switchActiveAccount(
+  req: Request,
+  requestedAccountId: string,
+): Promise<CoachActor> {
+  const session = await readAdminSessionAuthUserId(req);
+  if (!session) {
+    const err = new Error("Admin login required.") as Error & { status: number; code: string };
+    err.status = 401;
+    err.code = "unauthorized";
+    throw err;
+  }
+  const authUserId = await ensureSessionAuthUserId(session);
+  const wanted = cleanSlug(requestedAccountId, "");
+  const memberships = await listMembershipsForAuthUser(authUserId);
+  const matched =
+    memberships.find((membership) => membership.accountId === wanted) ||
+    (await sandboxActorFor(wanted, memberships));
+  if (!matched) {
+    const err = new Error("You do not have access to that workspace.") as Error & {
+      status: number;
+      code: string;
+    };
+    err.status = 403;
+    err.code = "membership_required";
+    throw err;
+  }
+  await db().sql`
+    UPDATE admin_sessions
+    SET active_account_id = ${matched.accountId}
+    WHERE token_hash = ${hashToken(session.sessionToken)}
+  `;
+  return matched;
 }
 
 /**
@@ -340,6 +456,7 @@ export async function resolvePublicAccount(slug: string): Promise<{
     FROM accounts
     WHERE (slug = ${clean} OR id = ${clean})
       AND status = 'active'
+      AND kind = ${LIVE_KIND}
     LIMIT 1
   `;
   const row = rows[0];

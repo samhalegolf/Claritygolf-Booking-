@@ -27,6 +27,9 @@ const PublicBookingApp = lazy(() => import("./modules/public-booking/PublicBooki
 const PublicBookingManage = lazy(() => import("./modules/public-booking/PublicBookingManage"));
 const PlayerPortal = lazy(() => import("./modules/player-portal/PlayerPortal"));
 const VideoSharePage = lazy(() => import("./modules/video-share/VideoSharePage"));
+// Not lazy: it is small, and a testing workspace that renders its warning a
+// beat after the workspace it warns about is a workspace someone acts in first.
+import SandboxBar from "./modules/sandbox/SandboxBar";
 
 // The booking embed is public by design -- it is the widget clients book
 // through. It wins over everything below, including any session.
@@ -135,9 +138,17 @@ function Root() {
   // navigation bar survives the trip.
   if (session.role === "player") {
     return (
-      <Suspense fallback={<Loading size="screen" what="your profile" />}>
-        <PlayerPortal session={session} onSignedOut={handleSessionLost} />
-      </Suspense>
+      <>
+        {/* A coach part-way through a sandbox handoff. The portal below is the
+            real one -- this is the only thing on screen that knows the player
+            looking at it is not the player. */}
+        {session.accountKind === "sandbox" && session.viewingAs ? (
+          <SandboxBar viewingAs={session.viewingAs} />
+        ) : null}
+        <Suspense fallback={<Loading size="screen" what="your profile" />}>
+          <PlayerPortal session={session} onSignedOut={handleSessionLost} />
+        </Suspense>
+      </>
     );
   }
 
@@ -154,9 +165,17 @@ function Root() {
 
   if (session.role === "coach") {
     return (
-      <Suspense fallback={<Loading size="screen" what="your workspace" />}>
-        <App onSessionLost={handleSessionLost} session={session} />
-      </Suspense>
+      <>
+        {/* Above the shell rather than inside it, so the coach workspace and the
+            player terminal both get the same bar without either layout having to
+            make room for it. */}
+        {session.accountKind === "sandbox" ? (
+          <SandboxBar liveAccountId={session.liveAccountId || ""} />
+        ) : null}
+        <Suspense fallback={<Loading size="screen" what="your workspace" />}>
+          <App onSessionLost={handleSessionLost} session={session} />
+        </Suspense>
+      </>
     );
   }
 

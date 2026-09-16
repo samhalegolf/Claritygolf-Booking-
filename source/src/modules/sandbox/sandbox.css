@@ -1,0 +1,153 @@
+/* The sandbox bar.
+ *
+ * Fixed rather than inline, and the padding it needs is pushed onto <body> from
+ * the component. Both shells -- the coach workspace and the player terminal --
+ * already own their own full-height layouts, and threading a row above either
+ * of them would mean editing two layouts that have nothing else in common.
+ *
+ * It is loud on purpose. The entire risk of a testing workspace that looks
+ * exactly like the real one is doing real work in it by mistake, so the bar is
+ * full width, high contrast, and present on every screen rather than a badge in
+ * a corner someone learns to stop seeing.
+ */
+
+body.has-sandbox-bar {
+  padding-top: var(--sandbox-bar-height, 44px);
+}
+
+.sandbox-bar {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 2147483000;
+  display: flex;
+  align-items: center;
+  gap: var(--c-space-5);
+  min-height: var(--sandbox-bar-height, 44px);
+  padding: var(--c-space-2) var(--c-space-6);
+  background: var(--c-sandbox);
+  color: var(--c-on-sandbox);
+  font-size: 13px;
+  line-height: 1.3;
+  box-shadow: 0 1px 0 var(--c-scrim-soft);
+}
+
+.sandbox-bar__mark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--c-space-2);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.sandbox-bar__detail {
+  display: flex;
+  align-items: center;
+  gap: var(--c-space-5);
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--c-on-sandbox-soft);
+}
+
+.sandbox-bar__detail strong {
+  color: var(--c-on-sandbox);
+  font-weight: 600;
+}
+
+.sandbox-bar__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--c-space-3);
+  flex: 0 0 auto;
+}
+
+.sandbox-bar__action {
+  appearance: none;
+  border: 1px solid var(--c-sandbox-line);
+  background: transparent;
+  color: inherit;
+  border-radius: var(--c-radius-pill);
+  padding: 4px 12px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sandbox-bar__action:hover:not(:disabled) {
+  background: var(--c-sandbox-hover);
+}
+
+.sandbox-bar__action--leave {
+  background: var(--c-on-sandbox);
+  border-color: var(--c-on-sandbox);
+  color: var(--c-sandbox);
+}
+
+.sandbox-bar__action--leave:hover:not(:disabled) {
+  background: var(--c-sandbox-leave-hover);
+}
+
+.sandbox-bar__picker {
+  appearance: none;
+  border: 1px solid var(--c-sandbox-line);
+  background: transparent;
+  color: inherit;
+  border-radius: var(--c-radius-pill);
+  padding: 4px 10px;
+  font: inherit;
+  max-width: 200px;
+}
+
+/* The options are drawn by the OS against its own background, so they need a
+   colour that is not the bar's white-on-purple. */
+.sandbox-bar__picker option {
+  color: var(--c-text);
+  background: var(--c-surface);
+}
+
+.sandbox-bar__action:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+@media (max-width: 640px) {
+  .sandbox-bar {
+    gap: var(--c-space-3);
+    padding-inline: var(--c-space-4);
+  }
+
+  /* The label and the way out survive; the detail is the first thing to go. */
+  .sandbox-bar__detail {
+    display: none;
+  }
+}
+
+/* --- The Settings panel --------------------------------------------------- */
+
+.sandbox-panel__lede {
+  margin: 0 0 var(--c-space-5);
+  color: var(--c-text-soft);
+}
+
+.sandbox-panel__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--c-space-4);
+}
+
+.sandbox-panel__note {
+  margin: var(--c-space-5) 0 0;
+  color: var(--c-muted);
+  font-size: 13px;
+}
+
+.sandbox-panel__error {
+  margin: var(--c-space-4) 0 0;
+  color: var(--c-error-text);
+}

@@ -15,6 +15,7 @@ import { apiFetch, clearAuthToken, setAuthToken } from "./apiFetch";
 // which is what let a successful login read as a guest. src/ already imports
 // from _shared for this reason (see phone.mts).
 import type {
+  AccountKind,
   AuthSessionResponse,
   SessionRole as WireSessionRole,
   WorkspaceBootstrap,
@@ -27,6 +28,22 @@ export type Session = {
   email: string;
   name: string;
   /**
+   * Which workspace this session is acting in. Not a role -- a coach in the
+   * sandbox is the same person with the same permissions, working on throwaway
+   * data. The shell draws the sandbox bar on this and changes nothing else.
+   *
+   * Defaults to "live" so an older server answer, or any path that does not set
+   * it, can never quietly read as a sandbox.
+   */
+  accountKind: AccountKind;
+  /** Sandbox sessions only: the live business the sandbox belongs to. */
+  liveAccountId?: string;
+  /**
+   * Set only during a sandbox handoff: the player this coach is viewing as.
+   * The portal shows it in the sandbox bar and offers the way back.
+   */
+  viewingAs?: string;
+  /**
    * Coach sessions: the business, plan, coaches and user the server answered
    * with, so the workspace can draw its frame before the calendar arrives.
    * Absent when the server could not read settings; the shell then fills it.
@@ -34,7 +51,7 @@ export type Session = {
   workspace?: WorkspaceBootstrap;
 };
 
-export const guestSession: Session = { role: "guest", email: "", name: "" };
+export const guestSession: Session = { role: "guest", email: "", name: "", accountKind: "live" };
 
 type SessionResponse = Partial<AuthSessionResponse>;
 
@@ -43,7 +60,14 @@ function toSession(data: SessionResponse | null | undefined): Session {
   const role: SessionRole =
     data.role === "coach" ? "coach" : data.role === "player" ? "player" : "guest";
   if (role === "guest") return guestSession;
-  const session: Session = { role, email: data.email || "", name: data.name || "" };
+  const session: Session = {
+    role,
+    email: data.email || "",
+    name: data.name || "",
+    accountKind: data.accountKind === "sandbox" ? "sandbox" : "live",
+  };
+  if (data.liveAccountId) session.liveAccountId = data.liveAccountId;
+  if (data.viewingAs) session.viewingAs = data.viewingAs;
   if (role === "coach" && data.workspace) session.workspace = data.workspace;
   return session;
 }

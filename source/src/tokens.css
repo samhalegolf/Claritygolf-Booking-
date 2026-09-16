@@ -58,6 +58,18 @@
   --c-success-wash: #eef8ef;
   --c-danger-wash: #fff3f0;
 
+  /* The sandbox bar. Deliberately outside the palette above: everything else
+     here is a shade of the product, and this has to read as "you are not in
+     the product" at a glance, in either scheme, on every screen. Purple
+     because nothing else in Clarity is -- which is the whole job. Fixed in
+     both schemes for the same reason --c-scrim is. */
+  --c-sandbox: #3b1d5e;
+  --c-on-sandbox: #ffffff;
+  --c-sandbox-hover: rgba(255, 255, 255, 0.14);
+  --c-sandbox-line: rgba(255, 255, 255, 0.45);
+  --c-on-sandbox-soft: rgba(255, 255, 255, 0.82);
+  --c-sandbox-leave-hover: rgba(255, 255, 255, 0.85);
+
   /* --- Dark: parked until a trigger asks for it -------------------------- */
   /* Held as their own names rather than repeated inside each trigger block,
      so a colour is written down exactly once. The two trigger blocks below

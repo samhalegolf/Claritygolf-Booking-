@@ -1,6 +1,7 @@
 import type { Config } from "@netlify/functions";
 import { createHash, randomUUID } from "node:crypto";
 import { requireCoachActor } from "./_shared/coach-auth.mts";
+import { deliverEmail } from "./_shared/email-delivery.mts";
 import {
   SETTINGS_UPSERT_QUERY,
   settingsSelectQuery,
@@ -88,23 +89,27 @@ async function checkOptixOrganizationCapabilities() {
   };
 }
 
-async function sendSmokeEmail(to: string) {
-  const apiKey = env("RESEND_API_KEY");
-  const from = env("CLARITY_EMAIL_FROM", "Clarity Golf Booking <bookings@claritygolf.app>");
-  if (!apiKey) throw new Error("RESEND_API_KEY is not configured.");
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      from,
-      to,
-      subject: "Clarity booking smoke test",
-      text: `Smoke test accepted by the booking app at ${nowIso()}.`,
-    }),
+/**
+ * The email step of the smoke test.
+ *
+ * Goes through the same deliverEmail() every real send uses, so a pass means
+ * the path production takes works -- a hand-rolled fetch here could pass while
+ * the actual sender was broken. `fromName` is the one legitimate override in the
+ * app: this email is from Clarity, not from the coach's business.
+ */
+async function sendSmokeEmail(accountId: string, to: string) {
+  const result = await deliverEmail({
+    accountId,
+    to,
+    subject: "Clarity booking smoke test",
+    text: `Smoke test accepted by the booking app at ${nowIso()}.`,
+    fromName: "Clarity Golf Booking",
+    idempotencyKey: `smoke-${Date.now()}`,
   });
-  const text = await response.text();
-  if (!response.ok) throw new Error(`Resend failed ${response.status}: ${text.slice(0, 500)}`);
-  return text ? JSON.parse(text) : {};
+  if (!result.sent) {
+    throw new Error(`Email send failed (${result.reason}): ${(result.error || "").slice(0, 500)}`);
+  }
+  return { id: result.id || "" };
 }
 
 export default async function handler(req: Request) {
@@ -133,7 +138,7 @@ export default async function handler(req: Request) {
       await checkStep("optix_organization_capabilities", () => checkOptixOrganizationCapabilities()),
     ];
     const emailTo = url.searchParams.get("email");
-    if (emailTo) steps.push(await checkStep("resend_send", () => sendSmokeEmail(emailTo)));
+    if (emailTo) steps.push(await checkStep("resend_send", () => sendSmokeEmail(accountId, emailTo)));
     else steps.push({ name: "resend_config", ok: Boolean(env("RESEND_API_KEY")), value: env("RESEND_API_KEY") ? "configured" : "missing" });
 
     return json({ ok: steps.every((step) => step.ok), checkedAt: nowIso(), steps });

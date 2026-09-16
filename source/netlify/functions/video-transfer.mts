@@ -21,6 +21,7 @@ import {
   setSettings,
 } from "./_shared/google-provider.mts";
 import { requireCoachActor } from "./_shared/coach-auth.mts";
+import { deliverEmail } from "./_shared/email-delivery.mts";
 import { canonicalPhoneKey } from "./_shared/phone.mts";
 
 // Player portal sessions (see booking-core.mts). Player video routes are scoped
@@ -2656,7 +2657,6 @@ async function notifyPlayerOfCoachReturn(session: VideoTransferSession) {
       `&account_id=eq.${encodeURIComponent(accountId)}&limit=1`,
   }).catch(() => []);
   const to = cleanString(rows[0]?.email, "", 180);
-  const apiKey = env("RESEND_API_KEY");
   const siteUrl =
     env("URL") || env("DEPLOY_PRIME_URL") || env("CLARITY_SITE_URL", "https://claritygolf.app");
   const subject = "Your coach sent you a video";
@@ -2667,22 +2667,13 @@ async function notifyPlayerOfCoachReturn(session: VideoTransferSession) {
     `\nSign in and open Videos to watch it: ${siteUrl}`,
   ].filter(Boolean);
 
-  if (apiKey && to) {
-    await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "Idempotency-Key": `coach-return-${session.transferId}`,
-      },
-      body: JSON.stringify({
-        from: env("CLARITY_EMAIL_FROM", "Clarity Golf <onboarding@resend.dev>"),
-        to: [to],
-        subject,
-        text: lines.join("\n"),
-      }),
-    });
-  }
+  const delivery = await deliverEmail({
+    accountId,
+    to,
+    subject,
+    text: lines.join("\n"),
+    idempotencyKey: `coach-return-${session.transferId}`,
+  });
 
   await supabase("notification_history", {
     method: "POST",
@@ -2694,8 +2685,10 @@ async function notifyPlayerOfCoachReturn(session: VideoTransferSession) {
       recipient: to || "",
       subject,
       kind: "coach_video_return",
-      status: apiKey && to ? "sent" : "skipped",
+      status: delivery.sent ? "sent" : "skipped",
       provider: "resend",
+      provider_id: delivery.id || "",
+      error: delivery.reason || "",
       created_at: new Date().toISOString(),
     },
   }).catch(() => {
@@ -2706,7 +2699,6 @@ async function notifyPlayerOfCoachReturn(session: VideoTransferSession) {
 async function notifyCoachOfPlayerSubmission(session: VideoTransferSession) {
   // The transfer session names the business whose coach is being notified.
   const accountId = cleanString(session.accountId, "", 120);
-  const apiKey = env("RESEND_API_KEY");
   const to = env("CLARITY_ALERT_EMAIL") || env("CLARITY_COACH_EMAIL");
   const playerName = cleanString(session.submittedByName, "A player", 180);
   const subject = `${playerName} sent you a video`;
@@ -2717,22 +2709,13 @@ async function notifyCoachOfPlayerSubmission(session: VideoTransferSession) {
     "\nOpen Player Profiles in Clarity Golf Booking to watch it.",
   ].filter(Boolean);
 
-  if (apiKey && to) {
-    await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "Idempotency-Key": `player-submission-${session.transferId}`,
-      },
-      body: JSON.stringify({
-        from: env("CLARITY_EMAIL_FROM", "Clarity Golf <onboarding@resend.dev>"),
-        to: [to],
-        subject,
-        text: lines.join("\n"),
-      }),
-    });
-  }
+  const delivery = await deliverEmail({
+    accountId,
+    to,
+    subject,
+    text: lines.join("\n"),
+    idempotencyKey: `player-submission-${session.transferId}`,
+  });
 
   await supabase("notification_history", {
     method: "POST",
@@ -2747,8 +2730,10 @@ async function notifyCoachOfPlayerSubmission(session: VideoTransferSession) {
       recipient: to || "",
       subject,
       kind: "player_video_submission",
-      status: apiKey && to ? "sent" : "skipped",
+      status: delivery.sent ? "sent" : "skipped",
       provider: "resend",
+      provider_id: delivery.id || "",
+      error: delivery.reason || "",
       created_at: new Date().toISOString(),
     },
   }).catch(() => {
@@ -2770,7 +2755,6 @@ async function notifyCoachOfPlayerSubmission(session: VideoTransferSession) {
  */
 async function notifyCoachOfGuestSubmission(session: VideoTransferSession, coachViewToken: string) {
   const accountId = cleanString(session.accountId, "", 120);
-  const apiKey = env("RESEND_API_KEY");
   const to = env("CLARITY_ALERT_EMAIL") || env("CLARITY_COACH_EMAIL");
   const senderName = cleanString(session.submittedByName, "Someone", 180);
   const senderEmail = cleanString(session.submittedByEmail, "", 180);
@@ -2793,22 +2777,13 @@ async function notifyCoachOfGuestSubmission(session: VideoTransferSession, coach
     `\nThis link and the video expire on ${expiryLabel}. Adding them as a player from Clarity Golf Booking keeps the video for good.`,
   ].filter(Boolean);
 
-  if (apiKey && to) {
-    await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "Idempotency-Key": `guest-submission-${session.transferId}`,
-      },
-      body: JSON.stringify({
-        from: env("CLARITY_EMAIL_FROM", "Clarity Golf <onboarding@resend.dev>"),
-        to: [to],
-        subject,
-        text: lines.join("\n"),
-      }),
-    });
-  }
+  const delivery = await deliverEmail({
+    accountId,
+    to,
+    subject,
+    text: lines.join("\n"),
+    idempotencyKey: `guest-submission-${session.transferId}`,
+  });
 
   await supabase("notification_history", {
     method: "POST",
@@ -2823,8 +2798,10 @@ async function notifyCoachOfGuestSubmission(session: VideoTransferSession, coach
       recipient: to || "",
       subject,
       kind: "guest_video_submission",
-      status: apiKey && to ? "sent" : "skipped",
+      status: delivery.sent ? "sent" : "skipped",
       provider: "resend",
+      provider_id: delivery.id || "",
+      error: delivery.reason || "",
       created_at: new Date().toISOString(),
     },
   }).catch(() => {

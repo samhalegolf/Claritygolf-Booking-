@@ -66,6 +66,7 @@ import {
   Users,
   Video,
   X,
+  FlaskConical,
 } from "lucide-react";
 import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "./modules/auth/session";
@@ -328,6 +329,7 @@ const PosCheckoutModal = lazy(() =>
 // rather than with the workspace; the integrations one carries the 50 KB
 // detail panel for every provider, which nobody visiting Booking asked for.
 const IntegrationsPanel = lazy(() => import("./modules/integrations/IntegrationsPanel"));
+const SandboxPanel = lazy(() => import("./modules/sandbox/SandboxPanel"));
 const BrowserNotificationsPanel = lazy(() => import("./modules/notifications/BrowserNotificationsPanel"));
 const MessageTemplatesPanel = lazy(() =>
   import("./modules/notifications/MessageTemplatesPanel").then((module) => ({ default: module.MessageTemplatesPanel })),
@@ -1458,6 +1460,9 @@ const SETTINGS_SECTIONS: Array<{
   // brand new workspace could see the platform's Resend, Drive and Stripe
   // wiring and read another business's Google connection as its own.
   { key: "admin", label: "Admin", icon: Code2, platformOnly: true },
+  // Last on purpose. It is the one section that is not about configuring this
+  // business -- it is about standing up a second, disposable copy of it.
+  { key: "sandbox", label: "Sandbox", icon: FlaskConical, adminOnly: true },
 ];
 
 type SettingsTab =
@@ -1470,7 +1475,8 @@ type SettingsTab =
   | "email-sms"
   | "account"
   | "developer"
-  | "admin";
+  | "admin"
+  | "sandbox";
 
 type BookingForm = {
   firstName: string;
@@ -6207,32 +6213,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   // workspaces: most are SettingsGroups, but invoicing and the product catalogue
   // are Billing sections. Both mount their real subtree in the same shell.
   const [workspaceOverlay, setWorkspaceOverlay] = useState<WorkspaceOverlay | null>(null);
-
-  // Browser Back moves between the workspaces the coach has actually been in,
-  // rather than leaving the app. The snapshot is everything the sidebar and the
-  // profile's overlays can change between them; the transient things a screen
-  // owns -- a half-filled quick create, an open calendar detail -- are closed
-  // on the way back rather than recorded, because they belong to the visit and
-  // not to the destination.
-  useBackNavigation({
-    enabled: !isEmbedMode,
-    state: {
-      view: activeView,
-      settingsTab,
-      billingSection,
-      settingsGroup: requestedSettingsGroup,
-      overlay: workspaceOverlay,
-    },
-    restore: (snapshot) => {
-      setActiveView(snapshot.view);
-      setSettingsTab(snapshot.settingsTab);
-      setBillingSection(snapshot.billingSection);
-      setRequestedSettingsGroup(snapshot.settingsGroup);
-      setWorkspaceOverlay(snapshot.overlay);
-      setQuickCreate(null);
-      closeCalendarDetails();
-    },
-  });
   const [activeEditableBlockId, setActiveEditableBlockId] = useState<string | null>(null);
   const activeEditableBlock = editableBlocks.find((block) => block.id === activeEditableBlockId) ?? null;
   const dirtyEditableBlock = editableBlocks.find((block) => block.editor.dirty) ?? null;
@@ -12218,13 +12198,17 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
    * profile; only a card naming a whole workspace (Clients, Players, Video)
    * actually navigates, because there is no one section to open.
    */
-  function closeWorkspaceOverlay() {
+  // Reports whether the overlay actually closed. Every caller but one ignores
+  // the answer; browser Back needs it, because an overlay kept open over an
+  // unsaved edit has to refuse the whole restore rather than half-apply it.
+  function closeWorkspaceOverlay(): boolean {
     // An unsaved edit is worth a question wherever the block is mounted.
-    if (dirtyEditableBlock && !confirmDiscardEditableBlock(dirtyEditableBlock.title)) return;
+    if (dirtyEditableBlock && !confirmDiscardEditableBlock(dirtyEditableBlock.title)) return false;
     if (activeEditableBlock) activeEditableBlock.editor.cancel();
     setActiveEditableBlockId(null);
     setWorkspaceOverlay(null);
     setRequestedSettingsGroup("");
+    return true;
   }
 
   function openProfileTarget(target: ProfileTarget, label = "") {
@@ -22295,6 +22279,69 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const selectedDetails = selectedGroupSessionDetails
     ? selectedGroupSessionDetails
     : selectedAppointmentDetails;
+
+  /**
+   * What is open over the workspace, bottom of the stack first.
+   *
+   * Everything here is dismissible: a modal, a confirm, the popover the
+   * calendar opens on an empty slot. Back closes the top one before it moves
+   * between views, because a modal over a page is the thing you meant to leave
+   * first. Each closes through its own path rather than by having its state
+   * cleared, so the questions a close asks still get asked -- see
+   * closeWorkspaceOverlay and the unsaved-edit guard.
+   */
+  const backLayers: { id: string; close: () => boolean }[] = [];
+  if (workspaceOverlay) backLayers.push({ id: "workspace-overlay", close: closeWorkspaceOverlay });
+  if (selectedDetails) backLayers.push({ id: "calendar-details", close: () => (closeCalendarDetails(), true) });
+  if (quickCreate) backLayers.push({ id: "quick-create", close: () => (setQuickCreate(null), true) });
+  if (selectedClient || isAddingClient) backLayers.push({ id: "client-profile", close: () => (closeClientModal(), true) });
+  if (clientMergeReview) backLayers.push({ id: "client-merge", close: () => (closeClientMergeReview(), true) });
+  if (showPlayerAddDialog) backLayers.push({ id: "player-add", close: () => (setShowPlayerAddDialog(false), true) });
+  // Topmost on purpose: the archive/delete confirm can stand over any of them.
+  if (pendingService && pendingServiceAction) {
+    backLayers.push({ id: "service-action", close: () => (closeServiceActionModal(), true) });
+  }
+  const backLayerIds = backLayers.map((layer) => layer.id);
+
+  // Browser Back moves between the screens the coach has actually been on,
+  // rather than leaving the app: it closes whatever is open over the workspace
+  // first, and only then walks back through the views themselves.
+  //
+  // Layers are recorded by name, not by content, so Back can close one but
+  // Forward cannot reopen it -- a reopened modal would need the booking or the
+  // client it was opened on, which is a lot of state to carry for a gesture
+  // nobody makes. A Forward onto such an entry simply rewrites it.
+  useBackNavigation({
+    enabled: !isEmbedMode,
+    depth: (snapshot) => snapshot.layers.length,
+    state: {
+      view: activeView,
+      settingsTab,
+      billingSection,
+      settingsGroup: requestedSettingsGroup,
+      overlay: workspaceOverlay,
+      layers: backLayerIds,
+    },
+    restore: (snapshot) => {
+      // Topmost first, so a confirm standing over a modal goes before it.
+      const wanted = new Set(snapshot.layers);
+      for (let index = backLayers.length - 1; index >= 0; index -= 1) {
+        const layer = backLayers[index];
+        // A close that refuses -- an unsaved edit the coach chose to keep --
+        // abandons the whole restore. The hook rewrites the entry to where
+        // they actually are, so Back is honest about having been declined
+        // rather than half-navigating.
+        if (!wanted.has(layer.id) && !layer.close()) return;
+      }
+      setActiveView(snapshot.view);
+      setSettingsTab(snapshot.settingsTab);
+      setBillingSection(snapshot.billingSection);
+      setRequestedSettingsGroup(snapshot.settingsGroup);
+      // Only when the overlay is staying: closing it is the layer's job above,
+      // and doing it here as well would skip that unsaved-edit question.
+      if (wanted.has("workspace-overlay")) setWorkspaceOverlay(snapshot.overlay);
+    },
+  });
   // The Dashboard's "ready to pull" filter. The New Invoice rail shows the same
   // bookingPullFilter as chips rather than a select, so the two controls look
   // different but read and write one piece of state - they can disagree about
@@ -28958,6 +29005,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 <Suspense fallback={<Loading what="your connections" />}>
                   <IntegrationsPanel audience="integration" />
                 </Suspense>
+              ) : null}
+              {/* Own tab only, like the panels either side of it: it asks the
+                  server whether a sandbox exists, and that is not a question
+                  anyone visiting Booking asked. */}
+              {isAdminUser && settingsTab === "sandbox" ? (
+                <SettingsGroup id="sandbox" section="sandbox" title="Sandbox workspace">
+                  <Suspense fallback={<Loading what="the sandbox" />}>
+                    <SandboxPanel />
+                  </Suspense>
+                </SettingsGroup>
               ) : null}
               {/* Guarded on render, not just hidden from the nav. Two Clarity
                   Cloud error paths call setSettingsTab("admin") directly, so
