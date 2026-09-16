@@ -70,6 +70,7 @@ import {
 import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "./modules/auth/session";
 import { WORKSPACE_ACCOUNTS_STORAGE_KEY } from "./modules/shared/workspaceStorage";
+import { useBackNavigation } from "./modules/shared/backNavigation";
 import { Loading, loadingLabel } from "./modules/shared/Loading";
 import { cleanPeople as cleanPeopleWith, type PeopleImportDiagnostic, type Person } from "./modules/clients/clientsModel";
 import { isUnauthorizedClientsError, loadClients, replaceClients, resetClients, useClientsState } from "./modules/clients/clientsStore";
@@ -6206,6 +6207,32 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   // workspaces: most are SettingsGroups, but invoicing and the product catalogue
   // are Billing sections. Both mount their real subtree in the same shell.
   const [workspaceOverlay, setWorkspaceOverlay] = useState<WorkspaceOverlay | null>(null);
+
+  // Browser Back moves between the workspaces the coach has actually been in,
+  // rather than leaving the app. The snapshot is everything the sidebar and the
+  // profile's overlays can change between them; the transient things a screen
+  // owns -- a half-filled quick create, an open calendar detail -- are closed
+  // on the way back rather than recorded, because they belong to the visit and
+  // not to the destination.
+  useBackNavigation({
+    enabled: !isEmbedMode,
+    state: {
+      view: activeView,
+      settingsTab,
+      billingSection,
+      settingsGroup: requestedSettingsGroup,
+      overlay: workspaceOverlay,
+    },
+    restore: (snapshot) => {
+      setActiveView(snapshot.view);
+      setSettingsTab(snapshot.settingsTab);
+      setBillingSection(snapshot.billingSection);
+      setRequestedSettingsGroup(snapshot.settingsGroup);
+      setWorkspaceOverlay(snapshot.overlay);
+      setQuickCreate(null);
+      closeCalendarDetails();
+    },
+  });
   const [activeEditableBlockId, setActiveEditableBlockId] = useState<string | null>(null);
   const activeEditableBlock = editableBlocks.find((block) => block.id === activeEditableBlockId) ?? null;
   const dirtyEditableBlock = editableBlocks.find((block) => block.editor.dirty) ?? null;

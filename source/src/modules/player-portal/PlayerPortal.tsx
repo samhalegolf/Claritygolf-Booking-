@@ -16,6 +16,7 @@ import { apiFetch } from "../auth/apiFetch";
 import { signOut, type Session } from "../auth/session";
 import { hasGuestToken, NATIVE } from "../auth/apiFetch";
 import { isPlayerBookingMode, slotDate } from "../shared/bookingHandoff";
+import { useBackNavigation } from "../shared/backNavigation";
 import {
   PlayerTerminalNav,
   type PlayerTerminalDestination,
@@ -321,6 +322,27 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   // profile lands, and null forever for a business that has not set one up --
   // which is what keeps the tab out of the nav.
   const [bookingEmbed, setBookingEmbed] = useState<PlayerBookingEmbedConfig | null>(null);
+
+  // Browser Back steps through the tabs the player has actually opened rather
+  // than leaving the portal. Only the tab and its subtab are recorded: the
+  // sheets and expanded cards a tab owns are closed when Back lands, since
+  // they belong to that visit rather than to the tab itself.
+  //
+  // A tab can stop existing while the player is in the portal -- the coach
+  // clears the booking URL, or a sign-out turns them into a guest -- and the
+  // effects further down bounce them home when that happens. Back onto such a
+  // tab is refused here instead, so the hook rewrites the stale entry rather
+  // than the bounce pushing a fresh one: otherwise the next Back would land on
+  // the same dead tab again and Back would look broken.
+  useBackNavigation({
+    state: { tab, lessonsSubtab },
+    restore: (snapshot) => {
+      if (snapshot.tab === "book" && !bookingEmbed) return;
+      if (isGuest && (snapshot.tab === "reviews" || snapshot.tab === "lessons" || snapshot.tab === "practice")) return;
+      setTab(snapshot.tab);
+      setLessonsSubtab(snapshot.lessonsSubtab);
+    },
+  });
 
   // Videos live on this device first. Nothing leaves it until the player
   // presses Send to coach.
@@ -670,7 +692,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
     const reservation = params.get("reservation");
     if (!purchase) return;
 
-    window.history.replaceState(null, "", window.location.pathname);
+    window.history.replaceState(window.history.state, "", window.location.pathname);
     if (purchase === "cancelled") {
       setPurchaseNote("Purchase cancelled — nothing was charged.");
       if (reservation) {
