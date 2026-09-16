@@ -17762,6 +17762,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setToast({ message: "Public lesson types must be assigned to at least one booking screen." });
       return;
     }
+    // A package whose credits cover no lesson type cannot be spent on anything,
+    // so selling one takes money for nothing. The player shop already refuses to
+    // list one; catching it here means it never gets as far as a shelf.
+    if (editableEditor.lessonFormat === "package" && !(editableEditor.packageCoversServiceId || "").trim()) {
+      setToast({ message: "Choose which lesson type this package covers before saving it." });
+      return;
+    }
     const stableServiceId = editingServiceId || editableEditor.id || generateServiceDraftId();
     const clean = cleanService(
       {
@@ -20451,7 +20458,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       value={serviceEditor.packageCoversServiceId ?? ""}
                       onChange={(event) => updateServiceEditor("packageCoversServiceId", event.target.value)}
                     >
-                      <option value="">Any matching lesson</option>
+                      <option value="">Choose a lesson type</option>
                       {activeServices
                         .filter((service) => service.lessonFormat !== "package")
                         .map((service) => (
@@ -20460,6 +20467,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           </option>
                         ))}
                     </select>
+                    <p className="field-help">
+                      Credits from this package can only pay for the lesson type you pick here. A package
+                      that covers nothing cannot be sold or spent.
+                    </p>
                   </label>
                 </div>
               )}
@@ -27565,10 +27576,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       people={clients.map((client) => ({ id: client.id, name: client.name }))}
                       loadState={passInboxLoadState}
                       busyId={passInboxBusyId}
-                      onIssue={(purchaseId, templateServiceId) =>
+                      onIssue={(purchaseId, templateServiceId, valueCents) =>
                         void postPassInbox(
                           "/api/passes/inbox",
-                          { purchaseId, templateServiceId },
+                          // Omitted entirely when the coach left the suggested
+                          // price alone, so the server decides it rather than
+                          // trusting a number the browser worked out.
+                          valueCents === undefined
+                            ? { purchaseId, templateServiceId }
+                            : { purchaseId, templateServiceId, totalValueCents: valueCents },
                           purchaseId,
                           "Could not issue that pass.",
                           "Pass issued.",

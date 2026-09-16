@@ -14781,7 +14781,11 @@ button {
   font-size: var(--c-size-meta);
 }
 
-.pass-inbox-field select {
+/* input as well as select: form controls do not inherit the page font anywhere
+   in this stylesheet, so a control left out of this list switches to the
+   browser's default mid-row. */
+.pass-inbox-field select,
+.pass-inbox-field input {
   font: inherit;
   min-width: var(--c-w-name);
   height: var(--c-h-control);
@@ -14790,6 +14794,11 @@ button {
   border-radius: var(--c-radius-control);
   background: var(--c-surface);
   color: var(--c-text);
+}
+
+/* The value box holds a price, not a name, so it does not need a name's width. */
+.pass-inbox-field input[type="number"] {
+  min-width: var(--c-w-price);
 }
 
 .pass-inbox-suggestion {

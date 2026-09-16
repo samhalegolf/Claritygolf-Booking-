@@ -48,6 +48,7 @@ import {
   readFlexibleValueForPerson,
   readPassesForPerson,
   readUnassignedPasses,
+  resolveInboxPassValue,
   reserveFlexibleValueForPurchase,
   reversePassValueTransaction,
   reservePassForService,
@@ -14092,6 +14093,16 @@ async function readPassInbox(accountId: string, services) {
         );
       }
 
+      const quantity = Math.max(1, Number(purchase.quantity || 1) || 1);
+      const passValue = resolveInboxPassValue({
+        typed: body?.totalValueCents,
+        purchaseCents: purchase.amount_cents,
+        purchaseCurrency: cleanString(purchase.currency, "", 3),
+        templatePriceCents: template.priceCents,
+        quantity,
+        accountCurrency: playerShopCurrency(await readSettingsMap(accountId)),
+      });
+
       await grantPass(
         {
           // The buyer was resolved when the purchase was recorded. Null is
@@ -14099,14 +14110,13 @@ async function readPassInbox(accountId: string, services) {
           // blocking the issue -- the entitlement is real either way.
           personId: cleanString(purchase.person_id, "", 160) || "",
           templateServiceId: template.serviceId,
-          credits: template.credits * Math.max(1, Number(purchase.quantity || 1) || 1),
+          credits: template.credits * quantity,
           source: "optix",
           sourceRef: `optix:${purchaseId}`,
-          totalValueCents:
-            purchase.amount_cents === null || purchase.amount_cents === undefined
-              ? undefined
-              : Number(purchase.amount_cents),
-          currency: cleanString(purchase.currency, "", 3).toUpperCase() || undefined,
+          // Both halves or neither -- never a number with no currency, which is
+          // what a 0.00 Optix sale used to produce and what refused the issue.
+          totalValueCents: passValue?.cents,
+          currency: passValue?.currency,
           entitlementServiceId:
             template.coversServiceIds.length === 1 ? template.coversServiceIds[0] : undefined,
           note: `Optix sale · ${cleanString(purchase.item_name, "", 200)}`,

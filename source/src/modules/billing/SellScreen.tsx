@@ -42,6 +42,7 @@ import {
   setSellPrice,
   setSellQuantity,
 } from "./stockMath";
+import { catalogTiles, offTabMatchCount } from "./catalogSearch";
 import type { SellLine } from "./stockMath";
 import { postPosJson, renderQrSvg, usePosPaymentPoll } from "./posCheckoutPoll";
 
@@ -205,18 +206,11 @@ export function SellScreen({
     };
   }, []);
 
-  const tiles = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    return catalog
-      .filter((item) => item.active !== false)
-      .filter((item) => (tab === "all" ? true : item.kind === tab))
-      .filter((item) =>
-        needle
-          ? [item.name, item.sku, item.supplier].filter(Boolean).some((field) => String(field).toLowerCase().includes(needle))
-          : true,
-      )
-      .slice(0, 120);
-  }, [catalog, tab, search]);
+  // The rule lives in catalogSearch.ts so it can be tested as a rule: a coach
+  // searching for something that exists and being shown an empty shelf is
+  // exactly the sort of thing that should fail a test rather than a sale.
+  const tiles = useMemo(() => catalogTiles(catalog, tab, search), [catalog, tab, search]);
+  const offTabMatches = useMemo(() => offTabMatchCount(tiles, tab, search), [tiles, tab, search]);
 
   const clientMatches = useMemo(() => {
     const needle = customerSearch.trim().toLowerCase();
@@ -581,6 +575,13 @@ export function SellScreen({
             <button className="link-button" onClick={onReloadCatalog} type="button">
               Retry
             </button>
+          </p>
+        )}
+        {catalogState === "loaded" && offTabMatches > 0 && (
+          <p className="field-help">
+            {offTabMatches === 1
+              ? "1 match from another category is shown below."
+              : `${offTabMatches} matches from other categories are shown below.`}
           </p>
         )}
         {catalogState === "loaded" && !tiles.length && (

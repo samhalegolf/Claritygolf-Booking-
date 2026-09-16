@@ -50,7 +50,32 @@ export type PassInboxUnassigned = {
   issuedAt: string;
 };
 
-export type PassInboxTemplate = { serviceId: string; name: string; credits: number };
+/**
+ * What a pass issued from this sale is worth, before the coach touches it.
+ *
+ * An external sale often carries no usable price -- a pass bundled into a
+ * membership arrives as 0.00 -- so the catalogue price of the package stands in.
+ * Shown rather than applied silently, because a comped or discounted pass is a
+ * real thing and the coach is the only one who knows.
+ *
+ * Mirrors resolveInboxPassValue on the server, which decides it for real.
+ */
+export function suggestedValueCents(
+  purchase: { amountCents: number | null; quantity: number },
+  template: { priceCents: number | null } | undefined,
+): number | null {
+  if (purchase.amountCents !== null && purchase.amountCents > 0) return purchase.amountCents;
+  if (!template || template.priceCents === null) return null;
+  return template.priceCents * Math.max(1, purchase.quantity || 1);
+}
+
+export type PassInboxTemplate = {
+  serviceId: string;
+  name: string;
+  credits: number;
+  /** The catalogue price, used when the external sale carried none. */
+  priceCents: number | null;
+};
 
 export type PassInboxPerson = { id: string; name: string };
 
@@ -62,7 +87,8 @@ export type PassInboxPanelProps = {
   people: PassInboxPerson[];
   loadState: "idle" | "loading" | "loaded" | "error";
   busyId: string;
-  onIssue: (purchaseId: string, templateServiceId: string) => void;
+  /** `valueCents` is undefined when the coach left the suggested price alone. */
+  onIssue: (purchaseId: string, templateServiceId: string, valueCents?: number) => void;
   onDismiss: (purchaseId: string) => void;
   onAttach: (passId: string, personId: string) => void;
   onRetry: () => void;
@@ -112,6 +138,8 @@ export function PassInboxPanel({
   // so the common case is one click and the dropdown only exists for the rows
   // where the suggestion was refused or wrong.
   const [chosenTemplate, setChosenTemplate] = useState<Record<string, string>>({});
+  /** Per-row price override, as typed. Empty means "use the suggested one". */
+  const [chosenValue, setChosenValue] = useState<Record<string, string>>({});
   const [chosenPerson, setChosenPerson] = useState<Record<string, string>>({});
 
   const sortedPeople = useMemo(
@@ -163,6 +191,18 @@ export function PassInboxPanel({
           {purchases.map((purchase) => {
             const selected = templateFor(purchase);
             const busy = busyId === purchase.id;
+            const suggested = suggestedValueCents(
+              purchase,
+              templates.find((template) => template.serviceId === selected),
+            );
+            // Only send a value the coach actually typed. Leaving the field
+            // alone means "whatever you suggested", and the server works that
+            // out again rather than trusting a number the browser rendered.
+            const typedRaw = chosenValue[purchase.id];
+            const typedValueCents =
+              typedRaw === undefined || typedRaw.trim() === "" || !Number.isFinite(Number(typedRaw))
+                ? undefined
+                : Math.max(0, Math.round(Number(typedRaw) * 100));
             return (
               <article className="pass-inbox-row" key={purchase.id}>
                 <div className="pass-inbox-row-main">
@@ -218,6 +258,37 @@ export function PassInboxPanel({
                       ))}
                     </select>
                   </label>
+
+                  {/* What it was worth. An external sale often says 0.00 -- the
+                      pass was bundled into a membership, or rung up elsewhere --
+                      so the package's own price stands in, and stays editable
+                      because a comped or discounted one is a real thing. */}
+                  <label className="pass-inbox-field">
+                    <span>Value</span>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      inputMode="decimal"
+                      value={
+                        chosenValue[purchase.id] ??
+                        (suggested === null ? "" : (suggested / 100).toFixed(2))
+                      }
+                      placeholder={purchase.currency || ""}
+                      onChange={(event) =>
+                        setChosenValue((current) => ({
+                          ...current,
+                          [purchase.id]: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                  {suggested !== null &&
+                    (purchase.amountCents === null || purchase.amountCents <= 0) && (
+                      <span className="pass-inbox-suggestion">
+                        The sale came through at 0 — this is the package's price.
+                      </span>
+                    )}
                   {/* Only ever shown for a suggestion that is actually in the
                       box. Leaving it up after a coach overrides the guess would
                       describe a choice nobody made. */}
@@ -242,7 +313,7 @@ export function PassInboxPanel({
                       className="primary-button"
                       type="button"
                       disabled={busy || !selected}
-                      onClick={() => onIssue(purchase.id, selected)}
+                      onClick={() => onIssue(purchase.id, selected, typedValueCents)}
                     >
                       <Ticket size={15} />
                       {busy ? "Issuing…" : "Issue pass"}

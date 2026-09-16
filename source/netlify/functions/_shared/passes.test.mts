@@ -23,6 +23,7 @@ import {
   passOptionsForService,
   passTemplatesFromServices,
   readPassesForPerson,
+  resolveInboxPassValue,
   reservePassCredit,
   reserveCrossRedemption,
   reverseRedemptionsForBooking,
@@ -803,4 +804,113 @@ test("a reversal with no booking id touches nothing at all", async (t) => {
   t.after(() => setDatabaseForTests(null));
   assert.equal(await reverseRedemptionsForBooking(client, ACCOUNT, "", "Booking deleted"), 0);
   assert.equal(called, false, "an empty id must never become an unfiltered update");
+});
+
+// --- What an externally-sold pass is worth ---------------------------------
+
+test("a sale that charged something is worth what it charged", () => {
+  assert.deepEqual(
+    resolveInboxPassValue({
+      purchaseCents: 65_000,
+      purchaseCurrency: "nzd",
+      templatePriceCents: 65_000,
+      accountCurrency: "NZD",
+    }),
+    { cents: 65_000, currency: "NZD" },
+  );
+});
+
+test("a sale that came through at zero falls back to the package's price", () => {
+  // The real one: Optix had the package at 0.00 with no currency, which paired
+  // a number with nothing and refused the issue outright.
+  assert.deepEqual(
+    resolveInboxPassValue({
+      purchaseCents: 0,
+      purchaseCurrency: "",
+      templatePriceCents: 65_000,
+      accountCurrency: "NZD",
+    }),
+    { cents: 65_000, currency: "NZD" },
+  );
+});
+
+test("buying two of a package at zero is worth two of its price", () => {
+  const value = resolveInboxPassValue({
+    purchaseCents: 0,
+    templatePriceCents: 65_000,
+    quantity: 2,
+    accountCurrency: "NZD",
+  });
+  assert.equal(value?.cents, 130_000);
+});
+
+test("what the coach typed beats both", () => {
+  // A comped or discounted pass is a real thing, and the catalogue price would
+  // misstate it.
+  const value = resolveInboxPassValue({
+    typed: 30_000,
+    purchaseCents: 65_000,
+    purchaseCurrency: "NZD",
+    templatePriceCents: 65_000,
+    accountCurrency: "NZD",
+  });
+  assert.equal(value?.cents, 30_000);
+});
+
+test("a coach who really means free types zero, and it is kept", () => {
+  const value = resolveInboxPassValue({
+    typed: 0,
+    purchaseCents: 0,
+    templatePriceCents: 65_000,
+    accountCurrency: "NZD",
+  });
+  assert.equal(value?.cents, 0, "an explicit zero is a decision, unlike the sale's");
+});
+
+test("an untouched field sends nothing and lets the fallback stand", () => {
+  const value = resolveInboxPassValue({
+    typed: "",
+    purchaseCents: 0,
+    templatePriceCents: 65_000,
+    accountCurrency: "NZD",
+  });
+  assert.equal(value?.cents, 65_000);
+});
+
+test("the sale's own currency wins when the sale charged something", () => {
+  const value = resolveInboxPassValue({
+    purchaseCents: 5_000,
+    purchaseCurrency: "AUD",
+    templatePriceCents: 65_000,
+    accountCurrency: "NZD",
+  });
+  assert.equal(value?.currency, "AUD");
+});
+
+test("a price taken from this account's catalogue is in this account's currency", () => {
+  // The sale said nothing, so its blank currency must not be inherited by a
+  // number that came from somewhere else entirely.
+  const value = resolveInboxPassValue({
+    purchaseCents: 0,
+    purchaseCurrency: "AUD",
+    templatePriceCents: 65_000,
+    accountCurrency: "NZD",
+  });
+  assert.deepEqual(value, { cents: 65_000, currency: "NZD" });
+});
+
+test("no price anywhere issues the pass without one rather than refusing it", () => {
+  assert.equal(
+    resolveInboxPassValue({ purchaseCents: 0, templatePriceCents: null, accountCurrency: "NZD" }),
+    undefined,
+  );
+});
+
+test("a price with no currency to put it in is not half-sent", () => {
+  // Sending one half is exactly what produced "needs both an exact amount and a
+  // three-letter currency", so the two can only ever leave here together.
+  assert.equal(
+    resolveInboxPassValue({ purchaseCents: 0, templatePriceCents: 65_000, accountCurrency: "" }),
+    undefined,
+  );
 });

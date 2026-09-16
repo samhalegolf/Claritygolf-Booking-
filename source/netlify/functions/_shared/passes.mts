@@ -225,6 +225,67 @@ export function passTemplatesFromServices(services: unknown): PassTemplate[] {
 }
 
 /**
+ * What a pass issued from an external sale is worth.
+ *
+ * The number matters beyond bookkeeping: cross-redemption values a credit at
+ * what was paid for it, so a pass issued at zero is a pass that can pay for
+ * nothing by value. And a value with no currency is refused outright, which is
+ * how a 0.00 Optix line used to fail the issue with a message about
+ * three-letter currencies that told the coach nothing about what to do.
+ *
+ * So the amount is taken from the first source that actually knows one:
+ *
+ *   1. what the coach typed -- they were looking at the sale, and a comped or
+ *      discounted pass is a real thing the catalogue price would misstate
+ *   2. what the external sale charged, when that is more than nothing
+ *   3. the catalogue price of the package it was, times how many were bought
+ *
+ * A zero from the external system is treated as "no price given" rather than
+ * "free", because that is overwhelmingly what it means: the pass was bundled
+ * into a membership, or rung up outside the till. A coach who really means free
+ * can type 0 -- which arrives as an explicit value and is kept.
+ *
+ * Returns undefined when nothing knows a price, so the caller sends neither
+ * half and the pass is issued without a value rather than refused.
+ */
+export function resolveInboxPassValue(input: {
+  typed?: unknown;
+  purchaseCents?: unknown;
+  purchaseCurrency?: unknown;
+  templatePriceCents?: number | null;
+  quantity?: number;
+  accountCurrency?: unknown;
+}): { cents: number; currency: string } | undefined {
+  const quantity = Math.max(1, Math.round(Number(input.quantity) || 1));
+
+  const typed =
+    input.typed === undefined || input.typed === null || input.typed === ""
+      ? null
+      : Number(input.typed);
+  const typedCents =
+    typed !== null && Number.isFinite(typed) && typed >= 0 ? Math.round(typed) : null;
+
+  const charged = Number(input.purchaseCents);
+  const chargedCents = Number.isFinite(charged) && charged > 0 ? Math.round(charged) : null;
+
+  const listed =
+    input.templatePriceCents === null || input.templatePriceCents === undefined
+      ? null
+      : Math.max(0, Math.round(input.templatePriceCents)) * quantity;
+
+  const cents = typedCents ?? chargedCents ?? listed;
+  if (cents === null) return undefined;
+
+  // The sale's own currency is the truth when it charged something; otherwise
+  // the value came from this account's own catalogue, so its currency did too.
+  const fromSale = chargedCents !== null ? cleanCurrency(input.purchaseCurrency) : null;
+  const currency = fromSale || cleanCurrency(input.accountCurrency);
+  if (!currency) return undefined;
+
+  return { cents, currency };
+}
+
+/**
  * Credit consumption order: the allocation that expires first is spent first.
  *
  * The database already orders this way in pass_allocation_balances, and the

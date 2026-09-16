@@ -84,8 +84,16 @@ export function PosCheckoutModal({
 
   const productMatches = useMemo(() => {
     const needle = productSearch.trim().toLowerCase();
-    const sellable = products.filter((product) => product.kind === "product" && product.active !== false);
-    if (!needle) return sellable.slice(0, 6);
+    // Packages belong here as well as on the shelf: a customer in for a lesson
+    // buying a block of them is the most ordinary way one gets sold, and until
+    // now this picker filtered them out, so the only route was the counter.
+    //
+    // Unshown by default though -- with no search this is the "add a glove"
+    // shortcut, and a package is not an impulse buy.
+    const sellable = products.filter(
+      (product) => (product.kind === "product" || product.kind === "package") && product.active !== false,
+    );
+    if (!needle) return sellable.filter((product) => product.kind === "product").slice(0, 6);
     return sellable
       .filter((product) =>
         [product.name, product.sku, product.supplier]
@@ -349,12 +357,12 @@ export function PosCheckoutModal({
         {stage === "form" && (
           <>
             <div className="settings-field">
-              <label htmlFor="pos-product-search">Products</label>
+              <label htmlFor="pos-product-search">Products and packages</label>
               <input
                 id="pos-product-search"
                 value={productSearch}
                 onChange={(event) => setProductSearch(event.target.value)}
-                placeholder="Search by name, SKU or supplier"
+                placeholder="Search products and packages"
               />
               <div className="pos-product-options">
                 {productMatches.map((product) => (
@@ -366,6 +374,7 @@ export function PosCheckoutModal({
                   >
                     <span>
                       {product.name}
+                      {product.kind === "package" && <Ticket size={12} />}
                       {isLowStock(product) && <AlertTriangle size={12} />}
                     </span>
                     <em>
@@ -376,7 +385,9 @@ export function PosCheckoutModal({
                 ))}
                 {!productMatches.length && (
                   <p className="field-help">
-                    {productSearch.trim() ? "No product matches that." : "No products yet - add them under Billing > Products."}
+                    {productSearch.trim()
+                      ? "Nothing matches that. Packages are found by name -- try the package's own name."
+                      : "Search to add a product or a package. Nothing on the shelf yet? Add items under Billing > Products."}
                   </p>
                 )}
               </div>
