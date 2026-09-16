@@ -24,7 +24,6 @@ import {
   findReviewService,
   newSwingReviewLessonId,
   reviewDraftVerdict,
-  reviewPaymentOptions,
 } from "./_shared/swing-review.mts";
 import {
   checkoutSourceRef,
@@ -46,11 +45,15 @@ import {
   passOptionsForService,
   passTemplatesFromServices,
   playerPassViews,
+  readFlexibleValueForPerson,
   readPassesForPerson,
   readUnassignedPasses,
-  reservePassCredit,
+  reserveFlexibleValueForPurchase,
+  reversePassValueTransaction,
+  reservePassForService,
   reverseRedemptionsForBooking,
   suggestPassTemplate,
+  settleFlexibleValuePurchase,
   voidPass,
 } from "./_shared/passes.mts";
 import {
@@ -68,7 +71,7 @@ import {
 } from "./_shared/coach-auth.mts";
 import type { CoachActor } from "./_shared/coach-auth.mts";
 import { authSessionResponse, type WorkspaceBootstrap } from "./_shared/auth-contract.mts";
-import { activeCurrency, activeLocale } from "./_shared/locale.mts";
+import { activeCurrency, activeLocale, currencyForAccountSettings } from "./_shared/locale.mts";
 import {
   caddyAppUrl,
   caddyConfigured,
@@ -827,6 +830,9 @@ function cleanService(service, index = 0, accountId = "") {
     packageCoverageMode: lessonFormat === "package" ? packageCoverageMode : undefined,
     packageCoversServiceId:
       lessonFormat === "package" ? cleanString(service?.packageCoversServiceId, "", 120) || undefined : undefined,
+    crossRedeemable: lessonFormat === "package" ? service?.crossRedeemable === true : undefined,
+    acceptsCrossRedemption:
+      lessonFormat !== "package" ? service?.acceptsCrossRedemption !== false : undefined,
     // A review is one player's swing, reviewed once. Carrying a turnaround on
     // any other format would be a number nothing reads.
     reviewTurnaroundDays: videoReview
@@ -9634,7 +9640,8 @@ async function claimGuestSubmissions({ guestSenderId, personId, portalPlayerId, 
  *  the same settings blob the invoice editor writes, so a coach changes it in
  *  one place and the shop follows. */
 function playerShopCurrency(settingsMap: Record<string, string>) {
-  return cleanInvoiceSettings(safeJsonParse(settingsMap.accountInvoiceSettingsJson, {})).currency;
+  const invoiceSettings = safeJsonParse(settingsMap.accountInvoiceSettingsJson, {});
+  return currencyForAccountSettings(invoiceSettings?.currency, settingsMap.accountCountry);
 }
 
 async function readPlayerProfile(session) {
@@ -9734,6 +9741,9 @@ async function readPlayerProfile(session) {
 
   const stripeStatus = stripeCredentialStatus(settingsMap[STRIPE_SECRET_SETTING]);
   const currency = playerShopCurrency(settingsMap);
+  const flexibleValueCents = session.personId
+    ? await readFlexibleValueForPerson(accountId, session.personId, currency)
+    : 0;
   const shop = stripeStatus.configured ? playerShopItems(serviceList, currency) : [];
 
   /* Everything the New Swing Review screen needs to decide what it can offer.
@@ -9753,7 +9763,19 @@ async function readPlayerProfile(session) {
         currency,
         turnaroundDays: reviewService.turnaroundDays,
         /** Empty means they must buy one -- or that the coach sells none. */
-        passOptions: reviewPaymentOptions(heldPasses, reviewService.id),
+        passOptions: passOptionsForService(heldPasses, reviewService.id, reviewService.name, {
+          serviceValueCents: Math.max(0, Math.round(Number(reviewService.price || 0) * 100)),
+          currency,
+          acceptsCrossRedemption: reviewService.acceptsCrossRedemption !== false,
+          flexibleValueCents,
+        })
+          .filter((option) => option.covered)
+          .map((option) => ({
+            passId: option.passId,
+            name: option.paymentKind === "cross_redemption" ? "Clarity balance" : option.name,
+            creditsAvailable: option.creditsAvailable,
+            expiresAt: option.nextExpiry || option.expiresAt,
+          })),
         /** False when the business cannot take a card, so the screen offers a
          *  credit or nothing rather than a button that cannot charge. */
         canBuy: stripeStatus.configured && reviewService.price > 0,
@@ -9775,6 +9797,8 @@ async function readPlayerProfile(session) {
     practice,
     practiceBlockTypes,
     passes,
+    flexibleValueCents,
+    passCurrency: currency,
     shop,
     review,
     bookingEmbed,
@@ -12166,10 +12190,15 @@ async function routeBookingApiRequest(
       // reservePassCredit. The pre-check exists only so the common failure --
       // no credits at all -- costs a 402 rather than an orphaned booking.
       const passId = cleanString(body?.passId, "", 120);
-      const options = reviewPaymentOptions(
-        await readPassesForPerson(accountId, session.personId),
-        service.id,
-      );
+      const settingsMap = await readSettingsMap(accountId);
+      const currency = playerShopCurrency(settingsMap);
+      const heldPasses = await readPassesForPerson(accountId, session.personId);
+      const options = passOptionsForService(heldPasses, service.id, service.name, {
+        serviceValueCents: Math.max(0, Math.round(Number(service.price || 0) * 100)),
+        currency,
+        acceptsCrossRedemption: service.acceptsCrossRedemption !== false,
+        flexibleValueCents: await readFlexibleValueForPerson(accountId, session.personId, currency),
+      }).filter((option) => option.covered);
       const chosen = passId
         ? options.find((option) => option.passId === passId)
         : options[0];
@@ -12223,10 +12252,14 @@ async function routeBookingApiRequest(
        * because it should be rare.
        */
       try {
-        await reservePassCredit({
+        await reservePassForService({
           accountId,
           passId: chosen.passId,
           bookingId,
+          serviceId: service.id,
+          serviceValueCents: Math.max(0, Math.round(Number(service.price || 0) * 100)),
+          currency,
+          acceptsCrossRedemption: service.acceptsCrossRedemption !== false,
           actorId: session.personId,
         });
       } catch (error) {
@@ -12316,28 +12349,141 @@ async function routeBookingApiRequest(
       }
 
       const origin = new URL(req.url).origin;
-      const checkout = await createStripeCheckoutSession(credential, {
-        amount: item.price,
+      const purchaseValueCents = Math.max(0, Math.round(item.price * 100));
+      const reservation = await reserveFlexibleValueForPurchase({
+        accountId,
+        personId: session.personId,
+        purchaseValueCents,
         currency: item.currency,
-        productName: item.name,
-        productDescription:
-          item.credits === 1 ? "1 credit" : `${item.credits} credits`,
-        customerEmail: session.email || "",
-        clientReferenceId: session.personId,
-        // Read back on confirm and checked against the session doing the
-        // confirming. Without this a player could take somebody else's session
-        // id and have the credits land on their own account.
-        metadata: {
-          account_id: accountId,
-          person_id: session.personId,
-          service_id: item.serviceId,
-        },
-        // The portal is the root app, chosen by the session's role -- there is
-        // no /portal path to come back to.
-        successUrl: `${origin}/?purchase={CHECKOUT_SESSION_ID}`,
-        cancelUrl: `${origin}/?purchase=cancelled`,
+        sourceRef: `checkout-attempt:${randomUUID()}`,
+        actorId: session.personId,
       });
+      const cardValueCents = purchaseValueCents - (reservation?.creditUsedCents || 0);
+
+      if (cardValueCents === 0 && reservation) {
+        const purchaseRef = `credit-purchase:${reservation.transactionId}`;
+        try {
+          // Bank the tender before issuing the entitlement. If issuing fails,
+          // the catch path appends the exact opposite value movement and marks
+          // this tender refunded, so a partial failure cannot leave a free pass.
+          await db().sql`
+            INSERT INTO public.billing_payment_tenders (
+              id, account_id, purchase_ref, tender_kind, amount_cents, currency,
+              pass_value_transaction_id, created_at
+            ) VALUES (
+              ${`tender-${randomUUID()}`}, ${accountId}, ${purchaseRef},
+              'clarity_credit', ${reservation.creditUsedCents}, ${item.currency},
+              ${reservation.transactionId}, NOW()
+            ) ON CONFLICT (account_id, purchase_ref, tender_kind) DO NOTHING
+          `;
+          await settleFlexibleValuePurchase(accountId, reservation.transactionId);
+          await grantPass(
+            {
+              personId: session.personId,
+              ...(item.kind === "package"
+                ? { templateServiceId: item.serviceId }
+                : { name: item.name, coversServiceIds: item.coversServiceIds }),
+              credits: item.credits,
+              source: "clarity_checkout",
+              sourceRef: purchaseRef,
+              totalValueCents: purchaseValueCents,
+              currency: item.currency,
+              entitlementServiceId:
+                item.coversServiceIds.length === 1 ? item.coversServiceIds[0] : undefined,
+              note: "Bought in the player portal with Clarity credit",
+            },
+            passTemplatesFromServices(state.services),
+            { accountId, actorId: session.personId },
+          );
+        } catch (error) {
+          await reversePassValueTransaction(
+            accountId,
+            reservation.transactionId,
+            "Purchase could not be completed",
+            session.personId,
+          ).catch(() => null);
+          await db().sql`
+            UPDATE public.billing_payment_tenders
+            SET refunded_cents = amount_cents
+            WHERE account_id = ${accountId}
+              AND purchase_ref = ${purchaseRef}
+              AND tender_kind = 'clarity_credit'
+          `.catch(() => null);
+          throw error;
+        }
+        return json({ ok: true, paid: true, ...(await readPlayerProfile(session)) });
+      }
+
+      let checkout;
+      try {
+        checkout = await createStripeCheckoutSession(credential, {
+          amount: cardValueCents / 100,
+          currency: item.currency,
+          productName: item.name,
+          productDescription:
+            item.credits === 1 ? "1 credit" : `${item.credits} credits`,
+          customerEmail: session.email || "",
+          clientReferenceId: session.personId,
+          // Read back on confirm and checked against the session doing the
+          // confirming. Without this a player could take somebody else's session
+          // id and have the credits land on their own account.
+          metadata: {
+            account_id: accountId,
+            person_id: session.personId,
+            service_id: item.serviceId,
+            full_value_cents: String(purchaseValueCents),
+            credit_used_cents: String(reservation?.creditUsedCents || 0),
+            value_transaction_id: reservation?.transactionId || "",
+            cross_redeemable: item.crossRedeemable ? "true" : "false",
+          },
+          // The portal is the root app, chosen by the session's role -- there is
+          // no /portal path to come back to.
+          successUrl: `${origin}/?purchase={CHECKOUT_SESSION_ID}`,
+          cancelUrl:
+            `${origin}/?purchase=cancelled` +
+            (reservation ? `&reservation=${encodeURIComponent(reservation.transactionId)}` : ""),
+        });
+      } catch (error) {
+        if (reservation) {
+          await reversePassValueTransaction(
+            accountId,
+            reservation.transactionId,
+            "Card checkout could not be created",
+            session.personId,
+          ).catch(() => null);
+        }
+        throw error;
+      }
       return json({ url: checkout.url, sessionId: checkout.sessionId });
+    }
+
+    if (req.method === "POST" && pathname === "/api/player/checkout/cancel") {
+      const session = await readPlayerSession(playerSessionTokenFromRequest(req));
+      if (!session) return json({ error: "unauthorized", message: "Player login required." }, 401);
+      const accountId = cleanSlug(session.accountId, "");
+      const body = await parseBody(req);
+      const transactionId = cleanString(body?.transactionId, "", 160);
+      if (transactionId) {
+        const owned = await db().sql`
+          SELECT id FROM public.pass_value_transactions
+          WHERE id = ${transactionId}
+            AND account_id = ${accountId}
+            AND person_id = ${session.personId || ""}
+            AND kind = 'purchase_tender'
+            AND settled_at IS NULL
+            AND reversed_at IS NULL
+          LIMIT 1
+        `;
+        if (owned.length) {
+          await reversePassValueTransaction(
+            accountId,
+            transactionId,
+            "Purchase cancelled",
+            session.personId || "",
+          );
+        }
+      }
+      return json({ ok: true });
     }
 
     /* Bank a finished checkout.
@@ -12375,6 +12521,14 @@ async function routeBookingApiRequest(
         return json({ error: "not_found", message: "That purchase was not found." }, 404);
       }
       if (!paid.paid) {
+        if (paid.expired && paid.metadata?.value_transaction_id) {
+          await reversePassValueTransaction(
+            accountId,
+            paid.metadata.value_transaction_id,
+            "Card checkout expired",
+            session.personId || "",
+          );
+        }
         return json({ ok: false, status: paid.expired ? "expired" : "pending" });
       }
 
@@ -12400,6 +12554,33 @@ async function routeBookingApiRequest(
         );
       }
 
+      const creditUsedCents = Math.max(0, Math.round(Number(paid.metadata?.credit_used_cents) || 0));
+      const fullValueCents = Math.max(
+        paid.amountTotal + creditUsedCents,
+        Math.round(Number(paid.metadata?.full_value_cents) || 0),
+      );
+      if (paid.amountTotal + creditUsedCents !== fullValueCents) {
+        return json({ error: "payment_mismatch", message: "Your payment needs coach review." }, 409);
+      }
+      const valueTransactionId = cleanString(paid.metadata?.value_transaction_id, "", 160);
+      if (creditUsedCents > 0) {
+        const activeReservation = await db().sql`
+          SELECT id FROM public.pass_value_transactions
+          WHERE id = ${valueTransactionId}
+            AND account_id = ${accountId}
+            AND person_id = ${session.personId || ""}
+            AND kind = 'purchase_tender'
+            AND reversed_at IS NULL
+          LIMIT 1
+        `;
+        if (!activeReservation.length) {
+          return json({
+            error: "credit_reservation_missing",
+            message: "Your card payment went through, but the credit reservation needs coach review.",
+          }, 409);
+        }
+      }
+
       await grantPass(
         {
           personId: session.personId,
@@ -12412,11 +12593,42 @@ async function routeBookingApiRequest(
           credits: item.credits,
           source: "clarity_checkout",
           sourceRef: checkoutSourceRef(sessionId),
+          totalValueCents: fullValueCents,
+          currency: paid.currency || item.currency,
+          entitlementServiceId:
+            item.coversServiceIds.length === 1 ? item.coversServiceIds[0] : undefined,
+          crossRedeemable: paid.metadata?.cross_redeemable === "true",
           note: `Bought in the player portal`,
         },
         passTemplatesFromServices(services),
         { accountId, actorId: session.personId },
       );
+
+      if (creditUsedCents > 0 && valueTransactionId) {
+        await db().sql`
+          INSERT INTO public.billing_payment_tenders (
+            id, account_id, purchase_ref, tender_kind, amount_cents, currency,
+            pass_value_transaction_id, created_at
+          ) VALUES (
+            ${`tender-${randomUUID()}`}, ${accountId}, ${checkoutSourceRef(sessionId)},
+            'clarity_credit', ${creditUsedCents}, ${paid.currency || item.currency},
+            ${valueTransactionId}, NOW()
+          ) ON CONFLICT (account_id, purchase_ref, tender_kind) DO NOTHING
+        `;
+        await settleFlexibleValuePurchase(accountId, valueTransactionId);
+      }
+      if (paid.amountTotal > 0) {
+        await db().sql`
+          INSERT INTO public.billing_payment_tenders (
+            id, account_id, purchase_ref, tender_kind, amount_cents, currency,
+            external_payment_ref, created_at
+          ) VALUES (
+            ${`tender-${randomUUID()}`}, ${accountId}, ${checkoutSourceRef(sessionId)},
+            'card', ${paid.amountTotal}, ${paid.currency || item.currency},
+            ${paid.paymentIntentId || sessionId}, NOW()
+          ) ON CONFLICT (account_id, purchase_ref, tender_kind) DO NOTHING
+        `;
+      }
 
       return json({ ok: true, status: "paid", ...(await readPlayerProfile(session)) });
     }
@@ -13278,8 +13490,15 @@ async function routeBookingApiRequest(
       const service = serviceId
         ? (state.services || []).find((entry) => entry.id === serviceId)
         : null;
+      const settingsMap = serviceId ? await readSettingsMap(requestContext.accountId) : null;
+      const currency = settingsMap ? playerShopCurrency(settingsMap) : "";
+      const flexibleValueCents = serviceId
+        ? await readFlexibleValueForPerson(requestContext.accountId, personId, currency)
+        : 0;
       return json({
         passes,
+        flexibleValueCents,
+        currency: currency || undefined,
         templates: passTemplatesFromServices(state.services),
         // Everything a pass could be told to cover, so a free-form grant can
         // say what it is for. Packages are excluded: a pass that covers a pass
@@ -13288,7 +13507,14 @@ async function routeBookingApiRequest(
           .filter((entry) => entry.lessonFormat !== "package" && entry.active !== false)
           .map((entry) => ({ id: entry.id, name: entry.name })),
         ...(serviceId
-          ? { options: passOptionsForService(passes, serviceId, service?.name || "") }
+          ? {
+              options: passOptionsForService(passes, serviceId, service?.name || "", {
+                serviceValueCents: Math.max(0, Math.round(Number(service?.price || 0) * 100)),
+                currency,
+                acceptsCrossRedemption: service?.acceptsCrossRedemption !== false,
+                flexibleValueCents,
+              }),
+            }
           : {}),
       });
     }
@@ -13466,7 +13692,8 @@ async function readPassInbox(accountId: string, services) {
       }
 
       const rows = (await db().sql`
-        SELECT id, item_name, quantity, person_id, member_name, classification
+        SELECT id, item_name, quantity, person_id, member_name, classification,
+               amount_cents, currency
         FROM public.optix_pass_purchases
         WHERE id = ${purchaseId} AND account_id = ${accountId}
         LIMIT 1
@@ -13507,6 +13734,13 @@ async function readPassInbox(accountId: string, services) {
           credits: template.credits * Math.max(1, Number(purchase.quantity || 1) || 1),
           source: "optix",
           sourceRef: `optix:${purchaseId}`,
+          totalValueCents:
+            purchase.amount_cents === null || purchase.amount_cents === undefined
+              ? undefined
+              : Number(purchase.amount_cents),
+          currency: cleanString(purchase.currency, "", 3).toUpperCase() || undefined,
+          entitlementServiceId:
+            template.coversServiceIds.length === 1 ? template.coversServiceIds[0] : undefined,
           note: `Optix sale · ${cleanString(purchase.item_name, "", 200)}`,
           allowUnassigned: true,
         },

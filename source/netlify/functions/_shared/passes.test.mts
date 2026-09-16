@@ -17,10 +17,14 @@ import {
   grantPass,
   isCompatiblePass,
   normaliseGrant,
+  allocationUnitValueCents,
+  planCrossRedemption,
+  planTenderRefund,
   passOptionsForService,
   passTemplatesFromServices,
   readPassesForPerson,
   reservePassCredit,
+  reserveCrossRedemption,
   reverseRedemptionsForBooking,
   reversePassRedemption,
   spendOrder,
@@ -88,6 +92,8 @@ test("a package service is read as a pass template, coverage widened to a list",
       name: "5 Lesson Package",
       credits: 5,
       coversServiceIds: ["lesson-60"],
+      crossRedeemable: false,
+      priceCents: null,
     },
   ]);
 });
@@ -120,6 +126,38 @@ test("a grant from a template inherits its name, allowance and coverage", () => 
   assert.equal(grant.credits, 5);
   assert.deepEqual(grant.coversServiceIds, ["lesson-60"]);
   assert.ok(grant.expiresAt, "defaults to an expiry rather than an unbounded liability");
+});
+
+test("a paid grant snapshots exact value, currency and cross-redemption policy", () => {
+  const [template] = passTemplatesFromServices([
+    { ...FIVE_LESSON_PACKAGE, price: 599.99, crossRedeemable: true },
+  ]);
+  const grant = normaliseGrant(
+    {
+      personId: "person-1",
+      templateServiceId: template.serviceId,
+      totalValueCents: 59_999,
+      currency: "nzd",
+    },
+    [template],
+  );
+  assert.equal(grant.totalValueCents, 59_999);
+  assert.equal(grant.currency, "NZD");
+  assert.equal(grant.crossRedeemable, true);
+  assert.equal(grant.entitlementServiceId, "lesson-60");
+  assert.equal(grant.merge, false, "paid lots stay distinct internally");
+});
+
+test("a grant with no reliable acquisition value stays native-only", () => {
+  const [template] = passTemplatesFromServices([
+    { ...FIVE_LESSON_PACKAGE, price: 599.99, crossRedeemable: true },
+  ]);
+  const grant = normaliseGrant(
+    { personId: "person-1", templateServiceId: template.serviceId },
+    [template],
+  );
+  assert.equal(grant.totalValueCents, null);
+  assert.equal(grant.crossRedeemable, false);
 });
 
 test("a free-form grant still has to say what it is and what it is worth", () => {
@@ -191,6 +229,129 @@ test("allocations expiring together are spent oldest first", () => {
   );
 });
 
+test("non-divisible acquisition value is exact and deterministic", () => {
+  assert.deepEqual(
+    [1, 2, 3].map((ordinal) => allocationUnitValueCents(100, 3, ordinal)),
+    [34, 33, 33],
+  );
+});
+
+test("basic cross redemption preserves whole entitlements and creates residual value", () => {
+  const plan = planCrossRedemption(6_000, 0, [
+    {
+      allocationId: "lot-a",
+      passId: "pass-a",
+      unitsAllocated: 5,
+      unitsRedeemed: 0,
+      unitsAvailable: 5,
+      totalValueCents: 50_000,
+      expiresAt: null,
+      availableFrom: "2026-01-01",
+    },
+  ]);
+  assert.equal(plan?.entitlements.length, 1);
+  assert.equal(plan?.residualCents, 4_000);
+});
+
+test("existing residual is spent before the minimum number of whole entitlements", () => {
+  const plan = planCrossRedemption(6_000, 4_000, [
+    {
+      allocationId: "lot-a",
+      passId: "pass-a",
+      unitsAllocated: 4,
+      unitsRedeemed: 0,
+      unitsAvailable: 4,
+      totalValueCents: 40_000,
+      expiresAt: null,
+      availableFrom: "2026-01-01",
+    },
+  ]);
+  assert.equal(plan?.flexibleUsedCents, 4_000);
+  assert.equal(plan?.entitlements.length, 1);
+  assert.equal(plan?.residualCents, 8_000);
+});
+
+test("a service fully covered by flexible value creates no duplicate change", () => {
+  const plan = planCrossRedemption(6_000, 10_000, []);
+  assert.deepEqual(plan, {
+    flexibleUsedCents: 6_000,
+    entitlements: [],
+    residualCents: 0,
+  });
+});
+
+test("different-value lots remain distinct and spend earliest expiry first", () => {
+  const plan = planCrossRedemption(15_000, 0, [
+    {
+      allocationId: "ninety-dollar-lot",
+      passId: "pass-b",
+      unitsAllocated: 10,
+      unitsRedeemed: 0,
+      unitsAvailable: 10,
+      totalValueCents: 90_000,
+      expiresAt: "2027-01-01",
+      availableFrom: "2026-02-01",
+    },
+    {
+      allocationId: "hundred-dollar-lot",
+      passId: "pass-a",
+      unitsAllocated: 2,
+      unitsRedeemed: 0,
+      unitsAvailable: 2,
+      totalValueCents: 20_000,
+      expiresAt: "2026-12-01",
+      availableFrom: "2026-01-01",
+    },
+  ]);
+  assert.deepEqual(plan?.entitlements.map((entry) => entry.allocationId), [
+    "hundred-dollar-lot",
+    "hundred-dollar-lot",
+  ]);
+  assert.equal(plan?.residualCents, 5_000);
+});
+
+test("cross redemption refuses an insufficient value instead of going negative", () => {
+  assert.equal(
+    planCrossRedemption(20_000, 500, [
+      {
+        allocationId: "lot-a",
+        passId: "pass-a",
+        unitsAllocated: 1,
+        unitsRedeemed: 0,
+        unitsAvailable: 1,
+        totalValueCents: 10_000,
+        expiresAt: null,
+        availableFrom: "2026-01-01",
+      },
+    ]),
+    null,
+  );
+});
+
+test("a mixed-tender full refund restores credit and card to their original amounts", () => {
+  assert.deepEqual(
+    planTenderRefund([
+      { kind: "clarity_credit", amountCents: 6_500 },
+      { kind: "card", amountCents: 83_500 },
+    ]),
+    [
+      { kind: "clarity_credit", amountCents: 6_500 },
+      { kind: "card", amountCents: 83_500 },
+    ],
+  );
+});
+
+test("partial mixed-tender refunds are proportional and exact to the cent", () => {
+  const refund = planTenderRefund(
+    [
+      { kind: "clarity_credit", amountCents: 6_500 },
+      { kind: "card", amountCents: 83_500 },
+    ],
+    10_001,
+  );
+  assert.equal(refund.reduce((sum, tender) => sum + tender.amountCents, 0), 10_001);
+});
+
 // --- The account boundary ---------------------------------------------------
 
 test("reading a person's passes filters by account in the SQL, not afterwards", async (t) => {
@@ -202,7 +363,7 @@ test("reading a person's passes filters by account in the SQL, not afterwards", 
   // The sweep, then the read. The read itself stays a single statement: the
   // allocations and redemptions come back aggregated beside their pass rather
   // than as a follow-up query per ledger table.
-  const reads = issued.filter((entry) => entry.text.startsWith("SELECT"));
+  const reads = issued.filter((entry) => entry.text.includes("FROM public.pass_balances"));
   assert.equal(reads.length, 1, "one round trip, not one per ledger table");
   const [query] = reads;
   assert.match(query.text, /FROM public\.pass_balances/);
@@ -413,6 +574,14 @@ test("void and expired passes are not offered at all", () => {
 
 const RESERVE = { accountId: ACCOUNT, passId: "pass-1", bookingId: "booking-1", actorId: "coach@example.test" };
 
+const CROSS_RESERVE = {
+  ...RESERVE,
+  serviceId: "review-1",
+  serviceValueCents: 6_000,
+  currency: "NZD",
+  acceptsCrossRedemption: true,
+};
+
 test("a pass cannot settle anything that is not a booking", async (t) => {
   const issued = fakeDatabase(() => []);
   t.after(() => setDatabaseForTests(null));
@@ -479,6 +648,66 @@ test("a booking already settled on a pass cannot take a second credit", async (t
   });
 });
 
+test("cross redemption locks person currency and records one transaction for all movements", async (t) => {
+  const issued = fakeDatabase((text) => {
+    if (text.includes("SELECT id, person_id, cross_redeemable")) {
+      return [{ id: "pass-1", person_id: "person-1", cross_redeemable: true }];
+    }
+    if (text.includes("FROM public.pass_balances b")) return [];
+    if (text.includes("SUM(amount_cents)")) return [{ value_cents: 0 }];
+    if (text.includes("FROM public.pass_allocation_balances a")) {
+      return [{
+        allocation_id: "alloc-1",
+        pass_id: "pass-1",
+        credits_allocated: 5,
+        credits_redeemed: 0,
+        credits_available: 5,
+        total_value_cents: 50_000,
+        expires_at: null,
+        available_from: "2026-01-01",
+      }];
+    }
+    return [];
+  });
+  t.after(() => setDatabaseForTests(null));
+
+  const result = await reserveCrossRedemption(CROSS_RESERVE);
+  assert.equal(result.redemptionIds.length, 1);
+  assert.equal(result.residualCents, 4_000);
+  assert.ok(issued.some((entry) => entry.text.includes("pg_advisory_xact_lock")));
+  assert.ok(issued.some((entry) => entry.text.includes("ORDER BY id FOR UPDATE")));
+  assert.ok(issued.some((entry) => entry.text.includes("INSERT INTO public.pass_value_transactions")));
+  assert.ok(issued.some((entry) => entry.text.includes("'residual_created'")));
+  assert.ok(issued.some((entry) => entry.text === "COMMIT"));
+});
+
+test("a service that refuses exchange is rejected before any value is touched", async (t) => {
+  const issued = fakeDatabase(() => []);
+  t.after(() => setDatabaseForTests(null));
+  await assert.rejects(
+    reserveCrossRedemption({ ...CROSS_RESERVE, acceptsCrossRedemption: false }),
+    (error: { code?: string }) => error.code === "cross_redemption_disabled",
+  );
+  assert.equal(issued.length, 0);
+});
+
+test("native entitlement availability blocks cross redemption", async (t) => {
+  const issued = fakeDatabase((text) => {
+    if (text.includes("SELECT id, person_id, cross_redeemable")) {
+      return [{ id: "pass-1", person_id: "person-1", cross_redeemable: true }];
+    }
+    if (text.includes("FROM public.pass_balances b")) return [{ pass_id: "native-pass" }];
+    return [];
+  });
+  t.after(() => setDatabaseForTests(null));
+  await assert.rejects(
+    reserveCrossRedemption(CROSS_RESERVE),
+    (error: { code?: string }) => error.code === "native_entitlement_available",
+  );
+  assert.ok(issued.some((entry) => entry.text === "ROLLBACK"));
+  assert.ok(!issued.some((entry) => entry.text.includes("INSERT INTO public.pass_redemptions")));
+});
+
 test("a reversal never deletes the line it reverses", async (t) => {
   const issued = fakeDatabase(() => [{ id: "red-1" }]);
   t.after(() => setDatabaseForTests(null));
@@ -494,11 +723,14 @@ test("a reversal never deletes the line it reverses", async (t) => {
 // --- Giving credits back ----------------------------------------------------
 
 test("the sweep returns credits whose booking is gone, cancelled, or no longer a lesson", async (t) => {
-  const issued = fakeDatabase(() => [{ id: "red-1" }]);
+  const issued = fakeDatabase((text) =>
+    text.startsWith("UPDATE public.pass_redemptions") ? [{ id: "red-1" }] : [],
+  );
   t.after(() => setDatabaseForTests(null));
 
   assert.equal(await sweepReturnableCredits(ACCOUNT), 1);
-  const [sweep] = issued;
+  const sweep = issued.find((entry) => entry.text.startsWith("UPDATE public.pass_redemptions"));
+  assert.ok(sweep);
   assert.match(sweep.text, /UPDATE public\.pass_redemptions/);
   assert.match(sweep.text, /c\.id IS NULL/, "deleted booking");
   assert.match(sweep.text, /c\.status = 'cancelled'/, "cancelled lesson");
@@ -532,9 +764,9 @@ test("reading a balance sweeps first, so a cancelled lesson's credit is never sh
 
   await readPassesForPerson(ACCOUNT, "person-1");
 
-  assert.equal(issued.length, 2, "the sweep, then the read");
-  assert.match(issued[0].text, /UPDATE public\.pass_redemptions/, "sweep runs before the read");
-  assert.match(issued[1].text, /FROM public\.pass_balances/);
+  assert.equal(issued.length, 3, "value sweep, native sweep, then the read");
+  assert.match(issued[1].text, /UPDATE public\.pass_redemptions/, "sweep runs before the read");
+  assert.match(issued[2].text, /FROM public\.pass_balances/);
 });
 
 test("deleting a booking returns its credit in the caller's own transaction", async (t) => {
@@ -544,17 +776,19 @@ test("deleting a booking returns its credit in the caller's own transaction", as
   const client = {
     async query(text: string, values: unknown[] = []) {
       calls.push({ text: text.replace(/\s+/g, " ").trim(), values });
-      return { rows: [{ id: "red-1" }] };
+      return {
+        rows: text.includes("UPDATE public.pass_redemptions") ? [{ id: "red-1" }] : [],
+      };
     },
   };
   t.after(() => setDatabaseForTests(null));
 
   const returned = await reverseRedemptionsForBooking(client, ACCOUNT, "booking-1", "Booking deleted", "coach");
   assert.equal(returned, 1);
-  assert.equal(calls.length, 1);
-  assert.match(calls[0].text, /reversed_at = NOW\(\)/);
-  assert.match(calls[0].text, /reversed_at IS NULL/, "a credit already returned is not returned twice");
-  assert.ok(calls[0].values.includes(ACCOUNT) && calls[0].values.includes("booking-1"));
+  assert.equal(calls.length, 2);
+  assert.match(calls[1].text, /reversed_at = NOW\(\)/);
+  assert.match(calls[1].text, /reversed_at IS NULL/, "a credit already returned is not returned twice");
+  assert.ok(calls[1].values.includes(ACCOUNT) && calls[1].values.includes("booking-1"));
 });
 
 test("a booking that never used a pass is not a special case", async (t) => {

@@ -37,6 +37,7 @@ export type PlayerShopItem = {
   /** Service ids the resulting credits may be spent on. */
   coversServiceIds: string[];
   kind: "package" | "video-review";
+  crossRedeemable: boolean;
 };
 
 const text = (value: unknown, max = 200) => String(value ?? "").trim().slice(0, max);
@@ -99,6 +100,7 @@ export function playerShopItems(services: unknown, currency: string): PlayerShop
       credits,
       coversServiceIds,
       kind: format === "video-review" ? "video-review" : "package",
+      crossRedeemable: entry?.crossRedeemable === true,
     });
   }
 

@@ -6,12 +6,16 @@ import { requireCoachActor } from "./_shared/coach-auth.mts";
 import { settingsSelectQuery } from "./_shared/settings-scope.mts";
 import {
   attachRedemptionToSale,
+  attachValueTransactionToSale,
   grantPass,
   passTemplatesFromServices,
   reversePassRedemption,
-  reservePassCredit,
+  reversePassValueTransaction,
+  reservePassForService,
 } from "./_shared/passes.mts";
+import type { ReservedPassPayment } from "./_shared/passes.mts";
 import type { PassSource, PassTemplate } from "./_shared/passes.mts";
+import { currencyForAccountSettings } from "./_shared/locale.mts";
 import {
   createStripeCheckoutSession as createStripeCheckoutSessionWith,
   resolveStripeCredential,
@@ -385,6 +389,30 @@ async function passTemplatesForAccount(accountId: string): Promise<PassTemplate[
   }
 }
 
+async function serviceForPassSettlement(accountId: string, serviceId: string) {
+  if (!serviceId) return null;
+  const rows = await supabase("settings", {
+    query: settingsSelectQuery(accountId, {
+      select: "value",
+      filters: [`key=eq.${encodeFilter("servicesJson")}`, "limit=1"],
+    }),
+  });
+  try {
+    const services = rows[0]?.value ? JSON.parse(rows[0].value) : [];
+    const service = Array.isArray(services)
+      ? services.find((entry) => String(entry?.id || "") === serviceId)
+      : null;
+    if (!service || service.lessonFormat === "package" || service.active === false) return null;
+    return {
+      id: serviceId,
+      valueCents: Math.max(0, Math.round(lessonTypeUnitPrice(service) * 100)),
+      acceptsCrossRedemption: service.acceptsCrossRedemption !== false,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Issue the passes a paid purchase bought.
  *
@@ -400,7 +428,13 @@ async function passTemplatesForAccount(accountId: string): Promise<PassTemplate[
  */
 export async function issuePassesForPurchase(
   accountId: string,
-  lines: Array<{ serviceId: string; quantity: number; ref: string }>,
+  lines: Array<{
+    serviceId: string;
+    quantity: number;
+    ref: string;
+    totalValueCents: number | null;
+    currency: string;
+  }>,
   buyer: { personId: string; name: string },
   source: PassSource,
   note: string,
@@ -427,6 +461,10 @@ export async function issuePassesForPurchase(
           // One reference per line, not per sale: a docket can legitimately
           // carry two different packages, and they must not collide.
           sourceRef: line.ref,
+          totalValueCents: line.totalValueCents,
+          currency: line.totalValueCents === null ? undefined : line.currency,
+          entitlementServiceId:
+            template.coversServiceIds.length === 1 ? template.coversServiceIds[0] : undefined,
           allowUnassigned: true,
         },
         templates,
@@ -443,14 +481,42 @@ export async function issuePassesForPurchase(
 /** The package lines on a POS sale, keyed so a replay cannot re-issue them. */
 export function passLinesFromPosItems(
   transactionId: string,
-  items: Array<{ productId: string; quantity: number }>,
+  items: Array<{ productId: string; quantity: number; lineTotal?: number }>,
+  currency = "",
+  purchaseTotalCents?: number,
 ) {
+  const itemValues = items.map((item) =>
+    Number.isFinite(Number(item.lineTotal))
+      ? Math.max(0, Math.round(Number(item.lineTotal) * 100))
+      : null,
+  );
+  const listedTotalCents = itemValues.every((value) => value !== null)
+    ? itemValues.reduce((sum, value) => sum + (value || 0), 0)
+    : null;
+  const paidTotalCents = Number.isFinite(Number(purchaseTotalCents))
+    ? Math.max(0, Math.round(Number(purchaseTotalCents)))
+    : null;
+  let allocatedSoFar = 0;
+  let listedSoFar = 0;
   return items
-    .filter((item) => item.productId.startsWith(LESSON_ITEM_PREFIX))
-    .map((item) => ({
+    .map((item, index) => {
+      const listedCents = itemValues[index];
+      let economicValueCents = listedCents;
+      if (listedCents !== null && listedTotalCents && paidTotalCents !== null) {
+        listedSoFar += listedCents;
+        const cumulativeAllocation = Math.floor((listedSoFar * paidTotalCents) / listedTotalCents);
+        economicValueCents = cumulativeAllocation - allocatedSoFar;
+        allocatedSoFar = cumulativeAllocation;
+      }
+      return { item, economicValueCents };
+    })
+    .filter(({ item }) => item.productId.startsWith(LESSON_ITEM_PREFIX))
+    .map(({ item, economicValueCents }) => ({
       serviceId: item.productId.slice(LESSON_ITEM_PREFIX.length),
       quantity: item.quantity,
       ref: `pos:${transactionId}:${item.productId}`,
+      totalValueCents: economicValueCents,
+      currency: cleanString(currency, "", 3).toUpperCase(),
     }));
 }
 
@@ -458,11 +524,16 @@ export function passLinesFromPosItems(
 async function issuePassesForPosSale(
   accountId: string,
   row: Record<string, unknown>,
-  items: Array<{ productId: string; quantity: number }>,
+  items: Array<{ productId: string; quantity: number; lineTotal?: number }>,
 ) {
   return issuePassesForPurchase(
     accountId,
-    passLinesFromPosItems(String(row.id ?? ""), items),
+    passLinesFromPosItems(
+      String(row.id ?? ""),
+      items,
+      cleanString(row.currency, "", 3),
+      Math.round(Number(row.amount || 0) * 100),
+    ),
     { personId: cleanString(row.customer_id, "", 160), name: cleanString(row.customer_name, "", 140) },
     "clarity_pos",
     `Sold on ${cleanString(row.receipt_number, "", 60)}`,
@@ -1600,7 +1671,7 @@ async function updateInvoiceStatus(accountId: string, id: string, body: Record<s
  */
 async function issuePassesForInvoice(accountId: string, invoiceId: string, invoice: Record<string, unknown>) {
   const items = await supabase("billing_invoice_items", {
-    query: `select=id,source_type,source_id,quantity&invoice_id=eq.${encodeFilter(invoiceId)}&account_id=eq.${encodeFilter(accountId)}`,
+    query: `select=id,source_type,source_id,quantity,line_total&invoice_id=eq.${encodeFilter(invoiceId)}&account_id=eq.${encodeFilter(accountId)}`,
   });
   const lines = (items as Array<Record<string, unknown>>)
     .filter((item) => cleanString(item.source_id, "", 160))
@@ -1610,6 +1681,10 @@ async function issuePassesForInvoice(accountId: string, invoiceId: string, invoi
       // Keyed on the line, not the invoice: an invoice can carry two different
       // packages, and marking it paid twice must not double either.
       ref: `invoice:${invoiceId}:${cleanString(item.id, "", 160)}`,
+      totalValueCents: Number.isFinite(Number(item.line_total))
+        ? Math.max(0, Math.round(Number(item.line_total) * 100))
+        : null,
+      currency: cleanString(invoice.currency, "", 3).toUpperCase(),
     }));
 
   return issuePassesForPurchase(
@@ -1764,15 +1839,21 @@ function bucketizeRevenue(period: RevenuePeriod, start: Date, end: Date, rows: A
 async function resolveDefaultCurrency(accountId: string) {
   const rows = await supabase("settings", {
     query: settingsSelectQuery(accountId, {
-      select: "value",
-      filters: [`key=eq.${encodeFilter("accountInvoiceSettingsJson")}`, "limit=1"],
+      select: "key,value",
+      filters: [
+        `key=in.(${encodeFilter("accountInvoiceSettingsJson")},${encodeFilter("accountCountry")})`,
+      ],
     }),
   });
   try {
-    const parsed = rows[0]?.value ? JSON.parse(rows[0].value) : null;
-    return cleanString(parsed?.currency, "NZD", 10);
+    const settings = Object.fromEntries(rows.map((row: { key: string; value: string }) => [row.key, row.value]));
+    const parsed = settings.accountInvoiceSettingsJson
+      ? JSON.parse(settings.accountInvoiceSettingsJson)
+      : null;
+    return currencyForAccountSettings(parsed?.currency, settings.accountCountry);
   } catch {
-    return "NZD";
+    const country = rows.find((row: { key?: string }) => row.key === "accountCountry")?.value;
+    return currencyForAccountSettings("", country);
   }
 }
 
@@ -3530,6 +3611,10 @@ async function createPosTransaction(accountId: string, body: Record<string, unkn
   // given - but a basket no longer needs one typed in.
   const requestedAmount = round2(cleanNumber(body?.amount, 0, { min: 0 }));
   const amount = requestedAmount > 0 ? requestedAmount : itemsTotal;
+  // The account's selected invoice currency is authoritative for both the
+  // receipt and any value lot issued from it. The browser does not get to
+  // relabel a purchase into another currency.
+  const accountCurrency = await resolveDefaultCurrency(accountId);
 
   const description =
     cleanString(body?.description, "", 300) ||
@@ -3590,12 +3675,24 @@ async function createPosTransaction(accountId: string, body: Record<string, unkn
   //
   // Which credit gets spent is decided in there, not here: oldest-expiring
   // first, under a lock on the pass.
-  let reservedCredit: { redemptionId: string; allocationId: string } | null = null;
+  let reservedCredit: ReservedPassPayment | null = null;
   if (settledByPass) {
-    reservedCredit = await reservePassCredit({
+    const serviceId = cleanString(body?.serviceId, "", 120);
+    const service = await serviceForPassSettlement(accountId, serviceId);
+    if (!service || service.valueCents <= 0) {
+      throw Object.assign(new Error("A pass can only settle a current lesson service."), {
+        status: 400,
+        code: "INVALID_PASS_SERVICE",
+      });
+    }
+    reservedCredit = await reservePassForService({
       accountId,
       passId: cleanString(body?.passId, "", 120),
       bookingId: cleanString(body?.bookingId, "", 160),
+      serviceId,
+      serviceValueCents: service.valueCents,
+      currency: accountCurrency,
+      acceptsCrossRedemption: service.acceptsCrossRedemption,
       actorId: cleanString(body?.actorId, "", 160),
     });
   }
@@ -3624,7 +3721,7 @@ async function createPosTransaction(accountId: string, body: Record<string, unkn
           ? itemsTotal
           : null
         : round2(cleanNumber(listedAmountRaw, 0, { min: 0 })),
-    currency: cleanString(body?.currency, await resolveDefaultCurrency(accountId), 10),
+    currency: accountCurrency,
     customer_id: cleanString(body?.customerId, "", 160)
       || await resolveCustomerIdByEmail(accountId, body?.customerEmail),
     customer_name: cleanString(body?.customerName, "", 140) || null,
@@ -3659,19 +3756,32 @@ async function createPosTransaction(accountId: string, body: Record<string, unkn
       // evidence that it was taken and given back, which is the difference
       // between a balance that explains itself and one that is merely correct.
       if (reservedCredit) {
-        await reversePassRedemption(
-          accountId,
-          reservedCredit.redemptionId,
-          "Sale could not be recorded",
-          cleanString(body?.actorId, "", 160),
-        ).catch(() => null);
+        if (reservedCredit.kind === "native") {
+          await reversePassRedemption(
+            accountId,
+            reservedCredit.redemptionId,
+            "Sale could not be recorded",
+            cleanString(body?.actorId, "", 160),
+          ).catch(() => null);
+        } else {
+          await reversePassValueTransaction(
+            accountId,
+            reservedCredit.transactionId,
+            "Sale could not be recorded",
+            cleanString(body?.actorId, "", 160),
+          ).catch(() => null);
+        }
       }
       throw error;
     }
   }
 
   if (reservedCredit) {
-    await attachRedemptionToSale(accountId, reservedCredit.redemptionId, String(row.id));
+    if (reservedCredit.kind === "native") {
+      await attachRedemptionToSale(accountId, reservedCredit.redemptionId, String(row.id));
+    } else {
+      await attachValueTransactionToSale(accountId, reservedCredit.transactionId, String(row.id));
+    }
   }
 
   if (couponId && couponAmount > 0) {

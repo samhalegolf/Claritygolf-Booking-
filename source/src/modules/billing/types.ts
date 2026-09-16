@@ -440,6 +440,12 @@ export type PassOption = {
   nextExpiry: string | null;
   covered: boolean;
   reason: string;
+  paymentKind: "native" | "cross_redemption" | "unavailable";
+  availableValueCents: number;
+  flexibleValueCents: number;
+  currency: string | null;
+  remainingCreditsAfter: number | null;
+  residualValueCentsAfter: number | null;
 };
 
 // Shape returned by /api/billing/expenses. Not linked to invoices/bookings -

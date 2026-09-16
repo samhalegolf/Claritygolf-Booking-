@@ -74,6 +74,7 @@ export function PosCheckoutModal({
   const amount = Number(amountInput);
   const amountValid = Number.isFinite(amount) && amount > 0;
   const selectedMethod = methods.find((method) => method.id === methodId) || null;
+  const selectedPassOption = passOptions.find((option) => option.passId === passId) || null;
   const linesTotal = basketTotal(lines);
   // Products are added *to* whatever opened the modal, not instead of it - a
   // lesson card with a glove rung up owes the lesson plus the glove.
@@ -239,6 +240,7 @@ export function PosCheckoutModal({
             currency,
             paymentMethodId: payingMethod.id,
             passId,
+            serviceId: context.serviceId || "",
             customerId: context.customerId || "",
             customerName: customerName.trim(),
             customerEmail: customerEmail.trim(),
@@ -502,7 +504,9 @@ export function PosCheckoutModal({
                       </span>
                       <span className="pos-pass-meta">
                         {option.covered
-                          ? `${option.creditsAvailable} of ${option.creditsAllocated} left` +
+                          ? (option.paymentKind === "cross_redemption"
+                              ? `Use Clarity balance · ${formatMoney(option.availableValueCents / 100, option.currency || currency)} available`
+                              : `${option.creditsAvailable} of ${option.creditsAllocated} left`) +
                             (option.nextExpiry
                               ? ` · expires ${new Date(option.nextExpiry).toLocaleDateString(undefined, {
                                   day: "numeric",
@@ -517,8 +521,17 @@ export function PosCheckoutModal({
                 </div>
                 {passId ? (
                   <p className="field-help">
-                    One credit will be used. The lesson is recorded as settled at {formatMoney(amount, currency)} of value,
-                    with nothing taken.
+                    {selectedPassOption?.paymentKind === "cross_redemption" ? (
+                      <>
+                        Using balance will leave {selectedPassOption.remainingCreditsAfter ?? 0} whole entitlement
+                        {(selectedPassOption.remainingCreditsAfter ?? 0) === 1 ? "" : "s"}
+                        {selectedPassOption.residualValueCentsAfter
+                          ? ` and ${formatMoney(selectedPassOption.residualValueCentsAfter / 100, selectedPassOption.currency || currency)} credit`
+                          : ""}.
+                      </>
+                    ) : (
+                      <>One native entitlement will be used. Flexible credit stays untouched.</>
+                    )}
                   </p>
                 ) : null}
               </div>

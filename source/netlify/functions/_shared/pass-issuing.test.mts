@@ -85,7 +85,13 @@ test("a POS line names its service through the lesson: prefix", () => {
     { productId: "glove-product-id", quantity: 2 },
   ]);
   assert.deepEqual(lines, [
-    { serviceId: "package-5", quantity: 1, ref: "pos:txn-1:lesson:package-5" },
+    {
+      serviceId: "package-5",
+      quantity: 1,
+      ref: "pos:txn-1:lesson:package-5",
+      totalValueCents: null,
+      currency: "",
+    },
   ]);
 });
 
@@ -97,6 +103,20 @@ test("two different packages on one docket get one reference each", () => {
     { productId: "lesson:package-10", quantity: 1 },
   ]);
   assert.equal(new Set(lines.map((line) => line.ref)).size, 2);
+});
+
+test("a counter discount becomes the allocation's exact acquisition value", () => {
+  const lines = passLinesFromPosItems(
+    "txn-discount",
+    [
+      { productId: "lesson:package-5", quantity: 1, lineTotal: 100 },
+      { productId: "glove-product-id", quantity: 1, lineTotal: 100 },
+    ],
+    "NZD",
+    15_000,
+  );
+  assert.equal(lines[0].totalValueCents, 7_500);
+  assert.equal(lines[0].currency, "NZD");
 });
 
 // --- Issuing ----------------------------------------------------------------

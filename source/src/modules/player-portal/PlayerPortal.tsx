@@ -291,6 +291,8 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   const [practice, setPractice] = useState<PracticeItem[]>([]);
   const [practiceBlockTypes, setPracticeBlockTypes] = useState<PracticeTypeMeta[]>([]);
   const [passes, setPasses] = useState<PlayerPass[]>([]);
+  const [flexibleValueCents, setFlexibleValueCents] = useState(0);
+  const [passCurrency, setPassCurrency] = useState("");
   const [shop, setShop] = useState<ShopItem[]>([]);
   /** Which item is mid-purchase, so only its own button goes quiet. */
   const [buyingId, setBuyingId] = useState("");
@@ -392,6 +394,8 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
         practice?: PracticeItem[];
         practiceBlockTypes?: PracticeTypeMeta[];
         passes?: PlayerPass[];
+        flexibleValueCents?: number;
+        passCurrency?: string;
         shop?: ShopItem[];
         review?: ReviewOffer | null;
         bookingEmbed?: PlayerBookingEmbedConfig;
@@ -405,6 +409,8 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
       // edited them and both ends fall back to the same defaults.
       setPracticeBlockTypes(Array.isArray(data.practiceBlockTypes) ? data.practiceBlockTypes : []);
       setPasses(Array.isArray(data.passes) ? data.passes : []);
+      setFlexibleValueCents(Math.max(0, Math.round(Number(data.flexibleValueCents) || 0)));
+      setPassCurrency(String(data.passCurrency || ""));
       // Empty when the business has no card payments set up, which is the
       // server's answer rather than something the portal works out.
       setShop(Array.isArray(data.shop) ? data.shop : []);
@@ -619,10 +625,25 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ serviceId }),
       });
-      const data = (await response.json().catch(() => ({}))) as { url?: string; message?: string };
-      if (!response.ok || !data.url) {
+      const data = (await response.json().catch(() => ({}))) as {
+        url?: string;
+        message?: string;
+        paid?: boolean;
+        passes?: PlayerPass[];
+        flexibleValueCents?: number;
+      };
+      if (!response.ok) {
         throw new Error(data?.message || "Could not start that purchase.");
       }
+      if (data.paid && Array.isArray(data.passes)) {
+        setPasses(data.passes);
+        setFlexibleValueCents(Math.max(0, Math.round(Number(data.flexibleValueCents) || 0)));
+        setPurchaseNote("Paid with Clarity credit. It is on your account now.");
+        setBuyingId("");
+        setTab("passes");
+        return;
+      }
+      if (!data.url) throw new Error(data?.message || "Could not start that purchase.");
       // Stripe owns the next screen. Replacing rather than opening a tab keeps
       // the back button meaningful on a phone.
       window.location.assign(data.url);
@@ -646,11 +667,19 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
     if (isGuest) return;
     const params = new URLSearchParams(window.location.search);
     const purchase = params.get("purchase");
+    const reservation = params.get("reservation");
     if (!purchase) return;
 
     window.history.replaceState(null, "", window.location.pathname);
     if (purchase === "cancelled") {
       setPurchaseNote("Purchase cancelled — nothing was charged.");
+      if (reservation) {
+        void apiFetch("/api/player/checkout/cancel", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ transactionId: reservation }),
+        }).then(() => loadProfile()).catch(() => null);
+      }
       return;
     }
 
@@ -2237,9 +2266,14 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                       that has run out or timed out is the answer to "why can't
                       I book on my pass" -- hiding it turns that into a message
                       to the coach. */}
-                  {passes.length > 0 && (
+                  {(passes.length > 0 || flexibleValueCents > 0) && (
                     <section className="player-portal-section">
                       <h2>Your passes</h2>
+                      {flexibleValueCents > 0 && (
+                        <p className="player-portal-lead">
+                          +{passCurrency} {(flexibleValueCents / 100).toFixed(2)} Clarity credit
+                        </p>
+                      )}
                       {spendableCredits > 0 && (
                         <p className="player-portal-lead">
                           {spendableCredits === 1

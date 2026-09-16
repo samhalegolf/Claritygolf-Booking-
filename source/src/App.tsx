@@ -613,6 +613,10 @@ type Service = {
   packageAllowance?: number;
   packageCoverageMode?: PackageCoverageMode;
   packageCoversServiceId?: string;
+  /** Packages only: purchased units may fund other eligible services by value. */
+  crossRedeemable?: boolean;
+  /** Services only: may be funded by value from a cross-redeemable pass. */
+  acceptsCrossRedemption?: boolean;
   /** Video reviews only: days between booking and the clip being owed back. */
   reviewTurnaroundDays?: number;
   bookingScreenIds?: string[];
@@ -4184,6 +4188,9 @@ function cleanService(service?: Partial<Service>, index = 0): Service {
       lessonFormat === "package" && typeof service?.packageCoversServiceId === "string"
         ? service.packageCoversServiceId.trim().slice(0, 120)
         : undefined,
+    crossRedeemable: lessonFormat === "package" ? service?.crossRedeemable === true : undefined,
+    acceptsCrossRedemption:
+      lessonFormat !== "package" ? service?.acceptsCrossRedemption !== false : undefined,
     reviewTurnaroundDays: videoReview
       ? clamp(
           Math.round(
@@ -20439,6 +20446,25 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     </select>
                   </label>
                 </div>
+              )}
+              {serviceEditor.lessonFormat === "package" ? (
+                <label className="settings-toggle">
+                  <input
+                    checked={serviceEditor.crossRedeemable === true}
+                    onChange={(event) => updateServiceEditor("crossRedeemable", event.target.checked)}
+                    type="checkbox"
+                  />
+                  <span>Cross redeemable by its original purchase value</span>
+                </label>
+              ) : (
+                <label className="settings-toggle">
+                  <input
+                    checked={serviceEditor.acceptsCrossRedemption !== false}
+                    onChange={(event) => updateServiceEditor("acceptsCrossRedemption", event.target.checked)}
+                    type="checkbox"
+                  />
+                  <span>Accept Clarity balance from other eligible passes</span>
+                </label>
               )}
               <label className="settings-toggle">
                 <input

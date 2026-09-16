@@ -22,6 +22,9 @@ export type PassAllocation = {
   source: string;
   note: string;
   createdAt: string;
+  entitlementServiceId: string | null;
+  totalValueCents: number | null;
+  currency: string | null;
 };
 
 export type PassRedemption = {
@@ -40,6 +43,7 @@ export type Pass = {
   name: string;
   templateServiceId: string | null;
   coversServiceIds: string[];
+  crossRedeemable: boolean;
   creditsAvailable: number;
   creditsAllocated: number;
   creditsRedeemed: number;
@@ -57,6 +61,8 @@ export type PassTemplate = {
   name: string;
   credits: number;
   coversServiceIds: string[];
+  crossRedeemable: boolean;
+  priceCents: number | null;
 };
 
 export type PassGrant = {
@@ -110,6 +116,11 @@ function creditWord(count: number) {
   return count === 1 ? "credit" : "credits";
 }
 
+function allocationValueLabel(allocation: PassAllocation) {
+  if (allocation.totalValueCents === null || !allocation.currency) return "native only";
+  return `${allocation.currency} ${(allocation.totalValueCents / 100).toFixed(2)} purchase value`;
+}
+
 /**
  * The ledger under a pass, in the order the events happened.
  *
@@ -126,6 +137,7 @@ function ledgerLines(pass: Pass) {
       reversed: false,
       text:
         `+${allocation.credits} ${creditWord(allocation.credits)} · ${allocation.source}` +
+        ` · ${allocationValueLabel(allocation)}` +
         (allocation.expiresAt && !allocation.isLive ? " · expired" : "") +
         ` · ${dateLabel(allocation.createdAt)}`,
     })),
@@ -339,6 +351,7 @@ export function PassesPanel({
                 </strong>
                 <span>
                   {covers ? `Covers ${covers}` : "No covered service set"}
+                  {pass.crossRedeemable ? " · Cross redeemable" : " · Native use only"}
                   {pass.expiresAt ? ` · Valid until ${dateLabel(pass.expiresAt)}` : " · No expiry"}
                 </span>
                 {pass.note ? <span>{pass.note}</span> : null}

@@ -39,6 +39,7 @@ export type ReviewService = {
   name: string;
   price: number;
   turnaroundDays: number;
+  acceptsCrossRedemption: boolean;
 };
 
 /**
@@ -68,6 +69,7 @@ export function findReviewService(services: unknown): ReviewService | null {
     name: text(service.name, 180) || "Video review",
     price: Number(service.price) || 0,
     turnaroundDays: cleanTurnaroundDays(service.reviewTurnaroundDays),
+    acceptsCrossRedemption: service.acceptsCrossRedemption !== false,
   };
 }
 

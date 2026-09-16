@@ -52,6 +52,15 @@ export function currencyForCountry(country: unknown = getActivePhoneCountry()): 
   return CURRENCY_BY_COUNTRY[cleanPhoneCountry(country)] || FALLBACK_CURRENCY;
 }
 
+/** The account-selected invoice currency wins; country supplies the default. */
+export function currencyForAccountSettings(
+  selectedCurrency: unknown,
+  country: unknown,
+): string {
+  const selected = String(selectedCurrency || "").trim().toUpperCase();
+  return /^[A-Z]{3}$/.test(selected) ? selected : currencyForCountry(country);
+}
+
 /**
  * A BCP-47 tag for date and number formatting. We only ever render English text,
  * so the language stays "en" and the region does the work: en-NZ gives 8/07/2026,

@@ -64,6 +64,9 @@ export type PassAllocationView = {
   source: string;
   note: string;
   createdAt: string;
+  entitlementServiceId: string | null;
+  totalValueCents: number | null;
+  currency: string | null;
 };
 
 export type PassRedemptionView = {
@@ -83,6 +86,9 @@ export type PassView = {
   name: string;
   templateServiceId: string | null;
   coversServiceIds: string[];
+  crossRedeemable: boolean;
+  flexibleValueCents: number;
+  currency: string | null;
   creditsAvailable: number;
   creditsAllocated: number;
   creditsRedeemed: number;
@@ -118,6 +124,11 @@ export type PassGrantInput = {
    * not, and a pass sitting unassigned is better than one attached to a guess.
    */
   allowUnassigned?: unknown;
+  /** Exact consideration for this allocation lot, in minor currency units. */
+  totalValueCents?: unknown;
+  currency?: unknown;
+  crossRedeemable?: unknown;
+  entitlementServiceId?: unknown;
 };
 
 /** What a `lessonFormat: "package"` service says about the pass it sells. */
@@ -126,6 +137,8 @@ export type PassTemplate = {
   name: string;
   credits: number;
   coversServiceIds: string[];
+  crossRedeemable: boolean;
+  priceCents: number | null;
 };
 
 export type PassActor = {
@@ -153,6 +166,16 @@ function idList(value: unknown, max = 12): string[] {
     if (seen.size >= max) break;
   }
   return [...seen];
+}
+
+function cleanCurrency(value: unknown): string {
+  const currency = text(value, 3).toUpperCase();
+  return /^[A-Z]{3}$/.test(currency) ? currency : "";
+}
+
+function cleanCents(value: unknown): number | null {
+  const cents = Number(value);
+  return Number.isSafeInteger(cents) && cents >= 0 ? cents : null;
 }
 
 /**
@@ -192,6 +215,10 @@ export function passTemplatesFromServices(services: unknown): PassTemplate[] {
       name: text(entry?.name, 180) || "Pass",
       credits: cleanCredits(entry?.packageAllowance, 5),
       coversServiceIds: covers.length ? covers : single ? [single] : [],
+      crossRedeemable: entry?.crossRedeemable === true,
+      priceCents: Number.isFinite(Number(entry?.price))
+        ? Math.max(0, Math.round(Number(entry.price) * 100))
+        : null,
     });
   }
   return templates;
@@ -218,6 +245,123 @@ export function spendOrder<T extends { expiresAt: string | null; availableFrom: 
   });
 }
 
+/** Exact value of a unit within an allocation lot.
+ *
+ * Integer division can leave a remainder (for example 100 cents across three
+ * units). The earliest unit ordinals receive one extra cent. That makes the
+ * rule deterministic and guarantees the values of all units add back to the
+ * exact transaction total without floating point money.
+ */
+export function allocationUnitValueCents(
+  totalValueCents: number,
+  unitsAllocated: number,
+  unitOrdinal: number,
+): number {
+  if (!Number.isSafeInteger(totalValueCents) || totalValueCents < 0) {
+    fail("Allocation value must be whole minor currency units.");
+  }
+  if (!Number.isSafeInteger(unitsAllocated) || unitsAllocated < 1) {
+    fail("An allocation must contain at least one unit.");
+  }
+  if (!Number.isSafeInteger(unitOrdinal) || unitOrdinal < 1 || unitOrdinal > unitsAllocated) {
+    fail("Unit ordinal is outside the allocation.");
+  }
+  const base = Math.floor(totalValueCents / unitsAllocated);
+  const remainder = totalValueCents % unitsAllocated;
+  return base + (unitOrdinal <= remainder ? 1 : 0);
+}
+
+export type ExchangeAllocation = {
+  allocationId: string;
+  passId: string;
+  unitsAllocated: number;
+  unitsRedeemed: number;
+  unitsAvailable: number;
+  totalValueCents: number;
+  expiresAt: string | null;
+  availableFrom: string;
+};
+
+export type ExchangePlan = {
+  flexibleUsedCents: number;
+  entitlements: Array<{ allocationId: string; passId: string; unitOrdinal: number; valueCents: number }>;
+  residualCents: number;
+};
+
+/** Plan a cross-redemption without mutating state. The caller supplies only
+ * same-currency, live, cross-redeemable allocations. */
+export function planCrossRedemption(
+  targetValueCents: number,
+  flexibleValueCents: number,
+  allocations: ExchangeAllocation[],
+): ExchangePlan | null {
+  if (!Number.isSafeInteger(targetValueCents) || targetValueCents <= 0) return null;
+  const flexibleUsedCents = Math.min(
+    targetValueCents,
+    Math.max(0, Math.trunc(flexibleValueCents)),
+  );
+  let available = flexibleUsedCents;
+  let needed = targetValueCents - flexibleUsedCents;
+  const entitlements: ExchangePlan["entitlements"] = [];
+
+  for (const allocation of spendOrder(allocations)) {
+    for (let offset = 1; offset <= allocation.unitsAvailable && needed > 0; offset += 1) {
+      const unitOrdinal = allocation.unitsRedeemed + offset;
+      const valueCents = allocationUnitValueCents(
+        allocation.totalValueCents,
+        allocation.unitsAllocated,
+        unitOrdinal,
+      );
+      entitlements.push({
+        allocationId: allocation.allocationId,
+        passId: allocation.passId,
+        unitOrdinal,
+        valueCents,
+      });
+      available += valueCents;
+      needed = Math.max(0, targetValueCents - available);
+    }
+    if (needed === 0) break;
+  }
+
+  if (available < targetValueCents) return null;
+  return {
+    flexibleUsedCents,
+    entitlements,
+    residualCents: available - targetValueCents,
+  };
+}
+
+export type TenderAmount = { kind: string; amountCents: number };
+
+/** Deterministic refund split across the original tenders.
+ * Full refunds reproduce them exactly. Partial refunds are proportional, with
+ * any indivisible cent assigned in original tender order.
+ */
+export function planTenderRefund(
+  tenders: TenderAmount[],
+  requestedCents?: number,
+): TenderAmount[] {
+  const clean = tenders
+    .map((tender) => ({ kind: tender.kind, amountCents: Math.max(0, Math.trunc(tender.amountCents)) }))
+    .filter((tender) => tender.amountCents > 0);
+  const total = clean.reduce((sum, tender) => sum + tender.amountCents, 0);
+  const refund = Math.min(total, Math.max(0, Math.trunc(requestedCents ?? total)));
+  if (!total || !refund) return clean.map((tender) => ({ ...tender, amountCents: 0 }));
+  const result = clean.map((tender) => ({
+    kind: tender.kind,
+    amountCents: Math.floor((refund * tender.amountCents) / total),
+  }));
+  let remainder = refund - result.reduce((sum, tender) => sum + tender.amountCents, 0);
+  for (let index = 0; remainder > 0; index = (index + 1) % result.length) {
+    if (result[index].amountCents < clean[index].amountCents) {
+      result[index].amountCents += 1;
+      remainder -= 1;
+    }
+  }
+  return result;
+}
+
 /**
  * Two passes are the same entitlement -- and so a second purchase should top
  * the first one up rather than appear as another card -- only when they came
@@ -229,13 +373,16 @@ export function spendOrder<T extends { expiresAt: string | null; availableFrom: 
  * by the back door, silently widening or narrowing what the older credits buy.
  */
 export function isCompatiblePass(
-  pass: { templateServiceId: string | null; coversServiceIds: string[] },
-  grant: { templateServiceId: string | null; coversServiceIds: string[] },
+  pass: { templateServiceId: string | null; coversServiceIds: string[]; crossRedeemable?: boolean },
+  grant: { templateServiceId: string | null; coversServiceIds: string[]; crossRedeemable?: boolean },
 ): boolean {
   if (!pass.templateServiceId || pass.templateServiceId !== grant.templateServiceId) return false;
   if (pass.coversServiceIds.length !== grant.coversServiceIds.length) return false;
   const held = new Set(pass.coversServiceIds);
-  return grant.coversServiceIds.every((id) => held.has(id));
+  return (
+    Boolean(pass.crossRedeemable) === Boolean(grant.crossRedeemable) &&
+    grant.coversServiceIds.every((id) => held.has(id))
+  );
 }
 
 export type NormalisedGrant = {
@@ -249,6 +396,10 @@ export type NormalisedGrant = {
   merge: boolean;
   source: PassSource;
   sourceRef: string;
+  totalValueCents: number | null;
+  currency: string | null;
+  crossRedeemable: boolean;
+  entitlementServiceId: string | null;
 };
 
 /**
@@ -281,6 +432,21 @@ export function normaliseGrant(input: PassGrantInput, templates: PassTemplate[])
   const credits = cleanCredits(input?.credits, template?.credits || 0);
   if (!credits) fail("How many credits is this pass worth?");
 
+  const totalValueCents = cleanCents(input?.totalValueCents);
+  const currency = cleanCurrency(input?.currency) || null;
+  if ((totalValueCents === null) !== (currency === null)) {
+    fail("Pass value needs both an exact amount and a three-letter currency.");
+  }
+  const crossRedeemable = totalValueCents !== null && (
+    input?.crossRedeemable === undefined
+      ? Boolean(template?.crossRedeemable)
+      : input.crossRedeemable === true
+  );
+  const entitlementServiceId =
+    text(input?.entitlementServiceId, 120) ||
+    (coversServiceIds.length === 1 ? coversServiceIds[0] : "") ||
+    null;
+
   const months = Number(input?.expiryMonths);
   const expiryMonths = Number.isFinite(months)
     ? Math.max(0, Math.min(120, Math.round(months)))
@@ -296,9 +462,16 @@ export function normaliseGrant(input: PassGrantInput, templates: PassTemplate[])
     // make; it just should not be the one nobody picked.
     expiresAt: expiryMonths ? monthsFromNow(expiryMonths) : null,
     note: text(input?.note, 600),
-    merge: input?.merge !== false,
+    // Paid lots stay separate so their purchase value, expiry and source can
+    // never be blurred by a later purchase. Free/manual top-ups retain the
+    // existing merge behaviour unless the caller opts out.
+    merge: input?.merge !== false && totalValueCents === null,
     source: PASS_SOURCES.includes(input?.source as PassSource) ? (input.source as PassSource) : "manual",
     sourceRef: text(input?.sourceRef, 200),
+    totalValueCents,
+    currency,
+    crossRedeemable,
+    entitlementServiceId,
   };
 }
 
@@ -311,7 +484,7 @@ function monthsFromNow(months: number): string {
 
 function rowToAllocation(row: Record<string, unknown>): PassAllocationView {
   return {
-    id: String(row.id),
+    id: String(row.allocation_id || row.id),
     credits: Number(row.credits) || 0,
     creditsRedeemed: Number(row.credits_redeemed) || 0,
     creditsAvailable: Number(row.credits_available) || 0,
@@ -321,6 +494,12 @@ function rowToAllocation(row: Record<string, unknown>): PassAllocationView {
     source: String(row.source || ""),
     note: (row.note as string) || "",
     createdAt: String(row.created_at || ""),
+    entitlementServiceId: (row.entitlement_service_id as string) || null,
+    totalValueCents:
+      row.total_value_cents === null || row.total_value_cents === undefined
+        ? null
+        : Number(row.total_value_cents),
+    currency: (row.currency as string) || null,
   };
 }
 
@@ -352,6 +531,9 @@ function rowToPass(row: Record<string, unknown>): PassView {
     coversServiceIds: Array.isArray(row.covers_service_ids)
       ? (row.covers_service_ids as string[]).map(String)
       : [],
+    crossRedeemable: row.cross_redeemable === true,
+    flexibleValueCents: Number(row.flexible_value_cents) || 0,
+    currency: (row.value_currency as string) || null,
     creditsAvailable: Number(row.credits_available) || 0,
     creditsAllocated: Number(row.credits_allocated_all_time) || 0,
     creditsRedeemed: Number(row.credits_redeemed_all_time) || 0,
@@ -386,6 +568,19 @@ export async function readPassesForPerson(accountId: string, personId: string): 
       p.source,
       p.note,
       p.issued_at,
+      p.cross_redeemable,
+      COALESCE((
+        SELECT SUM(m.amount_cents)
+        FROM public.pass_value_movements m
+        WHERE m.pass_id = p.id AND m.account_id = ${accountId}
+      ), 0) AS flexible_value_cents,
+      (
+        SELECT m.currency
+        FROM public.pass_value_movements m
+        WHERE m.pass_id = p.id AND m.account_id = ${accountId}
+        ORDER BY m.created_at DESC
+        LIMIT 1
+      ) AS value_currency,
       COALESCE((
         SELECT json_agg(a ORDER BY a.expires_at NULLS LAST, a.available_from)
         FROM public.pass_allocation_balances a
@@ -406,7 +601,8 @@ export async function readPassesForPerson(accountId: string, personId: string): 
 
 async function readPassRow(accountId: string, passId: string) {
   const rows = await db().sql`
-    SELECT id, person_id, template_service_id, covers_service_ids, status
+    SELECT id, person_id, template_service_id, covers_service_ids, status,
+           cross_redeemable
     FROM public.passes
     WHERE id = ${passId} AND account_id = ${accountId}
     LIMIT 1
@@ -448,14 +644,15 @@ export async function grantPass(
     if (!passId) {
       passId = `pass-${randomUUID()}`;
       await client.query(
-        `INSERT INTO public.passes (
+      `INSERT INTO public.passes (
            id, account_id, person_id, name, template_service_id, covers_service_ids,
            issued_at, expires_at, status, source, source_ref, allocation_mode,
-           credits_per_period, rollover_policy, note, created_by, created_at, updated_at
+           credits_per_period, rollover_policy, note, created_by, created_at, updated_at,
+           cross_redeemable
          ) VALUES (
            $1, $2, NULLIF($3, ''), $4, $5, $6,
            NOW(), $7, 'active', $8, NULLIF($9, ''), 'one_off',
-           $10, 'rollover', $11, $12, NOW(), NOW()
+           $10, 'rollover', $11, $12, NOW(), NOW(), $13
          )`,
         [
           passId,
@@ -470,6 +667,7 @@ export async function grantPass(
           grant.credits,
           grant.note,
           actor.actorId,
+          grant.crossRedeemable,
         ],
       );
     }
@@ -477,8 +675,9 @@ export async function grantPass(
     await client.query(
       `INSERT INTO public.pass_allocations (
          id, account_id, pass_id, credits, available_from, expires_at,
-         source, source_ref, note, created_by, created_at
-       ) VALUES ($1, $2, $3, $4, NOW(), $5, $6, NULLIF($7, ''), $8, $9, NOW())`,
+         source, source_ref, note, created_by, created_at,
+         entitlement_service_id, total_value_cents, currency
+       ) VALUES ($1, $2, $3, $4, NOW(), $5, $6, NULLIF($7, ''), $8, $9, NOW(), $10, $11, $12)`,
       [
         `alloc-${randomUUID()}`,
         accountId,
@@ -492,6 +691,9 @@ export async function grantPass(
         grant.sourceRef,
         grant.note,
         actor.actorId,
+        grant.entitlementServiceId,
+        grant.totalValueCents,
+        grant.currency,
       ],
     );
 
@@ -733,6 +935,12 @@ export type PassOption = {
   covered: boolean;
   /** Why it cannot pay, ready to show greyed beside it. */
   reason: string;
+  paymentKind: "native" | "cross_redemption" | "unavailable";
+  availableValueCents: number;
+  flexibleValueCents: number;
+  currency: string | null;
+  remainingCreditsAfter: number | null;
+  residualValueCentsAfter: number | null;
 };
 
 /**
@@ -751,16 +959,78 @@ export function passOptionsForService(
   passes: PassView[],
   serviceId: string,
   serviceName = "",
+  value?: {
+    serviceValueCents: number;
+    currency: string;
+    acceptsCrossRedemption: boolean;
+    flexibleValueCents?: number;
+  },
 ): PassOption[] {
   const wanted = text(serviceId, 120);
+  const hasNativeEntitlement = passes.some(
+    (pass) =>
+      pass.status === "active" &&
+      pass.creditsAvailable > 0 &&
+      pass.coversServiceIds.includes(wanted),
+  );
+  const currency = cleanCurrency(value?.currency);
+  const exchangeAllocations: ExchangeAllocation[] = passes.flatMap((pass) =>
+    pass.crossRedeemable
+      ? pass.allocations
+          .filter(
+            (allocation) =>
+              allocation.isLive &&
+              allocation.creditsAvailable > 0 &&
+              allocation.totalValueCents !== null &&
+              allocation.currency === currency,
+          )
+          .map((allocation) => ({
+            allocationId: allocation.id,
+            passId: pass.id,
+            unitsAllocated: allocation.credits,
+            unitsRedeemed: allocation.creditsRedeemed,
+            unitsAvailable: allocation.creditsAvailable,
+            totalValueCents: allocation.totalValueCents as number,
+            expiresAt: allocation.expiresAt,
+            availableFrom: allocation.availableFrom,
+          }))
+      : [],
+  );
+  const exchangePlan = value?.acceptsCrossRedemption && currency
+    ? planCrossRedemption(
+        Math.round(Number(value.serviceValueCents) || 0),
+        Math.max(0, Math.round(Number(value.flexibleValueCents) || 0)),
+        exchangeAllocations,
+      )
+    : null;
+  const availableValueCents =
+    Math.max(0, Math.round(Number(value?.flexibleValueCents) || 0)) +
+    exchangeAllocations.reduce((sum, allocation) => {
+      let remaining = 0;
+      for (let offset = 1; offset <= allocation.unitsAvailable; offset += 1) {
+        remaining += allocationUnitValueCents(
+          allocation.totalValueCents,
+          allocation.unitsAllocated,
+          allocation.unitsRedeemed + offset,
+        );
+      }
+      return sum + remaining;
+    }, 0);
   return passes
     .filter((pass) => pass.status === "active" || pass.status === "exhausted")
     .map((pass) => {
       const covered = Boolean(wanted) && pass.coversServiceIds.includes(wanted);
+      const crossCovered = Boolean(
+        !hasNativeEntitlement && !covered && pass.crossRedeemable && exchangePlan,
+      );
       let reason = "";
       if (!pass.coversServiceIds.length) reason = "No covered service set";
-      else if (!covered) reason = "Covers something else";
-      else if (pass.creditsAvailable < 1) reason = "No credits left";
+      else if (!covered && hasNativeEntitlement) reason = "A matching entitlement is used first";
+      else if (!covered && !pass.crossRedeemable) reason = "Covers something else";
+      else if (!covered && !value?.acceptsCrossRedemption) reason = "This service does not accept balance";
+      else if (!covered && !currency) reason = "No currency set";
+      else if (!covered && !exchangePlan) reason = "Not enough same-currency value";
+      else if (covered && pass.creditsAvailable < 1) reason = "No credits left";
       return {
         passId: pass.id,
         name: pass.name,
@@ -768,10 +1038,138 @@ export function passOptionsForService(
         creditsAllocated: pass.creditsAllocated,
         expiresAt: pass.expiresAt,
         nextExpiry: pass.nextExpiry,
-        covered: covered && pass.creditsAvailable >= 1,
+        covered: (covered && pass.creditsAvailable >= 1) || crossCovered,
         reason: reason || (serviceName ? `Covers ${serviceName}` : ""),
+        paymentKind: covered && pass.creditsAvailable >= 1
+          ? "native"
+          : crossCovered
+            ? "cross_redemption"
+            : "unavailable",
+        availableValueCents,
+        flexibleValueCents: Math.max(0, Math.round(Number(value?.flexibleValueCents) || 0)),
+        currency: currency || null,
+        remainingCreditsAfter: crossCovered
+          ? Math.max(0, passes.reduce((sum, entry) => sum + entry.creditsAvailable, 0) - exchangePlan!.entitlements.length)
+          : covered
+            ? pass.creditsAvailable - 1
+            : null,
+        residualValueCentsAfter: crossCovered ? exchangePlan!.residualCents : null,
       };
     });
+}
+
+export async function readFlexibleValueForPerson(
+  accountId: string,
+  personId: string,
+  currency: string,
+): Promise<number> {
+  const code = cleanCurrency(currency);
+  if (!accountId || !personId || !code) return 0;
+  const expired = await db().sql`
+    SELECT id
+    FROM public.pass_value_transactions
+    WHERE account_id = ${accountId}
+      AND person_id = ${personId}
+      AND kind = 'purchase_tender'
+      AND settled_at IS NULL
+      AND reversed_at IS NULL
+      AND expires_at IS NOT NULL
+      AND expires_at <= NOW()
+  `;
+  for (const row of expired as Record<string, unknown>[]) {
+    await reversePassValueTransaction(
+      accountId,
+      String(row.id),
+      "Purchase reservation expired",
+      "system",
+    );
+  }
+  const rows = await db().sql`
+    SELECT COALESCE(SUM(amount_cents), 0)::BIGINT AS value_cents
+    FROM public.pass_value_movements
+    WHERE account_id = ${accountId}
+      AND person_id = ${personId}
+      AND currency = ${code}
+  `;
+  return Math.max(0, Number((rows as Record<string, unknown>[])[0]?.value_cents || 0));
+}
+
+/** Reserve existing flexible credit as one tender toward a new purchase. */
+export async function reserveFlexibleValueForPurchase(input: {
+  accountId: string;
+  personId: string;
+  purchaseValueCents: number;
+  currency: string;
+  sourceRef: string;
+  actorId?: string;
+}): Promise<{ transactionId: string; creditUsedCents: number } | null> {
+  const accountId = text(input.accountId, 120);
+  const personId = text(input.personId, 160);
+  const currency = cleanCurrency(input.currency);
+  const purchaseValueCents = cleanCents(input.purchaseValueCents);
+  const sourceRef = text(input.sourceRef, 200);
+  if (!accountId || !personId || !currency || purchaseValueCents === null || purchaseValueCents <= 0) {
+    fail("The purchase needs a player, exact value and currency.");
+  }
+  const client = await db().pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+      [`pass-value:${accountId}:${personId}:${currency}`],
+    );
+    const balanceRows = await client.query(
+      `SELECT COALESCE(SUM(amount_cents), 0)::BIGINT AS value_cents
+       FROM public.pass_value_movements
+       WHERE account_id = $1 AND person_id = $2 AND currency = $3`,
+      [accountId, personId, currency],
+    );
+    const available = Math.max(0, Number((balanceRows.rows[0] as Record<string, unknown>)?.value_cents || 0));
+    const creditUsedCents = Math.min(available, purchaseValueCents);
+    if (creditUsedCents <= 0) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+    const transactionId = `pvtx-${randomUUID()}`;
+    await client.query(
+      `INSERT INTO public.pass_value_transactions (
+         id, account_id, person_id, kind, target_value_cents, currency,
+         source_ref, expires_at, created_by, created_at
+       ) VALUES ($1, $2, $3, 'purchase_tender', $4, $5, NULLIF($6, ''),
+                 NOW() + INTERVAL '25 hours', $7, NOW())`,
+      [transactionId, accountId, personId, creditUsedCents, currency, sourceRef, text(input.actorId, 160)],
+    );
+    await client.query(
+      `INSERT INTO public.pass_value_movements (
+         id, account_id, person_id, transaction_id, amount_cents, currency,
+         movement_kind, note, created_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, 'flexible_spent', 'Purchase tender', NOW())`,
+      [`pvm-${randomUUID()}`, accountId, personId, transactionId, -creditUsedCents, currency],
+    );
+    await client.query("COMMIT");
+    return { transactionId, creditUsedCents };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => null);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function settleFlexibleValuePurchase(
+  accountId: string,
+  transactionId: string,
+): Promise<boolean> {
+  const rows = await db().sql`
+    UPDATE public.pass_value_transactions
+    SET settled_at = COALESCE(settled_at, NOW()), expires_at = NULL
+    WHERE id = ${text(transactionId, 160)}
+      AND account_id = ${text(accountId, 120)}
+      AND kind = 'purchase_tender'
+      AND reversed_at IS NULL
+    RETURNING id
+  `;
+  return (rows as unknown[]).length > 0;
 }
 
 /* --- What a player is allowed to see -----------------------------------
@@ -862,6 +1260,13 @@ export function playerPassViews(
 }
 
 export type ReservedCredit = { redemptionId: string; allocationId: string };
+
+export type ReservedValue = {
+  transactionId: string;
+  redemptionIds: string[];
+  flexibleUsedCents: number;
+  residualCents: number;
+};
 
 /**
  * Take a credit for a booking, or refuse.
@@ -956,6 +1361,238 @@ export async function reservePassCredit(input: {
   }
 }
 
+/**
+ * Settle an unrelated service from flexible value plus the minimum whole
+ * entitlements required. The service eligibility and authoritative price are
+ * supplied by the server-side catalogue caller; this function never accepts a
+ * browser-calculated balance.
+ */
+export async function reserveCrossRedemption(input: {
+  accountId: string;
+  passId: string;
+  bookingId: string;
+  serviceId: string;
+  serviceValueCents: number;
+  currency: string;
+  acceptsCrossRedemption: boolean;
+  actorId?: string;
+}): Promise<ReservedValue> {
+  const accountId = text(input.accountId, 120);
+  const selectedPassId = text(input.passId, 120);
+  const bookingId = text(input.bookingId, 160);
+  const serviceId = text(input.serviceId, 120);
+  const currency = cleanCurrency(input.currency);
+  const serviceValueCents = cleanCents(input.serviceValueCents);
+  if (!accountId) fail("No account.", 403, "forbidden");
+  if (!selectedPassId) fail("Which pass?");
+  if (!bookingId) fail("A balance can only settle a booking.", 400, "booking_required");
+  if (!serviceId || serviceValueCents === null || serviceValueCents <= 0 || !currency) {
+    fail("The service needs an exact value and currency.");
+  }
+  if (!input.acceptsCrossRedemption) {
+    fail("That service does not accept cross redemption.", 409, "cross_redemption_disabled");
+  }
+
+  const client = await db().pool.connect();
+  try {
+    await client.query("BEGIN");
+    const selected = await client.query(
+      `SELECT id, person_id, cross_redeemable
+       FROM public.passes
+       WHERE id = $1 AND account_id = $2 AND status = 'active'
+       FOR UPDATE`,
+      [selectedPassId, accountId],
+    );
+    const pass = selected.rows[0] as Record<string, unknown> | undefined;
+    if (!pass) fail("That pass was not found.", 404, "not_found");
+    if (pass.cross_redeemable !== true || !pass.person_id) {
+      fail("That pass can only be used for its covered services.", 409, "cross_redemption_disabled");
+    }
+    const personId = String(pass.person_id);
+
+    const native = await client.query(
+      `SELECT b.pass_id
+       FROM public.pass_balances b
+       WHERE b.account_id = $1
+         AND b.person_id = $2
+         AND $3 = ANY(b.covers_service_ids)
+         AND b.effective_status = 'active'
+         AND b.credits_available > 0
+       LIMIT 1`,
+      [accountId, personId, serviceId],
+    );
+    if (native.rows.length) {
+      fail("Use the matching service entitlement before flexible value.", 409, "native_entitlement_available");
+    }
+
+    // Serialise every flexible-value spend for this person/currency, including
+    // the case where there are no movement rows yet (which row locks cannot do).
+    await client.query(
+      `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+      [`pass-value:${accountId}:${personId}:${currency}`],
+    );
+
+    const flexibleRows = await client.query(
+      `SELECT COALESCE(SUM(amount_cents), 0)::BIGINT AS value_cents
+       FROM public.pass_value_movements
+       WHERE account_id = $1 AND person_id = $2 AND currency = $3`,
+      [accountId, personId, currency],
+    );
+    const flexibleValueCents = Number((flexibleRows.rows[0] as Record<string, unknown>)?.value_cents || 0);
+
+    // Lock all candidate pass rows before reading their derived balances. This
+    // prevents a native redemption racing the cross-redemption planner.
+    await client.query(
+      `SELECT id FROM public.passes
+       WHERE account_id = $1 AND person_id = $2 AND cross_redeemable = TRUE
+       ORDER BY id FOR UPDATE`,
+      [accountId, personId],
+    );
+    const rows = await client.query(
+      `SELECT a.allocation_id, a.pass_id, a.credits_allocated,
+              a.credits_redeemed, a.credits_available, a.total_value_cents,
+              a.expires_at, a.available_from
+       FROM public.pass_allocation_balances a
+       JOIN public.passes p ON p.id = a.pass_id AND p.account_id = a.account_id
+       WHERE a.account_id = $1
+         AND p.person_id = $2
+         AND p.status = 'active'
+         AND p.cross_redeemable = TRUE
+         AND a.currency = $3
+         AND a.total_value_cents IS NOT NULL
+         AND a.is_live
+         AND a.credits_available > 0
+       ORDER BY a.expires_at NULLS LAST, a.available_from, a.allocation_id`,
+      [accountId, personId, currency],
+    );
+    const plan = planCrossRedemption(
+      serviceValueCents,
+      flexibleValueCents,
+      (rows.rows as Record<string, unknown>[]).map((row) => ({
+        allocationId: String(row.allocation_id),
+        passId: String(row.pass_id),
+        unitsAllocated: Number(row.credits_allocated),
+        unitsRedeemed: Number(row.credits_redeemed),
+        unitsAvailable: Number(row.credits_available),
+        totalValueCents: Number(row.total_value_cents),
+        expiresAt: (row.expires_at as string) || null,
+        availableFrom: String(row.available_from || ""),
+      })),
+    );
+    if (!plan) fail("That Clarity balance is not enough for this service.", 409, "insufficient_value");
+
+    const transactionId = `pvtx-${randomUUID()}`;
+    await client.query(
+      `INSERT INTO public.pass_value_transactions (
+         id, account_id, person_id, booking_id, target_service_id, kind,
+         target_value_cents, currency, created_by, created_at
+       ) VALUES ($1, $2, $3, $4, $5, 'cross_redemption', $6, $7, $8, NOW())`,
+      [transactionId, accountId, personId, bookingId, serviceId, serviceValueCents, currency, text(input.actorId, 160)],
+    );
+
+    if (plan.flexibleUsedCents > 0) {
+      await client.query(
+        `INSERT INTO public.pass_value_movements (
+           id, account_id, person_id, transaction_id, amount_cents, currency,
+           movement_kind, note, created_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, 'flexible_spent', $7, NOW())`,
+        [`pvm-${randomUUID()}`, accountId, personId, transactionId, -plan.flexibleUsedCents, currency, `Used for ${serviceId}`],
+      );
+    }
+
+    const redemptionIds: string[] = [];
+    for (const [unitIndex, unit] of plan.entitlements.entries()) {
+      const redemptionId = `red-${randomUUID()}`;
+      // Only the first row carries booking_id. The value transaction groups
+      // every unit, while the original global booking index still arbitrates
+      // native versus cross-redemption races across two tills.
+      const redemptionBookingId = unitIndex === 0 ? bookingId : null;
+      await client.query(
+        `INSERT INTO public.pass_redemptions (
+           id, account_id, pass_id, allocation_id, booking_id, credits,
+           redeemed_at, redeemed_by, created_at, value_cents,
+           redemption_kind, value_transaction_id
+         ) VALUES ($1, $2, $3, $4, $5, 1, NOW(), $6, NOW(), $7,
+                   'cross_redemption', $8)`,
+        [redemptionId, accountId, unit.passId, unit.allocationId, redemptionBookingId, text(input.actorId, 160), unit.valueCents, transactionId],
+      );
+      redemptionIds.push(redemptionId);
+    }
+
+    if (plan.residualCents > 0) {
+      await client.query(
+        `INSERT INTO public.pass_value_movements (
+           id, account_id, person_id, transaction_id, pass_id, allocation_id,
+           redemption_id, amount_cents, currency, movement_kind, note, created_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'residual_created', $10, NOW())`,
+        [`pvm-${randomUUID()}`, accountId, personId, transactionId,
+          plan.entitlements[0]?.passId || selectedPassId,
+          plan.entitlements[0]?.allocationId || null,
+          redemptionIds[0] || null,
+          plan.residualCents, currency,
+          `Change from ${serviceId}`],
+      );
+    }
+
+    await client.query("COMMIT");
+    return {
+      transactionId,
+      redemptionIds,
+      flexibleUsedCents: plan.flexibleUsedCents,
+      residualCents: plan.residualCents,
+    };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => null);
+    if ((error as { code?: string })?.code === "23505") {
+      fail("That booking has already been settled with a pass.", 409, "already_redeemed");
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export type ReservedPassPayment =
+  | ({ kind: "native" } & ReservedCredit)
+  | ({ kind: "cross_redemption" } & ReservedValue);
+
+/** Server-owned switch between native entitlement use and value exchange. */
+export async function reservePassForService(input: {
+  accountId: string;
+  passId: string;
+  bookingId: string;
+  serviceId: string;
+  serviceValueCents: number;
+  currency: string;
+  acceptsCrossRedemption: boolean;
+  actorId?: string;
+}): Promise<ReservedPassPayment> {
+  const rows = await db().sql`
+    SELECT covers_service_ids
+    FROM public.passes
+    WHERE id = ${text(input.passId, 120)}
+      AND account_id = ${text(input.accountId, 120)}
+    LIMIT 1
+  `;
+  const pass = (rows as Record<string, unknown>[])[0];
+  if (!pass) fail("That pass was not found.", 404, "not_found");
+  const covers = Array.isArray(pass.covers_service_ids)
+    ? (pass.covers_service_ids as unknown[]).map(String)
+    : [];
+  if (covers.includes(text(input.serviceId, 120))) {
+    return {
+      kind: "native",
+      ...(await reservePassCredit({
+        accountId: input.accountId,
+        passId: input.passId,
+        bookingId: input.bookingId,
+        actorId: input.actorId,
+      })),
+    };
+  }
+  return { kind: "cross_redemption", ...(await reserveCrossRedemption(input)) };
+}
+
 /** Record which $0 sale a redemption settled, once that sale exists. */
 export async function attachRedemptionToSale(
   accountId: string,
@@ -967,6 +1604,109 @@ export async function attachRedemptionToSale(
     SET pos_transaction_id = ${text(posTransactionId, 160)}
     WHERE id = ${text(redemptionId, 120)} AND account_id = ${text(accountId, 120)}
   `;
+}
+
+/** Attach every entitlement movement in a value settlement to its POS row. */
+export async function attachValueTransactionToSale(
+  accountId: string,
+  transactionId: string,
+  posTransactionId: string,
+): Promise<void> {
+  await db().sql`
+    UPDATE public.pass_redemptions
+    SET pos_transaction_id = ${text(posTransactionId, 160)}
+    WHERE value_transaction_id = ${text(transactionId, 160)}
+      AND account_id = ${text(accountId, 120)}
+  `;
+}
+
+/** Restore the exact allocation units and append inverse monetary movements. */
+export async function reversePassValueTransaction(
+  accountId: string,
+  transactionId: string,
+  reason: string,
+  actorId = "",
+): Promise<boolean> {
+  const client = await db().pool.connect();
+  try {
+    await client.query("BEGIN");
+    const held = await client.query(
+      `SELECT * FROM public.pass_value_transactions
+       WHERE id = $1 AND account_id = $2 AND reversed_at IS NULL
+       FOR UPDATE`,
+      [text(transactionId, 160), text(accountId, 120)],
+    );
+    const original = held.rows[0] as Record<string, unknown> | undefined;
+    if (!original) {
+      await client.query("ROLLBACK");
+      return false;
+    }
+    const personId = String(original.person_id);
+    const currency = String(original.currency);
+    await client.query(
+      `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+      [`pass-value:${accountId}:${personId}:${currency}`],
+    );
+    const movements = await client.query(
+      `SELECT id, pass_id, allocation_id, redemption_id, amount_cents
+       FROM public.pass_value_movements
+       WHERE account_id = $1 AND transaction_id = $2
+       ORDER BY created_at, id`,
+      [accountId, transactionId],
+    );
+    const balanceRows = await client.query(
+      `SELECT COALESCE(SUM(amount_cents), 0)::BIGINT AS value_cents
+       FROM public.pass_value_movements
+       WHERE account_id = $1 AND person_id = $2 AND currency = $3`,
+      [accountId, personId, currency],
+    );
+    const balance = Number((balanceRows.rows[0] as Record<string, unknown>)?.value_cents || 0);
+    const inverseTotal = -(movements.rows as Record<string, unknown>[])
+      .reduce((sum, row) => sum + Number(row.amount_cents || 0), 0);
+    if (balance + inverseTotal < 0) {
+      fail("Later spending must be reversed before this transaction.", 409, "dependent_value_spent");
+    }
+
+    const reversalId = `pvtx-${randomUUID()}`;
+    await client.query(
+      `INSERT INTO public.pass_value_transactions (
+         id, account_id, person_id, kind, target_value_cents, currency,
+         source_ref, created_by, created_at
+       ) VALUES ($1, $2, $3, 'reversal', $4, $5, $6, $7, NOW())`,
+      [reversalId, accountId, personId, Number(original.target_value_cents) || 0,
+        currency, `reversal:${transactionId}`, text(actorId, 160)],
+    );
+    for (const movement of movements.rows as Record<string, unknown>[]) {
+      await client.query(
+        `INSERT INTO public.pass_value_movements (
+           id, account_id, person_id, transaction_id, pass_id, allocation_id,
+           redemption_id, amount_cents, currency, movement_kind, note, created_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'reversal', $10, NOW())`,
+        [`pvm-${randomUUID()}`, accountId, personId, reversalId,
+          movement.pass_id || null, movement.allocation_id || null, movement.redemption_id || null,
+          -Number(movement.amount_cents), currency, text(reason, 300) || "Transaction reversed"],
+      );
+    }
+    await client.query(
+      `UPDATE public.pass_redemptions
+       SET reversed_at = NOW(), reversal_reason = $3, reversed_by = $4
+       WHERE account_id = $1 AND value_transaction_id = $2 AND reversed_at IS NULL`,
+      [accountId, transactionId, text(reason, 300), text(actorId, 160)],
+    );
+    await client.query(
+      `UPDATE public.pass_value_transactions
+       SET reversed_at = NOW(), reversal_reason = $3, reversed_by = $4
+       WHERE account_id = $1 AND id = $2 AND reversed_at IS NULL`,
+      [accountId, transactionId, text(reason, 300), text(actorId, 160)],
+    );
+    await client.query("COMMIT");
+    return true;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => null);
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 /**
@@ -1037,6 +1777,30 @@ type SqlClient = { query: (text: string, values?: unknown[]) => Promise<{ rows: 
  */
 export async function sweepReturnableCredits(accountId: string): Promise<number> {
   if (!accountId) return 0;
+  const valueRows = await db().sql`
+    SELECT t.id,
+      CASE
+        WHEN c.id IS NULL THEN 'Booking deleted'
+        WHEN c.status = 'cancelled' THEN 'Lesson cancelled'
+        ELSE 'Booking is no longer a lesson'
+      END AS reason
+    FROM public.pass_value_transactions t
+    LEFT JOIN public.calendar_items c
+      ON c.id = t.booking_id AND c.account_id = t.account_id
+    WHERE t.account_id = ${accountId}
+      AND t.reversed_at IS NULL
+      AND t.booking_id IS NOT NULL
+      AND (c.id IS NULL OR c.status = 'cancelled' OR c.kind <> 'appointment')
+  `;
+  let valueReturned = 0;
+  for (const row of valueRows as Record<string, unknown>[]) {
+    if (await reversePassValueTransaction(
+      accountId,
+      String(row.id),
+      String(row.reason || "Booking cancelled"),
+      "system",
+    )) valueReturned += 1;
+  }
   const rows = await db().sql`
     UPDATE public.pass_redemptions r
     SET reversed_at = NOW(),
@@ -1053,10 +1817,11 @@ export async function sweepReturnableCredits(accountId: string): Promise<number>
       AND r.account_id = ${accountId}
       AND r.reversed_at IS NULL
       AND r.booking_id IS NOT NULL
+      AND r.value_transaction_id IS NULL
       AND (c.id IS NULL OR c.status = 'cancelled' OR c.kind <> 'appointment')
     RETURNING r.id
   `;
-  return (rows as unknown[]).length;
+  return valueReturned + (rows as unknown[]).length;
 }
 
 /**
@@ -1077,12 +1842,81 @@ export async function reverseRedemptionsForBooking(
 ): Promise<number> {
   const id = text(bookingId, 160);
   if (!accountId || !id) return 0;
+  const valueTransactions = await client.query(
+    `SELECT id, person_id, currency, target_value_cents
+     FROM public.pass_value_transactions
+     WHERE account_id = $1 AND booking_id = $2 AND reversed_at IS NULL
+     FOR UPDATE`,
+    [accountId, id],
+  );
+  let reversed = 0;
+  for (const transaction of valueTransactions.rows as Record<string, unknown>[]) {
+    const transactionId = String(transaction.id);
+    const personId = String(transaction.person_id);
+    const currency = String(transaction.currency);
+    await client.query(
+      `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+      [`pass-value:${accountId}:${personId}:${currency}`],
+    );
+    const movements = await client.query(
+      `SELECT pass_id, allocation_id, redemption_id, amount_cents
+       FROM public.pass_value_movements
+       WHERE account_id = $1 AND transaction_id = $2
+       ORDER BY created_at, id`,
+      [accountId, transactionId],
+    );
+    const balanceRows = await client.query(
+      `SELECT COALESCE(SUM(amount_cents), 0)::BIGINT AS value_cents
+       FROM public.pass_value_movements
+       WHERE account_id = $1 AND person_id = $2 AND currency = $3`,
+      [accountId, personId, currency],
+    );
+    const inverseTotal = -(movements.rows as Record<string, unknown>[])
+      .reduce((sum, movement) => sum + Number(movement.amount_cents || 0), 0);
+    if (Number((balanceRows.rows[0] as Record<string, unknown>)?.value_cents || 0) + inverseTotal < 0) {
+      fail("Later spending must be reversed before this booking can be reversed.", 409, "dependent_value_spent");
+    }
+    const reversalId = `pvtx-${randomUUID()}`;
+    await client.query(
+      `INSERT INTO public.pass_value_transactions (
+         id, account_id, person_id, kind, target_value_cents, currency,
+         source_ref, created_by, created_at
+       ) VALUES ($1, $2, $3, 'reversal', $4, $5, $6, $7, NOW())`,
+      [reversalId, accountId, personId, Number(transaction.target_value_cents) || 0,
+        currency, `reversal:${transactionId}`, text(actorId, 160)],
+    );
+    for (const movement of movements.rows as Record<string, unknown>[]) {
+      await client.query(
+        `INSERT INTO public.pass_value_movements (
+           id, account_id, person_id, transaction_id, pass_id, allocation_id,
+           redemption_id, amount_cents, currency, movement_kind, note, created_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'reversal', $10, NOW())`,
+        [`pvm-${randomUUID()}`, accountId, personId, reversalId,
+          movement.pass_id || null, movement.allocation_id || null, movement.redemption_id || null,
+          -Number(movement.amount_cents), currency, text(reason, 300) || "Booking reversed"],
+      );
+    }
+    await client.query(
+      `UPDATE public.pass_redemptions
+       SET reversed_at = NOW(), reversal_reason = $3, reversed_by = $4
+       WHERE account_id = $1 AND value_transaction_id = $2 AND reversed_at IS NULL`,
+      [accountId, transactionId, text(reason, 300), text(actorId, 160)],
+    );
+    await client.query(
+      `UPDATE public.pass_value_transactions
+       SET reversed_at = NOW(), reversal_reason = $3, reversed_by = $4
+       WHERE account_id = $1 AND id = $2 AND reversed_at IS NULL`,
+      [accountId, transactionId, text(reason, 300), text(actorId, 160)],
+    );
+    reversed += 1;
+  }
   const result = await client.query(
     `UPDATE public.pass_redemptions
      SET reversed_at = NOW(), reversal_reason = $3, reversed_by = $4
      WHERE account_id = $1 AND booking_id = $2 AND reversed_at IS NULL
+       AND value_transaction_id IS NULL
      RETURNING id`,
     [accountId, id, text(reason, 300) || "Booking deleted", text(actorId, 160)],
   );
-  return result.rows.length;
+  return reversed + result.rows.length;
 }
