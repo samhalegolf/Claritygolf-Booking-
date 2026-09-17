@@ -38,10 +38,22 @@ export type CouponsPanelProps = {
   onSetVoid: (coupon: BillingCoupon, isVoid: boolean) => Promise<void>;
   onLoadRedemptions: (couponId: string) => Promise<CouponRedemption[]>;
   onScanStripe: () => Promise<CouponScanResult | null>;
-  onImport: (chargeIds: string[]) => Promise<number>;
+  onImport: (chargeIds: string[], addBuyersAsClients: boolean) => Promise<number>;
   /** The coach's price rules, and saving a changed list of them. */
   rules: VoucherAmountRule[];
   onSaveRules: (rules: VoucherAmountRule[]) => Promise<boolean>;
+  /** Preview, then perform, the "give old vouchers an owner" repair. */
+  onRepairOwners: (preview: boolean, addBuyersAsClients: boolean) => Promise<VoucherRepairResult | null>;
+};
+
+export type VoucherRepairResult = {
+  preview: boolean;
+  unowned?: number;
+  alreadyKnown?: number;
+  clientsToAdd?: number;
+  linked?: number;
+  clientsAdded?: number;
+  failures?: number;
 };
 
 const SOURCE_LABELS: Record<BillingCoupon["source"], string> = {
@@ -74,6 +86,7 @@ export function CouponsPanel({
   onImport,
   rules,
   onSaveRules,
+  onRepairOwners,
 }: CouponsPanelProps) {
   const [form, setForm] = useState(emptyIssueForm);
   const [issuing, setIssuing] = useState(false);
@@ -151,7 +164,7 @@ export function CouponsPanel({
     if (!chargeIds.length) return;
     setImporting(true);
     try {
-      await onImport(chargeIds);
+      await onImport(chargeIds, addBuyers);
       setScan(null);
       setChosen({});
     } finally {
@@ -225,6 +238,50 @@ export function CouponsPanel({
    * numbers back is a real workflow, and a far better one than reading 102
    * rows off a screen. */
   const [copied, setCopied] = useState("");
+  /* Default on, because a voucher filed under nobody cannot be found by the
+   * name of whoever bought it -- which is the point of filing it. Still a
+   * choice, because adding fifty clients is a thing to agree to rather than
+   * discover afterwards. */
+  const [addBuyers, setAddBuyers] = useState(true);
+
+  /* The one-off repair for vouchers imported before they could be filed under
+   * anybody. Two steps on purpose: on this account the honest description is
+   * "add 29 people to your client list", which somebody should read before it
+   * happens rather than after. */
+  const [repairPreview, setRepairPreview] = useState<VoucherRepairResult | null>(null);
+  const [repairing, setRepairing] = useState(false);
+  const [repairDone, setRepairDone] = useState("");
+
+  async function previewRepair() {
+    setRepairing(true);
+    setRepairDone("");
+    try {
+      setRepairPreview(await onRepairOwners(true, addBuyers));
+    } finally {
+      setRepairing(false);
+    }
+  }
+
+  async function runRepair() {
+    setRepairing(true);
+    try {
+      const result = await onRepairOwners(false, addBuyers);
+      if (result) {
+        setRepairDone(
+          `Filed ${result.linked || 0} voucher${result.linked === 1 ? "" : "s"}` +
+            (result.clientsAdded
+              ? `, ${result.clientsAdded} client${result.clientsAdded === 1 ? "" : "s"} added`
+              : "") +
+            (result.failures ? `, ${result.failures} could not be filed` : "") +
+            ".",
+        );
+        setRepairPreview(null);
+      }
+    } finally {
+      setRepairing(false);
+    }
+  }
+
   const [orderPaste, setOrderPaste] = useState("");
   const [showPaste, setShowPaste] = useState(false);
 
@@ -373,6 +430,54 @@ export function CouponsPanel({
           to Stripe rather than the synced invoice list because Stripe labels every one of these
           "Charge for &lt;email&gt;", so the product name is not in your records at all.
         </p>
+        {/* Vouchers imported before they could be filed under anyone.
+         *
+         * Not shown unless there are some: a repair for a problem the account
+         * does not have is a button that only ever creates doubt. */}
+        <div className="coupon-repair">
+          {!repairPreview && !repairDone && (
+            <button className="link-button" type="button" disabled={repairing} onClick={() => void previewRepair()}>
+              {repairing ? "Checking…" : "Check for vouchers that belong to nobody"}
+            </button>
+          )}
+          {repairPreview && (repairPreview.unowned || 0) > 0 && (
+            <div className="coupon-repair-preview">
+              <p className="field-help">
+                {repairPreview.unowned} voucher{repairPreview.unowned === 1 ? "" : "s"} belong
+                {repairPreview.unowned === 1 ? "s" : ""} to nobody.{" "}
+                {repairPreview.alreadyKnown
+                  ? `${repairPreview.alreadyKnown} of them match a client you already have. `
+                  : "None of them matches a client you already have — which is normal for gifts. "}
+                {addBuyers
+                  ? `Filing them adds ${repairPreview.clientsToAdd} client${
+                      repairPreview.clientsToAdd === 1 ? "" : "s"
+                    }.`
+                  : "Only the ones matching an existing client will be filed."}
+              </p>
+              <div className="panel-actions">
+                <button className="primary-button" type="button" disabled={repairing} onClick={() => void runRepair()}>
+                  {repairing ? "Filing…" : "File them"}
+                </button>
+                <button className="outline-button" type="button" onClick={() => setRepairPreview(null)}>
+                  Not now
+                </button>
+                <label className="coupon-add-buyers">
+                  <input
+                    type="checkbox"
+                    checked={addBuyers}
+                    onChange={(event) => setAddBuyers(event.target.checked)}
+                  />
+                  Add buyers to the client list
+                </label>
+              </div>
+            </div>
+          )}
+          {repairPreview && !repairPreview.unowned && (
+            <p className="field-help">Every voucher already belongs to somebody.</p>
+          )}
+          {repairDone && <p className="field-help">{repairDone}</p>}
+        </div>
+
         {/* Price rules.
          *
          * Only ever consulted for a payment Stripe could not name, which for a
@@ -492,6 +597,16 @@ export function CouponsPanel({
             <button className="primary-button" disabled={importing} onClick={() => void runImport()} type="button">
               {importing ? "Issuing…" : `Issue ${chosenCount} code${chosenCount === 1 ? "" : "s"}`}
             </button>
+          )}
+          {chosenCount > 0 && (
+            <label className="coupon-add-buyers">
+              <input
+                type="checkbox"
+                checked={addBuyers}
+                onChange={(event) => setAddBuyers(event.target.checked)}
+              />
+              Add buyers to the client list
+            </label>
           )}
         </div>
 

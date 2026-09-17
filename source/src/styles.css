@@ -12618,6 +12618,38 @@ button {
   color: var(--c-danger);
 }
 
+/* The one-off owner repair. Quiet until it has something to say: it opens as a
+   link, not a button, because on a healthy account the answer is "nothing to
+   do" and that should cost a glance rather than a decision. */
+.billing-coupons .coupon-repair {
+  display: grid;
+  gap: var(--c-space-1);
+  justify-items: start;
+  margin-bottom: var(--c-space-3);
+}
+
+.billing-coupons .coupon-repair-preview {
+  display: grid;
+  gap: var(--c-space-2);
+  justify-items: start;
+  padding: var(--c-space-2);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface-soft);
+}
+
+/* Filing buyers as clients, beside the button that mints the codes.
+   Deliberately not tucked into a settings panel: it changes what pressing the
+   button does, so it belongs where the button is. */
+.billing-coupons .coupon-add-buyers {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--c-space-1);
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+  cursor: pointer;
+}
+
 /* Selecting in bulk. The two things a coach knows about a payment that
    carries no product name are its price and its order number, so both are
    offered wholesale above the list rather than one checkbox at a time. */

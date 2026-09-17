@@ -4157,10 +4157,34 @@ async function customerTransactions(accountId: string, url: URL) {
     }
   }
 
+  /* Vouchers filed under this person.
+   *
+   * Two ways, and the second is the point of the whole thing: one issued *to*
+   * them, and one they *bought*. A gift is usually bought by somebody who will
+   * never redeem it, so the buyer is the only name anybody remembers when the
+   * card turns up months later without a code -- and searching the client list
+   * for that name has to lead here.
+   *
+   * Matched on customer_id or the address on the voucher, because an imported
+   * voucher carries the buyer's email whether or not a client was ever filed
+   * for them.
+   */
+  const person = (await supabase("people", {
+    query: `select=email&id=eq.${encodeFilter(personId)}&account_id=eq.${encodeFilter(accountId)}&limit=1`,
+  })) as Array<{ email?: string }>;
+  const personEmail = String(person[0]?.email || "").toLowerCase();
+  const couponFilters = [`customer_id=eq.${encodeFilter(personId)}`];
+  if (personEmail) couponFilters.push(`issued_to_email=ilike.${encodeFilter(personEmail)}`);
+  const couponRows = (await supabase("billing_coupons", {
+    query:
+      `select=*&account_id=eq.${encodeFilter(accountId)}` +
+      `&or=(${couponFilters.join(",")})&order=issued_at.desc&limit=100`,
+  }).catch(() => [])) as Array<Record<string, unknown>>;
+
   const invoices = [...billed, ...included].sort((a, b) =>
     String((b as Record<string, unknown>).issueDate ?? "").localeCompare(String((a as Record<string, unknown>).issueDate ?? ""))
     || String((b as Record<string, unknown>).createdAt ?? "").localeCompare(String((a as Record<string, unknown>).createdAt ?? "")));
-  return { pos: pos.transactions, invoices };
+  return { pos: pos.transactions, invoices, coupons: couponRows.map(couponRowToApi) };
 }
 
 // --- Coupons (gift vouchers) -------------------------------------------------
@@ -4384,6 +4408,100 @@ async function restoreCouponValue(accountId: string, couponId: string, amount: n
   return balance === null || balance === undefined ? null : Number(balance);
 }
 
+/**
+ * Give the vouchers already imported an owner.
+ *
+ * Everything issued before 2026-09-17 was filed under nobody: the import wrote
+ * the *Stripe* customer into billing_coupons.customer_id, and for a guest
+ * checkout Stripe sends none, so the column simply stayed empty. The codes are
+ * fine and spendable; they are just unreachable from the client list, which is
+ * the one place a coach looks when a card turns up months later with a name on
+ * it and no code.
+ *
+ * WHY IT RUNS AS A PREVIEW FIRST
+ *
+ * Because on this account "repair" does not mean linking, it means creating.
+ * Not one of the 32 buyers is an existing client -- which is exactly what a
+ * gift looks like -- so the honest description of the operation is "add 29
+ * people to your client list", and that is a sentence somebody should read
+ * before it happens rather than after.
+ *
+ * Idempotent: it only touches coupons with no owner, and createVoucherBuyer
+ * resolves a duplicate address to the existing person rather than failing, so
+ * running it twice links the same coupons to the same people.
+ */
+async function repairVoucherOwners(accountId: string, body: Record<string, unknown>) {
+  const preview = body?.preview === true;
+  const addBuyers = body?.addBuyersAsClients !== false;
+
+  const orphans = (await supabase("billing_coupons", {
+    query:
+      `select=id,code,issued_to_name,issued_to_email&account_id=eq.${encodeFilter(accountId)}` +
+      `&or=(customer_id.is.null,customer_id.eq.)` +
+      `&issued_to_email=not.is.null&limit=1000`,
+  })) as Array<Record<string, unknown>>;
+
+  const withEmail = orphans.filter((row) => cleanString(row.issued_to_email, "", 180));
+  const known = await matchPeopleByEmail(
+    accountId,
+    withEmail.map((row) => cleanString(row.issued_to_email, "", 180)),
+  );
+
+  // Counted on the distinct address, not on the coupon: three vouchers from
+  // one buyer are one client, and saying "32 clients would be added" when it
+  // is 29 is the kind of small lie that stops a number being trusted.
+  const unmatched = new Set(
+    withEmail
+      .map((row) => cleanString(row.issued_to_email, "", 180).toLowerCase())
+      .filter((email) => email && !known.get(email)),
+  );
+
+  if (preview) {
+    return {
+      preview: true,
+      unowned: withEmail.length,
+      alreadyKnown: withEmail.filter((row) =>
+        known.get(cleanString(row.issued_to_email, "", 180).toLowerCase()),
+      ).length,
+      clientsToAdd: addBuyers ? unmatched.size : 0,
+    };
+  }
+
+  const resolved = new Map<string, string>();
+  let clientsAdded = 0;
+  let linked = 0;
+  const failures: string[] = [];
+
+  for (const row of withEmail) {
+    const email = cleanString(row.issued_to_email, "", 180);
+    const key = email.toLowerCase();
+    try {
+      let personId = resolved.get(key) || known.get(key)?.id || "";
+      if (!personId && addBuyers) {
+        personId = await createVoucherBuyer(accountId, cleanString(row.issued_to_name, "", 140), email);
+        clientsAdded += 1;
+      }
+      if (!personId) continue;
+      // Remembered so a buyer with three vouchers produces one client, not
+      // three people racing the same unique index.
+      resolved.set(key, personId);
+      await supabase("billing_coupons", {
+        method: "PATCH",
+        query: `id=eq.${encodeFilter(String(row.id))}&account_id=eq.${encodeFilter(accountId)}`,
+        body: { customer_id: personId, updated_at: nowIso() },
+      });
+      linked += 1;
+    } catch (error) {
+      // One unlinkable voucher must not stop the other thirty-one. The code
+      // itself is untouched either way -- this only ever writes customer_id.
+      console.error("billing_api:voucher_owner_repair_failed", row.id, error);
+      failures.push(String(row.code || row.id));
+    }
+  }
+
+  return { preview: false, linked, clientsAdded, failures: failures.length };
+}
+
 /* --- Vouchers bought online ------------------------------------------------
  *
  * Squarespace sells the voucher, Stripe takes the money, and somebody has to
@@ -4456,6 +4574,96 @@ async function writeVoucherRules(accountId: string, body: Record<string, unknown
   return { rules };
 }
 
+/* --- Whose voucher is it -----------------------------------------------
+ *
+ * billing_coupons.customer_id is a Clarity person, the same as it is on an
+ * invoice -- that is what makes a voucher findable from a client's profile
+ * rather than only from the Coupons screen. It had been getting the *Stripe*
+ * customer (`gcus_...`) written into it, which is not a person here and never
+ * resolves to one, so every imported voucher belonged to nobody.
+ *
+ * Matching is by email on the exactly-one rule this codebase applies
+ * everywhere identity is at stake: two clients sharing an address produce no
+ * answer rather than a coin flip. Names are not matched at all here. On a
+ * booking, a name match is the deliberate exception because Optix sends no
+ * email; a gift voucher always carries the buyer's address, so guessing from a
+ * name would buy nothing and could hand somebody else's stored value to a
+ * client who happens to share a name.
+ *
+ * MOST BUYERS WILL NOT BE CLIENTS, AND THAT IS THE NORMAL CASE
+ *
+ * A gift is bought by somebody who is not the person who will redeem it, and
+ * often by somebody who has never had a lesson. So "no match" is expected, not
+ * a failure, and the coach can have a client filed for them anyway -- which is
+ * the only way a name typed into the client list ever finds the voucher.
+ */
+async function matchPeopleByEmail(accountId: string, emails: string[]) {
+  const wanted = [...new Set(emails.map((email) => email.trim().toLowerCase()).filter(Boolean))];
+  const found = new Map<string, { id: string; name: string } | null>();
+  if (!wanted.length) return found;
+  for (let index = 0; index < wanted.length; index += 100) {
+    const list = wanted
+      .slice(index, index + 100)
+      .map((email) => `"${email.replace(/"/g, "")}"`)
+      .join(",");
+    const rows = (await supabase("people", {
+      query:
+        `select=id,name,email&account_id=eq.${encodeFilter(accountId)}` +
+        `&email=in.(${encodeURIComponent(list)})`,
+    })) as Array<Record<string, unknown>>;
+    for (const row of rows) {
+      const key = String(row.email || "").toLowerCase();
+      if (!key) continue;
+      // Seen twice means the address identifies nobody in particular.
+      found.set(
+        key,
+        found.has(key) ? null : { id: String(row.id), name: String(row.name || "") },
+      );
+    }
+  }
+  return found;
+}
+
+/**
+ * File a client for a voucher buyer nobody knows yet.
+ *
+ * `external: true` and `source: 'stripe'`, the same marking the integrations
+ * pipeline gives a person it invents, so these are distinguishable from
+ * clients the coach entered and can be merged or promoted later.
+ *
+ * A duplicate-email collision is resolved by reading the row back rather than
+ * failing: the account-scoped unique index means at most one person can hold
+ * the address, so there is exactly one right answer and no guess involved.
+ * That also makes a re-run of the import idempotent.
+ */
+async function createVoucherBuyer(accountId: string, name: string, email: string) {
+  const cleanEmail = email.trim().toLowerCase();
+  const cleanName = cleanString(name, "", 140) || cleanEmail || "Voucher buyer";
+  const id = randomUUID();
+  try {
+    await supabase("people", {
+      method: "POST",
+      body: [
+        {
+          id,
+          account_id: accountId,
+          name: cleanName,
+          email: cleanEmail || null,
+          source: "stripe",
+          external: true,
+        },
+      ],
+    });
+    return id;
+  } catch (error) {
+    if (!cleanEmail) throw error;
+    const existing = await matchPeopleByEmail(accountId, [cleanEmail]);
+    const matched = existing.get(cleanEmail);
+    if (matched) return matched.id;
+    throw error;
+  }
+}
+
 /** How far back a scan looks by default: roughly two years of vouchers. */
 const VOUCHER_SCAN_DEFAULT_DAYS = 730;
 const VOUCHER_SCAN_PAGE = 100;
@@ -4506,6 +4714,13 @@ async function stripeVoucherCandidates(accountId: string, url: URL) {
    * look that far" rather than a wrong answer.
    */
   const rules = await readVoucherRules(accountId);
+  // Who, if anyone, each buyer already is. Answered before the rows are built
+  // so the screen can say "new client" on the ones that will get one, rather
+  // than the coach finding out afterwards how many were added.
+  const knownBuyers = await matchPeopleByEmail(
+    accountId,
+    charges.map((charge) => String((charge.billing_details || {}).email || "")),
+  );
   const needingBasket = charges.filter((charge) => !chargeWording(charge).length);
   const looked = needingBasket.slice(0, VOUCHER_SCAN_BASKET_CAP);
   const baskets = await mapLimit(looked, 6, (charge) =>
@@ -4557,6 +4772,8 @@ async function stripeVoucherCandidates(accountId: string, url: URL) {
         labelSource: priced ? "price rule" : verdict.labelSource,
         likely: verdict.likely || Boolean(priced),
         partlyRefunded: Number(charge.amount_refunded) > 0,
+        buyerClientName:
+          knownBuyers.get(cleanString(billing.email, "", 180).toLowerCase())?.name || "",
       };
     });
 
@@ -4590,9 +4807,15 @@ async function importStripeVouchers(accountId: string, body: Record<string, unkn
     : [];
   if (!wanted.length) throw Object.assign(new Error("Pick at least one purchase."), { status: 400 });
 
+  // Default on, because a voucher attached to nobody cannot be found by the
+  // name of the person who bought it -- which is the reason for attaching it.
+  // Still a flag, because filing a hundred clients is a thing to have agreed
+  // to rather than discovered.
+  const addBuyers = body?.addBuyersAsClients !== false;
   const rules = await readVoucherRules(accountId);
   const issued: unknown[] = [];
   const skipped: string[] = [];
+  let clientsAdded = 0;
   for (const chargeId of wanted) {
     const params = new URLSearchParams();
     params.append("expand[]", "payment_intent");
@@ -4622,12 +4845,37 @@ async function importStripeVouchers(accountId: string, body: Record<string, unkn
           rules,
         );
     const billing = (charge.billing_details || {}) as Record<string, any>;
+    const buyerName = cleanString(billing.name, "", 140);
+    const buyerEmail = cleanString(billing.email, "", 180);
+
+    /* Who this voucher is filed under.
+     *
+     * Never charge.customer: that is Stripe's id for the card holder
+     * ("gcus_..." for a guest), not a person in this account, and writing it
+     * here is what left every imported voucher belonging to nobody.
+     */
+    let personId = buyerEmail
+      ? (await matchPeopleByEmail(accountId, [buyerEmail])).get(buyerEmail.toLowerCase())?.id || ""
+      : "";
+    if (!personId && addBuyers && (buyerEmail || buyerName)) {
+      try {
+        personId = await createVoucherBuyer(accountId, buyerName, buyerEmail);
+        clientsAdded += 1;
+      } catch (error) {
+        // The voucher matters more than the filing. A coupon with no client is
+        // still spendable and still searchable by the buyer's name on this
+        // screen; losing the code because a person row would not write is the
+        // worse of the two outcomes by a distance.
+        console.error("billing_api:voucher_buyer_create_failed", chargeId, error);
+      }
+    }
+
     const coupon = await issueCoupon(accountId, {
       value: round2(chargeValueCents(charge) / 100),
       currency: String(charge.currency || "").toUpperCase(),
-      issuedToName: cleanString(billing.name, "", 140),
-      issuedToEmail: cleanString(billing.email, "", 180),
-      customerId: cleanString(charge.customer, "", 160),
+      issuedToName: buyerName,
+      issuedToEmail: buyerEmail,
+      customerId: personId,
       source: "stripe",
       sourceLineId: String(charge.id),
       note: `Bought online · ${priced?.label || verdict.label || chargeInvoiceNumber(charge)}`,
@@ -4635,7 +4883,7 @@ async function importStripeVouchers(accountId: string, body: Record<string, unkn
     if (coupon) issued.push(coupon);
     else skipped.push(chargeId);
   }
-  return { issued, issuedCount: issued.length, skipped: skipped.length };
+  return { issued, issuedCount: issued.length, skipped: skipped.length, clientsAdded };
 }
 
 // --- Router ------------------------------------------------------------------
@@ -4674,6 +4922,9 @@ export default async function handler(req: Request) {
     }
     if (action === "coupons/rules" && (req.method === "PUT" || req.method === "POST")) {
       return json(await writeVoucherRules(accountId, await parseBody(req)));
+    }
+    if (action === "coupons/repair-owners" && req.method === "POST") {
+      return json(await repairVoucherOwners(accountId, await parseBody(req)));
     }
     if (action === "coupons/stripe-candidates" && req.method === "GET") {
       return json(await stripeVoucherCandidates(accountId, url));

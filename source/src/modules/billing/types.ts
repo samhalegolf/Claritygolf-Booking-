@@ -556,4 +556,7 @@ export type CouponImportCandidate = {
   /** The classifier read a voucher in it. False rows are listed separately. */
   likely: boolean;
   partlyRefunded: boolean;
+  /** The client this buyer already is, or "" — usually "", since a gift is
+   *  normally bought by somebody who has never had a lesson. */
+  buyerClientName: string;
 };

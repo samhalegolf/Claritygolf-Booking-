@@ -234,7 +234,7 @@ import {
   printableInvoiceCustomFields,
 } from "./modules/billing/invoiceSettings";
 import { computeInvoiceTotals, invoiceLineNet, invoiceLineGross, lineDiscountAmount } from "./modules/billing/invoiceMath";
-import type { CouponIssueValues, CouponScanResult } from "./modules/billing/CouponsPanel";
+import type { CouponIssueValues, CouponScanResult, VoucherRepairResult } from "./modules/billing/CouponsPanel";
 import type { VoucherAmountRule } from "./modules/billing/types";
 import type { ProductFormValues, StockAdjustInput } from "./modules/billing/ProductsPanel";
 import {
@@ -1585,7 +1585,11 @@ type ClientProfileTab = "bookings" | "notes" | "notifications" | "transactions" 
 // they were billed on (or included in, for a bulk invoice).
 type ClientTransactionRow =
   | { kind: "sale"; date: string; sale: PosTransaction }
-  | { kind: "invoice"; date: string; invoice: BillingInvoiceRecord };
+  | { kind: "invoice"; date: string; invoice: BillingInvoiceRecord }
+  // A gift voucher is on this list for a reason the other two are not: it is
+  // usually bought by somebody who will never spend it, so the buyer's name is
+  // the only thing anybody remembers when a card turns up without its code.
+  | { kind: "coupon"; date: string; coupon: BillingCoupon };
 /* The nine sections of a player profile. The first four are the coach's
  * daily reads and sit on the bar; the last five are the record and live behind
  * its toggle -- see .player-tool-tabs.is-expanded. */
@@ -16329,6 +16333,32 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     }
   }
 
+  /* The one-off repair for vouchers imported before they could be filed under
+   * a client. Preview and perform are the same call, so the numbers a coach
+   * agrees to are produced by the code that then acts on them. */
+  async function repairVoucherOwners(preview: boolean, addBuyersAsClients: boolean) {
+    try {
+      const response = await fetch("/api/billing/coupons/repair-owners", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ preview, addBuyersAsClients }),
+      });
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not check those vouchers."));
+      const data = (await response.json()) as VoucherRepairResult;
+      if (!preview) {
+        await fetchCoupons();
+        // Clients were just created, so the list a coach searches to find
+        // these vouchers has to be reloaded or the names will not be there.
+        if (data.clientsAdded) void refreshPeopleList({ maxAgeMs: 0 });
+      }
+      return data;
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not check those vouchers." });
+      return null;
+    }
+  }
+
   async function findStripeCouponCandidates() {
     try {
       const response = await fetch("/api/billing/coupons/stripe-candidates", {
@@ -16354,22 +16384,32 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     }
   }
 
-  async function importStripeCoupons(chargeIds: string[]) {
+  async function importStripeCoupons(chargeIds: string[], addBuyersAsClients: boolean) {
     try {
       const response = await fetch("/api/billing/coupons/import", {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chargeIds }),
+        body: JSON.stringify({ chargeIds, addBuyersAsClients }),
       });
       if (!response.ok) throw new Error(await readApiFailure(response, "Could not issue those codes."));
-      const data = (await response.json()) as { issuedCount?: number; skipped?: number };
+      const data = (await response.json()) as {
+        issuedCount?: number;
+        skipped?: number;
+        clientsAdded?: number;
+      };
       const issued = data.issuedCount || 0;
+      const added = data.clientsAdded || 0;
       await fetchCoupons();
+      // Clients were just created, so the list the coach searches to find
+      // these vouchers has to be reloaded or the names will not be there.
+      if (added) void refreshPeopleList({ maxAgeMs: 0 });
       setToast({
-        message: `${issued} voucher${issued === 1 ? "" : "s"} issued${
-          data.skipped ? `, ${data.skipped} skipped (already had one, or refunded)` : ""
-        }.`,
+        message:
+          `${issued} voucher${issued === 1 ? "" : "s"} issued` +
+          (added ? `, ${added} buyer${added === 1 ? "" : "s"} added to clients` : "") +
+          (data.skipped ? `, ${data.skipped} skipped (already had one, or refunded)` : "") +
+          ".",
       });
       return issued;
     } catch (error) {
@@ -19136,7 +19176,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       throw new Error("unauthorized");
     }
     if (!response.ok) throw new Error(await readApiFailure(response, "Could not load transactions."));
-    const data = (await response.json()) as { pos?: PosTransaction[]; invoices?: BillingInvoiceRecord[] };
+    const data = (await response.json()) as {
+      pos?: PosTransaction[];
+      invoices?: BillingInvoiceRecord[];
+      coupons?: BillingCoupon[];
+    };
     const rows: ClientTransactionRow[] = [
         ...(Array.isArray(data.pos) ? data.pos : []).map((sale) => ({
           kind: "sale" as const,
@@ -19147,6 +19191,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           kind: "invoice" as const,
           date: invoice.createdAt || invoice.issueDate || "",
           invoice,
+        })),
+        ...(Array.isArray(data.coupons) ? data.coupons : []).map((coupon) => ({
+          kind: "coupon" as const,
+          date: coupon.issuedAt || "",
+          coupon,
         })),
     ].sort((a, b) => b.date.localeCompare(a.date));
     return rows;
@@ -24516,7 +24565,23 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                     </p>
                                   ) : playerTransactions.length ? (
                                     playerTransactions.map((row) =>
-                                      row.kind === "sale" ? (
+                                      row.kind === "coupon" ? (
+                                        <div className="player-tool-row" key={`coupon-${row.coupon.id}`}>
+                                          <span className="player-tool-row-when">
+                                            {transactionDateLabel(row.date)}
+                                          </span>
+                                          <div className="player-tool-row-main">
+                                            <strong>{row.coupon.code}</strong>
+                                            <span>
+                                              Gift voucher ·{" "}
+                                              {formatMoney(row.coupon.remainingValue, row.coupon.currency)} left
+                                              {row.coupon.issuedToName
+                                                ? ` · bought by ${row.coupon.issuedToName}`
+                                                : ""}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      ) : row.kind === "sale" ? (
                                         <div className="player-tool-row" key={`sale-${row.sale.id}`}>
                                           <span className="player-tool-row-when">
                                             {transactionDateLabel(row.date)}
@@ -27815,6 +27880,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   onImport={importStripeCoupons}
                   rules={voucherRules}
                   onSaveRules={saveVoucherRules}
+                  onRepairOwners={repairVoucherOwners}
                 />
               </Suspense>
             )}
@@ -32204,7 +32270,31 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     </p>
                   ) : clientTransactions.length ? (
                     clientTransactions.map((row) =>
-                      row.kind === "sale" ? (
+                      row.kind === "coupon" ? (
+                        <div className="profile-history-row" key={`coupon-${row.coupon.id}`}>
+                          <div>
+                            <strong>
+                              <Ticket size={15} /> {row.coupon.code}
+                            </strong>
+                            <span>
+                              Gift voucher
+                              {row.coupon.issuedToName ? ` · bought by ${row.coupon.issuedToName}` : ""}
+                              {row.coupon.note ? ` · ${row.coupon.note}` : ""}
+                            </span>
+                          </div>
+                          <em>
+                            {/* What is left, not what it was worth: the
+                                question asked at a counter is always "how much
+                                is on this", and the original is beside it only
+                                because a half-spent voucher is confusing
+                                without it. */}
+                            {`${formatMoney(row.coupon.remainingValue, row.coupon.currency)} left of ${formatMoney(
+                              row.coupon.originalValue,
+                              row.coupon.currency,
+                            )} · ${transactionDateLabel(row.date)}`}
+                          </em>
+                        </div>
+                      ) : row.kind === "sale" ? (
                         <div className="profile-history-row" key={`sale-${row.sale.id}`}>
                           <div>
                             <strong>{row.sale.description || row.sale.receiptNumber}</strong>
