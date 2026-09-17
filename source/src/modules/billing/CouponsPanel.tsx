@@ -6,8 +6,8 @@ import { Loading } from "../shared/Loading";
 // list and every request; what lives here is form and disclosure state.
 
 import { Fragment, useMemo, useState } from "react";
-import { AlertTriangle, Check, Download, Plus, Search, Ticket, X } from "lucide-react";
-import type { BillingCoupon, CouponImportCandidate, CouponRedemption } from "./types";
+import { Plus, Search, Ticket, X } from "lucide-react";
+import type { BillingCoupon, CouponRedemption } from "./types";
 
 export type CouponIssueValues = {
   value: number;
@@ -27,8 +27,6 @@ export type CouponsPanelProps = {
   onIssue: (values: CouponIssueValues) => Promise<boolean>;
   onSetVoid: (coupon: BillingCoupon, isVoid: boolean) => Promise<void>;
   onLoadRedemptions: (couponId: string) => Promise<CouponRedemption[]>;
-  onFindStripeCandidates: () => Promise<CouponImportCandidate[]>;
-  onImport: (lineIds: string[]) => Promise<number>;
 };
 
 const SOURCE_LABELS: Record<BillingCoupon["source"], string> = {
@@ -57,8 +55,6 @@ export function CouponsPanel({
   onIssue,
   onSetVoid,
   onLoadRedemptions,
-  onFindStripeCandidates,
-  onImport,
 }: CouponsPanelProps) {
   const [form, setForm] = useState(emptyIssueForm);
   const [issuing, setIssuing] = useState(false);
@@ -68,11 +64,6 @@ export function CouponsPanel({
   const [openCoupon, setOpenCoupon] = useState("");
   const [redemptions, setRedemptions] = useState<CouponRedemption[]>([]);
   const [redemptionsLoading, setRedemptionsLoading] = useState(false);
-
-  const [candidates, setCandidates] = useState<CouponImportCandidate[] | null>(null);
-  const [scanning, setScanning] = useState(false);
-  const [importing, setImporting] = useState(false);
-  const [chosen, setChosen] = useState<Record<string, boolean>>({});
 
   const visible = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -116,35 +107,6 @@ export function CouponsPanel({
     }
   }
 
-  async function scanStripe() {
-    setScanning(true);
-    try {
-      const found = await onFindStripeCandidates();
-      setCandidates(found);
-      // Price-id matches are exact, so they start ticked. A name match is a
-      // guess and has to be agreed to deliberately.
-      setChosen(Object.fromEntries(found.map((entry) => [entry.lineId, entry.matchedBy === "price"])));
-    } finally {
-      setScanning(false);
-    }
-  }
-
-  async function runImport() {
-    if (!candidates) return;
-    const lineIds = candidates.filter((entry) => chosen[entry.lineId]).map((entry) => entry.lineId);
-    if (!lineIds.length) return;
-    setImporting(true);
-    try {
-      await onImport(lineIds);
-      setCandidates(null);
-      setChosen({});
-    } finally {
-      setImporting(false);
-    }
-  }
-
-  const chosenCount = candidates ? candidates.filter((entry) => chosen[entry.lineId]).length : 0;
-
   return (
     <div className="billing-dashboard billing-coupons">
       <article className="data-card">
@@ -185,83 +147,6 @@ export function CouponsPanel({
             Refresh
           </button>
         </div>
-      </article>
-
-      <article className="data-card wide">
-        <div className="data-card-header">
-          <div>
-            <span>From Stripe</span>
-            <h2>Vouchers bought online</h2>
-          </div>
-          <Download size={24} />
-        </div>
-        <p className="field-help">
-          Looks through synced Stripe purchases for anything sold as a voucher product, and issues a code for each one
-          that hasn't got one. Mark a product as a voucher under Billing &gt; Products first, or nothing here will match.
-        </p>
-        <div className="panel-actions coupon-import-actions">
-          <button className="outline-button" disabled={scanning} onClick={() => void scanStripe()} type="button">
-            {scanning ? "Looking..." : "Find voucher purchases"}
-          </button>
-          {candidates !== null && candidates.length > 0 && (
-            <button className="primary-button" disabled={importing || !chosenCount} onClick={() => void runImport()} type="button">
-              {importing ? "Issuing..." : `Issue ${chosenCount} coupon${chosenCount === 1 ? "" : "s"}`}
-            </button>
-          )}
-        </div>
-
-        {candidates !== null && !candidates.length && (
-          <p className="field-help">Nothing new - every voucher purchase found already has a coupon.</p>
-        )}
-
-        {candidates !== null && candidates.length > 0 && (
-          <table className="recent-invoices-table">
-            <thead>
-              <tr>
-                <th />
-                <th>Bought</th>
-                <th>Customer</th>
-                <th>Item</th>
-                <th>Value</th>
-                <th>Match</th>
-              </tr>
-            </thead>
-            <tbody>
-              {candidates.map((candidate) => (
-                <tr key={candidate.lineId}>
-                  <td>
-                    <input
-                      checked={Boolean(chosen[candidate.lineId])}
-                      onChange={(event) =>
-                        setChosen((current) => ({ ...current, [candidate.lineId]: event.target.checked }))
-                      }
-                      type="checkbox"
-                      aria-label={`Issue a coupon for ${candidate.description}`}
-                    />
-                  </td>
-                  <td>{candidate.purchasedAt ? new Date(candidate.purchasedAt).toLocaleDateString() : "-"}</td>
-                  <td>
-                    {candidate.customerName || "-"}
-                    {candidate.customerEmail && <em className="product-row-meta">{candidate.customerEmail}</em>}
-                  </td>
-                  <td>{candidate.description}</td>
-                  <td>{formatMoney(candidate.value, candidate.currency || currency)}</td>
-                  <td>
-                    {candidate.matchedBy === "price" ? (
-                      <span className="coupon-match exact">
-                        <Check size={12} /> exact
-                      </span>
-                    ) : (
-                      <span className="coupon-match guess">
-                        <AlertTriangle size={12} /> by name
-                      </span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
       </article>
 
       <article className="data-card wide">

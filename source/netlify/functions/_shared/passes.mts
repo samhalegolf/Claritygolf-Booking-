@@ -40,6 +40,7 @@ export type PassSource =
   | "clarity_invoice"
   | "clarity_checkout"
   | "optix"
+  | "stripe"
   | "stripe_subscription"
   | "promotion";
 
@@ -49,6 +50,7 @@ const PASS_SOURCES: PassSource[] = [
   "clarity_invoice",
   "clarity_checkout",
   "optix",
+  "stripe",
   "stripe_subscription",
   "promotion",
 ];

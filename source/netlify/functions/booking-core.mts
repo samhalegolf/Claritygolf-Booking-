@@ -59,6 +59,12 @@ import {
   voidPass,
 } from "./_shared/passes.mts";
 import {
+  classifyInboxLine,
+  inboxLineType,
+  isDismissedLine,
+} from "./_shared/pass-inbox-lines.mts";
+import { generateCouponCode } from "./_shared/coupon-codes.mts";
+import {
   requireCoachActor,
   resolveMembershipForAuthUser,
   switchActiveAccount,
@@ -13893,10 +13899,11 @@ async function routeBookingApiRequest(
  *
  * Two queues that look the same on screen and are not the same problem.
  *
- *   Waiting to be issued  An external sale that classified as a lesson pass
- *                         and has produced no pass. Somebody paid and holds
- *                         nothing. What is missing is which package it was --
- *                         the sale names a product, not a credit count.
+ *   Waiting to be issued  A sale that looks like an entitlement and has
+ *                         produced none. Somebody paid and holds nothing.
+ *                         What is missing is which package it was -- the sale
+ *                         names a product, not a credit count -- or, for a
+ *                         gift voucher, simply a code.
  *
  *   Waiting for an owner   A pass that exists and belongs to nobody. What is
  *                         missing is a person.
@@ -13905,9 +13912,215 @@ async function routeBookingApiRequest(
  * the payload cannot answer it, so a machine answering it is a machine
  * guessing. What this does instead is pre-fill the guess and make pressing the
  * button cheap.
+ *
+ * TWO PROVIDERS, ONE QUEUE
+ *
+ * Optix sales arrive pre-classified, through the integrations pipeline, and
+ * carry their own correction (classification = 'not_pass'). Stripe sales do
+ * not arrive at all: they are already in billing_invoice_items because the
+ * billing sync mirrors them, and nothing had ever read them as entitlements.
+ * They are read here rather than re-synced, so the inbox never has a second,
+ * staler copy of a sale the invoice list already shows.
+ *
+ * What replaced the old Stripe voucher import is the classification. That
+ * importer asked whether a line matched a product flagged is_voucher, which
+ * needed a Stripe product id the catalogue stopped carrying in August -- so it
+ * answered "nothing to do" whether there was nothing to do or nothing it could
+ * see. Wording is a worse signal in theory and the only one that exists.
  */
+
+/** Where "this product is never an entitlement" is remembered, per account. */
+function passInboxDismissedTypesKey(accountId: string) {
+  return `passInbox.dismissedTypes.v1.${cleanSlug(accountId, "default")}`;
+}
+
+/*
+ * Product types the coach has said are not entitlements.
+ *
+ * Dismissal is by product, not by purchase, and that is the whole point. A
+ * per-row dismissal means next month's bay-hire line is back in the queue and
+ * the queue is never empty, which is how a screen stops being opened. The
+ * coach's actual intent -- "Extra Hour is not a pass" -- is a fact about the
+ * product that stays true for every sale of it.
+ *
+ * A settings key rather than a column, because the fact is about a product
+ * nothing in Clarity owns: the line is a description on a Stripe invoice, and
+ * there is no catalogue row to hang a flag on. Same shape, and for the same
+ * reason, as practice.dismissedSuggestions.
+ *
+ * Stored as {type, label} pairs. The type is what matching runs on and it is
+ * unreadable by design -- "1xextrahour" -- so the wording that was dismissed
+ * is kept beside it. Without that, the list offering to undo a dismissal could
+ * only show the key, and "1xextrahour · Show again" asks the coach to
+ * recognise something they never typed.
+ *
+ * Bare strings are still read, because that is what the first version wrote.
+ */
+async function readPassInboxDismissedTypes(accountId: string): Promise<Map<string, string>> {
+  const parsed = safeJsonParse(await getSetting(accountId, passInboxDismissedTypesKey(accountId)), []);
+  const dismissed = new Map<string, string>();
+  if (!Array.isArray(parsed)) return dismissed;
+  for (const entry of parsed) {
+    const label = cleanString(
+      typeof entry === "string" ? entry : (entry as Record<string, unknown>)?.label,
+      "",
+      200,
+    );
+    const type = inboxLineType(
+      typeof entry === "string" ? entry : cleanString((entry as Record<string, unknown>)?.type, "", 200),
+    );
+    if (type) dismissed.set(type, label || type);
+  }
+  return dismissed;
+}
+
+async function writePassInboxDismissedType(accountId: string, description: string, restore: boolean) {
+  const raw = cleanString(description, "", 200);
+  const type = inboxLineType(raw);
+  if (!type) throw Object.assign(new Error("Which product?"), { status: 400 });
+  const dismissed = await readPassInboxDismissedTypes(accountId);
+  // Restoring accepts the key as readily as the wording, because that is what
+  // the undo list has to hand.
+  if (restore) dismissed.delete(type);
+  else dismissed.set(type, raw);
+  // Capped for the same reason the practice list is: a coach dismissing
+  // steadily for a year must not grow a settings row without bound. Oldest
+  // fall off first, which only means a long-forgotten product is offered again.
+  const kept = Array.from(dismissed, ([key, label]) => ({ type: key, label })).slice(-300);
+  await setSetting(accountId, passInboxDismissedTypesKey(accountId), JSON.stringify(kept));
+  return kept;
+}
+
+/**
+ * Stripe purchases that have produced neither a pass nor a voucher.
+ *
+ * Reads what the billing sync already mirrored. Void invoices are excluded --
+ * a voided Stripe invoice is a sale that was undone, and offering to issue
+ * credits against it is offering to give away the thing that was refunded.
+ *
+ * Returns rows in the same shape the Optix half produces, so the panel renders
+ * one list and the difference shows up as a provider label rather than as a
+ * second code path.
+ */
+async function readStripeInboxLines(accountId: string, templates, dismissed: Set<string>) {
+  if (!(await tableExists("billing_invoice_items"))) return [];
+
+  const rows = (await db().sql`
+    SELECT
+      item.id,
+      item.invoice_id,
+      item.description,
+      item.quantity,
+      item.line_total,
+      invoice.customer_name,
+      invoice.customer_email,
+      invoice.currency,
+      invoice.issue_date
+    FROM public.billing_invoice_items item
+    JOIN public.billing_invoices invoice
+      ON invoice.id = item.invoice_id AND invoice.account_id = ${accountId}
+    WHERE item.account_id = ${accountId}
+      AND item.source_type = 'stripe'
+      AND invoice.status <> 'void'
+      AND item.line_total > 0
+    ORDER BY invoice.issue_date DESC, item.id
+    LIMIT 300
+  `) as Record<string, unknown>[];
+  if (!rows.length) return [];
+
+  const live = rows.filter((row) => !isDismissedLine(cleanString(row.description, "", 500), dismissed));
+  if (!live.length) return [];
+
+  // Both halves of "already handled", asked of the tables that actually
+  // prevent a duplicate rather than of a flag that could drift from them: the
+  // unique index on (account_id, source, source_ref) for passes, and the one
+  // on (account_id, source_line_id) for coupons.
+  const lineIds = live.map((row) => String(row.id || ""));
+  const issuedPasses = await issuedSourceRefs(
+    accountId,
+    "stripe",
+    lineIds.map((id) => `stripe:${id}`),
+  );
+  const couponRows = (await tableExists("billing_coupons"))
+    ? ((await db().sql`
+        SELECT source_line_id
+        FROM public.billing_coupons
+        WHERE account_id = ${accountId} AND source_line_id = ANY(${lineIds})
+      `) as Record<string, unknown>[])
+    : [];
+  const issuedCoupons = new Set(couponRows.map((row) => String(row.source_line_id || "")));
+
+  const outstanding = live.filter(
+    (row) =>
+      !issuedPasses.has(`stripe:${String(row.id || "")}`) && !issuedCoupons.has(String(row.id || "")),
+  );
+  if (!outstanding.length) return [];
+
+  // One query for every buyer on the page. The exactly-one rule that makes
+  // email matching safe everywhere else applies here too: two clients sharing
+  // an address produce no link rather than a coin flip, and the row says so.
+  const emails = [
+    ...new Set(
+      outstanding
+        .map((row) => cleanString(row.customer_email, "", 200).toLowerCase())
+        .filter(Boolean),
+    ),
+  ];
+  const byEmail = new Map<string, { id: string; name: string } | null>();
+  if (emails.length) {
+    const people = (await db().sql`
+      SELECT id, name, lower(email) AS email
+      FROM people
+      WHERE account_id = ${accountId} AND lower(email) = ANY(${emails})
+    `) as Record<string, unknown>[];
+    for (const person of people) {
+      const key = String(person.email || "");
+      // Seen twice means the address identifies nobody in particular.
+      byEmail.set(key, byEmail.has(key) ? null : { id: String(person.id), name: String(person.name || "") });
+    }
+  }
+
+  return outstanding.map((row) => {
+    const description = cleanString(row.description, "", 500);
+    const kind = classifyInboxLine(description);
+    const quantity = Math.max(1, Math.round(Number(row.quantity) || 1));
+    // billing_invoice_items stores dollars; every pass value in this app is
+    // minor units. Converting here rather than on the client keeps the one
+    // rounding step on the side that also decides what gets written.
+    const amountCents = Math.max(0, Math.round((Number(row.line_total) || 0) * 100));
+    const suggestion = kind === "voucher"
+      ? { template: null, confidence: "none" as const }
+      : suggestPassTemplate(description, templates);
+    const matched = byEmail.get(cleanString(row.customer_email, "", 200).toLowerCase()) || null;
+    return {
+      // Namespaced so one id space covers both providers and the client never
+      // has to carry which table a row came from alongside its id.
+      id: `stripe:${String(row.id || "")}`,
+      provider: "stripe",
+      kind,
+      saleNumber: "",
+      itemName: description,
+      quantity,
+      amountCents,
+      currency: cleanString(row.currency, "", 10),
+      purchasedAt: cleanString(row.issue_date, "", 80),
+      buyerName: cleanString(row.customer_name, "", 180),
+      buyerEmail: cleanString(row.customer_email, "", 200),
+      personId: matched?.id || "",
+      personName: matched?.name || "",
+      personLinkSource: matched ? "email" : "",
+      classification: kind === "unknown" ? "unknown" : "pass",
+      suggestedTemplateServiceId: suggestion.template?.serviceId || "",
+      suggestedTemplateName: suggestion.template?.name || "",
+      suggestionConfidence: suggestion.confidence,
+    };
+  });
+}
+
 async function readPassInbox(accountId: string, services) {
   const templates = passTemplatesFromServices(services);
+  const dismissed = await readPassInboxDismissedTypes(accountId);
+  const dismissedKeys = new Set(dismissed.keys());
   const purchases = (await tableExists("optix_pass_purchases"))
     ? ((await db().sql`
         SELECT id, provider, sale_number, member_name, member_email, person_id,
@@ -13939,36 +14152,51 @@ async function readPassInbox(accountId: string, services) {
     for (const row of rows) people.set(String(row.id), String(row.name || ""));
   }
 
+  const optixRows = purchases
+    .filter((row) => !issued.has(`optix:${String(row.id || "")}`))
+    .map((row) => {
+      const itemName = cleanString(row.item_name, "", 200);
+      const suggestion = suggestPassTemplate(itemName, templates);
+      const personId = cleanString(row.person_id, "", 160);
+      const classification = cleanString(row.classification, "unknown", 20);
+      return {
+        id: String(row.id || ""),
+        provider: cleanString(row.provider, "optix", 40),
+        // Optix purchases were classified on arrival and only ever as passes.
+        // The wording classifier is applied on top so a gift voucher sold
+        // through Optix reaches the same button a Stripe one does.
+        kind: classification === "unknown" ? classifyInboxLine(itemName) : "pass",
+        saleNumber: cleanString(row.sale_number, "", 60),
+        itemName,
+        quantity: Number(row.quantity || 1) || 1,
+        amountCents: row.amount_cents === null ? null : Number(row.amount_cents),
+        currency: cleanString(row.currency, "", 10),
+        purchasedAt: cleanString(row.purchased_at, "", 80),
+        buyerName: cleanString(row.member_name, "", 180),
+        buyerEmail: cleanString(row.member_email, "", 200),
+        personId,
+        personName: people.get(personId) || "",
+        // How the buyer was tied to that person, so "matched on a name" is
+        // never mistaken on screen for "matched on an email".
+        personLinkSource: cleanString(row.person_link_source, "", 20),
+        classification,
+        suggestedTemplateServiceId: suggestion.template?.serviceId || "",
+        suggestedTemplateName: suggestion.template?.name || "",
+        suggestionConfidence: suggestion.confidence,
+      };
+    })
+    .filter((row) => !isDismissedLine(row.itemName, dismissedKeys));
+
+  const stripeRows = await readStripeInboxLines(accountId, templates, dismissedKeys);
+
   return {
     templates,
-    waitingToIssue: purchases
-      .filter((row) => !issued.has(`optix:${String(row.id || "")}`))
-      .map((row) => {
-        const itemName = cleanString(row.item_name, "", 200);
-        const suggestion = suggestPassTemplate(itemName, templates);
-        const personId = cleanString(row.person_id, "", 160);
-        return {
-          id: String(row.id || ""),
-          provider: cleanString(row.provider, "optix", 40),
-          saleNumber: cleanString(row.sale_number, "", 60),
-          itemName,
-          quantity: Number(row.quantity || 1) || 1,
-          amountCents: row.amount_cents === null ? null : Number(row.amount_cents),
-          currency: cleanString(row.currency, "", 10),
-          purchasedAt: cleanString(row.purchased_at, "", 80),
-          buyerName: cleanString(row.member_name, "", 180),
-          buyerEmail: cleanString(row.member_email, "", 200),
-          personId,
-          personName: people.get(personId) || "",
-          // How the buyer was tied to that person, so "matched on a name" is
-          // never mistaken on screen for "matched on an email".
-          personLinkSource: cleanString(row.person_link_source, "", 20),
-          classification: cleanString(row.classification, "unknown", 20),
-          suggestedTemplateServiceId: suggestion.template?.serviceId || "",
-          suggestedTemplateName: suggestion.template?.name || "",
-          suggestionConfidence: suggestion.confidence,
-        };
-      }),
+    // Newest first across both providers, so the queue reads as one list of
+    // sales rather than as Optix's queue followed by Stripe's.
+    waitingToIssue: [...optixRows, ...stripeRows].sort((left, right) =>
+      String(right.purchasedAt || "").localeCompare(String(left.purchasedAt || "")),
+    ),
+    dismissedTypes: Array.from(dismissed, ([type, label]) => ({ type, label })),
     waitingForOwner: (await readUnassignedPasses(accountId)).map((pass) => ({
       id: pass.id,
       name: pass.name,
@@ -14047,16 +14275,105 @@ async function readPassInbox(accountId: string, services) {
       return json(await readPassInbox(requestContext.accountId, state.services));
     }
 
-    /* Turn an external purchase into a pass.
+    /* One sale, read out of whichever table it lives in.
+     *
+     * The id the client sends carries its own provider ("stripe:<line id>", or
+     * a bare Optix purchase id), so the queue can be one list on screen without
+     * the browser having to remember which table each row came from and send it
+     * back. Getting that wrong would be a cross-table lookup by a caller-
+     * supplied string, which is exactly the shape a tenant leak takes, so both
+     * reads filter on account_id in the SQL rather than checking afterwards.
+     */
+    async function readInboxSale(accountId: string, purchaseId: string) {
+      if (purchaseId.startsWith("stripe:")) {
+        const lineId = purchaseId.slice("stripe:".length);
+        if (!lineId || !(await tableExists("billing_invoice_items"))) return null;
+        const rows = (await db().sql`
+          SELECT
+            item.id,
+            item.invoice_id,
+            item.description,
+            item.quantity,
+            item.line_total,
+            invoice.customer_name,
+            invoice.customer_email,
+            invoice.customer_id,
+            invoice.currency
+          FROM public.billing_invoice_items item
+          JOIN public.billing_invoices invoice
+            ON invoice.id = item.invoice_id AND invoice.account_id = ${accountId}
+          WHERE item.id = ${lineId}
+            AND item.account_id = ${accountId}
+            AND item.source_type = 'stripe'
+            AND invoice.status <> 'void'
+          LIMIT 1
+        `) as Record<string, unknown>[];
+        const line = rows[0];
+        if (!line) return null;
+        const email = cleanString(line.customer_email, "", 200).toLowerCase();
+        // Same exactly-one rule the read path uses. Resolved again here rather
+        // than trusted from the payload: the browser has had this list open for
+        // who knows how long, and a person id it sends is a person id it chose.
+        const people = email
+          ? ((await db().sql`
+              SELECT id, name FROM people
+              WHERE account_id = ${accountId} AND lower(email) = ${email}
+              LIMIT 2
+            `) as Record<string, unknown>[])
+          : [];
+        return {
+          provider: "stripe" as const,
+          sourceRef: `stripe:${lineId}`,
+          lineId,
+          invoiceId: cleanString(line.invoice_id, "", 200),
+          itemName: cleanString(line.description, "", 500),
+          quantity: Math.max(1, Math.round(Number(line.quantity) || 1)),
+          amountCents: Math.max(0, Math.round((Number(line.line_total) || 0) * 100)),
+          currency: cleanString(line.currency, "", 10),
+          personId: people.length === 1 ? String(people[0].id) : "",
+          buyerName: cleanString(line.customer_name, "", 180),
+          buyerEmail: cleanString(line.customer_email, "", 200),
+          customerId: cleanString(line.customer_id, "", 160),
+        };
+      }
+
+      if (!(await tableExists("optix_pass_purchases"))) return null;
+      const rows = (await db().sql`
+        SELECT id, item_name, quantity, person_id, member_name, member_email,
+               classification, amount_cents, currency
+        FROM public.optix_pass_purchases
+        WHERE id = ${purchaseId} AND account_id = ${accountId}
+        LIMIT 1
+      `) as Record<string, unknown>[];
+      const purchase = rows[0];
+      if (!purchase) return null;
+      return {
+        provider: "optix" as const,
+        sourceRef: `optix:${purchaseId}`,
+        lineId: "",
+        invoiceId: "",
+        itemName: cleanString(purchase.item_name, "", 500),
+        quantity: Math.max(1, Number(purchase.quantity || 1) || 1),
+        amountCents: purchase.amount_cents === null ? null : Number(purchase.amount_cents),
+        currency: cleanString(purchase.currency, "", 10),
+        personId: cleanString(purchase.person_id, "", 160),
+        buyerName: cleanString(purchase.member_name, "", 180),
+        buyerEmail: cleanString(purchase.member_email, "", 200),
+        customerId: "",
+      };
+    }
+
+    /* Turn a sale into a pass, a voucher, or nothing.
      *
      * The template is named by the caller, never inferred here. readPassInbox
      * suggests one and says how confident it is; committing that suggestion is
      * a click, because a wrong template issues real spendable credits for the
      * wrong number of lessons and nothing downstream can tell.
      *
-     * The purchase's own id is the source ref, so the unique index makes a
+     * The sale's own id is the source ref, so the unique index makes a
      * double-tap -- or two coaches on the same queue -- idempotent rather than
-     * a second pass.
+     * a second pass. Vouchers get the same protection from a different index,
+     * on billing_coupons (account_id, source_line_id).
      */
     if (req.method === "POST" && pathname === "/api/passes/inbox") {
       const body = await parseBody(req);
@@ -14064,33 +14381,112 @@ async function readPassInbox(accountId: string, services) {
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountFeature(requestContext.account, "clients");
       const accountId = requestContext.accountId;
-      const purchaseId = cleanString(body?.purchaseId, "", 120);
-      if (!purchaseId) return json({ error: "invalid", message: "Which purchase?" }, 400);
-      if (!(await tableExists("optix_pass_purchases"))) {
-        return json({ error: "not_found", message: "That purchase was not found." }, 404);
+      const action = cleanString(body?.action, "", 20);
+
+      /* "Never a pass" -- a whole product waved away rather than one sale.
+       *
+       * Handled before the sale is looked up, and deliberately: the type is
+       * the product's wording, which the coach can dismiss from a row that is
+       * about to stop existing. It is also the only action here that can be
+       * undone, so it carries a restore rather than needing a support request.
+       */
+      if (action === "dismissType" || action === "restoreType") {
+        await writePassInboxDismissedType(
+          accountId,
+          cleanString(body?.itemName, "", 500),
+          action === "restoreType",
+        );
+        return json(await readPassInbox(accountId, state.services));
       }
 
-      const rows = (await db().sql`
-        SELECT id, item_name, quantity, person_id, member_name, classification,
-               amount_cents, currency
-        FROM public.optix_pass_purchases
-        WHERE id = ${purchaseId} AND account_id = ${accountId}
-        LIMIT 1
-      `) as Record<string, unknown>[];
-      const purchase = rows[0];
-      if (!purchase) return json({ error: "not_found", message: "That purchase was not found." }, 404);
+      const purchaseId = cleanString(body?.purchaseId, "", 220);
+      if (!purchaseId) return json({ error: "invalid", message: "Which purchase?" }, 400);
+      const sale = await readInboxSale(accountId, purchaseId);
+      if (!sale) return json({ error: "not_found", message: "That purchase was not found." }, 404);
 
-      // "Not a pass" is how a wrong guess by the keyword classifier gets
-      // corrected without a code change, and how a bay-time top-up leaves the
-      // queue. It writes the correction back to the purchase, which is where
-      // the classifier's own output lives.
-      if (cleanString(body?.action, "", 20) === "dismiss") {
-        await db().sql`
-          UPDATE public.optix_pass_purchases
-          SET classification = 'not_pass', is_pass = FALSE, updated_at = NOW()
-          WHERE id = ${purchaseId} AND account_id = ${accountId}
-        `;
+      // "Not a pass" is how a wrong guess by the classifier gets corrected
+      // without a code change, and how a bay-time top-up leaves the queue.
+      //
+      // For an Optix sale it writes back to the purchase, which is where the
+      // classifier's own output lives. A Stripe line has no such row to
+      // correct -- it belongs to the billing sync, which would overwrite an
+      // edit on the next run -- so it is dismissed by product instead. That is
+      // the better answer anyway: the next month's line would otherwise be
+      // back, and the coach has already said what they think of this product.
+      if (action === "dismiss") {
+        if (sale.provider === "optix") {
+          await db().sql`
+            UPDATE public.optix_pass_purchases
+            SET classification = 'not_pass', is_pass = FALSE, updated_at = NOW()
+            WHERE id = ${purchaseId} AND account_id = ${accountId}
+          `;
+        } else {
+          await writePassInboxDismissedType(accountId, sale.itemName, false);
+        }
         return json(await readPassInbox(accountId, state.services));
+      }
+
+      /* Issue it as a gift voucher: a code with a balance, spendable at the
+       * till, rather than an entitlement to a particular lesson.
+       *
+       * A voucher is the right shape when nobody yet knows who will redeem it
+       * -- which is the whole point of a gift -- and it is why this is not
+       * simply an unassigned pass. An unassigned pass still says what it buys;
+       * a voucher says only what it is worth, and the recipient decides.
+       *
+       * Written straight to billing_coupons rather than through billing-api's
+       * issueCoupon: the two functions reach the same Postgres by different
+       * routes, and an HTTP hop between them would put a second way for this
+       * to half-fail in the middle of minting money.
+       */
+      if (action === "voucher") {
+        if (!(await tableExists("billing_coupons"))) {
+          return json(
+            { error: "unavailable", message: "Gift vouchers are not set up on this database yet." },
+            409,
+          );
+        }
+        // A typed override only counts when it is a whole, positive number of
+        // minor units. Anything else falls back to what the sale was for --
+        // never to zero, which would mint a voucher worth nothing.
+        const typed = Number(body?.totalValueCents);
+        const valueCents =
+          Number.isSafeInteger(typed) && typed > 0 ? typed : Math.max(0, Number(sale.amountCents) || 0);
+        if (valueCents <= 0) {
+          return json(
+            { error: "invalid", message: "A voucher needs a value greater than zero." },
+            400,
+          );
+        }
+        const currency =
+          cleanString(sale.currency, "", 10).toUpperCase() ||
+          playerShopCurrency(await readSettingsMap(accountId));
+        // ON CONFLICT DO NOTHING against the (account_id, source_line_id)
+        // index: a double-tap, or two coaches on the same queue, ends as one
+        // voucher and a no-op rather than two codes for one gift.
+        const inserted = (await db().sql`
+          INSERT INTO public.billing_coupons (
+            id, account_id, code, status, original_value, remaining_value, currency,
+            issued_to_name, issued_to_email, customer_id, source,
+            source_line_id, source_invoice_id, note, issued_at, created_at, updated_at
+          ) VALUES (
+            ${randomUUID()}, ${accountId}, ${generateCouponCode()}, 'active',
+            ${valueCents / 100}, ${valueCents / 100}, ${currency},
+            ${sale.buyerName || null}, ${sale.buyerEmail || null},
+            ${sale.customerId || null}, 'stripe',
+            ${sale.lineId || sale.sourceRef}, ${sale.invoiceId || null},
+            ${`Issued from the Pass Inbox · ${sale.itemName}`.slice(0, 400)},
+            NOW(), NOW(), NOW()
+          )
+          ON CONFLICT DO NOTHING
+          RETURNING code
+        `) as Record<string, unknown>[];
+        return json({
+          ...(await readPassInbox(accountId, state.services)),
+          // Empty when the conflict fired, which the panel reports as "already
+          // had one" rather than as a failure -- because it is not one.
+          issuedCouponCode: inserted[0] ? String(inserted[0].code) : "",
+        });
       }
 
       const templates = passTemplatesFromServices(state.services);
@@ -14103,11 +14499,11 @@ async function readPassInbox(accountId: string, services) {
         );
       }
 
-      const quantity = Math.max(1, Number(purchase.quantity || 1) || 1);
+      const quantity = sale.quantity;
       const passValue = resolveInboxPassValue({
         typed: body?.totalValueCents,
-        purchaseCents: purchase.amount_cents,
-        purchaseCurrency: cleanString(purchase.currency, "", 3),
+        purchaseCents: sale.amountCents,
+        purchaseCurrency: cleanString(sale.currency, "", 3),
         templatePriceCents: template.priceCents,
         quantity,
         accountCurrency: playerShopCurrency(await readSettingsMap(accountId)),
@@ -14115,21 +14511,22 @@ async function readPassInbox(accountId: string, services) {
 
       await grantPass(
         {
-          // The buyer was resolved when the purchase was recorded. Null is
-          // legitimate and lands in the other half of this queue rather than
-          // blocking the issue -- the entitlement is real either way.
-          personId: cleanString(purchase.person_id, "", 160) || "",
+          // The buyer was resolved when the purchase was recorded, or from the
+          // invoice's email just now. Null is legitimate and lands in the other
+          // half of this queue rather than blocking the issue -- the
+          // entitlement is real either way.
+          personId: sale.personId,
           templateServiceId: template.serviceId,
           credits: template.credits * quantity,
-          source: "optix",
-          sourceRef: `optix:${purchaseId}`,
+          source: sale.provider,
+          sourceRef: sale.sourceRef,
           // Both halves or neither -- never a number with no currency, which is
           // what a 0.00 Optix sale used to produce and what refused the issue.
           totalValueCents: passValue?.cents,
           currency: passValue?.currency,
           entitlementServiceId:
             template.coversServiceIds.length === 1 ? template.coversServiceIds[0] : undefined,
-          note: `Optix sale · ${cleanString(purchase.item_name, "", 200)}`,
+          note: `${sale.provider === "stripe" ? "Stripe" : "Optix"} sale · ${sale.itemName.slice(0, 200)}`,
           allowUnassigned: true,
         },
         templates,

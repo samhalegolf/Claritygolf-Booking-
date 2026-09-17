@@ -2,6 +2,7 @@ import type { Config } from "@netlify/functions";
 import { createHash, randomUUID } from "node:crypto";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { defaultCalendarSlug } from "./_shared/account.mts";
+import { generateCouponCode, normaliseCouponCode } from "./_shared/coupon-codes.mts";
 import { requireCoachActor } from "./_shared/coach-auth.mts";
 import { settingsSelectQuery } from "./_shared/settings-scope.mts";
 import {
@@ -4130,21 +4131,6 @@ async function customerTransactions(accountId: string, url: URL) {
 // here: two tills spending the same voucher at once would otherwise both
 // succeed.
 
-// Ambiguous characters left out on purpose - a code gets read off a printed
-// card and down a phone line, and 0/O and 1/I/L are where that goes wrong.
-// Mirrors generateCouponCode in src/modules/billing/couponMath.ts.
-const COUPON_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
-
-function generateCouponCode() {
-  const block = (length: number) =>
-    Array.from({ length }, () => COUPON_ALPHABET[Math.floor(Math.random() * COUPON_ALPHABET.length)]).join("");
-  return `CG-${block(4)}-${block(4)}`;
-}
-
-function normaliseCouponCode(value: unknown) {
-  return cleanString(value, "", 40).toUpperCase().replace(/[^A-Z0-9]/g, "");
-}
-
 function couponRowToApi(row: Record<string, unknown>) {
   const remaining = Number(row.remaining_value) || 0;
   const expiresAt = row.expires_at ? String(row.expires_at) : null;
@@ -4358,151 +4344,37 @@ async function restoreCouponValue(accountId: string, couponId: string, amount: n
   return balance === null || balance === undefined ? null : Number(balance);
 }
 
-// --- Importing vouchers bought through Stripe --------------------------------
-// Squarespace sells the voucher, Stripe takes the money, and the existing
-// billing sync already mirrors that purchase into billing_invoices /
-// billing_invoice_items. So the import reads what is already here rather than
-// re-querying Stripe for orders.
-//
-// Matching a line back to a voucher product is unavoidably a heuristic: an
-// invoice line carries a Stripe *price* id, while a catalog row is keyed by the
-// Stripe *product* id. So we resolve prices per voucher product where Stripe is
-// reachable, and fall back to matching the line description against the product
-// name. Because it is a heuristic, the result is a list of candidates for a
-// human to confirm - nothing is minted automatically.
-
-async function voucherProducts(accountId: string) {
-  const rows = await supabase("billing_products_services", {
-    query: `select=*&account_id=eq.${encodeFilter(accountId)}&is_voucher=is.true`,
-  });
-  return rows as Array<Record<string, unknown>>;
-}
-
-async function stripePriceIdsForProduct(accountId: string, productId: string) {
-  // Only Stripe-synced catalog rows have Stripe product ids; a hand-made one
-  // has a UUID and there is nothing to ask Stripe about.
-  if (!/^prod_/.test(productId)) return [];
-  try {
-    const response = (await stripeRequest(accountId, "prices", {
-      method: "GET",
-      params: new URLSearchParams({ product: productId, limit: "100" }),
-    })) as { data?: Array<{ id?: string }> };
-    return (response.data || []).map((price) => String(price.id || "")).filter(Boolean);
-  } catch {
-    // Stripe unreachable or not configured: fall back to name matching.
-    return [];
-  }
-}
-
-async function stripeCouponCandidates(accountId: string, url: URL) {
-  const products = await voucherProducts(accountId);
-  if (!products.length) return { candidates: [], voucherProducts: [] as unknown[] };
-
-  const priceToProduct = new Map<string, Record<string, unknown>>();
-  const nameToProduct = new Map<string, Record<string, unknown>>();
-  for (const product of products) {
-    nameToProduct.set(String(product.name ?? "").trim().toLowerCase(), product);
-    for (const priceId of await stripePriceIdsForProduct(accountId, String(product.id ?? ""))) {
-      priceToProduct.set(priceId, product);
-    }
-  }
-
-  const limit = Math.max(1, Math.min(1000, cleanNumber(url.searchParams.get("limit"), 500)));
-  const lines = (await supabase("billing_invoice_items", {
-    query:
-      `select=id,invoice_id,description,line_total,source_id,created_at` +
-      `&account_id=eq.${encodeFilter(accountId)}&order=created_at.desc&limit=${limit}`,
-  })) as Array<Record<string, unknown>>;
-
-  const matched = lines
-    .map((line) => {
-      const bySource = priceToProduct.get(String(line.source_id ?? ""));
-      const byName = nameToProduct.get(String(line.description ?? "").trim().toLowerCase());
-      const product = bySource || byName;
-      if (!product) return null;
-      return {
-        lineId: String(line.id ?? ""),
-        invoiceId: String(line.invoice_id ?? ""),
-        description: String(line.description ?? ""),
-        value: round2(Number(line.line_total) || 0),
-        productId: String(product.id ?? ""),
-        productName: String(product.name ?? ""),
-        // How confident the match is, so the review list can say so.
-        matchedBy: bySource ? "price" : "name",
-        purchasedAt: String(line.created_at ?? ""),
-      };
-    })
-    .filter(Boolean) as Array<Record<string, unknown>>;
-
-  if (!matched.length) return { candidates: [], voucherProducts: products.map(productRowToApi) };
-
-  // Anything already issued is dropped rather than shown greyed out - the point
-  // of the list is "what still needs doing".
-  const existing = (await supabase("billing_coupons", {
-    query: `select=source_line_id&account_id=eq.${encodeFilter(accountId)}&source_line_id=not.is.null&limit=5000`,
-  })) as Array<{ source_line_id?: string }>;
-  const issued = new Set(existing.map((row) => String(row.source_line_id ?? "")));
-
-  // Invoice customer details make the voucher findable later by the person who
-  // bought it, so they are pulled in for the invoices that survived the filter.
-  const outstanding = matched.filter((entry) => !issued.has(String(entry.lineId)) && Number(entry.value) > 0);
-  const invoiceIds = [...new Set(outstanding.map((entry) => String(entry.invoiceId)).filter(Boolean))];
-  const invoices = new Map<string, Record<string, unknown>>();
-  for (let index = 0; index < invoiceIds.length; index += 150) {
-    const batch = invoiceIds.slice(index, index + 150);
-    const list = batch.map((id) => `"${id.replace(/"/g, "")}"`).join(",");
-    const rows = (await supabase("billing_invoices", {
-      query:
-        `select=id,customer_name,customer_email,currency,issue_date&account_id=eq.${encodeFilter(accountId)}` +
-        `&id=in.(${encodeURIComponent(list)})`,
-    })) as Array<Record<string, unknown>>;
-    for (const row of rows) invoices.set(String(row.id ?? ""), row);
-  }
-
-  return {
-    voucherProducts: products.map(productRowToApi),
-    candidates: outstanding.map((entry) => {
-      const invoice = invoices.get(String(entry.invoiceId));
-      return {
-        ...entry,
-        customerName: String(invoice?.customer_name ?? ""),
-        customerEmail: String(invoice?.customer_email ?? ""),
-        currency: String(invoice?.currency ?? "NZD"),
-        purchasedAt: String(invoice?.issue_date ?? entry.purchasedAt ?? ""),
-      };
-    }),
-  };
-}
-
-// Issues one coupon per confirmed candidate. Re-running with the same ids is
-// harmless: the unique index on (account_id, source_line_id) turns a repeat into
-// a skip, not a duplicate voucher.
-async function importStripeCoupons(accountId: string, body: Record<string, unknown>, url: URL) {
-  const requested = Array.isArray(body?.lineIds) ? body.lineIds.map((id) => cleanString(id, "", 200)).filter(Boolean) : [];
-  const { candidates } = await stripeCouponCandidates(accountId, url);
-  const wanted = requested.length
-    ? (candidates as Array<Record<string, unknown>>).filter((entry) => requested.includes(String(entry.lineId)))
-    : (candidates as Array<Record<string, unknown>>);
-
-  const issued: unknown[] = [];
-  let skipped = 0;
-  for (const candidate of wanted) {
-    const coupon = await issueCoupon(accountId, {
-      value: Number(candidate.value) || 0,
-      currency: String(candidate.currency || ""),
-      issuedToName: String(candidate.customerName || ""),
-      issuedToEmail: String(candidate.customerEmail || ""),
-      source: "stripe",
-      productId: String(candidate.productId || ""),
-      sourceLineId: String(candidate.lineId || ""),
-      sourceInvoiceId: String(candidate.invoiceId || ""),
-      note: `Imported from ${candidate.description}`,
-    });
-    if (coupon) issued.push(coupon);
-    else skipped += 1;
-  }
-  return { issued, issuedCount: issued.length, skipped };
-}
+/* --- Vouchers bought through Stripe: now the Pass Inbox's job ---------------
+ *
+ * There used to be stripeCouponCandidates/importStripeCoupons here, behind
+ * "Find voucher purchases" on this screen. It was removed on 2026-09-17 and
+ * must not come back in that shape.
+ *
+ * It matched an invoice line to a catalogue row flagged is_voucher, two ways,
+ * and by the end neither could fire. The price-id path needed a Stripe
+ * *product* id on the catalogue row, and product sync was deleted in August
+ * (see the note at the foot of _shared/stripe-billing.mts), so every row now
+ * carries a UUID. That left an exact, case-folded match of the line
+ * description against the product name -- and SHG's card money arrives as
+ * Stripe *charges*, whose line description is the charge's own text or the
+ * literal "Card payment", never a catalogue name.
+ *
+ * So it returned an empty list whether there was nothing to do, nothing
+ * flagged, or nothing it could see, and the screen rendered all three as
+ * "every voucher purchase found already has a coupon".
+ *
+ * What replaced it reads the same billing_invoice_items rows but classifies on
+ * wording rather than requiring a flag, and puts the result in the Pass Inbox
+ * beside the Optix sales that already worked that way -- one queue for "money
+ * arrived and something is unfinished". Confirming a voucher there writes
+ * billing_coupons directly, keyed by the same (account_id, source_line_id)
+ * index this importer relied on, so a voucher issued either way is one
+ * voucher. See _shared/pass-inbox-lines.mts and readStripeInboxLines in
+ * booking-core.mts.
+ *
+ * issueCoupon below stays: the till still mints vouchers, and so does this
+ * screen's own "New coupon".
+ */
 
 // --- Router ------------------------------------------------------------------
 
@@ -4537,12 +4409,6 @@ export default async function handler(req: Request) {
     }
     if (action === "coupons/lookup" && req.method === "GET") {
       return json(await lookupCoupon(accountId, url.searchParams.get("code") || ""));
-    }
-    if (action === "coupons/stripe-candidates" && req.method === "GET") {
-      return json(await stripeCouponCandidates(accountId, url));
-    }
-    if (action === "coupons/import" && req.method === "POST") {
-      return json(await importStripeCoupons(accountId, await parseBody(req), url));
     }
     if (action.startsWith("coupons/") && action.endsWith("/redemptions") && req.method === "GET") {
       return json(await listCouponRedemptions(accountId, action.slice("coupons/".length, -"/redemptions".length), url));

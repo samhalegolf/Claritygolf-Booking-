@@ -79,6 +79,7 @@ import type { ClientsPanel as ClientsPanelComponent } from "./modules/clients/Cl
 import type { CoverableService, Pass, PassGrant, PassTemplate } from "./modules/passes/PassesPanel";
 import type { IssuedPass } from "./modules/passes/IssuedPassesPanel";
 import type {
+  PassInboxDismissedType,
   PassInboxPurchase,
   PassInboxUnassigned,
 } from "./modules/passes/PassInboxPanel";
@@ -220,7 +221,6 @@ import type {
   StockMovement,
   BillingCoupon,
   CouponRedemption,
-  CouponImportCandidate,
 } from "./modules/billing/types";
 import {
   defaultInvoiceSettings,
@@ -5585,8 +5585,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const [passInbox, setPassInbox] = useState<{
     waitingToIssue: PassInboxPurchase[];
     waitingForOwner: PassInboxUnassigned[];
+    dismissedTypes: PassInboxDismissedType[];
     templates: PassTemplate[];
-  }>({ waitingToIssue: [], waitingForOwner: [], templates: [] });
+  }>({ waitingToIssue: [], waitingForOwner: [], dismissedTypes: [], templates: [] });
   const [passInboxLoadState, setPassInboxLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   /* Every pass the business has issued, for Billing's Passes tab. Separate
      from the inbox: that is what is unfinished, this is what is done. */
@@ -16154,43 +16155,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     }
   }
 
-  async function findStripeCouponCandidates() {
-    try {
-      const response = await fetch("/api/billing/coupons/stripe-candidates", {
-        credentials: "same-origin",
-        cache: "no-store",
-      });
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not look through Stripe purchases."));
-      const data = (await response.json()) as { candidates?: CouponImportCandidate[] };
-      return Array.isArray(data.candidates) ? data.candidates : [];
-    } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not look through Stripe purchases." });
-      return [];
-    }
-  }
-
-  async function importStripeCoupons(lineIds: string[]) {
-    try {
-      const response = await fetch("/api/billing/coupons/import", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lineIds }),
-      });
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not import the coupons."));
-      const data = (await response.json()) as { issuedCount?: number; skipped?: number };
-      const issued = data.issuedCount || 0;
-      await fetchCoupons();
-      setToast({
-        message: `${issued} coupon${issued === 1 ? "" : "s"} issued${data.skipped ? `, ${data.skipped} already had one` : ""}.`,
-      });
-      return issued;
-    } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not import the coupons." });
-      return 0;
-    }
-  }
-
   // "+ Add" on the Sell screen's customer search. Same PUT /api/people write the
   // rest of the app uses; the till only ever has a name to go on, so email and
   // phone are filled in later from Clients.
@@ -19107,11 +19071,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     const payload = (data || {}) as {
       waitingToIssue?: PassInboxPurchase[];
       waitingForOwner?: PassInboxUnassigned[];
+      dismissedTypes?: PassInboxDismissedType[];
       templates?: PassTemplate[];
     };
     setPassInbox({
       waitingToIssue: Array.isArray(payload.waitingToIssue) ? payload.waitingToIssue : [],
       waitingForOwner: Array.isArray(payload.waitingForOwner) ? payload.waitingForOwner : [],
+      dismissedTypes: Array.isArray(payload.dismissedTypes) ? payload.dismissedTypes : [],
       templates: Array.isArray(payload.templates) ? payload.templates : [],
     });
     setPassInboxLoadState("loaded");
@@ -19122,7 +19088,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     body: Record<string, unknown>,
     busyId: string,
     failure: string,
-    success: string,
+    // A function rather than a string because issuing a voucher has something
+    // to say that the request did not know: the code it minted. An empty one
+    // means the sale already had a voucher, which is a no-op, not a failure.
+    success: string | ((payload: { issuedCouponCode?: string }) => string),
   ) {
     setPassInboxBusyId(busyId);
     try {
@@ -19133,8 +19102,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         body: JSON.stringify(body),
       });
       if (!response.ok) throw new Error(await readApiFailure(response, failure));
-      applyPassInbox(await response.json());
-      setToast({ message: success });
+      const payload = (await response.json()) as { issuedCouponCode?: string };
+      applyPassInbox(payload);
+      setToast({ message: typeof success === "function" ? success(payload) : success });
       void fetchIssuedPasses();
     } catch (error) {
       setToast({ message: error instanceof Error ? error.message : failure });
@@ -27566,8 +27536,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   onIssue={issueCoupon}
                   onSetVoid={setCouponVoid}
                   onLoadRedemptions={fetchCouponRedemptions}
-                  onFindStripeCandidates={findStripeCouponCandidates}
-                  onImport={importStripeCoupons}
                 />
               </Suspense>
             )}
@@ -27635,6 +27603,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       unassigned={passInbox.waitingForOwner}
                       templates={passInbox.templates}
                       people={clients.map((client) => ({ id: client.id, name: client.name }))}
+                      dismissedTypes={passInbox.dismissedTypes}
                       loadState={passInboxLoadState}
                       busyId={passInboxBusyId}
                       onIssue={(purchaseId, templateServiceId, valueCents) =>
@@ -27651,6 +27620,20 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           "Pass issued.",
                         )
                       }
+                      onVoucher={(purchaseId, valueCents) =>
+                        void postPassInbox(
+                          "/api/passes/inbox",
+                          valueCents === undefined
+                            ? { purchaseId, action: "voucher" }
+                            : { purchaseId, action: "voucher", totalValueCents: valueCents },
+                          purchaseId,
+                          "Could not issue that voucher.",
+                          (payload) =>
+                            payload.issuedCouponCode
+                              ? `Voucher ${payload.issuedCouponCode} issued — it is in Billing › Coupons.`
+                              : "That sale already had a voucher.",
+                        )
+                      }
                       onDismiss={(purchaseId) =>
                         void postPassInbox(
                           "/api/passes/inbox",
@@ -27658,6 +27641,24 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           purchaseId,
                           "Could not update that purchase.",
                           "Marked as not a pass.",
+                        )
+                      }
+                      onDismissType={(itemName) =>
+                        void postPassInbox(
+                          "/api/passes/inbox",
+                          { itemName, action: "dismissType" },
+                          itemName,
+                          "Could not hide that product.",
+                          "Hidden — sales of that product will not show here again.",
+                        )
+                      }
+                      onRestoreType={(itemName) =>
+                        void postPassInbox(
+                          "/api/passes/inbox",
+                          { itemName, action: "restoreType" },
+                          itemName,
+                          "Could not restore that product.",
+                          "Back in the queue.",
                         )
                       }
                       onAttach={(passId, personId) =>

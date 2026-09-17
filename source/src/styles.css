@@ -12401,29 +12401,6 @@ button {
   letter-spacing: 0.04em;
 }
 
-.coupon-import-actions {
-  justify-content: flex-start;
-  gap: 10px;
-}
-
-/* A price-id match is exact; a name match is a guess and has to look like one,
-   because agreeing to it mints money. */
-.coupon-match {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.coupon-match.exact {
-  color: var(--coach-primary, #1fd36d);
-}
-
-.coupon-match.guess {
-  color: var(--danger, #a52e15);
-}
-
 /* --- Redeeming at the till --- */
 
 .sell-coupon-entry {
@@ -14811,6 +14788,79 @@ button {
   flex-wrap: wrap;
   gap: var(--c-space-2);
   margin-top: var(--c-space-1);
+}
+
+/* The fold, and what is inside it.
+ *
+ * A sale the classifier did not recognise is still shown -- being quietly
+ * wrong about which sales exist is the one failure that looks exactly like an
+ * empty inbox -- but it is shown at a weight that says "probably nothing".
+ * Dimmed rather than hidden, and never disabled: a row you cannot act on is a
+ * row that wasted the click that opened it. */
+.pass-inbox-fold {
+  display: grid;
+  gap: var(--c-space-2);
+  align-content: start;
+}
+
+.pass-inbox-fold-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--c-space-1);
+  justify-self: start;
+  padding: var(--c-space-1) 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--c-size-meta);
+  color: var(--c-text-soft);
+  cursor: pointer;
+  text-align: left;
+}
+
+.pass-inbox-fold-toggle:hover {
+  color: var(--c-text);
+}
+
+/* Scoped through .pass-inbox for the reason every text rule on this screen is:
+   .data-card's descendant rules are 0-1-1 and beat a bare class. */
+.pass-inbox .pass-inbox-row-folded {
+  background: none;
+  border-style: dashed;
+}
+
+.pass-inbox .pass-inbox-row-folded .pass-inbox-row-main strong {
+  font-weight: 500;
+  color: var(--c-text-soft);
+}
+
+/* Products waved away for good, and the way back. Reversible from the same
+   screen that hides them, because a dismissal with no undo is one the coach
+   has to be sure about -- which means hesitating over every row. */
+.pass-inbox-dismissed {
+  display: grid;
+  gap: var(--c-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pass-inbox-dismissed li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--c-space-2);
+  padding: var(--c-space-1) var(--c-space-2);
+  border: 1px dashed var(--c-border);
+  border-radius: var(--c-radius-control);
+}
+
+.pass-inbox-dismissed li span {
+  min-width: 0;
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+  overflow-wrap: anywhere;
 }
 
 .pass-inbox-empty {

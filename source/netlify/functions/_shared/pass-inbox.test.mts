@@ -161,3 +161,57 @@ test("no account is a refusal before anything is read", async () => {
   );
   assert.deepEqual(issued, [], "a request with no account must not reach the database at all");
 });
+
+/* --- Reading a Stripe line ------------------------------------------------
+ *
+ * The inbox now reads every synced Stripe sale, not just the handful an
+ * integration pre-classified. Most of those sales are not entitlements, so the
+ * classifier's job is mostly to say "not this one" -- and the tests that
+ * matter are the ones where saying yes would cost real money.
+ */
+
+import { classifyInboxLine, inboxLineType, isDismissedLine } from "./pass-inbox-lines.mts";
+
+test("a gift voucher for a package is a voucher, not a package", () => {
+  // The ordering failure this exists to prevent. "5 lesson package" is in
+  // there, so a pass-first classifier issues five lessons to whoever bought
+  // the gift -- when the entire point is that somebody else redeems it later.
+  assert.equal(classifyInboxLine("Gift voucher - 5 lesson package"), "voucher");
+  assert.equal(classifyInboxLine("Gift Certificate"), "voucher");
+});
+
+test("the wording a real catalogue uses classifies as a pass", () => {
+  assert.equal(classifyInboxLine("30 Minute Golf Lesson Package"), "pass");
+  assert.equal(classifyInboxLine("10 Lesson Block"), "pass");
+  assert.equal(classifyInboxLine("Coaching Pass"), "pass");
+});
+
+test("a sale that is just money stays unknown rather than becoming a pass", () => {
+  // Each of these is a real line off a synced Stripe invoice. Classifying any
+  // of them as a pass issues spendable credits for a coffee.
+  for (const line of ["1 x Extra Hour", "Range balls", "Card payment", "Green fee", ""]) {
+    assert.equal(classifyInboxLine(line), "unknown", `${line || "(blank)"} must not classify`);
+  }
+});
+
+test('"Card payment" is not a gift card', () => {
+  // The description every Stripe charge without one falls back to. If "card"
+  // were a voucher keyword, every unlabelled card sale in the account would be
+  // offered as a gift voucher to mint.
+  assert.equal(classifyInboxLine("Card payment"), "unknown");
+});
+
+test("one product dismissed once stays dismissed however it is punctuated", () => {
+  // The whole value of dismissing by product: next month's line is worded
+  // slightly differently by whoever rang it up, and it must not come back.
+  const dismissed = new Set([inboxLineType("1 x Extra Hour")]);
+  assert.equal(isDismissedLine("1 X EXTRA HOUR", dismissed), true);
+  assert.equal(isDismissedLine("1x Extra Hour.", dismissed), true);
+  assert.equal(isDismissedLine("Extra Hour", dismissed), false, "a different product is not covered");
+});
+
+test("a blank description can never be dismissed into hiding everything", () => {
+  // inboxLineType("") is "", and an empty dismissal entry matching every
+  // blank-described line would silently swallow rows nobody waved away.
+  assert.equal(isDismissedLine("", new Set([""])), false);
+});
