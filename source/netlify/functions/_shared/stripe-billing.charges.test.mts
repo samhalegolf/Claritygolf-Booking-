@@ -71,7 +71,9 @@ test("charge line is a single stripe-source row summing to the charge total", ()
   assert.equal(line.invoice_id, "ch_123");
   assert.equal(line.source_type, "stripe");
   assert.equal(line.source_id, "pi_123");
-  assert.equal(line.description, "Charge for mary@example.com");
+  // Was "Charge for mary@example.com" until 2026-09-17. Stripe's filler is no
+  // longer written through as though it described a product.
+  assert.equal(line.description, "Card payment");
   assert.equal(line.quantity, 1);
   assert.equal(line.unit_price, 160);
   assert.equal(line.line_total, 160);
@@ -97,4 +99,67 @@ test("invoice number: order id > receipt number > short card code", () => {
     chargeInvoiceNumber(charge({ id: "ch_3Ttll2HT7TJ4nhHW0KEuYoTx", metadata: {}, receipt_number: null })),
     "CARD-0KEUYOTX",
   );
+});
+
+/* --- Keeping the name of what was sold ------------------------------------
+ *
+ * Every Squarespace sale reaches Stripe with the description "Charge for
+ * <email>" -- all 102 in this account -- and the sync used to write that
+ * verbatim as the invoice line. The product name was discarded at the one
+ * point it existed, which is why nothing reading billing_invoice_items could
+ * tell a gift voucher from a lesson, and why a card sale can never match a
+ * pass on a client's profile.
+ */
+
+test("a product name in charge metadata becomes the invoice line", () => {
+  const row = mapChargeLine(
+    charge({ metadata: { orderId: "268", itemName: "Lesson Gift Voucher" } }),
+    "sam-hale-golf",
+  );
+  assert.equal(row.description, "Lesson Gift Voucher");
+});
+
+test("the metadata key is not assumed to be called anything in particular", () => {
+  // Squarespace's schema is its business, and naming one key is exactly how
+  // the old voucher importer ended up matching nothing.
+  for (const key of ["product", "line_item_1", "sqsp_item"]) {
+    const row = mapChargeLine(charge({ metadata: { orderId: "268", [key]: "Lesson Gift Voucher" } }), "shg");
+    assert.equal(row.description, "Lesson Gift Voucher", `${key} should have been read`);
+  }
+});
+
+test("an expanded payment intent's description is used when the charge has none", () => {
+  const row = mapChargeLine(
+    charge({ payment_intent: { id: "pi_123", description: "1 Hour Golf Lesson Voucher", metadata: {} } }),
+    "sam-hale-golf",
+  );
+  assert.equal(row.description, "1 Hour Golf Lesson Voucher");
+});
+
+test("a real charge description still wins over metadata", () => {
+  const row = mapChargeLine(
+    charge({ description: "5 Lesson Package", metadata: { orderId: "268", itemName: "something else" } }),
+    "sam-hale-golf",
+  );
+  assert.equal(row.description, "5 Lesson Package");
+});
+
+test("Stripe's filler description never survives as a line", () => {
+  // The whole point. With nothing else to go on it falls back to the generic
+  // label rather than stamping a customer's email address across the invoice
+  // list as though it were a product.
+  const row = mapChargeLine(charge(), "sam-hale-golf");
+  assert.equal(row.description, "Card payment");
+});
+
+test("an order id alone is not a product name", () => {
+  const row = mapChargeLine(charge({ metadata: { orderId: "268" } }), "sam-hale-golf");
+  assert.equal(row.description, "Card payment", "a number is not what was sold");
+});
+
+test("the source id still points at the payment intent when it is expanded", () => {
+  // cleanString returns "" for an object, so an expanded intent must not
+  // silently blank the column that used to hold its id.
+  const row = mapChargeLine(charge({ payment_intent: { id: "pi_123", metadata: {} } }), "shg");
+  assert.equal(row.source_id, "pi_123");
 });

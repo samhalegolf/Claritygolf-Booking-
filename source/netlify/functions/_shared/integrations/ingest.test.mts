@@ -415,3 +415,141 @@ test("a newer stored cancellation prevents an older create from resurrecting the
     mock.restore();
   }
 });
+
+// The bridge from an Optix booking id to its Clarity lesson is normally the
+// external_booking_links row, but that row is a second write that can fail on
+// its own — and did, for a fortnight, when its person_link_source column was
+// missing from the database. The lesson was on the calendar the whole time; the
+// link was not, so Optix's later cancellations and moves had nothing to change.
+// The calendar item carries the booking id itself, which is what these two
+// tests hold the recovery to.
+const cancelledPayload = { ...payload, event: "member_booking_cancelled" };
+
+const movedPayload = {
+  ...payload,
+  event: "member_booking_updated",
+  check_in_timestamp: "2026-08-04T04:00:00.000Z",
+  check_out_timestamp: "2026-08-04T05:00:00.000Z",
+};
+
+const mappingRow = {
+  provider: "optix", organisation_id: "org-1", workspace_id: "637949", workspace_name: "Swing Analysis",
+  account_id: "sam-hale-golf", location_id: "three-kings", default_coach_id: "sam-hale", enabled: true,
+  expected_duration: 60, bay_profile_id: "standard", email_behaviour: "none",
+};
+
+const orphanedLesson = {
+  id: "optix-item-9", origin: "optix", external_provider: "optix",
+  external_booking_id: "swing-123", person_id: "person-5",
+};
+
+/** Every table this path touches, with no link row and the lesson on the calendar. */
+function unlinkedLessonMocks(onCalendarItems?: (url: string, init: RequestInit) => void) {
+  return {
+    optix_webhook_events: (url: string, init: RequestInit) => {
+      if (init.method === "PATCH") return new Response("[]", { status: 200 });
+      if (url.includes("select=attempt_count")) {
+        return new Response(JSON.stringify([{ attempt_count: 0, received_at: "2026-09-17T00:00:00.000Z" }]), { status: 200 });
+      }
+      return new Response("[]", { status: 200 });
+    },
+    external_booking_mappings: () => new Response(JSON.stringify([mappingRow]), { status: 200 }),
+    // The link row that PGRST204 stopped from ever being written.
+    external_booking_links: (_url: string, init: RequestInit) => {
+      if (!init.method || init.method === "GET") return new Response("[]", { status: 200 });
+      return new Response(JSON.stringify([{ ok: true }]), { status: 201 });
+    },
+    calendar_items: (url: string, init: RequestInit) => {
+      onCalendarItems?.(url, init);
+      if (!init.method || init.method === "GET") return new Response(JSON.stringify([orphanedLesson]), { status: 200 });
+      return new Response(JSON.stringify([orphanedLesson]), { status: 200 });
+    },
+  };
+}
+
+test("an Optix cancellation cancels the lesson even when the link row was never written", async () => {
+  const { processStoredExternalEvent } = await import("./ingest.mts");
+  const mock = withMockSupabase(unlinkedLessonMocks());
+  try {
+    const result: any = await processStoredExternalEvent("optix", "event-cancel", cancelledPayload);
+    assert.equal(result.status, "processed");
+    assert.equal(result.clarityItemId, "optix-item-9");
+
+    // The lookup may only ever reach this business's own Optix bookings.
+    const lookup = mock.calls.find((call) => call.url.includes("/rest/v1/calendar_items") && (!call.init.method || call.init.method === "GET"));
+    assert.ok(lookup, "the lesson is looked up by its Optix booking id");
+    assert.match(lookup!.url, /account_id=eq\.sam-hale-golf/);
+    assert.match(lookup!.url, /origin=eq\.optix/);
+    assert.match(lookup!.url, /external_provider=eq\.optix/);
+    assert.match(lookup!.url, /external_booking_id=eq\.swing-123/);
+
+    const patch = mock.calls.find((call) => call.url.includes("/rest/v1/calendar_items") && call.init.method === "PATCH");
+    assert.ok(patch, "the lesson itself is changed, not just the link");
+    assert.match(patch!.url, /id=eq\.optix-item-9/);
+    assert.equal(JSON.parse(String(patch!.init.body)).status, "cancelled");
+
+    // And the bridge is rebuilt, pointing at the lesson it just cancelled, so
+    // the next event for this booking does not have to recover it again.
+    const linkWrite = mock.calls.find((call) => call.url.includes("/rest/v1/external_booking_links") && call.init.method === "POST");
+    const written = JSON.parse(String(linkWrite?.init.body))[0];
+    assert.equal(written.clarity_item_id, "optix-item-9");
+    assert.equal(written.person_id, "person-5");
+    assert.equal(written.processing_status, "cancelled");
+  } finally {
+    mock.restore();
+  }
+});
+
+test("an Optix move rewrites the lesson's slot even when the link row was never written", async () => {
+  const { calendarSlot, processStoredExternalEvent } = await import("./ingest.mts");
+  const mock = withMockSupabase(unlinkedLessonMocks());
+  try {
+    const result: any = await processStoredExternalEvent("optix", "event-move", movedPayload);
+    assert.equal(result.status, "processed");
+    assert.equal(result.created, false, "a recovered lesson is not a new import");
+
+    const patch = mock.calls.find((call) => call.url.includes("/rest/v1/calendar_items") && call.init.method === "PATCH");
+    assert.ok(patch);
+    assert.match(patch!.url, /id=eq\.optix-item-9/);
+    const body = JSON.parse(String(patch!.init.body));
+    const slot = calendarSlot("2026-08-04T04:00:00.000Z", "Pacific/Auckland");
+    assert.deepEqual({ week: body.week, day: body.day, start: body.start }, slot);
+    assert.equal(body.duration, 60);
+    assert.equal(body.status, "booked");
+    // Clarity keeps what Clarity owns: a move may not reset the coach or the note.
+    assert.equal(body.coach_id, undefined);
+    assert.equal(body.note, undefined);
+    assert.equal(body.service_id, undefined);
+
+    assert.equal(
+      mock.calls.some((call) => call.url.includes("/rest/v1/calendar_items") && call.init.method === "POST"),
+      false,
+      "a move must never mint a second copy of the lesson",
+    );
+  } finally {
+    mock.restore();
+  }
+});
+
+test("a cancellation for a booking Clarity has never held still leaves no lesson behind", async () => {
+  // The recovery must not invent one: with nothing on the calendar carrying
+  // this booking id, the cancellation is still only a link row.
+  const { processStoredExternalEvent } = await import("./ingest.mts");
+  const mocks = unlinkedLessonMocks();
+  const mock = withMockSupabase({
+    ...mocks,
+    calendar_items: (_url: string, init: RequestInit) => {
+      if (!init.method || init.method === "GET") return new Response("[]", { status: 200 });
+      throw new Error("no calendar item may be written");
+    },
+  });
+  try {
+    const result: any = await processStoredExternalEvent("optix", "event-cancel-unknown", cancelledPayload);
+    assert.equal(result.status, "processed");
+    assert.equal(result.clarityItemId, null);
+    const linkWrite = mock.calls.find((call) => call.url.includes("/rest/v1/external_booking_links") && call.init.method === "POST");
+    assert.equal(JSON.parse(String(linkWrite?.init.body))[0].clarity_item_id, null);
+  } finally {
+    mock.restore();
+  }
+});

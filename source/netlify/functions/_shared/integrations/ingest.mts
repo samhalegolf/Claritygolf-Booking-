@@ -270,6 +270,39 @@ async function assertSafeExistingLink(existing: any, event: NormalizedBookingEve
   return item;
 }
 
+/**
+ * The lesson an external booking id points at, read from the calendar itself
+ * rather than from the link table.
+ *
+ * external_booking_links is the normal bridge from an Optix booking to its
+ * Clarity lesson, but it is a second write that can fail on its own — and did,
+ * for every booking imported between 2 and 17 September 2026, when the row's
+ * person_link_source column was missing and every upsert came back PGRST204.
+ * The lesson still landed on the calendar; only the bridge was lost. With it
+ * went every later cancellation and move for that booking: the cancellation
+ * wrote a link with no lesson on it and the calendar kept showing the lesson
+ * as booked, and the move was ignored as missing_lesson_link.
+ *
+ * The calendar item carries the same three fields the link does, so it can
+ * answer the question itself. Ownership is the same rule assertSafeExistingLink
+ * applies — origin, external_provider and external_booking_id must all be this
+ * provider's — plus the account the workspace maps to, so a booking id can only
+ * ever reach the business that imported it.
+ */
+async function findOwnedCalendarItem(
+  provider: ExternalProvider,
+  event: NormalizedBookingEvent,
+  mapping: IntegrationMapping,
+): Promise<ExistingOptixCalendarItem | null> {
+  const rows = await integrationRequest(
+    `calendar_items?account_id=eq.${encodeURIComponent(mapping.accountId)}` +
+      `&origin=eq.${provider}&external_provider=eq.${provider}` +
+      `&external_booking_id=eq.${encodeURIComponent(event.bookingId)}` +
+      "&select=id,origin,external_provider,external_booking_id,person_id&order=updated_at.desc&limit=1",
+  ).catch(() => []);
+  return rowsOf(rows)[0] as ExistingOptixCalendarItem | undefined || null;
+}
+
 async function findMapping(event: NormalizedBookingEvent, provider: ExternalProvider): Promise<IntegrationMapping | null> {
   const query = `external_booking_mappings?provider=eq.${provider}&organisation_id=eq.${encodeURIComponent(event.organisationId)}&workspace_id=eq.${encodeURIComponent(event.workspaceId)}&limit=1`;
   let rows = await integrationRequest(query);
@@ -334,6 +367,8 @@ async function updateEvent(eventKey: string, values: Record<string, unknown>) {
 async function writeCancelledLink(args: {
   provider: ExternalProvider;
   event: NormalizedBookingEvent;
+  /** The lesson this cancellation closed, when one was found. */
+  clarityItemId?: string | null;
   personId?: string | null;
   personLinkSource?: PersonLinkSource;
 }) {
@@ -344,7 +379,7 @@ async function writeCancelledLink(args: {
       provider: args.provider,
       purpose: "lesson",
       external_booking_id: args.event.bookingId,
-      clarity_item_id: null,
+      clarity_item_id: args.clarityItemId || null,
       person_id: args.personId || null,
       person_link_source: args.personLinkSource || null,
       provider_customer_id: args.event.providerCustomerId || null,
@@ -506,7 +541,11 @@ export async function processStoredExternalEvent(
       });
       return { status: "ignored", reason: "superseded_by_cancelled" };
     }
-    if (!existing && event.kind === "booking.cancelled") {
+    // A booking Clarity already holds whose link row never made it. Found
+    // here, a cancellation and a move both land on the real lesson instead of
+    // being written off as a booking Clarity has never heard of.
+    const recovered = existing ? null : await findOwnedCalendarItem(provider, event, mapping);
+    if (!existing && !recovered && event.kind === "booking.cancelled") {
       await writeCancelledLink({ provider, event });
       await updateEvent(eventKey, {
         processing_status: "processed",
@@ -516,31 +555,41 @@ export async function processStoredExternalEvent(
       });
       return { status: "processed", clarityItemId: null, created: false, mapping, item: { id: "", status: "cancelled" } };
     }
-    if (!existing && event.kind !== "booking.created") {
+    if (!existing && !recovered && event.kind !== "booking.created") {
       await updateEvent(eventKey, { processing_status: "ignored", failure_code: "missing_lesson_link", processed_at: new Date().toISOString() });
       return { status: "ignored", reason: "missing_lesson_link" };
     }
-    const linkedItem = existing ? await assertSafeExistingLink(existing, event, provider) : null;
-    const itemId = existing?.clarity_item_id || `${adapter.itemIdPrefix}-${randomUUID()}`;
-    if (event.kind === "booking.cancelled" && existing) {
+    const linkedItem = existing ? await assertSafeExistingLink(existing, event, provider) : recovered;
+    const itemId = text(existing?.clarity_item_id) || recovered?.id || `${adapter.itemIdPrefix}-${randomUUID()}`;
+    /** Whether Clarity already has this lesson, by either route. */
+    const known = Boolean(existing || recovered);
+    if (event.kind === "booking.cancelled" && known) {
       await integrationRequest(`calendar_items?id=eq.${encodeURIComponent(itemId)}`, {
         method: "PATCH",
         body: JSON.stringify({ status: "cancelled", external_event_type: event.rawEventType, external_sync_state: "cancelled", external_updated_at: new Date().toISOString(), updated_at: new Date().toISOString() }),
       });
-      await integrationRequest(`external_booking_links?provider=eq.${provider}&purpose=eq.lesson&external_booking_id=eq.${encodeURIComponent(event.bookingId)}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          processing_status: "cancelled",
-          provider_customer_id: event.providerCustomerId || null,
-          updated_at: new Date().toISOString(),
-        }),
-      });
+      if (existing) {
+        // PATCH rather than upsert so email_status survives: a confirmation
+        // that was sent stays sent in the record, whatever happens later.
+        await integrationRequest(`external_booking_links?provider=eq.${provider}&purpose=eq.lesson&external_booking_id=eq.${encodeURIComponent(event.bookingId)}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            processing_status: "cancelled",
+            provider_customer_id: event.providerCustomerId || null,
+            updated_at: new Date().toISOString(),
+          }),
+        });
+      } else {
+        // Recovered from the calendar: there is no link row to patch, so the
+        // bridge is rebuilt here pointing at the lesson just cancelled.
+        await writeCancelledLink({ provider, event, clarityItemId: itemId, personId: recovered?.person_id });
+      }
       await updateEvent(eventKey, { processing_status: "processed", clarity_item_id: itemId, failure_code: null, error_message: null, processed_at: new Date().toISOString() });
       return { status: "processed", clarityItemId: itemId, created: false, mapping, item: { id: itemId, status: "cancelled" } };
     }
     // Only on first sight of a booking. An event for a booking Clarity already
     // tracks is an update, and belongs on its own record however the slot looks.
-    if (!existing) {
+    if (!known) {
       const duplicateOf = await findExistingBookingForEvent(event, mapping);
       if (duplicateOf) {
         await updateEvent(eventKey, {
@@ -561,7 +610,7 @@ export async function processStoredExternalEvent(
       : await resolvePerson(event, mapping.accountId, provider);
     const personId = resolvedPerson.personId;
     const item = createCalendarItemFromOptixBooking(event, mapping, { itemId, personId });
-    if (existing) {
+    if (known) {
       // Patch only what Optix owns. Rebuilding the whole item here is what used
       // to reset the coach and blank the note on every reschedule.
       await integrationRequest(`calendar_items?id=eq.${encodeURIComponent(itemId)}`, { method: "PATCH", body: JSON.stringify(updateCalendarItemFromOptixBooking(event, mapping)) });
@@ -585,7 +634,7 @@ export async function processStoredExternalEvent(
       }]),
     });
     await updateEvent(eventKey, { processing_status: "processed", clarity_item_id: itemId, failure_code: null, error_message: null, processed_at: new Date().toISOString() });
-    return { status: "processed", clarityItemId: itemId, created: !existing, mapping, item };
+    return { status: "processed", clarityItemId: itemId, created: !known, mapping, item };
   } catch (error: any) {
     await updateEvent(eventKey, { processing_status: "failed", failure_code: String(error?.code || "processing_failed"), error_message: error instanceof Error ? error.message.slice(0, 1000) : "Processing failed." }).catch(() => undefined);
     throw error;

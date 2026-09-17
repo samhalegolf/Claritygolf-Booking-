@@ -114,7 +114,25 @@ function cleanIsoDate(value: unknown): string | null {
   return parsed.toISOString().slice(0, 10) === text ? text : null;
 }
 
-function cleanNumber(value: unknown, fallback = 0, { min = -1e12, max = 1e12 } = {}) {
+/**
+ * A number from something that may not be one, or the fallback.
+ *
+ * The absent check is not tidiness. `Number(null)` is 0 and `Number("")` is 0,
+ * and both are finite -- so without it every caller reading an optional query
+ * parameter got 0 instead of its fallback the moment the parameter was left
+ * off. `?limit=` absent meant a limit of 0, which the surrounding
+ * `Math.max(1, ...)` then turned into a limit of *one row*.
+ *
+ * Every call site here passes `url.searchParams.get(...)`, which is null when
+ * the parameter is missing, so all of them had it. It stayed hidden because
+ * the browser always sent `?limit=500`; the voucher scan, whose parameter is
+ * genuinely optional, is what exposed it -- as "Read 0 payments from the last
+ * 1 days".
+ *
+ * An explicit 0 is still 0. Only "nothing was supplied" takes the fallback.
+ */
+export function cleanNumber(value: unknown, fallback = 0, { min = -1e12, max = 1e12 } = {}) {
+  if (value === null || value === undefined || value === "") return fallback;
   const num = Number(value);
   return Number.isFinite(num) ? Math.max(min, Math.min(max, num)) : fallback;
 }

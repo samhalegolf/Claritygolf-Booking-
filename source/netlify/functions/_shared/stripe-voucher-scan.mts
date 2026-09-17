@@ -80,6 +80,22 @@ export function chargeWording(charge: Record<string, unknown>): ChargeWording[] 
   return found;
 }
 
+/**
+ * The best name this charge has for what was sold, or "" if it has none.
+ *
+ * Used by the billing sync as well as the voucher scan, so a card payment
+ * stops being mirrored into billing_invoice_items as "Charge for <email>" --
+ * which is what every one of them said, and why nothing downstream could ever
+ * tell a gift voucher from a lesson.
+ *
+ * Returns "" rather than a placeholder so the caller decides what to show when
+ * a charge genuinely carries nothing. A helpful-sounding default invented here
+ * would be indistinguishable from a real product name one row later.
+ */
+export function chargeProductName(charge: Record<string, unknown>): string {
+  return chargeWording(charge)[0]?.text || "";
+}
+
 export type VoucherVerdict = {
   /** The wording this was judged on, or "" when the charge carried none. */
   label: string;

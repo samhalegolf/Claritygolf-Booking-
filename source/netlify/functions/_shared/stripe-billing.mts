@@ -324,6 +324,8 @@ export async function syncInvoicesSince(sinceEpoch: number, accountId: string, u
   };
 }
 
+import { chargeProductName } from "./stripe-voucher-scan.mts";
+
 // --- Charge mapping -----------------------------------------------------------
 // Sam Hale Golf's card payments arrive as Stripe *charges* (via the external
 // booking site), not invoices, and none are linked to a Stripe invoice. Each
@@ -331,6 +333,15 @@ export async function syncInvoicesSince(sinceEpoch: number, accountId: string, u
 // in the invoice list + revenue report exactly like every other row. Keyed by
 // the charge id (ch_...), so re-runs upsert and never collide with the SHG
 // invoices or the app's own randomUUID invoice ids.
+
+/** The id of a Stripe reference that may or may not have been expanded. */
+function stripeIdOf(value: unknown) {
+  if (typeof value === "string") return cleanString(value, "", 160);
+  if (value && typeof value === "object") {
+    return cleanString((value as Record<string, unknown>).id, "", 160);
+  }
+  return "";
+}
 
 function chargeAmountPaid(charge: Record<string, any>) {
   const captured = Number(charge.amount_captured);
@@ -401,8 +412,25 @@ export function mapChargeLine(charge: Record<string, any>, accountId: string) {
     invoice_id: charge.id,
     account_id: accountId,
     source_type: "stripe",
-    source_id: cleanString(charge.payment_intent, "", 160) || null,
-    description: cleanString(charge.description, "", 500) || "Card payment",
+    // Either shape: a bare "pi_..." from the webhook, or the expanded object
+    // the backfill now asks for. cleanString returns "" for an object, so
+    // without this the expand silently emptied this column on every line.
+    source_id: stripeIdOf(charge.payment_intent) || null,
+    // What was actually sold, when the charge says anywhere at all.
+    //
+    // This used to be `charge.description` alone, and for Squarespace sales
+    // Stripe's description is the literal "Charge for <email>" -- all 102
+    // synced charges in this account said that and nothing else. The product
+    // name was thrown away at the only point it was ever available, which is
+    // why no query over billing_invoice_items could find a gift voucher, and
+    // why the pass-to-invoice matcher on a client profile cannot match a card
+    // sale to anything.
+    //
+    // chargeProductName reads the charge's own description, then the payment
+    // intent's, then every metadata value -- deliberately not one named key,
+    // since which one Squarespace uses is its business. "Card payment" remains
+    // the fallback for a charge that genuinely carries no wording.
+    description: chargeProductName(charge) || "Card payment",
     quantity: 1,
     unit_price: lineTotal,
     tax_rate: 0,
@@ -447,6 +475,11 @@ export async function syncChargesSince(sinceEpoch: number, accountId: string, un
   const charges = await stripePageAll("/v1/charges", {
     "created[gte]": sinceEpoch,
     ...(untilEpoch ? { "created[lte]": untilEpoch } : {}),
+    // Expanded so mapChargeLine can reach the intent's description. Without it
+    // payment_intent is a bare id string and the only wording available is the
+    // charge's own -- which for a Squarespace sale is Stripe's "Charge for
+    // <email>" filler. One extra field on a request already being made.
+    "expand[]": "data.payment_intent",
   });
   let synced = 0;
   let skipped = 0;

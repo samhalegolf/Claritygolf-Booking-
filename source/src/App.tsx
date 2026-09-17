@@ -5615,6 +5615,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   } | null>(null);
   const [stripeKeyDraft, setStripeKeyDraft] = useState("");
   const [stripeSaving, setStripeSaving] = useState(false);
+  const [stripeResyncing, setStripeResyncing] = useState(false);
+  /** What the last re-read did. Kept on the card rather than shown as a toast:
+   *  it is a count worth reading twice, and this runs for a while. */
+  const [stripeResyncResult, setStripeResyncResult] = useState("");
+  /** How far through the windowed walk, so a long run is not a frozen button. */
+  const [stripeResyncProgress, setStripeResyncProgress] = useState<{ done: number; total: number } | null>(null);
   /** Which row is mid-write, so only that row's buttons go quiet. */
   const [passInboxBusyId, setPassInboxBusyId] = useState("");
   const [clientTransactions, setClientTransactions] = useState<ClientTransactionRow[]>([]);
@@ -16201,6 +16207,90 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
    * null rather than an empty result, so the panel can tell "nothing found"
    * apart from "the look-up did not happen".
    */
+  /* Re-pulling everything Stripe has already taken.
+   *
+   * Safe to run whenever: every row upserts on its Stripe id, so this is a
+   * refresh rather than an import, and running it twice changes nothing the
+   * first run did not.
+   *
+   * What it is actually for is repair. The sync used to write Stripe's own
+   * "Charge for <email>" as the description of every card payment, so the
+   * invoice list, the revenue report and the pass-matching on a client profile
+   * all saw a customer's email address where a product name should have been.
+   * The sync now reads the real wording off the charge, but only for charges it
+   * pulls -- the rows already in the table keep whatever they were written with
+   * until they are pulled again. This is how a coach pulls them again.
+   *
+   * WHY IT IS DRIVEN IN WINDOWS FROM HERE
+   *
+   * Because one request cannot do it. The account has around three hundred
+   * Stripe records and each costs several round trips -- a line fetch, a
+   * delete, an insert -- so a single full backfill is thousands of requests
+   * and runs well past the function timeout. The endpoint was built for this
+   * (its `until` parameter exists for exactly this reason); nothing had ever
+   * driven it.
+   *
+   * Windows are walked newest first, so the records a coach is most likely to
+   * be looking at are fixed within seconds of pressing the button. A window
+   * that fails is counted and the walk continues: one timed-out quarter must
+   * not cost the fifteen that would have worked, and re-running is free.
+   */
+  const STRIPE_RESYNC_FROM = Date.UTC(2023, 0, 1) / 1000;
+  const STRIPE_RESYNC_WINDOW_DAYS = 90;
+
+  async function resyncStripeBilling() {
+    setStripeResyncing(true);
+    setStripeResyncResult("");
+    const windowSeconds = STRIPE_RESYNC_WINDOW_DAYS * 86400;
+    const now = Math.floor(Date.now() / 1000);
+    const windows: Array<{ since: number; until: number }> = [];
+    for (let until = now; until > STRIPE_RESYNC_FROM; until -= windowSeconds) {
+      windows.push({ since: Math.max(STRIPE_RESYNC_FROM, until - windowSeconds), until });
+    }
+
+    let invoices = 0;
+    let charges = 0;
+    let failedWindows = 0;
+    try {
+      for (const [index, span] of windows.entries()) {
+        setStripeResyncProgress({ done: index, total: windows.length });
+        try {
+          const response = await fetch("/api/billing-stripe-sync", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ action: "syncAll", since: span.since, until: span.until }),
+          });
+          if (!response.ok) throw new Error(await readApiFailure(response, "window failed"));
+          const data = (await response.json()) as {
+            invoices?: { invoicesSynced?: number };
+            charges?: { chargesSynced?: number };
+          };
+          invoices += data.invoices?.invoicesSynced || 0;
+          charges += data.charges?.chargesSynced || 0;
+        } catch {
+          // Counted, not thrown. A slice that timed out is re-read by pressing
+          // the button again; losing the fifteen that worked is not.
+          failedWindows += 1;
+        }
+      }
+      setStripeResyncResult(
+        `Re-read ${invoices} invoice${invoices === 1 ? "" : "s"} and ${charges} card payment${
+          charges === 1 ? "" : "s"
+        }.` +
+          (failedWindows
+            ? ` ${failedWindows} period${failedWindows === 1 ? "" : "s"} could not be read — press the button again to retry ${failedWindows === 1 ? "it" : "them"}.`
+            : ""),
+      );
+      // The invoice list is the most visibly wrong thing before this runs, so
+      // it is refreshed rather than left showing the old descriptions.
+      void fetchRecentInvoices();
+    } finally {
+      setStripeResyncing(false);
+      setStripeResyncProgress(null);
+    }
+  }
+
   async function findStripeCouponCandidates() {
     try {
       const response = await fetch("/api/billing/coupons/stripe-candidates", {
@@ -28096,6 +28186,51 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     the publishable one and cannot take payments. The key is stored on your
                     account and is never shown again once saved.
                   </p>
+                </article>
+
+                {/* Repair, not import. Everything here has already been
+                    pulled once; what this fixes is what was kept of it. */}
+                <article className="data-card">
+                  <div className="data-card-header">
+                    <div>
+                      <span>From Stripe</span>
+                      <h2>Re-read payment history</h2>
+                    </div>
+                    <RefreshCw size={24} />
+                  </div>
+                  <p className="field-help">
+                    Pulls every Stripe invoice and card payment again, from the beginning. Safe to
+                    run whenever — each one updates the record it already has rather than adding a
+                    second.
+                  </p>
+                  <p className="field-help">
+                    Worth running once: card payments used to be filed under Stripe's own label for
+                    them, <code>Charge for &lt;email&gt;</code>, so the invoice list and the
+                    lesson-matching on a client's profile saw an email address where the product
+                    name should have been. New payments now keep the real name; the ones already
+                    recorded keep the old label until they are read again.
+                  </p>
+                  <div className="panel-actions">
+                    <button
+                      className="outline-button"
+                      type="button"
+                      disabled={stripeResyncing}
+                      onClick={() => void resyncStripeBilling()}
+                    >
+                      {stripeResyncing ? "Reading…" : "Re-read everything from Stripe"}
+                    </button>
+                  </div>
+                  {stripeResyncing && (
+                    <p className="field-help">
+                      {stripeResyncProgress
+                        ? `Reading period ${stripeResyncProgress.done + 1} of ${stripeResyncProgress.total} — newest first.`
+                        : "Starting…"}{" "}
+                      This takes a minute or two on a few hundred payments. Leave the page open.
+                    </p>
+                  )}
+                  {stripeResyncResult && !stripeResyncing && (
+                    <p className="field-help">{stripeResyncResult}</p>
+                  )}
                 </article>
 
                 <article className="data-card">
