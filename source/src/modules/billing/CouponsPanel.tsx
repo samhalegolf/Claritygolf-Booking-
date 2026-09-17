@@ -6,8 +6,17 @@ import { Loading } from "../shared/Loading";
 // list and every request; what lives here is form and disclosure state.
 
 import { Fragment, useMemo, useState } from "react";
-import { Plus, Search, Ticket, X } from "lucide-react";
-import type { BillingCoupon, CouponRedemption } from "./types";
+import { AlertTriangle, ChevronDown, ChevronRight, Download, Plus, Search, Ticket, X } from "lucide-react";
+import type { BillingCoupon, CouponImportCandidate, CouponRedemption } from "./types";
+
+/** What a scan came back with. `scannedCount` is how many charges were read,
+ *  so "nothing found" can be told apart from "nothing looked at". */
+export type CouponScanResult = {
+  candidates: CouponImportCandidate[];
+  otherCharges: CouponImportCandidate[];
+  scannedCount: number;
+  sinceDays: number;
+};
 
 export type CouponIssueValues = {
   value: number;
@@ -27,6 +36,8 @@ export type CouponsPanelProps = {
   onIssue: (values: CouponIssueValues) => Promise<boolean>;
   onSetVoid: (coupon: BillingCoupon, isVoid: boolean) => Promise<void>;
   onLoadRedemptions: (couponId: string) => Promise<CouponRedemption[]>;
+  onScanStripe: () => Promise<CouponScanResult | null>;
+  onImport: (chargeIds: string[]) => Promise<number>;
 };
 
 const SOURCE_LABELS: Record<BillingCoupon["source"], string> = {
@@ -55,6 +66,8 @@ export function CouponsPanel({
   onIssue,
   onSetVoid,
   onLoadRedemptions,
+  onScanStripe,
+  onImport,
 }: CouponsPanelProps) {
   const [form, setForm] = useState(emptyIssueForm);
   const [issuing, setIssuing] = useState(false);
@@ -64,6 +77,46 @@ export function CouponsPanel({
   const [openCoupon, setOpenCoupon] = useState("");
   const [redemptions, setRedemptions] = useState<CouponRedemption[]>([]);
   const [redemptionsLoading, setRedemptionsLoading] = useState(false);
+
+  /** null until a scan has been run: "not looked yet" is not "nothing found". */
+  const [scan, setScan] = useState<CouponScanResult | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [chosen, setChosen] = useState<Record<string, boolean>>({});
+  /** The charges the classifier did not recognise, shut by default. */
+  const [showOthers, setShowOthers] = useState(false);
+
+  async function runScan() {
+    setScanning(true);
+    try {
+      const found = await onScanStripe();
+      setScan(found);
+      // Recognised ones start ticked -- that is the whole point of recognising
+      // them -- but each is still a tick a coach can take off, because the
+      // classifier is a keyword match and a coupon is spendable money.
+      setChosen(Object.fromEntries((found?.candidates || []).map((entry) => [entry.chargeId, true])));
+      setShowOthers(false);
+    } finally {
+      setScanning(false);
+    }
+  }
+
+  async function runImport() {
+    const chargeIds = Object.entries(chosen)
+      .filter(([, ticked]) => ticked)
+      .map(([chargeId]) => chargeId);
+    if (!chargeIds.length) return;
+    setImporting(true);
+    try {
+      await onImport(chargeIds);
+      setScan(null);
+      setChosen({});
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  const chosenCount = Object.values(chosen).filter(Boolean).length;
 
   const visible = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -147,6 +200,144 @@ export function CouponsPanel({
             Refresh
           </button>
         </div>
+      </article>
+
+      <article className="data-card wide">
+        <div className="data-card-header">
+          <div>
+            <span>From Stripe</span>
+            <h2>Vouchers bought online</h2>
+          </div>
+          <Download size={24} />
+        </div>
+        <p className="field-help">
+          Reads your Stripe payments directly and looks for gift vouchers among them. It has to go
+          to Stripe rather than the synced invoice list because Stripe labels every one of these
+          "Charge for &lt;email&gt;" — the product name only exists on the payment itself.
+        </p>
+        <div className="panel-actions coupon-import-actions">
+          <button className="outline-button" disabled={scanning} onClick={() => void runScan()} type="button">
+            {scanning ? "Looking…" : "Find voucher purchases"}
+          </button>
+          {chosenCount > 0 && (
+            <button className="primary-button" disabled={importing} onClick={() => void runImport()} type="button">
+              {importing ? "Issuing…" : `Issue ${chosenCount} code${chosenCount === 1 ? "" : "s"}`}
+            </button>
+          )}
+        </div>
+
+        {scan && (
+          <>
+            {/* Said plainly, because the old version of this screen could not:
+                "nothing found" and "nothing looked at" rendered identically and
+                the difference was the entire bug. */}
+            <p className="field-help">
+              Read {scan.scannedCount} payment{scan.scannedCount === 1 ? "" : "s"} from the last{" "}
+              {scan.sinceDays} days.{" "}
+              {scan.candidates.length
+                ? `${scan.candidates.length} look${scan.candidates.length === 1 ? "s" : ""} like a voucher.`
+                : "None of them is named like a voucher."}
+            </p>
+
+            {scan.candidates.length > 0 && (
+              <ul className="coupon-candidates">
+                {scan.candidates.map((candidate) => (
+                  <li key={candidate.chargeId}>
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(chosen[candidate.chargeId])}
+                        onChange={(event) =>
+                          setChosen((current) => ({
+                            ...current,
+                            [candidate.chargeId]: event.target.checked,
+                          }))
+                        }
+                      />
+                      <span className="coupon-candidate-main">
+                        <strong>{candidate.label || "Unnamed purchase"}</strong>
+                        <em>
+                          {[
+                            candidate.buyerName || candidate.buyerEmail || "Unknown buyer",
+                            formatMoney(candidate.valueCents / 100, candidate.currency || currency),
+                            candidate.when ? new Date(candidate.when).toLocaleDateString() : "",
+                            candidate.orderNumber,
+                            // Where the name came from. A coach deciding
+                            // whether to mint money should be able to see what
+                            // the guess was made on.
+                            candidate.labelSource ? `from ${candidate.labelSource}` : "",
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </em>
+                        {candidate.partlyRefunded && (
+                          <em className="coupon-candidate-warning">
+                            <AlertTriangle size={12} /> Partly refunded — the value above is what is
+                            left
+                          </em>
+                        )}
+                      </span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {/* Everything else that was paid for and is not already a voucher.
+                Kept because the classifier reads words, and a voucher the coach
+                knows was bought but that Squarespace named something
+                unexpected has to be reachable -- otherwise this screen is
+                confidently wrong in exactly the way the last one was. */}
+            {scan.otherCharges.length > 0 && (
+              <div className="coupon-candidates-fold">
+                <button
+                  className="coupon-candidates-fold-toggle"
+                  type="button"
+                  aria-expanded={showOthers}
+                  onClick={() => setShowOthers((current) => !current)}
+                >
+                  {showOthers ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+                  {scan.otherCharges.length} other payment
+                  {scan.otherCharges.length === 1 ? "" : "s"} with no coupon — tick any that were
+                  vouchers
+                </button>
+                {showOthers && (
+                  <ul className="coupon-candidates">
+                    {scan.otherCharges.map((candidate) => (
+                      <li key={candidate.chargeId}>
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(chosen[candidate.chargeId])}
+                            onChange={(event) =>
+                              setChosen((current) => ({
+                                ...current,
+                                [candidate.chargeId]: event.target.checked,
+                              }))
+                            }
+                          />
+                          <span className="coupon-candidate-main">
+                            <strong>{candidate.label || "Unnamed purchase"}</strong>
+                            <em>
+                              {[
+                                candidate.buyerName || candidate.buyerEmail || "Unknown buyer",
+                                formatMoney(candidate.valueCents / 100, candidate.currency || currency),
+                                candidate.when ? new Date(candidate.when).toLocaleDateString() : "",
+                                candidate.orderNumber,
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </em>
+                          </span>
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </>
+        )}
       </article>
 
       <article className="data-card wide">

@@ -12554,6 +12554,95 @@ button {
 /* --- Coupons (gift vouchers) ------------------------------------------------
    The Billing > Coupons list and the redeem box on the till. */
 
+.coupon-import-actions {
+  justify-content: flex-start;
+  gap: var(--c-space-2);
+}
+
+/* The candidate list. A row is a tick, a name and the evidence behind it --
+   laid out so the evidence is always under the name rather than beside it,
+   because the wording and where it came from is the whole basis on which a
+   coach is agreeing to mint money. */
+.billing-coupons .coupon-candidates {
+  display: grid;
+  gap: var(--c-space-1);
+  margin: var(--c-space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.billing-coupons .coupon-candidates li {
+  padding: var(--c-space-2);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface-soft);
+}
+
+.billing-coupons .coupon-candidates label {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--c-space-2);
+  min-width: 0;
+  cursor: pointer;
+}
+
+.billing-coupons .coupon-candidate-main {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+/* The colour is set, not inherited: the surrounding label picks up a soft grey
+   from the settings-field rules, which left the product name lighter than the
+   evidence beneath it -- the wrong way round for the one line a coach reads
+   first. */
+.billing-coupons .coupon-candidate-main strong {
+  font-size: var(--c-size-body);
+  color: var(--c-text);
+  overflow-wrap: anywhere;
+}
+
+/* Scoped past `.data-card em` (0-1-1), which would otherwise leave every line
+   of evidence the same weight as the name above it. */
+.billing-coupons .coupon-candidate-main em {
+  font-style: normal;
+  font-size: var(--c-size-meta);
+  color: var(--c-text-soft);
+  overflow-wrap: anywhere;
+}
+
+.billing-coupons .coupon-candidate-main .coupon-candidate-warning {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--c-danger);
+}
+
+.billing-coupons .coupon-candidates-fold {
+  display: grid;
+  gap: var(--c-space-1);
+  margin-top: var(--c-space-3);
+}
+
+.billing-coupons .coupon-candidates-fold-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--c-space-1);
+  justify-self: start;
+  padding: var(--c-space-1) 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--c-size-meta);
+  color: var(--c-text-soft);
+  cursor: pointer;
+  text-align: left;
+}
+
+.billing-coupons .coupon-candidates-fold-toggle:hover {
+  color: var(--c-text);
+}
+
 .coupon-code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-weight: 700;

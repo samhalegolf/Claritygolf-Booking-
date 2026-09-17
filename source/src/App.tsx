@@ -234,7 +234,7 @@ import {
   printableInvoiceCustomFields,
 } from "./modules/billing/invoiceSettings";
 import { computeInvoiceTotals, invoiceLineNet, invoiceLineGross, lineDiscountAmount } from "./modules/billing/invoiceMath";
-import type { CouponIssueValues } from "./modules/billing/CouponsPanel";
+import type { CouponIssueValues, CouponScanResult } from "./modules/billing/CouponsPanel";
 import type { ProductFormValues, StockAdjustInput } from "./modules/billing/ProductsPanel";
 import {
   presetRange,
@@ -16193,6 +16193,58 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     }
   }
 
+  /* Looking through Stripe for gift vouchers that still need a code.
+   *
+   * Goes to the server, which goes to Stripe: the synced invoice rows cannot
+   * answer this because Stripe names every one of these payments "Charge for
+   * <email>" and the product name never reaches our tables. A failure returns
+   * null rather than an empty result, so the panel can tell "nothing found"
+   * apart from "the look-up did not happen".
+   */
+  async function findStripeCouponCandidates() {
+    try {
+      const response = await fetch("/api/billing/coupons/stripe-candidates", {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not look through Stripe payments."));
+      const data = (await response.json()) as CouponScanResult;
+      return {
+        candidates: Array.isArray(data.candidates) ? data.candidates : [],
+        otherCharges: Array.isArray(data.otherCharges) ? data.otherCharges : [],
+        scannedCount: Number(data.scannedCount) || 0,
+        sinceDays: Number(data.sinceDays) || 0,
+      };
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not look through Stripe payments." });
+      return null;
+    }
+  }
+
+  async function importStripeCoupons(chargeIds: string[]) {
+    try {
+      const response = await fetch("/api/billing/coupons/import", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chargeIds }),
+      });
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not issue those codes."));
+      const data = (await response.json()) as { issuedCount?: number; skipped?: number };
+      const issued = data.issuedCount || 0;
+      await fetchCoupons();
+      setToast({
+        message: `${issued} voucher${issued === 1 ? "" : "s"} issued${
+          data.skipped ? `, ${data.skipped} skipped (already had one, or refunded)` : ""
+        }.`,
+      });
+      return issued;
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not issue those codes." });
+      return 0;
+    }
+  }
+
   // "+ Add" on the Sell screen's customer search. Same PUT /api/people write the
   // rest of the app uses; the till only ever has a name to go on, so email and
   // phone are filled in later from Clients.
@@ -27626,6 +27678,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   onIssue={issueCoupon}
                   onSetVoid={setCouponVoid}
                   onLoadRedemptions={fetchCouponRedemptions}
+                  onScanStripe={findStripeCouponCandidates}
+                  onImport={importStripeCoupons}
                 />
               </Suspense>
             )}

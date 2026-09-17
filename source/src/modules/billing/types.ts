@@ -514,20 +514,29 @@ export type CouponRedemption = {
   createdAt: string;
 };
 
-// A Stripe purchase that looks like it bought a voucher but has no coupon yet.
-// Matching a line to a product is a heuristic (invoice lines carry a Stripe
-// price id, catalog rows are keyed by product id), so these are reviewed by a
-// human before anything is issued. matchedBy says how confident the match is.
+/**
+ * A Stripe charge that has not yet been turned into a voucher code.
+ *
+ * Read from Stripe rather than from the synced invoice rows, because the
+ * product name never reaches our tables -- every synced charge's description is
+ * the literal "Charge for <email>". `label` is the best wording found anywhere
+ * on the charge or its payment intent, and `labelSource` says which field it
+ * came from, so a coach can see what the judgement was made on rather than
+ * being asked to trust it.
+ */
 export type CouponImportCandidate = {
-  lineId: string;
-  invoiceId: string;
-  description: string;
-  value: number;
-  productId: string;
-  productName: string;
-  matchedBy: "price" | "name";
-  customerName: string;
-  customerEmail: string;
+  chargeId: string;
+  orderNumber: string;
+  valueCents: number;
   currency: string;
-  purchasedAt: string;
+  when: string;
+  buyerName: string;
+  buyerEmail: string;
+  /** The wording judged on. Empty when the charge carried none at all. */
+  label: string;
+  /** "charge.itemName", "payment intent", … — where `label` was found. */
+  labelSource: string;
+  /** The classifier read a voucher in it. False rows are listed separately. */
+  likely: boolean;
+  partlyRefunded: boolean;
 };

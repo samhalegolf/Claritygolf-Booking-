@@ -3,6 +3,14 @@ import { createHash, randomUUID } from "node:crypto";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { defaultCalendarSlug } from "./_shared/account.mts";
 import { generateCouponCode, normaliseCouponCode } from "./_shared/coupon-codes.mts";
+import {
+  chargeIsClaimable,
+  chargeValueCents,
+  voucherVerdict,
+} from "./_shared/stripe-voucher-scan.mts";
+// The same human-scaled order number the billing sync stamps on a card charge,
+// so a voucher and the invoice row beside it name the sale identically.
+import { chargeInvoiceNumber } from "./_shared/stripe-billing.mts";
 import { requireCoachActor } from "./_shared/coach-auth.mts";
 import { settingsSelectQuery } from "./_shared/settings-scope.mts";
 import {
@@ -4352,37 +4360,163 @@ async function restoreCouponValue(accountId: string, couponId: string, amount: n
   return balance === null || balance === undefined ? null : Number(balance);
 }
 
-/* --- Vouchers bought through Stripe: now the Pass Inbox's job ---------------
+/* --- Vouchers bought online ------------------------------------------------
  *
- * There used to be stripeCouponCandidates/importStripeCoupons here, behind
- * "Find voucher purchases" on this screen. It was removed on 2026-09-17 and
- * must not come back in that shape.
+ * Squarespace sells the voucher, Stripe takes the money, and somebody has to
+ * turn that into a code the buyer can actually spend. That is this.
  *
- * It matched an invoice line to a catalogue row flagged is_voucher, two ways,
- * and by the end neither could fire. The price-id path needed a Stripe
- * *product* id on the catalogue row, and product sync was deleted in August
- * (see the note at the foot of _shared/stripe-billing.mts), so every row now
- * carries a UUID. That left an exact, case-folded match of the line
- * description against the product name -- and SHG's card money arrives as
- * Stripe *charges*, whose line description is the charge's own text or the
- * literal "Card payment", never a catalogue name.
+ * WHY IT ASKS STRIPE AND NOT OUR OWN TABLES
  *
- * So it returned an empty list whether there was nothing to do, nothing
- * flagged, or nothing it could see, and the screen rendered all three as
- * "every voucher purchase found already has a coupon".
+ * The obvious implementation reads billing_invoice_items, which the billing
+ * sync already fills with every Stripe charge. It is also the implementation
+ * that was here until 2026-09-17 and never once worked, for a reason no amount
+ * of matching could fix: mapChargeLine writes `charge.description` as the line
+ * text, and Stripe's description for every one of these is the literal
+ * "Charge for <email>". All 102 synced charges in this account say that. The
+ * product name is not in the database, has never been in the database, and
+ * cannot be recovered from it.
  *
- * What replaced it reads the same billing_invoice_items rows but classifies on
- * wording rather than requiring a flag, and puts the result in the Pass Inbox
- * beside the Optix sales that already worked that way -- one queue for "money
- * arrived and something is unfinished". Confirming a voucher there writes
- * billing_coupons directly, keyed by the same (account_id, source_line_id)
- * index this importer relied on, so a voucher issued either way is one
- * voucher. See _shared/pass-inbox-lines.mts and readStripeInboxLines in
- * booking-core.mts.
+ * The old version also required the line to match a catalogue row flagged
+ * is_voucher, by Stripe *price* id or by exact name -- and product sync was
+ * deleted in August, so the price path was unreachable and the name path was
+ * matching "Charge for x@y.com" against product names. It returned an empty
+ * list whether there was nothing to do or nothing it could see, and the screen
+ * called all three "already imported".
  *
- * issueCoupon below stays: the till still mints vouchers, and so does this
- * screen's own "New coupon".
+ * So this goes to Stripe, reads the charge and its payment intent, and judges
+ * on every string it finds rather than one nominated field. See
+ * _shared/stripe-voucher-scan.mts for why it does not name a metadata key.
+ *
+ * Nothing is minted automatically. Every candidate is shown with the wording
+ * it was judged on and where that wording came from, and a coach presses the
+ * button -- because a coupon is spendable money and the classifier is a
+ * keyword match.
  */
+
+/** How far back a scan looks by default: roughly two years of vouchers. */
+const VOUCHER_SCAN_DEFAULT_DAYS = 730;
+const VOUCHER_SCAN_PAGE = 100;
+const VOUCHER_SCAN_MAX_PAGES = 20;
+
+async function stripeChargesSince(accountId: string, sinceEpoch: number) {
+  const all: Array<Record<string, any>> = [];
+  let startingAfter = "";
+  for (let page = 0; page < VOUCHER_SCAN_MAX_PAGES; page += 1) {
+    const params = new URLSearchParams({
+      limit: String(VOUCHER_SCAN_PAGE),
+      "created[gte]": String(sinceEpoch),
+    });
+    // The wording is as often on the intent as on the charge, and expanding it
+    // here costs one request instead of one per charge.
+    params.append("expand[]", "data.payment_intent");
+    if (startingAfter) params.set("starting_after", startingAfter);
+    const body = (await stripeRequest(accountId, "charges", { params })) as {
+      data?: Array<Record<string, any>>;
+      has_more?: boolean;
+    };
+    const data = Array.isArray(body?.data) ? body.data : [];
+    all.push(...data);
+    if (!body?.has_more || !data.length) break;
+    startingAfter = String(data[data.length - 1].id || "");
+    if (!startingAfter) break;
+  }
+  return all;
+}
+
+async function stripeVoucherCandidates(accountId: string, url: URL) {
+  const days = Math.max(1, Math.min(1825, cleanNumber(url.searchParams.get("days"), VOUCHER_SCAN_DEFAULT_DAYS)));
+  const sinceEpoch = Math.floor(Date.now() / 1000) - days * 86400;
+
+  const charges = (await stripeChargesSince(accountId, sinceEpoch)).filter(chargeIsClaimable);
+
+  // Already-issued ones are dropped rather than greyed out: the list answers
+  // "what still needs a code". Keyed on the charge id, which is also the unique
+  // index, so a scan and an import can never disagree about what is done.
+  const issuedRows = (await supabase("billing_coupons", {
+    query:
+      `select=source_line_id&account_id=eq.${encodeFilter(accountId)}` +
+      `&source_line_id=not.is.null&limit=5000`,
+  })) as Array<{ source_line_id?: string }>;
+  const issued = new Set(issuedRows.map((row) => String(row.source_line_id ?? "")));
+
+  const candidates = charges
+    .filter((charge) => !issued.has(String(charge.id)))
+    .map((charge) => {
+      const verdict = voucherVerdict(charge);
+      const billing = (charge.billing_details || {}) as Record<string, any>;
+      return {
+        chargeId: String(charge.id || ""),
+        orderNumber: chargeInvoiceNumber(charge),
+        valueCents: chargeValueCents(charge),
+        currency: String(charge.currency || "nzd").toUpperCase(),
+        when: charge.created ? new Date(Number(charge.created) * 1000).toISOString() : "",
+        buyerName: cleanString(billing.name, "", 140),
+        buyerEmail: cleanString(billing.email, "", 180),
+        label: verdict.label,
+        labelSource: verdict.labelSource,
+        likely: verdict.likely,
+        partlyRefunded: Number(charge.amount_refunded) > 0,
+      };
+    });
+
+  return {
+    // Split rather than flagged, because they are read differently: the first
+    // list is work, the second is somewhere to look when a voucher the coach
+    // knows was bought is not in the first.
+    candidates: candidates.filter((entry) => entry.likely),
+    otherCharges: candidates.filter((entry) => !entry.likely),
+    scannedCount: charges.length,
+    sinceDays: days,
+  };
+}
+
+/**
+ * Mint a coupon for each confirmed charge.
+ *
+ * Re-running with the same ids is harmless: the unique index on
+ * (account_id, source_line_id) turns a repeat into a skip rather than a second
+ * code for one gift.
+ *
+ * The charges are fetched again rather than trusted from the request. The
+ * value on a coupon is money somebody can spend, and a browser that has had
+ * the list open for ten minutes is not where that number should come from --
+ * nor is it where "this one was not refunded" should come from.
+ */
+async function importStripeVouchers(accountId: string, body: Record<string, unknown>) {
+  const wanted = Array.isArray(body?.chargeIds)
+    ? [...new Set(body.chargeIds.map((id) => cleanString(id, "", 200)).filter(Boolean))].slice(0, 100)
+    : [];
+  if (!wanted.length) throw Object.assign(new Error("Pick at least one purchase."), { status: 400 });
+
+  const issued: unknown[] = [];
+  const skipped: string[] = [];
+  for (const chargeId of wanted) {
+    const params = new URLSearchParams();
+    params.append("expand[]", "payment_intent");
+    const charge = (await stripeRequest(accountId, `charges/${encodeURIComponent(chargeId)}`, {
+      params,
+    })) as Record<string, any>;
+    if (!chargeIsClaimable(charge)) {
+      skipped.push(chargeId);
+      continue;
+    }
+    const verdict = voucherVerdict(charge);
+    const billing = (charge.billing_details || {}) as Record<string, any>;
+    const coupon = await issueCoupon(accountId, {
+      value: round2(chargeValueCents(charge) / 100),
+      currency: String(charge.currency || "").toUpperCase(),
+      issuedToName: cleanString(billing.name, "", 140),
+      issuedToEmail: cleanString(billing.email, "", 180),
+      customerId: cleanString(charge.customer, "", 160),
+      source: "stripe",
+      sourceLineId: String(charge.id),
+      note: `Bought online · ${verdict.label || chargeInvoiceNumber(charge)}`,
+    });
+    if (coupon) issued.push(coupon);
+    else skipped.push(chargeId);
+  }
+  return { issued, issuedCount: issued.length, skipped: skipped.length };
+}
 
 // --- Router ------------------------------------------------------------------
 
@@ -4414,6 +4548,12 @@ export default async function handler(req: Request) {
       const coupon = await issueCoupon(accountId, { ...body, source: "manual" });
       if (!coupon) throw Object.assign(new Error("That coupon already exists."), { status: 409 });
       return json({ coupon }, 201);
+    }
+    if (action === "coupons/stripe-candidates" && req.method === "GET") {
+      return json(await stripeVoucherCandidates(accountId, url));
+    }
+    if (action === "coupons/import" && req.method === "POST") {
+      return json(await importStripeVouchers(accountId, await parseBody(req)));
     }
     if (action === "coupons/lookup" && req.method === "GET") {
       return json(await lookupCoupon(accountId, url.searchParams.get("code") || ""));
