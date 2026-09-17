@@ -388,6 +388,8 @@ export type PosBookingPayment = {
   amount: number;
   currency: string;
   paymentMethodName: string;
+  /** "pass" settles a lesson without money; the $0 amount is not a discount. */
+  paymentMethodKind?: "clarity_pay" | "pass" | "custom";
   paidAt: string;
 };
 

@@ -3952,7 +3952,7 @@ async function posBookingPayments(accountId: string, bookingIds: string[]) {
   const list = bookingIds.slice(0, 400).map((id) => `"${id.replace(/"/g, "")}"`).join(",");
   const rows = await supabase("billing_pos_transactions", {
     query:
-      `select=id,receipt_number,booking_id,amount,currency,payment_method_name,paid_at` +
+      `select=id,receipt_number,booking_id,amount,currency,payment_method_name,payment_method_kind,paid_at` +
       `&account_id=eq.${encodeFilter(accountId)}&status=eq.paid&booking_id=in.(${encodeURIComponent(list)})`,
   });
   const payments: Record<string, unknown> = {};
@@ -3965,6 +3965,14 @@ async function posBookingPayments(accountId: string, bookingIds: string[]) {
       amount: Number(row.amount) || 0,
       currency: row.currency || "NZD",
       paymentMethodName: row.payment_method_name,
+      // Carried as well as the name because a pass is not money and the two
+      // must be distinguishable without reading a label somebody renamed. A
+      // lesson settled with a credit shows a $0 sale, and "paid $0.00" on a
+      // profile is worse than saying nothing.
+      paymentMethodKind:
+        row.payment_method_kind === "clarity_pay" || row.payment_method_kind === "pass"
+          ? String(row.payment_method_kind)
+          : "custom",
       paidAt: row.paid_at || "",
     };
   }

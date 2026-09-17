@@ -1,26 +1,22 @@
 /**
- * Reading a Stripe purchase line well enough to put it in a queue.
+ * Reading a sale's wording well enough to sort it into a queue.
  *
- * Everything sold through Stripe lands in billing_invoice_items -- lesson
- * packages, gift vouchers, a coffee, a bay hire, a refunded deposit. Two of
- * those are entitlements somebody is owed and the rest are just money that has
- * already changed hands. Nothing on the row says which, so the wording of the
- * line is the only signal there is.
+ * An external sale names a product and nothing else useful -- lesson packages,
+ * gift vouchers, a coffee, a bay hire all arrive as a string and an amount.
+ * Some of those are entitlements somebody is owed and most are just money that
+ * has already changed hands. Nothing on the row says which, so the wording is
+ * the only signal there is.
  *
  * This file is that signal and nothing else. It decides what a line probably
  * is and refuses to act on it -- the inbox shows the guess, a coach agrees.
- * The reason is the same one the pass engine is built around: a pass issued
- * for the wrong product hands somebody the wrong number of lessons, and a
- * voucher minted for a coffee is real spendable money. Both are found out at
- * the counter, months later, by a customer.
+ * The reason is the one the pass engine is built around: a pass issued for the
+ * wrong product hands somebody the wrong number of lessons, found out at the
+ * counter months later, by a customer.
  *
- * It replaces the old Stripe voucher import, which asked a different question
- * -- "does this line match a product flagged as a voucher" -- and could not
- * answer it. That matcher needed a Stripe *product* id on the catalogue row,
- * and product sync was removed in August, so the only path left was an exact
- * name match against a line description that, for card charges, is never a
- * product name. It returned an empty list for four different reasons and the
- * screen called all four "already imported".
+ * Used in two places now, for opposite purposes. The Pass Inbox uses it to
+ * decide which Optix sales are worth showing at full size. The client's Passes
+ * tab uses it on invoice lines, where nothing is issued at all and a match is
+ * only ever evidence that two records are about the same thing.
  */
 
 /** What a line looks like it is. Never what it is -- a coach decides that. */

@@ -76,7 +76,13 @@ import { Loading, loadingLabel } from "./modules/shared/Loading";
 import { cleanPeople as cleanPeopleWith, type PeopleImportDiagnostic, type Person } from "./modules/clients/clientsModel";
 import { isUnauthorizedClientsError, loadClients, replaceClients, resetClients, useClientsState } from "./modules/clients/clientsStore";
 import type { ClientsPanel as ClientsPanelComponent } from "./modules/clients/ClientsPanel";
-import type { CoverableService, Pass, PassGrant, PassTemplate } from "./modules/passes/PassesPanel";
+import type {
+  CoverableService,
+  InvoicedLesson,
+  Pass,
+  PassGrant,
+  PassTemplate,
+} from "./modules/passes/PassesPanel";
 import type { IssuedPass } from "./modules/passes/IssuedPassesPanel";
 import type {
   PassInboxDismissedType,
@@ -5578,6 +5584,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const [clientSaveState, setClientSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [clientProfileTab, setClientProfileTab] = useState<ClientProfileTab>("bookings");
   const [clientPasses, setClientPasses] = useState<Pass[]>([]);
+  // What this client was billed for, beside what they hold. Evidence only --
+  // no number on a pass is figured from it -- so it lives alongside the passes
+  // rather than inside them.
+  const [clientInvoicedLines, setClientInvoicedLines] = useState<InvoicedLesson[]>([]);
+  const [clientUnmatchedInvoicedLines, setClientUnmatchedInvoicedLines] = useState<InvoicedLesson[]>([]);
   const [passTemplates, setPassTemplates] = useState<PassTemplate[]>([]);
   const [passCoverableServices, setPassCoverableServices] = useState<CoverableService[]>([]);
   const [clientPassesLoadState, setClientPassesLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
@@ -15953,6 +15964,33 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     }
   }
 
+  /* How a lesson was paid for, in one word, or nothing at all.
+   *
+   * Four answers off two maps the billing screens already maintain, in the
+   * order that decides which is the truest: a pass credit settles through a $0
+   * till sale, so it has to be read before "paid at the till" or every
+   * pass-paid lesson would report as a sale of nothing. An invoice is checked
+   * last because a lesson can be both invoiced and then paid, and what a coach
+   * wants to see is that the money arrived.
+   *
+   * Silence is deliberate when nothing is known. A lesson with no record is not
+   * the same as an unpaid one -- it may predate any of this, or have been
+   * settled in a way the app never saw -- and stamping "Unpaid" on a client's
+   * history on that basis would be an accusation the data cannot support.
+   */
+  function bookingPaymentBadge(bookingId: string) {
+    const paid = posPaidBookings[bookingId];
+    if (paid?.paymentMethodKind === "pass") return { tone: "pass", label: "Paid with a pass" };
+    if (paid) {
+      return {
+        tone: "money",
+        label: paid.paymentMethodName ? `Paid · ${paid.paymentMethodName}` : "Paid at the till",
+      };
+    }
+    if (invoicedBookingIds[bookingId]) return { tone: "invoiced", label: "On an invoice" };
+    return null;
+  }
+
   async function fetchPosBookingPayments(bookingIds: string[]) {
     if (!bookingIds.length) {
       setPosPaidBookings({});
@@ -18985,10 +19023,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         passes?: Pass[];
         templates?: PassTemplate[];
         coverableServices?: CoverableService[];
+        invoicedLines?: InvoicedLesson[];
+        unmatchedInvoicedLines?: InvoicedLesson[];
       };
       setClientPasses(Array.isArray(data.passes) ? data.passes : []);
       setPassTemplates(Array.isArray(data.templates) ? data.templates : []);
       setPassCoverableServices(Array.isArray(data.coverableServices) ? data.coverableServices : []);
+      setClientInvoicedLines(Array.isArray(data.invoicedLines) ? data.invoicedLines : []);
+      setClientUnmatchedInvoicedLines(
+        Array.isArray(data.unmatchedInvoicedLines) ? data.unmatchedInvoicedLines : [],
+      );
       setClientPassesLoadState("loaded");
     } catch (error) {
       setClientPassesLoadState("error");
@@ -19136,6 +19180,52 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setToast({ message: error instanceof Error ? error.message : "Could not give that pass." });
     } finally {
       setPassGranting(false);
+    }
+  }
+
+  /* Spending a credit on a lesson that was never booked, and putting one back.
+   *
+   * Both re-read the passes from the response rather than patching state: the
+   * balance is derived server-side from the allocation ledger, and a browser
+   * that decremented a number locally would be inventing the one figure this
+   * whole system exists to not have to trust.
+   *
+   * The invoiced lines are deliberately left alone. They are a record of what
+   * was billed, and spending a credit does not change what was billed.
+   */
+  async function redeemClientPassCredit(passId: string, credits: number, note: string) {
+    if (!selectedClientId) return;
+    try {
+      const response = await fetch("/api/passes/redeem", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ personId: selectedClientId, passId, credits, note }),
+      });
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not use that credit."));
+      const data = (await response.json()) as { passes?: Pass[] };
+      setClientPasses(Array.isArray(data.passes) ? data.passes : []);
+      setToast({ message: credits === 1 ? "Credit used." : `${credits} credits used.` });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not use that credit." });
+    }
+  }
+
+  async function returnClientPassCredit(redemptionId: string) {
+    if (!selectedClientId) return;
+    try {
+      const response = await fetch("/api/passes/redeem/reverse", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ personId: selectedClientId, redemptionId }),
+      });
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not put that credit back."));
+      const data = (await response.json()) as { passes?: Pass[] };
+      setClientPasses(Array.isArray(data.passes) ? data.passes : []);
+      setToast({ message: "Credit put back." });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not put that credit back." });
     }
   }
 
@@ -27620,20 +27710,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           "Pass issued.",
                         )
                       }
-                      onVoucher={(purchaseId, valueCents) =>
-                        void postPassInbox(
-                          "/api/passes/inbox",
-                          valueCents === undefined
-                            ? { purchaseId, action: "voucher" }
-                            : { purchaseId, action: "voucher", totalValueCents: valueCents },
-                          purchaseId,
-                          "Could not issue that voucher.",
-                          (payload) =>
-                            payload.issuedCouponCode
-                              ? `Voucher ${payload.issuedCouponCode} issued — it is in Billing › Coupons.`
-                              : "That sale already had a voucher.",
-                        )
-                      }
                       onDismiss={(purchaseId) =>
                         void postPassInbox(
                           "/api/passes/inbox",
@@ -31757,6 +31833,21 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             <div>
                               <strong>{service?.name ?? appointment.title}</strong>
                               <span>{appointment.kind === "appointment" ? "Booked lesson" : "Blocked time"}</span>
+                              {appointment.kind === "appointment" &&
+                                appointment.status !== "cancelled" &&
+                                (() => {
+                                  // How this one was settled, read off the maps
+                                  // the billing screens already keep. Shown
+                                  // here because "which of these did the pass
+                                  // pay for" is the question the credits on the
+                                  // Passes tab cannot answer on their own.
+                                  const badge = bookingPaymentBadge(appointment.id);
+                                  return badge ? (
+                                    <span className={`booking-paid-badge booking-paid-${badge.tone}`}>
+                                      {badge.label}
+                                    </span>
+                                  ) : null;
+                                })()}
                               {appointment.note ? (
                                 <span className="booking-note-line">Booking notes: {appointment.note}</span>
                               ) : null}
@@ -31821,12 +31912,18 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       <Suspense fallback={<Loading what="passes" />}>
                         <PassesPanel
                           passes={clientPasses}
+                          invoicedLines={clientInvoicedLines}
+                          unmatchedInvoicedLines={clientUnmatchedInvoicedLines}
                           templates={passTemplates}
                           coverableServices={passCoverableServices}
                           loadState={clientPassesLoadState}
                           granting={passGranting}
                           onGrant={(grant) => void grantClientPass(grant)}
                           onVoid={(pass) => void voidClientPass(pass)}
+                          onRedeem={(passId, credits, note) =>
+                            void redeemClientPassCredit(passId, credits, note)
+                          }
+                          onReturnCredit={(redemptionId) => void returnClientPassCredit(redemptionId)}
                           onRetry={() => selectedClientId && void fetchClientPasses(selectedClientId)}
                           serviceName={(serviceId) =>
                             services.find((service) => service.id === serviceId)?.name || serviceId

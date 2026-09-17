@@ -15,27 +15,26 @@
 //
 // WHAT THE THIRD STATE COSTS
 //
-// The first queue reads every sale, from Optix and from Stripe, and most sales
-// are not entitlements at all -- a coffee, an hour of bay time, a green fee.
-// Those arrive classified "unknown" and they used to render at full size with
-// a line saying they were probably not passes, which made a queue of four real
-// jobs look like a queue of forty. An unlikely row is still shown, because the
-// classifier is a keyword match and being quietly wrong about which sales
-// exist is the one failure that looks exactly like an empty inbox. It is just
-// shown folded: one line saying how many, opened on request.
+// Plenty of what arrives is not an entitlement at all -- an hour of bay time,
+// a round of range balls. Those classify "unknown" and they used to render at
+// full size with a line saying they were probably not passes, which made a
+// queue of four real jobs look like a queue of forty. An unlikely row is still
+// shown, because the classifier is a keyword match and being quietly wrong
+// about which sales exist is the one failure that looks exactly like an empty
+// inbox. It is just shown folded: one line saying how many, opened on request.
 //
-// And when the coach says a product is never an entitlement, that is kept. The
+// And when the coach says a product is never a pass, that is kept. The
 // dismissal is by product rather than by sale, so next month's bay-hire line
 // does not come back -- a queue that refills with the same rejected rows is a
 // queue nobody opens twice.
 
 import { useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, Gift, Inbox, Ticket, Undo2, UserPlus } from "lucide-react";
+import { ChevronDown, ChevronRight, Inbox, Ticket, Undo2, UserPlus } from "lucide-react";
 
 import { Loading } from "../shared/Loading";
 
 /** What a sale looks like it is. "unknown" is a real answer, not a failure. */
-export type PassInboxKind = "pass" | "voucher" | "unknown";
+export type PassInboxKind = "pass" | "unknown";
 
 export type PassInboxPurchase = {
   id: string;
@@ -116,7 +115,6 @@ export type PassInboxPanelProps = {
   busyId: string;
   /** `valueCents` is undefined when the coach left the suggested price alone. */
   onIssue: (purchaseId: string, templateServiceId: string, valueCents?: number) => void;
-  onVoucher: (purchaseId: string, valueCents?: number) => void;
   onDismiss: (purchaseId: string) => void;
   onDismissType: (itemName: string) => void;
   onRestoreType: (itemName: string) => void;
@@ -185,7 +183,6 @@ export function PassInboxPanel({
   loadState,
   busyId,
   onIssue,
-  onVoucher,
   onDismiss,
   onDismissType,
   onRestoreType,
@@ -252,12 +249,6 @@ export function PassInboxPanel({
       templates.find((template) => template.serviceId === selected),
     );
     const typed = typedValueCents(chosenValue[purchase.id]);
-    // A voucher is worth what was paid and nothing else -- there is no
-    // catalogue package behind it to price it from.
-    const voucherSuggested = purchase.amountCents;
-    const isVoucher = purchase.kind === "voucher";
-    const offerPass = !isVoucher;
-    const offerVoucher = isVoucher || purchase.kind === "unknown";
 
     return (
       <article
@@ -287,15 +278,14 @@ export function PassInboxPanel({
               how a wrong guess gets corrected without a code change. */}
           {purchase.kind === "unknown" && (
             <em className="pass-inbox-row-caution">
-              Not recognised as a pass or a voucher — is it one?
+              Not recognised as a lesson pass — is it one?
             </em>
           )}
         </div>
 
         <div className="pass-inbox-row-actions">
-          {offerPass && (
-            <label className="pass-inbox-field">
-              <span>Package</span>
+          <label className="pass-inbox-field">
+            <span>Package</span>
               <select
                 value={selected}
                 onChange={(event) =>
@@ -309,15 +299,13 @@ export function PassInboxPanel({
                     {template.credits === 1 ? "" : "s"}
                   </option>
                 ))}
-              </select>
-            </label>
-          )}
+            </select>
+          </label>
 
           {/* What it was worth. An external sale often says 0.00 -- the pass
               was bundled into a membership, or rung up elsewhere -- so the
               package's own price stands in, and stays editable because a
-              comped or discounted one is a real thing. A voucher has no
-              package behind it, so what was paid is all there is. */}
+              comped or discounted one is a real thing. */}
           <label className="pass-inbox-field">
             <span>Value</span>
             <input
@@ -327,10 +315,7 @@ export function PassInboxPanel({
               inputMode="decimal"
               value={
                 chosenValue[purchase.id] ??
-                (() => {
-                  const fallback = isVoucher ? voucherSuggested : suggested;
-                  return fallback === null ? "" : (fallback / 100).toFixed(2);
-                })()
+                (suggested === null ? "" : (suggested / 100).toFixed(2))
               }
               placeholder={purchase.currency || ""}
               onChange={(event) =>
@@ -339,7 +324,7 @@ export function PassInboxPanel({
             />
           </label>
 
-          {offerPass && suggested !== null && (purchase.amountCents === null || purchase.amountCents <= 0) && (
+          {suggested !== null && (purchase.amountCents === null || purchase.amountCents <= 0) && (
             <span className="pass-inbox-suggestion">
               The sale came through at 0 — this is the package's price.
             </span>
@@ -347,8 +332,7 @@ export function PassInboxPanel({
           {/* Only ever shown for a suggestion that is actually in the box.
               Leaving it up after a coach overrides the guess would describe a
               choice nobody made. */}
-          {offerPass &&
-            purchase.suggestionConfidence !== "none" &&
+          {purchase.suggestionConfidence !== "none" &&
             selected === purchase.suggestedTemplateServiceId && (
               <span className="pass-inbox-suggestion">
                 {purchase.suggestionConfidence === "exact"
@@ -370,44 +354,29 @@ export function PassInboxPanel({
             >
               Never a pass
             </button>
-            {/* Optix rows keep the single-sale correction as well: it writes
-                back to the classifier's own output, which is the record that
-                was wrong. A Stripe line has no such row -- the billing sync
-                owns it and would overwrite the edit -- so it only has the
-                product-level answer above. */}
-            {purchase.provider === "optix" && (
-              <button
-                className="outline-button"
-                type="button"
-                disabled={busy}
-                title="Just this sale"
-                onClick={() => onDismiss(purchase.id)}
-              >
-                Just this one
-              </button>
-            )}
-            {offerVoucher && (
-              <button
-                className={isVoucher ? "primary-button" : "outline-button"}
-                type="button"
-                disabled={busy}
-                onClick={() => onVoucher(purchase.id, typed)}
-              >
-                <Gift size={15} />
-                {busy ? "Issuing…" : "Issue voucher"}
-              </button>
-            )}
-            {offerPass && (
-              <button
-                className="primary-button"
-                type="button"
-                disabled={busy || !selected}
-                onClick={() => onIssue(purchase.id, selected, typed)}
-              >
-                <Ticket size={15} />
-                {busy ? "Issuing…" : "Issue pass"}
-              </button>
-            )}
+            {/* The single-sale correction as well: it writes back to the
+                classifier's own output, which is the record that was actually
+                wrong. Worth keeping beside the product-level one because a
+                mis-read one-off is a different thing from a product that will
+                be sold again next month. */}
+            <button
+              className="outline-button"
+              type="button"
+              disabled={busy}
+              title="Just this sale"
+              onClick={() => onDismiss(purchase.id)}
+            >
+              Just this one
+            </button>
+            <button
+              className="primary-button"
+              type="button"
+              disabled={busy || !selected}
+              onClick={() => onIssue(purchase.id, selected, typed)}
+            >
+              <Ticket size={15} />
+              {busy ? "Issuing…" : "Issue pass"}
+            </button>
           </div>
         </div>
       </article>

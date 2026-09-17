@@ -40,7 +40,6 @@ export type PassSource =
   | "clarity_invoice"
   | "clarity_checkout"
   | "optix"
-  | "stripe"
   | "stripe_subscription"
   | "promotion";
 
@@ -50,7 +49,6 @@ const PASS_SOURCES: PassSource[] = [
   "clarity_invoice",
   "clarity_checkout",
   "optix",
-  "stripe",
   "stripe_subscription",
   "promotion",
 ];
@@ -80,6 +78,10 @@ export type PassRedemptionView = {
   redeemedBy: string;
   reversedAt: string | null;
   reversalReason: string | null;
+  /** Why the credit was spent, when no booking says so. */
+  note: string;
+  /** No booking behind it: written by hand to correct a count. */
+  manual: boolean;
 };
 
 export type PassView = {
@@ -576,6 +578,11 @@ function rowToRedemption(row: Record<string, unknown>): PassRedemptionView {
     redeemedBy: (row.redeemed_by as string) || "",
     reversedAt: (row.reversed_at as string) || null,
     reversalReason: (row.reversal_reason as string) || null,
+    note: (row.note as string) || "",
+    // Derived from the absence of a booking rather than stored as a flag. The
+    // two can then never disagree, and "manual" keeps meaning the one thing it
+    // has to mean: nothing in the calendar explains this credit.
+    manual: !row.booking_id,
   };
 }
 
@@ -1828,6 +1835,102 @@ export async function reversePassValueTransaction(
  * Used both when a sale fails after the credit was reserved, and when a lesson
  * that was settled on a pass is later cancelled.
  */
+/**
+ * Spend a credit on something that was never booked.
+ *
+ * The honest correction for the commonest way a pass drifts out of true: the
+ * lesson happened, nobody put it in the calendar, and the balance has said one
+ * too many ever since. Before this the only fix was to void the pass and grant
+ * a smaller one -- rewriting what somebody was given in order to correct what
+ * they have since used, which loses the history that made the ledger worth
+ * keeping.
+ *
+ * It takes the same allocation in the same order as a booking would, through
+ * the same one-statement insert, so a hand-written spend and a booked one come
+ * out of the same lot and expire on the same terms. The differences are that
+ * booking_id is null and a reason is required.
+ *
+ * WHY THE SWEEP CANNOT TOUCH IT
+ *
+ * sweepReturnableCredits hands a credit back when the booking behind it is
+ * gone, and it finds those with `booking_id IS NOT NULL`. A manual redemption
+ * has no booking, so it is outside that filter by construction -- not by an
+ * exception somebody has to remember. Were it not, every one of these would be
+ * reversed by the very next balance read, labelled "Booking deleted".
+ *
+ * No idempotency key, and that is deliberate: a coach correcting a count may
+ * genuinely mean to spend two credits in two clicks, and there is no second
+ * record that could tell a repeat from an intention. The undo is a reversal,
+ * which leaves both facts on the ledger.
+ */
+export async function redeemPassManually(input: {
+  accountId: string;
+  passId: string;
+  credits?: number;
+  note: string;
+  actorId?: string;
+}): Promise<{ redemptionId: string; allocationId: string }> {
+  const accountId = text(input.accountId, 120);
+  const passId = text(input.passId, 120);
+  const note = text(input.note, 300);
+  const credits = Math.max(1, Math.min(MAX_CREDITS, Math.round(Number(input.credits) || 1)));
+  if (!accountId) fail("No account.", 403, "forbidden");
+  if (!passId) fail("Which pass?");
+  // Required rather than optional. A credit that vanished with no booking and
+  // no reason is precisely what gets argued about at a counter months later,
+  // and the ledger is the only place that argument can be settled.
+  if (!note) fail("Say what this credit was used for.", 400, "note_required");
+
+  const client = await db().pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const held = await client.query(
+      `SELECT id FROM public.passes WHERE id = $1 AND account_id = $2 FOR UPDATE`,
+      [passId, accountId],
+    );
+    if (!held.rows.length) {
+      await client.query("ROLLBACK");
+      fail("That pass was not found.", 404, "not_found");
+    }
+
+    const spent = await client.query(
+      `INSERT INTO public.pass_redemptions (
+         id, account_id, pass_id, allocation_id, booking_id, credits, note,
+         redeemed_at, redeemed_by, created_at
+       )
+       SELECT $1, $2, $3, a.allocation_id, NULL, $4, $5, NOW(), $6, NOW()
+       FROM public.pass_allocation_balances a
+       JOIN public.passes p ON p.id = a.pass_id AND p.account_id = a.account_id
+       WHERE a.pass_id = $3
+         AND a.account_id = $2
+         AND a.is_live
+         AND a.credits_available >= $4
+         AND p.status = 'active'
+         AND (p.expires_at IS NULL OR p.expires_at > NOW())
+         AND (p.starts_at IS NULL OR p.starts_at <= NOW())
+       ORDER BY a.expires_at NULLS LAST, a.available_from
+       LIMIT 1
+       RETURNING id, allocation_id`,
+      [`red-${randomUUID()}`, accountId, passId, credits, note, text(input.actorId, 160)],
+    );
+
+    if (!spent.rows.length) {
+      await client.query("ROLLBACK");
+      fail("That pass has no credits left to spend.", 409, "no_credits");
+    }
+
+    await client.query("COMMIT");
+    const row = spent.rows[0] as Record<string, unknown>;
+    return { redemptionId: String(row.id), allocationId: String(row.allocation_id) };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => null);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function reversePassRedemption(
   accountId: string,
   redemptionId: string,

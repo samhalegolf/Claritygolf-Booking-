@@ -1887,6 +1887,43 @@ button {
   margin-top: 5px;
 }
 
+/* How a lesson was paid for, on the client's own history.
+ *
+ * Three tones because the three are genuinely different facts and a coach
+ * reconciling a pass needs to tell them apart at a glance: a credit was spent,
+ * money arrived, or an invoice went out and has not been settled. A lesson
+ * with no badge is one nothing is known about, which is not the same as
+ * unpaid -- so it says nothing rather than guessing. */
+/* Scoped through .profile-history-row throughout, because that row colours
+   every span it contains at 0-1-1 and a bare badge class is 0-1-0. Without it
+   all three badges render the same grey as the line above them. */
+.profile-history-row .booking-paid-badge {
+  justify-self: start;
+  padding: 1px var(--c-space-1);
+  border-radius: var(--c-radius-control);
+  border: 1px solid var(--c-border);
+  font-size: var(--c-size-meta);
+  width: fit-content;
+}
+
+/* No --c-info-wash exists and adding one would mean a matching entry in all
+   three dark triggers for a single badge. The soft surface plus the info text
+   colour reads as clearly as a tint would. */
+.profile-history-row .booking-paid-pass {
+  background: var(--c-surface-soft);
+  color: var(--c-info-text);
+}
+
+.profile-history-row .booking-paid-money {
+  border-color: transparent;
+  background: var(--c-success-wash);
+  color: var(--c-success-text);
+}
+
+.profile-history-row .booking-paid-invoiced {
+  color: var(--c-text-soft);
+}
+
 /* Passes tab on a client profile.
  *
  * Deliberately thin: the pass rows reuse .profile-history-row, so only the
@@ -1989,6 +2026,128 @@ button {
 .pass-panel .pass-ledger-reversed {
   text-decoration: line-through;
   color: var(--c-text-disabled);
+}
+
+/* "Put it back" sits on the ledger line it undoes, so there is never a
+   question of which credit is being returned. Only ever rendered on a
+   hand-written spend. */
+.pass-panel .pass-ledger-line .link-button {
+  margin-left: var(--c-space-1);
+  font-size: inherit;
+}
+
+.pass-panel .pass-redeem-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: var(--c-space-2);
+  font-size: var(--c-size-meta);
+}
+
+.pass-panel .pass-redeem-form {
+  display: grid;
+  gap: var(--c-space-2);
+  margin-top: var(--c-space-2);
+  padding: var(--c-space-2);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+}
+
+/* What they were billed for, under what they hold.
+ *
+ * Indented behind a rule rather than boxed: it is supporting evidence for the
+ * pass above it, and a second card would read as a second thing to act on when
+ * there is nothing here to act on at all. */
+.pass-panel .pass-invoiced {
+  margin-top: var(--c-space-2);
+  padding-left: var(--c-space-2);
+  border-left: 2px solid var(--c-border);
+}
+
+.pass-panel .pass-invoiced h4 {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 var(--c-space-1);
+  font-size: var(--c-size-meta);
+  font-weight: 600;
+  color: var(--c-text-soft);
+}
+
+.pass-panel .pass-invoiced ul,
+.pass-panel .pass-invoiced-list {
+  display: grid;
+  gap: var(--c-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pass-panel .pass-invoiced li,
+.pass-panel .pass-invoiced-list li {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.pass-panel .pass-invoiced li span,
+.pass-panel .pass-invoiced-list li span {
+  font-size: var(--c-size-meta);
+  color: var(--c-text);
+  overflow-wrap: anywhere;
+}
+
+/* `.pass-panel .pass-row em` right-aligns the status column on the far side of
+   the row, and it is a descendant selector, so it reaches these nested ems at
+   the same specificity and wins on order. Every property it sets has to be put
+   back explicitly -- the first version of this rendered each invoice line's
+   detail flush right, under the credits remaining. */
+.pass-panel .pass-invoiced li em,
+.pass-panel .pass-invoiced-list li em {
+  display: block;
+  justify-items: start;
+  text-align: left;
+  font-style: normal;
+  font-size: var(--c-size-meta);
+  color: var(--c-text-soft);
+}
+
+/* A loose match is a guess about wording, and the row has to say so at a
+   glance -- a coach counting lines against credits is relying on the list
+   being the right list. Certain and close matches are left plain: colouring
+   every row would make the caveat invisible. */
+/* `li` in the selector for specificity, not for structure: the rule above is
+   0-3-1 and a bare `.pass-invoiced-loose span` is 0-2-1, so the caveat colour
+   loses to the plain one and a guess renders identically to a certainty. */
+.pass-panel .pass-invoiced li.pass-invoiced-loose span {
+  color: var(--c-text-soft);
+  font-style: italic;
+}
+
+.pass-panel .pass-invoiced-fold {
+  display: grid;
+  gap: var(--c-space-2);
+  margin-top: var(--c-space-3);
+}
+
+.pass-panel .pass-invoiced-fold-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--c-space-1);
+  justify-self: start;
+  padding: var(--c-space-1) 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--c-size-meta);
+  color: var(--c-text-soft);
+  cursor: pointer;
+  text-align: left;
+}
+
+.pass-panel .pass-invoiced-fold-toggle:hover {
+  color: var(--c-text);
 }
 
 .pass-coverage {
