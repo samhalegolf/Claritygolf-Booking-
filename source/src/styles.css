@@ -2065,13 +2065,40 @@ button {
   border-left: 2px solid var(--c-border);
 }
 
-.pass-panel .pass-invoiced h4 {
+/* The headline count, and the button that opens the lines behind it. Styled as
+   the heading it replaced -- it reads as the section's title, and the chevron
+   is the only thing saying there is more underneath. */
+.pass-panel .pass-invoiced-toggle {
   display: flex;
   align-items: center;
   gap: 4px;
+  width: 100%;
   margin: 0 0 var(--c-space-1);
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
   font-size: var(--c-size-meta);
   font-weight: 600;
+  color: var(--c-text-soft);
+  text-align: left;
+  cursor: pointer;
+}
+
+.pass-panel .pass-invoiced-toggle:hover {
+  color: var(--c-text);
+}
+
+/* Pushed to the far side so it reads as the row's control rather than as
+   punctuation after the sentence. */
+.pass-panel .pass-invoiced-chevron {
+  margin-left: auto;
+  flex: none;
+}
+
+.pass-panel .pass-invoiced-caption {
+  margin: 0 0 var(--c-space-1);
+  font-size: var(--c-size-meta);
   color: var(--c-text-soft);
 }
 

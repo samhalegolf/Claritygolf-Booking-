@@ -10,6 +10,7 @@ import { useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, FileText, MinusCircle, Plus, Ticket } from "lucide-react";
 
 import { Loading } from "../shared/Loading";
+import { invoicedSessions, lineWord, sessionWord } from "./invoicedSessions";
 
 export type PassAllocation = {
   id: string;
@@ -249,6 +250,9 @@ export function PassesPanel({
   const [redeemCredits, setRedeemCredits] = useState("1");
   /** Invoiced lines that matched nothing, shut by default. */
   const [showUnmatched, setShowUnmatched] = useState(false);
+  /** Which passes have their invoice lines opened. The count is the headline;
+      which lines make it up is a level deeper, on request. */
+  const [openInvoiced, setOpenInvoiced] = useState<string[]>([]);
 
   // Grouped once rather than filtered inside each row's render, so a client
   // with a long billing history does not walk the whole list per pass.
@@ -262,6 +266,31 @@ export function PassesPanel({
     }
     return grouped;
   }, [invoicedLines]);
+
+  // Same rule as the per-pass headline: what was billed is counted in sessions,
+  // so the fold and the rows above it cannot disagree about the same invoice.
+  const unmatchedSessions = useMemo(
+    () => invoicedSessions(unmatchedInvoicedLines),
+    [unmatchedInvoicedLines],
+  );
+
+  /** Sessions billed against one pass, its lines, and whether they are open. */
+  function invoicedForPass(passId: string) {
+    const lines = linesByPass.get(passId) || [];
+    return {
+      lines,
+      sessions: invoicedSessions(lines),
+      open: openInvoiced.includes(passId),
+    };
+  }
+
+  function toggleInvoiced(passId: string) {
+    setOpenInvoiced((current) =>
+      current.includes(passId)
+        ? current.filter((id) => id !== passId)
+        : [...current, passId],
+    );
+  }
 
   function closeRedeem() {
     setRedeemingPassId("");
@@ -453,6 +482,7 @@ export function PassesPanel({
         passes.map((pass) => {
           const covers = pass.coversServiceIds.map(serviceName).filter(Boolean).join(", ");
           const spendable = pass.status === "active";
+          const passInvoiced = invoicedForPass(pass.id);
           return (
             <div className="profile-history-row pass-row" key={pass.id}>
               <div>
@@ -540,36 +570,63 @@ export function PassesPanel({
                   ))}
 
                 {/* What they were billed for, beside what they hold.
-                    Nothing joins these to the pass but wording, so each row
-                    says how sure the match was and none of it is totalled
-                    into the pass's own numbers. */}
-                {(linesByPass.get(pass.id) || []).length > 0 && (
+                    The headline is sessions, not rows: one line reading
+                    "Lesson × 3" is three lessons sold, and that is the number
+                    that compares against the credits above it. Which lines it
+                    came from opens underneath, because nothing joins them to
+                    the pass but wording and each row has to say how sure that
+                    was. None of it is totalled into the pass's own numbers. */}
+                {passInvoiced.lines.length > 0 && (
                   <div className="pass-invoiced">
-                    <h4>
+                    <button
+                      className="pass-invoiced-toggle"
+                      type="button"
+                      aria-expanded={passInvoiced.open}
+                      onClick={() => toggleInvoiced(pass.id)}
+                    >
                       <FileText size={14} />
-                      Invoiced for {(linesByPass.get(pass.id) || []).length}{" "}
-                      {(linesByPass.get(pass.id) || []).length === 1 ? "line" : "lines"} that look
-                      like this
-                    </h4>
-                    <ul>
-                      {(linesByPass.get(pass.id) || []).map((line) => (
-                        <li className={`pass-invoiced-${line.strength}`} key={line.id}>
-                          <span>{line.description}</span>
-                          <em>
-                            {[
-                              line.quantity > 1 ? `×${line.quantity}` : "",
-                              moneyLabel(line.amountCents, line.currency),
-                              dateLabel(line.when),
-                              line.invoiceNumber ? `Invoice ${line.invoiceNumber}` : "",
-                              relationNote(line.relation),
-                              strengthNote(line.strength),
-                            ]
-                              .filter(Boolean)
-                              .join(" · ")}
-                          </em>
-                        </li>
-                      ))}
-                    </ul>
+                      <span>
+                        Invoiced for {passInvoiced.sessions}{" "}
+                        {sessionWord(passInvoiced.sessions)} that look like this
+                      </span>
+                      {passInvoiced.open ? (
+                        <ChevronDown className="pass-invoiced-chevron" size={15} />
+                      ) : (
+                        <ChevronRight className="pass-invoiced-chevron" size={15} />
+                      )}
+                    </button>
+                    {passInvoiced.open && (
+                      <>
+                        {/* Only said when the two counts differ, which is the
+                            one case where "3 sessions" and a list of 2 rows
+                            would read as a mistake. */}
+                        {passInvoiced.sessions !== passInvoiced.lines.length && (
+                          <p className="pass-invoiced-caption">
+                            Across {passInvoiced.lines.length}{" "}
+                            {lineWord(passInvoiced.lines.length)}
+                          </p>
+                        )}
+                        <ul>
+                          {passInvoiced.lines.map((line) => (
+                            <li className={`pass-invoiced-${line.strength}`} key={line.id}>
+                              <span>{line.description}</span>
+                              <em>
+                                {[
+                                  line.quantity > 1 ? `×${line.quantity}` : "",
+                                  moneyLabel(line.amountCents, line.currency),
+                                  dateLabel(line.when),
+                                  line.invoiceNumber ? `Invoice ${line.invoiceNumber}` : "",
+                                  relationNote(line.relation),
+                                  strengthNote(line.strength),
+                                ]
+                                  .filter(Boolean)
+                                  .join(" · ")}
+                              </em>
+                            </li>
+                          ))}
+                        </ul>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -600,8 +657,8 @@ export function PassesPanel({
             onClick={() => setShowUnmatched((current) => !current)}
           >
             {showUnmatched ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-            {unmatchedInvoicedLines.length} other invoiced{" "}
-            {unmatchedInvoicedLines.length === 1 ? "line" : "lines"} matching no pass
+            {unmatchedSessions} other invoiced {sessionWord(unmatchedSessions)} matching no
+            pass
           </button>
           {showUnmatched && (
             <ul className="pass-invoiced-list">
