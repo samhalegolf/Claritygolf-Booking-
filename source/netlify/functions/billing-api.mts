@@ -12,11 +12,13 @@ import {
   voucherVerdict,
 } from "./_shared/stripe-voucher-scan.mts";
 import type { ChargeWording } from "./_shared/stripe-voucher-scan.mts";
+import { matchVoucherRule, parseVoucherRules } from "./_shared/voucher-rules.mts";
+
 // The same human-scaled order number the billing sync stamps on a card charge,
 // so a voucher and the invoice row beside it name the sale identically.
 import { chargeInvoiceNumber } from "./_shared/stripe-billing.mts";
 import { requireCoachActor } from "./_shared/coach-auth.mts";
-import { settingsSelectQuery } from "./_shared/settings-scope.mts";
+import { SETTINGS_UPSERT_QUERY, settingsSelectQuery, settingsUpsertRows } from "./_shared/settings-scope.mts";
 import {
   attachRedemptionToSale,
   attachValueTransactionToSale,
@@ -4415,6 +4417,45 @@ async function restoreCouponValue(accountId: string, couponId: string, amount: n
  * keyword match.
  */
 
+/* Where the coach's "a payment of this much was this product" rules live.
+ *
+ * Settings rather than a table: it is a short list a coach edits by hand, it
+ * has no relationships, and it is expected to be replaced once the Squarespace
+ * order can be looked up directly. A table would outlive its usefulness and
+ * still need migrating away.
+ */
+const VOUCHER_RULES_SETTING = "billing.voucherAmountRules.v1";
+
+async function readVoucherRules(accountId: string) {
+  const rows = await supabase("settings", {
+    query: settingsSelectQuery(accountId, {
+      select: "key,value",
+      filters: [`key=eq.${encodeFilter(VOUCHER_RULES_SETTING)}`],
+    }),
+  });
+  const raw = (rows as Array<{ value?: string }>)[0]?.value;
+  if (!raw) return [];
+  try {
+    return parseVoucherRules(JSON.parse(raw));
+  } catch {
+    // A settings value that will not parse is a value somebody or something
+    // corrupted. Answering with no rules is recoverable; throwing would take
+    // the whole voucher screen down with it.
+    return [];
+  }
+}
+
+async function writeVoucherRules(accountId: string, body: Record<string, unknown>) {
+  const rules = parseVoucherRules(body?.rules).slice(0, 50);
+  await supabase("settings", {
+    method: "POST",
+    query: SETTINGS_UPSERT_QUERY,
+    prefer: "resolution=merge-duplicates",
+    body: settingsUpsertRows(accountId, { [VOUCHER_RULES_SETTING]: JSON.stringify(rules) }, nowIso()),
+  });
+  return { rules };
+}
+
 /** How far back a scan looks by default: roughly two years of vouchers. */
 const VOUCHER_SCAN_DEFAULT_DAYS = 730;
 const VOUCHER_SCAN_PAGE = 100;
@@ -4464,6 +4505,7 @@ async function stripeVoucherCandidates(accountId: string, url: URL) {
    * lists the charges, just without basket names, which is visibly "I did not
    * look that far" rather than a wrong answer.
    */
+  const rules = await readVoucherRules(accountId);
   const needingBasket = charges.filter((charge) => !chargeWording(charge).length);
   const looked = needingBasket.slice(0, VOUCHER_SCAN_BASKET_CAP);
   const baskets = await mapLimit(looked, 6, (charge) =>
@@ -4487,6 +4529,22 @@ async function stripeVoucherCandidates(accountId: string, url: URL) {
     .map((charge) => {
       const verdict = voucherVerdict(charge, basketByCharge.get(String(charge.id)) || []);
       const billing = (charge.billing_details || {}) as Record<string, any>;
+      // A price rule only ever speaks for a payment nothing else could name.
+      // Wording that came off the payment itself is evidence; a price is an
+      // assumption, and an assumption must not overrule what Stripe actually
+      // said was sold.
+      const priced = verdict.likely
+        ? null
+        : matchVoucherRule(
+            {
+              // The amount charged, not what survived a refund: a partly
+              // refunded voucher was still a purchase of that product.
+              amountCents: Math.max(0, Math.round(Number(charge.amount) || 0)),
+              currency: String(charge.currency || "").toUpperCase(),
+              when: charge.created ? new Date(Number(charge.created) * 1000).toISOString() : "",
+            },
+            rules,
+          );
       return {
         chargeId: String(charge.id || ""),
         orderNumber: chargeInvoiceNumber(charge),
@@ -4495,9 +4553,9 @@ async function stripeVoucherCandidates(accountId: string, url: URL) {
         when: charge.created ? new Date(Number(charge.created) * 1000).toISOString() : "",
         buyerName: cleanString(billing.name, "", 140),
         buyerEmail: cleanString(billing.email, "", 180),
-        label: verdict.label,
-        labelSource: verdict.labelSource,
-        likely: verdict.likely,
+        label: priced ? priced.label : verdict.label,
+        labelSource: priced ? "price rule" : verdict.labelSource,
+        likely: verdict.likely || Boolean(priced),
         partlyRefunded: Number(charge.amount_refunded) > 0,
       };
     });
@@ -4510,6 +4568,7 @@ async function stripeVoucherCandidates(accountId: string, url: URL) {
     otherCharges: candidates.filter((entry) => !entry.likely),
     scannedCount: charges.length,
     sinceDays: days,
+    rules,
   };
 }
 
@@ -4531,6 +4590,7 @@ async function importStripeVouchers(accountId: string, body: Record<string, unkn
     : [];
   if (!wanted.length) throw Object.assign(new Error("Pick at least one purchase."), { status: 400 });
 
+  const rules = await readVoucherRules(accountId);
   const issued: unknown[] = [];
   const skipped: string[] = [];
   for (const chargeId of wanted) {
@@ -4549,6 +4609,18 @@ async function importStripeVouchers(accountId: string, body: Record<string, unkn
         stripeRequest(accountId, path, { params }),
       ),
     );
+    // Same precedence as the scan: a price rule names only what nothing else
+    // could, so the coupon's note says the same thing the coach agreed to.
+    const priced = verdict.likely
+      ? null
+      : matchVoucherRule(
+          {
+            amountCents: Math.max(0, Math.round(Number(charge.amount) || 0)),
+            currency: String(charge.currency || "").toUpperCase(),
+            when: charge.created ? new Date(Number(charge.created) * 1000).toISOString() : "",
+          },
+          rules,
+        );
     const billing = (charge.billing_details || {}) as Record<string, any>;
     const coupon = await issueCoupon(accountId, {
       value: round2(chargeValueCents(charge) / 100),
@@ -4558,7 +4630,7 @@ async function importStripeVouchers(accountId: string, body: Record<string, unkn
       customerId: cleanString(charge.customer, "", 160),
       source: "stripe",
       sourceLineId: String(charge.id),
-      note: `Bought online · ${verdict.label || chargeInvoiceNumber(charge)}`,
+      note: `Bought online · ${priced?.label || verdict.label || chargeInvoiceNumber(charge)}`,
     });
     if (coupon) issued.push(coupon);
     else skipped.push(chargeId);
@@ -4596,6 +4668,12 @@ export default async function handler(req: Request) {
       const coupon = await issueCoupon(accountId, { ...body, source: "manual" });
       if (!coupon) throw Object.assign(new Error("That coupon already exists."), { status: 409 });
       return json({ coupon }, 201);
+    }
+    if (action === "coupons/rules" && req.method === "GET") {
+      return json({ rules: await readVoucherRules(accountId) });
+    }
+    if (action === "coupons/rules" && (req.method === "PUT" || req.method === "POST")) {
+      return json(await writeVoucherRules(accountId, await parseBody(req)));
     }
     if (action === "coupons/stripe-candidates" && req.method === "GET") {
       return json(await stripeVoucherCandidates(accountId, url));

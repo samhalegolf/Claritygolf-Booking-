@@ -18,6 +18,7 @@ import {
   chargeWording,
   checkoutLineItemWording,
   mapLimit,
+  squarespaceOrderId,
   voucherVerdict,
 } from "./stripe-voucher-scan.mts";
 
@@ -211,4 +212,71 @@ test("mapLimit runs everything, in order, a few at a time", async () => {
 
 test("mapLimit on an empty list does nothing and returns nothing", async () => {
   assert.deepEqual(await mapLimit([], 6, async () => 1), []);
+});
+
+/* --- Identifiers are not product names ------------------------------------
+ *
+ * Squarespace's real metadata, read off a live payment on 2026-09-17, is four
+ * identifiers and nothing else. Offering one of them as the name of what was
+ * sold is worse than saying the charge is nameless: a coach cannot tell a hex
+ * string that means nothing from a product code that means something.
+ */
+
+const REAL_SQUARESPACE_METADATA = {
+  id: "6a97b4afc2292557d4837052",
+  idempotencyKey: "3e4385ca-d62f-4f4f-8193-bc135ccca0ff",
+  orderId: "272",
+  websiteId: "60fc8fda6e7e057270d8ddbf",
+};
+
+test("the real Squarespace metadata yields no product name at all", () => {
+  const verdict = voucherVerdict({
+    id: "ch_1",
+    description: "Charge for harrisontapleyking@gmail.com",
+    metadata: REAL_SQUARESPACE_METADATA,
+  });
+  assert.deepEqual(
+    verdict,
+    { label: "", labelSource: "", likely: false },
+    "an identifier must never be presented as the thing that was bought",
+  );
+});
+
+test("an identifier is rejected by its shape, not only by its key name", () => {
+  // A provider that calls the field something else must not slip through.
+  for (const value of [
+    "6a97b4afc2292557d4837052",
+    "3e4385ca-d62f-4f4f-8193-bc135ccca0ff",
+    "272",
+    "abcdefghijklmnopqrstuvwxyz0123",
+  ]) {
+    assert.deepEqual(
+      chargeWording({ id: "ch_1", metadata: { sqsp_thing: value } }),
+      [],
+      `${value} should not read as a product name`,
+    );
+  }
+});
+
+test("a real product name is still read from a key that ends in nothing special", () => {
+  // The filter must not be so keen that it throws away the thing we are for.
+  assert.equal(
+    voucherVerdict({ id: "ch_1", metadata: { item: "Lesson Gift Voucher" } }).label,
+    "Lesson Gift Voucher",
+  );
+  assert.equal(
+    voucherVerdict({ id: "ch_1", metadata: { sqsp_product: "1 Hour Golf Lesson Voucher" } }).label,
+    "1 Hour Golf Lesson Voucher",
+  );
+});
+
+test("the Squarespace order number is readable from either place it lands", () => {
+  // The join key for the Orders API lookup that will replace price rules.
+  // Read from the charge or, once the intent is expanded, from the intent.
+  assert.equal(squarespaceOrderId({ metadata: { orderId: "272" } }), "272");
+  assert.equal(
+    squarespaceOrderId({ metadata: {}, payment_intent: { id: "pi_1", metadata: { orderId: "272" } } }),
+    "272",
+  );
+  assert.equal(squarespaceOrderId({ metadata: {} }), "");
 });

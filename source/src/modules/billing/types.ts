@@ -524,6 +524,23 @@ export type CouponRedemption = {
  * came from, so a coach can see what the judgement was made on rather than
  * being asked to trust it.
  */
+/**
+ * "A payment of this much was this product."
+ *
+ * The coach's own rules, used only for payments Stripe could not name — which
+ * for Squarespace sales is all of them. Two rules with the same label is how a
+ * price change is expressed ($150 became $160 in 2025); the dates are for the
+ * rarer case of one amount meaning something different later.
+ */
+export type VoucherAmountRule = {
+  id: string;
+  amountCents: number;
+  currency: string;
+  label: string;
+  from: string;
+  until: string;
+};
+
 export type CouponImportCandidate = {
   chargeId: string;
   orderNumber: string;

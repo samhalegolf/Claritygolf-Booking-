@@ -235,6 +235,7 @@ import {
 } from "./modules/billing/invoiceSettings";
 import { computeInvoiceTotals, invoiceLineNet, invoiceLineGross, lineDiscountAmount } from "./modules/billing/invoiceMath";
 import type { CouponIssueValues, CouponScanResult } from "./modules/billing/CouponsPanel";
+import type { VoucherAmountRule } from "./modules/billing/types";
 import type { ProductFormValues, StockAdjustInput } from "./modules/billing/ProductsPanel";
 import {
   presetRange,
@@ -5615,6 +5616,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   } | null>(null);
   const [stripeKeyDraft, setStripeKeyDraft] = useState("");
   const [stripeSaving, setStripeSaving] = useState(false);
+  const [voucherRules, setVoucherRules] = useState<VoucherAmountRule[]>([]);
   const [stripeResyncing, setStripeResyncing] = useState(false);
   /** What the last re-read did. Kept on the card rather than shown as a toast:
    *  it is a count worth reading twice, and this runs for a while. */
@@ -16041,6 +16043,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       });
     }
     if (billingSection === "transactions") void fetchPosTransactions();
+    if (billingSection === "coupons" && !voucherRules.length) void fetchVoucherRules();
     if (billingSection === "settings" && !stripeStatus) void fetchStripeStatus();
   }
 
@@ -16291,6 +16294,41 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     }
   }
 
+  async function fetchVoucherRules() {
+    try {
+      const response = await fetch("/api/billing/coupons/rules", {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      if (!response.ok) return;
+      const data = (await response.json()) as { rules?: VoucherAmountRule[] };
+      setVoucherRules(Array.isArray(data.rules) ? data.rules : []);
+    } catch {
+      // The rules are an aid to the scan, not the scan. Failing to read them
+      // leaves the editor empty rather than taking the screen down.
+    }
+  }
+
+  async function saveVoucherRules(rules: VoucherAmountRule[]) {
+    try {
+      const response = await fetch("/api/billing/coupons/rules", {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rules }),
+      });
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not save those rules."));
+      const data = (await response.json()) as { rules?: VoucherAmountRule[] };
+      // Taken from the response, not the request: the server drops rules that
+      // could never match, and the editor must show what was actually kept.
+      setVoucherRules(Array.isArray(data.rules) ? data.rules : []);
+      return true;
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not save those rules." });
+      return false;
+    }
+  }
+
   async function findStripeCouponCandidates() {
     try {
       const response = await fetch("/api/billing/coupons/stripe-candidates", {
@@ -16299,11 +16337,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       });
       if (!response.ok) throw new Error(await readApiFailure(response, "Could not look through Stripe payments."));
       const data = (await response.json()) as CouponScanResult;
+      const rules = Array.isArray(data.rules) ? data.rules : [];
+      // The scan answers with the rules it used, so the editor beside it can
+      // never be showing a different list from the one that did the matching.
+      setVoucherRules(rules);
       return {
         candidates: Array.isArray(data.candidates) ? data.candidates : [],
         otherCharges: Array.isArray(data.otherCharges) ? data.otherCharges : [],
         scannedCount: Number(data.scannedCount) || 0,
         sinceDays: Number(data.sinceDays) || 0,
+        rules,
       };
     } catch (error) {
       setToast({ message: error instanceof Error ? error.message : "Could not look through Stripe payments." });
@@ -27770,6 +27813,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   onLoadRedemptions={fetchCouponRedemptions}
                   onScanStripe={findStripeCouponCandidates}
                   onImport={importStripeCoupons}
+                  rules={voucherRules}
+                  onSaveRules={saveVoucherRules}
                 />
               </Suspense>
             )}

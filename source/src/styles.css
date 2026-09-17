@@ -12618,6 +12618,149 @@ button {
   color: var(--c-danger);
 }
 
+/* Selecting in bulk. The two things a coach knows about a payment that
+   carries no product name are its price and its order number, so both are
+   offered wholesale above the list rather than one checkbox at a time. */
+.billing-coupons .coupon-bulk {
+  display: grid;
+  gap: var(--c-space-2);
+  margin-bottom: var(--c-space-3);
+}
+
+.billing-coupons .coupon-bulk-amounts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--c-space-1);
+}
+
+.billing-coupons .coupon-bulk-label {
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+  margin-right: var(--c-space-1);
+}
+
+.billing-coupons .coupon-amount-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--c-space-1);
+  padding: var(--c-space-1) var(--c-space-2);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  color: var(--c-text);
+  font: inherit;
+  font-size: var(--c-size-meta);
+  cursor: pointer;
+}
+
+.billing-coupons .coupon-amount-chip em {
+  font-style: normal;
+  color: var(--c-text-soft);
+}
+
+.billing-coupons .coupon-amount-chip:hover {
+  border-color: var(--c-pencil-hover);
+}
+
+/* On and half-on read differently on purpose: a group where some rows were
+   already ticked individually must not look the same as one fully selected,
+   or the next click does the opposite of what it appears to. */
+.billing-coupons .coupon-amount-chip.is-on {
+  border-color: transparent;
+  background: var(--c-success-wash);
+  color: var(--c-success-text);
+}
+
+.billing-coupons .coupon-amount-chip.is-on em {
+  color: inherit;
+}
+
+.billing-coupons .coupon-amount-chip.is-part {
+  border-style: dashed;
+  border-color: var(--c-pencil-hover);
+}
+
+.billing-coupons .coupon-paste {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--c-space-2);
+}
+
+/* What gets pasted here is a list, and a box that wraps a dozen order numbers
+   into a thin column is one nobody can check before pressing the button beside
+   it. Prose width, because that is what this is: a block of text somebody
+   pasted, not a field with a known shape. */
+.billing-coupons .coupon-paste .settings-field {
+  flex: 1 1 var(--c-w-prose);
+  min-width: 0;
+}
+
+/* Form controls do not inherit the page font anywhere in this stylesheet, and
+   a textarea left out of a panel's list switches to the browser's monospace
+   mid-sentence. */
+.billing-coupons .coupon-paste textarea {
+  font: inherit;
+  width: var(--c-w-prose);
+  max-width: 100%;
+  padding: var(--c-space-1) var(--c-space-2);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  color: var(--c-text);
+  resize: vertical;
+}
+
+/* The price rules, and the form that adds one. Sits above the scan because it
+   is what decides what the scan can name -- reading it after the results would
+   be reading the answer before the question. */
+.billing-coupons .coupon-rules {
+  display: grid;
+  gap: var(--c-space-2);
+  margin-bottom: var(--c-space-3);
+}
+
+.billing-coupons .coupon-rules-list {
+  display: grid;
+  gap: var(--c-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.billing-coupons .coupon-rules-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--c-space-2);
+  padding: var(--c-space-1) var(--c-space-2);
+  border: 1px dashed var(--c-border);
+  border-radius: var(--c-radius-control);
+}
+
+/* Scoped past `.data-card span` (0-1-1), which would grey out the whole rule
+   including the amount that is the point of reading it. */
+.billing-coupons .coupon-rules-list li span {
+  min-width: 0;
+  color: var(--c-text);
+  font-size: var(--c-size-meta);
+  overflow-wrap: anywhere;
+}
+
+.billing-coupons .coupon-rules-list li em {
+  font-style: normal;
+  color: var(--c-text-soft);
+}
+
+.billing-coupons .coupon-rule-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--c-space-2);
+}
+
 .billing-coupons .coupon-candidates-fold {
   display: grid;
   gap: var(--c-space-1);

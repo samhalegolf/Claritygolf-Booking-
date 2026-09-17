@@ -47,13 +47,46 @@ function push(into: ChargeWording[], text: unknown, source: string) {
   into.push({ text: clean, source });
 }
 
+/*
+ * Metadata keys that hold an identifier rather than a name.
+ *
+ * Squarespace's actual metadata, read off a live payment on 2026-09-17, is:
+ *
+ *   id             6a97b4afc2292557d4837052
+ *   idempotencyKey 3e4385ca-d62f-4f4f-8193-bc135ccca0ff
+ *   orderId        272
+ *   websiteId      60fc8fda6e7e057270d8ddbf
+ *
+ * Four identifiers and no product. Scanning every value without this would
+ * have offered "6a97b4afc2292557d4837052" to a coach as the name of what was
+ * sold -- worse than admitting the charge is nameless, because it looks like
+ * an answer.
+ */
+const ID_KEY = /(^|_)(id|ids|key|token|ref|reference|uuid|guid)$/i;
+
+/*
+ * Values that are identifiers whatever they are filed under.
+ *
+ * The key list above catches the names Squarespace happens to use today; this
+ * catches the shape, so a provider that calls it "sqsp_1" is handled too. A
+ * product name has spaces in it or is a short word; a long unbroken run of
+ * hex, a UUID, or a bare number is never something a customer bought.
+ */
+function looksLikeIdentifier(value: string) {
+  if (/^\d+$/.test(value)) return true;
+  if (/^[0-9a-f]{16,}$/i.test(value)) return true;
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) return true;
+  // No space anywhere and longer than any real product name would run
+  // unbroken.
+  if (!/\s/.test(value) && value.length > 24) return true;
+  return false;
+}
+
 function pushMetadata(into: ChargeWording[], metadata: unknown, prefix: string) {
   if (!metadata || typeof metadata !== "object") return;
   for (const [key, value] of Object.entries(metadata as Record<string, unknown>)) {
-    // The order number is already used as the receipt number and is a number,
-    // not a name; including it would make every charge look like it has
-    // wording when it has none.
-    if (/^order_?id$/i.test(key)) continue;
+    if (ID_KEY.test(key)) continue;
+    if (typeof value === "string" && looksLikeIdentifier(value.trim())) continue;
     push(into, value, `${prefix}.${key}`);
   }
 }
@@ -193,6 +226,39 @@ export async function mapLimit<T, R>(
   });
   await Promise.all(workers);
   return results;
+}
+
+/**
+ * The order number Squarespace stamped on this payment.
+ *
+ * WHERE THE REAL FIX PLUGS IN
+ *
+ * Squarespace's metadata carries no product -- `id`, `idempotencyKey`,
+ * `orderId`, `websiteId` and nothing else -- but `orderId` is a join key to
+ * Squarespace's own Commerce Orders API, where the order does have line items
+ * with product names. That is the answer that never rots, and it is blocked
+ * only on the API being a paid-tier feature of their plan.
+ *
+ * When it is available, the change is small and belongs entirely outside this
+ * file: fetch the order by this number and hand the line-item names in as the
+ * `extra` argument to voucherVerdict, exactly as checkoutLineItemWording's
+ * result is handed in now, with a source of "order". Precedence then falls out
+ * for free -- real wording already beats the coach's price rules, because a
+ * price is an assumption and a product name is not.
+ *
+ * Until then the price rules in _shared/voucher-rules.mts stand in, and the
+ * order number is shown on every candidate row so a coach can look a payment
+ * up in Squarespace by hand.
+ */
+export function squarespaceOrderId(charge: Record<string, unknown>): string {
+  const fromCharge = (charge.metadata as Record<string, unknown> | undefined)?.orderId;
+  if (typeof fromCharge === "string" && fromCharge.trim()) return fromCharge.trim().slice(0, 40);
+  const intent =
+    charge.payment_intent && typeof charge.payment_intent === "object"
+      ? ((charge.payment_intent as Record<string, unknown>).metadata as Record<string, unknown> | undefined)
+      : undefined;
+  const fromIntent = intent?.orderId;
+  return typeof fromIntent === "string" ? fromIntent.trim().slice(0, 40) : "";
 }
 
 export type VoucherVerdict = {

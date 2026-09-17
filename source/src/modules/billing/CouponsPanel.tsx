@@ -6,8 +6,8 @@ import { Loading } from "../shared/Loading";
 // list and every request; what lives here is form and disclosure state.
 
 import { Fragment, useMemo, useState } from "react";
-import { AlertTriangle, ChevronDown, ChevronRight, Download, Plus, Search, Ticket, X } from "lucide-react";
-import type { BillingCoupon, CouponImportCandidate, CouponRedemption } from "./types";
+import { AlertTriangle, ChevronDown, ChevronRight, Copy, Download, Plus, Search, Ticket, X } from "lucide-react";
+import type { BillingCoupon, CouponImportCandidate, CouponRedemption, VoucherAmountRule } from "./types";
 
 /** What a scan came back with. `scannedCount` is how many charges were read,
  *  so "nothing found" can be told apart from "nothing looked at". */
@@ -16,6 +16,7 @@ export type CouponScanResult = {
   otherCharges: CouponImportCandidate[];
   scannedCount: number;
   sinceDays: number;
+  rules: VoucherAmountRule[];
 };
 
 export type CouponIssueValues = {
@@ -38,6 +39,9 @@ export type CouponsPanelProps = {
   onLoadRedemptions: (couponId: string) => Promise<CouponRedemption[]>;
   onScanStripe: () => Promise<CouponScanResult | null>;
   onImport: (chargeIds: string[]) => Promise<number>;
+  /** The coach's price rules, and saving a changed list of them. */
+  rules: VoucherAmountRule[];
+  onSaveRules: (rules: VoucherAmountRule[]) => Promise<boolean>;
 };
 
 const SOURCE_LABELS: Record<BillingCoupon["source"], string> = {
@@ -68,6 +72,8 @@ export function CouponsPanel({
   onLoadRedemptions,
   onScanStripe,
   onImport,
+  rules,
+  onSaveRules,
 }: CouponsPanelProps) {
   const [form, setForm] = useState(emptyIssueForm);
   const [issuing, setIssuing] = useState(false);
@@ -85,6 +91,43 @@ export function CouponsPanel({
   const [chosen, setChosen] = useState<Record<string, boolean>>({});
   /** The charges the classifier did not recognise, shut by default. */
   const [showOthers, setShowOthers] = useState(false);
+
+  /** The price-rule editor. Shut unless the coach opens it or has rules. */
+  const [showRules, setShowRules] = useState(false);
+  const [ruleDraft, setRuleDraft] = useState({ amount: "", label: "", from: "", until: "" });
+  const [savingRules, setSavingRules] = useState(false);
+
+  async function addRule() {
+    const amountCents = Math.round(Number(ruleDraft.amount) * 100);
+    const label = ruleDraft.label.trim();
+    if (!Number.isFinite(amountCents) || amountCents <= 0 || !label) return;
+    setSavingRules(true);
+    try {
+      const saved = await onSaveRules([
+        ...rules,
+        {
+          id: `rule-${Date.now()}`,
+          amountCents,
+          currency,
+          label,
+          from: ruleDraft.from,
+          until: ruleDraft.until,
+        },
+      ]);
+      if (saved) setRuleDraft({ amount: "", label: "", from: "", until: "" });
+    } finally {
+      setSavingRules(false);
+    }
+  }
+
+  async function removeRule(id: string) {
+    setSavingRules(true);
+    try {
+      await onSaveRules(rules.filter((rule) => rule.id !== id));
+    } finally {
+      setSavingRules(false);
+    }
+  }
 
   async function runScan() {
     setScanning(true);
@@ -117,6 +160,120 @@ export function CouponsPanel({
   }
 
   const chosenCount = Object.values(chosen).filter(Boolean).length;
+
+  /* Everything the scan came back with, as one list.
+   *
+   * The screen still separates recognised from unrecognised, because they are
+   * read differently -- but selecting works across both. A coach who knows the
+   * $160 ones are vouchers does not care which half of the screen each row
+   * happens to be sitting in. */
+  const allCandidates = useMemo(
+    () => (scan ? [...scan.candidates, ...scan.otherCharges] : []),
+    [scan],
+  );
+
+  /* Amounts, biggest group first.
+   *
+   * Grouping by price because price is what a coach actually knows about these
+   * -- the payments carry no product name, which is the whole problem, and
+   * "all the $160 ones" is the sentence they would use out loud. */
+  const amountGroups = useMemo(() => {
+    const groups = new Map<string, { key: string; valueCents: number; currency: string; ids: string[] }>();
+    for (const entry of allCandidates) {
+      const key = `${entry.currency}:${entry.valueCents}`;
+      const held = groups.get(key);
+      if (held) held.ids.push(entry.chargeId);
+      else
+        groups.set(key, {
+          key,
+          valueCents: entry.valueCents,
+          currency: entry.currency,
+          ids: [entry.chargeId],
+        });
+    }
+    return [...groups.values()].sort((a, b) => b.ids.length - a.ids.length || b.valueCents - a.valueCents);
+  }, [allCandidates]);
+
+  /* A selection the coach cannot see is a selection they cannot check.
+   *
+   * Both bulk actions reach rows in the folded half, and "Issue 21 codes" over
+   * a shut fold is a button that will mint money for rows nobody has looked
+   * at. Selecting anything in there opens it. */
+  function revealIfFolded(ids: string[]) {
+    if (!scan) return;
+    const folded = new Set(scan.otherCharges.map((entry) => entry.chargeId));
+    if (ids.some((id) => folded.has(id))) setShowOthers(true);
+  }
+
+  function toggleAmount(ids: string[]) {
+    // All-or-nothing on the group: half-ticked, clicking selects the rest,
+    // which is what "select all of these" means when some already are.
+    const allOn = ids.every((id) => chosen[id]);
+    setChosen((current) => {
+      const next = { ...current };
+      for (const id of ids) next[id] = !allOn;
+      return next;
+    });
+    if (!allOn) revealIfFolded(ids);
+  }
+
+  /* Order numbers, in a form that can be taken somewhere else.
+   *
+   * The payments cannot say what they were for, but the coach's own order
+   * confirmation emails can -- and the order number is the join. Copying the
+   * list out, working out which are vouchers elsewhere, and pasting the
+   * numbers back is a real workflow, and a far better one than reading 102
+   * rows off a screen. */
+  const [copied, setCopied] = useState("");
+  const [orderPaste, setOrderPaste] = useState("");
+  const [showPaste, setShowPaste] = useState(false);
+
+  async function copyOrderNumbers() {
+    const lines = allCandidates.map((entry) =>
+      [
+        entry.orderNumber,
+        entry.when ? entry.when.slice(0, 10) : "",
+        `${entry.currency} ${(entry.valueCents / 100).toFixed(2)}`,
+        entry.buyerName,
+        entry.buyerEmail,
+      ].join("\t"),
+    );
+    try {
+      await navigator.clipboard.writeText(lines.join("\n"));
+      setCopied(`Copied ${lines.length} order${lines.length === 1 ? "" : "s"}.`);
+    } catch {
+      setCopied("Could not reach the clipboard — select the list by hand.");
+    }
+  }
+
+  /* Tick the rows whose order number appears in the pasted text.
+   *
+   * Deliberately forgiving about what is pasted: a reply from an assistant, a
+   * list with bullets, "ORD-272" or "272" are all the same answer, and making
+   * a coach reformat it would undo the point of the shortcut. Anything that is
+   * not an order number here matches nothing, which is visible as a count. */
+  function selectPastedOrders() {
+    const wanted = new Set(
+      (orderPaste.match(/\d{1,10}/g) || []).map((digits) => digits.replace(/^0+(?=\d)/, "")),
+    );
+    if (!wanted.size) return;
+    const matched: string[] = [];
+    for (const entry of allCandidates) {
+      const digits = (entry.orderNumber.match(/\d{1,10}/) || [])[0];
+      if (digits && wanted.has(digits.replace(/^0+(?=\d)/, ""))) matched.push(entry.chargeId);
+    }
+    setChosen((current) => {
+      const next = { ...current };
+      for (const id of matched) next[id] = true;
+      return next;
+    });
+    revealIfFolded(matched);
+    setCopied(
+      matched.length
+        ? `Ticked ${matched.length} of ${wanted.size} order number${wanted.size === 1 ? "" : "s"}.`
+        : "None of those order numbers is in this list.",
+    );
+  }
 
   const visible = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -216,6 +373,117 @@ export function CouponsPanel({
           to Stripe rather than the synced invoice list because Stripe labels every one of these
           "Charge for &lt;email&gt;", so the product name is not in your records at all.
         </p>
+        {/* Price rules.
+         *
+         * Only ever consulted for a payment Stripe could not name, which for a
+         * Squarespace sale is every one of them: its metadata is four
+         * identifiers and no product. They are the coach's own because a price
+         * is not permanent -- this account's voucher was $150 until July 2025
+         * and $160 from September -- and a number written into the code would
+         * be wrong the next time one moved, silently.
+         */}
+        <div className="coupon-rules">
+          <button
+            className="coupon-candidates-fold-toggle"
+            type="button"
+            aria-expanded={showRules}
+            onClick={() => setShowRules((current) => !current)}
+          >
+            {showRules ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+            {rules.length
+              ? `${rules.length} price rule${rules.length === 1 ? "" : "s"} for naming a payment`
+              : "No price rules yet — add one to name payments Stripe cannot"}
+          </button>
+          {showRules && (
+            <>
+              <p className="field-help">
+                Squarespace tells Stripe an order number and nothing about the product, so a price
+                is the only clue left. A rule is used only when the payment itself says nothing.
+                Changed your price? Add a second rule with the same name — the old one keeps naming
+                the older sales correctly.
+              </p>
+              {rules.length > 0 && (
+                <ul className="coupon-rules-list">
+                  {rules.map((rule) => (
+                    <li key={rule.id}>
+                      <span>
+                        <strong>{formatMoney(rule.amountCents / 100, rule.currency || currency)}</strong>{" "}
+                        → {rule.label}
+                        {rule.from || rule.until ? (
+                          <em>
+                            {rule.from ? ` from ${rule.from}` : ""}
+                            {rule.until ? ` until ${rule.until}` : ""}
+                          </em>
+                        ) : null}
+                      </span>
+                      <button
+                        className="link-button"
+                        type="button"
+                        disabled={savingRules}
+                        onClick={() => void removeRule(rule.id)}
+                      >
+                        Remove
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="coupon-rule-form">
+                <label className="settings-field">
+                  <span>Amount ({currency})</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={ruleDraft.amount}
+                    onChange={(event) =>
+                      setRuleDraft((current) => ({ ...current, amount: event.target.value }))
+                    }
+                  />
+                </label>
+                <label className="settings-field">
+                  <span>Is this product</span>
+                  <input
+                    value={ruleDraft.label}
+                    placeholder="Lesson Gift Voucher"
+                    onChange={(event) =>
+                      setRuleDraft((current) => ({ ...current, label: event.target.value }))
+                    }
+                  />
+                </label>
+                <label className="settings-field">
+                  <span>From (optional)</span>
+                  <input
+                    type="date"
+                    value={ruleDraft.from}
+                    onChange={(event) =>
+                      setRuleDraft((current) => ({ ...current, from: event.target.value }))
+                    }
+                  />
+                </label>
+                <label className="settings-field">
+                  <span>Until (optional)</span>
+                  <input
+                    type="date"
+                    value={ruleDraft.until}
+                    onChange={(event) =>
+                      setRuleDraft((current) => ({ ...current, until: event.target.value }))
+                    }
+                  />
+                </label>
+                <button
+                  className="outline-button"
+                  type="button"
+                  disabled={savingRules || !ruleDraft.label.trim() || !Number(ruleDraft.amount)}
+                  onClick={() => void addRule()}
+                >
+                  {savingRules ? "Saving…" : "Add rule"}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+
         <div className="panel-actions coupon-import-actions">
           <button className="outline-button" disabled={scanning} onClick={() => void runScan()} type="button">
             {scanning ? "Looking…" : "Find voucher purchases"}
@@ -239,6 +507,77 @@ export function CouponsPanel({
                 ? `${scan.candidates.length} look${scan.candidates.length === 1 ? "s" : ""} like a voucher.`
                 : "None of them is named like a voucher."}
             </p>
+
+            {/* Selecting in bulk.
+              *
+              * A hundred payments that carry no product name cannot be triaged
+              * one checkbox at a time, and the two things a coach does know
+              * about them are the price and the order number. So both are
+              * selectable wholesale: pick every payment at a price, or paste
+              * the order numbers worked out elsewhere. */}
+            {allCandidates.length > 0 && (
+              <div className="coupon-bulk">
+                <div className="coupon-bulk-amounts">
+                  <span className="coupon-bulk-label">Select every payment of</span>
+                  {amountGroups.map((group) => {
+                    const allOn = group.ids.every((id) => chosen[id]);
+                    const someOn = !allOn && group.ids.some((id) => chosen[id]);
+                    return (
+                      <button
+                        key={group.key}
+                        type="button"
+                        className={`coupon-amount-chip${allOn ? " is-on" : someOn ? " is-part" : ""}`}
+                        aria-pressed={allOn}
+                        onClick={() => toggleAmount(group.ids)}
+                      >
+                        {formatMoney(group.valueCents / 100, group.currency || currency)}
+                        <em>{group.ids.length}</em>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="panel-actions coupon-import-actions">
+                  <button className="outline-button" type="button" onClick={() => void copyOrderNumbers()}>
+                    <Copy size={15} /> Copy {allCandidates.length} order numbers
+                  </button>
+                  <button
+                    className="outline-button"
+                    type="button"
+                    aria-expanded={showPaste}
+                    onClick={() => setShowPaste((current) => !current)}
+                  >
+                    Paste order numbers to tick
+                  </button>
+                  {chosenCount > 0 && (
+                    <button className="link-button" type="button" onClick={() => setChosen({})}>
+                      Clear {chosenCount} selected
+                    </button>
+                  )}
+                </div>
+                {showPaste && (
+                  <div className="coupon-paste">
+                    <label className="settings-field">
+                      <span>Order numbers</span>
+                      <textarea
+                        rows={3}
+                        value={orderPaste}
+                        placeholder="272, 266, ORD-261 — any format, one line or many"
+                        onChange={(event) => setOrderPaste(event.target.value)}
+                      />
+                    </label>
+                    <button
+                      className="outline-button"
+                      type="button"
+                      disabled={!orderPaste.trim()}
+                      onClick={selectPastedOrders}
+                    >
+                      Tick those
+                    </button>
+                  </div>
+                )}
+                {copied && <p className="field-help">{copied}</p>}
+              </div>
+            )}
 
             {scan.candidates.length > 0 && (
               <ul className="coupon-candidates">
