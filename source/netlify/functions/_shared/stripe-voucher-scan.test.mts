@@ -16,6 +16,8 @@ import {
   chargeIsClaimable,
   chargeValueCents,
   chargeWording,
+  checkoutLineItemWording,
+  mapLimit,
   voucherVerdict,
 } from "./stripe-voucher-scan.mts";
 
@@ -99,4 +101,114 @@ test("the captured amount wins over the authorised one", () => {
     chargeValueCents(squarespaceCharge({}, { amount: 15000, amount_captured: 12000 })),
     12000,
   );
+});
+
+/* --- The basket -----------------------------------------------------------
+ *
+ * The last place a product name can be, and for this account the only one:
+ * every Squarespace charge says "Charge for <email>" and carries nothing but
+ * an order id. If reading the Checkout Session's line items does not work,
+ * the voucher screen has nothing to show.
+ */
+
+/** A fake Stripe that answers the two calls the lookup makes. */
+function fakeStripe(
+  responses: Record<string, unknown>,
+  seen: Array<{ path: string; params: string }> = [],
+) {
+  return {
+    seen,
+    get: async (path: string, params: URLSearchParams) => {
+      seen.push({ path, params: params.toString() });
+      if (path in responses) return responses[path];
+      throw Object.assign(new Error(`unexpected ${path}`), { status: 404 });
+    },
+  };
+}
+
+test("a basket line is found through the payment intent", async () => {
+  const stripe = fakeStripe({
+    "checkout/sessions": { data: [{ id: "cs_1" }] },
+    "checkout/sessions/cs_1/line_items": { data: [{ description: "Lesson Gift Voucher" }] },
+  });
+  const found = await checkoutLineItemWording(
+    { id: "ch_1", payment_intent: "pi_1" },
+    stripe.get,
+  );
+  assert.deepEqual(found, [{ text: "Lesson Gift Voucher", source: "basket" }]);
+  assert.equal(stripe.seen[0].params, "payment_intent=pi_1&limit=1", "sessions are found by intent");
+});
+
+test("an expanded payment intent object still resolves to its id", async () => {
+  // The backfill asks for expand[]=data.payment_intent, so by the time this
+  // runs the field is an object. Reading it as a string would send
+  // "[object Object]" to Stripe and quietly find nothing.
+  const stripe = fakeStripe({
+    "checkout/sessions": { data: [{ id: "cs_1" }] },
+    "checkout/sessions/cs_1/line_items": { data: [{ description: "Lesson Gift Voucher" }] },
+  });
+  const found = await checkoutLineItemWording(
+    { id: "ch_1", payment_intent: { id: "pi_1", description: null } },
+    stripe.get,
+  );
+  assert.equal(found[0]?.text, "Lesson Gift Voucher");
+  assert.equal(stripe.seen[0].params, "payment_intent=pi_1&limit=1");
+});
+
+test("a charge with no session is simply nameless, not an error", async () => {
+  const stripe = fakeStripe({ "checkout/sessions": { data: [] } });
+  assert.deepEqual(await checkoutLineItemWording({ id: "ch_1", payment_intent: "pi_1" }, stripe.get), []);
+});
+
+test("a Stripe failure never escapes the lookup", async () => {
+  // One unreadable session must not abandon a sync of three hundred charges.
+  const failing = async () => {
+    throw new Error("Stripe 500");
+  };
+  assert.deepEqual(await checkoutLineItemWording({ id: "ch_1", payment_intent: "pi_1" }, failing), []);
+});
+
+test("a charge with no payment intent is not looked up at all", async () => {
+  const stripe = fakeStripe({});
+  assert.deepEqual(await checkoutLineItemWording({ id: "ch_1" }, stripe.get), []);
+  assert.equal(stripe.seen.length, 0, "no request should have been made");
+});
+
+test("a basket name is judged for voucher wording like any other", async () => {
+  const basket = [{ text: "Lesson Gift Voucher", source: "basket" }];
+  const verdict = voucherVerdict(
+    { id: "ch_1", description: "Charge for buyer@example.com", metadata: { orderId: "272" } },
+    basket,
+  );
+  assert.equal(verdict.likely, true);
+  assert.equal(verdict.label, "Lesson Gift Voucher");
+  assert.equal(verdict.labelSource, "basket");
+});
+
+test("the charge's own wording still beats the basket's", async () => {
+  // A description somebody wrote about this sale is more specific than the
+  // catalogue's name for the product in general.
+  const verdict = voucherVerdict(
+    { id: "ch_1", description: "Gift voucher for Dad — Christmas", metadata: {} },
+    [{ text: "Lesson Gift Voucher", source: "basket" }],
+  );
+  assert.equal(verdict.label, "Gift voucher for Dad — Christmas");
+});
+
+test("mapLimit runs everything, in order, a few at a time", async () => {
+  let running = 0;
+  let peak = 0;
+  const out = await mapLimit([1, 2, 3, 4, 5, 6, 7], 3, async (n) => {
+    running += 1;
+    peak = Math.max(peak, running);
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    running -= 1;
+    return n * 2;
+  });
+  assert.deepEqual(out, [2, 4, 6, 8, 10, 12, 14], "results keep their input order");
+  assert.ok(peak <= 3, `concurrency was ${peak}, should never exceed 3`);
+});
+
+test("mapLimit on an empty list does nothing and returns nothing", async () => {
+  assert.deepEqual(await mapLimit([], 6, async () => 1), []);
 });

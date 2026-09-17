@@ -211,9 +211,10 @@ export function CouponsPanel({
           <Download size={24} />
         </div>
         <p className="field-help">
-          Reads your Stripe payments directly and looks for gift vouchers among them. It has to go
+          Reads your Stripe payments directly and looks for gift vouchers among them — in the
+          payment's own wording, and failing that in what was actually in the basket. It has to go
           to Stripe rather than the synced invoice list because Stripe labels every one of these
-          "Charge for &lt;email&gt;" — the product name only exists on the payment itself.
+          "Charge for &lt;email&gt;", so the product name is not in your records at all.
         </p>
         <div className="panel-actions coupon-import-actions">
           <button className="outline-button" disabled={scanning} onClick={() => void runScan()} type="button">

@@ -92,8 +92,107 @@ export function chargeWording(charge: Record<string, unknown>): ChargeWording[] 
  * a charge genuinely carries nothing. A helpful-sounding default invented here
  * would be indistinguishable from a real product name one row later.
  */
-export function chargeProductName(charge: Record<string, unknown>): string {
-  return chargeWording(charge)[0]?.text || "";
+export function chargeProductName(
+  charge: Record<string, unknown>,
+  extra: ChargeWording[] = [],
+): string {
+  // The charge's own wording first: a description somebody wrote about this
+  // sale beats a basket line, which is the catalogue's wording for the product
+  // in general.
+  return (chargeWording(charge)[0] || extra[0])?.text || "";
+}
+
+/**
+ * A GET against Stripe, supplied by the caller.
+ *
+ * Injected rather than imported because the two callers hold different keys.
+ * The billing sync runs on the deployment's STRIPE_SECRET_KEY; billing-api
+ * resolves the business's own key through stripeFor(accountId), which is the
+ * whole point of that function -- a second business's charges must never be
+ * read with the first one's credential. A module that reached for one of them
+ * would quietly be wrong for the other.
+ */
+export type StripeGet = (path: string, params: URLSearchParams) => Promise<any>;
+
+/** The id of a Stripe reference that may or may not have been expanded. */
+function idOf(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object") {
+    const id = (value as Record<string, unknown>).id;
+    return typeof id === "string" ? id : "";
+  }
+  return "";
+}
+
+/**
+ * What a Checkout Session says was in the basket.
+ *
+ * The last place a product name can be, and the only one that survives when
+ * the charge itself carries nothing -- which is every Squarespace sale in this
+ * account, all of which read "Charge for <email>" and hold no useful metadata.
+ *
+ * Two requests, and only for charges that needed them: sessions are found by
+ * the payment intent they settled, then their line items read. The line items
+ * are asked for separately rather than expanded on the list, because `expand`
+ * on a list endpoint is silently dropped by Stripe when the field is not
+ * expandable there, and a silent drop here would look exactly like "this sale
+ * had no line items" -- the failure mode this whole feature exists to stop
+ * repeating.
+ *
+ * Any Stripe failure returns nothing rather than throwing. A charge whose
+ * session cannot be read is a charge with no name, which is a state the
+ * callers already handle; it is not a reason to abandon a sync of three
+ * hundred others.
+ */
+export async function checkoutLineItemWording(
+  charge: Record<string, unknown>,
+  get: StripeGet,
+): Promise<ChargeWording[]> {
+  const intentId = idOf(charge.payment_intent);
+  if (!intentId) return [];
+  try {
+    const sessions = (await get(
+      "checkout/sessions",
+      new URLSearchParams({ payment_intent: intentId, limit: "1" }),
+    )) as { data?: Array<Record<string, unknown>> };
+    const session = Array.isArray(sessions?.data) ? sessions.data[0] : undefined;
+    const sessionId = idOf(session);
+    if (!sessionId) return [];
+
+    const items = (await get(
+      `checkout/sessions/${encodeURIComponent(sessionId)}/line_items`,
+      new URLSearchParams({ limit: "10" }),
+    )) as { data?: Array<Record<string, unknown>> };
+
+    const found: ChargeWording[] = [];
+    for (const item of Array.isArray(items?.data) ? items.data : []) {
+      push(found, item?.description, "basket");
+    }
+    return found;
+  } catch {
+    return [];
+  }
+}
+
+/** Run an async job over a list a few at a time.
+ *
+ * Sequential is too slow to fit a function timeout once there are a hundred
+ * charges to look up, and unbounded parallelism is how an account gets rate
+ * limited by Stripe halfway through a sync. */
+export async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  job: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
+    for (let index = next++; index < items.length; index = next++) {
+      results[index] = await job(items[index]);
+    }
+  });
+  await Promise.all(workers);
+  return results;
 }
 
 export type VoucherVerdict = {
@@ -114,8 +213,11 @@ export type VoucherVerdict = {
  * is still returned with likely = false, because a charge whose name nothing
  * recognised is exactly the one a coach may need to look at by hand.
  */
-export function voucherVerdict(charge: Record<string, unknown>): VoucherVerdict {
-  const wording = chargeWording(charge);
+export function voucherVerdict(
+  charge: Record<string, unknown>,
+  extra: ChargeWording[] = [],
+): VoucherVerdict {
+  const wording = [...chargeWording(charge), ...extra];
   for (const entry of wording) {
     if (classifyInboxLine(entry.text) === "voucher") {
       return { label: entry.text, labelSource: entry.source, likely: true };

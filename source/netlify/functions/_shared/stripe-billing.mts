@@ -324,7 +324,12 @@ export async function syncInvoicesSince(sinceEpoch: number, accountId: string, u
   };
 }
 
-import { chargeProductName } from "./stripe-voucher-scan.mts";
+import {
+  chargeProductName,
+  chargeWording,
+  checkoutLineItemWording,
+  mapLimit,
+} from "./stripe-voucher-scan.mts";
 
 // --- Charge mapping -----------------------------------------------------------
 // Sam Hale Golf's card payments arrive as Stripe *charges* (via the external
@@ -405,7 +410,7 @@ export function mapCharge(charge: Record<string, any>, accountId: string) {
   };
 }
 
-export function mapChargeLine(charge: Record<string, any>, accountId: string) {
+export function mapChargeLine(charge: Record<string, any>, accountId: string, productName = "") {
   const lineTotal = fromCents(charge.amount);
   return {
     id: `${charge.id}:line`,
@@ -430,7 +435,7 @@ export function mapChargeLine(charge: Record<string, any>, accountId: string) {
     // intent's, then every metadata value -- deliberately not one named key,
     // since which one Squarespace uses is its business. "Card payment" remains
     // the fallback for a charge that genuinely carries no wording.
-    description: chargeProductName(charge) || "Card payment",
+    description: productName || chargeProductName(charge) || "Card payment",
     quantity: 1,
     unit_price: lineTotal,
     tax_rate: 0,
@@ -450,7 +455,35 @@ export function shouldSyncCharge(charge: Record<string, any>) {
   return true;
 }
 
-async function upsertCharge(charge: Record<string, any>, accountId: string) {
+/** A Stripe GET in this module's credential, shaped for the shared scanner. */
+const stripeGet = (path: string, params: URLSearchParams) =>
+  stripe(`/v1/${path}`, Object.fromEntries(params.entries()));
+
+/**
+ * What the basket said, for charges that said nothing themselves.
+ *
+ * Only asked for when the charge, its intent and its metadata all came back
+ * empty -- which for this account is most of them, but skipping the ones that
+ * did carry a name keeps a re-sync from doubling its request count for no
+ * gain. Bounded concurrency because sequential does not fit a function timeout
+ * once there are a hundred of these, and unbounded is how Stripe starts
+ * rate limiting halfway through.
+ */
+async function basketNames(charges: Record<string, any>[]) {
+  const needing = charges.filter((charge) => !chargeWording(charge).length);
+  const found = new Map<string, string>();
+  if (!needing.length) return found;
+  const wordings = await mapLimit(needing, 6, (charge) =>
+    checkoutLineItemWording(charge, stripeGet),
+  );
+  needing.forEach((charge, index) => {
+    const text = wordings[index][0]?.text;
+    if (text) found.set(String(charge.id), text);
+  });
+  return found;
+}
+
+async function upsertCharge(charge: Record<string, any>, accountId: string, productName = "") {
   await supabase("billing_invoices", {
     method: "POST",
     query: "on_conflict=id",
@@ -460,13 +493,16 @@ async function upsertCharge(charge: Record<string, any>, accountId: string) {
   // Replace the single synthetic line wholesale so a later refund/amount edit
   // never leaves a stale line behind.
   await supabase("billing_invoice_items", { method: "DELETE", query: `invoice_id=eq.${encodeFilter(charge.id)}` });
-  await supabase("billing_invoice_items", { method: "POST", body: [mapChargeLine(charge, accountId)] });
+  await supabase("billing_invoice_items", { method: "POST", body: [mapChargeLine(charge, accountId, productName)] });
 }
 
 /** Sync a single Stripe charge (e.g. a webhook payload). Returns null when skipped. */
 export async function syncStripeCharge(charge: Record<string, any>, accountId: string) {
   if (!shouldSyncCharge(charge)) return null;
-  await upsertCharge(charge, accountId);
+  // A webhook payload carries an unexpanded intent and often no wording, so
+  // the basket is the only name available on the live path too.
+  const names = await basketNames([charge]);
+  await upsertCharge(charge, accountId, names.get(String(charge.id)) || "");
   return { chargeId: charge.id as string, status: chargeStatus(charge) };
 }
 
@@ -484,13 +520,16 @@ export async function syncChargesSince(sinceEpoch: number, accountId: string, un
   let synced = 0;
   let skipped = 0;
   const failures: { chargeId: string; error: string }[] = [];
+  // Resolved for the whole window up front, so the basket look-ups run a few
+  // at a time rather than one per charge inside a serial write loop.
+  const names = await basketNames(charges.filter(shouldSyncCharge));
   for (const charge of charges) {
     if (!shouldSyncCharge(charge)) {
       skipped += 1;
       continue;
     }
     try {
-      await upsertCharge(charge, accountId);
+      await upsertCharge(charge, accountId, names.get(String(charge.id)) || "");
       synced += 1;
     } catch (error) {
       failures.push({ chargeId: charge.id, error: error instanceof Error ? error.message : String(error) });

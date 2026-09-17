@@ -6,8 +6,12 @@ import { generateCouponCode, normaliseCouponCode } from "./_shared/coupon-codes.
 import {
   chargeIsClaimable,
   chargeValueCents,
+  chargeWording,
+  checkoutLineItemWording,
+  mapLimit,
   voucherVerdict,
 } from "./_shared/stripe-voucher-scan.mts";
+import type { ChargeWording } from "./_shared/stripe-voucher-scan.mts";
 // The same human-scaled order number the billing sync stamps on a card charge,
 // so a voucher and the invoice row beside it name the sale identically.
 import { chargeInvoiceNumber } from "./_shared/stripe-billing.mts";
@@ -4415,6 +4419,8 @@ async function restoreCouponValue(accountId: string, couponId: string, amount: n
 const VOUCHER_SCAN_DEFAULT_DAYS = 730;
 const VOUCHER_SCAN_PAGE = 100;
 const VOUCHER_SCAN_MAX_PAGES = 20;
+/** How many charges a scan will chase a basket for before it stops looking. */
+const VOUCHER_SCAN_BASKET_CAP = 250;
 
 async function stripeChargesSince(accountId: string, sinceEpoch: number) {
   const all: Array<Record<string, any>> = [];
@@ -4447,6 +4453,25 @@ async function stripeVoucherCandidates(accountId: string, url: URL) {
 
   const charges = (await stripeChargesSince(accountId, sinceEpoch)).filter(chargeIsClaimable);
 
+  /* What was in the basket, for the charges that named nothing themselves.
+   *
+   * Every Squarespace sale in this account is one of those -- "Charge for
+   * <email>" and an order id -- so without this the scan can only ever report
+   * that it found nothing, which is the failure the whole feature replaced.
+   *
+   * Capped as well as parallelised. Two extra requests per charge is fine for
+   * eighty and is not fine for eight hundred; past the cap the scan still
+   * lists the charges, just without basket names, which is visibly "I did not
+   * look that far" rather than a wrong answer.
+   */
+  const needingBasket = charges.filter((charge) => !chargeWording(charge).length);
+  const looked = needingBasket.slice(0, VOUCHER_SCAN_BASKET_CAP);
+  const baskets = await mapLimit(looked, 6, (charge) =>
+    checkoutLineItemWording(charge, (path, params) => stripeRequest(accountId, path, { params })),
+  );
+  const basketByCharge = new Map<string, ChargeWording[]>();
+  looked.forEach((charge, index) => basketByCharge.set(String(charge.id), baskets[index]));
+
   // Already-issued ones are dropped rather than greyed out: the list answers
   // "what still needs a code". Keyed on the charge id, which is also the unique
   // index, so a scan and an import can never disagree about what is done.
@@ -4460,7 +4485,7 @@ async function stripeVoucherCandidates(accountId: string, url: URL) {
   const candidates = charges
     .filter((charge) => !issued.has(String(charge.id)))
     .map((charge) => {
-      const verdict = voucherVerdict(charge);
+      const verdict = voucherVerdict(charge, basketByCharge.get(String(charge.id)) || []);
       const billing = (charge.billing_details || {}) as Record<string, any>;
       return {
         chargeId: String(charge.id || ""),
@@ -4518,7 +4543,12 @@ async function importStripeVouchers(accountId: string, body: Record<string, unkn
       skipped.push(chargeId);
       continue;
     }
-    const verdict = voucherVerdict(charge);
+    const verdict = voucherVerdict(
+      charge,
+      await checkoutLineItemWording(charge, (path, params) =>
+        stripeRequest(accountId, path, { params }),
+      ),
+    );
     const billing = (charge.billing_details || {}) as Record<string, any>;
     const coupon = await issueCoupon(accountId, {
       value: round2(chargeValueCents(charge) / 100),

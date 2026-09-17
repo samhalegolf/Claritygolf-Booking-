@@ -28207,8 +28207,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     Worth running once: card payments used to be filed under Stripe's own label for
                     them, <code>Charge for &lt;email&gt;</code>, so the invoice list and the
                     lesson-matching on a client's profile saw an email address where the product
-                    name should have been. New payments now keep the real name; the ones already
-                    recorded keep the old label until they are read again.
+                    name should have been. Payments now keep what was actually bought — read from
+                    the payment, or from the basket behind it. The ones already recorded keep the
+                    old label until they are read again.
                   </p>
                   <div className="panel-actions">
                     <button
