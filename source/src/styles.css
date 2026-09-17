@@ -14847,3 +14847,44 @@ button {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
+
+/* Billing > Passes: every issued pass in one table. The table and status
+ * pills are the invoice list's, so only the filter row is new. Scoped under
+ * .issued-passes because `.data-card span` (0-1-1) would otherwise repaint
+ * the label, and form controls do not inherit the page font on their own. */
+.issued-passes {
+  display: grid;
+  gap: var(--c-space-2);
+}
+
+.issued-passes-toolbar {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.issued-passes-toolbar label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--c-space-1);
+}
+
+.issued-passes .issued-passes-toolbar span {
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+}
+
+.issued-passes-toolbar select {
+  font: inherit;
+  height: var(--c-h-control);
+  padding: 0 var(--c-space-2);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  color: var(--c-text);
+}
+
+.issued-passes .issued-pass-name {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--c-space-1);
+}

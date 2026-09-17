@@ -371,7 +371,7 @@ export function PassesPanel({
                 {statusLabel(pass)}
                 {spendable || pass.status === "exhausted" ? (
                   <button className="link-button" type="button" onClick={() => onVoid(pass)}>
-                    Void
+                    Void pass
                   </button>
                 ) : null}
               </em>

@@ -22,7 +22,9 @@ export default async function handler(req: Request, context: Context) {
     ? "/api/passes/inbox"
     : pathname.endsWith("/attach")
       ? "/api/passes/attach"
-      : "/api/passes";
+      : pathname.endsWith("/list")
+        ? "/api/passes/list"
+        : "/api/passes";
   return handleBookingApiRoute(req, route, context);
 }
 
@@ -30,5 +32,5 @@ export const config: Config = {
   // Each path spelled out rather than "/api/passes/*": the wildcard would also
   // claim routes nobody has written yet, and a typo would be answered by this
   // function instead of falling through to a 404 that says so.
-  path: ["/api/passes", "/api/passes/inbox", "/api/passes/attach"],
+  path: ["/api/passes", "/api/passes/inbox", "/api/passes/attach", "/api/passes/list"],
 };

@@ -77,6 +77,7 @@ import { cleanPeople as cleanPeopleWith, type PeopleImportDiagnostic, type Perso
 import { isUnauthorizedClientsError, loadClients, replaceClients, resetClients, useClientsState } from "./modules/clients/clientsStore";
 import type { ClientsPanel as ClientsPanelComponent } from "./modules/clients/ClientsPanel";
 import type { CoverableService, Pass, PassGrant, PassTemplate } from "./modules/passes/PassesPanel";
+import type { IssuedPass } from "./modules/passes/IssuedPassesPanel";
 import type {
   PassInboxPurchase,
   PassInboxUnassigned,
@@ -315,6 +316,9 @@ const PassInboxPanel = lazy(() =>
 );
 const PassesPanel = lazy(() =>
   import("./modules/passes/PassesPanel").then((module) => ({ default: module.PassesPanel })),
+);
+const IssuedPassesPanel = lazy(() =>
+  import("./modules/passes/IssuedPassesPanel").then((module) => ({ default: module.IssuedPassesPanel })),
 );
 
 const SellScreen = lazy(() => import("./modules/billing/SellScreen").then((module) => ({ default: module.SellScreen })));
@@ -1144,7 +1148,7 @@ const BILLING_SECTION_LABELS: Record<Exclude<BillingSection, "none">, string> = 
   coupons: "Coupons",
   reports: "Reports",
   transactions: "Transaction History",
-  passes: "Pass Inbox",
+  passes: "Passes",
   settings: "Settings",
 };
 
@@ -5584,6 +5588,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     templates: PassTemplate[];
   }>({ waitingToIssue: [], waitingForOwner: [], templates: [] });
   const [passInboxLoadState, setPassInboxLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+  /* Every pass the business has issued, for Billing's Passes tab. Separate
+     from the inbox: that is what is unfinished, this is what is done. */
+  const [issuedPasses, setIssuedPasses] = useState<IssuedPass[]>([]);
+  const [issuedPassesLoadState, setIssuedPassesLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   /* Whose Stripe account this business's money lands in. The key itself never
      comes back from the server -- only whether there is one, its last four,
      and whether it is a test key. */
@@ -19071,6 +19079,19 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     }
   }
 
+  async function fetchIssuedPasses() {
+    setIssuedPassesLoadState((current) => (current === "loaded" ? current : "loading"));
+    try {
+      const response = await fetch("/api/passes/list", { credentials: "same-origin", cache: "no-store" });
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not load passes."));
+      const data = (await response.json()) as { passes?: IssuedPass[] };
+      setIssuedPasses(Array.isArray(data.passes) ? data.passes : []);
+      setIssuedPassesLoadState("loaded");
+    } catch {
+      setIssuedPassesLoadState("error");
+    }
+  }
+
   async function fetchPassInbox() {
     setPassInboxLoadState((current) => (current === "loaded" ? current : "loading"));
     try {
@@ -19114,6 +19135,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       if (!response.ok) throw new Error(await readApiFailure(response, failure));
       applyPassInbox(await response.json());
       setToast({ message: success });
+      void fetchIssuedPasses();
     } catch (error) {
       setToast({ message: error instanceof Error ? error.message : failure });
     } finally {
@@ -25456,15 +25478,17 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 onClick={() => {
                   setBillingSection("passes");
                   void fetchPassInbox();
+                  void fetchIssuedPasses();
                 }}
                 role="tab"
                 aria-selected={billingSection === "passes"}
                 type="button"
               >
-                <Inbox size={16} />
-                Pass Inbox
-                {/* The count is the point of the tab. An inbox you have to open
-                    to discover is empty is one nobody opens. */}
+                <Ticket size={16} />
+                Passes
+                {/* The count is what is waiting in the inbox below the list. An
+                    inbox you have to open to discover is empty is one nobody
+                    opens. */}
                 {passInboxCount > 0 && <span className="tab-count">{passInboxCount}</span>}
               </button>
               <button
@@ -27550,6 +27574,43 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
             {billingSection === "passes" && (
               <div className="billing-dashboard">
+                <article className="data-card wide">
+                  <div className="data-card-header">
+                    <div>
+                      <span>Issued passes</span>
+                      <h2>
+                        {(() => {
+                          const live = issuedPasses.filter((pass) => pass.status === "active");
+                          const left = live.reduce((sum, pass) => sum + pass.creditsAvailable, 0);
+                          return live.length === 0
+                            ? "No active passes"
+                            : `${live.length} active · ${left} ${left === 1 ? "credit" : "credits"} left`;
+                        })()}
+                      </h2>
+                    </div>
+                    <Ticket size={24} />
+                  </div>
+                  <p className="field-help">
+                    Every pass this business has issued and who holds it. A pass is spent from the
+                    lesson checkout, so a holder with credits left pays with it there.
+                  </p>
+                  <Suspense fallback={<Loading what="passes" />}>
+                    <IssuedPassesPanel
+                      passes={issuedPasses}
+                      loadState={issuedPassesLoadState}
+                      onRetry={() => void fetchIssuedPasses()}
+                      onOpenPerson={(personId) => {
+                        const linked = clients.find((entry) => entry.id === personId);
+                        if (linked) openClientProfile(linked);
+                        else setToast({ message: "That client is not in the list yet. Try again after it loads." });
+                      }}
+                      serviceName={(serviceId) =>
+                        services.find((service) => service.id === serviceId)?.name || serviceId
+                      }
+                    />
+                  </Suspense>
+                </article>
+
                 <article className="data-card wide">
                   <div className="data-card-header">
                     <div>

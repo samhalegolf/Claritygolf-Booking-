@@ -915,6 +915,52 @@ export async function readUnassignedPasses(accountId: string): Promise<PassView[
   return (rows as Record<string, unknown>[]).map(rowToPass);
 }
 
+export type IssuedPassView = PassView & { personName: string };
+
+/**
+ * Every pass the account has issued, newest first, with who holds it.
+ *
+ * The Billing view of the same ledger a profile shows one person of. Voided,
+ * used-up and expired passes stay in the list: "what did I sell in August" and
+ * "why can't he use his pass" are both answered here, and each row carries its
+ * own state, so the screen filters rather than the query.
+ */
+export async function readIssuedPasses(accountId: string): Promise<IssuedPassView[]> {
+  if (!accountId) return [];
+  // Same sweep every balance surface runs, so a cancelled lesson's credit is
+  // never shown as spent here either.
+  await sweepReturnableCredits(accountId);
+  const rows = await db().sql`
+    SELECT
+      b.*,
+      p.source,
+      p.note,
+      p.issued_at,
+      p.cross_redeemable,
+      COALESCE(pe.name, '') AS person_name,
+      COALESCE((
+        SELECT json_agg(a ORDER BY a.expires_at NULLS LAST, a.available_from)
+        FROM public.pass_allocation_balances a
+        WHERE a.pass_id = b.pass_id AND a.account_id = ${accountId}
+      ), '[]'::json) AS allocations,
+      COALESCE((
+        SELECT json_agg(r ORDER BY r.redeemed_at DESC)
+        FROM public.pass_redemptions r
+        WHERE r.pass_id = b.pass_id AND r.account_id = ${accountId}
+      ), '[]'::json) AS redemptions
+    FROM public.pass_balances b
+    JOIN public.passes p ON p.id = b.pass_id AND p.account_id = ${accountId}
+    LEFT JOIN public.people pe ON pe.id = b.person_id AND pe.account_id = ${accountId}
+    WHERE b.account_id = ${accountId}
+    ORDER BY p.issued_at DESC
+    LIMIT 300
+  `;
+  return (rows as Record<string, unknown>[]).map((row) => ({
+    ...rowToPass(row),
+    personName: String(row.person_name || ""),
+  }));
+}
+
 /**
  * Which purchases have already produced a pass.
  *

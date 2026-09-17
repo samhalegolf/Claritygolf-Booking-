@@ -46,6 +46,7 @@ import {
   passTemplatesFromServices,
   playerPassViews,
   readFlexibleValueForPerson,
+  readIssuedPasses,
   readPassesForPerson,
   readUnassignedPasses,
   resolveInboxPassValue,
@@ -14028,6 +14029,15 @@ async function readPassInbox(accountId: string, services) {
         stripe: stripeCredentialStatus(settingsMap[STRIPE_SECRET_SETTING]),
         cleared: !raw,
       });
+    }
+
+    // Billing's Passes tab: everything issued, whoever holds it. The inbox
+    // below is what is still unfinished; this is what is done.
+    if (req.method === "GET" && pathname === "/api/passes/list") {
+      const state = await readSettingsState(await currentAccountId(req));
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountFeature(requestContext.account, "clients");
+      return json({ passes: await readIssuedPasses(requestContext.accountId) });
     }
 
     if (req.method === "GET" && pathname === "/api/passes/inbox") {
