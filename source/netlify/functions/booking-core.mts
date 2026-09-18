@@ -66,6 +66,7 @@ import {
   isDismissedLine,
 } from "./_shared/pass-inbox-lines.mts";
 import { bestPassForLine } from "./_shared/pass-invoice-match.mts";
+import { unlinkedLineBelongsToPerson } from "./_shared/invoice-line-owner.mts";
 import {
   requireCoachActor,
   resolveMembershipForAuthUser,
@@ -13936,7 +13937,9 @@ async function readInvoicedLessonsForPerson(accountId: string, personId: string,
 
   const rows = (await db().sql`
     WITH person AS (
-      SELECT NULLIF(lower(COALESCE(email, '')), '') AS email
+      SELECT
+        NULLIF(lower(COALESCE(email, '')), '') AS email,
+        COALESCE(name, '') AS name
       FROM people
       WHERE account_id = ${accountId} AND id = ${personId}
       LIMIT 1
@@ -13995,11 +13998,27 @@ async function readInvoicedLessonsForPerson(accountId: string, personId: string,
       theirs.currency,
       theirs.issue_date,
       theirs.customer_name,
-      theirs.relation
+      theirs.relation,
+      -- Present only when the line was pulled from a booking, in which case it
+      -- is this person's booking: the join says so, and the WHERE below drops
+      -- every line whose booking belongs to somebody else. Read in JS to tell
+      -- a line that has been proven theirs from one nothing vouches for.
+      owner.person_id AS booking_person_id,
+      (SELECT name FROM person) AS person_name
     FROM public.billing_invoice_items item
     JOIN theirs ON theirs.id = item.invoice_id
+    -- A pulled lesson carries its booking id in source_id, and the booking
+    -- carries the person who had the lesson. On a bulk invoice that is the only
+    -- thing that separates this client's lines from the other fourteen.
+    LEFT JOIN public.calendar_items owner
+      ON item.source_type = 'booking'
+      AND owner.id = item.source_id
+      AND owner.account_id = ${accountId}
     WHERE item.account_id = ${accountId}
       AND item.line_total > 0
+      -- Done here rather than after the fetch so the row limit is spent on
+      -- lines that could be theirs.
+      AND (owner.person_id IS NULL OR owner.person_id = ${personId})
     ORDER BY theirs.issue_date DESC, item.id
     LIMIT 300
   `) as Record<string, unknown>[];
@@ -14015,13 +14034,22 @@ async function readInvoicedLessonsForPerson(accountId: string, personId: string,
   const unmatchedInvoicedLines: Record<string, unknown>[] = [];
   for (const row of rows) {
     const description = cleanString(row.description, "", 500);
+    const relation = cleanString(row.relation, "", 20);
+    // Lines the booking join vouched for are theirs and need no wording test.
+    // Everything else on somebody else's invoice has to name them.
+    if (
+      !cleanString(row.booking_person_id, "", 160) &&
+      !unlinkedLineBelongsToPerson(relation, description, cleanString(row.person_name, "", 140))
+    ) {
+      continue;
+    }
     const line = {
       id: String(row.id || ""),
       invoiceId: cleanString(row.invoice_id, "", 200),
       invoiceNumber: cleanString(row.invoice_number, "", 60),
       invoiceStatus: cleanString(row.status, "", 20),
       billedTo: cleanString(row.customer_name, "", 140),
-      relation: cleanString(row.relation, "", 20),
+      relation,
       description,
       quantity: Math.max(1, Math.round(Number(row.quantity) || 1)),
       amountCents: Math.max(0, Math.round((Number(row.line_total) || 0) * 100)),
