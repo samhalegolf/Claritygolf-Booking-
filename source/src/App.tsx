@@ -55,6 +55,7 @@ import {
   ScissorsLineDashed,
   Search,
   Send,
+  Link2 as LinkIcon,
   Settings,
   Sparkles,
   Sun,
@@ -5642,6 +5643,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   /** The Practice tab lists blocks; this flips it to the module's own composer. */
   const [playerPracticeComposer, setPlayerPracticeComposer] = useState(false);
   const [openSwingReviewId, setOpenSwingReviewId] = useState<string | null>(null);
+  // The review currently being sent, and the link the last send produced. The
+  // link is kept in memory rather than re-read, because the raw token exists
+  // only in the response that minted it -- the server stores its hash.
+  const [sendingSwingReviewId, setSendingSwingReviewId] = useState<string | null>(null);
+  const [sentSwingReviewLink, setSentSwingReviewLink] = useState<{ id: string; url: string } | null>(null);
   const [playerTransactions, setPlayerTransactions] = useState<ClientTransactionRow[]>([]);
   const [playerTransactionsLoadState, setPlayerTransactionsLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [selectedId, setSelectedId] = useState("");
@@ -12639,6 +12645,115 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         next.delete(item.savedVideoId);
         return next;
       });
+    }
+  }
+
+
+  /**
+   * Hands a finished swing review to the player it is about.
+   *
+   * A review is not one thing to send. It is videos that may or may not have
+   * reached the cloud yet, notes that are already server-side, and practice
+   * hanging off the videos -- so this does the delivery and the announcement as
+   * two separate passes, in that order:
+   *
+   *   1. Every video in the review goes up as a coach-return, with its own
+   *      email held. That is what puts it in the player's portal Videos, and it
+   *      is what a review share can stream from later.
+   *   2. One email, naming the review.
+   *
+   * The ordering is the safety property. Nothing here can leave a player
+   * holding a link to a review whose videos are not there, because the link is
+   * only minted after the last of them lands. A partial upload stops before the
+   * email and says which video failed, so the coach re-sends rather than
+   * wondering what the player got.
+   *
+   * No payment gate anywhere in here on purpose. A review the coach started
+   * from a client's profile is work they have already decided to do -- the
+   * credit question belongs at the player's end, where they ask for one.
+   */
+  async function sendSwingReviewToPlayer(
+    review: { id: string; videos: SavedVideoItem[]; notes: unknown[]; practice: unknown[] },
+    client: Pick<Person, "id" | "name">,
+  ) {
+    const store = savedVideoLibraryRef.current;
+    if (!store) {
+      setToast({ message: "Saved video library is unavailable in this browser." });
+      return;
+    }
+    const portalPlayer = portalPlayers.find(
+      (entry) => entry.personId === client.id && entry.status !== "disabled",
+    );
+    if (!portalPlayer) {
+      setToast({ message: "Give this player portal access first — that is where the review is kept." });
+      return;
+    }
+    // Only the videos need the cloud. A review that is all notes is worth
+    // sending without it, so this asks only when there is something to upload.
+    const cloudReason = review.videos.length ? clarityCloudTransferBlockReason(clarityCloudHealth) : "";
+    if (cloudReason) {
+      setToast({ message: cloudReason });
+      return;
+    }
+    // null is Cancel, "" is an empty note deliberately sent. Same distinction
+    // sendSavedVideoToPlayer makes, and only the first one aborts.
+    const note = window.prompt(
+      `Send this review to ${client.name}. Add a note (optional):`,
+      "",
+    );
+    if (note === null) return;
+    const message = note.trim();
+
+    setSendingSwingReviewId(review.id);
+    try {
+      for (const video of review.videos) {
+        setToast({ message: `Sending ${review.videos.length > 1 ? "videos" : "video"}…` });
+        await saveSavedVideoToCloud(video.savedVideoId, store, {
+          onProgress: () => refreshSavedVideoLibrary(),
+          returnToPlayer: true,
+          returnToPersonId: client.id,
+          message,
+          // The review sends one email for all of this. Without the flag a
+          // three-angle review would send the player four emails.
+          deferNotification: true,
+        });
+      }
+      refreshSavedVideoLibrary();
+      await refreshClarityCloudImports();
+
+      const response = await fetch("/api/video-transfer/review/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lessonId: review.id, personId: client.id, message }),
+      });
+      const result = (await response.json().catch(() => ({}))) as {
+        ok?: boolean;
+        emailed?: boolean;
+        recipient?: string;
+        shareUrl?: string;
+        message?: string;
+      };
+      if (!response.ok || !result.ok) {
+        throw new Error(result.message || "Could not send this review.");
+      }
+      setSentSwingReviewLink(result.shareUrl ? { id: review.id, url: result.shareUrl } : null);
+      setToast({
+        message: result.emailed
+          ? `Sent to ${result.recipient || client.name}. It is in their portal too.`
+          : "The review is in their portal, but the email could not be sent. Copy the link instead.",
+      });
+    } catch (error) {
+      refreshSavedVideoLibrary();
+      // eslint-disable-next-line no-console
+      console.warn("swing_review_send_failed", { lessonId: review.id });
+      setToast({
+        message:
+          error instanceof Error && error.message
+            ? error.message
+            : "Could not send this review. Your device copies are safe.",
+      });
+    } finally {
+      setSendingSwingReviewId(null);
     }
   }
 
@@ -24474,6 +24589,48 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                                   <div><strong>{block.title}</strong><p>{block.content}</p><span>{block.status} · {block.dose}</span></div>
                                                 </div>
                                               ))}
+                                              {/* What a coach does when the review is finished. It
+                                                * lives at the bottom of the open record rather than
+                                                * on the collapsed row, because sending is the last
+                                                * thing you do and the row is the thing you scan. */}
+                                              <div className="swing-review-record-actions">
+                                                <button
+                                                  type="button"
+                                                  className="primary-button"
+                                                  disabled={sendingSwingReviewId === review.id}
+                                                  onClick={() =>
+                                                    void sendSwingReviewToPlayer(review, notesWorkspaceClient)
+                                                  }
+                                                >
+                                                  <Send size={15} />
+                                                  {sendingSwingReviewId === review.id
+                                                    ? "Sending…"
+                                                    : sentSwingReviewLink?.id === review.id
+                                                      ? "Send again"
+                                                      : "Send to player"}
+                                                </button>
+                                                {/* Only after a send, and only for that review: the
+                                                  * raw token exists in the send's response and
+                                                  * nowhere else, so there is no link to copy until
+                                                  * one has been minted in this session. */}
+                                                {sentSwingReviewLink?.id === review.id ? (
+                                                  <button
+                                                    type="button"
+                                                    className="outline-button"
+                                                    onClick={() => {
+                                                      void navigator.clipboard
+                                                        ?.writeText(sentSwingReviewLink.url)
+                                                        .then(() => setToast({ message: "Viewing link copied." }))
+                                                        .catch(() =>
+                                                          setToast({ message: "Could not copy the link." }),
+                                                        );
+                                                    }}
+                                                  >
+                                                    <LinkIcon size={15} />
+                                                    Copy viewing link
+                                                  </button>
+                                                ) : null}
+                                              </div>
                                             </div>
                                           ) : null}
                                         </article>

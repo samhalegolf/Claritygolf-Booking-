@@ -39,6 +39,26 @@ export function isVideoShareMode(): boolean {
   return Boolean(videoShareToken());
 }
 
+/**
+ * The player's no-login view of a finished swing review: ?reviewShare=<token>.
+ *
+ * Same shape and same bargain as videoShare above, pointed the other way: the
+ * coach sending work out rather than a stranger sending work in. Its own
+ * parameter rather than a mode on videoShare, because the two tokens address
+ * different things -- one video, and a whole review -- and a page that had to
+ * work out which it had been handed would be a page that could get it wrong.
+ */
+export const REVIEW_SHARE_PARAM = "reviewShare";
+
+export function reviewShareToken(): string {
+  if (typeof window === "undefined") return "";
+  return new URLSearchParams(window.location.search).get(REVIEW_SHARE_PARAM) ?? "";
+}
+
+export function isReviewShareMode(): boolean {
+  return Boolean(reviewShareToken());
+}
+
 /** The public booking host serves the embed with no parameter at all. */
 export const PUBLIC_BOOKING_HOST = "book.claritygolf.app";
 

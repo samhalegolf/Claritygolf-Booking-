@@ -22,6 +22,16 @@ import {
 } from "./_shared/google-provider.mts";
 import { requireCoachActor } from "./_shared/coach-auth.mts";
 import { deliverEmail } from "./_shared/email-delivery.mts";
+import {
+  isSwingReviewLessonId,
+  reviewAt,
+  reviewEmail,
+  reviewSendVerdict,
+  reviewShareExpiry,
+  reviewShareUrl,
+  reviewShareVideo,
+  type ReviewSharePayload,
+} from "./_shared/swing-review-share.mts";
 import { canonicalPhoneKey, cleanPhoneCountry } from "./_shared/phone.mts";
 
 // Player portal sessions (see booking-core.mts). Player video routes are scoped
@@ -90,6 +100,12 @@ export type CoachReturn = {
   playerEmail: string;
   playerName: string;
   message: string;
+  /**
+   * The coach is sending a whole swing review, and this is one video out of it.
+   * The return still happens; only its own email is held, because the review
+   * sends one email naming all of it.
+   */
+  deferNotification: boolean;
 };
 
 type ClarityCloudCatalogueStatus =
@@ -316,6 +332,13 @@ export type VideoTransferSession = {
   playerSeenAt?: string;
   returnedToPortalPlayerId?: string;
   returnedAt?: string;
+  /**
+   * Set when this return is one video out of a swing review being sent as a
+   * whole. The video is still delivered and still stamped returnedAt -- it is
+   * just not announced on its own, because the review sends one email naming
+   * all of it. See deliverCoachReturn.
+   */
+  suppressReturnEmail?: boolean;
   /** Guest submissions only: the guest_senders row that authorised this. */
   guestSenderId?: string;
   submittedByEmail?: string;
@@ -1677,6 +1700,7 @@ export function rowToSession(row: any): VideoTransferSession {
     playerSeenAt: row.player_seen_at || undefined,
     returnedToPortalPlayerId: row.returned_to_portal_player_id || undefined,
     returnedAt: row.returned_at || undefined,
+    suppressReturnEmail: row.suppress_return_email === true,
     guestSenderId: row.guest_sender_id || undefined,
     submittedByEmail: row.submitted_by_email || undefined,
     coachViewTokenHash: row.coach_view_token_hash || undefined,
@@ -1752,6 +1776,10 @@ export function sessionToRow(session: VideoTransferSession) {
           returned_at: session.returnedAt || null,
         }
       : {}),
+    // Emitted only when it is true, unlike the block above. A review send is
+    // the only thing that sets it, so an ordinary return must not carry the
+    // column at all on a deploy that lands ahead of the migration.
+    ...(session.suppressReturnEmail ? { suppress_return_email: true } : {}),
     ready_to_import_at: session.readyToImportAt || null,
     destination_device_id: session.destinationDeviceId || null,
     destination_device_name: session.destinationDeviceName || null,
@@ -1907,6 +1935,7 @@ async function handleSession(
             direction: "coach-return" as const,
             returnedToPortalPlayerId: coachReturn.portalPlayerId,
             coachMessage: coachReturn.message || cleanString(body?.message, "", 600),
+            suppressReturnEmail: coachReturn.deferNotification,
           }
         : { direction: "coach-device" as const };
   const existing = await readTransferSession(accountId, savedVideoId);
@@ -1935,6 +1964,7 @@ async function handleSession(
         returnedToPortalPlayerId: coachReturn.portalPlayerId,
         coachMessage: coachReturn.message || cleanString(body?.message, "", 600),
         playerId: coachReturn.playerId,
+        suppressReturnEmail: coachReturn.deferNotification,
       });
       const delivered = await deliverCoachReturn(converted);
       return json({ ok: true, status: "ready", session: publicTransferSession(delivered), ...publicTransferSession(delivered) });
@@ -2620,7 +2650,13 @@ async function resolveCoachReturn(req: Request, accountId: string): Promise<Coac
       409,
     );
   }
-  return { ...target, message: cleanString(body?.message, "", 600) };
+  return {
+    ...target,
+    message: cleanString(body?.message, "", 600),
+    // Only the review send asks for this, and it asks per video as it uploads
+    // them. Anything else sending a return gets its own email as before.
+    deferNotification: body?.deferNotification === true,
+  };
 }
 
 /**
@@ -2633,6 +2669,10 @@ async function resolveCoachReturn(req: Request, accountId: string): Promise<Coac
 async function deliverCoachReturn(session: VideoTransferSession): Promise<VideoTransferSession> {
   if (session.direction !== "coach-return" || session.returnedAt) return session;
   const delivered = await patchTransferSession(session, { returnedAt: new Date().toISOString() });
+  // Delivered either way. What is held is the telling, not the handing over:
+  // this video is one of several in a swing review, and the review send that
+  // asked for it emails once, about all of them, when the last one is up.
+  if (delivered.suppressReturnEmail) return delivered;
   await notifyPlayerOfCoachReturn(delivered).catch((error: any) => {
     console.warn("video_transfer:return_notify_failed", redactForLogs(error?.message || error));
   });
@@ -3343,6 +3383,463 @@ export async function purgeStaleGuestSenders(days = 90) {
   return { removed };
 }
 
+
+/* ---------------------------------------------------------------------------
+ * A swing review, handed over.
+ *
+ * Three routes. One is the coach's ("send this review"), two are the player's
+ * and neither asks who they are -- the token in the emailed link is the whole
+ * credential, exactly as it is for the guest share above, and bounded the same
+ * way: one review, read-only, expiring.
+ *
+ * The review is still not a record. These routes re-gather it from the same
+ * places both apps do -- the returned videos wearing its lesson id, the lesson
+ * notes filed under it, the practice hanging off its videos -- so a review
+ * shared on Monday and added to on Tuesday shows Tuesday's work too, without
+ * the coach re-sending. What the share row holds is the act of sending, not a
+ * copy of what was sent.
+ * ------------------------------------------------------------------------- */
+
+const reviewShareTable = "swing_review_shares";
+
+/** Lesson notes live in one settings row per business, the same JSON array
+ *  booking-core reads and writes. Named here rather than inlined so the two
+ *  stay findable together. */
+function lessonNotesSettingKey(accountId: string) {
+  return `lessonNotes.v1.${accountId}`;
+}
+
+type ReviewShareRecord = {
+  id: string;
+  accountId: string;
+  lessonId: string;
+  playerId: string;
+  portalPlayerId: string;
+  coachMessage: string;
+  expiresAt: string;
+};
+
+/**
+ * The share behind a link, or null.
+ *
+ * One flat null for revoked, expired, wrong and never-existed alike -- the page
+ * renders one message for all four, and distinguishing them out loud would turn
+ * the endpoint into an oracle for guessing tokens.
+ */
+async function readReviewShare(token: string): Promise<ReviewShareRecord | null> {
+  if (!token) return null;
+  const rows = await supabase(reviewShareTable, {
+    query: `select=*&token_hash=eq.${encodeURIComponent(hashToken(token))}&limit=1`,
+  }).catch(() => []);
+  const row = rows[0];
+  if (!row) return null;
+  if (row.revoked_at) return null;
+  const expiresAt = cleanString(row.expires_at, "", 40);
+  if (!expiresAt || new Date(expiresAt).getTime() <= Date.now()) return null;
+  return {
+    id: cleanString(row.id, "", 80),
+    accountId: cleanString(row.account_id, "", 120),
+    lessonId: cleanString(row.lesson_id, "", 160),
+    playerId: cleanString(row.player_id, "", 160),
+    portalPlayerId: cleanString(row.portal_player_id, "", 80),
+    coachMessage: cleanString(row.coach_message, "", 600),
+    expiresAt,
+  };
+}
+
+/**
+ * The videos in a review, as the player was actually sent them.
+ *
+ * Deliberately only coach-returns. The coach's library syncs constantly and is
+ * filed under player ids throughout, so a plain "every cloud video wearing this
+ * lesson id" would put working footage the coach never chose to send in front
+ * of the player.
+ */
+async function reviewReturnedSessions(accountId: string, playerId: string, lessonId: string) {
+  const rows = await supabase(transferSessionTable, {
+    query:
+      `select=*&account_id=eq.${encodeURIComponent(accountId)}` +
+      `&player_id=eq.${encodeURIComponent(playerId)}` +
+      `&lesson_id=eq.${encodeURIComponent(lessonId)}` +
+      `&direction=eq.coach-return&status=eq.ready&order=created_at.asc`,
+  }).catch(() => []);
+  return (rows as any[]).map(rowToSession).filter((session) => session.driveVideoFileId);
+}
+
+/** The review's notes: this business's lesson notes, narrowed to this review
+ *  and this player. Both filters matter -- the setting holds every note the
+ *  business has ever written. */
+async function reviewLessonNotes(accountId: string, playerId: string, lessonId: string) {
+  const rows = await supabase("settings", {
+    query:
+      `select=value&account_id=eq.${encodeURIComponent(accountId)}` +
+      `&key=eq.${encodeURIComponent(lessonNotesSettingKey(accountId))}&limit=1`,
+  }).catch(() => []);
+  let parsed: any[] = [];
+  try {
+    const value = rows[0]?.value;
+    parsed = value ? JSON.parse(value) : [];
+  } catch {
+    // A settings row that will not parse is an empty notes list, not a 500.
+    parsed = [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed
+    .filter(
+      (note) =>
+        cleanString(note?.lessonId, "", 160) === lessonId &&
+        cleanString(note?.playerId, "", 160) === playerId,
+    )
+    .map((note, index) => ({
+      id: cleanString(note?.id, "", 120) || `note-${index}`,
+      title: cleanString(note?.title, "", 180) || "Lesson note",
+      body: cleanString(note?.body, "", 8000),
+      createdAt: cleanString(note?.createdAt || note?.updatedAt, "", 40),
+    }))
+    .filter((note) => note.body);
+}
+
+/** Practice is filed against a video, never against a review, so the only way
+ *  back to it is through the review's own videos. Same rule as the portal. */
+async function reviewPracticeBlocks(accountId: string, playerId: string, savedVideoIds: string[]) {
+  if (!savedVideoIds.length) return [];
+  const list = savedVideoIds.map((id) => `"${id.replace(/"/g, "")}"`).join(",");
+  const rows = await supabase("practice_blocks", {
+    query:
+      `select=id,title,content,dose,status,linked_video_id&account_id=eq.${encodeURIComponent(accountId)}` +
+      `&player_id=eq.${encodeURIComponent(playerId)}` +
+      `&linked_video_id=in.(${encodeURIComponent(list)})&order=created_at.asc`,
+  }).catch(() => []);
+  return (rows as any[]).map((row, index) => ({
+    id: cleanString(row?.id, "", 120) || `practice-${index}`,
+    title: cleanString(row?.title, "", 180) || "Practice",
+    content: cleanString(row?.content, "", 4000),
+    dose: cleanString(row?.dose, "", 120),
+    status: cleanString(row?.status, "", 40),
+  }));
+}
+
+/** The business's own name and its coach's, which is who the player thinks
+ *  sent this. Same three settings keys the From header is built from. */
+async function reviewSenderIdentity(settings: Record<string, string>) {
+  return {
+    businessName: cleanString(settings.accountBusinessName, "", 120),
+    coachName:
+      cleanString(settings.notificationFromName, "", 120) ||
+      cleanString(settings.accountCoachName, "", 120) ||
+      cleanString(settings.accountBusinessName, "", 120),
+  };
+}
+
+/**
+ * Everything behind the link, assembled.
+ *
+ * Note what the payload does not carry: no Drive ids, no account id, no person
+ * id, no transfer ids, nothing about any other review. The page is reachable by
+ * whoever holds the token, so it is handed this review and no way to ask about
+ * anything else. Videos are addressed by savedVideoId, which the stream route
+ * re-checks against this same share.
+ */
+async function buildReviewSharePayload(
+  share: ReviewShareRecord,
+  settings: Record<string, string>,
+  provider: ClarityCloudProviderAdapter,
+): Promise<ReviewSharePayload> {
+  const sessions = await reviewReturnedSessions(share.accountId, share.playerId, share.lessonId);
+  const files = await Promise.all(
+    sessions.map(async (session) => {
+      // A manifest or analysis file that will not load costs that video its
+      // title and its notes, not the whole page.
+      const [manifest, analysis] = await Promise.all([
+        session.driveManifestFileId
+          ? provider.readJsonFile({ fileId: session.driveManifestFileId }).catch(() => ({}))
+          : Promise.resolve({}),
+        session.driveAnalysisFileId
+          ? provider.readJsonFile({ fileId: session.driveAnalysisFileId }).catch(() => null)
+          : Promise.resolve(null),
+      ]);
+      return { session, manifest: manifest as any, analysis: analysis as any };
+    }),
+  );
+
+  const videos = files.map(({ session, manifest, analysis }) =>
+    reviewShareVideo(
+      {
+        savedVideoId: session.savedVideoId,
+        title: cleanString(manifest?.title, "", 180),
+        mimeType: cleanString(manifest?.video?.mimeType, "", 80),
+        sizeBytes: session.expectedSizeBytes,
+        durationSeconds: Number(manifest?.video?.duration || 0) || null,
+        createdAt: cleanString(manifest?.createdAt, "", 40) || session.createdAt,
+      },
+      analysis,
+    ),
+  );
+
+  const [notes, practice, people] = await Promise.all([
+    reviewLessonNotes(share.accountId, share.playerId, share.lessonId),
+    reviewPracticeBlocks(
+      share.accountId,
+      share.playerId,
+      sessions.map((session) => session.savedVideoId),
+    ),
+    supabase("people", {
+      query:
+        `select=name&id=eq.${encodeURIComponent(share.playerId)}` +
+        `&account_id=eq.${encodeURIComponent(share.accountId)}&limit=1`,
+    }).catch(() => []),
+  ]);
+
+  const identity = await reviewSenderIdentity(settings);
+  return {
+    playerName: cleanString(people[0]?.name, "", 180),
+    coachName: identity.coachName,
+    businessName: identity.businessName,
+    reviewAt: reviewAt(share.lessonId, [
+      ...videos.map((video) => video.createdAt),
+      ...notes.map((note) => note.createdAt),
+    ]),
+    coachMessage: share.coachMessage,
+    expiresAt: share.expiresAt,
+    videos,
+    notes,
+    practice,
+  };
+}
+
+/** Opening the link is worth recording -- it is the only signal the coach gets
+ *  that the review landed. A log, never a gate: a failed write must not cost
+ *  the player their page. */
+async function recordReviewShareOpen(share: ReviewShareRecord) {
+  const now = new Date().toISOString();
+  await supabase(reviewShareTable, {
+    method: "PATCH",
+    prefer: "return=minimal",
+    query: `id=eq.${encodeURIComponent(share.id)}`,
+    body: { last_opened_at: now, first_opened_at: now },
+  }).catch(() => {});
+}
+
+async function handleReviewShareRoute(
+  req: Request,
+  token: string,
+  sub: string[],
+  diagnostics: ProviderDiagnostics,
+) {
+  const share = await readReviewShare(cleanString(token, "", 400));
+  if (!share) {
+    return new Response(JSON.stringify({ error: "not_found" }), {
+      status: 404,
+      headers: { "Content-Type": "application/json", ...shareResponseHeaders },
+    });
+  }
+  const settings = await readSettings(share.accountId);
+
+  // The video itself. Streamed server-side with the coach's own token, exactly
+  // as the guest share does, so the Drive file's own sharing is never touched
+  // and the bytes never leave the coach's account.
+  if (sub[0] === "video" && sub[1]) {
+    const savedVideoId = cleanString(sub[1], "", 160);
+    const sessions = await reviewReturnedSessions(share.accountId, share.playerId, share.lessonId);
+    // The token addresses a review, so a saved video id outside it is a 404
+    // rather than a stream. Without this check the link would read any video
+    // in the business.
+    const session = sessions.find((entry) => entry.savedVideoId === savedVideoId);
+    if (!session?.driveVideoFileId) {
+      return new Response(JSON.stringify({ error: "not_found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json", ...shareResponseHeaders },
+      });
+    }
+    const accessToken = await ensureDriveReady(share.accountId, diagnostics);
+    const provider = googleDriveProviderAdapter(accessToken, settings, diagnostics);
+    const result = await provider.readFileRange({
+      fileId: session.driveVideoFileId,
+      range: req.headers.get("range") || undefined,
+    });
+    if (result instanceof Response) {
+      const headers = new Headers(result.headers);
+      Object.entries(shareResponseHeaders).forEach(([key, value]) => headers.set(key, value));
+      return new Response(result.body, { status: result.status, statusText: result.statusText, headers });
+    }
+    const body = result.buffer.slice(
+      result.byteOffset,
+      result.byteOffset + result.byteLength,
+    ) as ArrayBuffer;
+    return new Response(body, {
+      status: 200,
+      headers: { "Content-Type": "application/octet-stream", ...shareResponseHeaders },
+    });
+  }
+
+  if (sub.length) {
+    return new Response(JSON.stringify({ error: "not_found" }), {
+      status: 404,
+      headers: { "Content-Type": "application/json", ...shareResponseHeaders },
+    });
+  }
+
+  const accessToken = await ensureDriveReady(share.accountId, diagnostics);
+  const payload = await buildReviewSharePayload(
+    share,
+    settings,
+    googleDriveProviderAdapter(accessToken, settings, diagnostics),
+  );
+  await recordReviewShareOpen(share);
+  return new Response(JSON.stringify({ ok: true, review: payload }), {
+    status: 200,
+    headers: { "Content-Type": "application/json", ...shareResponseHeaders },
+  });
+}
+
+/**
+ * The coach's send.
+ *
+ * Runs after the review's videos have been uploaded as returns, because it is
+ * the announcement rather than the delivery -- the videos are already in the
+ * player's portal by the time this is called, and would be even if the email
+ * failed. That ordering is deliberate: nothing here can leave a player holding
+ * a link to a review that is not there.
+ *
+ * Re-sending is allowed and mints a fresh link. A coach who added a note the
+ * day after is sending the same review again, not a second one, so the old
+ * link is revoked rather than left alive beside the new one.
+ */
+async function handleReviewSend(req: Request, accountId: string, diagnostics: ProviderDiagnostics) {
+  const body = (await readJson(req)) as any;
+  const lessonId = cleanString(body?.lessonId, "", 160);
+  const personId = cleanString(body?.personId, "", 160);
+  const message = cleanString(body?.message, "", 600);
+  if (!isSwingReviewLessonId(lessonId)) {
+    throw new TransferError("CLARITY_CLOUD_PROVIDER_FAILED", "That is not a swing review.", 400);
+  }
+
+  const target = await readPortalPlayerForReturn(accountId, personId);
+  const sessions = target
+    ? await reviewReturnedSessions(accountId, target.playerId, lessonId)
+    : [];
+  const [notes, practice] = target
+    ? await Promise.all([
+        reviewLessonNotes(accountId, target.playerId, lessonId),
+        reviewPracticeBlocks(
+          accountId,
+          target.playerId,
+          sessions.map((session) => session.savedVideoId),
+        ),
+      ])
+    : [[], []];
+
+  const verdict = reviewSendVerdict({
+    target: target
+      ? {
+          portalPlayerId: target.portalPlayerId,
+          personId: target.playerId,
+          email: target.playerEmail,
+          name: target.playerName,
+        }
+      : null,
+    videoCount: sessions.length,
+    noteCount: notes.length,
+    practiceCount: practice.length,
+  });
+  if (verdict.ok === false) {
+    throw new TransferError("CLARITY_CLOUD_PROVIDER_FAILED", verdict.reason, 409);
+  }
+  const player = target!;
+
+  // One live link per review. The previous one is revoked in the same breath
+  // as the new one is written, so a re-send never leaves two doors open.
+  await supabase(reviewShareTable, {
+    method: "PATCH",
+    prefer: "return=minimal",
+    query:
+      `account_id=eq.${encodeURIComponent(accountId)}` +
+      `&lesson_id=eq.${encodeURIComponent(lessonId)}&revoked_at=is.null`,
+    body: { revoked_at: new Date().toISOString() },
+  }).catch(() => {
+    // A failed revoke leaves an older link alive. Worth logging, not worth
+    // refusing to send the review the coach just finished.
+    console.warn("video_transfer:review_share_revoke_failed", { lessonId });
+  });
+
+  const token = randomBytes(32).toString("base64url");
+  const expiresAt = reviewShareExpiry();
+  const shareId = randomUUID();
+  await supabase(reviewShareTable, {
+    method: "POST",
+    prefer: "return=minimal",
+    body: {
+      id: shareId,
+      account_id: accountId,
+      lesson_id: lessonId,
+      player_id: player.playerId,
+      portal_player_id: player.portalPlayerId,
+      token_hash: hashToken(token),
+      recipient_email: player.playerEmail,
+      coach_message: message,
+      expires_at: expiresAt,
+      created_at: new Date().toISOString(),
+    },
+  });
+
+  const settings = await readSettings(accountId);
+  const identity = await reviewSenderIdentity(settings);
+  const appUrl = (env("CLARITY_APP_URL", "") || env("URL") || env("DEPLOY_PRIME_URL") || "").replace(/\/$/, "");
+  const { subject, text } = reviewEmail({
+    playerName: player.playerName,
+    coachName: identity.coachName,
+    coachMessage: message,
+    shareUrl: reviewShareUrl(appUrl, token),
+    portalUrl: appUrl,
+    expiresAt,
+    videoCount: sessions.length,
+    noteCount: notes.length,
+    practiceCount: practice.length,
+  });
+
+  const delivery = await deliverEmail({
+    accountId,
+    to: player.playerEmail,
+    subject,
+    text,
+    // One review, one email, however many times a flaky network retried it.
+    idempotencyKey: `swing-review-${shareId}`,
+  });
+
+  await supabase("notification_history", {
+    method: "POST",
+    prefer: "return=minimal",
+    body: {
+      id: randomUUID(),
+      account_id: accountId,
+      person_key: player.playerId,
+      recipient: player.playerEmail,
+      subject,
+      kind: "swing_review_sent",
+      status: delivery.sent ? "sent" : "skipped",
+      provider: "resend",
+      provider_id: delivery.id || "",
+      error: delivery.reason || "",
+      created_at: new Date().toISOString(),
+    },
+  }).catch(() => {
+    // A log, not a dependency of the send.
+  });
+
+  void diagnostics;
+  return json({
+    ok: true,
+    emailed: delivery.sent,
+    emailReason: delivery.reason || "",
+    recipient: player.playerEmail,
+    shareUrl: reviewShareUrl(appUrl, token),
+    expiresAt,
+    videoCount: sessions.length,
+    noteCount: notes.length,
+    practiceCount: practice.length,
+  });
+}
+
 async function routeVideoTransferRequest(
   req: Request,
   options: { resolveAccountId?: (req: Request) => Promise<string> } = {},
@@ -3378,6 +3875,15 @@ async function routeVideoTransferRequest(
       return await handleShareRoute(req, parts[1] || "", parts[2] || "", diagnostics);
     }
 
+    // The player's emailed no-login link to a whole swing review. Same bargain
+    // as the share route above and for the same reason: asking someone to
+    // remember a password before they can watch what their coach made for them
+    // is exactly the friction the link exists to remove. Ahead of the admin
+    // gate, and reachable with nothing but the token.
+    if (parts[0] === "review" && parts[1] === "share" && req.method === "GET") {
+      return await handleReviewShareRoute(req, parts[2] || "", parts.slice(3), diagnostics);
+    }
+
     // Drive, folders and saved videos all belong to one business, so the coach
     // routes need the business the caller administers rather than "a session
     // exists". requireCoachActor throws 401/403 and the outer catch renders it.
@@ -3393,6 +3899,11 @@ async function routeVideoTransferRequest(
     // uploads go straight to the stored resumable URL, so skipping the
     // refresh-token exchange here removes several round-trips per chunk.
 
+    // Sending a finished review. Not a transfer of bytes -- those went up as
+    // returns already -- so it needs no Drive token, only the coach's session.
+    if (req.method === "POST" && parts[0] === "review" && parts[1] === "send") {
+      return await handleReviewSend(req, accountId, diagnostics);
+    }
     if (req.method === "POST" && parts[0] === "upload-session") {
       const body = await req.clone().json().catch(() => ({})) as any;
       const savedVideoId = cleanString(body?.savedVideoId || body?.savedVideo?.savedVideoId, "", 160);

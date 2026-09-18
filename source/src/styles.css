@@ -4793,6 +4793,14 @@ button {
      defined once and the four old systems converge without a rewrite.
      New rules should read --c-* directly and let this list shrink. */
   --coach-neutral: var(--c-surface);
+  /* A default for the pages nobody signs in to. --coach-primary is a brand
+     colour applied inline by App.tsx and, pre-auth, from localStorage by
+     LoginScreen -- neither of which runs for a visitor arriving on an emailed
+     no-login link. .primary-button paints itself with a colour-mix of this
+     variable, and a colour-mix of nothing is an invalid declaration: the whole
+     background was dropped, so the button rendered as white text on nothing.
+     Both inline setters still win over this. */
+  --coach-primary: var(--c-accent);
   --page: var(--c-page);
   --panel: var(--c-surface);
   --panel-soft: var(--c-surface-soft);

@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import LoginScreen from "./modules/auth/LoginScreen";
 import { Loading } from "./modules/shared/Loading";
 import { fetchSession, guestSession, type Session } from "./modules/auth/session";
-import { isBookingEmbedMode, isPlayerBookingMode, isVideoShareMode } from "./modules/shared/bookingHandoff";
+import { isBookingEmbedMode, isPlayerBookingMode, isReviewShareMode, isVideoShareMode } from "./modules/shared/bookingHandoff";
 import { lastVisitorWasCoach } from "./modules/shared/workspaceStorage";
 import { installOptixOriginFeedback } from "./optix-origin-feedback";
 import { installBoxAudit } from "./lib/boxAudit";
@@ -27,6 +27,7 @@ const PublicBookingApp = lazy(() => import("./modules/public-booking/PublicBooki
 const PublicBookingManage = lazy(() => import("./modules/public-booking/PublicBookingManage"));
 const PlayerPortal = lazy(() => import("./modules/player-portal/PlayerPortal"));
 const VideoSharePage = lazy(() => import("./modules/video-share/VideoSharePage"));
+const SwingReviewSharePage = lazy(() => import("./modules/review-share/SwingReviewSharePage"));
 // Not lazy: it is small, and a testing workspace that renders its warning a
 // beat after the workspace it warns about is a workspace someone acts in first.
 import SandboxBar from "./modules/sandbox/SandboxBar";
@@ -46,12 +47,16 @@ const publicReschedule = publicBookingOnly && new URLSearchParams(window.locatio
 // the credential, and asking a coach to log in to watch one video is exactly
 // the friction the link exists to remove.
 const videoShare = isVideoShareMode();
+// The player's emailed link to a finished swing review. Same reasoning as the
+// line above: the token is the credential, and a player who has never signed in
+// must not be stopped at a login screen on the way to their own review.
+const reviewShare = isReviewShareMode();
 
 // A coach who was here last time and did not sign out is a coach again, so
 // their workspace starts downloading now, alongside the session check, rather
 // than after it. The lazy import above reuses the same promise. A player or a
 // stranger never trips this: the hint is removed on logout.
-if (!publicBookingOnly && !videoShare && lastVisitorWasCoach()) {
+if (!publicBookingOnly && !videoShare && !reviewShare && lastVisitorWasCoach()) {
   void loadApp();
   // The client list too. It is the first thing Clients and Player Profiles
   // need, it is served by its own function, and nothing about the request
@@ -85,7 +90,7 @@ function Root() {
   useEffect(() => {
     // The share page never asks who is looking -- that is the whole point of
     // it -- so it must not make a session call either.
-    if (publicBookingOnly || videoShare) return;
+    if (publicBookingOnly || videoShare || reviewShare) return;
     let cancelled = false;
     void fetchSession().then((next) => {
       if (!cancelled) setSession(next);
@@ -119,6 +124,14 @@ function Root() {
     return (
       <Suspense fallback={<Loading size="screen" what="video" />}>
         <VideoSharePage />
+      </Suspense>
+    );
+  }
+
+  if (reviewShare) {
+    return (
+      <Suspense fallback={<Loading size="screen" what="your review" />}>
+        <SwingReviewSharePage />
       </Suspense>
     );
   }

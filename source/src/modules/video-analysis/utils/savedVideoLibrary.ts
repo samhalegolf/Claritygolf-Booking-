@@ -1085,6 +1085,13 @@ export const saveSavedVideoToCloud = async (
      */
     returnToPlayer?: boolean;
     returnToPersonId?: string;
+    /**
+     * This return is one video out of a swing review being sent as a whole.
+     * The video still goes; only its own "your coach sent you a video" email is
+     * held, because the review send that follows sends one email naming all of
+     * it. Meaningless without returnToPlayer.
+     */
+    deferNotification?: boolean;
   } = {}
 ): Promise<SavedVideoItem> => {
   const scope: VideoTransferScope = options.scope || "coach";
@@ -1135,6 +1142,7 @@ export const saveSavedVideoToCloud = async (
         ? {
             returnToPlayer: true,
             returnToPersonId: options.returnToPersonId || working.playerId,
+            ...(options.deferNotification ? { deferNotification: true } : {}),
           }
         : {}),
     };

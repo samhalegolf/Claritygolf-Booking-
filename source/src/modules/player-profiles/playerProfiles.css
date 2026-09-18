@@ -907,6 +907,16 @@
   padding: 4px 14px 16px 124px;
 }
 
+/* Sending is the last thing in an open review, so its buttons sit below the
+   last of its contents rather than floating at the top where they would be the
+   first thing read. */
+.swing-review-record-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--c-space-2);
+  margin-top: var(--c-space-1);
+}
+
 .swing-review-video {
   display: grid;
   grid-template-columns: 72px minmax(0, 1fr);
