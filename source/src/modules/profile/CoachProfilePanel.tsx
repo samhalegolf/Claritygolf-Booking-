@@ -98,6 +98,13 @@ const SECTION_ORDER = [
   "Player portal",
 ];
 
+const EXTERNAL_SECTION_JOBS: Record<string, string> = {
+  Calendar: "Calendar",
+  "Resource booking": "Resource booking",
+  Storage: "Cloud storage",
+  Accounting: "Payments & accounting",
+};
+
 /** Where a connection is set up. One destination: Settings › Integrations. */
 const INTEGRATION_TARGET: ProfileTarget = { kind: "settings", tab: "developer" };
 
@@ -166,7 +173,12 @@ export function CoachProfilePanel({ identity, internalJobs, onOpen }: CoachProfi
     name,
     external: cards.filter((card) => (SECTION_BY_CATEGORY[card.category] || "Accounting") === name),
     internal: internalJobs.filter((job) => job.category === name),
-  })).filter((section) => section.external.length || section.internal.length);
+  })).filter(
+    (section) =>
+      section.external.length ||
+      section.internal.length ||
+      (connectionsStatus !== "loaded" && Boolean(EXTERNAL_SECTION_JOBS[section.name])),
+  );
 
   function detailToggle(id: string, hasFacts: boolean) {
     const open = openDetail === id;
@@ -256,6 +268,21 @@ export function CoachProfilePanel({ identity, internalJobs, onOpen }: CoachProfi
         {sections.map((section) => (
           <section className="cp-section" key={section.name}>
             <h3>{section.name}</h3>
+
+            {connectionsStatus !== "loaded" && section.external.length === 0 && EXTERNAL_SECTION_JOBS[section.name] ? (
+              <article className="cp-cell cp-cell-pending" aria-busy="true">
+                <div className="cp-cell-head">
+                  <span className="cp-mark is-placeholder">…</span>
+                  <span className="cp-cell-title">
+                    <strong>{EXTERNAL_SECTION_JOBS[section.name]}</strong>
+                    <span className="cp-external" title="External connection">
+                      <Link2 size={14} />
+                    </span>
+                  </span>
+                </div>
+                <p className="cp-cell-summary">Checking connection…</p>
+              </article>
+            ) : null}
 
             {section.external.map((card) => {
               const state = stateOf(card);
@@ -354,9 +381,6 @@ export function CoachProfilePanel({ identity, internalJobs, onOpen }: CoachProfi
         ))}
       </div>
 
-      {connectionsStatus === "loading" && !cards.length && !error ? (
-        <p className="cp-connections-pending" role="status">Checking connections…</p>
-      ) : null}
     </div>
   );
 }
