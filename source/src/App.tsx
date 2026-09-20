@@ -16586,6 +16586,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     }, 2500);
   }, [isEmbedMode, authStatus, adminWorkspaceLoadStatus, isPlatformAdmin]);
 
+  // Profile navigation is a stronger signal than the generic idle warm-up.
+  // Start/join the shared integration request immediately so Coach Profile and
+  // Settings consume one resource lifecycle rather than mounting separate reads.
+  useEffect(() => {
+    if (isEmbedMode || authStatus !== "authenticated" || activeView !== "profile") return;
+    prefetchIntegrations("integration");
+  }, [activeView, authStatus, isEmbedMode]);
+
   // Billing data is not part of the calendar frame. It used to load the moment
   // the plan allowed it: seven billing-api calls at boot, racing the calendar
   // shell, whether or not the coach ever opened Billing -- and now that the
