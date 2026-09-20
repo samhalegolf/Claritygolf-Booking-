@@ -7119,7 +7119,11 @@ function schedulePublicBookingSideEffects(accountId: string, context, appointmen
     if (stamped.personId && stamped.personId !== appointment.personId) {
       await writeItems([stamped]);
     }
-    await syncGoogleCalendarChangesIfEnabled(accountId, [{ id: appointment.id, action: "upsert" }], "public_booking_created").catch((error) =>
+    await syncGoogleCalendarChangesIfEnabled(
+      accountId,
+      [{ id: appointment.id, action: "upsert" }],
+      options.googleCalendarTrigger || "public_booking_created",
+    ).catch((error) =>
       console.error("public_booking:google_calendar_sync_failed", error),
     );
     // Lesson types with Auto-book ticked in Resources get their Optix bay
@@ -11435,7 +11439,10 @@ async function reschedulePublicBooking(accountId: string, payload: Record<string
     // appointment row directly and never touched the bay, so a client
     // reschedule used to leave the bay held at the old time — still 'synced',
     // still painting the orange ring over a lesson that had no bay.
-    { rebookResource: appointmentSlotChanged(appointment, updatedAppointment) },
+    {
+      rebookResource: appointmentSlotChanged(appointment, updatedAppointment),
+      googleCalendarTrigger: "public_booking_rescheduled",
+    },
   );
   let notifications = [];
   try {
