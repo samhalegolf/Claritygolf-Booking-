@@ -143,21 +143,83 @@ export interface PostureShape {
   readonly spanM: number;
 }
 
-const midpoint = (
-  frame: WorldObservationFrame,
-  joints: readonly ClarityJoint[]
-): Vec3 | null => {
+/**
+ * How a caller hands over a body. A function rather than a record so the
+ * observation layer and the Motion Layer can both use this without either
+ * having to convert into the other's shape first.
+ */
+export type JointLookup = (joint: ClarityJoint) => Vec3 | undefined;
+
+export const lookupFrom = (frame: WorldObservationFrame): JointLookup =>
+  (joint) => frame.joints[joint]?.position as Vec3 | undefined;
+
+const midpoint = (lookup: JointLookup, joints: readonly ClarityJoint[]): Vec3 | null => {
   let x = 0;
   let y = 0;
   let z = 0;
   for (const joint of joints) {
-    const observed = frame.joints[joint];
-    if (!observed) return null;
-    x += observed.position[0];
-    y += observed.position[1];
-    z += observed.position[2];
+    const position = lookup(joint);
+    if (!position) return null;
+    x += position[0];
+    y += position[1];
+    z += position[2];
   }
   return [x / joints.length, y / joints.length, z / joints.length];
+};
+
+/**
+ * How far this body's foot points are from lying in one plane, metres.
+ *
+ * MEASURED AS A SPREAD, NOT AS A HEIGHT ABOVE THE GROUND.
+ *
+ * The obvious test -- every foot point within a few centimetres of Y = 0 --
+ * fails on exactly the clips this module exists for. A camera pitched by
+ * theta raises the toes above the heels by `footLength * sin(theta)`, which
+ * at ten degrees is 35mm on a 200mm foot: enough to fail any sane ground
+ * tolerance on EVERY frame. The filter would then silently return no
+ * samples, and a measurement that vanishes when the tilt gets large is worse
+ * than none at all.
+ *
+ * The spread does not care. Pitch adds the same splay to every frame in the
+ * clip, so comparing each frame against the clip's own flattest frames
+ * removes it, while a heel coming up -- which is a CHANGE -- still shows.
+ */
+export const footSplay = (lookup: JointLookup): number | null => {
+  let lowest = Number.POSITIVE_INFINITY;
+  let highest = Number.NEGATIVE_INFINITY;
+  for (const joint of FOOT_JOINTS) {
+    const position = lookup(joint);
+    if (!position) return null;
+    lowest = Math.min(lowest, position[1]);
+    highest = Math.max(highest, position[1]);
+  }
+  return highest - lowest;
+};
+
+/**
+ * Which bodies in a clip are standing on both feet.
+ *
+ * Against the clip's OWN flattest frames -- the 20th-percentile splay -- so a
+ * constant camera pitch cancels and a lifting heel does not. Low enough to
+ * exclude the takeaway, high enough to be a real frame rather than the one
+ * the detector got luckiest on.
+ */
+export const plantedIndices = (bodies: readonly JointLookup[]): readonly number[] => {
+  const splays: number[] = [];
+  for (const lookup of bodies) {
+    const splay = footSplay(lookup);
+    if (splay !== null) splays.push(splay);
+  }
+  if (splays.length === 0) return [];
+  const sorted = [...splays].sort((a, b) => a - b);
+  const planted = sorted[Math.floor(sorted.length * 0.2)];
+
+  const indices: number[] = [];
+  for (let index = 0; index < bodies.length; index += 1) {
+    const splay = footSplay(bodies[index]);
+    if (splay !== null && splay <= planted + HEEL_LIFT_TOLERANCE_M) indices.push(index);
+  }
+  return indices;
 };
 
 /**
@@ -168,15 +230,13 @@ const midpoint = (
  * translation is exactly what the anchoring step has already removed. Fitting
  * one again would let frame-to-frame anchoring noise leak into the slope.
  */
-export const foreAftProfile = (
-  frame: WorldObservationFrame
-): readonly ForeAftSample[] => {
-  const ankle = midpoint(frame, CHAIN[0].from);
+export const foreAftProfileOf = (lookup: JointLookup): readonly ForeAftSample[] => {
+  const ankle = midpoint(lookup, CHAIN[0].from);
   if (!ankle) return [];
 
   const samples: ForeAftSample[] = [];
   for (const rung of CHAIN) {
-    const point = midpoint(frame, rung.from);
+    const point = midpoint(lookup, rung.from);
     if (!point) continue;
     samples.push({
       name: rung.name,
@@ -186,6 +246,17 @@ export const foreAftProfile = (
   }
   return samples;
 };
+
+export const foreAftProfile = (frame: WorldObservationFrame): readonly ForeAftSample[] =>
+  foreAftProfileOf(lookupFrom(frame));
+
+/**
+ * The slope of the best line through the origin, which is where a camera
+ * pitch lives. Exported because removing it is how anything else in the
+ * pipeline becomes pitch-free.
+ */
+export const foreAftSlope = (samples: readonly ForeAftSample[]): number =>
+  fitSlope(samples);
 
 /** Slope of the best line through the origin: the camera's share, plus lean. */
 const fitSlope = (samples: readonly ForeAftSample[]): number => {
@@ -227,8 +298,8 @@ const NO_SHAPE: PostureShape = {
   spanM: 0,
 };
 
-export const postureShape = (frame: WorldObservationFrame): PostureShape => {
-  const samples = foreAftProfile(frame);
+export const postureShapeOf = (lookup: JointLookup): PostureShape => {
+  const samples = foreAftProfileOf(lookup);
   // Three rungs is the minimum that can distinguish a bend from a slope: two
   // points define the line the third is measured against.
   if (samples.length < 3) return NO_SHAPE;
@@ -258,36 +329,10 @@ export const postureShape = (frame: WorldObservationFrame): PostureShape => {
   };
 };
 
-/* --------------------------- over a sequence -------------------------- */
+export const postureShape = (frame: WorldObservationFrame): PostureShape =>
+  postureShapeOf(lookupFrom(frame));
 
-/**
- * How far this frame's foot points are from lying in one plane, metres.
- *
- * MEASURED AS A SPREAD, NOT AS A HEIGHT ABOVE THE GROUND.
- *
- * The obvious test -- every foot point within a few centimetres of Y = 0 --
- * fails on exactly the clips this module exists for. A camera pitched by
- * theta raises the toes above the heels by `footLength * sin(theta)`, which
- * at ten degrees is 35mm on a 200mm foot: enough to fail any sane ground
- * tolerance on EVERY frame. The filter would then silently return no
- * samples, and a pitch measurement that vanishes when the pitch gets large
- * is worse than none at all.
- *
- * The spread does not care. Pitch adds the same splay to every frame in the
- * clip, so comparing each frame against the clip's own flattest frames
- * removes it, while a heel coming up -- which is a CHANGE -- still shows.
- */
-const footSpread = (frame: WorldObservationFrame): number | null => {
-  let lowest = Number.POSITIVE_INFINITY;
-  let highest = Number.NEGATIVE_INFINITY;
-  for (const joint of FOOT_JOINTS) {
-    const observed = frame.joints[joint];
-    if (!observed) return null;
-    lowest = Math.min(lowest, observed.position[1]);
-    highest = Math.max(highest, observed.position[1]);
-  }
-  return highest - lowest;
-};
+/* --------------------------- over a sequence -------------------------- */
 
 export interface ForeAftSeparation {
   /** The averaged shape over every usable frame. */
@@ -315,27 +360,10 @@ const MAX_LINEAR_FRACTION = 0.97;
 export const separateForeAft = (
   sequence: WorldObservationSequence
 ): ForeAftSeparation => {
-  /*
-   * The clip's own planted baseline: the 20th-percentile foot splay. Low
-   * enough to exclude the takeaway, high enough that it is a real frame
-   * rather than the one the detector got luckiest on.
-   */
-  const spreads: number[] = [];
-  for (const frame of sequence.frames) {
-    if (!frame.detected) continue;
-    const spread = footSpread(frame);
-    if (spread !== null) spreads.push(spread);
-  }
-  spreads.sort((a, b) => a - b);
-  const planted =
-    spreads.length > 0 ? spreads[Math.floor(spreads.length * 0.2)] : Number.POSITIVE_INFINITY;
-
+  const detected = sequence.frames.filter((frame) => frame.detected);
   const shapes: PostureShape[] = [];
-  for (const frame of sequence.frames) {
-    if (!frame.detected) continue;
-    const spread = footSpread(frame);
-    if (spread === null || spread > planted + HEEL_LIFT_TOLERANCE_M) continue;
-    const shape = postureShape(frame);
+  for (const index of plantedIndices(detected.map(lookupFrom))) {
+    const shape = postureShape(detected[index]);
     if (shape.samples.length >= 3) shapes.push(shape);
   }
 

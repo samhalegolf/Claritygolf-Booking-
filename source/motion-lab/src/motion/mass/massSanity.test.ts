@@ -1,0 +1,266 @@
+/**
+ * Checking the fore-aft mass reading against the body's own shape.
+ *
+ * The reading is the most pitch-sensitive number the pipeline produces -- 16mm
+ * of travel per degree of camera tilt, on a foot 265mm long -- and a tilted
+ * tripod leaves no trace in the picture. These tests are about what can still
+ * be said without ever calibrating the camera.
+ */
+
+import { strict as assert } from "node:assert";
+import { test } from "node:test";
+
+import type { ClarityFrame, ClarityJoint, Vec3 } from "../../contracts";
+import { lookupFrom, type JointLookup } from "../../observe/foreAft";
+import { anchorSequence } from "../../observe/anchor";
+import type { CameraObservationSequence, ObservationFrame } from "../../observe/observation";
+import { detectFromClarityFrames } from "../../observe/syntheticDetector";
+import { toCameraFrame } from "../../observe/toCameraFrame";
+import { generateSyntheticSwing } from "../../synthetic/syntheticSwing";
+import { checkMassAgainstShape, readMass } from "./massSanity";
+
+const swing = generateSyntheticSwing();
+
+const buildCameraSequence = (raw: readonly ObservationFrame[]): CameraObservationSequence => ({
+  space: "camera",
+  frames: raw.map((frame) => toCameraFrame(frame)),
+  fps: swing.fps,
+  width: 1920,
+  height: 1080,
+  durationMs: swing.frames.length * (1000 / swing.fps),
+  detector: "synthetic",
+});
+
+/** A real rotation about the stance line, as a tripod on a slope gives. */
+const withCameraPitch = (raw: readonly ObservationFrame[], degrees: number) => {
+  const radians = (degrees * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  return raw.map((frame) => ({
+    ...frame,
+    world:
+      frame.world?.map((point) => ({
+        ...point,
+        y: point.y * cos - point.z * sin,
+        z: point.y * sin + point.z * cos,
+      })) ?? null,
+  }));
+};
+
+const bodiesOf = (frames: readonly ClarityFrame[], pitchDeg: number): readonly JointLookup[] =>
+  anchorSequence(buildCameraSequence(withCameraPitch(detectFromClarityFrames(frames), pitchDeg)))
+    .frames.filter((frame) => frame.detected)
+    .map(lookupFrom);
+
+const check = (frames: readonly ClarityFrame[], pitchDeg: number) =>
+  checkMassAgainstShape(bodiesOf(frames, pitchDeg));
+
+/** A golfer who sits back into the shot. Applied to the body, not the camera. */
+const SQUAT: Partial<Record<ClarityJoint, Vec3>> = {
+  leftHip: [0, -0.04, -0.06], rightHip: [0, -0.04, -0.06],
+  leftKnee: [0, -0.02, 0.03], rightKnee: [0, -0.02, 0.03],
+  leftShoulder: [0, -0.04, 0], rightShoulder: [0, -0.04, 0],
+  neck: [0, -0.04, 0], head: [0, -0.04, 0],
+  leftElbow: [0, -0.04, 0], rightElbow: [0, -0.04, 0],
+  leftWrist: [0, -0.04, 0], rightWrist: [0, -0.04, 0],
+  leftHand: [0, -0.04, 0], rightHand: [0, -0.04, 0],
+};
+
+const squatted: readonly ClarityFrame[] = swing.frames.map((frame) => ({
+  ...frame,
+  body: {
+    ...frame.body,
+    joints: Object.fromEntries(
+      Object.entries(frame.body.joints).map(([name, position]) => {
+        const shift = SQUAT[name as ClarityJoint];
+        return [
+          name,
+          shift
+            ? [position[0] + shift[0], position[1] + shift[1], position[2] + shift[2]]
+            : position,
+        ];
+      })
+    ) as Record<ClarityJoint, Vec3>,
+  },
+}));
+
+const PITCHES = [0, 2, 5, 10, -5, -10] as const;
+
+/* ------------------------------ soundness ------------------------------ */
+
+test("the admissible pitch interval never excludes the truth", () => {
+  /*
+   * The property everything else rests on. The interval comes from a physical
+   * fact -- a golfer standing on both feet has their mass over their feet --
+   * so the real camera angle MUST be inside it. An interval that could
+   * exclude the truth would be worse than no interval, because it would be
+   * confidently wrong rather than merely wide.
+   */
+  for (const degrees of PITCHES) {
+    const [low, high] = check(swing.frames, degrees).pitchRangeDeg;
+    assert.ok(
+      degrees >= low - 0.01 && degrees <= high + 0.01,
+      `a true pitch of ${degrees}° fell outside the admissible range [${low.toFixed(1)}, ${high.toFixed(1)}]`
+    );
+  }
+});
+
+test("the correction is never larger than the physics forces", () => {
+  // Over-correcting would be inventing a camera angle, which is the exact
+  // failure the whole module is built to avoid.
+  for (const degrees of PITCHES) {
+    const { minimumPitchDeg } = check(swing.frames, degrees);
+    assert.ok(
+      Math.abs(minimumPitchDeg) <= Math.abs(degrees) + 0.01,
+      `a ${degrees}° pitch drew a ${minimumPitchDeg.toFixed(2)}° correction`
+    );
+    assert.ok(
+      minimumPitchDeg === 0 || Math.sign(minimumPitchDeg) === Math.sign(degrees),
+      `a ${degrees}° pitch drew a correction of the wrong sign, ${minimumPitchDeg.toFixed(2)}°`
+    );
+  }
+});
+
+test("a level camera draws no correction at all", () => {
+  const level = check(swing.frames, 0);
+  assert.equal(level.minimumPitchDeg, 0);
+  assert.equal(level.verdict, "consistent");
+  assert.equal(level.impossibleFrames, 0);
+});
+
+/* --------------------------- what it catches --------------------------- */
+
+test("a mass reading beyond the toes is impossible, and proves a pitch", () => {
+  /*
+   * At five degrees the fixture's mass reads at 109% of the foot: the golfer
+   * would be falling forwards. No posture explains that, so the excess is a
+   * hard lower bound on the camera. It recovers 1.6 of the 5 degrees -- not
+   * all of it, because the reading only has to get back to the toe line to
+   * become possible, not back to where it truly was.
+   */
+  const tilted = check(swing.frames, 5);
+  assert.ok(
+    tilted.reading.footFractionUnit > 1,
+    `the raw reading was ${tilted.reading.footFractionUnit.toFixed(3)} of the foot, which should be impossible`
+  );
+  assert.equal(tilted.verdict, "corrected");
+  assert.ok(
+    tilted.minimumPitchDeg > 1,
+    `only ${tilted.minimumPitchDeg.toFixed(2)}° was proven from a reading that far outside the foot`
+  );
+  assert.ok(
+    tilted.correctedFootFractionUnit <= 1.001 && tilted.correctedFootFractionUnit >= -0.001,
+    `the corrected reading, ${tilted.correctedFootFractionUnit.toFixed(3)}, is still outside the foot`
+  );
+
+  // Ten degrees is further outside, so more of it is provable.
+  assert.ok(check(swing.frames, 10).minimumPitchDeg > tilted.minimumPitchDeg);
+});
+
+test("more tilt is caught than not, but the clip has to get near the edge to pin it", () => {
+  // Two degrees leaves the mass at 89% of the foot -- ugly, entirely possible,
+  // and therefore unprovable. Saying so is the honest answer; a module that
+  // reported a pitch here would be guessing.
+  const small = check(swing.frames, 2);
+  assert.ok(small.reading.footFractionUnit < 1);
+  assert.equal(small.minimumPitchDeg, 0);
+  assert.equal(small.verdict, "consistent");
+  // and it says the reading is not pinned down
+  assert.ok(small.confidence < 0.6, `confidence was ${small.confidence.toFixed(2)}`);
+});
+
+/* ---------------------- the bend is the stable part -------------------- */
+
+test("the bend holds the mass reading still while the raw one runs away", () => {
+  const level = check(swing.frames, 0).reading;
+  const tilted = check(swing.frames, 10).reading;
+
+  const rawMm = Math.abs(tilted.footFractionUnit - level.footFractionUnit) * level.footSpanM * 1000;
+  const bendMm = Math.abs(tilted.bendFractionUnit - level.bendFractionUnit) * level.footSpanM * 1000;
+
+  // ~175mm against ~10mm over ten degrees.
+  assert.ok(rawMm > 100, `ten degrees moved the raw reading only ${rawMm.toFixed(0)}mm`);
+  assert.ok(
+    bendMm * 10 < rawMm,
+    `the bend moved ${bendMm.toFixed(1)}mm against the raw reading's ${rawMm.toFixed(0)}mm -- not a big enough separation to be worth the machinery`
+  );
+});
+
+test("a real squat moves the bend; a camera pitch does not", () => {
+  const level = check(swing.frames, 0).reading;
+  const pitched = check(swing.frames, 5).reading;
+  const squat = check(squatted, 0).reading;
+
+  const fromCamera = Math.abs(pitched.bendFractionUnit - level.bendFractionUnit);
+  const fromGolfer = Math.abs(squat.bendFractionUnit - level.bendFractionUnit);
+  assert.ok(
+    fromGolfer > 2 * fromCamera,
+    `the bend moved ${(fromCamera * 100).toFixed(1)}% of the foot for the camera and ${(fromGolfer * 100).toFixed(1)}% for a real squat`
+  );
+
+  // And the squat moves the mass toward the heels, which is what sitting back
+  // means -- so the two readings corroborate rather than merely coexist.
+  assert.ok(squat.bendFractionUnit < level.bendFractionUnit);
+  assert.ok(squat.footFractionUnit < level.footFractionUnit);
+});
+
+test("the clip's own movement is reported split between bend and lean", () => {
+  // Both are ranges, and a constant pitch cancels out of a difference, so
+  // both numbers are pitch-free however badly the camera was set up.
+  const level = check(swing.frames, 0);
+  const tilted = check(swing.frames, 5);
+  assert.ok(level.bendRangeM > 0.01, `the bend moved the mass only ${(level.bendRangeM * 1000).toFixed(0)}mm`);
+  assert.ok(
+    Math.abs(tilted.bendRangeM - level.bendRangeM) * 1000 < 2,
+    `five degrees changed the bend's range by ${((tilted.bendRangeM - level.bendRangeM) * 1000).toFixed(1)}mm`
+  );
+});
+
+/* ------------------------------- honesty ------------------------------- */
+
+test("the tight mid-foot band is NOT sound on this fixture, which is why it is not the default", () => {
+  /*
+   * Narrowing the band to "a still golfer stands near mid-foot" would sharpen
+   * the interval from about 15 degrees wide to under 4 -- a four-fold gain,
+   * and almost certainly true of real people.
+   *
+   * It is not true of this fixture. Its address leans the spine forward
+   * without pushing the hips back to counterbalance, so its mass genuinely
+   * sits at 76% of the foot. Asked to force that into a mid-foot band, the
+   * check "proves" two degrees of tilt on a perfectly level camera.
+   *
+   * That is the fixture's flaw rather than the method's, and the test exists
+   * so nobody tightens the default until real footage says where people
+   * actually stand.
+   */
+  const tight = checkMassAgainstShape(bodiesOf(swing.frames, 0), { balanceBand: [0.35, 0.65] });
+  const [low, high] = tight.pitchRangeDeg;
+
+  assert.ok(high - low < 5, `the tight band should be sharp; it spanned ${(high - low).toFixed(1)}°`);
+  assert.ok(
+    low > 0.01,
+    "the tight band is expected to exclude the true, level camera on this fixture -- if it no longer does, the fixture's address posture has been fixed and this default should be revisited"
+  );
+});
+
+test("no planted frames means no answer, rather than a plausible one", () => {
+  const footless: JointLookup[] = bodiesOf(swing.frames, 0).map((lookup) => (joint) =>
+    joint === "leftHeel" || joint === "rightHeel" || joint === "leftToe" || joint === "rightToe"
+      ? undefined
+      : lookup(joint)
+  );
+  const result = checkMassAgainstShape(footless);
+  assert.equal(result.verdict, "undetermined");
+  assert.equal(result.samples, 0);
+  assert.equal(result.confidence, 0);
+});
+
+test("a body missing any mass parcel yields no reading", () => {
+  const [first] = bodiesOf(swing.frames, 0);
+  assert.ok(readMass(first), "the complete body reads");
+  assert.equal(
+    readMass((joint) => (joint === "leftElbow" ? undefined : first(joint))),
+    null,
+    "half a mass cloud is not a mass reading"
+  );
+});

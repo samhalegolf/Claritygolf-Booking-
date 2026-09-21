@@ -170,6 +170,51 @@ named for what it is: camera plus golfer, inseparable from one posture.
 so a body shaped like a plumb line declines to answer rather than reporting
 zero.
 
+## Sanity-checking the mass reading without calibrating the camera
+
+"Where is the mass between heel and toe" is the most pitch-sensitive number
+here: the mass centre is ~920mm up and the foot is ~265mm long, so **one
+degree of camera pitch slides the reading 16mm** — 6% of the foot. Measured on
+the fixture, 5° of pitch moved it from 77% of the foot to 110%, while a golfer
+genuinely sitting 60mm back moved it 7%. The reading is about **five times
+more sensitive to the tripod than to the golfer**.
+
+`motion/mass/massSanity.ts` checks it two ways, neither needing a calibrated
+camera.
+
+**Possibility.** A golfer standing on both feet has their mass over their feet
+— not as style, as not falling over. A reading past the toes is not surprising,
+it is *impossible*, and the excess is a hard lower bound on the pitch. Each
+planted frame gives one interval; they intersect; the correction applied is the
+**smallest pitch inside the result**, which is usually zero.
+
+| true pitch | raw reading | admissible range | correction | corrected |
+| --- | --- | --- | --- | --- |
+| 0° | 0.76 | −3.8° … 11.3° | none | 0.76 |
+| 2° | 0.89 | −1.7° … 13.4° | none | 0.89 |
+| 5° | **1.09** | 1.6° … 16.5° | 1.6° | 0.99 |
+| 10° | **1.42** | 7.2° … 21.6° | 7.2° | 0.99 |
+
+The interval always contains the truth — that is the property the tests pin
+down, and it is why the correction can never invent a camera angle. Two degrees
+is unprovable because 89% of the foot, while ugly, is possible; saying so is
+the honest answer.
+
+**Shape.** The mass centre is a weighted sum of body points, so it splits the
+same way the profile does: the bend part is pitch-free. Over 10° of pitch the
+raw reading moves ~175mm and `bendFractionUnit` moves ~10mm. A real squat moves
+the bend; a camera pitch does not.
+
+### The band that would make this sharp, and why it is not the default
+
+Narrowing "over the feet" to "near mid-foot" tightens the interval from ~15°
+to under 4°. It is almost certainly true of real people — and it is *false of
+this fixture*, whose address leans the spine forward without pushing the hips
+back, putting its mass genuinely at 76% of the foot. Asked to force that into
+a mid-foot band, the check proves 2° of tilt on a level camera. There is a test
+that fails if anyone tightens the default before real footage says where people
+actually stand.
+
 ## What the confidence score means
 
 How much reconstruction and assumption a frame required. **Not** whether the
