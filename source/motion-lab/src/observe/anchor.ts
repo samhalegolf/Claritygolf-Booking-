@@ -305,7 +305,25 @@ const findPlanted = (
   };
 };
 
-/** How close to the ground a foot point must be to count as bearing weight. */
+/**
+ * How close to the lowest foot point another must be to anchor a frame.
+ *
+ * DELIBERATELY AGAINST THE GROUND, NOT AGAINST RESTING HEIGHTS
+ *
+ * The mass model tests contact against each landmark's own resting height,
+ * because a detector's heel sits up on the calcaneus and would otherwise
+ * never count as touching the floor -- see `footRestHeightM`. This is a
+ * different question with a different right answer.
+ *
+ * Here the job is to pick points that do not MOVE, so the frames can be
+ * aligned to each other. That is the toes: they stay planted through a swing
+ * while the heels come up, and a point that lifts is precisely the one to
+ * exclude. Admitting a resting heel would add two points that are about to
+ * leave the ground.
+ *
+ * The resting heights could not be used here anyway without a second pass --
+ * they are measured from the anchored frames this alignment produces.
+ */
 const CONTACT_TOLERANCE_M = 0.03;
 
 /** Foot points currently on the ground, in rotated camera space. */
@@ -669,7 +687,7 @@ export const anchorSequence = (
       ? rotateY(level(point), cos, sin)
       : rotateX(rotateY(level(point), cos, sin), pitchCos, pitchSin);
 
-  const anchor: WorldFrameAnchor = {
+  const anchor: Omit<WorldFrameAnchor, "footRestHeightM"> = {
     anchorFrameIndex: choice.index,
     stanceWidthM,
     anchorIsStable: choice.stable && stanceWidthM > 1e-4,
@@ -877,6 +895,31 @@ export const anchorSequence = (
     };
   });
 
+  /*
+   * Each foot landmark's resting height above the ground.
+   *
+   * A low percentile per landmark, not a shared one: the toes and the heels
+   * rest at genuinely different heights on a detector's skeleton, and that is
+   * the whole point. Taken over every frame rather than only the planted ones
+   * because the percentile already selects the moments a given point was
+   * down -- a trail heel that lifts for a third of the swing still spends the
+   * rest of it resting.
+   */
+  const restHeights: Record<string, number> = {};
+  for (const joint of FOOT_JOINTS) {
+    const heights: number[] = [];
+    for (const frame of worldFrames) {
+      const observed = frame.joints[joint];
+      if (observed) heights.push(observed.position[1]);
+    }
+    if (heights.length === 0) {
+      restHeights[joint] = 0;
+      continue;
+    }
+    heights.sort((a, b) => a - b);
+    restHeights[joint] = Math.max(0, heights[Math.floor(heights.length * 0.05)]);
+  }
+
   return {
     space: "world",
     frames: worldFrames,
@@ -885,7 +928,7 @@ export const anchorSequence = (
     height: sequence.height,
     durationMs: sequence.durationMs,
     detector: sequence.detector,
-    anchor,
+    anchor: { ...anchor, footRestHeightM: restHeights },
   };
 };
 

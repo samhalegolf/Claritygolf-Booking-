@@ -741,6 +741,10 @@ export const generateSyntheticSwing = (
       gravityTiltIsMeasured: true,
       pitchCorrectionDeg: 0,
       pitchCorrectionSource: "none",
+      // The fixture places every foot point on the sole, so they all rest on
+      // the ground. A real detector's heel landmark does not -- see the note
+      // on `footRestHeightM`.
+      footRestHeightM: { leftHeel: 0, rightHeel: 0, leftToe: 0, rightToe: 0 },
     },
     /*
      * Run on the fixture as well, where there is no camera to be wrong.

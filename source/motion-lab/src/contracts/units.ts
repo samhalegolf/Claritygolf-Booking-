@@ -174,6 +174,30 @@ export interface WorldFrameAnchor {
    * so they are kept apart and the provenance travels with the value.
    */
   readonly pitchCorrectionSource: "none" | "falling-over-boundary" | "standing-shot";
+  /**
+   * How high each foot landmark sits above the ground when that foot is flat,
+   * metres. Keyed by joint name.
+   *
+   * WHY THIS IS NOT ZERO, AND WHAT ASSUMING IT WAS COST
+   *
+   * A detector's HEEL landmark is not the bottom of the heel. It sits up on
+   * the calcaneus, while the toe landmark sits at the ball, near the ground.
+   * Measured on two real clips, a planted heel rested 15 to 65mm up and a
+   * planted toe within a few millimetres of nothing.
+   *
+   * Contact was tested as "within 35mm of the ground", so on real footage the
+   * heels NEVER counted as touching it. Every frame of both clips came back
+   * with two contact points instead of four -- the two toes -- which makes
+   * the support polygon a LINE. The golfer was modelled as balancing on their
+   * toe line for the whole swing, and the foot-load split and support centre
+   * were computed from that.
+   *
+   * So contact is measured against each landmark's own resting height rather
+   * than against zero. The heights are taken from the clip: a landmark's low
+   * percentile over the frames where it is down IS its resting height, so
+   * nothing has to be assumed about a particular detector's skeleton.
+   */
+  readonly footRestHeightM: Readonly<Record<string, Metres>>;
 }
 
 export const clampUnit = (value: number): Unit =>

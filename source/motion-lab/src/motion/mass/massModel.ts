@@ -50,6 +50,17 @@ export interface MassModelInput {
    * mass centre built on a reconstructed pelvis does not read as certain.
    */
   readonly jointSupport?: Readonly<Partial<Record<ClarityJoint, Unit>>>;
+  /**
+   * How high each foot landmark rests above the ground when its foot is flat,
+   * metres. From `WorldFrameAnchor.footRestHeightM`.
+   *
+   * Without it, contact is tested against the ground itself -- and a
+   * detector's heel landmark sits up on the calcaneus, 15 to 65mm above it on
+   * real clips. Every frame then reports the two toes and nothing else, which
+   * turns the support polygon into a LINE and models the golfer as balancing
+   * on their toe line for the whole swing.
+   */
+  readonly footRestHeightM?: Readonly<Record<string, number>>;
 }
 
 const DEFAULT_CONTACT_TOLERANCE_M = 0.035;
@@ -202,8 +213,14 @@ export const estimateMass = (input: MassModelInput): MassEstimate => {
   // Which foot points are actually bearing weight. A lifted heel drops out,
   // which shrinks the polygon and moves the support centre onto the toes --
   // the physically right answer rather than a convenient one.
+  /*
+   * Contact is measured against each point's own resting height, not against
+   * the ground. A heel landmark that rests 60mm up is touching the floor at
+   * 60mm; insisting it reach zero means it never touches at all.
+   */
+  const restHeights = input.footRestHeightM;
   const contactPoints = FOOT_CONTACT_JOINTS.filter(
-    (joint) => joints[joint][1] <= tolerance
+    (joint) => joints[joint][1] - (restHeights?.[joint] ?? 0) <= tolerance
   ).map((joint) => joints[joint]);
 
   const supportPolygon = contactPoints.length > 0 ? convexHullXZ(contactPoints) : [];

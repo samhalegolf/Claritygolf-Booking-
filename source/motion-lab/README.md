@@ -404,6 +404,39 @@ detector's depth axis is compressed by roughly half: face-on the stance lies
 across the image and measures right; down the line it lies along depth and
 halves.
 
+### The detector's heel is not on the floor
+
+A detector's **HEEL landmark sits up on the calcaneus**; its toe landmark sits
+at the ball, near the ground. Measured on two real clips, planted heels rested
+**15–65 mm** up and planted toes within a few millimetres of nothing.
+
+Contact was tested as "within 35 mm of the ground", so on real footage **the
+heels never counted as touching it**:
+
+| | face-on | down the line |
+| --- | --- | --- |
+| frames with all four points in contact | **0 / 81** | **0 / 72** |
+
+Every frame reported the two toes and nothing else — which makes the support
+polygon a **line**. The golfer was modelled as balancing on their toe line for
+the whole swing, and the foot-load split and support centre were computed from
+that.
+
+Contact is now measured against each landmark's **own resting height**, taken
+from the clip (a low percentile per landmark is its resting height), so nothing
+depends on a particular detector's skeleton. The fixture has all four on the
+sole, which is why this survived until there was real video.
+
+| | before | after (face-on) | after (down the line) |
+| --- | --- | --- | --- |
+| mean polygon points | 2.00 | **3.16** | **2.79** |
+| four-point frames | 0 | 34 | 26 |
+| foot load split | — | 47 / 53 | 55 / 47 |
+
+The anchor's own contact test still works against the ground, deliberately: its
+job is to pick points that do not *move* so frames can be aligned, and that is
+the toes — a resting heel is about to lift.
+
 ### Levelling down the line: the answer is that you cannot
 
 `gravityTiltDeg` is measured from the ankle-to-ankle line, and square to the

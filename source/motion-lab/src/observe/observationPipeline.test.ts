@@ -17,6 +17,8 @@ import { CLARITY_JOINTS, distance, type ClarityJoint, type Vec3 } from "../contr
 import { generateSyntheticSwing } from "../synthetic/syntheticSwing";
 import { anchorSequence, detectionRate, findAnchorFrame } from "./anchor";
 import type { CameraObservationSequence, ObservationFrame, RawLandmark } from "./observation";
+import { estimateMass } from "../motion/mass/massModel";
+import { MP } from "./mediapipe/landmarks";
 import { detectFromClarityFrames } from "./syntheticDetector";
 import { observedFraction, toCameraFrame, toClarityAxes } from "./toCameraFrame";
 
@@ -562,4 +564,86 @@ test("with no feet there is no vertical to measure, and it says so", () => {
 
   assert.equal(anchored.anchor.gravityTiltDeg, 0, "no feet means no tilt measurement");
   assert.equal(anchored.anchor.anchorIsStable, false);
+});
+
+/* ----------------------- the detector's foot skeleton ------------------ */
+
+/**
+ * Raise the heel landmarks, as a real detector does.
+ *
+ * A detector's HEEL sits up on the calcaneus while its toe landmark sits at
+ * the ball, near the ground. Measured on two real clips, planted heels rested
+ * 15 to 65mm up and planted toes within a few millimetres of nothing. The
+ * fixture puts all four on the sole, so this is what makes it honest.
+ */
+const withRaisedHeels = (raw: readonly ObservationFrame[], metres: number) =>
+  raw.map((frame) => ({
+    ...frame,
+    world:
+      frame.world?.map((point, index) =>
+        // MediaPipe's world landmarks are Y-DOWN, so raising is subtracting.
+        index === MP.LEFT_HEEL || index === MP.RIGHT_HEEL
+          ? { ...point, y: point.y - metres }
+          : point
+      ) ?? null,
+  }));
+
+test("a heel landmark that rests above the ground still counts as touching it", () => {
+  /*
+   * THE FAILURE THIS PREVENTS, REPRODUCED.
+   *
+   * Contact was tested as "within 35mm of the ground". On real footage the
+   * heels never passed it, so every frame of both clips reported two contact
+   * points instead of four -- the two toes -- which makes the support polygon
+   * a LINE. The golfer was modelled as balancing on their toe line for the
+   * whole swing, and the foot-load split and support centre were computed
+   * from that.
+   *
+   * The resting heights are measured from the clip rather than assumed, so
+   * nothing here depends on a particular detector's skeleton.
+   */
+  const raised = 0.06;
+  const anchored = anchorSequence(
+    buildCameraSequence(withRaisedHeels(detectFromClarityFrames(swing.frames), raised))
+  );
+
+  for (const joint of ["leftHeel", "rightHeel"] as const) {
+    assert.ok(
+      Math.abs(anchored.anchor.footRestHeightM[joint] - raised) < 0.015,
+      `${joint} rests at ${(anchored.anchor.footRestHeightM[joint] * 1000).toFixed(0)}mm, expected about ${raised * 1000}mm`
+    );
+  }
+  for (const joint of ["leftToe", "rightToe"] as const) {
+    assert.ok(
+      anchored.anchor.footRestHeightM[joint] < 0.015,
+      `${joint} should rest on the ground, got ${(anchored.anchor.footRestHeightM[joint] * 1000).toFixed(0)}mm`
+    );
+  }
+});
+
+test("and the support polygon survives it, where before it collapsed to a line", () => {
+  const raised = 0.06;
+  const anchored = anchorSequence(
+    buildCameraSequence(withRaisedHeels(detectFromClarityFrames(swing.frames), raised))
+  );
+  const address = anchored.frames[0];
+  const joints = Object.fromEntries(
+    CLARITY_JOINTS.map((joint) => [joint, address.joints[joint]!.position as Vec3])
+  ) as Record<ClarityJoint, Vec3>;
+
+  const blind = estimateMass({ joints, stanceWidthM: anchored.anchor.stanceWidthM });
+  const seeing = estimateMass({
+    joints,
+    stanceWidthM: anchored.anchor.stanceWidthM,
+    footRestHeightM: anchored.anchor.footRestHeightM,
+  });
+
+  assert.ok(
+    blind.supportPolygon.length <= 2,
+    `without the resting heights the polygon should collapse; it had ${blind.supportPolygon.length} points`
+  );
+  assert.ok(
+    seeing.supportPolygon.length >= 3,
+    `with them it should be a polygon again; it had ${seeing.supportPolygon.length} points`
+  );
 });

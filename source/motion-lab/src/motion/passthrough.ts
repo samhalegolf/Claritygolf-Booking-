@@ -255,6 +255,7 @@ export const passthroughSequence = (
           ? estimateMass({
               joints,
               stanceWidthM: sequence.anchor.stanceWidthM,
+              footRestHeightM: sequence.anchor.footRestHeightM,
               jointSupport: support,
             })
           : null,

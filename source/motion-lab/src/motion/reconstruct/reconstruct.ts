@@ -751,6 +751,7 @@ const assembleFrame = (
         ? estimateMass({
             joints,
             stanceWidthM: observations.anchor.stanceWidthM,
+            footRestHeightM: observations.anchor.footRestHeightM,
             jointSupport: support,
           })
         : null,
