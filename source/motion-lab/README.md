@@ -97,10 +97,38 @@ data by degrading good data has not improved anything.
 Each stage can be switched off individually to see what it is buying. A stage
 that changes nothing is not earning its place.
 
-**Build 4 — the club.** The CBP is the one derived marker the plan asks for,
-and it needs club evidence: a clubhead tracker. The Motion Layer reports
-`club: null` rather than estimating one from the hands and an assumed length,
-which would be a claim it cannot support.
+**Build 4 — the clubhead tracker and the CBP. Done.** A clubhead found in
+pixels, lifted into 3D, and a balance point derived from the club's geometry.
+
+### How the CBP gets from pixels to metres
+
+| step | how |
+| --- | --- |
+| find the clubhead | the fastest-moving thing in the frame. Three-frame differencing tells where it IS from where it WAS. |
+| calibrate the camera | from the body itself — every observed joint carries its 3D position and the pixel it was seen at. Recovers the camera's position to 2cm. |
+| measure the club | the perpendicular distance from the hands to a detection's viewing ray is a hard LOWER BOUND on the club's length. The true length is the largest such bound over the swing. |
+| place the clubhead | where the ray meets a sphere of that length around the hands. |
+| derive the CBP | from that geometry — never from the detected pixels. |
+
+Nothing is calibrated, no club is assumed, and no depth sensor is involved.
+
+Measured: clubhead found to within **8 pixels** on a 480px frame; median CBP
+error **7–9mm** end to end for cameras 45°–90° off face-on, including down the
+line.
+
+### The known limit
+
+Square to the camera the club swings mostly toward and away from the lens,
+and the two candidate depths leave the wrist angle identical to within a
+degree. There the clubhead's **image position stays correct** and its
+**depth can be several hundred millimetres wrong** — precisely the error a
+face-on viewer cannot see and a 3D view can. `depthEvidence` reports it and
+the club's confidence falls to about 0.15.
+
+There is exactly one golf-specific prior in the reconstruction, and it is
+named as such: a swing brings the clubhead to the ground. It is consulted
+only where the hard physics is silent, weighted below a real anatomical
+violation, and kept out of `depthEvidence`.
 
 ## What the confidence score means
 

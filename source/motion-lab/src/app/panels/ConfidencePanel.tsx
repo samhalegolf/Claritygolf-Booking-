@@ -74,6 +74,10 @@ export function ConfidencePanel({
               <dt>Frames since head seen</dt>
               <dd>{frame.club.evidence.framesSinceHeadObserved}</dd>
             </div>
+            <div className="readout-row">
+              <dt>Measured club</dt>
+              <dd>{frame.club.lengthM.toFixed(3)} m</dd>
+            </div>
           </>
         ) : (
           <div className="readout-row">
@@ -83,8 +87,11 @@ export function ConfidencePanel({
         )}
       </dl>
       <p className="panel-note">
-        Kept apart from the overall score on purpose: a poor club track should not
-        invalidate an otherwise strong body reconstruction.
+        The balance point is derived from the club's reconstructed geometry, never
+        from the detected clubhead pixels — and the club's length is measured from
+        viewing-ray geometry, not assumed. Kept apart from the overall score on
+        purpose: a poor club track should not invalidate an otherwise strong body
+        reconstruction.
       </p>
 
       <h3 className="panel-subtitle">This frame</h3>

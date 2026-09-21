@@ -338,6 +338,12 @@ export function LabApp() {
                       <dd>{result.duplicateDecodes}</dd>
                     </div>
                     <div className="readout-row">
+                      <dt>Clubhead found in</dt>
+                      <dd>
+                        {result.clubDetections} / {result.camera.frames.length}
+                      </dd>
+                    </div>
+                    <div className="readout-row">
                       <dt>Anchor frame</dt>
                       <dd>{result.world.anchor.anchorFrameIndex}</dd>
                     </div>
