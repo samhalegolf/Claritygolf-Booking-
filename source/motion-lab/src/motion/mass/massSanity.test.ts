@@ -57,10 +57,15 @@ const bodiesOf = (frames: readonly ClarityFrame[], pitchDeg: number): readonly J
 const check = (frames: readonly ClarityFrame[], pitchDeg: number) =>
   checkMassAgainstShape(bodiesOf(frames, pitchDeg));
 
-/** A golfer who sits back into the shot. Applied to the body, not the camera. */
+/**
+ * A golfer who sits back into the shot. Applied to the body, not the camera.
+ *
+ * Hips move to +Z and knees to -Z, because a golfer's toes point along -Z:
+ * sitting back is moving AWAY from the toes. See `contracts/units`.
+ */
 const SQUAT: Partial<Record<ClarityJoint, Vec3>> = {
-  leftHip: [0, -0.04, -0.06], rightHip: [0, -0.04, -0.06],
-  leftKnee: [0, -0.02, 0.03], rightKnee: [0, -0.02, 0.03],
+  leftHip: [0, -0.04, 0.06], rightHip: [0, -0.04, 0.06],
+  leftKnee: [0, -0.02, -0.03], rightKnee: [0, -0.02, -0.03],
   leftShoulder: [0, -0.04, 0], rightShoulder: [0, -0.04, 0],
   neck: [0, -0.04, 0], head: [0, -0.04, 0],
   leftElbow: [0, -0.04, 0], rightElbow: [0, -0.04, 0],

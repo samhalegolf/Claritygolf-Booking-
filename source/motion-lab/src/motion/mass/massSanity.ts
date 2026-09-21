@@ -59,6 +59,7 @@ import {
   foreAftProfileOf,
   foreAftSlope,
   plantedIndices,
+  toeDirection,
   type JointLookup,
 } from "../../observe/foreAft";
 import { buildMassCloud } from "./massModel";
@@ -119,31 +120,46 @@ export const readMass = (lookup: JointLookup): MassReading | null => {
   const ankle = midpointOf(lookup, "leftAnkle", "rightAnkle");
   const heel = midpointOf(lookup, "leftHeel", "rightHeel");
   const toe = midpointOf(lookup, "leftToe", "rightToe");
-  if (!ankle || !heel || !toe) return null;
+  const forward = toeDirection(lookup);
+  if (!ankle || !heel || !toe || !forward) return null;
 
-  const footSpanM = toe[2] - heel[2];
-  if (Math.abs(footSpanM) < 0.05) return null;
+  /*
+   * Measured ALONG the feet, not along a world axis.
+   *
+   * Taking it as `toe.z - heel.z` assumes which way the toes point, and that
+   * assumption is how a mirrored body went unnoticed through the whole
+   * pipeline. Projected onto the direction the feet actually point, the span
+   * is positive by construction and the fraction below means what it says
+   * whichever way the world frame is turned.
+   */
+  const footSpanM =
+    (toe[0] - heel[0]) * forward[0] + (toe[2] - heel[2]) * forward[2];
+  if (footSpanM < 0.05) return null;
 
   const cloud = buildMassCloud(joints);
-  let weighted = 0;
+  let weightedX = 0;
+  let weightedZ = 0;
   let height = 0;
   let total = 0;
   for (const parcel of cloud) {
-    weighted += parcel.position[2] * parcel.units;
+    weightedX += parcel.position[0] * parcel.units;
+    weightedZ += parcel.position[2] * parcel.units;
     height += parcel.position[1] * parcel.units;
     total += parcel.units;
   }
   if (total <= 0) return null;
 
-  const massZ = weighted / total;
+  // How far the mass sits from the heel line, along the feet.
+  const massAlongM =
+    (weightedX / total - heel[0]) * forward[0] + (weightedZ / total - heel[2]) * forward[2];
   const massHeightM = height / total - ankle[1];
 
   const slope = foreAftSlope(foreAftProfileOf(lookup));
-  const bendZ = massZ - slope * massHeightM;
+  const bendAlongM = massAlongM - slope * massHeightM;
 
   return {
-    footFractionUnit: (massZ - heel[2]) / footSpanM,
-    bendFractionUnit: (bendZ - heel[2]) / footSpanM,
+    footFractionUnit: massAlongM / footSpanM,
+    bendFractionUnit: bendAlongM / footSpanM,
     massHeightM,
     footSpanM,
   };

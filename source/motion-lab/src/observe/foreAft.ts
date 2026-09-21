@@ -230,9 +230,40 @@ export const plantedIndices = (bodies: readonly JointLookup[]): readonly number[
  * translation is exactly what the anchoring step has already removed. Fitting
  * one again would let frame-to-frame anchoring noise leak into the slope.
  */
+/**
+ * Which way the toes point, measured from the feet rather than assumed.
+ *
+ * Ground-projected and unit length, or null when both feet are not visible.
+ *
+ * WHY THIS IS MEASURED
+ *
+ * It is tempting to take it from the axis convention: +X is the stance line,
+ * +Y is up, so forward must be one of +Z or -Z and a constant will do. That
+ * is exactly the assumption that shipped a mirror image of a human through
+ * the whole pipeline -- the sign was documented backwards, the fixture was
+ * built to match, and every test agreed with both. See `contracts/units`.
+ *
+ * The feet cannot be wrong about it. Heel to toe IS the direction the toes
+ * point, whatever any convention says, and whichever detector produced it.
+ * Averaged over both feet, so one badly-placed foot cannot flip it.
+ */
+export const toeDirection = (lookup: JointLookup): Vec3 | null => {
+  const heel = midpoint(lookup, ["leftHeel", "rightHeel"]);
+  const toe = midpoint(lookup, ["leftToe", "rightToe"]);
+  if (!heel || !toe) return null;
+
+  const along: Vec3 = [toe[0] - heel[0], 0, toe[2] - heel[2]];
+  const length = Math.hypot(along[0], along[2]);
+  // A foot seen end-on projects to nothing, and a direction from noise is
+  // worse than no direction at all.
+  if (length < 0.02) return null;
+  return [along[0] / length, 0, along[2] / length];
+};
+
 export const foreAftProfileOf = (lookup: JointLookup): readonly ForeAftSample[] => {
   const ankle = midpoint(lookup, CHAIN[0].from);
-  if (!ankle) return [];
+  const forward = toeDirection(lookup);
+  if (!ankle || !forward) return [];
 
   const samples: ForeAftSample[] = [];
   for (const rung of CHAIN) {
@@ -241,7 +272,10 @@ export const foreAftProfileOf = (lookup: JointLookup): readonly ForeAftSample[] 
     samples.push({
       name: rung.name,
       heightM: point[1] - ankle[1],
-      foreAftM: point[2] - ankle[2],
+      // Along the measured toe direction, so "toward the toes" means that
+      // whatever sign the world frame happens to put it at.
+      foreAftM:
+        (point[0] - ankle[0]) * forward[0] + (point[2] - ankle[2]) * forward[2],
     });
   }
   return samples;

@@ -383,7 +383,15 @@ test("the torso turns about its spine, rather than tipping and swinging round", 
 test("address posture leans forward over the ball", () => {
   const address = swing.frames[0];
   const spineUp = qRotate(address.body.thorax.orientation, [0, 1, 0]);
-  assert.ok(spineUp[2] > 0.4, `address should lean forward, got Z=${spineUp[2].toFixed(3)}`);
+  /*
+   * Leaning FORWARD tips the spine's up-axis toward the toes, and a golfer's
+   * toes point along -Z (see `contracts/units`), so this is negative. It
+   * used to be positive, back when the fixture was a mirror image of a human.
+   */
+  assert.ok(
+    spineUp[2] < -0.4,
+    `address should lean forward over the ball, toward the toes on -Z; got Z=${spineUp[2].toFixed(3)}`
+  );
   assert.ok(
     Math.abs(spineUp[0]) < 1e-6,
     "with no side bend scheduled, address should have no lateral lean"

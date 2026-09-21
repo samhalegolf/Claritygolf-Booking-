@@ -28,9 +28,14 @@ const swing = generateSyntheticSwing();
 const cameraAt = (yawDeg: number) => {
   const radians = (yawDeg * Math.PI) / 180;
   const distanceM = 4.6;
+  /*
+   * Negated in Z so that zero really does look at the FRONT of the stance:
+   * a golfer's toes point along -Z (see `contracts/units`), so a camera on
+   * +Z would be filming the back of their head while the name said face-on.
+   */
   return perspectiveCamera(
-    [Math.sin(radians) * distanceM, 1.55, Math.cos(radians) * distanceM],
-    [0, 1.0, 0.3]
+    [Math.sin(radians) * distanceM, 1.55, -Math.cos(radians) * distanceM],
+    [0, 1.0, -0.3]
   );
 };
 

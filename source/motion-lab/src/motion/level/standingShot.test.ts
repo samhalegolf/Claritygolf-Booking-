@@ -63,8 +63,8 @@ const errorMm = (frames: readonly ClarityFrame[]) => {
 
 /** Push the hips back and sit down slightly. A posture, not a viewpoint. */
 const SIT_BACK: Partial<Record<ClarityJoint, Vec3>> = {
-  leftHip: [0, -0.04, -0.06], rightHip: [0, -0.04, -0.06],
-  leftKnee: [0, -0.02, 0.03], rightKnee: [0, -0.02, 0.03],
+  leftHip: [0, -0.04, 0.06], rightHip: [0, -0.04, 0.06],
+  leftKnee: [0, -0.02, -0.03], rightKnee: [0, -0.02, -0.03],
   leftShoulder: [0, -0.04, 0], rightShoulder: [0, -0.04, 0],
   neck: [0, -0.04, 0], head: [0, -0.04, 0],
   leftElbow: [0, -0.04, 0], rightElbow: [0, -0.04, 0],

@@ -58,8 +58,25 @@ export const IDENTITY_QUAT: Quat = [0, 0, 0, 1];
  *
  *   +X  along the stance line, from the left foot toward the right foot
  *   +Y  up
- *   +Z  X cross Y -- roughly "in front of the golfer", the direction the
- *       toes point
+ *   +Z  X cross Y -- which points BEHIND the golfer, toward their heels.
+ *       Their toes point along -Z.
+ *
+ * THAT LAST SIGN IS NOT A TYPO, AND IT USED TO BE WRONG HERE
+ *
+ * It reads backwards, which is exactly why it was documented backwards for
+ * so long. The mnemonic is East-North-Up: E cross N is Up, so E cross U is
+ * SOUTH. Right cross up points behind you, not in front.
+ *
+ * The cost of the old wording was not theoretical. The synthetic fixture was
+ * built to match it, so the fixture and this file agreed with each other and
+ * the whole suite passed while describing a mirror image of a human. Real
+ * footage disagreed the first time it was tried: MediaPipe on a face-on clip
+ * put the left ankle at image x 0.595 against the right at 0.398 -- correct
+ * for a golfer facing the lens -- with the toes toward the camera, giving
+ * `dot(R x U, toes)` of -0.996 where the fixture gave +0.993.
+ *
+ * Anything that needs to know which way is forward should MEASURE it from
+ * the feet rather than assume it from this axis. See `observe/foreAft`.
  *
  * Camera presets are then defined against these measured axes rather than
  * against an assumed target direction. "Face-on" means looking down -Z at

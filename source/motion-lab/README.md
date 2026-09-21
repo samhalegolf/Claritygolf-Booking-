@@ -170,6 +170,45 @@ named for what it is: camera plus golfer, inseparable from one posture.
 so a body shaped like a plumb line declines to answer rather than reporting
 zero.
 
+## The fixture used to be a mirror image of a human
+
+Found the first time a real clip was run, which is the only way it could have
+been found.
+
+With `+X` from the left foot to the right and `+Y` up, a real person's toes
+point along **−(X × Y)**. The mnemonic is East-North-Up: E × N = Up, so
+**E × U = South** — right cross up points *behind* you. The fixture was built
+the other way and `units.ts` documented the same mistake, so the two agreed
+with each other and the whole suite passed over a body no human could have.
+
+| | facing | left foot | `dot(R×U, toes)` |
+| --- | --- | --- | --- |
+| real clip, via MediaPipe | +Z | +X | **−0.996** |
+| fixture, before | +Z | −X | **+0.993** |
+| fixture, after | −Z | −X | **−0.993** |
+
+**What it cost.** Every signal whose meaning depends on the fore-aft *sign*
+came out backwards on real video while looking perfect on the fixture: the
+direction `hipSetBackM` calls "behind", the sign of `apparentLeanDeg`, and
+worst, the sign of the camera-pitch correction — which would have **doubled**
+the error it exists to remove.
+
+**The fix.** The fixture is reflected in Z (not X: the anchor *defines* +X as
+left-to-right, so every anchored body has its left on −X, and reflecting in X
+would leave the round trip comparing a body against its own 180° rotation).
+Rotations need more than a sign flip — conjugating by `diag(1,1,−1)` turns a
+quaternion `(x,y,z,w)` into `(−x,−y,z,w)`.
+
+Two viewpoints moved with it, since a camera on +Z was now filming the back of
+the golfer's head while the name said face-on: the synthetic detector's camera
+and the club test's `cameraAt`.
+
+**So it cannot come back:** `foreAft.toeDirection` now *measures* which way the
+toes point from the feet instead of assuming it from the axis, so the pipeline
+is correct whichever convention a detector uses; and a test asserts
+`dot(R×U, toes) < −0.8` — the remaining degree of freedom that "left is on −X"
+could never check, because the anchor makes that true by construction.
+
 ## The falling-over boundary
 
 "Where is the mass between heel and toe" is the most pitch-sensitive number

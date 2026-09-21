@@ -80,7 +80,15 @@ const toMediaPipeAxes = (
   yawRad: number,
   pitchRad: number
 ): Vec3 => {
-  const relative = rotateY(sub(point, hipCentre), yawRad);
+  /*
+   * The half turn puts the camera on the side the golfer FACES at yaw zero.
+   *
+   * Clarity world axes put a golfer's toes on -Z (see `contracts/units`), so
+   * a camera naively placed on +Z would be filming the back of their head and
+   * "face-on" would mean the opposite of what it says. This is a rotation,
+   * not a reflection, so it changes the viewpoint and nothing about the body.
+   */
+  const relative = rotateY(sub(point, hipCentre), yawRad + Math.PI);
   const mp: Vec3 = [relative[0], -relative[1], -relative[2]];
   if (pitchRad === 0) return mp;
   /*

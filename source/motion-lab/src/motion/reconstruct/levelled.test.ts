@@ -133,11 +133,15 @@ test("the correction never overshoots the pitch that was really there", () => {
 test("the applied pitch is on the record, with its sign", () => {
   const levelled = reconstructLevelled(cameraAt(5));
   assert.ok(levelled.pitchCorrectionDeg > 1);
-  // The anchor carries the rotation that was APPLIED, which undoes the
-  // camera's, so it is the other way round.
+  /*
+   * The anchor carries the rotation that was APPLIED, and it has the same
+   * sign, not the opposite one: positive means the camera leaned the golfer
+   * toward their toes, and the anchor's rotation about the stance line tips
+   * the body back toward the heels. See the note in `levelled.ts`.
+   */
   assert.equal(
     levelled.sequence.anchor.pitchCorrectionDeg,
-    -levelled.pitchCorrectionDeg
+    levelled.pitchCorrectionDeg
   );
 });
 

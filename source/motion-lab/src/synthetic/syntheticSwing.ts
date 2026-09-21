@@ -571,6 +571,77 @@ const buildPose = (
   };
 };
 
+
+/* ------------------------- anatomical handedness --------------------- */
+
+/**
+ * Mirror the whole scene in X, so the golfer is a possible human.
+ *
+ * THE BUG THIS FIXES, AND WHY NOTHING CAUGHT IT FOR SO LONG
+ *
+ * With +X running from the left foot to the right foot and +Y up, a real
+ * person's toes point along -(X cross Y), not +(X cross Y). The mnemonic is
+ * ENU: East cross Up is SOUTH, so right cross up points BEHIND you.
+ *
+ * This fixture was built the other way round -- left foot on -X while facing
+ * +Z -- which puts the left foot where a real person's right foot goes. It
+ * is a mirror image of a human, and `units.ts` documented the same mistake,
+ * so the fixture and the contract agreed with each other and every test
+ * passed. Real footage does not agree: MediaPipe on a face-on clip put the
+ * left ankle at image x 0.595 against the right at 0.398 -- correct for a
+ * golfer facing the camera -- and the toes toward the lens. Measured,
+ * `dot(R x U, toes)` was +0.993 on the fixture and -0.996 on the real clip.
+ *
+ * What it cost: every signal whose meaning depends on the fore-aft SIGN --
+ * `apparentLeanDeg`, the direction `hipSetBackM` calls "behind", and worst,
+ * the sign of the camera-pitch correction -- came out backwards on real
+ * video while looking perfect on the fixture.
+ *
+ * WHY MIRRORING IS THE WHOLE FIX
+ *
+ * "Left" is a LABEL on a part, not a property of the geometry, and the labels
+ * travel with the points. So reflecting the scene leaves the swing's
+ * body-relative structure -- which foot leads, which way the backswing goes,
+ * which heel lifts -- completely untouched. Only the chirality of the
+ * embedding changes, which is precisely what was wrong.
+ *
+ * WHY IN Z RATHER THAN X
+ *
+ * Either reflection fixes the chirality; they differ by a 180-degree turn,
+ * which is a proper rotation and changes nothing anatomical. Z is the one to
+ * use because `anchorSequence` DEFINES +X as left-foot-to-right-foot, so
+ * every anchored body -- real or synthetic -- comes out with its left on -X.
+ * Reflecting in X would move the fixture's truth to +X and leave the round
+ * trip comparing a body against its own 180-degree rotation. Reflecting in Z
+ * keeps left on -X and puts the toes on -Z, which is what the real clip
+ * measured.
+ *
+ * Rotations need more than a sign flip. Conjugating a rotation by the
+ * reflection diag(1, 1, -1) gives a rotation about the mirrored axis by the
+ * NEGATED angle, which for a quaternion (x, y, z, w) is (-x, -y, z, w).
+ */
+const mirrorVecZ = (v: Vec3): Vec3 => [v[0], v[1], -v[2]];
+
+const mirrorQuatZ = (q: Quat): Quat => [-q[0], -q[1], q[2], q[3]];
+
+const mirrorStructureZ = (structure: RigidStructure): RigidStructure => ({
+  ...structure,
+  centre: mirrorVecZ(structure.centre),
+  orientation: mirrorQuatZ(structure.orientation),
+});
+
+const mirrorPoseZ = (pose: Pose): Pose => ({
+  ...pose,
+  joints: Object.fromEntries(
+    Object.entries(pose.joints).map(([joint, position]) => [joint, mirrorVecZ(position)])
+  ) as Record<ClarityJoint, Vec3>,
+  thorax: mirrorStructureZ(pose.thorax),
+  pelvis: mirrorStructureZ(pose.pelvis),
+  grip: mirrorVecZ(pose.grip),
+  clubhead: mirrorVecZ(pose.clubhead),
+  cbp: mirrorVecZ(pose.cbp),
+});
+
 /* ------------------------- body model ------------------------------- */
 
 /** Measure the model from a pose, exactly as the real layer measures it from observations. */
@@ -630,7 +701,9 @@ export const generateSyntheticSwing = (
     const time = index * dt;
     const key = sampleSwing(keys, time);
 
-    const pose = buildPose(key, props, plane, clubLengthM, cbpRatio);
+    // Built in the plane's own axes, then mirrored into anatomically
+    // possible ones. See `mirrorPoseX`.
+    const pose = mirrorPoseZ(buildPose(key, props, plane, clubLengthM, cbpRatio));
     poses.push(pose);
     truth.push({ ...pose.joints });
   }
@@ -684,7 +757,7 @@ export const generateSyntheticSwing = (
     })(),
     confidence: summariseSequence(frames),
     source: options.source ?? "synthetic:right-handed-swing",
-    ballPosition: plane.ballPosition,
+    ballPosition: mirrorVecZ(plane.ballPosition),
     planeTiltDeg: plane.effectiveTiltDeg,
     truth,
   };

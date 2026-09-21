@@ -129,8 +129,10 @@ export const reconstructCalibrated = (
   const applied = reconstruct(
     anchorSequence(swing, {
       ...options.anchor,
-      // The anchor takes the rotation to APPLY, which undoes the camera's.
-      pitchCorrectionDeg: -calibration.pitchDeg,
+      // Same sign, not the opposite: see the note in `reconstruct/levelled`.
+      // Positive means the camera leaned the golfer toward their toes, and
+      // the anchor's rotation tips the body back toward the heels.
+      pitchCorrectionDeg: calibration.pitchDeg,
       pitchCorrectionSource: "standing-shot",
     }),
     options.reconstruct
@@ -162,7 +164,7 @@ export const reconstructCalibrated = (
   const both = reconstruct(
     anchorSequence(swing, {
       ...options.anchor,
-      pitchCorrectionDeg: -total,
+      pitchCorrectionDeg: total,
       pitchCorrectionSource: "standing-shot",
     }),
     options.reconstruct

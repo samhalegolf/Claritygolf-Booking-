@@ -170,6 +170,71 @@ test("the golfer is not mirrored: anatomical left stays on the -X side at addres
   assert.ok(address.joints.leftHip!.position[1] > address.joints.leftAnkle!.position[1]);
 });
 
+test("the golfer is a possible human: right cross up points BEHIND them", () => {
+  /*
+   * THE TEST THAT WAS MISSING, AND WHAT IT COST.
+   *
+   * Checking that the left foot is on -X is not enough, because the anchor
+   * DEFINES +X as left-to-right -- it is true by construction and cannot
+   * fail. What it never checked was the remaining degree of freedom: which
+   * way the toes point relative to that axis.
+   *
+   * For a real person, right cross up points BEHIND them. The mnemonic is
+   * East-North-Up: E cross N is Up, so E cross U is SOUTH. The fixture was
+   * built the other way round and `units.ts` documented the same mistake, so
+   * the two agreed with each other and 198 tests passed over a mirror image
+   * of a human.
+   *
+   * It surfaced the first time real footage was tried. MediaPipe on a face-on
+   * clip put the left ankle at image x 0.595 against the right at 0.398 --
+   * correct for a golfer facing the lens -- with the toes toward the camera,
+   * giving dot(R x U, toes) = -0.996 where the fixture gave +0.993.
+   *
+   * The damage was not cosmetic. Every signal whose meaning depends on the
+   * fore-aft SIGN came out backwards on real video while looking perfect on
+   * the fixture: the direction `hipSetBackM` calls "behind", the sign of
+   * `apparentLeanDeg`, and worst, the sign of the camera-pitch correction,
+   * which would have doubled the error it was meant to remove.
+   */
+  const address = runPipeline({ cameraYawDeg: 37 }).frames[0];
+  const at = (joint: ClarityJoint) => address.joints[joint]!.position as Vec3;
+  const mid = (a: Vec3, b: Vec3): Vec3 => [
+    (a[0] + b[0]) / 2,
+    (a[1] + b[1]) / 2,
+    (a[2] + b[2]) / 2,
+  ];
+
+  const right = mid(at("rightHeel"), at("rightToe"));
+  const left = mid(at("leftHeel"), at("leftToe"));
+  const across: Vec3 = [right[0] - left[0], 0, right[2] - left[2]];
+  const up: Vec3 = [0, 1, 0];
+  // across x up, ground-projected.
+  const behind: Vec3 = [
+    across[1] * up[2] - across[2] * up[1],
+    0,
+    across[0] * up[1] - across[1] * up[0],
+  ];
+
+  const toes: Vec3 = [
+    mid(at("leftToe"), at("rightToe"))[0] - mid(at("leftHeel"), at("rightHeel"))[0],
+    0,
+    mid(at("leftToe"), at("rightToe"))[2] - mid(at("leftHeel"), at("rightHeel"))[2],
+  ];
+
+  const unit = (v: Vec3): Vec3 => {
+    const length = Math.hypot(v[0], v[2]) || 1;
+    return [v[0] / length, 0, v[2] / length];
+  };
+  const a = unit(behind);
+  const b = unit(toes);
+  const alignment = a[0] * b[0] + a[2] * b[2];
+
+  assert.ok(
+    alignment < -0.8,
+    `right cross up must point AWAY from the toes for a real human; dot was ${alignment.toFixed(3)} (positive means the body is mirrored)`
+  );
+});
+
 /* ---------------------------- the anchor ------------------------------- */
 
 test("the anchor lands on the still address hold, not mid-swing", () => {

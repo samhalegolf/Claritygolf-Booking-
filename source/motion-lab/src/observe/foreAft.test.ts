@@ -81,10 +81,10 @@ const hipVsAnkleMm = (frame: WorldObservationFrame): number =>
  * posture rather than a change of viewpoint dressed up as one.
  */
 const SQUAT: Partial<Record<ClarityJoint, Vec3>> = {
-  leftHip: [0, -0.04, -0.06],
-  rightHip: [0, -0.04, -0.06],
-  leftKnee: [0, -0.02, 0.03],
-  rightKnee: [0, -0.02, 0.03],
+  leftHip: [0, -0.04, 0.06],
+  rightHip: [0, -0.04, 0.06],
+  leftKnee: [0, -0.02, -0.03],
+  rightKnee: [0, -0.02, -0.03],
   leftShoulder: [0, -0.04, 0],
   rightShoulder: [0, -0.04, 0],
   neck: [0, -0.04, 0],
@@ -224,6 +224,9 @@ test("a camera pitch can erase a genuine squat from the naive reading", () => {
    * and the hips read as being in FRONT of the ankles. Not attenuated, not
    * noisy -- the wrong sign.
    */
+  // Measured along the toe direction, so a set-back is NEGATIVE: away from
+  // the toes. Which way that is in world coordinates is the module's problem,
+  // not this test's -- that is the whole point of measuring it from the feet.
   const trueSetBack = hipVsAnkleMm(run(squatted, 0).frames[0]);
   const asFilmed = hipVsAnkleMm(run(squatted, 5).frames[0]);
 
@@ -301,17 +304,27 @@ test("a golfer shaped like a plumb line cannot be separated, and says so", () =>
     joints: Object.fromEntries(
       (
         [
-          ["leftAnkle", 0.08], ["rightAnkle", 0.08],
-          ["leftKnee", 0.5], ["rightKnee", 0.5],
-          ["leftHip", 0.95], ["rightHip", 0.95],
-          ["leftShoulder", 1.45], ["rightShoulder", 1.45],
-          ["head", 1.65],
+          // Feet first: the toe direction is MEASURED from them, so a body
+          // with no feet has no fore-aft axis to be measured along at all.
+          // Toes on -Z, which is where a real golfer's are. See units.ts.
+          ["leftHeel", 0.03, 0.06], ["rightHeel", 0.03, 0.06],
+          ["leftToe", 0.02, -0.14], ["rightToe", 0.02, -0.14],
+          ["leftAnkle", 0.08, 0], ["rightAnkle", 0.08, 0],
+          ["leftKnee", 0.5, 0], ["rightKnee", 0.5, 0],
+          ["leftHip", 0.95, 0], ["rightHip", 0.95, 0],
+          ["leftShoulder", 1.45, 0], ["rightShoulder", 1.45, 0],
+          ["head", 1.65, 0],
         ] as const
-      ).map(([name, height]) => [
+      ).map(([name, height, footZ]) => [
         name,
         {
-          // Perfectly linear in height: a five-degree lean and nothing else.
-          position: [0, height, height * Math.tan((5 * Math.PI) / 180)] as const,
+          /*
+           * Perfectly linear in height: a five-degree lean and nothing else.
+           * Negated because the toes are on -Z, so leaning TOWARD them is
+           * the -Z direction -- which is exactly the sign this module now
+           * measures rather than assumes.
+           */
+          position: [0, height, footZ - height * Math.tan((5 * Math.PI) / 180)] as const,
           image: [0.5, 0.5] as const,
           visibility: 1,
           presence: 1,

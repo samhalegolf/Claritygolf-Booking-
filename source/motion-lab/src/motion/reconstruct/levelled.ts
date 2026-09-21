@@ -100,14 +100,24 @@ export const reconstructLevelled = (
   }
 
   /*
-   * The sign. `fallingOverPitchDeg` is the camera's tilt as the boundary sees
-   * it; undoing it means turning the world the other way, so the angle handed
-   * to the anchor is negated.
+   * The sign, which is not the obvious one.
+   *
+   * `fallingOverPitchDeg` is positive when the camera made the mass read too
+   * far TOWARD THE TOES, and the toes are on -Z. Undoing that means tipping
+   * the top of the body back toward the heels, which is +Z -- and
+   * `anchorSequence`'s rotation about X moves a point at height y by +y*angle
+   * in z. So the angle handed over has the SAME sign, not the opposite one.
+   *
+   * It read as a negation for as long as the fixture was a mirror image of a
+   * human, which is exactly the kind of error a sign convention hides. The
+   * test that catches it is the one measuring joint error against the known
+   * body: get this backwards and the correction doubles the error instead of
+   * removing it.
    */
   const second = reconstruct(
     anchorSequence(camera, {
       ...options.anchor,
-      pitchCorrectionDeg: -pitchCorrectionDeg,
+      pitchCorrectionDeg,
       pitchCorrectionSource: "falling-over-boundary",
     }),
     options.reconstruct
