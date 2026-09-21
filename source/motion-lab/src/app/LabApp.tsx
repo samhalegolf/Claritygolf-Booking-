@@ -17,6 +17,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ClaritySpace3D } from "../space3d/ClaritySpace3D";
 import type { CameraPreset } from "../space3d/cameraRig";
 import { DEFAULT_LAYERS, type SceneLayers } from "../space3d/layers";
+import type { StandingCalibration } from "../motion/level/standingShot";
 import { ConfidencePanel } from "./panels/ConfidencePanel";
 import { LayerPanel } from "./panels/LayerPanel";
 import { MassPanel } from "./panels/MassPanel";
@@ -315,16 +316,34 @@ export function LabApp() {
             <div className="panel">
               <h2 className="panel-title">Observation</h2>
               {status === "idle" && (
-                <p className="panel-note">
-                  Pick a clip. Every frame is seeked to and detected in order, so
-                  nothing is skipped — which is slower than playback and the reason
-                  a gap downstream means the detector lost the golfer rather than
-                  that we outran it.
-                </p>
+                <>
+                  <p className="panel-note">
+                    Pick a clip. Every frame is seeked to and detected in order, so
+                    nothing is skipped — which is slower than playback and the reason
+                    a gap downstream means the detector lost the golfer rather than
+                    that we outran it.
+                  </p>
+                  {/*
+                    A standing shot can be loaded FIRST, and when it is there is
+                    no swing and no result to hang its verdict off. Showing it
+                    here is the difference between "measured, waiting for a
+                    swing" and the user believing nothing happened.
+                  */}
+                  {calibration && (
+                    <StandingShotReadout
+                      calibration={calibration}
+                      fileName={calibrationFileName}
+                    />
+                  )}
+                </>
               )}
               {status === "running" && progress && (
                 <>
                   <dl className="readout">
+                    <div className="readout-row">
+                      <dt>Detecting</dt>
+                      <dd>{progress.phase === "standing" ? "standing shot" : "the swing"}</dd>
+                    </div>
                     <div className="readout-row">
                       <dt>Frame</dt>
                       <dd>
@@ -402,21 +421,6 @@ export function LabApp() {
                             : "refused"}
                       </dd>
                     </div>
-                    {calibration?.usable && (
-                      <>
-                        <div className="readout-row">
-                          <dt>Calibration range</dt>
-                          <dd>
-                            {calibration.pitchRangeDeg[0].toFixed(2)}° …{" "}
-                            {calibration.pitchRangeDeg[1].toFixed(2)}°
-                          </dd>
-                        </div>
-                        <div className="readout-row">
-                          <dt>Stood off plumb by</dt>
-                          <dd>{(calibration.standingBendM * 1000).toFixed(0)} mm</dd>
-                        </div>
-                      </>
-                    )}
                     <div className="readout-row">
                       <dt>Camera roll</dt>
                       <dd>
@@ -585,5 +589,59 @@ export function LabApp() {
         </aside>
       </div>
     </div>
+  );
+}
+
+/**
+ * What a standing shot measured, on its own terms.
+ *
+ * Shown before a swing has been loaded as well as after, because a standing
+ * shot is evidence in its own right and the two clips can arrive in either
+ * order. Without this, loading the calibration first looks like nothing
+ * happened at all.
+ */
+function StandingShotReadout({
+  calibration,
+  fileName,
+}: {
+  calibration: StandingCalibration;
+  fileName: string | null;
+}) {
+  return (
+    <>
+      <dl className="readout">
+        <div className="readout-row">
+          <dt>Standing shot</dt>
+          <dd>{fileName ?? "loaded"}</dd>
+        </div>
+        <div className="readout-row">
+          <dt>Camera pitch</dt>
+          <dd>
+            {calibration.usable
+              ? `${calibration.pitchDeg >= 0 ? "+" : ""}${calibration.pitchDeg.toFixed(2)}°`
+              : "refused"}
+          </dd>
+        </div>
+        <div className="readout-row">
+          <dt>Range</dt>
+          <dd>
+            {calibration.pitchRangeDeg[0].toFixed(2)}° … {calibration.pitchRangeDeg[1].toFixed(2)}°
+          </dd>
+        </div>
+        <div className="readout-row">
+          <dt>Stood off plumb by</dt>
+          <dd>{(calibration.standingBendM * 1000).toFixed(0)} mm</dd>
+        </div>
+        <div className="readout-row">
+          <dt>Still frames used</dt>
+          <dd>{calibration.samples}</dd>
+        </div>
+      </dl>
+      <p className="panel-note">
+        {calibration.usable
+          ? "Measured. Load a swing filmed from the same camera position and it will be levelled with this rather than with the lower bound the swing can prove on its own."
+          : `Refused: ${calibration.reason}.`}
+      </p>
+    </>
   );
 }

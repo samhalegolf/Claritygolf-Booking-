@@ -18,24 +18,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { ClaritySequence } from "../contracts";
-import { reconstructCalibrated, type CalibratedResult } from "../motion/level/calibrated";
 import { calibrateFromStandingShot, type StandingCalibration } from "../motion/level/standingShot";
-import { passthroughSequence } from "../motion/passthrough";
 import { MediaPipeDetector } from "../observe/mediapipe/MediaPipeDetector";
 import type { CameraObservationSequence, ObservationFrame } from "../observe/observation";
 import { observeVideo, type ObservationResult } from "../observe/runObservation";
+import { buildVideoSequences, type LevellingReadout } from "./videoSequences";
 
 export type ObservationStatus = "idle" | "running" | "ready" | "error";
-
-/** What the levelling decided, once a swing has been through. */
-export interface LevellingReadout {
-  readonly pitchCorrectionDeg: number;
-  readonly source: CalibratedResult["source"];
-  readonly agreement: CalibratedResult["agreement"];
-  readonly boundaryResidualDeg: number;
-  readonly boundaryRangeDeg: readonly [number, number];
-  readonly calibrationWithinBoundary: boolean;
-}
 
 export interface VideoObservationState {
   readonly status: ObservationStatus;
@@ -145,29 +134,13 @@ export const useVideoObservation = () => {
   );
 
   /**
-   * Rebuild the reconstruction from whatever observations are in hand.
-   *
-   * Cheap next to detection, so it runs again whenever either clip changes
-   * rather than trying to patch the previous answer.
+   * Rebuild from whatever observations are in hand. Cheap next to detection,
+   * so it runs again whenever either clip changes. See `videoSequences`.
    */
-  const rebuild = useCallback((swing: ObservationResult) => {
-    const standing = standingRef.current;
-    const built = reconstructCalibrated(swing.camera, standing);
-    return {
-      // The passthrough is deliberately NOT levelled. Its job is to show what
-      // arrives with nothing done to it.
-      sequence: passthroughSequence(swing.world),
-      reconstructed: built.sequence,
-      levelling: {
-        pitchCorrectionDeg: built.pitchCorrectionDeg,
-        source: built.source,
-        agreement: built.agreement,
-        boundaryResidualDeg: built.boundaryResidualDeg,
-        boundaryRangeDeg: built.boundaryRangeDeg,
-        calibrationWithinBoundary: built.calibrationWithinBoundary,
-      } satisfies LevellingReadout,
-    };
-  }, []);
+  const rebuild = useCallback(
+    (swing: ObservationResult) => buildVideoSequences(swing, standingRef.current),
+    []
+  );
 
   const run = useCallback(
     async (file: File) => {

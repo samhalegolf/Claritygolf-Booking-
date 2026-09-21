@@ -315,6 +315,25 @@ The two therefore fail in opposite directions, so what is reported is the
 was ambiguous, narrow when the golfer did what they were asked. A bend over
 50mm is refused outright, with the reason.
 
+### In the video path
+
+Two clips, **detected once each**. A swing, and optionally a standing shot,
+which can arrive in either order and either of which can be replaced or
+dropped. Detection is the expensive step (tens of ms per frame); reconstruction
+is not — so adding a standing shot re-levels a swing already loaded **without
+detecting it again**, and dropping one restores the un-calibrated result
+exactly rather than approximately.
+
+The decision logic lives in `app/videoSequences.ts` rather than in the hook,
+because a React hook cannot be tested by this project's runner and the part
+that can actually be wrong should be. What is left in `useVideoObservation` is
+state plumbing. The club search is switched off for the standing clip — there
+is no swing in it to find a clubhead in.
+
+The baseline shown beside the reconstruction is **never** levelled. Its job is
+to show what arrives with nothing done to it, and correcting it too would make
+the side-by-side flatter the Motion Layer. There is a test.
+
 ### The blind spot, on the record
 
 After the calibration is applied, the boundary is asked again; anything it
