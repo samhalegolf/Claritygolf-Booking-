@@ -195,8 +195,8 @@ function ForeAftCheck({
           </div>
         )}
         <div className="readout-row">
-          <dt>Depth scale</dt>
-          <dd>{sanity.reading.depthScaleUnit.toFixed(2)}</dd>
+          <dt>Detector foot</dt>
+          <dd>{(sanity.reading.footScaleUnit * 100).toFixed(0)}% of anatomy</dd>
         </div>
         <div className="readout-row">
           <dt>Confidence</dt>
@@ -204,16 +204,15 @@ function ForeAftCheck({
         </div>
       </dl>
 
-      {sanity.reading.depthScaleUnit < 0.75 && (
+      {sanity.reading.footScaleUnit < 0.75 && (
         <p className="panel-note">
-          <strong>The depth axis is not to be trusted on this clip.</strong> The
-          feet measure{" "}
-          {(sanity.reading.depthScaleUnit * 100).toFixed(0)}% of the length
-          anatomy expects, and a foot points almost entirely along depth — so
-          that number is the clearest view available of how far the detector&rsquo;s
-          depth is off. Every fore-aft reading here inherits it, the heel–toe
-          mass above all. Filming further round from face-on is the fix; nothing
-          in the arithmetic can recover depth a detector did not resolve.
+          The detector&rsquo;s feet measure{" "}
+          {(sanity.reading.footScaleUnit * 100).toFixed(0)}% of the length anatomy
+          expects, which is why the base of support above is derived from the
+          golfer&rsquo;s height rather than measured between the foot landmarks.
+          Around half is normal for this detector and is not a fault in the clip:
+          it reads much the same face-on and down the line, so it is the
+          detector&rsquo;s own body model rather than the camera angle.
         </p>
       )}
 

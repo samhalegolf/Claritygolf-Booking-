@@ -272,13 +272,27 @@ export interface MassReading {
    * What the foot landmarks actually measured, as a fraction of what anatomy
    * expects. One means they agree.
    *
-   * This is the clearest view the pipeline has of how much it can trust the
-   * DEPTH axis on a given clip, because the foot is a known length pointing
-   * almost entirely along it. Well below one means depth is compressed, and
-   * every fore-aft reading -- the heel-to-toe mass above all -- inherits
-   * that. On a real face-on clip it read 0.45.
+   * NOT A PER-CLIP DEPTH WARNING, THOUGH IT WAS BRIEFLY DOCUMENTED AS ONE
+   *
+   * The first reading of it was 0.47 on a face-on clip, where the foot points
+   * along the depth axis, and the obvious conclusion was that depth had been
+   * compressed. A down-the-line clip settled it the other way: there the foot
+   * lies ACROSS the image and it still measured 0.51.
+   *
+   * Measured against the tibia in the same frames -- both in the image plane,
+   * so neither is foreshortened -- the IMAGE landmarks put the foot at 0.50 of
+   * the tibia where anatomy says 0.62, while the WORLD landmarks put it at
+   * 0.32. So the detector's world model simply builds a smaller foot than the
+   * body it is attached to, whichever way the camera points.
+   *
+   * What it is good for: noticing a clip where the detector's foot is unusually
+   * far from its own norm, and justifying why `footSpanM` is derived from
+   * stature rather than measured. What it cannot do is tell one clip's depth
+   * from another's -- for that, see the stance width, which really is
+   * view-dependent: 0.476m on a face-on clip and 0.24m on a down-the-line one
+   * of a comparable golfer.
    */
-  readonly depthScaleUnit: Unit;
+  readonly footScaleUnit: Unit;
 }
 
 /**

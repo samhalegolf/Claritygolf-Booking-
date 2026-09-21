@@ -153,8 +153,10 @@ export const readMass = (
    *
    * 0.152 is foot length as a fraction of stature -- the same ratio the
    * fixture is built from, and a population figure rather than anything about
-   * this golfer. It is an assumption, so it is named, and `depthScaleUnit`
-   * below reports how far the measurement disagreed with it.
+   * this golfer. It is an assumption, so it is named, and `footScaleUnit`
+   * below reports how far the measurement disagreed with it. Measured on real
+   * clips that disagreement is about half, and it is about half whichever way
+   * the camera points -- see the note on `footScaleUnit` in the contract.
    */
   const measuredSpanM =
     (toe[0] - heel[0]) * forward[0] + (toe[2] - heel[2]) * forward[2];
@@ -187,7 +189,7 @@ export const readMass = (
     bendFractionUnit: bendAlongM / footSpanM,
     massHeightM,
     footSpanM,
-    depthScaleUnit: measuredSpanM / footSpanM,
+    footScaleUnit: measuredSpanM / footSpanM,
   };
 };
 
@@ -211,7 +213,7 @@ const UNDETERMINED: MassSanity = {
     bendFractionUnit: 0.5,
     massHeightM: 0,
     footSpanM: 0,
-    depthScaleUnit: 0,
+    footScaleUnit: 0,
   },
   impossibleFrames: 0,
   pitchRangeDeg: [-90, 90],
@@ -279,7 +281,7 @@ export const checkMassAgainstShape = (
     bendFractionUnit: median(readings.map((r) => r.bendFractionUnit)),
     massHeightM: median(readings.map((r) => r.massHeightM)),
     footSpanM: median(readings.map((r) => r.footSpanM)),
-    depthScaleUnit: median(readings.map((r) => r.depthScaleUnit)),
+    footScaleUnit: median(readings.map((r) => r.footScaleUnit)),
   };
 
   const spread = (pick: (r: MassReading) => number): number => {

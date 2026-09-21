@@ -413,8 +413,8 @@ test("and the disagreement is reported, because it says the depth axis is unreli
    */
   const honest = checkMassAgainstShape(bodiesOf(swing.frames, 0), HEIGHT_M);
   assert.ok(
-    Math.abs(honest.reading.depthScaleUnit - 1) < 0.1,
-    `clean data should measure its own feet about right, got ${honest.reading.depthScaleUnit.toFixed(3)}`
+    Math.abs(honest.reading.footScaleUnit - 1) < 0.1,
+    `clean data should measure its own feet about right, got ${honest.reading.footScaleUnit.toFixed(3)}`
   );
 });
 

@@ -367,10 +367,18 @@ above) and the golfer's own stature gives the **length**, at 0.152 × height —
 the same population ratio the fixture is built from, named as an assumption
 rather than buried.
 
-`depthScaleUnit` reports measured ÷ expected. The foot is a known length lying
-along depth, which makes it the clearest view the pipeline has of how far a
-clip's depth can be trusted: **0.98** on clean synthetic data, **0.47** on the
-real face-on clip. Below 0.75 the panel says so in as many words.
+`footScaleUnit` reports measured ÷ expected: **0.98** on clean synthetic data,
+**0.47** on a real face-on clip, **0.51** down the line.
+
+That third number corrected the second. The 0.47 looked like depth compression —
+the foot points along depth face-on — but down the line the foot lies *across*
+the image and it still read 0.51. Measured against the tibia in the same frames
+(both in the image plane, so neither is foreshortened): the **image** landmarks
+put the foot at 0.50 of the tibia where anatomy says 0.62; the **world**
+landmarks put it at 0.32. The detector simply builds a smaller foot than the
+body it is attached to, whichever way the camera points. So `footScaleUnit`
+justifies deriving `footSpanM` from stature — it does not diagnose a clip's
+depth.
 
 What it bought on that clip:
 
@@ -381,9 +389,28 @@ What it bought on that clip:
 | verdict | `irreconcilable` | **`corrected`, +4.2° applied** |
 | confidence | 0 | **65** |
 
-Still honest about the limit: at a depth scale of 0.47 the fore-aft readings
-inherit real error, and filming further round from face-on is the fix. Nothing
-in the arithmetic can recover depth a detector did not resolve.
+### What the down-the-line clip showed
+
+The two views are complementary, and the numbers say so plainly.
+
+| | face-on | down the line |
+| --- | --- | --- |
+| stance width (along the stance line) | **0.476 m** ✓ | **0.24 m** — halved |
+| heel–toe mass verdict | `corrected`, confidence 65 | `corrected`, confidence 61 |
+| `footScaleUnit` | 0.47 | 0.51 — unchanged, so not a depth signal |
+
+Stance width **is** view-dependent, and it is the honest evidence that this
+detector's depth axis is compressed by roughly half: face-on the stance lies
+across the image and measures right; down the line it lies along depth and
+halves.
+
+**Which breaks the levelling down the line.** `gravityTiltDeg` is measured from
+the ankle-to-ankle line, and on that clip the line lies **99% along depth**. A
+depth axis compressed by half shrinks the horizontal part of that vector while
+leaving the vertical part alone, so the apparent roll roughly doubles: it read
+**13.1°**, against **6.7°** for the same vector with depth uncompressed. That is
+a real limitation of anatomical levelling on down-the-line footage, not a bad
+clip, and it is not yet fixed.
 
 ### In the video path
 
