@@ -1686,7 +1686,11 @@ export function VideoWorkspace({
   );
 
   const handleCanvasPointerDown = useCallback(
-    (side: ComparisonSide, point: { x: number; y: number }) => {
+    (
+      side: ComparisonSide,
+      point: { x: number; y: number },
+      meta: { pointerType: string }
+    ) => {
       const hasVideo = side === "left" ? !!playerVideoLeft : !!playerVideoRight;
       if (!hasVideo) {
         return;
@@ -1724,10 +1728,10 @@ export function VideoWorkspace({
       }
       setActiveSideInCompare(side);
       if (side === "left") {
-        leftDrawing.pointerDown(point);
+        leftDrawing.pointerDown(point, meta);
         return;
       }
-      rightDrawing.pointerDown(point);
+      rightDrawing.pointerDown(point, meta);
     },
     [
       canScrubByDrag,
@@ -1742,6 +1746,18 @@ export function VideoWorkspace({
       setActiveSideInCompare,
       playerVideoRight,
     ]
+  );
+
+  // The hover affordance only makes sense where a press would actually draw
+  // or grab. While the surface is a scrubber, or while a focus area is being
+  // dragged out, a press does something else entirely, so the handles stay
+  // down rather than promising a move that will not happen.
+  const handleCanvasPointerHover = useCallback(
+    (side: ComparisonSide, point: { x: number; y: number } | null) => {
+      const drawing = side === "left" ? leftDrawing : rightDrawing;
+      drawing.pointerHover(canScrubByDrag || focusSelectionMode ? null : point);
+    },
+    [canScrubByDrag, focusSelectionMode, leftDrawing, rightDrawing]
   );
 
   const handleCanvasPointerMove = useCallback(
@@ -3401,7 +3417,7 @@ export function VideoWorkspace({
               onLoadMetadata={() => undefined}
               objects={[]}
               draftObject={null}
-              selectedObjectId={null}
+              activeObjectId={null}
               onPointerDown={() => undefined}
               onPointerMove={() => undefined}
               onPointerUp={() => undefined}
@@ -3525,7 +3541,8 @@ export function VideoWorkspace({
             onLoadMetadata={() => onSourceLoad(side)}
             objects={drawingState.objects}
             draftObject={drawingState.draftObject}
-            selectedObjectId={drawingState.selectedObjectId}
+            activeObjectId={drawingState.activeObjectId}
+            hoverGrabbable={drawingState.hoverGrabbable}
             draggedObjectId={drawingState.isObjectDragging ? drawingState.draggingObjectId : null}
             onTrashDrop={(objectId) => {
               if (!drawingState.draggingObjectId || drawingState.draggingObjectId !== objectId) {
@@ -3535,14 +3552,17 @@ export function VideoWorkspace({
               drawingState.deleteByIds([objectId]);
               return true;
             }}
-            onPointerDown={(point) => {
-              handleCanvasPointerDown(side, point);
+            onPointerDown={(point, meta) => {
+              handleCanvasPointerDown(side, point, meta);
             }}
             onPointerMove={(point) => {
               handleCanvasPointerMove(side, point);
             }}
             onPointerUp={(point) => {
               handleCanvasPointerUp(side, point);
+            }}
+            onPointerHover={(point) => {
+              handleCanvasPointerHover(side, point);
             }}
             overlayDimensions={overlayDimensions}
             onDimensionsChange={setOverlayDimensions}

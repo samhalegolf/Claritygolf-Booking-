@@ -544,6 +544,16 @@
   margin: 0 auto;
 }
 
+/* The cursor half of the hover affordance: over a shape the handles have just
+   appeared on, the press that follows will pick it up rather than draw. */
+.video-frame.is-grabbable {
+  cursor: grab;
+}
+
+.video-frame.is-grabbable:active {
+  cursor: grabbing;
+}
+
 .video-frame video {
   width: auto;
   height: auto;
@@ -1846,6 +1856,15 @@
   display: flex;
   flex-direction: column;
   align-items: center;
+  /* The shell clips, so a rail taller than the picture loses its bottom
+     buttons silently -- which is exactly what happened to Focus and the two
+     snapshot buttons on the coach console whenever the clip was landscape or
+     the window was short. Capped at the height of the picture, it wraps into
+     a second column instead of hiding anything. Short frames are wide ones,
+     so there is room for it to go sideways. */
+  flex-wrap: wrap;
+  align-content: flex-start;
+  max-height: calc(100% - 64px);
   gap: 2px;
   padding: 5px;
   border-radius: var(--c-radius-pill, 999px);
@@ -1864,6 +1883,7 @@
 }
 
 .va-rail-btn {
+  flex: none;
   width: 40px;
   height: 40px;
   display: inline-flex;
@@ -1896,49 +1916,16 @@
   cursor: default;
 }
 
-.va-capture-tool {
-  position: relative;
-  width: 40px;
-  height: 40px;
-}
-
-.va-capture-area {
-  position: absolute;
-  left: 100%;
-  top: 0;
-  border: 1px solid rgba(233, 240, 255, 0.2);
-  background: rgba(8, 12, 22, 0.92);
-  backdrop-filter: blur(8px);
-  opacity: 0;
-  visibility: hidden;
-  transition: opacity 150ms ease, left 150ms ease, visibility 150ms;
-}
-
-.va-capture-tool:hover .va-capture-area,
-.va-capture-tool:focus-within .va-capture-area {
-  opacity: 1;
-  visibility: visible;
-  left: calc(100% + 7px);
-}
-
-.va-capture-tool:hover .va-capture-main,
-.va-capture-tool:focus-within .va-capture-main {
-  background: rgba(233, 240, 255, 0.12);
-}
-
 @media (prefers-reduced-motion: reduce) {
   .video-capture-flash,
   .video-capture-flash span {
     animation-duration: 1ms;
   }
-
-  .va-capture-area {
-    transition: none;
-  }
 }
 
 /* A separator is a line. It was never a reason for a second container. */
 .va-rail-rule {
+  flex: none;
   width: 22px;
   height: 1px;
   margin: 3px 0;

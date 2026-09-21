@@ -244,10 +244,20 @@ export class DrawingEngine {
     );
   }
 
+  /**
+   * What, if anything, is under the cursor on this object.
+   *
+   * `strokeOnly` narrows a circle to its outline and handles. With a drawing
+   * tool in hand every press over an existing shape is a choice between
+   * drawing and picking that shape up, and a circle claiming its whole
+   * interior would leave nowhere to draw inside one -- which is exactly where
+   * a coach puts the next line.
+   */
   static hitTestObject(
     object: DrawingObject,
     cursor: DrawingPoint,
-    dimensions: Dimensions
+    dimensions: Dimensions,
+    strokeOnly = false
   ): DrawingHandle | null {
     const px = cursor.x;
     const py = cursor.y;
@@ -287,7 +297,7 @@ export class DrawingEngine {
       if (Math.hypot(px - rightHandle.x, py - rightHandle.y) <= handleRadiusPx) return "radiusX";
       if (Math.hypot(px - bottomHandle.x, py - bottomHandle.y) <= handleRadiusPx) return "radiusY";
       if (Math.abs(dist - 1) <= CIRCLE_MOVE_TOLERANCE) return "radius";
-      if (dist < 1 - CIRCLE_MOVE_TOLERANCE) return "move";
+      if (!strokeOnly && dist < 1 - CIRCLE_MOVE_TOLERANCE) return "move";
       return null;
     }
     if (object.type === "pen") {
@@ -466,11 +476,12 @@ export class DrawingEngine {
   static getObjectsAtPoint(
     objects: DrawingObject[],
     cursorPx: DrawingPoint,
-    dimensions: Dimensions
+    dimensions: Dimensions,
+    strokeOnly = false
   ): { object: DrawingObject | null; handle: DrawingHandle | null } {
     for (let index = objects.length - 1; index >= 0; index -= 1) {
       const object = objects[index];
-      const handle = this.hitTestObject(object, cursorPx, dimensions);
+      const handle = this.hitTestObject(object, cursorPx, dimensions, strokeOnly);
       if (handle) {
         return { object, handle };
       }

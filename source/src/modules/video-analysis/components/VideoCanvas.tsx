@@ -11,12 +11,17 @@ export interface VideoCanvasProps {
   onLoadMetadata: () => void;
   objects: DrawingObject[];
   draftObject: DrawingObject | null;
-  selectedObjectId: string | null;
+  /** The one object drawn with its handles: what a press would pick up. */
+  activeObjectId: string | null;
+  /** Draws the grab cursor while the pointer is over something movable. */
+  hoverGrabbable?: boolean;
   draggedObjectId?: string | null;
   onTrashDrop?: (objectId: string) => boolean;
-  onPointerDown: (point: DrawingPoint) => void;
+  onPointerDown: (point: DrawingPoint, meta: { pointerType: string }) => void;
   onPointerMove: (point: DrawingPoint) => void;
   onPointerUp: (point: DrawingPoint) => void;
+  /** Pointer moving with nothing pressed; null once it leaves the picture. */
+  onPointerHover?: (point: DrawingPoint | null) => void;
   overlayDimensions: Dimensions;
   onDimensionsChange: (dimensions: Dimensions) => void;
   onTogglePlay?: () => void;
@@ -89,12 +94,14 @@ export function VideoCanvas({
   onLoadMetadata,
   objects,
   draftObject,
-  selectedObjectId,
+  activeObjectId,
+  hoverGrabbable = false,
   draggedObjectId,
   onTrashDrop,
   onPointerDown,
   onPointerMove,
   onPointerUp,
+  onPointerHover,
   overlayDimensions,
   onDimensionsChange,
   onTogglePlay,
@@ -103,6 +110,10 @@ export function VideoCanvas({
   const dimensionsRef = useRef(overlayDimensions);
   dimensionsRef.current = overlayDimensions;
   const pointerSamplesRef = useRef<PointerSample[]>([]);
+  // Whether this surface is currently under a press. Read rather than
+  // `event.buttons`, which is not something every touch stack reports the same
+  // way -- and a move mistaken for a hover is a stroke that never happens.
+  const isPressedRef = useRef(false);
   const [isTrashHovered, setIsTrashHovered] = useState(false);
   const isTrashDropEnabled = !!draggedObjectId;
 
@@ -226,9 +237,10 @@ export function VideoCanvas({
     const rect = event.currentTarget.getBoundingClientRect();
     const point = { x: event.clientX - rect.left, y: event.clientY - rect.top };
     event.currentTarget.setPointerCapture(event.pointerId);
+    isPressedRef.current = true;
     pointerSamplesRef.current = [];
     trackPointerSample(point);
-    onPointerDown(point);
+    onPointerDown(point, { pointerType: event.pointerType });
     event.preventDefault();
   };
 
@@ -238,6 +250,12 @@ export function VideoCanvas({
       x: event.clientX - rect.left,
       y: event.clientY - rect.top,
     };
+    // Nothing pressed: this is a cursor crossing the picture, and the only
+    // thing that cares is whether it is over something it could pick up.
+    if (!isPressedRef.current) {
+      onPointerHover?.(point);
+      return;
+    }
     trackPointerSample(point);
     onPointerMove(point);
     if (isTrashDropEnabled) {
@@ -256,6 +274,7 @@ export function VideoCanvas({
       y: event.clientY - rect.top,
     };
     trackPointerSample(point);
+    isPressedRef.current = false;
     const wantsTrash = isPointOverTrash(point) || isFlickTowardTrash();
     if (isTrashDropEnabled && draggedObjectId && onTrashDrop && wantsTrash) {
       const wasDeleted = onTrashDrop(draggedObjectId);
@@ -282,11 +301,12 @@ export function VideoCanvas({
 
   return (
     <div
-      className="video-frame"
+      className={`video-frame${hoverGrabbable ? " is-grabbable" : ""}`}
       ref={overlayRef}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
+      onPointerLeave={() => onPointerHover?.(null)}
       onDoubleClick={onTogglePlay}
     >
       <video
@@ -309,7 +329,7 @@ export function VideoCanvas({
             if (obj.type === "line") {
               const start = toScreen({ x: obj.x1, y: obj.y1 }, overlayDimensions);
               const end = toScreen({ x: obj.x2, y: obj.y2 }, overlayDimensions);
-              const isSelected = obj.id === selectedObjectId;
+              const isSelected = obj.id === activeObjectId;
               return (
                 <g key={obj.id}>
                   {isSelected ? (
@@ -345,7 +365,7 @@ export function VideoCanvas({
               const p1 = toScreen({ x: obj.x1, y: obj.y1 }, overlayDimensions);
               const p2 = toScreen({ x: obj.x2, y: obj.y2 }, overlayDimensions);
               const p3 = toScreen({ x: obj.x3, y: obj.y3 }, overlayDimensions);
-              const isSelected = obj.id === selectedObjectId;
+              const isSelected = obj.id === activeObjectId;
               return (
                 <g key={obj.id}>
                   {isSelected ? (
@@ -386,7 +406,7 @@ export function VideoCanvas({
               const center = toScreen({ x: obj.cx, y: obj.cy }, overlayDimensions);
               const rx = obj.rx * overlayDimensions.width;
               const ry = obj.ry * overlayDimensions.height;
-              const isSelected = obj.id === selectedObjectId;
+              const isSelected = obj.id === activeObjectId;
               const rightHandle = { x: center.x + Math.max(1, rx), y: center.y };
               const bottomHandle = { x: center.x, y: center.y + Math.max(1, ry) };
               return (
@@ -445,7 +465,7 @@ export function VideoCanvas({
               );
             }
             const path = toPath(obj.points, overlayDimensions.width, overlayDimensions.height);
-            const isSelected = obj.id === selectedObjectId;
+            const isSelected = obj.id === activeObjectId;
             return (
               <g key={obj.id}>
                 {isSelected ? (
