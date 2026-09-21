@@ -162,7 +162,13 @@ test("after correcting, the mass sits inside the boundary and nothing more is fo
   const sanity = levelled.sequence.massSanity;
   assert.ok(sanity);
   assert.equal(sanity?.verdict, "consistent");
-  assert.equal(sanity?.fallingOverPitchDeg, 0);
+  // Not exactly zero: the correction puts the mass ON the boundary, so which
+  // side of it the medians land is a rounding question. Anything under the
+  // 0.05 the verdict itself uses means nothing further is forced.
+  assert.ok(
+    Math.abs(sanity?.fallingOverPitchDeg ?? 1) < 0.05,
+    `a further ${sanity?.fallingOverPitchDeg.toFixed(3)}° was still being forced`
+  );
   assert.ok(
     (sanity?.reading.footFractionUnit ?? 2) <= 1.001,
     `the mass still reads at ${sanity?.reading.footFractionUnit.toFixed(3)} of the foot after correction`
