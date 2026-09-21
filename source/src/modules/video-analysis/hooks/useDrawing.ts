@@ -18,6 +18,11 @@ interface DrawingInteraction {
 interface UseDrawingState {
   objects: DrawingObject[];
   selectedObjectId: string | null;
+  /** The object whose handles are showing: the one being edited, the one a
+   *  finger has armed, or the one the cursor is over. */
+  activeObjectId: string | null;
+  /** True while the cursor is over something that a press would pick up. */
+  hoverGrabbable: boolean;
   selectedTool: DrawingTool;
   draftObject: DrawingObject | null;
   canUndo: boolean;
@@ -30,9 +35,17 @@ export interface UseDrawingOptions {
   onChange?: (objects: DrawingObject[]) => void;
 }
 
+export interface PointerMeta {
+  pointerType?: string;
+}
+
 export interface UseDrawingResult extends UseDrawingState {
   setTool: (tool: DrawingTool) => void;
-  pointerDown: (cursor: DrawingPoint) => void;
+  pointerDown: (cursor: DrawingPoint, meta?: PointerMeta) => void;
+  /** Mouse movement with nothing pressed. Null when the cursor leaves. */
+  pointerHover: (cursor: DrawingPoint | null) => void;
+  /** Whether a press here would land on an existing shape. */
+  hitTest: (cursor: DrawingPoint) => boolean;
   pointerMove: (cursor: DrawingPoint) => void;
   pointerUp: (cursor: DrawingPoint) => void;
   cancel: () => void;
@@ -67,6 +80,19 @@ const emptyHistory = (objects: DrawingObject[]): HistoryState => ({
   index: 0,
 });
 const DRAG_START_THRESHOLD_PX = 4;
+// A finger has no hover, so with a drawing tool in hand it says "pick this up
+// instead of drawing" by holding still on top of it. Long enough not to fire
+// on an ordinary quick stroke, short enough not to feel like a wait.
+const LONG_PRESS_MS = 420;
+const LONG_PRESS_SLOP_PX = 8;
+
+interface PendingLongPress {
+  timer: ReturnType<typeof setTimeout>;
+  objectId: string;
+  handle: DrawingHandle;
+  x: number;
+  y: number;
+}
 
 export function useDrawing({
   initialObjects,
@@ -80,7 +106,21 @@ export function useDrawing({
   const [draftObject, setDraftObject] = useState<DrawingObject | null>(null);
   const [interaction, setInteraction] = useState<DrawingInteraction | null>(null);
   const [editMode, setEditMode] = useState<EditMode>(null);
+  // What the cursor is over, and what a finger has held down on. Both only
+  // decide whether handles are drawn and whether a press picks something up;
+  // neither is a selection, so neither survives a tool change.
+  const [hoveredObjectId, setHoveredObjectId] = useState<string | null>(null);
+  const [armedObjectId, setArmedObjectId] = useState<string | null>(null);
+  const longPressRef = useRef<PendingLongPress | null>(null);
   const syncedRef = useRef("");
+
+  const cancelLongPress = useCallback(() => {
+    if (!longPressRef.current) return;
+    clearTimeout(longPressRef.current.timer);
+    longPressRef.current = null;
+  }, []);
+
+  useEffect(() => cancelLongPress, [cancelLongPress]);
 
   const canUndo = history.index > 0;
   const canRedo = history.index < history.states.length - 1;
@@ -96,6 +136,8 @@ export function useDrawing({
     setInteraction(null);
     setEditMode(null);
     setSelectedObjectId(null);
+    setHoveredObjectId(null);
+    setArmedObjectId(null);
   }, [initialObjects]);
 
   const setSyncedObjects = (next: DrawingObject[]) => {
@@ -133,34 +175,133 @@ export function useDrawing({
     [onChange]
   );
 
-  const setTool = useCallback((tool: DrawingTool) => {
-    setSelectedTool(tool);
-    setDraftObject(null);
-    setInteraction(null);
-    setEditMode(null);
-  }, []);
+  const setTool = useCallback(
+    (tool: DrawingTool) => {
+      cancelLongPress();
+      setSelectedTool(tool);
+      setDraftObject(null);
+      setInteraction(null);
+      setEditMode(null);
+      setArmedObjectId(null);
+      setHoveredObjectId(null);
+    },
+    [cancelLongPress]
+  );
 
-  const pointerDown = useCallback(
-    (cursor: DrawingPoint) => {
+  const beginEdit = useCallback(
+    (objectId: string, handle: DrawingHandle, cursor: DrawingPoint) => {
+      setSelectedObjectId(objectId);
+      setInteraction({
+        objectId,
+        handle,
+        startX: cursor.x,
+        startY: cursor.y,
+        hasMoved: false,
+      });
+      setEditMode("edit");
+      setDraftObject(null);
+    },
+    []
+  );
+
+  /**
+   * Mouse movement with nothing pressed.
+   *
+   * This is the whole affordance on a desktop: the handles are not a state the
+   * shape is left in after it is drawn, they are what the shape shows when the
+   * cursor is on it, saying "press here and you will move this rather than
+   * draw a new one".
+   */
+  const pointerHover = useCallback(
+    (cursor: DrawingPoint | null) => {
+      if (!cursor) {
+        setHoveredObjectId(null);
+        return;
+      }
       const { width, height } = videoDimensions;
       if (!width || !height) return;
-      if (selectedTool === "select") {
-        const hit = DrawingEngine.getObjectsAtPoint(objects, cursor, videoDimensions);
-        if (hit.object && hit.handle) {
-          setSelectedObjectId(hit.object.id);
-          setInteraction({
-            objectId: hit.object.id,
-            handle: hit.handle,
-            startX: cursor.x,
-            startY: cursor.y,
-            hasMoved: false,
-          });
-          setEditMode("edit");
-        } else {
-          setSelectedObjectId(null);
-          setInteraction(null);
-          setEditMode(null);
+      // Mid-gesture the handles that matter are already up.
+      if (editMode) return;
+      const hit = DrawingEngine.getObjectsAtPoint(
+        objects,
+        cursor,
+        videoDimensions,
+        selectedTool !== "select"
+      );
+      setHoveredObjectId(hit.object ? hit.object.id : null);
+    },
+    [editMode, objects, selectedTool, videoDimensions]
+  );
+
+  const hitTest = useCallback(
+    (cursor: DrawingPoint) => {
+      const { width, height } = videoDimensions;
+      if (!width || !height) return false;
+      return Boolean(
+        DrawingEngine.getObjectsAtPoint(
+          objects,
+          cursor,
+          videoDimensions,
+          selectedTool !== "select"
+        ).object
+      );
+    },
+    [objects, selectedTool, videoDimensions]
+  );
+
+  const pointerDown = useCallback(
+    (cursor: DrawingPoint, meta?: PointerMeta) => {
+      const { width, height } = videoDimensions;
+      if (!width || !height) return;
+      cancelLongPress();
+
+      const hit = DrawingEngine.getObjectsAtPoint(
+        objects,
+        cursor,
+        videoDimensions,
+        selectedTool !== "select"
+      );
+      const isTouch = meta?.pointerType === "touch";
+
+      if (hit.object && hit.handle) {
+        // Picking up what is already there beats drawing a new one -- with a
+        // mouse the handles under the cursor have already said as much, and a
+        // finger that has held the shape long enough has asked for it.
+        const needsHold =
+          isTouch && selectedTool !== "select" && armedObjectId !== hit.object.id;
+        if (!needsHold) {
+          setArmedObjectId(hit.object.id);
+          beginEdit(hit.object.id, hit.handle, cursor);
+          return;
         }
+        const objectId = hit.object.id;
+        const handle = hit.handle;
+        const startX = cursor.x;
+        const startY = cursor.y;
+        setSelectedObjectId(null);
+        // Undecided: the stroke starts as usual, and the hold takes it back if
+        // the finger stays put. Moving off first cancels the hold and leaves a
+        // normal stroke behind.
+        longPressRef.current = {
+          objectId,
+          handle,
+          x: startX,
+          y: startY,
+          timer: setTimeout(() => {
+            longPressRef.current = null;
+            setArmedObjectId(objectId);
+            beginEdit(objectId, handle, { x: startX, y: startY });
+          }, LONG_PRESS_MS),
+        };
+      } else {
+        setArmedObjectId(null);
+        setSelectedObjectId(null);
+      }
+
+      if (selectedTool === "select") {
+        setDraftObject(null);
+        setInteraction(null);
+        setEditMode(null);
         return;
       }
       const draft = DrawingEngine.createObject(selectedTool, cursor, videoDimensions);
@@ -168,13 +309,21 @@ export function useDrawing({
       setEditMode("create");
       setInteraction(null);
     },
-    [objects, selectedTool, videoDimensions]
+    [armedObjectId, beginEdit, cancelLongPress, objects, selectedTool, videoDimensions]
   );
 
   const pointerMove = useCallback(
     (cursor: DrawingPoint) => {
       const { width, height } = videoDimensions;
       if (!width || !height) return;
+      const pending = longPressRef.current;
+      if (
+        pending &&
+        Math.hypot(cursor.x - pending.x, cursor.y - pending.y) > LONG_PRESS_SLOP_PX
+      ) {
+        // Travelled: this was a stroke that happened to start on something.
+        cancelLongPress();
+      }
       if (!editMode) return;
       if (editMode === "create") {
         if (!draftObject) return;
@@ -206,18 +355,33 @@ export function useDrawing({
         setDraftObject(updated);
       }
     },
-    [draftObject, editMode, interaction, objects, selectedObjectId, videoDimensions]
+    [
+      cancelLongPress,
+      draftObject,
+      editMode,
+      interaction,
+      objects,
+      selectedObjectId,
+      videoDimensions,
+    ]
   );
 
   const pointerUp = useCallback(
     (cursor: DrawingPoint) => {
+      cancelLongPress();
       if (!videoDimensions.width || !videoDimensions.height) return;
       if (editMode === "create") {
         if (draftObject && DrawingEngine.canFinishDraft(draftObject)) {
           commit([...objects, draftObject]);
-          // Drop back to select and keep the new shape selected, so it can be
-          // dragged straight away instead of the next press drawing another one.
-          setSelectedObjectId(draftObject.id);
+          // Released is placed. The shape drops its handles and becomes part of
+          // the picture; it used to stay selected, which left every press after
+          // it dragging the thing that had just been put down. Getting it back
+          // is hovering it (or holding it, on a phone), not remembering it is
+          // still live. The tool drops to select so the next press is not
+          // another shape nobody asked for.
+          setSelectedObjectId(null);
+          setArmedObjectId(null);
+          setHoveredObjectId(null);
           setSelectedTool("select");
           return;
         }
@@ -250,16 +414,28 @@ export function useDrawing({
       setInteraction(null);
       setEditMode(null);
     },
-    [commit, draftObject, editMode, interaction, objects, selectedObjectId, videoDimensions]
+    [
+      cancelLongPress,
+      commit,
+      draftObject,
+      editMode,
+      interaction,
+      objects,
+      selectedObjectId,
+      videoDimensions,
+    ]
   );
 
   const cancel = useCallback(() => {
+    cancelLongPress();
     setSelectedObjectId(null);
+    setArmedObjectId(null);
+    setHoveredObjectId(null);
     setDraftObject(null);
     setInteraction(null);
     setEditMode(null);
     setSelectedTool("select");
-  }, []);
+  }, [cancelLongPress]);
 
   const deleteByIds = useCallback(
     (objectIds: string[]) => {
@@ -270,6 +446,8 @@ export function useDrawing({
       if (selectedObjectId && objectIdSet.has(selectedObjectId)) {
         setSelectedObjectId(null);
       }
+      setArmedObjectId((current) => (current && objectIdSet.has(current) ? null : current));
+      setHoveredObjectId((current) => (current && objectIdSet.has(current) ? null : current));
       commit(nextObjects);
     },
     [commit, objects, selectedObjectId]
@@ -307,6 +485,12 @@ export function useDrawing({
 
   const selectObject = useCallback((objectId: string | null) => {
     setSelectedObjectId(objectId);
+    // Nothing in hand means nothing in hand: a shape a finger had armed keeps
+    // its handles otherwise, and keeps grabbing the next press with it.
+    if (!objectId) {
+      setArmedObjectId(null);
+      setHoveredObjectId(null);
+    }
   }, []);
 
   const undo = useCallback(() => {
@@ -335,7 +519,7 @@ export function useDrawing({
 
   const allObjects = [...objects];
   const isObjectDragging = !!draggingObjectId;
-  if (draftObject && editMode === "create" && !selectedObjectId) {
+  if (draftObject && editMode === "create") {
     allObjects.push(draftObject);
   }
   if (draftObject && editMode === "edit" && selectedObjectId) {
@@ -350,15 +534,23 @@ export function useDrawing({
     }
   }
 
+  // Handles belong to whatever is in hand right now: the shape being edited,
+  // the one a finger armed, or the one under the cursor.
+  const activeObjectId = selectedObjectId || armedObjectId || hoveredObjectId || null;
+
   return {
     objects: allObjects,
     selectedObjectId,
+    activeObjectId,
+    hoverGrabbable: Boolean(hoveredObjectId),
     selectedTool,
     draftObject: editMode ? draftObject : null,
     canUndo,
     canRedo,
     setTool,
     pointerDown,
+    pointerHover,
+    hitTest,
     pointerMove,
     pointerUp,
     cancel,

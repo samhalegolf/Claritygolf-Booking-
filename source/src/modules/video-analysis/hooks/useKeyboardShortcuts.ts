@@ -15,9 +15,16 @@ interface KeyboardOptions {
   onUndo: () => void;
   onRedo: () => void;
   onDelete: () => void;
-  onCancel: () => void;
-  /** Enter is intentionally the capture key: Space remains play/pause. */
+  /**
+   * Space, because a screenshot is taken while watching -- eyes on the swing,
+   * hand finding the key without looking, and Space is the only key you can
+   * hit blind. Playback moves to K, which is what every editor uses. Where
+   * there is nothing to capture (the player's workspace) Space stays on
+   * play/pause rather than becoming a dead key.
+   */
   onCapture?: () => void;
+  /** Ctrl/Cmd+S. */
+  onSave?: () => void;
 }
 
 interface RepeatState {
@@ -38,8 +45,8 @@ export function useKeyboardShortcuts({
   onUndo,
   onRedo,
   onDelete,
-  onCancel,
   onCapture,
+  onSave,
 }: KeyboardOptions) {
   const repeatRef = useRef<RepeatState | null>(null);
   const shiftRef = useRef(false);
@@ -55,12 +62,17 @@ export function useKeyboardShortcuts({
 
   const schedule = useCallback(() => {
     if (!repeatRef.current) return;
+    // Stepping frames with the arrows is the main way this workspace gets
+    // used, so a hold starts gently -- the first half second is still for
+    // picking out one frame -- and then winds up to roughly twice the old
+    // top speed for travelling across a swing.
     const elapsed = Date.now() - repeatRef.current.startedAt;
-    let interval = 140;
-    if (elapsed > 1300) interval = 35;
-    else if (elapsed > 700) interval = 60;
-    else if (elapsed > 350) interval = 90;
-    const heldFrames = Math.max(1, Math.floor(elapsed / 260));
+    let interval = 110;
+    if (elapsed > 2000) interval = 24;
+    else if (elapsed > 1200) interval = 32;
+    else if (elapsed > 650) interval = 50;
+    else if (elapsed > 300) interval = 70;
+    const heldFrames = Math.max(1, Math.floor(elapsed / 220));
 
     if (!onNudgeSelected || repeatRef.current.mode === "playback" || !hasNudgeMode) {
       if (repeatRef.current.direction === -1) {
@@ -99,7 +111,7 @@ export function useKeyboardShortcuts({
       startedAt: Date.now(),
       timerId: setTimeout(() => {
         schedule();
-      }, 170),
+      }, 130),
     };
 
     if (mode === "nudge" && onNudgeSelected) {
@@ -127,6 +139,11 @@ export function useKeyboardShortcuts({
         }
       }
       if (event.metaKey || event.ctrlKey) {
+        if (onSave && event.key.toLowerCase() === "s") {
+          event.preventDefault();
+          onSave();
+          return;
+        }
         if (event.key.toLowerCase() === "z") {
           if (event.shiftKey) {
             event.preventDefault();
@@ -143,15 +160,18 @@ export function useKeyboardShortcuts({
         return;
       }
       switch (event.code) {
-        case "Enter":
-          if (onCapture && !event.repeat) {
-            event.preventDefault();
-            onCapture();
-          }
-          break;
         case "Space":
           event.preventDefault();
-          onPlayPause();
+          if (!onCapture) {
+            onPlayPause();
+            break;
+          }
+          // Held, not tapped: one press is one picture.
+          if (!event.repeat) onCapture();
+          break;
+        case "KeyK":
+          event.preventDefault();
+          if (!event.repeat) onPlayPause();
           break;
         case "ArrowLeft":
           event.preventDefault();
@@ -187,7 +207,11 @@ export function useKeyboardShortcuts({
           onDelete();
           break;
         case "Escape":
-          onCancel();
+          // Another undo key, within reach of the hand that is not on the
+          // mouse. Dialogs that need Escape to mean "close" handle it
+          // themselves before it reaches here.
+          event.preventDefault();
+          onUndo();
           break;
         default:
           break;
@@ -228,8 +252,8 @@ export function useKeyboardShortcuts({
     enabled,
     hasNudgeMode,
     clearRepeat,
-    onCancel,
     onCapture,
+    onSave,
     startRepeat,
     onDelete,
     onNextFrame,
