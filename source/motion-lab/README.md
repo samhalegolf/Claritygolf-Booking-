@@ -130,6 +130,46 @@ named as such: a swing brings the clubhead to the ground. It is consulted
 only where the hard physics is silent, weighted below a real anatomical
 violation, and kept out of `depthEvidence`.
 
+## Camera pitch, and the one thing it cannot corrupt
+
+Levelling from the stance line fixes the **roll** — the tilt around the lens
+axis — because a line between two flat feet is horizontal. One line gives one
+constraint, so the **pitch**, the tilt up or down, is left untouched.
+
+It is not a small residue. A pitch of θ adds `h·tan θ` to the fore-aft
+position of everything at height h: at 2° that is 2mm at the ankle, 33mm at
+the hip, 51mm at the shoulder. Every heel-versus-toe signal inherits it.
+
+**The naive fix does not work.** A camera pitch is exactly linear in height,
+so regressing fore-aft position on height looks like it should recover it. It
+does not, because a golfer is not a plumb line: address puts the shoulders and
+head well forward of the ankles, and those are also the highest points, so the
+*posture* correlates with height by itself. This fixture, filmed dead level,
+regresses to **10.7°**. Treating that as camera tilt would rotate a golfer's
+genuine address out of the data.
+
+**What works is the shape, not the slope.** A pitch adds a straight line and
+nothing else, so whatever is left after the best straight line is removed
+cannot contain any pitch. Hips back against shoulders forward is a *bend*, not
+a slope, so it survives intact.
+
+| reading | 5° of camera pitch moves it | a real 60mm squat moves it |
+| --- | --- | --- |
+| hips relative to the ankles | **76 mm** — sign flips | 60 mm |
+| hip bend off the ankle→shoulder line | 2.8 mm | **51 mm** |
+| knee bend off the same line | 0.4 mm | **34 mm** |
+
+The first row is the failure: filmed on a 5° pitch, a golfer genuinely sitting
+60mm back reads as 13mm *forward*. The other two are `foreAft.ts`.
+
+The invariance is exact for the shear a pitch applies and near-exact for the
+rotation it really is — 0.7mm per degree on the hip reading against 15mm per
+degree taken naively. `apparentLeanDeg` is where the pitch still lives, and is
+named for what it is: camera plus golfer, inseparable from one posture.
+`linearFractionUnit` says how much of a profile a tilt alone could account for,
+so a body shaped like a plumb line declines to answer rather than reporting
+zero.
+
 ## What the confidence score means
 
 How much reconstruction and assumption a frame required. **Not** whether the
