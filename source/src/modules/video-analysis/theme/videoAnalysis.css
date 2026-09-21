@@ -790,6 +790,37 @@
   z-index: 3;
 }
 
+/* The free box. It is a mark on the picture, not a control -- it does nothing
+   at all until a capture is asked for, so it stays a thin outline with a
+   corner label that says which key takes it. A click on empty video clears
+   it; it is deliberately not cleared by the capture itself, so the same
+   region can be taken at address and again at impact. */
+.capture-box {
+  position: absolute;
+  z-index: 3;
+  border: 1px dashed rgba(233, 240, 255, 0.85);
+  box-shadow: 0 0 0 1px rgba(8, 12, 22, 0.55);
+  background: rgba(233, 240, 255, 0.06);
+  pointer-events: none;
+}
+
+.capture-box-hint {
+  position: absolute;
+  left: 0;
+  bottom: 100%;
+  margin-bottom: 4px;
+  padding: 2px 6px;
+  border-radius: var(--c-radius-pill, 999px);
+  background: rgba(8, 12, 22, 0.82);
+  backdrop-filter: blur(8px);
+  color: var(--va-text);
+  font-size: 10px;
+  line-height: 1.5;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
 .video-capture-flash {
   position: absolute;
   inset: 0;

@@ -590,6 +590,15 @@ export function VideoWorkspace({
   const [focusAreaRect, setFocusAreaRect] = useState<FocusAreaRect | null>(null);
   const [focusArtifactExpandedId, setFocusArtifactExpandedId] = useState<string | null>(null);
   const [focusArtifactEditingId, setFocusArtifactEditingId] = useState<string | null>(null);
+  // The free box: dragged out over the video with nothing under the press,
+  // it sits there doing nothing at all until a capture is asked for, and then
+  // it is what gets captured. Nothing about it touches the focus window.
+  const [captureBox, setCaptureBox] = useState<{ side: ComparisonSide; rect: FocusAreaRect } | null>(
+    null
+  );
+  const captureBoxDragRef = useRef<{ side: ComparisonSide; start: { x: number; y: number } } | null>(
+    null
+  );
   const [captureAnimation, setCaptureAnimation] = useState<{ side: ComparisonSide; id: number } | null>(null);
   const captureAnimationTimerRef = useRef<number | null>(null);
   const [snapshotDraft, setSnapshotDraft] = useState<SnapshotDraft | null>(null);
@@ -1669,6 +1678,10 @@ export function VideoWorkspace({
   // of its own and always wins.
   const canScrubByDrag = isPlayerVariant && !toolRailOpen && !focusSelectionMode;
 
+  // The box exists to be captured, and the player has no capture, so there it
+  // would only be a rectangle that does nothing.
+  const canDragCaptureBox = !isPlayerVariant && !focusSelectionMode;
+
   const scrubToOffset = useCallback(
     (side: ComparisonSide, deltaX: number) => {
       const gesture = scrubGestureRef.current;
@@ -1726,14 +1739,22 @@ export function VideoWorkspace({
         });
         return;
       }
-      setActiveSideInCompare(side);
-      if (side === "left") {
-        leftDrawing.pointerDown(point, meta);
+      const drawing = side === "left" ? leftDrawing : rightDrawing;
+      // Nothing selected, nothing under the press, no tool in hand: this is a
+      // box being drawn round something, not a shape.
+      if (canDragCaptureBox && drawing.selectedTool === "select" && !drawing.hitTest(point)) {
+        setActiveSideInCompare(side);
+        drawing.selectObject(null);
+        const overlay = side === "left" ? leftOverlayDimensions : rightOverlayDimensions;
+        captureBoxDragRef.current = { side, start: normalizePoint(point, overlay) };
+        setCaptureBox(null);
         return;
       }
-      rightDrawing.pointerDown(point, meta);
+      setActiveSideInCompare(side);
+      drawing.pointerDown(point, meta);
     },
     [
+      canDragCaptureBox,
       canScrubByDrag,
       focusSelectionMode,
       leftDrawing,
@@ -1762,6 +1783,15 @@ export function VideoWorkspace({
 
   const handleCanvasPointerMove = useCallback(
     (side: ComparisonSide, point: { x: number; y: number }) => {
+      const boxDrag = captureBoxDragRef.current;
+      if (boxDrag && boxDrag.side === side) {
+        const overlay = side === "left" ? leftOverlayDimensions : rightOverlayDimensions;
+        setCaptureBox({
+          side,
+          rect: buildRectFromDrag(boxDrag.start, normalizePoint(point, overlay)),
+        });
+        return;
+      }
       const gesture = scrubGestureRef.current;
       if (gesture && gesture.side === side) {
         const deltaX = point.x - gesture.startX;
@@ -1816,6 +1846,19 @@ export function VideoWorkspace({
 
   const handleCanvasPointerUp = useCallback(
     (side: ComparisonSide, point: { x: number; y: number }) => {
+      if (captureBoxDragRef.current && captureBoxDragRef.current.side === side) {
+        captureBoxDragRef.current = null;
+        // A press that never became a drag is a click on empty video, and a
+        // click on empty video is how the box is put away.
+        setCaptureBox((current) =>
+          current &&
+          current.rect.width > MIN_ACTIVE_SELECTION_SIZE &&
+          current.rect.height > MIN_ACTIVE_SELECTION_SIZE
+            ? current
+            : null
+        );
+        return;
+      }
       const gesture = scrubGestureRef.current;
       if (gesture && gesture.side === side) {
         scrubGestureRef.current = null;
@@ -2332,12 +2375,20 @@ export function VideoWorkspace({
     document.body.removeChild(link);
   }, []);
 
-  const handleFocusWindowScreenshot = useCallback(
-    async (previewImageDataUrl: string): Promise<{ ok: boolean; error?: string }> => {
-      if (!focusWindowSide || !focusWindowMode || focusWindowMode !== "area" || !focusAreaRect) {
-        return { ok: false, error: "No valid focus crop selected." };
-      }
-      const isLeft = focusWindowSide === "left";
+  /**
+   * Crop a rectangle out of the current frame and hand it to the composer.
+   *
+   * It takes the rectangle it is given rather than reading the focus window's
+   * own crop, so a box dragged over the video goes straight to a note. The
+   * focus window is one caller of this, not the road to it.
+   */
+  const captureAreaSnapshot = useCallback(
+    async (
+      captureSide: ComparisonSide,
+      areaRect: FocusAreaRect,
+      previewImageDataUrl = ""
+    ): Promise<{ ok: boolean; error?: string }> => {
+      const isLeft = captureSide === "left";
       const activeStore = isLeft ? leftStore : rightStore;
       const activePlayback = isLeft ? leftPlayback : rightPlayback;
       const sourceVideo = isLeft ? playerVideoLeft : playerVideoRight;
@@ -2356,7 +2407,7 @@ export function VideoWorkspace({
         sourceVideoElement,
         activePlayback.dimensions
       );
-      const sourceCrop = buildSourceCropRect(focusAreaRect, sourceWidth, sourceHeight);
+      const sourceCrop = buildSourceCropRect(areaRect, sourceWidth, sourceHeight);
 
       try {
         if (
@@ -2457,13 +2508,13 @@ export function VideoWorkspace({
       const safeFrame = Math.max(0, Math.round(safeTime * safeFps));
 
       const snapshot: FocusSnapshot = {
-        id: createId(`focus-${focusWindowSide}`),
+        id: createId(`focus-${captureSide}`),
         playerId: resolvedPlayerId,
         analysisId: activeStore.analysis.id,
         title: "Focus snapshot",
         note: "",
         captureKind: "area",
-        side: focusWindowSide,
+        side: captureSide,
         sourceVideoId: sourceVideo.id,
         sourceVideoTitle: sourceVideo.title,
         sourceVideoMeta: {
@@ -2475,7 +2526,7 @@ export function VideoWorkspace({
         sourceImageMeta,
         currentTime: safeTime,
         currentFrame: safeFrame,
-        cropRect: { ...focusAreaRect },
+        cropRect: { ...areaRect },
         imageDataUrl,
         createdAt: new Date().toISOString(),
       };
@@ -2484,16 +2535,13 @@ export function VideoWorkspace({
       // composer beside it. Nothing is written to the analysis until Save.
       stageSnapshotDraft(
         snapshot,
-        { ...focusAreaRect },
+        { ...areaRect },
         sourceCrop.sourceCropRect.width / Math.max(1, sourceCrop.sourceCropRect.height)
       );
 
       return { ok: true };
     },
     [
-      focusAreaRect,
-      focusWindowMode,
-      focusWindowSide,
       leftPlayback,
       leftDrawing,
       leftOverlayDimensions,
@@ -2563,13 +2611,20 @@ export function VideoWorkspace({
     stageSnapshotDraft,
   ]);
 
-  const beginAreaCapture = useCallback(() => {
-    clearFocusSelection();
-    setFocusSelectionMode("area");
-    setFocusSelectionSide(effectiveActiveSide);
-    setShowFocusWindow(false);
-    setFocusPaletteOpen(false);
-  }, [clearFocusSelection, effectiveActiveSide]);
+  /**
+   * One capture, whichever shape it takes.
+   *
+   * A box drawn over the video is the coach saying "this part"; without one
+   * they mean the whole picture. The box survives the capture, so the same
+   * region can be taken again at address and at impact.
+   */
+  const captureSnapshot = useCallback(() => {
+    if (captureBox) {
+      void captureAreaSnapshot(captureBox.side, captureBox.rect);
+      return;
+    }
+    captureFullFrame();
+  }, [captureAreaSnapshot, captureBox, captureFullFrame]);
 
   const reselectAreaFocus = useCallback(() => {
     clearFocusSelection();
@@ -2585,6 +2640,16 @@ export function VideoWorkspace({
       clearFocusSelection();
     }
   }, [clearFocusSelection, modeIsCompare]);
+
+  // A box is drawn round something in a particular picture. Swap the clip out
+  // from under it and it is a rectangle over someone else's swing.
+  useEffect(() => {
+    setCaptureBox((current) => {
+      if (!current) return current;
+      const stillLoaded = current.side === "left" ? playerVideoLeft : playerVideoRight;
+      return stillLoaded ? current : null;
+    });
+  }, [playerVideoLeft, playerVideoRight]);
 
   useMarkerThumbnails({
     sourceUrl: leftMountedSource,
@@ -2628,8 +2693,8 @@ export function VideoWorkspace({
       activeDrawing.nudgeSelected(direction, axis, shift, heldFrames);
     },
     drawingLayerHasFocus: isDrawingKeyboardFocus,
-    onCancel: handleBackAction,
-    onCapture: workspaceHasVideo && !isPlayerVariant ? captureFullFrame : undefined,
+    onCapture: workspaceHasVideo && !isPlayerVariant ? captureSnapshot : undefined,
+    onSave: workspaceHasVideo ? () => void handleManualSave() : undefined,
   });
 
   const saveableSides = useMemo(() => {
@@ -3128,9 +3193,11 @@ export function VideoWorkspace({
               discardSnapshotDraft();
               return;
             }
-            // Enter alone stays a newline -- a note runs to more than one line
-            // more often than it is finished in one.
-            if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+            // Enter saves. A capture is often taken mid-swing with no time to
+            // write anything -- Enter files it and the note can be added later
+            // from the strip below. Shift+Enter is the newline for the times
+            // the note does get written here and there.
+            if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
               commitSnapshotDraft();
             }
@@ -3543,6 +3610,7 @@ export function VideoWorkspace({
             draftObject={drawingState.draftObject}
             activeObjectId={drawingState.activeObjectId}
             hoverGrabbable={drawingState.hoverGrabbable}
+            captureBox={captureBox && captureBox.side === side ? captureBox.rect : null}
             draggedObjectId={drawingState.isObjectDragging ? drawingState.draggingObjectId : null}
             onTrashDrop={(objectId) => {
               if (!drawingState.draggingObjectId || drawingState.draggingObjectId !== objectId) {
@@ -3593,8 +3661,10 @@ export function VideoWorkspace({
             onFocusOpen={
               isPlayerVariant ? undefined : () => setFocusPaletteOpen((previous) => !previous)
             }
-            onCaptureFrame={isPlayerVariant ? undefined : captureFullFrame}
-            onCaptureArea={isPlayerVariant ? undefined : beginAreaCapture}
+            onCapture={isPlayerVariant ? undefined : captureSnapshot}
+            captureTooltip={
+              captureBox ? "Screenshot the box (Space)" : "Screenshot the frame (Space)"
+            }
           />
         </div>
         <Timeline
@@ -3907,7 +3977,11 @@ export function VideoWorkspace({
           onClose={() => {
             setShowFocusWindow(false);
           }}
-          onScreenshot={handleFocusWindowScreenshot}
+          onScreenshot={(previewDataUrl) =>
+            focusAreaRect
+              ? captureAreaSnapshot(focusWindowSide, focusAreaRect, previewDataUrl)
+              : { ok: false, error: "No valid focus crop selected." }
+          }
           sourceVideo={focusWindowSide === "left" ? leftVideoRef.current : rightVideoRef.current}
           sourceDimensions={
             focusWindowSide === "left" ? leftPlayback.dimensions : rightPlayback.dimensions

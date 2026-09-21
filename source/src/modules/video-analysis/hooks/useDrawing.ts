@@ -44,6 +44,8 @@ export interface UseDrawingResult extends UseDrawingState {
   pointerDown: (cursor: DrawingPoint, meta?: PointerMeta) => void;
   /** Mouse movement with nothing pressed. Null when the cursor leaves. */
   pointerHover: (cursor: DrawingPoint | null) => void;
+  /** Whether a press here would land on an existing shape. */
+  hitTest: (cursor: DrawingPoint) => boolean;
   pointerMove: (cursor: DrawingPoint) => void;
   pointerUp: (cursor: DrawingPoint) => void;
   cancel: () => void;
@@ -229,6 +231,22 @@ export function useDrawing({
       setHoveredObjectId(hit.object ? hit.object.id : null);
     },
     [editMode, objects, selectedTool, videoDimensions]
+  );
+
+  const hitTest = useCallback(
+    (cursor: DrawingPoint) => {
+      const { width, height } = videoDimensions;
+      if (!width || !height) return false;
+      return Boolean(
+        DrawingEngine.getObjectsAtPoint(
+          objects,
+          cursor,
+          videoDimensions,
+          selectedTool !== "select"
+        ).object
+      );
+    },
+    [objects, selectedTool, videoDimensions]
   );
 
   const pointerDown = useCallback(
@@ -467,6 +485,12 @@ export function useDrawing({
 
   const selectObject = useCallback((objectId: string | null) => {
     setSelectedObjectId(objectId);
+    // Nothing in hand means nothing in hand: a shape a finger had armed keeps
+    // its handles otherwise, and keeps grabbing the next press with it.
+    if (!objectId) {
+      setArmedObjectId(null);
+      setHoveredObjectId(null);
+    }
   }, []);
 
   const undo = useCallback(() => {
@@ -526,6 +550,7 @@ export function useDrawing({
     setTool,
     pointerDown,
     pointerHover,
+    hitTest,
     pointerMove,
     pointerUp,
     cancel,

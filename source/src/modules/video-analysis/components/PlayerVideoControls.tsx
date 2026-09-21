@@ -98,13 +98,6 @@ const IconSnapshot = () => (
   </svg>
 );
 
-const IconSnapshotArea = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-    <path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" strokeLinecap="round" />
-    <rect x="8" y="8" width="8" height="8" rx="1" strokeDasharray="2 2" />
-  </svg>
-);
-
 export type PlayerToolRailProps = {
   open: boolean;
   selectedTool: DrawingTool;
@@ -115,8 +108,11 @@ export type PlayerToolRailProps = {
   canClear: boolean;
   /** Coach-only. The player has no focus palette, so this stays unset there. */
   onFocusOpen?: () => void;
-  onCaptureFrame?: () => void;
-  onCaptureArea?: () => void;
+  /** Coach-only. The rail's half of the Space key: one button that takes the
+   *  box if one has been dragged over the video, and the whole frame if not.
+   *  It is also the only way to reach a capture from a tablet. */
+  onCapture?: () => void;
+  captureTooltip?: string;
 };
 
 /**
@@ -136,8 +132,8 @@ export function PlayerToolRail({
   onClear,
   canClear,
   onFocusOpen,
-  onCaptureFrame,
-  onCaptureArea,
+  onCapture,
+  captureTooltip = "Screenshot (Space)",
 }: PlayerToolRailProps) {
   return (
     <div
@@ -191,31 +187,19 @@ export function PlayerToolRail({
           </button>
         </>
       ) : null}
-      {onCaptureFrame || onCaptureArea ? <span className="va-rail-rule" aria-hidden="true" /> : null}
-      {onCaptureFrame ? (
-        <button
-          type="button"
-          className="va-rail-btn"
-          aria-label="Capture full frame"
-          title="Capture full frame (Enter)"
-          onClick={onCaptureFrame}
-        >
-          <IconSnapshot />
-        </button>
-      ) : null}
-      {/* Its own button on the rail rather than a flyout off the one above.
-          The flyout only appeared on hover or keyboard focus, which meant a
-          coach working from a tablet had no way to reach it at all. */}
-      {onCaptureArea ? (
-        <button
-          type="button"
-          className="va-rail-btn"
-          aria-label="Choose an area to capture"
-          title="Choose an area to capture"
-          onClick={onCaptureArea}
-        >
-          <IconSnapshotArea />
-        </button>
+      {onCapture ? (
+        <>
+          <span className="va-rail-rule" aria-hidden="true" />
+          <button
+            type="button"
+            className="va-rail-btn"
+            aria-label={captureTooltip}
+            title={captureTooltip}
+            onClick={onCapture}
+          >
+            <IconSnapshot />
+          </button>
+        </>
       ) : null}
     </div>
   );

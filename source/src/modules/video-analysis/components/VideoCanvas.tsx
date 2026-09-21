@@ -15,6 +15,15 @@ export interface VideoCanvasProps {
   activeObjectId: string | null;
   /** Draws the grab cursor while the pointer is over something movable. */
   hoverGrabbable?: boolean;
+  /**
+   * The free capture box, in the same normalized space as the drawings.
+   *
+   * It is drawn in here rather than beside the canvas because `.video-frame`
+   * shrink-wraps the picture while the shell around it does not -- a
+   * percentage rect measured against the shell sits off the video by however
+   * much the clip is narrower than the panel.
+   */
+  captureBox?: { x: number; y: number; width: number; height: number } | null;
   draggedObjectId?: string | null;
   onTrashDrop?: (objectId: string) => boolean;
   onPointerDown: (point: DrawingPoint, meta: { pointerType: string }) => void;
@@ -96,6 +105,7 @@ export function VideoCanvas({
   draftObject,
   activeObjectId,
   hoverGrabbable = false,
+  captureBox = null,
   draggedObjectId,
   onTrashDrop,
   onPointerDown,
@@ -320,6 +330,20 @@ export function VideoCanvas({
         onLoadedMetadata={liveStream ? undefined : onLoadMetadata}
       />
       <div className="video-overlay">
+        {captureBox ? (
+          <div
+            className="capture-box"
+            style={{
+              left: `${captureBox.x * 100}%`,
+              top: `${captureBox.y * 100}%`,
+              width: `${captureBox.width * 100}%`,
+              height: `${captureBox.height * 100}%`,
+            }}
+            aria-hidden="true"
+          >
+            <span className="capture-box-hint">Space</span>
+          </div>
+        ) : null}
         <svg
           width={overlayDimensions.width}
           height={overlayDimensions.height}
