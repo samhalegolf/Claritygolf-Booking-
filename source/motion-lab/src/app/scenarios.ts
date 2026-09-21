@@ -14,6 +14,18 @@ import {
   type SyntheticSwingOptions,
 } from "../synthetic/syntheticSwing";
 
+/**
+ * Where the synthetic camera stands, in degrees round from face-on.
+ *
+ * Not zero, deliberately. Square to the camera the club's DEPTH is
+ * under-determined -- both candidate depths leave the wrist angle identical --
+ * so a face-on demo would show the club model at its weakest without
+ * explaining why. Sixty-five degrees is a realistic place to film from and is
+ * where the wrist cue has something to say. The club model's own tests cover
+ * the face-on case explicitly.
+ */
+const DEMO_CAMERA_YAW_DEG = 65;
+
 export interface Scenario {
   readonly key: string;
   readonly label: string;
@@ -39,7 +51,7 @@ export const SCENARIOS: readonly Scenario[] = [
     purpose:
       "Everything observed, nothing reconstructed. The baseline: if this does not look right, the problem is the renderer, not the data.",
     options: { source: "synthetic:clean" },
-    detector: {},
+    detector: { cameraYawDeg: DEMO_CAMERA_YAW_DEG },
   },
   {
     key: "pelvis-dropout",
@@ -56,6 +68,7 @@ export const SCENARIOS: readonly Scenario[] = [
       },
     },
     detector: {
+      cameraYawDeg: DEMO_CAMERA_YAW_DEG,
       dropouts: [
         { joint: "leftHip", startFrame: 62, length: 20 },
         { joint: "rightHip", startFrame: 62, length: 20 },
@@ -73,7 +86,10 @@ export const SCENARIOS: readonly Scenario[] = [
     },
     // The detector sees a clean body but loses the wrist briefly and finds it
     // again somewhere wrong -- which is what a jump actually looks like.
-    detector: { dropouts: [{ joint: "rightWrist", startFrame: 88, length: 1 }] },
+    detector: {
+      cameraYawDeg: DEMO_CAMERA_YAW_DEG,
+      dropouts: [{ joint: "rightWrist", startFrame: 88, length: 1 }],
+    },
   },
   {
     key: "club-lost",
@@ -81,7 +97,7 @@ export const SCENARIOS: readonly Scenario[] = [
     purpose:
       "Clubhead evidence disappears at the top and never returns. CBP confidence decays; the body score does not move. That separation is the point.",
     options: { source: "synthetic:club-lost", degradation: { clubLostFromFrame: 74 } },
-    detector: {},
+    detector: { cameraYawDeg: DEMO_CAMERA_YAW_DEG },
   },
   {
     key: "noisy",
@@ -89,7 +105,7 @@ export const SCENARIOS: readonly Scenario[] = [
     purpose:
       "15mm of Gaussian noise on every joint, every frame. What a real detector's jitter does to bone lengths before anything smooths it.",
     options: { source: "synthetic:noisy", degradation: { noiseM: 0.015 } },
-    detector: {},
+    detector: { cameraYawDeg: DEMO_CAMERA_YAW_DEG },
   },
   {
     key: "messy",
@@ -112,6 +128,7 @@ export const SCENARIOS: readonly Scenario[] = [
       },
     },
     detector: {
+      cameraYawDeg: DEMO_CAMERA_YAW_DEG,
       dropouts: [
         { joint: "leftAnkle", startFrame: 30, length: 14 },
         { joint: "rightElbow", startFrame: 95, length: 22 },
