@@ -102,38 +102,122 @@ const KEY_FIELDS = [
 ] as const;
 
 /**
- * Sample the schedule at an arbitrary time.
+ * Sample the schedule at an arbitrary time, with PCHIP interpolation.
  *
- * Smootherstep rather than linear so the second derivative is continuous at
- * the keys. Linear interpolation would put a velocity discontinuity at every
- * keyframe, and a velocity discontinuity is exactly the artefact the Motion
- * Layer's jump detection is meant to find -- synthetic data should not
- * manufacture the very fault it is used to test for.
+ * WHY NOT SMOOTHERSTEP BETWEEN EACH PAIR OF KEYS
+ *
+ * That was the first version, and it is a trap. Smootherstep has zero first
+ * derivative at BOTH ends, so the motion comes to a dead stop and restarts at
+ * every single keyframe. The positions still look smooth; the velocities have
+ * a hole in them at each key, and the accelerations needed to climb back out
+ * reached 650 m/s² -- about 66g on a hand.
+ *
+ * That matters far beyond looking odd. The jump detector's whole premise is
+ * that real motion deviates from its neighbours' midpoint by (1/2)·a·dt²,
+ * which is small. Feed it 66g and those deviations reach 90mm, which is
+ * outlier territory -- so the fixture was manufacturing exactly the fault it
+ * was being used to test for.
+ *
+ * WHY PCHIP RATHER THAN CATMULL-ROM
+ *
+ * Catmull-Rom gives the continuous velocity we need but overshoots, and the
+ * overshoot lands in the worst place: between two identical keys -- the
+ * address hold -- it bulges away and back, so the golfer waggles before
+ * moving. The anchor detection is looking for a genuinely still frame, and
+ * that would take it away.
+ *
+ * PCHIP's shape-preserving rule sets the tangent to zero wherever the slope
+ * changes sign or an adjacent slope is zero. A held value stays exactly held,
+ * and the top of the backswing -- where theta stops rising and starts falling
+ * -- gets a velocity of exactly zero, which is what the top of a backswing
+ * is.
  */
 export const sampleSwing = (
   keys: readonly SwingKey[],
   timeSeconds: number
 ): InterpolatedKey => {
   if (keys.length === 0) throw new Error("sampleSwing needs at least one key");
+  if (keys.length === 1) return stripTime(keys[0]);
   if (timeSeconds <= keys[0].t) return stripTime(keys[0]);
 
   const last = keys[keys.length - 1];
   if (timeSeconds >= last.t) return stripTime(last);
 
+  const tangents = tangentsFor(keys);
+
   let upper = 1;
   while (upper < keys.length && keys[upper].t <= timeSeconds) upper += 1;
-  const a = keys[upper - 1];
-  const b = keys[upper];
+  const lower = upper - 1;
 
-  const span = b.t - a.t;
-  const raw = span <= 0 ? 0 : (timeSeconds - a.t) / span;
-  const t = raw * raw * raw * (raw * (raw * 6 - 15) + 10);
+  const h = keys[upper].t - keys[lower].t;
+  const t = h <= 0 ? 0 : (timeSeconds - keys[lower].t) / h;
+
+  const t2 = t * t;
+  const t3 = t2 * t;
+  const h00 = 2 * t3 - 3 * t2 + 1;
+  const h10 = t3 - 2 * t2 + t;
+  const h01 = -2 * t3 + 3 * t2;
+  const h11 = t3 - t2;
 
   const out: Record<string, number> = {};
   for (const field of KEY_FIELDS) {
-    out[field] = a[field] + (b[field] - a[field]) * t;
+    const y0 = keys[lower][field];
+    const y1 = keys[upper][field];
+    const m0 = tangents[field][lower];
+    const m1 = tangents[field][upper];
+    out[field] = h00 * y0 + h10 * h * m0 + h01 * y1 + h11 * h * m1;
   }
   return out as unknown as InterpolatedKey;
+};
+
+type FieldTangents = Record<(typeof KEY_FIELDS)[number], number[]>;
+
+// Tangents depend only on the schedule, and `sampleSwing` is called once per
+// frame per generated swing. Computing them every call would redo the same
+// arithmetic a few hundred times for no reason.
+const tangentCache = new WeakMap<readonly SwingKey[], FieldTangents>();
+
+const tangentsFor = (keys: readonly SwingKey[]): FieldTangents => {
+  const cached = tangentCache.get(keys);
+  if (cached) return cached;
+
+  const spans: number[] = [];
+  for (let i = 0; i < keys.length - 1; i += 1) {
+    spans.push(Math.max(1e-9, keys[i + 1].t - keys[i].t));
+  }
+
+  const tangents = {} as FieldTangents;
+  for (const field of KEY_FIELDS) {
+    const slopes = spans.map(
+      (span, i) => (keys[i + 1][field] - keys[i][field]) / span
+    );
+    const m: number[] = new Array(keys.length).fill(0);
+
+    // Endpoints take the adjacent slope. A held pair gives zero, which is
+    // what "held" means.
+    m[0] = slopes[0];
+    m[keys.length - 1] = slopes[slopes.length - 1];
+
+    for (let i = 1; i < keys.length - 1; i += 1) {
+      const before = slopes[i - 1];
+      const after = slopes[i];
+
+      // Fritsch-Carlson: a sign change or a flat neighbour pins the tangent
+      // to zero, so the curve cannot overshoot past a key.
+      if (before * after <= 0) {
+        m[i] = 0;
+        continue;
+      }
+      const w1 = 2 * spans[i] + spans[i - 1];
+      const w2 = spans[i] + 2 * spans[i - 1];
+      m[i] = (w1 + w2) / (w1 / before + w2 / after);
+    }
+
+    tangents[field] = m;
+  }
+
+  tangentCache.set(keys, tangents);
+  return tangents;
 };
 
 const stripTime = (key: SwingKey): InterpolatedKey => {

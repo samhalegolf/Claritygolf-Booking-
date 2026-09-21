@@ -69,14 +69,38 @@ is still known. Once real video is involved there is no ground truth to
 compare against, so "does a dropout look like a dropout?" has to be answered
 now.
 
-**Build 2 — the observation engine.** MediaPipe Pose in a worker, raw
-landmarks cached, a debug overlay on the source video that stays honest about
-what the detector could actually see.
+**Build 2 — the observation engine. Done.** MediaPipe Pose in a classic
+worker, its output relabelled into Clarity's vocabulary and anchored into
+world space, with a raw overlay that stays honest about what the detector
+could actually see. Measured: 1.6s to initialise, 23ms per 1080p frame.
 
-**Build 3 — the Clarity Motion Layer.** The major piece: persistent body
-model, connected geometry, objective gap reconstruction, reacquisition,
-smoothing driven by evidence rather than by how ugly the movement looks, and
-reconstruction confidence.
+**Build 3 — the Clarity Motion Layer. Done.** Persistent body model measured
+from this golfer, outlier rejection by second difference, gap reconstruction
+from both sides, reacquisition with connected structures as evidence,
+evidence-driven smoothing, and per-structure confidence.
+
+### Does it work?
+
+The synthetic source runs one body three ways — ground truth, a detector with
+no reconstruction, and a detector with the full Motion Layer — so the question
+has a number rather than an opinion. Mean joint error against the truth:
+
+| scenario | baseline | Motion Layer |
+| --- | --- | --- |
+| clean | 5.7 mm | 5.7 mm |
+| pelvis dropout | 8.0 mm | 6.0 mm |
+| everything at once | 33.9 mm | 5.9 mm |
+
+The first row matters as much as the last: a reconstruction that improves bad
+data by degrading good data has not improved anything.
+
+Each stage can be switched off individually to see what it is buying. A stage
+that changes nothing is not earning its place.
+
+**Build 4 — the club.** The CBP is the one derived marker the plan asks for,
+and it needs club evidence: a clubhead tracker. The Motion Layer reports
+`club: null` rather than estimating one from the hands and an assumed length,
+which would be a claim it cannot support.
 
 ## What the confidence score means
 

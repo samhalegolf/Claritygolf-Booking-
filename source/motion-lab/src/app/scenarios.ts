@@ -7,6 +7,7 @@
  * dropout LOOKS like a dropout is now.
  */
 
+import type { SyntheticDetectorOptions } from "../observe/syntheticDetector";
 import {
   generateSyntheticSwing,
   type SyntheticSwing,
@@ -19,6 +20,16 @@ export interface Scenario {
   /** What this scenario is for. Shown under the picker. */
   readonly purpose: string;
   readonly options: SyntheticSwingOptions;
+  /**
+   * What the DETECTOR fails to see, for the pipeline modes.
+   *
+   * Kept apart from `options` on purpose. `options` degrades the body's own
+   * provenance story, which is what the ground-truth view demonstrates. This
+   * degrades what a detector could observe of a perfectly clean body -- which
+   * is the only way to grade a reconstruction, because the truth has to stay
+   * intact to compare against.
+   */
+  readonly detector?: SyntheticDetectorOptions;
 }
 
 export const SCENARIOS: readonly Scenario[] = [
@@ -28,6 +39,7 @@ export const SCENARIOS: readonly Scenario[] = [
     purpose:
       "Everything observed, nothing reconstructed. The baseline: if this does not look right, the problem is the renderer, not the data.",
     options: { source: "synthetic:clean" },
+    detector: {},
   },
   {
     key: "pelvis-dropout",
@@ -43,6 +55,12 @@ export const SCENARIOS: readonly Scenario[] = [
         ],
       },
     },
+    detector: {
+      dropouts: [
+        { joint: "leftHip", startFrame: 62, length: 20 },
+        { joint: "rightHip", startFrame: 62, length: 20 },
+      ],
+    },
   },
   {
     key: "hand-jump",
@@ -53,6 +71,9 @@ export const SCENARIOS: readonly Scenario[] = [
       source: "synthetic:hand-jump",
       degradation: { jumps: [{ joint: "rightWrist", frame: 88, offsetM: 0.25 }] },
     },
+    // The detector sees a clean body but loses the wrist briefly and finds it
+    // again somewhere wrong -- which is what a jump actually looks like.
+    detector: { dropouts: [{ joint: "rightWrist", startFrame: 88, length: 1 }] },
   },
   {
     key: "club-lost",
@@ -60,6 +81,7 @@ export const SCENARIOS: readonly Scenario[] = [
     purpose:
       "Clubhead evidence disappears at the top and never returns. CBP confidence decays; the body score does not move. That separation is the point.",
     options: { source: "synthetic:club-lost", degradation: { clubLostFromFrame: 74 } },
+    detector: {},
   },
   {
     key: "noisy",
@@ -67,6 +89,7 @@ export const SCENARIOS: readonly Scenario[] = [
     purpose:
       "15mm of Gaussian noise on every joint, every frame. What a real detector's jitter does to bone lengths before anything smooths it.",
     options: { source: "synthetic:noisy", degradation: { noiseM: 0.015 } },
+    detector: {},
   },
   {
     key: "messy",
@@ -88,8 +111,47 @@ export const SCENARIOS: readonly Scenario[] = [
         clubLostFromFrame: 100,
       },
     },
+    detector: {
+      dropouts: [
+        { joint: "leftAnkle", startFrame: 30, length: 14 },
+        { joint: "rightElbow", startFrame: 95, length: 22 },
+      ],
+      blindFrames: [50, 51, 52],
+    },
   },
 ];
 
 export const buildScenario = (scenario: Scenario): SyntheticSwing =>
   generateSyntheticSwing(scenario.options);
+
+/**
+ * The same scenario, seen three ways.
+ *
+ * Putting them behind one switch is the point. "Is the reconstruction any
+ * good?" is not answerable by looking at a reconstruction -- it needs the
+ * truth it is approximating and the do-nothing baseline, on the same data, a
+ * click apart.
+ */
+export type PipelineMode = "truth" | "passthrough" | "motion-layer";
+
+export const PIPELINE_MODES: readonly {
+  key: PipelineMode;
+  label: string;
+  hint: string;
+}[] = [
+  {
+    key: "truth",
+    label: "Ground truth",
+    hint: "The body as generated. No detector involved — what the reconstruction is trying to recover.",
+  },
+  {
+    key: "passthrough",
+    label: "Baseline",
+    hint: "Through a detector, with no reconstruction. A joint the detector missed stays missing.",
+  },
+  {
+    key: "motion-layer",
+    label: "Motion Layer",
+    hint: "Through a detector and the full Clarity Motion Layer.",
+  },
+];

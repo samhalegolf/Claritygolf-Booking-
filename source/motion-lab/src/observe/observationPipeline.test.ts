@@ -198,8 +198,17 @@ test("the anchor measures stance width, and it matches the body", () => {
 });
 
 test("the feet stay on the ground through the whole swing", () => {
-  // Anchoring pins the ground. If a foot floats or sinks, the support model
-  // downstream is computing contact against nothing.
+  /*
+   * Anchoring pins the ground. If a foot floats or sinks, the support model
+   * downstream is computing contact against nothing.
+   *
+   * A tolerance rather than exactness, deliberately. Pinning the lowest foot
+   * point to exactly zero EVERY frame would satisfy this to the millimetre
+   * and is a worse estimator: a minimum over noisy samples is biased low and
+   * jumps to whichever point was measured worst, so the whole body bobs. The
+   * ground is instead set once for the clip from a low percentile, which
+   * leaves individual frames a few millimetres out and the body still.
+   */
   const anchored = runPipeline();
   for (const frame of anchored.frames) {
     const candidates = (["leftHeel", "leftToe", "rightHeel", "rightToe"] as const)
@@ -209,8 +218,8 @@ test("the feet stay on the ground through the whole swing", () => {
 
     const lowest = Math.min(...candidates);
     assert.ok(
-      Math.abs(lowest) < 1e-6,
-      `frame ${frame.index}: lowest foot point is at Y=${lowest.toFixed(4)}, not on the ground`
+      lowest > -0.02 && lowest < 0.02,
+      `frame ${frame.index}: lowest foot point is at Y=${lowest.toFixed(4)}, off the ground`
     );
   }
 });

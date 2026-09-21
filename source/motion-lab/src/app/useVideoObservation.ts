@@ -14,6 +14,7 @@ import { MediaPipeDetector } from "../observe/mediapipe/MediaPipeDetector";
 import type { ObservationFrame } from "../observe/observation";
 import { observeVideo, type ObservationResult } from "../observe/runObservation";
 import { passthroughSequence } from "../motion/passthrough";
+import { reconstruct } from "../motion/reconstruct/reconstruct";
 
 export type ObservationStatus = "idle" | "running" | "ready" | "error";
 
@@ -22,7 +23,10 @@ export interface VideoObservationState {
   readonly progress: { readonly index: number; readonly total: number; readonly detected: number } | null;
   readonly error: string | null;
   readonly result: ObservationResult | null;
+  /** The naive baseline: what the detector said, holes left as holes. */
   readonly sequence: ClaritySequence | null;
+  /** The same observations through the full Motion Layer. */
+  readonly reconstructed: ClaritySequence | null;
   readonly raw: readonly ObservationFrame[];
   readonly videoUrl: string | null;
   readonly fileName: string | null;
@@ -34,6 +38,7 @@ const IDLE: VideoObservationState = {
   error: null,
   result: null,
   sequence: null,
+  reconstructed: null,
   raw: [],
   videoUrl: null,
   fileName: null,
@@ -111,9 +116,10 @@ export const useVideoObservation = () => {
           progress: null,
           error: null,
           result,
-          // The naive baseline, not a reconstruction. What the detector said,
-          // with holes left as holes.
+          // Both, so the two can be compared on identical input without
+          // re-running four seconds of detection.
           sequence: passthroughSequence(result.world),
+          reconstructed: reconstruct(result.world).sequence,
           raw: result.raw,
           videoUrl,
           fileName: file.name,

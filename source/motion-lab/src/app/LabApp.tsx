@@ -12,7 +12,7 @@
  *              holes. That is the control Build 3 will be measured against.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ClaritySpace3D } from "../space3d/ClaritySpace3D";
 import type { CameraPreset } from "../space3d/cameraRig";
@@ -22,7 +22,8 @@ import { LayerPanel } from "./panels/LayerPanel";
 import { MassPanel } from "./panels/MassPanel";
 import { Timeline } from "./panels/Timeline";
 import { VideoPanel } from "./panels/VideoPanel";
-import { SCENARIOS, buildScenario } from "./scenarios";
+import { PIPELINE_MODES, SCENARIOS, type PipelineMode } from "./scenarios";
+import { useSyntheticPipeline } from "./useSyntheticPipeline";
 import { PLAYBACK_SPEEDS, usePlayback } from "./usePlayback";
 import { useVideoObservation } from "./useVideoObservation";
 
@@ -34,16 +35,26 @@ export function LabApp() {
   const [layers, setLayers] = useState<SceneLayers>(DEFAULT_LAYERS);
   const [cameraPreset, setCameraPreset] = useState<CameraPreset>("face-on");
   const [showLowConfidence, setShowLowConfidence] = useState(true);
+  const [pipelineMode, setPipelineMode] = useState<PipelineMode>("truth");
+  const [stages, setStages] = useState({
+    rejectJumps: true,
+    validateReacquisition: true,
+    bridgeGaps: true,
+    constrain: true,
+    smooth: true,
+  });
+  const [videoUseMotionLayer, setVideoUseMotionLayer] = useState(true);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const scenario = SCENARIOS.find((entry) => entry.key === scenarioKey) ?? SCENARIOS[0];
-  // Regenerating a swing walks the schedule and solves IK per frame, so it is
-  // memoised on the scenario rather than run on every render.
-  const synthetic = useMemo(() => buildScenario(scenario), [scenario]);
+  const synthetic = useSyntheticPipeline(scenario, pipelineMode, stages);
 
   const video = useVideoObservation();
+  const videoSequence = videoUseMotionLayer
+    ? video.state.reconstructed
+    : video.state.sequence;
 
-  const sequence = source === "video" ? video.state.sequence : synthetic;
+  const sequence = source === "video" ? videoSequence : synthetic.sequence;
   const ballPosition = source === "synthetic" ? synthetic.ballPosition : undefined;
 
   const frameCount = sequence?.frames.length ?? 0;
@@ -130,6 +141,19 @@ export function LabApp() {
 
           {source === "synthetic" ? (
             <div className="scenario-picker">
+              <div className="camera-buttons">
+                {PIPELINE_MODES.map((entry) => (
+                  <button
+                    key={entry.key}
+                    type="button"
+                    title={entry.hint}
+                    className={entry.key === pipelineMode ? "chip chip-active" : "chip"}
+                    onClick={() => setPipelineMode(entry.key)}
+                  >
+                    {entry.label}
+                  </button>
+                ))}
+              </div>
               <label htmlFor="scenario">Scenario</label>
               <select
                 id="scenario"
@@ -177,7 +201,7 @@ export function LabApp() {
       <p className="scenario-purpose">
         {source === "synthetic"
           ? scenario.purpose
-          : "MediaPipe on a real clip, through the real pipeline, rendered by the naive passthrough. Nothing is reconstructed: a joint the detector missed stays missing. This is the control the Motion Layer will be measured against."}
+          : "MediaPipe on a real clip, through the real pipeline. Toggle the Motion Layer to compare reconstruction against the do-nothing baseline."}
       </p>
 
       <div className="lab-body">
@@ -188,6 +212,67 @@ export function LabApp() {
             cameraPreset={cameraPreset}
             onCameraPreset={setCameraPreset}
           />
+
+          {source === "synthetic" && pipelineMode !== "truth" && (
+            <div className="panel">
+              <h2 className="panel-title">Against ground truth</h2>
+              <div className="score-headline">
+                <span className="score-value">
+                  {synthetic.errorVsTruthM === null
+                    ? "—"
+                    : (synthetic.errorVsTruthM * 1000).toFixed(1)}
+                </span>
+                <span className="score-scale">mm mean joint error</span>
+              </div>
+              <p className="panel-note">
+                Averaged over every joint of every frame, against the body the
+                detector was shown. The only number here that measures whether the
+                reconstruction is <em>right</em> rather than merely smooth — switch
+                between Baseline and Motion Layer to see what the layer buys.
+              </p>
+
+              {pipelineMode === "motion-layer" && (
+                <>
+                  <h3 className="panel-subtitle">Stages</h3>
+                  {(
+                    [
+                      ["rejectJumps", "Reject jumps"],
+                      ["validateReacquisition", "Validate returns"],
+                      ["bridgeGaps", "Bridge gaps"],
+                      ["constrain", "Physical constraints"],
+                      ["smooth", "Smoothing"],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <label className="toggle" key={key}>
+                      <input
+                        type="checkbox"
+                        checked={stages[key]}
+                        onChange={(event) =>
+                          setStages((current) => ({ ...current, [key]: event.target.checked }))
+                        }
+                      />
+                      <span>{label}</span>
+                    </label>
+                  ))}
+                  <p className="panel-note">
+                    Turn one off and watch the error above. A stage that changes
+                    nothing is not earning its place.
+                  </p>
+
+                  {synthetic.stageCounts && (
+                    <dl className="readout">
+                      {Object.entries(synthetic.stageCounts).map(([key, value]) => (
+                        <div className="readout-row" key={key}>
+                          <dt>{key.replace(/([A-Z])/g, " $1").toLowerCase()}</dt>
+                          <dd>{value}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  )}
+                </>
+              )}
+            </div>
+          )}
 
           {source === "video" && (
             <div className="panel">
@@ -282,6 +367,14 @@ export function LabApp() {
                       onChange={(event) => setShowLowConfidence(event.target.checked)}
                     />
                     <span>Overlay: show low-confidence landmarks</span>
+                  </label>
+                  <label className="toggle">
+                    <input
+                      type="checkbox"
+                      checked={videoUseMotionLayer}
+                      onChange={(event) => setVideoUseMotionLayer(event.target.checked)}
+                    />
+                    <span>Reconstruct (Motion Layer)</span>
                   </label>
                 </>
               )}

@@ -217,7 +217,16 @@ test("clean synthetic data reports near-perfect confidence", () => {
 });
 
 test("the fastest motion is in the downswing, and it is genuinely fast", () => {
-  // Smoothing must not be tested against data that has nothing fast in it.
+  /*
+   * Smoothing and jump rejection must not be tested against data with nothing
+   * fast in it.
+   *
+   * The threshold is 20 m/s rather than a tour-like 45. The schedule models a
+   * moderate swing, and the honest number is the one the schedule actually
+   * produces -- an earlier version read higher only because per-segment
+   * smootherstep made the motion stop and restart at every keyframe, which
+   * inflated the peaks with acceleration no arm could produce.
+   */
   let peakSpeed = 0;
   let peakFrame = -1;
   for (let i = 1; i < swing.frames.length; i += 1) {
@@ -229,7 +238,7 @@ test("the fastest motion is in the downswing, and it is genuinely fast", () => {
       peakFrame = i;
     }
   }
-  assert.ok(peakSpeed > 25, `peak clubhead speed is only ${peakSpeed.toFixed(1)} m/s`);
+  assert.ok(peakSpeed > 20, `peak clubhead speed is only ${peakSpeed.toFixed(1)} m/s`);
   const peakTime = peakFrame / swing.fps;
   assert.ok(
     peakTime > 1.3 && peakTime < 1.7,

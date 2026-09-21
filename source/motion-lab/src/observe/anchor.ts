@@ -162,6 +162,40 @@ const lowestFootY = (frame: CameraObservationFrame, cos: number, sin: number): n
   return lowest;
 };
 
+/**
+ * Is this foot flat on the ground?
+ *
+ * By comparing the heel's height to the toe's, NOT to the ground -- which is
+ * the whole point. Detector world coordinates are re-centred on the hips
+ * every frame, so there is no ground to compare against until after
+ * anchoring, and anchoring is what this is needed for. The difference between
+ * two points on the same foot has no such problem: it does not care where the
+ * origin is.
+ */
+const isFootFlat = (frame: CameraObservationFrame, side: "left" | "right"): boolean => {
+  const heel = side === "left" ? frame.joints.leftHeel : frame.joints.rightHeel;
+  const toe = side === "left" ? frame.joints.leftToe : frame.joints.rightToe;
+  if (!heel || !toe) return false;
+  return Math.abs(heel.position[1] - toe.position[1]) <= 0.025;
+};
+
+/** How close to the ground a foot point must be to count as bearing weight. */
+const CONTACT_TOLERANCE_M = 0.03;
+
+/** Foot points currently on the ground, in rotated camera space. */
+const contactPoints = (
+  rotated: Partial<Record<string, Vec3>>,
+  groundY: number
+): Map<string, Vec3> => {
+  const contact = new Map<string, Vec3>();
+  for (const joint of FOOT_JOINTS) {
+    const position = rotated[joint];
+    if (!position) continue;
+    if (position[1] - groundY <= CONTACT_TOLERANCE_M) contact.set(joint, position);
+  }
+  return contact;
+};
+
 export const anchorSequence = (
   sequence: CameraObservationSequence,
   options: AnchorOptions = {}
@@ -173,32 +207,68 @@ export const anchorSequence = (
   // The stance line, measured. +X runs from the anatomical left foot toward
   // the right foot -- anatomical because MediaPipe labels sides by the
   // subject, so this holds whichever way the camera was pointing.
-  const leftAnkle = anchorFrame?.joints.leftAnkle;
-  const rightAnkle = anchorFrame?.joints.rightAnkle;
+  /*
+   * Measured across EVERY frame that saw both ankles, not just the anchor
+   * frame.
+   *
+   * This is the largest single source of error in the whole anchoring step,
+   * and it is not obvious why. The feet do not move, so the stance line is a
+   * constant -- but taken from one frame it carries that frame's detection
+   * noise. With 14mm of noise on ankles 400mm apart the angle is wrong by
+   * about two degrees, and two degrees rotates a shoulder a metre away by
+   * 35mm. Every joint in every frame inherits that as a common-mode error,
+   * larger than the per-joint noise the rest of the pipeline works hard to
+   * reduce.
+   *
+   * Averaged over a few hundred frames it falls by an order of magnitude, for
+   * nothing. Unit vectors are summed and renormalised rather than averaging
+   * angles, which would have to handle the wrap at 180 degrees.
+   */
+  let sumX = 0;
+  let sumZ = 0;
+  const widths: number[] = [];
+
+  for (const frame of frames) {
+    const left = frame.joints.leftAnkle;
+    const right = frame.joints.rightAnkle;
+    if (!left || !right) continue;
+    // Only while BOTH feet are flat. Once a heel lifts, that foot pivots
+    // about its toe and its ankle swings forward by up to 200mm -- so the
+    // line between the ankles genuinely rotates, and averaging across the
+    // follow-through measures the finish rather than the stance.
+    if (!isFootFlat(frame, "left") || !isFootFlat(frame, "right")) continue;
+
+    const across = projectToGround([
+      right.position[0] - left.position[0],
+      0,
+      right.position[2] - left.position[2],
+    ]);
+    const width = distance([0, 0, 0], across);
+    if (width <= 1e-4) continue;
+
+    const unit = normalise(across);
+    sumX += unit[0];
+    sumZ += unit[2];
+    widths.push(width);
+  }
 
   let cos = 1;
   let sin = 0;
   let stanceWidthM = 0;
 
-  if (leftAnkle && rightAnkle) {
-    const across = projectToGround([
-      rightAnkle.position[0] - leftAnkle.position[0],
-      0,
-      rightAnkle.position[2] - leftAnkle.position[2],
-    ]);
-    stanceWidthM = distance([0, 0, 0], across);
-    if (stanceWidthM > 1e-4) {
-      const unit = normalise(across);
-      // The rotation that brings `unit` onto +X. Derived from the measured
-      // stance, so a golfer standing at any angle to the camera ends up in the
-      // same frame of reference.
-      // Rotating (a, 0, b) onto (1, 0, 0) about Y needs cos = a, sin = b.
-      // The sign here is invisible to any test where the golfer happens to
-      // stand square to the camera, because then b is zero and both signs
-      // agree -- which is why the round trip is also run at 37 degrees.
-      cos = unit[0];
-      sin = unit[2];
-    }
+  if (widths.length > 0) {
+    const mean = normalise([sumX, 0, sumZ]);
+    // Rotating (a, 0, b) onto (1, 0, 0) about Y needs cos = a, sin = b. The
+    // sign is invisible to any test where the golfer stands square to the
+    // camera, because then b is zero and both signs agree -- which is why the
+    // round trip is also run at 37 degrees.
+    cos = mean[0];
+    sin = mean[2];
+
+    // Median, not mean: one frame that lost a foot would drag an average, and
+    // stance width normalises a signal people will read.
+    widths.sort((a, b) => a - b);
+    stanceWidthM = widths[Math.floor(widths.length / 2)];
   }
 
   const anchor: WorldFrameAnchor = {
@@ -222,22 +292,68 @@ export const anchorSequence = (
    * simply drops out of the set and the toe carries on alone; no point ever
    * has to be assumed stationary while it is visibly moving.
    */
-  const CONTACT_TOLERANCE_M = 0.03;
-
-  const contactPoints = (rotated: Partial<Record<string, Vec3>>, groundY: number) => {
-    const contact = new Map<string, Vec3>();
-    for (const joint of FOOT_JOINTS) {
-      const position = rotated[joint];
-      if (!position) continue;
-      if (position[1] - groundY <= CONTACT_TOLERANCE_M) contact.set(joint, position);
+  /*
+   * ABSOLUTE alignment to a reference stance, not incremental alignment to
+   * the previous frame.
+   *
+   * The first version accumulated each frame's small correction. That is a
+   * random walk: every frame's detection noise is added permanently to a
+   * running total, so the whole body drifts. Measured on a clip with 14mm of
+   * joint noise, it put 44mm of common-mode error into every joint -- more
+   * than the per-joint noise itself -- and being a slow drift rather than
+   * jitter, no amount of smoothing downstream could remove it.
+   *
+   * Aligning each frame independently to a fixed reference stance has no
+   * memory, so nothing accumulates. A heel that lifts simply drops out of the
+   * set and the remaining points carry the alignment, exactly as before.
+   */
+  /*
+   * The reference stance, averaged over every flat-footed frame rather than
+   * read off the anchor frame alone.
+   *
+   * Same argument as the rotation above: planted feet do not move, so every
+   * such frame is another measurement of the same thing, and one frame's
+   * worth of detection noise becomes a fixed offset applied to every joint in
+   * the clip. Averaging costs a pass over the frames and removes it.
+   */
+  const reference = new Map<string, Vec3>();
+  {
+    const sums = new Map<string, { x: number; y: number; z: number; n: number }>();
+    for (const frame of frames) {
+      if (!isFootFlat(frame, "left") || !isFootFlat(frame, "right")) continue;
+      for (const joint of FOOT_JOINTS) {
+        const observed = frame.joints[joint];
+        if (!observed) continue;
+        const rotated = rotateY(observed.position as Vec3, cos, sin);
+        const entry = sums.get(joint) ?? { x: 0, y: 0, z: 0, n: 0 };
+        entry.x += rotated[0];
+        entry.y += rotated[1];
+        entry.z += rotated[2];
+        entry.n += 1;
+        sums.set(joint, entry);
+      }
     }
-    return contact;
-  };
+    for (const [joint, entry] of sums) {
+      reference.set(joint, [entry.x / entry.n, entry.y / entry.n, entry.z / entry.n]);
+    }
 
-  let offsetX = 0;
-  let offsetZ = 0;
+    // No flat-footed frame anywhere -- a clip that starts mid-swing. Fall back
+    // to the anchor frame, and `anchorIsStable` already says not to trust it.
+    if (reference.size === 0 && anchorFrame) {
+      const anchorGround = lowestFootY(anchorFrame, cos, sin) ?? 0;
+      for (const joint of FOOT_JOINTS) {
+        const observed = anchorFrame.joints[joint];
+        if (!observed) continue;
+        const rotated = rotateY(observed.position as Vec3, cos, sin);
+        if (rotated[1] - anchorGround <= CONTACT_TOLERANCE_M) reference.set(joint, rotated);
+      }
+    }
+  }
+
   let lastGroundY = anchorFrame ? lowestFootY(anchorFrame, cos, sin) ?? 0 : 0;
-  let previousContact: Map<string, Vec3> | null = null;
+  let lastOffsetX = 0;
+  let lastOffsetY = 0;
+  let lastOffsetZ = 0;
 
   interface Staged {
     readonly frame: CameraObservationFrame;
@@ -257,31 +373,68 @@ export const anchorSequence = (
     const groundY = lowestFootY(frame, cos, sin) ?? lastGroundY;
     lastGroundY = groundY;
 
+    let offsetX = lastOffsetX;
+    let offsetY = lastOffsetY;
+    let offsetZ = lastOffsetZ;
+
+    /*
+     * All three axes are aligned the same way: by the MEAN offset of the
+     * contact points from their reference positions.
+     *
+     * Vertically that replaces pinning the lowest foot point to zero, which
+     * looks obvious and is a poor estimator. A minimum over noisy values is
+     * biased downward and jumps to whichever point happened to be measured
+     * low this frame, so the whole body bobbed. A mean over the same points
+     * averages the noise down instead of amplifying it.
+     */
     const contact = contactPoints(rotated, groundY);
-    if (previousContact) {
-      let sumX = 0;
-      let sumZ = 0;
-      let shared = 0;
-      for (const [joint, position] of contact) {
-        const before = previousContact.get(joint);
-        if (!before) continue;
-        sumX += position[0] - before[0];
-        sumZ += position[2] - before[2];
-        shared += 1;
-      }
-      if (shared > 0) {
-        offsetX += sumX / shared;
-        offsetZ += sumZ / shared;
-      }
+    let sumX = 0;
+    let sumY = 0;
+    let sumZ = 0;
+    let shared = 0;
+    for (const [joint, position] of contact) {
+      const anchored = reference.get(joint);
+      if (!anchored) continue;
+      sumX += position[0] - anchored[0];
+      sumY += position[1] - anchored[1];
+      sumZ += position[2] - anchored[2];
+      shared += 1;
     }
-    if (contact.size > 0) previousContact = contact;
+    if (shared > 0) {
+      offsetX = sumX / shared;
+      offsetY = sumY / shared;
+      offsetZ = sumZ / shared;
+      lastOffsetX = offsetX;
+      lastOffsetY = offsetY;
+      lastOffsetZ = offsetZ;
+    }
 
     const placed: Partial<Record<string, Vec3>> = {};
     for (const [name, position] of Object.entries(rotated) as [string, Vec3][]) {
-      placed[name] = [position[0] - offsetX, position[1] - groundY, position[2] - offsetZ];
+      placed[name] = [position[0] - offsetX, position[1] - offsetY, position[2] - offsetZ];
     }
     return { frame, joints: placed };
   });
+
+  /*
+   * Put the ground at Y = 0, once, for the whole clip.
+   *
+   * A low percentile rather than the outright minimum: over a few hundred
+   * frames the single lowest foot sample is whichever one the detector got
+   * most wrong, so using it would sink the golfer by the size of its worst
+   * error. Taking the 3rd percentile keeps that out while still landing on
+   * genuinely planted feet.
+   */
+  const footHeights: number[] = [];
+  for (const { joints: placed } of staged) {
+    for (const joint of FOOT_JOINTS) {
+      const position = placed[joint];
+      if (position) footHeights.push(position[1]);
+    }
+  }
+  footHeights.sort((a, b) => a - b);
+  const groundLevel =
+    footHeights.length > 0 ? footHeights[Math.floor(footHeights.length * 0.03)] : 0;
 
   /*
    * Now put the origin where the anchor frame's stance was, so the world
@@ -306,7 +459,7 @@ export const anchorSequence = (
       if (!position) continue;
       joints[name] = {
         ...observed,
-        position: [position[0] - originX, position[1], position[2] - originZ],
+        position: [position[0] - originX, position[1] - groundLevel, position[2] - originZ],
       };
     }
 

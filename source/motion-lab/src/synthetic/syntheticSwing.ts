@@ -44,6 +44,7 @@ import {
   clampUnit,
   cross,
   distance,
+  dot,
   lerpVec,
   normalise,
   qFromAxisAngle,
@@ -306,14 +307,13 @@ const buildTorso = (key: InterpolatedKey, props: Proportions) => {
   let hipY = props.hipY;
   let core = torsoCore(key, props, hipY);
 
+  // Fixed passes, no early exit, for the same reason as the arm fit: an
+  // iteration count that depends on the input makes the result discontinuous
+  // between adjacent frames.
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const excess =
       Math.max(distance(core.leftHip, leftAnkle), distance(core.rightHip, rightAnkle)) - legReach;
-    if (excess <= 0) break;
-
-    const next = Math.max(props.kneeY, hipY - excess * 1.05);
-    if (next >= hipY) break;
-    hipY = next;
+    hipY = Math.max(props.kneeY, hipY - Math.max(0, excess) * 1.05);
     core = torsoCore(key, props, hipY);
   }
 
@@ -345,8 +345,16 @@ const baseArmSpan = (props: Proportions): number => {
   return Math.max(0.2, perpendicular - WRIST_OFFSET_M);
 };
 
-/** Slightly inside full extension, so the elbow never sits exactly straight. */
-const maxArmReach = (props: Proportions): number => (props.upperArm + props.foreArm) * 0.97;
+/**
+ * How far the shoulder is allowed to be from its own wrist.
+ *
+ * Well inside full extension, and not merely for tidiness. As a two-bone
+ * chain straightens, the middle joint's sensitivity to the endpoint distance
+ * diverges -- at 97% of reach a millimetre at the wrist moves the elbow by
+ * four. Real arms do not straighten to the millimetre, and a fixture that
+ * lets them manufactures elbow accelerations no body could produce.
+ */
+const maxArmReach = (props: Proportions): number => (props.upperArm + props.foreArm) * 0.92;
 
 /**
  * Pin the swing plane using the address posture.
@@ -382,9 +390,61 @@ const buildSwingPlane = (
   };
 };
 
+/**
+ * Put a hand on the shaft, as near its nominal spot as the arm allows.
+ *
+ * Solves for where the shaft line enters the sphere of the shoulder's reach,
+ * and clamps the nominal offset into that interval. Exact, and continuous in
+ * every input -- which matters more than exactness here, because a
+ * discontinuous placement is what makes a joint appear to teleport.
+ *
+ * When the shaft misses the sphere entirely the arm cannot reach any part of
+ * the grip, so the hand goes to the closest point on the shaft instead: still
+ * wrong, but wrong by the smallest possible amount and without a jump.
+ */
+const placeHandOnShaft = (
+  grip: Vec3,
+  shaft: Vec3,
+  nominalOffset: number,
+  shoulder: Vec3,
+  armReach: number
+): Vec3 => {
+  const toGrip = sub(grip, shoulder);
+  const along = dot(toGrip, shaft);
+  const discriminant = along * along - (dot(toGrip, toGrip) - armReach * armReach);
+
+  if (discriminant <= 0) {
+    /*
+     * The shaft never comes within reach at all -- which really happens,
+     * mid-downswing, when the hands are across the body and the lead shoulder
+     * sits 623mm from a grip its 598mm arm cannot get to.
+     *
+     * Something has to give, and the choice is between two lies:
+     *
+     *   let the hand stay on the club   the forearm stretches by 25mm
+     *   let the hand leave the club     the hands separate by a few cm
+     *
+     * The second is chosen because it is anatomically POSSIBLE, and because
+     * the first is precisely the fault the constraint solver exists to catch.
+     * A fixture containing a stretching forearm cannot be used to test a
+     * solver whose whole job is to find stretching forearms.
+     *
+     * The arm therefore extends toward the nearest point on the shaft and
+     * stops at its own reach. Continuous: at discriminant zero this and the
+     * branch below give the same answer.
+     */
+    const nearest = add(grip, scale(shaft, -along));
+    return add(shoulder, scale(normalise(sub(nearest, shoulder)), armReach));
+  }
+
+  const root = Math.sqrt(discriminant);
+  const low = -along - root;
+  const high = -along + root;
+  return add(grip, scale(shaft, Math.min(high, Math.max(low, nominalOffset))));
+};
+
 const buildPose = (
   key: InterpolatedKey,
-  angularVelocity: number,
   props: Proportions,
   plane: SwingPlane,
   clubLengthM: number,
@@ -416,51 +476,83 @@ const buildPose = (
   );
   const clubhead = add(hub, scale(radial, radius));
 
-  // The hands sit off the hub-to-clubhead chord on the side the motion is
-  // heading -- which is what lag IS. The sign therefore flips at transition,
-  // smoothly, driven by the angular velocity rather than by a hand-written
-  // schedule. The constant bias toward the trail side keeps the pole
-  // well-defined at the top, where the angular velocity passes through zero
-  // and the tangent alone would vanish.
-  const lagSign = Math.tanh(angularVelocity / 3);
-  const pole = normalise(add(scale(tangent, lagSign), scale(plane.alongStance, 0.35)));
+  /*
+   * The hands sit off the hub-to-clubhead chord, and WHICH SIDE matters more
+   * than it looks.
+   *
+   * The first version flipped the side with the direction of travel, on the
+   * reasoning that the club trails the hands both going back and coming down.
+   * It produced a fixture in which the trail hand oscillated between 0 and
+   * 50 m/s on alternating frames near the top: as the pole swings through the
+   * chord its perpendicular component passes through zero and the two-bone
+   * solve folds through to the mirror configuration, so the grip teleports
+   * across. Impossible, and worse, impossible in a way that looked like a
+   * tracking fault -- the jump detector flagged eight frames of it before the
+   * cause was found.
+   *
+   * The side is now fixed, which is also the more honest model: a golfer's
+   * wrists hinge one way and the club never crosses to the other side of the
+   * arms. The tangent is exactly perpendicular to the chord by construction
+   * -- the chord IS the radius of the arc -- so this pole can never become
+   * degenerate, at any point in the swing.
+   */
+  const pole = tangent;
 
-  // Place the grip, then check that both shoulders can actually reach their
-  // own wrist. A lateral offset that is harmless at address becomes an
-  // overreach at the top, where the hands sit over the trail shoulder and the
-  // lead arm is stretched across the chest. Shrinking the hub-to-grip span
-  // until both arms fit is the honest fix; letting the IK straighten instead
-  // would stretch the forearm and break the fixture's own bone lengths.
+  /*
+   * The grip sits at a CONSTANT distance from the hub.
+   *
+   * An earlier version adjusted that distance per frame, shrinking it
+   * whenever a shoulder could not reach its own wrist. It was well meant and
+   * it was the single worst artefact in the fixture: the correction depended
+   * on how many passes the loop happened to take, so the span bounced between
+   * adjacent frames, and near impact the shoulder-to-wrist distance collapsed
+   * to 37% of reach and sprang back within two frames. Nothing in a body does
+   * that.
+   *
+   * No adjustment is needed at all, because `baseArmSpan` is already chosen so
+   * the worst case -- a shoulder offset laterally from the hub, plus the hand
+   * offset along the grip -- stays inside 92% of the arm's reach. And the
+   * swing plane's tilt is clamped so arm-plus-club can always span the radius.
+   * The two constraints are satisfied by construction, which is a much better
+   * guarantee than one enforced by iteration.
+   */
   const armReach = maxArmReach(props);
-  // The chain still has to close: the grip cannot come closer to the hub than
-  // the point where arm-plus-club can no longer span the radius.
-  const minSpan = Math.max(0.2, radius - clubLengthM + 0.005);
-
-  let span = Math.max(minSpan, baseArmSpan(props));
-  let gripSolve = solveTwoBone(hub, clubhead, span, clubLengthM, pole);
-  let shaft = normalise(sub(clubhead, gripSolve.joint));
-
-  for (let attempt = 0; attempt < 6; attempt += 1) {
-    const leftWrist = sub(gripSolve.joint, scale(shaft, WRIST_OFFSET_M));
-    const rightWrist = add(gripSolve.joint, scale(shaft, WRIST_OFFSET_M));
-    const excess = Math.max(
-      distance(torso.leftShoulder, leftWrist),
-      distance(torso.rightShoulder, rightWrist)
-    ) - armReach;
-    if (excess <= 0) break;
-
-    const next = Math.max(minSpan, span - excess * 1.1);
-    if (next >= span) break;
-    span = next;
-    gripSolve = solveTwoBone(hub, clubhead, span, clubLengthM, pole);
-    shaft = normalise(sub(clubhead, gripSolve.joint));
-  }
+  const span = Math.max(radius - clubLengthM + 0.005, baseArmSpan(props));
+  const gripSolve = solveTwoBone(hub, clubhead, span, clubLengthM, pole);
+  const shaft = normalise(sub(clubhead, gripSolve.joint));
 
   const grip = gripSolve.joint;
 
-  // The trail hand sits lower on the grip, i.e. further along the shaft.
-  joints.leftWrist = sub(grip, scale(shaft, WRIST_OFFSET_M));
-  joints.rightWrist = add(grip, scale(shaft, WRIST_OFFSET_M));
+  /*
+   * Each hand sits on the shaft, but not at a fixed spot.
+   *
+   * Both hands cannot be a fixed distance from the shoulder MIDPOINT and also
+   * within reach of their own shoulder. When the hands swing toward the trail
+   * shoulder, the lead arm has to cross the chest, and the lead shoulder can
+   * end up 670mm from a grip its 598mm arm cannot reach. Forcing it produced
+   * exactly one violated bone in the whole fixture -- a lead forearm stretched
+   * by 50mm -- which is both wrong and precisely the fault the constraint
+   * solver exists to catch, so the fixture must not contain it.
+   *
+   * So each hand slides a little along the grip to stay reachable. Golfers do
+   * keep their hands together, and a centimetre of separation is a far
+   * smaller lie than a stretching forearm -- and, unlike a stretching
+   * forearm, it is anatomically possible.
+   */
+  joints.leftWrist = placeHandOnShaft(
+    grip,
+    shaft,
+    -WRIST_OFFSET_M,
+    torso.leftShoulder,
+    armReach
+  );
+  joints.rightWrist = placeHandOnShaft(
+    grip,
+    shaft,
+    WRIST_OFFSET_M,
+    torso.rightShoulder,
+    armReach
+  );
   joints.leftHand = add(joints.leftWrist, scale(shaft, props.handLength));
   joints.rightHand = add(joints.rightWrist, scale(shaft, props.handLength));
 
@@ -584,13 +676,7 @@ export const generateSyntheticSwing = (
     const time = index * dt;
     const key = sampleSwing(keys, time);
 
-    // Angular velocity by central difference, so the lag sign is derived from
-    // the schedule rather than restated alongside it.
-    const ahead = sampleSwing(keys, time + dt).theta;
-    const behind = sampleSwing(keys, Math.max(0, time - dt)).theta;
-    const angularVelocity = ((ahead - behind) * DEG) / (2 * dt);
-
-    const pose = buildPose(key, angularVelocity, props, plane, clubLengthM, cbpRatio);
+    const pose = buildPose(key, props, plane, clubLengthM, cbpRatio);
     poses.push(pose);
     truth.push({ ...pose.joints });
   }
@@ -710,7 +796,7 @@ const assembleFrame = (input: AssembleInput): ClarityFrame => {
     ])
   ) as Record<ClarityJoint, Unit>;
 
-  const club = buildClub(input, joints);
+  const club = buildClub(input);
 
   const components: ConfidenceComponents = {
     directObservation: observedFraction,
@@ -751,10 +837,7 @@ const assembleFrame = (input: AssembleInput): ClarityFrame => {
   };
 };
 
-const buildClub = (
-  input: AssembleInput,
-  joints: Record<ClarityJoint, Vec3>
-): ClubEstimate => {
+const buildClub = (input: AssembleInput): ClubEstimate => {
   const { pose, degradation, index } = input;
   const lostFrom = degradation.clubLostFromFrame;
   const headObserved = lostFrom == null || index < lostFrom;
@@ -769,7 +852,16 @@ const buildClub = (
 
   return {
     cbp: pose.cbp,
-    grip: lerpVec(joints.leftWrist, joints.rightWrist, 0.5),
+    /*
+     * The CLUB's grip, not the midpoint of the hands.
+     *
+     * They are nearly the same and occasionally are not: a hand that had to
+     * leave the shaft to stay within its arm's reach would drag a
+     * hands-midpoint off the club with it, and the shaft would report a
+     * length it does not have. The club is a rigid object with its own
+     * geometry; the hands hold it approximately.
+     */
+    grip: pose.grip,
     head: pose.clubhead,
     lengthM: input.clubLengthM,
     evidence: {
