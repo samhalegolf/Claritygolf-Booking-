@@ -658,6 +658,9 @@ export const generateSyntheticSwing = (
       anchorFrameIndex: 0,
       stanceWidthM,
       anchorIsStable: true,
+      // The fixture is built in world axes, so there is no camera to be
+      // tilted and nothing to correct.
+      gravityTiltDeg: 0,
     },
     confidence: summariseSequence(frames),
     source: options.source ?? "synthetic:right-handed-swing",

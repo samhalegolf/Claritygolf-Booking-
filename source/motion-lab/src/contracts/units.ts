@@ -77,6 +77,29 @@ export interface WorldFrameAnchor {
    * every world coordinate inherits that doubt.
    */
   readonly anchorIsStable: boolean;
+  /**
+   * How far the camera was tilted, in degrees, as measured from the golfer's
+   * own stance and corrected for.
+   *
+   * WHY THIS IS NOT TAKEN FROM THE IMAGE
+   *
+   * Nothing says a phone on a tripod is level, and a detector's world
+   * landmarks inherit whatever tilt it had: their "down" is the image's down,
+   * not gravity's. Assuming the two agree is assuming something nobody
+   * checked.
+   *
+   * It matters more than it sounds. The ground HEIGHT barely moves under
+   * tilt, so the reconstruction looks fine -- but every signal that compares
+   * a position at height h against the ground shifts by h·tan(tilt). Measured
+   * on a clip tilted two degrees, a balanced 47/53 address read as 38/62, and
+   * at five degrees as 24/76. A golfer who is square appears to be leaning on
+   * their trail foot.
+   *
+   * So it is measured from anatomy instead: the line between the ankles is
+   * horizontal when both feet are flat on the ground, and that is a fact
+   * about the golfer rather than about the camera.
+   */
+  readonly gravityTiltDeg: number;
 }
 
 export const clampUnit = (value: number): Unit =>

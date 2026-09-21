@@ -274,3 +274,89 @@ test("a dropout leaves the joint absent rather than filled in", () => {
   assert.ok(anchored.frames[39].joints.leftElbow, "present before the gap");
   assert.ok(anchored.frames[50].joints.leftElbow, "present after the gap");
 });
+
+/* ------------------------- levelling from anatomy -------------------- */
+
+/**
+ * Roll the camera about its optical axis, as a phone on an uneven tripod is.
+ *
+ * Applied to the detector's WORLD landmarks, because that is where the tilt
+ * actually lands: a detector's axes are aligned to the image, so its "down"
+ * is the bottom of the frame rather than gravity.
+ */
+const withCameraRoll = (raw: readonly ObservationFrame[], degrees: number) => {
+  const radians = (degrees * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  return raw.map((frame) => ({
+    ...frame,
+    world:
+      frame.world?.map((point) => ({
+        ...point,
+        x: point.x * cos - point.y * sin,
+        y: point.x * sin + point.y * cos,
+      })) ?? null,
+  }));
+};
+
+test("which way is up is measured from the golfer, not assumed from the image", () => {
+  /*
+   * Nothing guarantees a camera is level, and the failure is quiet: ground
+   * HEIGHT survives a tilt almost untouched, so the reconstruction looks
+   * fine. What breaks is every signal comparing a position at height h to the
+   * ground, each shifting by h·tan(tilt).
+   *
+   * The stance line between two flat feet is horizontal because of the
+   * golfer's anatomy and the ground they stand on, not because of the camera.
+   */
+  for (const degrees of [0, 1, 2, 5, 10, -7]) {
+    const rolled = withCameraRoll(detectFromClarityFrames(swing.frames), degrees);
+    const anchored = anchorSequence(buildCameraSequence(rolled));
+
+    assert.ok(
+      Math.abs(anchored.anchor.gravityTiltDeg - Math.abs(degrees)) < 0.1,
+      `a ${degrees}° roll was measured as ${anchored.anchor.gravityTiltDeg.toFixed(2)}°`
+    );
+
+    let worst = 0;
+    for (const frame of anchored.frames) {
+      const truth = swing.frames[frame.index].body.joints;
+      for (const joint of CLARITY_JOINTS) {
+        const observed = frame.joints[joint];
+        if (!observed) continue;
+        worst = Math.max(worst, distance(observed.position as Vec3, truth[joint]));
+      }
+    }
+    assert.ok(
+      worst < 0.02,
+      `at ${degrees}° of roll the worst joint error was ${(worst * 1000).toFixed(0)}mm`
+    );
+  }
+});
+
+test("a level camera is left alone rather than nudged", () => {
+  // A correction smaller than the measurement is just noise with a rotation
+  // matrix attached.
+  const anchored = anchorSequence(buildCameraSequence(detectFromClarityFrames(swing.frames)));
+  assert.ok(
+    anchored.anchor.gravityTiltDeg < 0.05,
+    `an untilted clip measured ${anchored.anchor.gravityTiltDeg.toFixed(3)}° of tilt`
+  );
+});
+
+test("with no feet there is no vertical to measure, and it says so", () => {
+  // The whole reference is anatomical, so cropping the feet removes it. The
+  // flag is the only thing standing between that and a confidently level-
+  // looking reconstruction built on the camera's own idea of down.
+  const raw = detectFromClarityFrames(swing.frames, {
+    dropouts: (["leftHeel", "rightHeel", "leftToe", "rightToe"] as const).map((joint) => ({
+      joint,
+      startFrame: 0,
+      length: swing.frames.length,
+    })),
+  });
+  const anchored = anchorSequence(buildCameraSequence(withCameraRoll(raw, 6)));
+
+  assert.equal(anchored.anchor.gravityTiltDeg, 0, "no feet means no tilt measurement");
+  assert.equal(anchored.anchor.anchorIsStable, false);
+});

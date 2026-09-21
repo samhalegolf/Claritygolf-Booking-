@@ -38,7 +38,19 @@
  */
 
 import type { Vec3, WorldFrameAnchor } from "../contracts";
-import { clampUnit, distance, normalise, projectToGround } from "../contracts";
+import {
+  clampUnit,
+  distance,
+  dot,
+  normalise,
+  projectToGround,
+  qFromUnitVectors,
+  qMultiply,
+  qRotate,
+  scale,
+  sub,
+  type Quat,
+} from "../contracts";
 import type {
   CameraObservationFrame,
   CameraObservationSequence,
@@ -151,12 +163,15 @@ const rotateY = (point: Vec3, cos: number, sin: number): Vec3 => [
 ];
 
 /** Lowest foot point in a frame, or null when no foot was seen. */
-const lowestFootY = (frame: CameraObservationFrame, cos: number, sin: number): number | null => {
+const lowestFootY = (
+  frame: CameraObservationFrame,
+  toWorldAxes: (point: Vec3) => Vec3
+): number | null => {
   let lowest: number | null = null;
   for (const joint of FOOT_JOINTS) {
     const observed = frame.joints[joint];
     if (!observed) continue;
-    const rotated = rotateY(observed.position as Vec3, cos, sin);
+    const rotated = toWorldAxes(observed.position as Vec3);
     if (lowest === null || rotated[1] < lowest) lowest = rotated[1];
   }
   return lowest;
@@ -172,11 +187,33 @@ const lowestFootY = (frame: CameraObservationFrame, cos: number, sin: number): n
  * two points on the same foot has no such problem: it does not care where the
  * origin is.
  */
-const isFootFlat = (frame: CameraObservationFrame, side: "left" | "right"): boolean => {
+const isFootFlat = (
+  frame: CameraObservationFrame,
+  side: "left" | "right",
+  orient: (point: Vec3) => Vec3 = (point) => point
+): boolean => {
+  const tilt = footTilt(frame, side, orient);
+  return tilt !== null && tilt <= 0.025;
+};
+
+/**
+ * How far this foot is from flat, metres, or null when it cannot be seen.
+ *
+ * `orient` is the current best guess at which way is up. It matters: measured
+ * in a tilted frame, a flat foot looks tilted and a tilted one can look flat,
+ * which is why the levelling that uses this is run twice.
+ */
+const footTilt = (
+  frame: CameraObservationFrame,
+  side: "left" | "right",
+  orient: (point: Vec3) => Vec3 = (point) => point
+): number | null => {
   const heel = side === "left" ? frame.joints.leftHeel : frame.joints.rightHeel;
   const toe = side === "left" ? frame.joints.leftToe : frame.joints.rightToe;
-  if (!heel || !toe) return false;
-  return Math.abs(heel.position[1] - toe.position[1]) <= 0.025;
+  if (!heel || !toe) return null;
+  return Math.abs(
+    orient(heel.position as Vec3)[1] - orient(toe.position as Vec3)[1]
+  );
 };
 
 /** How close to the ground a foot point must be to count as bearing weight. */
@@ -194,6 +231,141 @@ const contactPoints = (
     if (position[1] - groundY <= CONTACT_TOLERANCE_M) contact.set(joint, position);
   }
   return contact;
+};
+
+/**
+ * Which way is up, measured from the golfer rather than assumed from the
+ * camera.
+ *
+ * THE ASSUMPTION THIS REPLACES
+ *
+ * A detector's world landmarks are aligned to the IMAGE: their "down" is the
+ * bottom of the frame. Taking that as gravity assumes the camera was level,
+ * and nothing about a phone on a tripod guarantees that.
+ *
+ * The cost of being wrong is easy to miss, because the part that looks wrong
+ * isn't. Ground HEIGHT survives a tilt almost untouched -- the feet stay
+ * coherent relative to each other, so the reconstruction looks right. What
+ * breaks is every signal that compares a position at height h against the
+ * ground, because each shifts by h·tan(tilt). Measured on a clip tilted two
+ * degrees, a balanced 47/53 address read as 38/62; at five degrees, 24/76.
+ *
+ * WHAT IS MEASURED INSTEAD
+ *
+ * The line between the ankles, while both feet are flat on level ground, is
+ * horizontal. That is a fact about the golfer's anatomy and the ground they
+ * are standing on, not about where the camera was.
+ *
+ * One line gives one constraint: gravity must be perpendicular to it. That
+ * fixes the tilt AROUND the optical axis -- the roll -- and leaves the tilt
+ * up or down unconstrained. Which is the right trade, because roll is what
+ * corrupts the mass and support signals and pitch very nearly does not:
+ * `normalisedSeparation` is measured ALONG the stance line, and a pitch
+ * rotates about that same line. Measured, five degrees of pitch moved the
+ * lead-foot load by one point.
+ *
+ * So the correction is the smallest rotation that makes the assumed vertical
+ * perpendicular to the measured stance. Nothing is invented: where there is
+ * no evidence -- pitch -- nothing is changed.
+ */
+interface Levelling {
+  readonly rotation: Quat;
+  readonly tiltDeg: number;
+  /** How many flat-footed frames the stance line was averaged over. */
+  readonly samples: number;
+}
+
+const estimateLevelling = (
+  frames: readonly CameraObservationFrame[],
+  prior: Quat = [0, 0, 0, 1]
+): Levelling => {
+  const orient = (point: Vec3): Vec3 => qRotate(prior, point);
+  /*
+   * Averaged over every flat-footed frame, for the same reason the yaw is:
+   * planted feet do not move, so each frame is another measurement of one
+   * line, and one frame's detection noise on ankles 400mm apart is worth
+   * about two degrees all by itself.
+   *
+   * Flatness is judged on the RAW coordinates here, before any levelling,
+   * which is mildly circular -- but a roll mixes x into y and the heel-to-toe
+   * vector is almost entirely z, so the test barely notices a tilt it is
+   * being used to measure.
+   */
+  const candidates: { direction: Vec3; flatness: number }[] = [];
+
+  for (const frame of frames) {
+    const left = frame.joints.leftAnkle;
+    const right = frame.joints.rightAnkle;
+    if (!left || !right) continue;
+    const leftTilt = footTilt(frame, "left", orient);
+    const rightTilt = footTilt(frame, "right", orient);
+    if (leftTilt === null || rightTilt === null) continue;
+    if (!isFootFlat(frame, "left", orient) || !isFootFlat(frame, "right", orient)) continue;
+
+    // NOT ground-projected. The vertical component IS the tilt; projecting it
+    // away is exactly how this went unmeasured in the first place.
+    const offset = sub(orient(right.position as Vec3), orient(left.position as Vec3));
+    if (Math.hypot(...offset) < 1e-4) continue;
+    candidates.push({
+      direction: normalise(offset),
+      flatness: Math.max(leftTilt, rightTilt),
+    });
+  }
+
+  if (candidates.length === 0) {
+    return { rotation: prior, tiltDeg: 0, samples: 0 };
+  }
+
+  /*
+   * The FLATTEST half, not merely the flat-enough ones.
+   *
+   * "Flat" admits a centimetre of heel lift, which raises that ankle enough
+   * to tilt the stance line by nearly two degrees on its own -- and a tilted
+   * stance line is precisely the thing being measured. A takeaway spends many
+   * frames just inside the tolerance, so the merely-flat set carries a
+   * consistent bias toward whichever heel came up first.
+   *
+   * Taking the flattest half is self-calibrating: a clip filmed with both
+   * feet planted throughout loses nothing, and one where the golfer is
+   * shuffling keeps only the moments they were still.
+   */
+  candidates.sort((a, b) => a.flatness - b.flatness);
+  const directions = candidates
+    .slice(0, Math.max(1, Math.ceil(candidates.length / 2)))
+    .map((entry) => entry.direction);
+  const samples = directions.length;
+
+  /*
+   * The MEDIAN direction, not the mean.
+   *
+   * "Both feet flat" admits a range: a heel a centimetre off the ground still
+   * passes, and that lifts one ankle enough to tilt the stance line by nearly
+   * two degrees on its own. A mean lets those frames pull the estimate; the
+   * median simply does not see them, because most of a swing has both heels
+   * genuinely down. Measured, it halves the error on a perfectly level clip.
+   */
+  const medianOf = (axis: 0 | 1 | 2) => {
+    const values = directions.map((d) => d[axis]).sort((a, b) => a - b);
+    return values[Math.floor(values.length / 2)];
+  };
+  const across = normalise([medianOf(0), medianOf(1), medianOf(2)]);
+  const assumedUp: Vec3 = [0, 1, 0];
+
+  // The smallest change to "up" that makes it perpendicular to the stance.
+  const corrected = normalise(sub(assumedUp, scale(across, dot(assumedUp, across))));
+  if (Math.hypot(...corrected) < 1e-6) {
+    // The stance line is parallel to the assumed vertical, which means the
+    // body is not being seen as a body. Nothing sensible to do.
+    return { rotation: prior, tiltDeg: 0, samples };
+  }
+
+  // Composed with whatever was already applied, so a second pass refines the
+  // first rather than replacing it.
+  const rotation = qMultiply(qFromUnitVectors(corrected, assumedUp), prior);
+  const total = qRotate(rotation, [0, 1, 0]);
+  const tiltRad = Math.acos(Math.min(1, Math.max(-1, dot(normalise(total), assumedUp))));
+
+  return { rotation, tiltDeg: (tiltRad * 180) / Math.PI, samples };
 };
 
 export const anchorSequence = (
@@ -224,6 +396,23 @@ export const anchorSequence = (
    * nothing. Unit vectors are summed and renormalised rather than averaging
    * angles, which would have to handle the wrap at 180 degrees.
    */
+  /*
+   * Level the world first, from the golfer's own stance -- see
+   * `estimateLevelling`. Everything below measures LEVELLED coordinates, so
+   * the yaw is a rotation about true vertical rather than about whatever the
+   * camera happened to call vertical.
+   */
+  /*
+   * Twice, because the measurement depends on its own answer: whether a foot
+   * is flat is judged by comparing heel height to toe height, and "height"
+   * is what is being solved for. One pass gets small tilts exactly right and
+   * drifts on large ones -- at ten degrees it over-corrected by a full
+   * degree. A second pass, measuring flatness in the frame the first pass
+   * produced, removes that.
+   */
+  const levelling = estimateLevelling(frames, estimateLevelling(frames).rotation);
+  const level = (point: Vec3): Vec3 => qRotate(levelling.rotation, point);
+
   let sumX = 0;
   let sumZ = 0;
   const widths: number[] = [];
@@ -238,10 +427,15 @@ export const anchorSequence = (
     // follow-through measures the finish rather than the stance.
     if (!isFootFlat(frame, "left") || !isFootFlat(frame, "right")) continue;
 
+    const levelledLeft = level(left.position as Vec3);
+    const levelledRight = level(right.position as Vec3);
+    // Ground-projected here on purpose: the vertical component has already
+    // been used, by `estimateLevelling`, to decide which way is up. What is
+    // left is the compass bearing of the stance.
     const across = projectToGround([
-      right.position[0] - left.position[0],
+      levelledRight[0] - levelledLeft[0],
       0,
-      right.position[2] - left.position[2],
+      levelledRight[2] - levelledLeft[2],
     ]);
     const width = distance([0, 0, 0], across);
     if (width <= 1e-4) continue;
@@ -271,10 +465,14 @@ export const anchorSequence = (
     stanceWidthM = widths[Math.floor(widths.length / 2)];
   }
 
+  /** Detector axes to Clarity world axes: level first, then face the stance. */
+  const toWorldAxes = (point: Vec3): Vec3 => rotateY(level(point), cos, sin);
+
   const anchor: WorldFrameAnchor = {
     anchorFrameIndex: choice.index,
     stanceWidthM,
     anchorIsStable: choice.stable && stanceWidthM > 1e-4,
+    gravityTiltDeg: levelling.tiltDeg,
   };
 
   /*
@@ -324,7 +522,7 @@ export const anchorSequence = (
       for (const joint of FOOT_JOINTS) {
         const observed = frame.joints[joint];
         if (!observed) continue;
-        const rotated = rotateY(observed.position as Vec3, cos, sin);
+        const rotated = toWorldAxes(observed.position as Vec3);
         const entry = sums.get(joint) ?? { x: 0, y: 0, z: 0, n: 0 };
         entry.x += rotated[0];
         entry.y += rotated[1];
@@ -340,17 +538,17 @@ export const anchorSequence = (
     // No flat-footed frame anywhere -- a clip that starts mid-swing. Fall back
     // to the anchor frame, and `anchorIsStable` already says not to trust it.
     if (reference.size === 0 && anchorFrame) {
-      const anchorGround = lowestFootY(anchorFrame, cos, sin) ?? 0;
+      const anchorGround = lowestFootY(anchorFrame, toWorldAxes) ?? 0;
       for (const joint of FOOT_JOINTS) {
         const observed = anchorFrame.joints[joint];
         if (!observed) continue;
-        const rotated = rotateY(observed.position as Vec3, cos, sin);
+        const rotated = toWorldAxes(observed.position as Vec3);
         if (rotated[1] - anchorGround <= CONTACT_TOLERANCE_M) reference.set(joint, rotated);
       }
     }
   }
 
-  let lastGroundY = anchorFrame ? lowestFootY(anchorFrame, cos, sin) ?? 0 : 0;
+  let lastGroundY = anchorFrame ? lowestFootY(anchorFrame, toWorldAxes) ?? 0 : 0;
   let lastOffsetX = 0;
   let lastOffsetY = 0;
   let lastOffsetZ = 0;
@@ -363,14 +561,14 @@ export const anchorSequence = (
   const staged: Staged[] = frames.map((frame) => {
     const rotated: Partial<Record<string, Vec3>> = {};
     for (const [name, observed] of Object.entries(frame.joints) as [string, ObservedJoint][]) {
-      rotated[name] = rotateY(observed.position as Vec3, cos, sin);
+      rotated[name] = toWorldAxes(observed.position as Vec3);
     }
 
     // A frame with no visible foot cannot be pinned on its own evidence. It
     // carries the previous offsets forward rather than snapping to the hips,
     // which would jolt the whole body for one frame and look exactly like a
     // tracking failure.
-    const groundY = lowestFootY(frame, cos, sin) ?? lastGroundY;
+    const groundY = lowestFootY(frame, toWorldAxes) ?? lastGroundY;
     lastGroundY = groundY;
 
     let offsetX = lastOffsetX;
