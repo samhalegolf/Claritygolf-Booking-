@@ -51,6 +51,7 @@ import {
   qMultiply,
   qRotate,
   scale,
+  smootherstep,
   solveTwoBone,
   sub,
 } from "../contracts";
@@ -473,11 +474,58 @@ const buildPose = (
    *
    * The side is now fixed, which is also the more honest model: a golfer's
    * wrists hinge one way and the club never crosses to the other side of the
-   * arms. The tangent is exactly perpendicular to the chord by construction
-   * -- the chord IS the radius of the arc -- so this pole can never become
-   * degenerate, at any point in the swing.
+   * arms.
+   *
+   * BUT THE TANGENT ALONE IS WRONG AT ADDRESS.
+   *
+   * The bend's SIZE is not a choice -- an arm span of 429mm plus a 1050mm
+   * club spanning a 1435mm reach leaves 44mm of slack, and the geometry turns
+   * that into 162mm of offset from the chord wherever it is put. Only the
+   * DIRECTION is ours.
+   *
+   * At theta zero the tangent is the stance line, so the whole 162mm went
+   * sideways: the grip sat 162mm toward the trail foot of a ball on the
+   * centreline, the lead arm crossed the body to reach it, and the trail
+   * elbow ended up further out than its own shoulder. A golfer does not stand
+   * like that. Their hands hang nearer the body than the straight line from
+   * shoulders to ball -- which is the plane's NORMAL, not its tangent.
+   *
+   * Mid-swing the tangent is right: the wrists cock in the plane and the club
+   * trails the hands along the arc, it does not swing out of the plane.
+   *
+   * So the pole runs from bodyward at address to tangent once the swing is
+   * going. Both ends are perpendicular to the chord by construction -- the
+   * chord is the arc's radius, the tangent and the normal are its other two
+   * axes -- so every blend of them is too, and the solve can never go
+   * degenerate. Neither end changes sign anywhere in the swing, so the
+   * fold-through this comment was originally written about cannot come back.
    */
-  const pole = tangent;
+  const bodyward = scale(plane.normal, -1);
+  /*
+   * BLENDED ON THE BODY'S TURN, NOT ON THE CLUB'S ANGLE.
+   *
+   * The obvious parameter is theta, the club's position round the arc: zero
+   * at address, growing as the swing starts. It is also zero AT IMPACT, by
+   * construction -- impact is the moment the schedule brings theta back
+   * through zero -- so blending on it snapped the pole back to bodyward at
+   * the fastest point in the swing and whipped the hands through ninety
+   * degrees of pole rotation at 18.8 m/s. The fixture's own tests caught it
+   * as 42g of hand acceleration, a flagged frame of "clean" fast motion and
+   * 232mm of extra gap-bridging error.
+   *
+   * What separates address from impact is not the club, it is the body: the
+   * pelvis and thorax are square at address and well past square at impact.
+   * Summed as magnitudes rather than signed, so a downswing that has the two
+   * turning opposite ways cannot cancel back to zero.
+   *
+   * Smootherstep because it has zero first and second derivative at both
+   * ends, so the hand path leaves address with no corner in it.
+   */
+  const turnDeg = Math.abs(key.pelvisYaw) + Math.abs(key.thoraxYaw);
+  const toTangent = smootherstep(Math.min(1, turnDeg / 30));
+  const pole = normalise(
+    add(scale(bodyward, 1 - toTangent), scale(tangent, toTangent))
+  );
 
   /*
    * The grip sits at a CONSTANT distance from the hub.

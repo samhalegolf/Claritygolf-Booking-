@@ -56,7 +56,26 @@ const handsOf = (index: number): Vec3 =>
   );
 
 const buildInputs = (options: BuildOptions = {}): ClubFrameInput[] => {
-  const matrix = cameraAt(options.yawDeg ?? 25).matrix;
+  /*
+   * FIFTY-FIVE DEGREES BY DEFAULT, NOT TWENTY-FIVE.
+   *
+   * The club's depth is settled by the wrist cue, and the cue needs the club
+   * to swing across the lens rather than at it. Measured on this fixture,
+   * `depthEvidence` is 0.000 at every yaw from 0 to 35 and 1.000 from 45 up:
+   * the model is not guessing badly below 45, it is saying it does not know.
+   *
+   * The old default of 25 therefore asserted 90mm of depth accuracy at an
+   * angle where the model reported no evidence for it, and passed because the
+   * smoothness tie-break happened to land the right way. It was not robust:
+   * a change to the fixture's address pose -- which does not touch a single
+   * frame after the takeaway -- flipped a segment and the error went to
+   * 1285mm.
+   *
+   * So the default is an angle where there is something to measure, and the
+   * limit below it is asserted on purpose further down instead of being
+   * relied on by accident.
+   */
+  const matrix = cameraAt(options.yawDeg ?? 55).matrix;
   // Deterministic jitter: a test that flakes teaches nothing.
   let seed = 12345;
   const jitter = () => {
@@ -145,6 +164,35 @@ test("the clubhead is recovered in 3D, on the right side of the camera", () => {
     worst < 0.09,
     `worst clubhead error ${(worst * 1000).toFixed(0)}mm at frame ${worstFrame}`
   );
+});
+
+test("below about forty-five degrees the depth is unevidenced, and the model says so", () => {
+  /*
+   * THE LIMIT, ASSERTED RATHER THAN RELIED ON.
+   *
+   * This used to be the accidental condition of the test above, which ran at
+   * twenty-five degrees and expected 90mm. It passed on a tie-break, and the
+   * first unrelated change to the fixture's address pose turned it into
+   * 1285mm.
+   *
+   * What is actually true is sharper and more useful: the wrist cue needs the
+   * club to swing ACROSS the lens, and below about forty-five degrees it has
+   * nothing to say. The model reports exactly that, and a caller who reads
+   * `depthEvidence` is never misled -- which is the guarantee worth testing.
+   */
+  for (const yawDeg of [0, 15, 25, 35]) {
+    assert.equal(
+      estimateClub(buildInputs({ yawDeg })).depthEvidence,
+      0,
+      `at ${yawDeg}° the model should report no depth evidence`
+    );
+  }
+  for (const yawDeg of [45, 60, 90]) {
+    assert.ok(
+      estimateClub(buildInputs({ yawDeg })).depthEvidence > 0.5,
+      `at ${yawDeg}° the wrist cue should settle the depth`
+    );
+  }
 });
 
 test("the CBP lies on the shaft it was derived from", () => {
