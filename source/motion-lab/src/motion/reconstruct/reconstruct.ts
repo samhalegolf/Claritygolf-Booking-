@@ -33,6 +33,7 @@
 import type {
   BodyPose,
   ClarityFrame,
+  ClubEstimate,
   ClarityJoint,
   ClaritySequence,
   ClarityStructure,
@@ -50,6 +51,7 @@ import {
   centroid,
   clampUnit,
   distance,
+  lerpVec,
   qIdentity,
   scale,
   sub,
@@ -58,6 +60,9 @@ import type { WorldObservationSequence } from "../../observe/observation";
 import { buildFrameConfidence, penalise, PENALTY_SCALES } from "../confidence/confidence";
 import { estimateMass } from "../mass/massModel";
 import { buildPelvis, buildThorax } from "../body/structures";
+import { fitCamera } from "../club/camera";
+import { estimateClub, type ClubFrameInput } from "../club/clubModel";
+import { bodyObstacles } from "../club/occupancy";
 import { measureBodyModel, type MeasuredBodyModel } from "./bodyModel";
 import { applyConstraints, structuralDisagreement } from "./constraints";
 import { bridgeGap } from "./gaps";
@@ -352,11 +357,78 @@ export const reconstruct = (
   }
 
   /* ------------------------------------------------------------------ *
-   * 7. Assemble
+   * 7. The club
+   * ------------------------------------------------------------------ */
+
+  /*
+   * Fitted AFTER the body, because it depends on it twice over: the camera is
+   * calibrated from the reconstructed joints and their image positions, and
+   * the club hangs off the reconstructed hands. A club estimated from raw
+   * observations would inherit every dropout the body reconstruction has just
+   * repaired.
+   */
+  const clubInputs: ClubFrameInput[] = observations.frames.map((observation, index) => {
+    const joints = {} as Record<ClarityJoint, Vec3>;
+    for (const joint of CLARITY_JOINTS) joints[joint] = cells[joint][index].position;
+
+    // The camera is fitted from joints that were actually SEEN -- their image
+    // position is the evidence. A reconstructed joint has a position but no
+    // pixel to justify it, so it cannot calibrate anything.
+    const correspondences = CLARITY_JOINTS.flatMap((joint) => {
+      const observed = observation.joints[joint];
+      if (!observed) return [];
+      return [
+        {
+          world: cells[joint][index].position,
+          image: observed.image,
+          weight: observed.visibility,
+        },
+      ];
+    });
+
+    const usable = (joint: ClarityJoint) => cells[joint][index].source !== "missing";
+    const hands =
+      usable("leftHand") && usable("rightHand")
+        ? lerpVec(joints.leftHand, joints.rightHand, 0.5)
+        : null;
+
+    return {
+      hands,
+      wrists:
+        usable("leftWrist") && usable("rightWrist")
+          ? lerpVec(joints.leftWrist, joints.rightWrist, 0.5)
+          : null,
+      transverse:
+        usable("leftShoulder") && usable("rightShoulder")
+          ? sub(joints.rightShoulder, joints.leftShoulder)
+          : null,
+      obstacles: bodyObstacles(joints, heightM),
+      forearms: [
+        sub(joints.leftElbow, joints.leftWrist),
+        sub(joints.rightElbow, joints.rightWrist),
+      ],
+      camera: fitCamera(correspondences),
+      observation: observation.club,
+    };
+  });
+
+  const club = estimateClub(clubInputs);
+  stageCounts.clubFramesObserved = club.observedFrames;
+  stageCounts.clubSegmentsFlipped = club.mirrored ? 1 : 0;
+
+  /* ------------------------------------------------------------------ *
+   * 8. Assemble
    * ------------------------------------------------------------------ */
 
   const frames = observations.frames.map((observation, index) =>
-    assembleFrame(observation.timestampMs, index, cells, observations, heightM)
+    assembleFrame(
+      observation.timestampMs,
+      index,
+      cells,
+      observations,
+      heightM,
+      club.frames[index] ?? null
+    )
   );
 
   return {
@@ -551,7 +623,8 @@ const assembleFrame = (
   index: number,
   cells: Record<ClarityJoint, Cell[]>,
   observations: WorldObservationSequence,
-  heightM: number
+  heightM: number,
+  club: ClubEstimate | null
 ): ClarityFrame => {
   const joints = {} as Record<ClarityJoint, Vec3>;
   const provenance = {} as Record<ClarityJoint, JointProvenance>;
@@ -625,9 +698,10 @@ const assembleFrame = (
     ),
     gapReconstruction: blendWorst(gapPenalties),
     bodyConstraintCorrection: blendWorst(correctionPenalties),
-    // No clubhead tracker exists yet, so there is no club evidence to score.
-    // Zero is the absence of a claim, not a bad one.
-    clubPoint: 0,
+    // Zero when there is no club evidence at all -- the absence of a claim,
+    // not a bad one. Kept out of `overall` either way, so a poor club track
+    // cannot sink a good body track.
+    clubPoint: club?.confidence ?? 0,
   };
 
   const structures = {} as Record<ClarityStructure, Unit>;
@@ -635,6 +709,10 @@ const assembleFrame = (
     ClarityStructure,
     readonly ClarityJoint[],
   ][]) {
+    if (structure === "club") {
+      structures.club = club?.confidence ?? 0;
+      continue;
+    }
     structures[structure] =
       structureJoints.length === 0
         ? 0
@@ -654,10 +732,7 @@ const assembleFrame = (
     index,
     timestampMs,
     body,
-    // The CBP needs club evidence, and no clubhead tracker exists yet. An
-    // estimate from the hands and an assumed length would be a claim this
-    // layer cannot support.
-    club: null,
+    club,
     mass:
       observedCount + gapTotal > 0 && usableForMass(cells, index, heightM)
         ? estimateMass({
@@ -723,7 +798,7 @@ const summarise = (frames: readonly ClarityFrame[]) => {
       jumpCorrection: mean((f) => f.confidence.components.jumpCorrection),
       gapReconstruction: mean((f) => f.confidence.components.gapReconstruction),
       bodyConstraintCorrection: mean((f) => f.confidence.components.bodyConstraintCorrection),
-      clubPoint: 0,
+      clubPoint: mean((f) => f.confidence.components.clubPoint),
     },
     reconstructedFrameFraction: clampUnit(reconstructedFrames / count),
     largestGapFrames,

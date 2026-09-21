@@ -46,6 +46,11 @@ export interface SyntheticDetectorOptions {
   /** Image size, for the normalised image coordinates. */
   readonly width?: number;
   readonly height?: number;
+  /** Frames where the clubhead is not found. */
+  readonly clubLostFrom?: number;
+  /** Jitter on the detected clubhead, in normalised image units. */
+  readonly clubNoise?: number;
+  readonly clubConfidence?: number;
 }
 
 const DEG = Math.PI / 180;
@@ -162,13 +167,53 @@ export const detectFromClarityFrame = (
   place(MP.LEFT_FOOT_INDEX, joints.leftToe, isHidden("leftToe"));
   place(MP.RIGHT_FOOT_INDEX, joints.rightToe, isHidden("rightToe"));
 
+  const image = toImageLandmarks(world);
+
+  /*
+   * The clubhead, projected the same way the body landmarks are.
+   *
+   * A detector sees the club in the IMAGE and knows nothing about its depth,
+   * so that is all this reports: two normalised coordinates and a confidence.
+   * Recovering where the club actually was in 3D is the Motion Layer's
+   * problem, and handing it anything more here would be cheating on the test.
+   */
+  const clubLost =
+    options.clubLostFrom != null && frame.index >= options.clubLostFrom;
+  const club =
+    frame.club && !clubLost
+      ? clubObservation(frame.club.head, hipCentre, yawRad, options)
+      : null;
+
   return {
     index: frame.index,
     timestampMs: frame.timestampMs,
     detected: true,
-    image: toImageLandmarks(world),
+    image,
     world,
-    club: null,
+    club,
+  };
+};
+
+const clubObservation = (
+  head: Vec3,
+  hipCentre: Vec3,
+  yawRad: number,
+  options: SyntheticDetectorOptions
+): ObservationFrame["club"] => {
+  const converted = toMediaPipeAxes(head, hipCentre, yawRad);
+  const projected = toImageLandmarks([landmark(converted, 1)])[0];
+  const noise = options.clubNoise ?? 0;
+
+  // Deterministic, from the position itself: a fixture that flakes is worse
+  // than one that is slightly unrealistic.
+  const wobble = (seed: number) =>
+    noise === 0 ? 0 : (((Math.sin(seed * 12.9898) * 43758.5453) % 1) * 2 - 1) * noise;
+
+  return {
+    imageX: projected.x + wobble(converted[0] + 1),
+    imageY: projected.y + wobble(converted[1] + 2),
+    imageRadius: 0.018,
+    confidence: options.clubConfidence ?? 0.82,
   };
 };
 

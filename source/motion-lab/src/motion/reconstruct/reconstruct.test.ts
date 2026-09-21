@@ -374,3 +374,94 @@ test("confidence falls where the reconstruction worked hardest", () => {
   assert.ok(inGap.structures.pelvis < clean.structures.pelvis * 0.8);
   assert.ok(inGap.structures.thorax > clean.structures.thorax * 0.9);
 });
+
+/* ------------------------- the club, end to end ---------------------- */
+
+test("the pipeline recovers a club from image detections alone", () => {
+  /*
+   * The whole Build 4 claim, end to end. The detector reports the clubhead as
+   * two normalised image coordinates and nothing else -- no depth, no length,
+   * no calibration -- and a CBP in metres comes out the other side.
+   *
+   * Everything in between is derived: the camera from the body's own joints,
+   * the club's length from how far the viewing rays pass from the hands, and
+   * the depth from what a wrist can and cannot do.
+   *
+   * Filmed from 75 degrees round -- near a down-the-line view -- which is
+   * where the wrist cue is strong. See the club model's own tests for the
+   * face-on case, where it is not.
+   */
+  const observations = observe({ cameraYawDeg: 75 });
+  const rebuilt = reconstruct(observations).sequence;
+
+  const withClub = rebuilt.frames.filter((frame) => frame.club !== null);
+  assert.ok(
+    withClub.length > rebuilt.frames.length * 0.9,
+    `only ${withClub.length} of ${rebuilt.frames.length} frames got a club`
+  );
+
+  const errors = rebuilt.frames
+    .filter((frame) => frame.club)
+    .map((frame) => distance(frame.club!.cbp, swing.frames[frame.index].club!.cbp))
+    .sort((a, b) => a - b);
+  const median = errors[Math.floor(errors.length / 2)];
+
+  assert.ok(
+    median < 0.03,
+    `median CBP error ${(median * 1000).toFixed(0)}mm`
+  );
+  assert.ok(
+    errors[errors.length - 1] < 0.08,
+    `worst CBP error ${(errors[errors.length - 1] * 1000).toFixed(0)}mm`
+  );
+
+  // The club's length was measured, not assumed, and it is one club.
+  const lengths = withClub.map((frame) => frame.club!.lengthM);
+  assert.ok(
+    Math.max(...lengths) - Math.min(...lengths) < 1e-9,
+    "a rigid club should report one length for the whole swing"
+  );
+  const trueSpan = distance(
+    [
+      (swing.frames[0].body.joints.leftHand[0] + swing.frames[0].body.joints.rightHand[0]) / 2,
+      (swing.frames[0].body.joints.leftHand[1] + swing.frames[0].body.joints.rightHand[1]) / 2,
+      (swing.frames[0].body.joints.leftHand[2] + swing.frames[0].body.joints.rightHand[2]) / 2,
+    ],
+    swing.frames[0].club!.head
+  );
+  assert.ok(
+    Math.abs(lengths[0] - trueSpan) < 0.03,
+    `measured club ${lengths[0].toFixed(3)}m against a true span of ${trueSpan.toFixed(3)}m`
+  );
+});
+
+test("a poor club track does not drag down the body score", () => {
+  // The plan's rule, now that there is a real club to test it with.
+  const observations = observe({ cameraYawDeg: 75, clubLostFrom: 70 });
+  const rebuilt = reconstruct(observations).sequence;
+
+  const before = rebuilt.frames[60];
+  const after = rebuilt.frames[110];
+
+  assert.ok(before.club, "the club should be tracked before it is lost");
+  assert.ok(
+    (after.club?.confidence ?? 0) < (before.club?.confidence ?? 1) * 0.5,
+    "club confidence should have fallen once the head was lost"
+  );
+
+  // The body is unaffected.
+  assert.ok(
+    after.confidence.overall > before.confidence.overall * 0.95,
+    `the body score fell from ${before.confidence.overall.toFixed(2)} to ${after.confidence.overall.toFixed(2)} because the club was lost`
+  );
+  assert.ok(after.confidence.structures.thorax > 0.8);
+});
+
+test("no club evidence at all leaves the club null, not guessed", () => {
+  const observations = observe({ cameraYawDeg: 75, clubLostFrom: 0 });
+  const rebuilt = reconstruct(observations).sequence;
+  assert.ok(rebuilt.frames.every((frame) => frame.club === null));
+  assert.equal(rebuilt.frames[60].confidence.components.clubPoint, 0);
+  // And the body is still fine.
+  assert.ok(rebuilt.frames[60].confidence.overall > 0.85);
+});

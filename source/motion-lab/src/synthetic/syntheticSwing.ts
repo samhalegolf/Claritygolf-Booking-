@@ -44,7 +44,6 @@ import {
   clampUnit,
   cross,
   distance,
-  dot,
   lerpVec,
   normalise,
   qFromAxisAngle,
@@ -320,8 +319,16 @@ const buildTorso = (key: InterpolatedKey, props: Proportions) => {
   return { ...core, leftFoot, rightFoot, leftAnkle, rightAnkle };
 };
 
-/** How far apart the two hands sit along the grip, metres. */
-const WRIST_OFFSET_M = 0.042;
+/**
+ * Where each hand grips the club, as a distance from the grip reference point
+ * along the shaft. The lead hand is above the trail hand, about 80mm apart,
+ * which is a golf grip.
+ */
+const LEAD_HAND_OFFSET_M = 0.04;
+const TRAIL_HAND_OFFSET_M = 0.12;
+
+/** Midpoint of the two, which is what a detector's "hands" resolve to. */
+const HANDS_CENTRE_OFFSET_M = (LEAD_HAND_OFFSET_M + TRAIL_HAND_OFFSET_M) / 2;
 
 /**
  * How far the grip sits from the hub -- the midpoint between the shoulders.
@@ -342,7 +349,7 @@ const baseArmSpan = (props: Proportions): number => {
   const perpendicular = Math.sqrt(
     Math.max(0.04, armReach * armReach - props.shoulderHalfWidth * props.shoulderHalfWidth)
   );
-  return Math.max(0.2, perpendicular - WRIST_OFFSET_M);
+  return Math.max(0.2, perpendicular - HANDS_CENTRE_OFFSET_M);
 };
 
 /**
@@ -388,59 +395,6 @@ const buildSwingPlane = (
     ballPosition: add(hub, scale(toBall, addressRadius)),
     effectiveTiltDeg: tiltRad / DEG,
   };
-};
-
-/**
- * Put a hand on the shaft, as near its nominal spot as the arm allows.
- *
- * Solves for where the shaft line enters the sphere of the shoulder's reach,
- * and clamps the nominal offset into that interval. Exact, and continuous in
- * every input -- which matters more than exactness here, because a
- * discontinuous placement is what makes a joint appear to teleport.
- *
- * When the shaft misses the sphere entirely the arm cannot reach any part of
- * the grip, so the hand goes to the closest point on the shaft instead: still
- * wrong, but wrong by the smallest possible amount and without a jump.
- */
-const placeHandOnShaft = (
-  grip: Vec3,
-  shaft: Vec3,
-  nominalOffset: number,
-  shoulder: Vec3,
-  armReach: number
-): Vec3 => {
-  const toGrip = sub(grip, shoulder);
-  const along = dot(toGrip, shaft);
-  const discriminant = along * along - (dot(toGrip, toGrip) - armReach * armReach);
-
-  if (discriminant <= 0) {
-    /*
-     * The shaft never comes within reach at all -- which really happens,
-     * mid-downswing, when the hands are across the body and the lead shoulder
-     * sits 623mm from a grip its 598mm arm cannot get to.
-     *
-     * Something has to give, and the choice is between two lies:
-     *
-     *   let the hand stay on the club   the forearm stretches by 25mm
-     *   let the hand leave the club     the hands separate by a few cm
-     *
-     * The second is chosen because it is anatomically POSSIBLE, and because
-     * the first is precisely the fault the constraint solver exists to catch.
-     * A fixture containing a stretching forearm cannot be used to test a
-     * solver whose whole job is to find stretching forearms.
-     *
-     * The arm therefore extends toward the nearest point on the shaft and
-     * stops at its own reach. Continuous: at discriminant zero this and the
-     * branch below give the same answer.
-     */
-    const nearest = add(grip, scale(shaft, -along));
-    return add(shoulder, scale(normalise(sub(nearest, shoulder)), armReach));
-  }
-
-  const root = Math.sqrt(discriminant);
-  const low = -along - root;
-  const high = -along + root;
-  return add(grip, scale(shaft, Math.min(high, Math.max(low, nominalOffset))));
 };
 
 const buildPose = (
@@ -516,7 +470,6 @@ const buildPose = (
    * The two constraints are satisfied by construction, which is a much better
    * guarantee than one enforced by iteration.
    */
-  const armReach = maxArmReach(props);
   const span = Math.max(radius - clubLengthM + 0.005, baseArmSpan(props));
   const gripSolve = solveTwoBone(hub, clubhead, span, clubLengthM, pole);
   const shaft = normalise(sub(clubhead, gripSolve.joint));
@@ -524,37 +477,37 @@ const buildPose = (
   const grip = gripSolve.joint;
 
   /*
-   * Each hand sits on the shaft, but not at a fixed spot.
+   * THE HANDS ARE FIXED ON THE CLUB. THE WRISTS TAKE UP THE SLACK.
    *
-   * Both hands cannot be a fixed distance from the shoulder MIDPOINT and also
-   * within reach of their own shoulder. When the hands swing toward the trail
-   * shoulder, the lead arm has to cross the chest, and the lead shoulder can
-   * end up 670mm from a grip its 598mm arm cannot reach. Forcing it produced
-   * exactly one violated bone in the whole fixture -- a lead forearm stretched
-   * by 50mm -- which is both wrong and precisely the fault the constraint
-   * solver exists to catch, so the fixture must not contain it.
+   * An earlier version had it the other way round: the hands slid along the
+   * shaft whenever an arm could not reach. That kept every bone exact and
+   * quietly broke something more important -- the hands-to-clubhead distance
+   * varied by 192mm over the swing, as though the golfer were repeatedly
+   * regripping mid-downswing.
    *
-   * So each hand slides a little along the grip to stay reachable. Golfers do
-   * keep their hands together, and a centimetre of separation is a far
-   * smaller lie than a stretching forearm -- and, unlike a stretching
-   * forearm, it is anatomically possible.
+   * It matters because that distance is the club model's entire constraint.
+   * A detector sees the hands and the clubhead; the club between them is
+   * assumed rigid, which is true of real golf and was not true of the
+   * fixture. Measuring a club against it came out 90mm short, and the short
+   * length then made viewing lines miss the sphere, which lost the depth
+   * branch and mirrored the club.
+   *
+   * So the hands hold the grip at fixed points, and the WRIST is placed 
+   * one hand-length back along the line toward its own shoulder -- which is
+   * where a forearm actually points, and which buys back that length of
+   * reach for free.
    */
-  joints.leftWrist = placeHandOnShaft(
-    grip,
-    shaft,
-    -WRIST_OFFSET_M,
-    torso.leftShoulder,
-    armReach
+  joints.leftHand = add(grip, scale(shaft, LEAD_HAND_OFFSET_M));
+  joints.rightHand = add(grip, scale(shaft, TRAIL_HAND_OFFSET_M));
+
+  joints.leftWrist = add(
+    joints.leftHand,
+    scale(normalise(sub(torso.leftShoulder, joints.leftHand)), props.handLength)
   );
-  joints.rightWrist = placeHandOnShaft(
-    grip,
-    shaft,
-    WRIST_OFFSET_M,
-    torso.rightShoulder,
-    armReach
+  joints.rightWrist = add(
+    joints.rightHand,
+    scale(normalise(sub(torso.rightShoulder, joints.rightHand)), props.handLength)
   );
-  joints.leftHand = add(joints.leftWrist, scale(shaft, props.handLength));
-  joints.rightHand = add(joints.rightWrist, scale(shaft, props.handLength));
 
   /* ---- arms ---- */
 
