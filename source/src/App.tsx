@@ -16586,6 +16586,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     }, 2500);
   }, [isEmbedMode, authStatus, adminWorkspaceLoadStatus, isPlatformAdmin]);
 
+  // Profile navigation is a stronger signal than the generic idle warm-up.
+  // Start/join the shared integration request immediately so Coach Profile and
+  // Settings consume one resource lifecycle rather than mounting separate reads.
+  useEffect(() => {
+    if (isEmbedMode || authStatus !== "authenticated" || activeView !== "profile") return;
+    prefetchIntegrations("integration");
+  }, [activeView, authStatus, isEmbedMode]);
+
   // Billing data is not part of the calendar frame. It used to load the moment
   // the plan allowed it: seven billing-api calls at boot, racing the calendar
   // shell, whether or not the coach ever opened Billing -- and now that the
@@ -24262,16 +24270,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
             <div className="player-profiles-layout">
               <div className="player-profiles-list">
-                {playerProfiles.length === 0 ? (
+                {playerProfiles.length === 0 && playerProfilesDataReady ? (
                   <div className="player-profiles-empty">
-                    {playerProfilesDataReady ? (
-                      <>
-                        <h2>No player profiles yet</h2>
-                        <p>Add a lesson note or video to a client, or use + to add one.</p>
-                      </>
-                    ) : (
-                      <Loading size="panel" what="player profiles" detail="Fetching lesson notes and saved videos." />
-                    )}
+                    <h2>No player profiles yet</h2>
+                    <p>Add a lesson note or video to a client, or use + to add one.</p>
                   </div>
                 ) : (
                   playerProfiles.map((player) => {
@@ -25700,6 +25702,23 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     );
                   })
                 )}
+                {!playerProfilesDataReady ? (
+                  <div className="player-profiles-progress" role="status" aria-live="polite">
+                    <span className="player-profiles-progress-dot" aria-hidden="true" />
+                    <span>
+                      Updating player activity
+                      <small>
+                        ${[
+                          !playerProfilesSourcesReady.people ? "clients" : "",
+                          !playerProfilesSourcesReady.notes ? "lesson notes" : "",
+                          !playerProfilesSourcesReady.videos ? "videos" : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </small>
+                    </span>
+                  </div>
+                ) : null}
               </div>
             </div>
           </section>

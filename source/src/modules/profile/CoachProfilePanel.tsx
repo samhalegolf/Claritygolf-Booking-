@@ -1,4 +1,3 @@
-import { Loading } from "../shared/Loading";
 // The Coach profile: who the coach is, and everything Clarity is plugged into
 // on their behalf, on one screen.
 //
@@ -19,7 +18,8 @@ import { Loading } from "../shared/Loading";
 //   Internal — Clarity's own settings. They always exist, so a card opens to
 //     show what it currently says and the gear goes to where it is changed.
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import { integrationsStore, type IntegrationCard } from "../integrations/integrationsStore";
 import {
   AlertCircle,
   ChevronDown,
@@ -60,18 +60,6 @@ export type CoachProfileIdentity = {
   currency: string;
 };
 
-// The integration list's own shape. Only the fields this screen reads.
-type IntegrationCard = {
-  id: string;
-  label: string;
-  category: string;
-  summary: string;
-  configured: boolean;
-  needsAuthorisation: boolean;
-  connectedAs?: string;
-  connectionError?: string;
-};
-
 /**
  * The job a connection does, which is how somebody arrives here: "I want my
  * lessons in my diary", not "I want to configure an OAuth2 connection". Same
@@ -109,6 +97,13 @@ const SECTION_ORDER = [
   "Customer experience",
   "Player portal",
 ];
+
+const EXTERNAL_SECTION_JOBS: Record<string, string> = {
+  Calendar: "Calendar",
+  "Resource booking": "Resource booking",
+  Storage: "Cloud storage",
+  Accounting: "Payments & accounting",
+};
 
 /** Where a connection is set up. One destination: Settings › Integrations. */
 const INTEGRATION_TARGET: ProfileTarget = { kind: "settings", tab: "developer" };
@@ -149,28 +144,18 @@ export type CoachProfilePanelProps = {
 };
 
 export function CoachProfilePanel({ identity, internalJobs, onOpen }: CoachProfilePanelProps) {
-  const [cards, setCards] = useState<IntegrationCard[] | null>(null);
-  const [error, setError] = useState("");
+  // One shared integration resource for the whole workspace. Settings and the
+  // profile now join the same in-flight request and reuse the same cached
+  // snapshot instead of mounting their own independent fetch lifecycle.
+  const store = integrationsStore("integration");
+  const { items: cards, status: connectionsStatus, error } = store.useState();
   const [openDetail, setOpenDetail] = useState("");
 
-  const load = useCallback(async () => {
-    try {
-      const response = await fetch("/api/integration-setup?audience=integration", {
-        credentials: "same-origin",
-        cache: "no-store",
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload?.message || payload?.error || `Connections returned ${response.status}.`);
-      setCards(payload.integrations || []);
-      setError("");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Your connections could not be loaded.");
-    }
-  }, []);
-
   useEffect(() => {
-    void load();
-  }, [load]);
+    // Accept the workspace's idle/navigation prefetch when it is recent. If the
+    // profile wins the race, this starts the same deduped request itself.
+    void store.load({ maxAgeMs: 30_000 }).catch(() => undefined);
+  }, [store]);
 
   const initials =
     identity.coachName
@@ -186,9 +171,14 @@ export function CoachProfilePanel({ identity, internalJobs, onOpen }: CoachProfi
   // of the two answers it.
   const sections = SECTION_ORDER.map((name) => ({
     name,
-    external: (cards || []).filter((card) => (SECTION_BY_CATEGORY[card.category] || "Accounting") === name),
+    external: cards.filter((card) => (SECTION_BY_CATEGORY[card.category] || "Accounting") === name),
     internal: internalJobs.filter((job) => job.category === name),
-  })).filter((section) => section.external.length || section.internal.length);
+  })).filter(
+    (section) =>
+      section.external.length ||
+      section.internal.length ||
+      (connectionsStatus !== "loaded" && Boolean(EXTERNAL_SECTION_JOBS[section.name])),
+  );
 
   function detailToggle(id: string, hasFacts: boolean) {
     const open = openDetail === id;
@@ -268,7 +258,7 @@ export function CoachProfilePanel({ identity, internalJobs, onOpen }: CoachProfi
         <div className="cp-error" role="alert">
           <strong>Your connections are unavailable</strong>
           {error}
-          <button className="text-button" onClick={() => void load()} type="button">
+          <button className="text-button" onClick={() => void store.load().catch(() => undefined)} type="button">
             Try again
           </button>
         </div>
@@ -278,6 +268,21 @@ export function CoachProfilePanel({ identity, internalJobs, onOpen }: CoachProfi
         {sections.map((section) => (
           <section className="cp-section" key={section.name}>
             <h3>{section.name}</h3>
+
+            {connectionsStatus !== "loaded" && section.external.length === 0 && EXTERNAL_SECTION_JOBS[section.name] ? (
+              <article className="cp-cell cp-cell-pending" aria-busy="true">
+                <div className="cp-cell-head">
+                  <span className="cp-mark is-placeholder">…</span>
+                  <span className="cp-cell-title">
+                    <strong>{EXTERNAL_SECTION_JOBS[section.name]}</strong>
+                    <span className="cp-external" title="External connection">
+                      <Link2 size={14} />
+                    </span>
+                  </span>
+                </div>
+                <p className="cp-cell-summary">Checking connection…</p>
+              </article>
+            ) : null}
 
             {section.external.map((card) => {
               const state = stateOf(card);
@@ -376,7 +381,6 @@ export function CoachProfilePanel({ identity, internalJobs, onOpen }: CoachProfi
         ))}
       </div>
 
-      {!cards && !error && <Loading what="your connections" />}
     </div>
   );
 }
