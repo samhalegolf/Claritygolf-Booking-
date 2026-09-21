@@ -607,10 +607,13 @@ test("a heel landmark that rests above the ground still counts as touching it", 
     buildCameraSequence(withRaisedHeels(detectFromClarityFrames(swing.frames), raised))
   );
 
+  // On top of the rise the fixture already gives its heel landmarks, since it
+  // now places them where a detector does.
+  const expected = raised + swing.anchor.footRestHeightM.leftHeel;
   for (const joint of ["leftHeel", "rightHeel"] as const) {
     assert.ok(
-      Math.abs(anchored.anchor.footRestHeightM[joint] - raised) < 0.015,
-      `${joint} rests at ${(anchored.anchor.footRestHeightM[joint] * 1000).toFixed(0)}mm, expected about ${raised * 1000}mm`
+      Math.abs(anchored.anchor.footRestHeightM[joint] - expected) < 0.015,
+      `${joint} rests at ${(anchored.anchor.footRestHeightM[joint] * 1000).toFixed(0)}mm, expected about ${(expected * 1000).toFixed(0)}mm`
     );
   }
   for (const joint of ["leftToe", "rightToe"] as const) {

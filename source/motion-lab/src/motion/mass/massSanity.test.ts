@@ -404,17 +404,21 @@ test("the base of support comes from the golfer's height, not from the foot land
   );
 });
 
-test("and the disagreement is reported, because it says the depth axis is unreliable", () => {
+test("and the disagreement is reported, at the size real footage shows", () => {
   /*
-   * The foot is a known length pointing almost entirely along depth, which
-   * makes it the clearest view the pipeline has of how much that axis can be
-   * trusted on a given clip. Clean synthetic data agrees with anatomy to
-   * within a few percent; the real face-on clip came back at 0.45.
+   * This used to assert the fixture measured its own feet at about 1.0, and
+   * it did -- because the fixture put all four landmarks on the sole and the
+   * toe at the toe tip, which no detector does.
+   *
+   * Now it places them where a detector does, so it reads what real clips
+   * read: 0.47 face-on and 0.51 down the line, against 0.45 here. A fixture
+   * that agreed with anatomy was the reason a halved base of support went
+   * unnoticed.
    */
   const honest = checkMassAgainstShape(bodiesOf(swing.frames, 0), HEIGHT_M);
   assert.ok(
-    Math.abs(honest.reading.footScaleUnit - 1) < 0.1,
-    `clean data should measure its own feet about right, got ${honest.reading.footScaleUnit.toFixed(3)}`
+    honest.reading.footScaleUnit > 0.35 && honest.reading.footScaleUnit < 0.6,
+    `the fixture should measure its feet the way a detector does, around 0.5; got ${honest.reading.footScaleUnit.toFixed(3)}`
   );
 });
 

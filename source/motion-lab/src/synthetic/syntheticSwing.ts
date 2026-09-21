@@ -220,10 +220,36 @@ const buildFoot = (side: "left" | "right", key: InterpolatedKey, props: Proporti
     toeOffset[2],
   ];
 
+  /*
+   * The SOLE, which is the part that touches the ground and pivots.
+   *
+   * The landmarks below sit on it rather than being it. Keeping the two
+   * apart is the whole point: the foot's physics -- planted toe, heel rising
+   * about it, bone lengths holding -- belongs to the sole, and the landmarks
+   * are what a detector would report of it.
+   */
+  const soleToe = toe;
+  const soleHeel = add(toe, qRotate(footQ, [0, 0, -soleLength]));
+
+  /*
+   * WHERE A DETECTOR ACTUALLY PUTS THEM.
+   *
+   * The heel landmark rides up on the calcaneus rather than sitting under
+   * it, and the toe landmark is at the ball rather than the toe tip -- and
+   * the detector's world model shortens the pair further still. Both rises
+   * are perpendicular to the SOLE, so they follow the foot when the heel
+   * comes up instead of floating at a fixed height.
+   *
+   * This is not decoration. Assuming a heel landmark was on the floor made
+   * every real clip report two contact points instead of four, which turns
+   * the support polygon into a line; assuming the pair spanned a whole foot
+   * halved the base of support. Both survived every test here for as long as
+   * the fixture put all four points on the sole.
+   */
   return {
-    toe,
+    toe: lerpVec(soleHeel, soleToe, props.toeLandmarkFraction),
     ankle: add(toe, qRotate(footQ, [0, props.ankleY, -props.toeAhead])),
-    heel: add(toe, qRotate(footQ, [0, 0, -soleLength])),
+    heel: add(soleHeel, qRotate(footQ, [0, props.heelLandmarkRise, 0])),
   };
 };
 
@@ -708,6 +734,21 @@ export const generateSyntheticSwing = (
     truth.push({ ...pose.joints });
   }
 
+  /*
+   * Where this fixture's foot landmarks rest, stated rather than measured.
+   *
+   * The toes sit on the sole, so they rest on the ground; the heels ride up
+   * on the calcaneus by `heelLandmarkRise`, as a detector's do. Anchoring
+   * MEASURES the same thing from a clip -- this is the fixture asserting what
+   * that measurement should find.
+   */
+  const footRestHeightM: Readonly<Record<string, number>> = {
+    leftHeel: props.heelLandmarkRise,
+    rightHeel: props.heelLandmarkRise,
+    leftToe: 0,
+    rightToe: 0,
+  };
+
   const bodyModel = measureBodyModel(poses[0], props);
   const stanceWidthM = distance(poses[0].joints.leftAnkle, poses[0].joints.rightAnkle);
 
@@ -721,6 +762,7 @@ export const generateSyntheticSwing = (
       stanceWidthM,
       clubLengthM,
       frameCount,
+      footRestHeightM,
     })
   );
 
@@ -741,10 +783,7 @@ export const generateSyntheticSwing = (
       gravityTiltIsMeasured: true,
       pitchCorrectionDeg: 0,
       pitchCorrectionSource: "none",
-      // The fixture places every foot point on the sole, so they all rest on
-      // the ground. A real detector's heel landmark does not -- see the note
-      // on `footRestHeightM`.
-      footRestHeightM: { leftHeel: 0, rightHeel: 0, leftToe: 0, rightToe: 0 },
+      footRestHeightM,
     },
     /*
      * Run on the fixture as well, where there is no camera to be wrong.
@@ -778,6 +817,8 @@ interface AssembleInput {
   readonly stanceWidthM: number;
   readonly clubLengthM: number;
   readonly frameCount: number;
+  /** Where this fixture's foot landmarks rest. See `footRestHeightM`. */
+  readonly footRestHeightM: Readonly<Record<string, number>>;
 }
 
 const assembleFrame = (input: AssembleInput): ClarityFrame => {
@@ -884,6 +925,9 @@ const assembleFrame = (input: AssembleInput): ClarityFrame => {
       joints,
       stanceWidthM: input.stanceWidthM,
       jointSupport,
+      // The fixture's heel landmarks ride up on the calcaneus like a real
+      // detector's, so contact has to be judged against where they rest.
+      footRestHeightM: input.footRestHeightM,
     }),
     confidence: buildFrameConfidence(components, structures),
     provenance,

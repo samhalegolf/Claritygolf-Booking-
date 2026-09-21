@@ -11,6 +11,26 @@
  * ankle exactly, which matters because the synthetic skeleton is measured to
  * produce the BodyModel and a chain that does not close would show up as a
  * body model that disagrees with its own poses.
+ *
+ * WHERE A LANDMARK IS NOT WHERE THE ANATOMY IS
+ *
+ * For most joints the two coincide closely enough: a detector's knee landmark
+ * is about where a knee is. The FOOT is the exception, and it is the
+ * exception that mattered -- the landmarks there are neither on the floor nor
+ * at the ends of the foot, and assuming otherwise put three separate bugs
+ * into the pipeline that every test passed over. So `heelLandmarkRise` and
+ * `toeLandmarkFraction` describe the detector's foot, measured from real
+ * clips, and the sole they sit on stays anatomical because that is what
+ * touches the ground.
+ *
+ * Measured across three clips and two golfers, as fractions of stature, the
+ * rest of a detector's skeleton against these ratios: femur 1.02, forearm
+ * 0.96, tibia 0.91, hip width 1.19, shoulder width 0.76, upper arm 0.71.
+ * Those are landmark-placement differences rather than errors -- a shoulder
+ * landmark is the joint centre, not the acromion -- and they are recorded
+ * here rather than applied, because nothing in the pipeline compares those
+ * segments against a population figure the way the foot is compared against
+ * the ground.
  */
 
 /** Ratios of standing height. */
@@ -31,6 +51,25 @@ export interface Proportions {
   readonly shank: number;
   readonly heelBehind: number;
   readonly toeAhead: number;
+  /**
+   * How far above the sole a detector puts the HEEL landmark, metres.
+   *
+   * Not zero, and that is the point. A detector's heel landmark sits up on
+   * the calcaneus rather than under it. Measured on three real clips it
+   * rested 16 to 65mm above the floor, around 0.028 of stature.
+   */
+  readonly heelLandmarkRise: number;
+  /**
+   * Where along the sole a detector puts the TOE landmark, as a fraction of
+   * foot length from the heel.
+   *
+   * Not one. The landmark is at the ball of the foot, and the detector's
+   * world model shortens it further: across three real clips heel-to-toe
+   * measured 0.075 of stature against 0.152 for a real foot. With the heel
+   * raised as well, 0.46 along the sole reproduces both the length and the
+   * 22-degree slope those clips show.
+   */
+  readonly toeLandmarkFraction: number;
   readonly stanceWidth: number;
 }
 
@@ -59,6 +98,8 @@ export const proportionsForHeight = (heightM: number): Proportions => {
     shank: kneeY - ankleY,
     heelBehind: 0.045 * h,
     toeAhead: 0.107 * h,
+    heelLandmarkRise: 0.028 * h,
+    toeLandmarkFraction: 0.46,
     stanceWidth: 0.22 * h,
   };
 };

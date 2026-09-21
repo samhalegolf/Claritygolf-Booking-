@@ -11,6 +11,7 @@ import {
   qRotate,
   sub,
   type ClarityJoint,
+  type Vec3,
 } from "../contracts";
 import { generateSyntheticSwing } from "./syntheticSwing";
 import { RIGHT_HANDED_IMPACT_SECONDS, sampleSwing, RIGHT_HANDED_SWING } from "./swingKeyframes";
@@ -168,18 +169,47 @@ test("the schedule's separation peaks after the top, not at it", () => {
 });
 
 test("feet stay planted and the trail heel lifts through the finish", () => {
+  /*
+   * "Down" is the heel landmark's RESTING height, not zero.
+   *
+   * A detector's heel landmark rides up on the calcaneus, and this fixture
+   * now places it there too, so a planted heel sits `heelLandmarkRise` above
+   * the floor. Asserting zero here is how the pipeline came to believe a real
+   * golfer's heels never touched the ground.
+   */
+  const rest = swing.anchor.footRestHeightM;
   const addressFrame = swing.frames[0];
-  assert.ok(Math.abs(addressFrame.body.joints.leftHeel[1]) < 1e-9, "lead heel starts down");
-  assert.ok(Math.abs(addressFrame.body.joints.rightHeel[1]) < 1e-9, "trail heel starts down");
+  assert.ok(rest.leftHeel > 0.02, "a detector's heel landmark is not on the floor");
+
+  for (const side of ["leftHeel", "rightHeel"] as const) {
+    assert.ok(
+      Math.abs(addressFrame.body.joints[side][1] - rest[side]) < 1e-9,
+      `${side} starts at its resting height, got ${addressFrame.body.joints[side][1].toFixed(4)}`
+    );
+  }
 
   const finishFrame = swing.frames[swing.frames.length - 1];
   assert.ok(
-    finishFrame.body.joints.rightHeel[1] > 0.2,
+    finishFrame.body.joints.rightHeel[1] > rest.rightHeel + 0.2,
     `trail heel should be high at the finish, got ${finishFrame.body.joints.rightHeel[1].toFixed(3)}`
   );
+  /*
+   * The trail TOE LANDMARK rises too, and it should.
+   *
+   * It sits at the ball of the foot, and the foot pivots about its tip -- so
+   * rolling up onto the toes lifts the ball off the floor, which is what a
+   * finish looks like. It used to sit at the tip, where it was the pivot and
+   * stayed at exactly zero.
+   *
+   * What still has to hold is that the foot ROLLS rather than jumps: the
+   * heel, further from the pivot, rises much further than the ball.
+   */
+  const toeRise = finishFrame.body.joints.rightToe[1];
+  const heelRise = finishFrame.body.joints.rightHeel[1] - swing.anchor.footRestHeightM.rightHeel;
+  assert.ok(toeRise > 0, "the ball of the trail foot leaves the ground at the finish");
   assert.ok(
-    Math.abs(finishFrame.body.joints.rightToe[1]) < 1e-9,
-    "the trail toe stays on the ground"
+    heelRise > toeRise * 1.5,
+    `the foot should roll about its tip, not lift off: heel ${(heelRise * 1000).toFixed(0)}mm against ball ${(toeRise * 1000).toFixed(0)}mm`
   );
 });
 
@@ -395,5 +425,50 @@ test("address posture leans forward over the ball", () => {
   assert.ok(
     Math.abs(spineUp[0]) < 1e-6,
     "with no side bend scheduled, address should have no lateral lean"
+  );
+});
+
+test("the fixture's feet are a detector's feet, not an anatomy textbook's", () => {
+  /*
+   * THE REGRESSION THIS EXISTS TO PREVENT, WHICH IS A WHOLE CLASS OF BUG.
+   *
+   * Three separate defects reached real footage because this fixture built an
+   * idealised body and the pipeline was graded against it: a support polygon
+   * halved by taking the landmark span for a whole foot, contact that no heel
+   * ever satisfied, and a levelling reference built on the assumption that
+   * heel and toe sit at the same height. Every test here passed throughout.
+   *
+   * So the numbers below are not tuning. They are what three real clips of
+   * two golfers measured, and the fixture is only useful while it keeps
+   * agreeing with them.
+   */
+  const h = swing.bodyModel.estimatedHeightM;
+  const j = swing.frames[0].body.joints;
+  const span = (a: Vec3, b: Vec3) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+
+  // Real clips: 0.084, 0.083, 0.056 of stature. A real foot is 0.152.
+  const footSpan = (span(j.leftHeel, j.leftToe) + span(j.rightHeel, j.rightToe)) / 2 / h;
+  assert.ok(
+    footSpan > 0.05 && footSpan < 0.10,
+    `the landmark foot should span about 0.075 of stature as a detector's does, got ${footSpan.toFixed(3)}`
+  );
+  assert.ok(footSpan < 0.152 * 0.7, "and nothing like a real foot, which is what it used to be");
+
+  // Real clips: planted heels rested 16 to 65mm up, about 0.028 of stature.
+  const rest = swing.anchor.footRestHeightM;
+  assert.ok(
+    rest.leftHeel / h > 0.015 && rest.leftHeel / h < 0.045,
+    `a heel landmark should rest about 0.028 of stature up, got ${(rest.leftHeel / h).toFixed(4)}`
+  );
+  assert.equal(rest.leftToe, 0, "the toe landmark does sit on the sole");
+
+  // And the pair slopes, because the heel is up and the toe is not. Real
+  // clips showed about 25 degrees; the fixture's geometry gives about 22.
+  const drop = j.leftHeel[1] - j.leftToe[1];
+  const alongM = Math.hypot(j.leftToe[0] - j.leftHeel[0], j.leftToe[2] - j.leftHeel[2]);
+  const slopeDeg = (Math.atan2(drop, alongM) * 180) / Math.PI;
+  assert.ok(
+    slopeDeg > 15 && slopeDeg < 32,
+    `heel to toe should slope like a detector's, got ${slopeDeg.toFixed(1)}°`
   );
 });

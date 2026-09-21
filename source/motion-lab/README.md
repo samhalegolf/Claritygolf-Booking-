@@ -404,6 +404,56 @@ detector's depth axis is compressed by roughly half: face-on the stance lies
 across the image and measures right; down the line it lies along depth and
 halves.
 
+## The fixture is built from a detector's skeleton, not an anatomy textbook
+
+Three defects reached real footage because the fixture built an idealised body
+and the pipeline was graded against it — a support polygon halved by taking the
+landmark span for a whole foot, contact that no heel ever satisfied, and a
+levelling reference that assumed heel and toe sit at the same height. **Every
+test here passed throughout.** They share one cause, so the fixture now mimics
+where a detector actually puts its landmarks.
+
+Measured across three clips and two golfers, as fractions of stature, against
+what the fixture used to assume:
+
+| segment | measured | fixture (old) | ratio |
+| --- | --- | --- | --- |
+| femur | 0.249 | 0.245 | 1.02 |
+| forearm | 0.140 | 0.146 | 0.96 |
+| tibia | 0.224 | 0.246 | 0.91 |
+| hip width | 0.131 | 0.110 | 1.19 |
+| shoulder width | 0.175 | 0.230 | 0.76 |
+| upper arm | 0.132 | 0.186 | 0.71 |
+| **foot** | **0.075** | **0.152** | **0.49** |
+
+**Only the foot is changed.** The rest are landmark-placement differences — a
+shoulder landmark is the joint centre, not the acromion — and nothing in the
+pipeline compares those segments against a population figure the way the foot
+is compared against the ground and against `0.152 × height`. They are recorded
+in `proportions.ts` rather than applied, because acting on the uncertain ones
+(the 0.71 upper arm would shorten the golfer's reach by 18%) would break a
+tuned fixture on a measurement taken from address poses with bent arms.
+
+The foot now has a **sole** and **landmarks on it**, kept apart. The sole is
+anatomical and does the physics — planted toe, heel pivoting about it, bone
+lengths holding. The landmarks are what a detector reports of it: the heel
+rides `0.028 × height` up the calcaneus, the toe sits `0.46` along the sole at
+the ball. Together those reproduce both the shortened span and the ~22° slope
+real clips show.
+
+| | fixture before | fixture now | face-on | dtl-a | dtl-b |
+| --- | --- | --- | --- | --- | --- |
+| heel rest height | 0 mm | **51 mm** | 56 mm | 28 mm | 15 mm |
+| `footScaleUnit` | 0.98 | **0.45** | 0.47 | 0.53 | 0.36 |
+| mean polygon points | 4.00 | **3.30** | 3.15 | 2.89 | 2.62 |
+
+One consequence worth seeing: the trail toe no longer stays at exactly zero
+through the finish. The landmark is at the ball and the foot pivots about its
+tip, so rolling up onto the toes lifts the ball off the floor — which is what a
+finish looks like. The test now asserts the foot *rolls* (heel rises much
+further than the ball) rather than asserting a zero that was only true of an
+idealised foot.
+
 ### The detector's heel is not on the floor
 
 A detector's **HEEL landmark sits up on the calcaneus**; its toe landmark sits
