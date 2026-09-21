@@ -1,0 +1,95 @@
+/**
+ * Synthetic scenarios.
+ *
+ * Each one exists to make a specific honesty layer visible while the true
+ * answer is still known. Once real video is involved that is impossible --
+ * there is no ground truth to compare against -- so the time to prove that a
+ * dropout LOOKS like a dropout is now.
+ */
+
+import {
+  generateSyntheticSwing,
+  type SyntheticSwing,
+  type SyntheticSwingOptions,
+} from "../synthetic/syntheticSwing";
+
+export interface Scenario {
+  readonly key: string;
+  readonly label: string;
+  /** What this scenario is for. Shown under the picker. */
+  readonly purpose: string;
+  readonly options: SyntheticSwingOptions;
+}
+
+export const SCENARIOS: readonly Scenario[] = [
+  {
+    key: "clean",
+    label: "Clean",
+    purpose:
+      "Everything observed, nothing reconstructed. The baseline: if this does not look right, the problem is the renderer, not the data.",
+    options: { source: "synthetic:clean" },
+  },
+  {
+    key: "pelvis-dropout",
+    label: "Pelvis dropout",
+    purpose:
+      "Both hips vanish for 20 frames through the top of the backswing. Proves reconstructed provenance reaches the skeleton colouring, the ribbon and the score.",
+    options: {
+      source: "synthetic:pelvis-dropout",
+      degradation: {
+        dropouts: [
+          { joint: "leftHip", startFrame: 62, length: 20 },
+          { joint: "rightHip", startFrame: 62, length: 20 },
+        ],
+      },
+    },
+  },
+  {
+    key: "hand-jump",
+    label: "Hand jump",
+    purpose:
+      "A single-frame 25cm jump on the trail wrist during the downswing. The kind of detection a constraint solver has to reject.",
+    options: {
+      source: "synthetic:hand-jump",
+      degradation: { jumps: [{ joint: "rightWrist", frame: 88, offsetM: 0.25 }] },
+    },
+  },
+  {
+    key: "club-lost",
+    label: "Club lost",
+    purpose:
+      "Clubhead evidence disappears at the top and never returns. CBP confidence decays; the body score does not move. That separation is the point.",
+    options: { source: "synthetic:club-lost", degradation: { clubLostFromFrame: 74 } },
+  },
+  {
+    key: "noisy",
+    label: "Noisy detector",
+    purpose:
+      "15mm of Gaussian noise on every joint, every frame. What a real detector's jitter does to bone lengths before anything smooths it.",
+    options: { source: "synthetic:noisy", degradation: { noiseM: 0.015 } },
+  },
+  {
+    key: "messy",
+    label: "Everything at once",
+    purpose:
+      "Noise, two dropouts, two jumps and a lost club. Nothing in the pipeline should collapse; the score should simply be low and say why.",
+    options: {
+      source: "synthetic:messy",
+      degradation: {
+        noiseM: 0.012,
+        dropouts: [
+          { joint: "leftAnkle", startFrame: 30, length: 14 },
+          { joint: "rightElbow", startFrame: 95, length: 22 },
+        ],
+        jumps: [
+          { joint: "head", frame: 50, offsetM: 0.18 },
+          { joint: "leftKnee", frame: 110, offsetM: 0.22 },
+        ],
+        clubLostFromFrame: 100,
+      },
+    },
+  },
+];
+
+export const buildScenario = (scenario: Scenario): SyntheticSwing =>
+  generateSyntheticSwing(scenario.options);
