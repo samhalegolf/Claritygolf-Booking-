@@ -56,6 +56,7 @@ import {
 } from "../contracts";
 import { buildFrameConfidence, penalise, PENALTY_SCALES } from "../motion/confidence/confidence";
 import { estimateMass } from "../motion/mass/massModel";
+import { checkableBodies, checkMassAgainstShape } from "../motion/mass/massSanity";
 import { gaussian, makeRng, proportionsForHeight, type Proportions } from "./proportions";
 import {
   RIGHT_HANDED_SWING,
@@ -662,6 +663,19 @@ export const generateSyntheticSwing = (
       // tilted and nothing to correct.
       gravityTiltDeg: 0,
     },
+    /*
+     * Run on the fixture as well, where there is no camera to be wrong.
+     *
+     * Not for the camera's sake -- there isn't one -- but because the reading
+     * is a posture measurement too, and running it here is what surfaces this
+     * fixture's known flaw: its address leans the spine forward without
+     * pushing the hips back, so its mass genuinely sits at about 76% of the
+     * foot. Better on the readout than buried in a comment.
+     */
+    massSanity: (() => {
+      const checkable = checkableBodies(frames);
+      return checkable.length > 0 ? checkMassAgainstShape(checkable) : null;
+    })(),
     confidence: summariseSequence(frames),
     source: options.source ?? "synthetic:right-handed-swing",
     ballPosition: plane.ballPosition,

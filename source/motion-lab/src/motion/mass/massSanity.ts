@@ -54,7 +54,7 @@
  * degrees of tilt, and saying so is the honest answer.
  */
 
-import type { ClarityJoint, Unit, Vec3 } from "../../contracts";
+import type { ClarityFrame, ClarityJoint, MassReading, MassSanity, Vec3 } from "../../contracts";
 import {
   foreAftProfileOf,
   foreAftSlope,
@@ -63,60 +63,14 @@ import {
 } from "../../observe/foreAft";
 import { buildMassCloud } from "./massModel";
 
-/** The fore-aft mass reading for one body. */
-export interface MassReading {
-  /** Where the mass sits between the heel line (0) and the toe line (1). */
-  readonly footFractionUnit: number;
-  /**
-   * The same reading with every possible camera pitch removed.
-   *
-   * This is the mass position relative to the golfer's own stacked axis --
-   * what their BEND puts there, with any whole-body lean taken out along with
-   * the camera. It is not "where the mass really is"; it is the part of where
-   * the mass is that a camera cannot have invented.
-   */
-  readonly bendFractionUnit: number;
-  /** Height of the mass centre above the ankles. The lever a pitch works through. */
-  readonly massHeightM: number;
-  /** Heel to toe, metres. */
-  readonly footSpanM: number;
-}
-
-export interface MassSanity {
-  /** Planted frames the check ran over. */
-  readonly samples: number;
-  /** The median reading across those frames. */
-  readonly reading: MassReading;
-  /** Frames whose mass fell outside the feet, which a standing golfer's cannot. */
-  readonly impossibleFrames: number;
-  /**
-   * The camera pitches consistent with every planted frame, degrees.
-   * Unbounded ends are reported as +/- 90.
-   */
-  readonly pitchRangeDeg: readonly [number, number];
-  /**
-   * The smallest pitch inside that range, degrees. Zero whenever a level
-   * camera is possible -- which is most of the time, and is the point.
-   */
-  readonly minimumPitchDeg: number;
-  /** The reading after applying `minimumPitchDeg`. */
-  readonly correctedFootFractionUnit: number;
-  /**
-   * How far the BEND moved the mass across the clip, metres.
-   *
-   * Pitch-free twice over: the bend is pitch-free, and a range is a set of
-   * differences, which a constant pitch cancels out of anyway.
-   */
-  readonly bendRangeM: number;
-  /**
-   * How far the whole-body LEAN moved it, metres. Also pitch-free as a range,
-   * though its absolute value is not.
-   */
-  readonly leanRangeM: number;
-  readonly verdict: "consistent" | "corrected" | "irreconcilable" | "undetermined";
-  /** Confidence in the corrected reading, after everything above. */
-  readonly confidence: Unit;
-}
+/*
+ * `MassReading` and `MassSanity` live in `contracts/` rather than here.
+ *
+ * They cross the boundary -- the 3D Space and the debug panel read the
+ * verdict -- and `contracts/` may import nothing, so a type defined in this
+ * file could never be named from there. The shapes are pure data; the
+ * physics below is what stays in the Motion Layer.
+ */
 
 export interface MassSanityOptions {
   /**
@@ -314,3 +268,38 @@ export const checkMassAgainstShape = (
     confidence,
   };
 };
+
+/**
+ * The bodies in a sequence this check is allowed to read.
+ *
+ * ONLY FRAMES WHOSE FEET WERE ACTUALLY SEEN.
+ *
+ * A reconstructed foot is a guess about where a foot was, and the whole
+ * argument here rests on the feet being the one thing in the picture we can
+ * trust -- the support polygon is the yardstick the mass is measured against.
+ * Measuring an invented mass position against an invented foot would produce
+ * a number with no evidence anywhere in it, and it would look exactly like a
+ * real one.
+ *
+ * `constrained` is admitted alongside `observed`: the joint was seen, and the
+ * solver moved it to keep the body coherent. `reconstructed` and
+ * `extrapolated` are not, because nobody saw them.
+ */
+export const checkableBodies = (frames: readonly ClarityFrame[]): readonly JointLookup[] =>
+  frames
+    .filter(
+      (frame) =>
+        frame.mass !== null &&
+        FOOT_JOINTS.every((joint) => {
+          const source = frame.provenance.joints[joint].source;
+          return source === "observed" || source === "constrained";
+        })
+    )
+    .map((frame) => (joint: ClarityJoint) => frame.body.joints[joint]);
+
+const FOOT_JOINTS: readonly ClarityJoint[] = [
+  "leftHeel",
+  "rightHeel",
+  "leftToe",
+  "rightToe",
+];

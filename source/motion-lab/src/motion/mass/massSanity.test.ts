@@ -10,13 +10,15 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
-import type { ClarityFrame, ClarityJoint, Vec3 } from "../../contracts";
+import { distance, type ClarityFrame, type ClarityJoint, type Vec3 } from "../../contracts";
 import { lookupFrom, type JointLookup } from "../../observe/foreAft";
 import { anchorSequence } from "../../observe/anchor";
 import type { CameraObservationSequence, ObservationFrame } from "../../observe/observation";
 import { detectFromClarityFrames } from "../../observe/syntheticDetector";
 import { toCameraFrame } from "../../observe/toCameraFrame";
 import { generateSyntheticSwing } from "../../synthetic/syntheticSwing";
+import { passthroughSequence } from "../passthrough";
+import { reconstruct } from "../reconstruct/reconstruct";
 import { checkMassAgainstShape, readMass } from "./massSanity";
 
 const swing = generateSyntheticSwing();
@@ -262,5 +264,85 @@ test("a body missing any mass parcel yields no reading", () => {
     readMass((joint) => (joint === "leftElbow" ? undefined : first(joint))),
     null,
     "half a mass cloud is not a mass reading"
+  );
+});
+
+/* ------------------------- reaching the contract ----------------------- */
+
+test("the finished sequence carries the verdict, and nothing else has moved", () => {
+  /*
+   * The wiring test. The check runs on the reconstructed bodies and lands on
+   * `ClaritySequence` -- which is the only way the 3D Space or the readout can
+   * see it, since they consume the contract and nothing else.
+   *
+   * What it must NOT have done is change a coordinate. The correction is
+   * reported, not applied: the levelling that produced these positions lives
+   * in `observe/`, which may not import this layer, so applying it would mean
+   * re-levelling the whole sequence. That is a separate decision.
+   */
+  const build = (degrees: number) =>
+    reconstruct(
+      anchorSequence(buildCameraSequence(withCameraPitch(detectFromClarityFrames(swing.frames), degrees)))
+    ).sequence;
+
+  const level = build(0);
+  const tilted = build(5);
+
+  assert.ok(level.massSanity, "a clean clip should produce a verdict");
+  assert.equal(level.massSanity?.verdict, "consistent");
+  assert.equal(level.massSanity?.minimumPitchDeg, 0);
+
+  assert.equal(tilted.massSanity?.verdict, "corrected");
+  assert.ok((tilted.massSanity?.minimumPitchDeg ?? 0) > 1);
+
+  // The geometry is untouched: the tilted clip's joints are exactly where the
+  // anchoring left them, five degrees of error and all.
+  const observed = anchorSequence(
+    buildCameraSequence(withCameraPitch(detectFromClarityFrames(swing.frames), 5))
+  );
+  const frame = tilted.frames[0];
+  const anchorFrame = observed.frames[0];
+  for (const joint of ["leftAnkle", "leftHip", "head"] as const) {
+    const before = anchorFrame.joints[joint];
+    if (!before) continue;
+    assert.ok(
+      distance(frame.body.joints[joint], before.position as Vec3) < 0.05,
+      `${joint} moved ${(distance(frame.body.joints[joint], before.position as Vec3) * 1000).toFixed(0)}mm -- the check should report, not correct`
+    );
+  }
+});
+
+test("a clip with no observed feet reports no verdict rather than a reassuring one", () => {
+  const footless = reconstruct(
+    anchorSequence(
+      buildCameraSequence(
+        detectFromClarityFrames(swing.frames, {
+          dropouts: (["leftHeel", "rightHeel", "leftToe", "rightToe"] as const).map((joint) => ({
+            joint,
+            startFrame: 0,
+            length: swing.frames.length,
+          })),
+        })
+      )
+    )
+  ).sequence;
+
+  assert.equal(footless.massSanity, null, "invented feet must not be checked against");
+});
+
+test("the passthrough reaches the same verdict as the Motion Layer", () => {
+  // The check is about the camera and the golfer, not about how much
+  // reconstruction happened, so it should not care which layer produced the
+  // bodies.
+  const observed = anchorSequence(
+    buildCameraSequence(withCameraPitch(detectFromClarityFrames(swing.frames), 5))
+  );
+  const raw = passthroughSequence(observed);
+  const built = reconstruct(observed).sequence;
+
+  assert.equal(raw.massSanity?.verdict, built.massSanity?.verdict);
+  assert.ok(
+    Math.abs((raw.massSanity?.minimumPitchDeg ?? 0) - (built.massSanity?.minimumPitchDeg ?? 0)) < 0.5,
+    `passthrough proved ${raw.massSanity?.minimumPitchDeg.toFixed(2)}° and the Motion Layer ${built.massSanity?.minimumPitchDeg.toFixed(2)}°`
   );
 });

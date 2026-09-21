@@ -46,6 +46,7 @@ import {
 import type { WorldObservationSequence } from "../observe/observation";
 import { buildFrameConfidence, penalise, PENALTY_SCALES } from "./confidence/confidence";
 import { estimateMass } from "./mass/massModel";
+import { checkableBodies, checkMassAgainstShape } from "./mass/massSanity";
 import { buildPelvis, buildThorax } from "./body/structures";
 
 const EMPTY_STRUCTURE: RigidStructure = {
@@ -269,11 +270,17 @@ export const passthroughSequence = (
   const mean = (pick: (frame: ClarityFrame) => number) =>
     frames.length === 0 ? 0 : frames.reduce((sum, frame) => sum + pick(frame), 0) / frames.length;
 
+  // Run on the passthrough too, so the readout compares like with like: the
+  // check is about the camera and the golfer, not about how much
+  // reconstruction happened, and it should say the same thing either way.
+  const checkable = checkableBodies(frames);
+
   return {
     frames,
     fps: sequence.fps,
     bodyModel,
     anchor: sequence.anchor,
+    massSanity: checkable.length > 0 ? checkMassAgainstShape(checkable) : null,
     confidence: {
       overall: mean((frame) => frame.confidence.overall),
       components: {

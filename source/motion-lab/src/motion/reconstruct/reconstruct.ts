@@ -59,6 +59,7 @@ import {
 import type { WorldObservationSequence } from "../../observe/observation";
 import { buildFrameConfidence, penalise, PENALTY_SCALES } from "../confidence/confidence";
 import { estimateMass } from "../mass/massModel";
+import { checkableBodies, checkMassAgainstShape } from "../mass/massSanity";
 import { buildPelvis, buildThorax } from "../body/structures";
 import { fitCamera } from "../club/camera";
 import { estimateClub, type ClubFrameInput } from "../club/clubModel";
@@ -431,6 +432,17 @@ export const reconstruct = (
     )
   );
 
+  /*
+   * Last, because it reads the finished bodies.
+   *
+   * Nothing it returns is applied. The levelling that produced these
+   * coordinates lives in `observe/`, which may not import this layer, so a
+   * correction would have to re-level the whole sequence here -- a much
+   * larger change than reporting what the physics implies. Reported now,
+   * acted on later or never.
+   */
+  const checkable = checkableBodies(frames);
+
   return {
     bodyModel: model,
     stageCounts,
@@ -440,6 +452,7 @@ export const reconstruct = (
       bodyModel: model,
       anchor: observations.anchor,
       confidence: summarise(frames),
+      massSanity: checkable.length > 0 ? checkMassAgainstShape(checkable) : null,
       source: `clarity-motion-layer:${observations.detector}`,
     },
   };

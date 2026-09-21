@@ -469,7 +469,7 @@ export function LabApp() {
           {sequence && frame ? (
             <>
               <ConfidencePanel frame={frame} sequence={sequence} />
-              <MassPanel frame={frame} />
+              <MassPanel frame={frame} sequence={sequence} />
             </>
           ) : (
             <div className="panel">

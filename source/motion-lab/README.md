@@ -205,6 +205,16 @@ same way the profile does: the bend part is pitch-free. Over 10° of pitch the
 raw reading moves ~175mm and `bendFractionUnit` moves ~10mm. A real squat moves
 the bend; a camera pitch does not.
 
+**Reported, not applied.** The verdict rides on `ClaritySequence.massSanity` —
+the clip level, because a camera's pitch is one number for a whole clip — and
+the mass panel reads it. **No coordinate is corrected.** Applying the pitch
+would mean re-levelling the world, and the levelling lives in `observe/`, which
+may not import the Motion Layer; that is a separate decision, deliberately not
+taken in the pipeline. The check runs on the Motion Layer and the passthrough
+alike, and only over frames whose **feet the detector actually saw** — measuring
+an invented mass against an invented foot would produce a number with no
+evidence in it that looked exactly like a real one.
+
 ### The band that would make this sharp, and why it is not the default
 
 Narrowing "over the feet" to "near mid-foot" tightens the interval from ~15°

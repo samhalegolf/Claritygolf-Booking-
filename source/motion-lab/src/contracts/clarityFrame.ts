@@ -235,6 +235,86 @@ export interface MassEstimate {
 }
 
 /* ------------------------------------------------------------------ *
+ * Sanity of the fore-aft mass reading
+ * ------------------------------------------------------------------ */
+
+/**
+ * The fore-aft mass reading for one body, and the part of it a camera angle
+ * cannot have invented.
+ */
+export interface MassReading {
+  /** Where the mass sits between the heel line (0) and the toe line (1). */
+  readonly footFractionUnit: Unit;
+  /**
+   * The same reading with every possible camera pitch removed.
+   *
+   * The mass position relative to the golfer's own stacked axis -- what their
+   * BEND puts there, with any whole-body lean taken out along with the camera.
+   * It is not "where the mass really is"; it is the part of where the mass is
+   * that a camera cannot have invented.
+   */
+  readonly bendFractionUnit: number;
+  /** Height of the mass centre above the ankles. The lever a pitch works through. */
+  readonly massHeightM: Metres;
+  /** Heel to toe, metres. */
+  readonly footSpanM: Metres;
+}
+
+/**
+ * Whether the clip's fore-aft mass reading is physically possible, and what
+ * that proves about the camera.
+ *
+ * WHY THIS IS ON THE SEQUENCE AND NOT THE FRAME
+ *
+ * A camera's pitch is one number for a whole clip. Reporting it per frame
+ * would invite averaging it, or worse, correcting each frame by a different
+ * amount -- which would deform the swing rather than level the world.
+ *
+ * WHAT IT IS NOT
+ *
+ * Not a correction that has been applied. Every coordinate in the sequence is
+ * exactly as the anchoring left it. This says what the mass reading implies
+ * about the camera; acting on it is a separate decision, deliberately not
+ * taken here.
+ */
+export interface MassSanity {
+  /** Frames the check ran over: detected, feet observed, standing on both. */
+  readonly samples: number;
+  /** The median reading across those frames. */
+  readonly reading: MassReading;
+  /** Frames whose mass fell outside the feet, which a standing golfer's cannot. */
+  readonly impossibleFrames: number;
+  /**
+   * The camera pitches consistent with every one of those frames, degrees.
+   * Unbounded ends are reported as +/- 90.
+   */
+  readonly pitchRangeDeg: readonly [number, number];
+  /**
+   * The smallest pitch inside that range, degrees -- the least the camera can
+   * have been tilted given what the body did. Zero whenever a level camera is
+   * still possible, which is the common and correct answer.
+   */
+  readonly minimumPitchDeg: number;
+  /** What the reading becomes once `minimumPitchDeg` is allowed for. */
+  readonly correctedFootFractionUnit: number;
+  /**
+   * How far the BEND moved the mass across the clip, metres.
+   *
+   * Pitch-free twice over: the bend is pitch-free, and a range is a set of
+   * differences, which a constant pitch cancels out of anyway.
+   */
+  readonly bendRangeM: Metres;
+  /**
+   * How far the whole-body LEAN moved it, metres. Also pitch-free as a range,
+   * though its absolute value is not.
+   */
+  readonly leanRangeM: Metres;
+  readonly verdict: "consistent" | "corrected" | "irreconcilable" | "undetermined";
+  /** Confidence in the corrected reading, after everything above. */
+  readonly confidence: Unit;
+}
+
+/* ------------------------------------------------------------------ *
  * The frame
  * ------------------------------------------------------------------ */
 
@@ -287,6 +367,17 @@ export interface ClaritySequence {
   readonly bodyModel: BodyModel;
   readonly anchor: WorldFrameAnchor;
   readonly confidence: SequenceConfidence;
+  /**
+   * Whether the fore-aft mass reading is physically possible, and the least
+   * camera pitch that would explain it if not.
+   *
+   * Null when no frame in the clip was standing on two observed feet, which
+   * is a real state -- a clip that starts mid-swing has nothing to check
+   * against -- and not the same as "the reading is fine".
+   *
+   * Nothing in this sequence has been corrected for it. See `MassSanity`.
+   */
+  readonly massSanity: MassSanity | null;
   /** Free-text provenance of the source, for the debug panel. */
   readonly source: string;
 }
