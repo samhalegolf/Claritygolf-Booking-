@@ -250,14 +250,20 @@ const torsoCore = (key: InterpolatedKey, props: Proportions, hipY: number) => {
   const shoulderOffset = qRotate(thoraxQ, [props.shoulderHalfWidth, 0, 0]);
   const hipOffset = qRotate(pelvisQ, [props.hipHalfWidth, 0, 0]);
 
-  const neck = add(thoraxCentre, qRotate(thoraxQ, [0, props.neckY - props.shoulderY, 0]));
+  // The neck IS the shoulder midpoint, which is `thoraxCentre` by
+  // construction. That is not a simplification, it is the only definition a
+  // detector can support: BlazePose has no neck landmark, so `observe/`
+  // derives the neck as the midpoint of the shoulders. A fixture that placed
+  // it a few centimetres higher would be testing the pipeline against a
+  // definition the pipeline cannot produce.
+  const neck = thoraxCentre;
   // The head stays quieter than the thorax -- it is not rigidly welded to it.
   const headQ = spineOrientation(
     key.thoraxYaw * DEG * 0.35,
     key.spineTilt * DEG * 0.8,
     key.thoraxRoll * DEG * 0.4
   );
-  const head = add(neck, qRotate(headQ, [0, props.headY - props.neckY, 0]));
+  const head = add(neck, qRotate(headQ, [0, props.headY - props.shoulderY, 0]));
 
   return {
     pelvisCentre,

@@ -159,3 +159,14 @@ test("the Motion Layer does not reach into the renderer", () => {
       "never be shaped by what is convenient to draw."
   );
 });
+
+test("the observation layer does not reach into reconstruction or rendering", () => {
+  assertLayerImportsOnly(
+    "observe",
+    ["contracts", "lifted", "@mediapipe/tasks-vision", ...BASE_PACKAGES],
+    "observe/ is the evidence layer. It reads a detector and relabels what it said.\n" +
+      "It must not import motion/ or space3d/: the moment observation starts \n" +
+      "reconstructing, the distinction between what was seen and what was worked out\n" +
+      "stops being recoverable, and that distinction is the whole point of provenance."
+  );
+});

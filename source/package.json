@@ -41,6 +41,7 @@
     "@capacitor/android": "^8.5.0",
     "@capacitor/cli": "^8.5.0",
     "@capacitor/ios": "^8.5.0",
+    "@mediapipe/tasks-vision": "^1.0.1",
     "@types/node": "^26.1.1",
     "@types/pg": "^8.11.10",
     "@types/react": "^19.2.17",

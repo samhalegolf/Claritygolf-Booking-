@@ -378,3 +378,91 @@ body {
     min-height: 420px;
   }
 }
+
+/* --------------------------- video source ------------------------- */
+
+.source-picker {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.stage-single {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.stage-single > .stage-canvas {
+  flex: 1;
+}
+
+.stage-split {
+  display: grid;
+  /* Two equal halves that can both shrink: `minmax(0, 1fr)` rather than 1fr,
+     or the video's intrinsic size pushes the grid wider than the window. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  flex: 1;
+  min-height: 0;
+}
+
+.video-stage {
+  position: relative;
+  background: #000;
+  border: 1px solid var(--lab-border);
+  border-radius: var(--lab-radius);
+  overflow: hidden;
+  align-self: center;
+  width: 100%;
+  max-height: 100%;
+}
+
+.video-stage video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.raw-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.stage-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--lab-text-dim);
+  font-size: 13px;
+}
+
+.panel-error {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(255, 138, 101, 0.12);
+  border: 1px solid rgba(255, 138, 101, 0.4);
+  color: #ffb59c;
+  font-size: 12px;
+  line-height: 1.45;
+  /* Detector errors can be long single-token URLs; let them wrap. */
+  overflow-wrap: anywhere;
+}
+
+.chip:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+@media (max-width: 1100px) {
+  .stage-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

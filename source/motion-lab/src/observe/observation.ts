@@ -18,7 +18,7 @@
  */
 
 import type { ClarityJoint } from "../contracts/joints";
-import type { TimestampMs, Unit } from "../contracts/units";
+import type { TimestampMs, Unit, WorldFrameAnchor } from "../contracts/units";
 
 /** One landmark as the detector reported it. No cleaning, no filling. */
 export interface RawLandmark {
@@ -67,14 +67,34 @@ export interface ObservationFrame {
 }
 
 /**
- * Detector output with landmarks renamed into Clarity's vocabulary and
- * rotated into Clarity world space, but otherwise untouched.
+ * Detector output with landmarks renamed into Clarity's vocabulary, but
+ * otherwise untouched.
  *
- * This is the last type before the Motion Layer. It has been RELABELLED, not
- * reconstructed: gaps are still gaps, jumps are still jumps, and a joint the
- * detector never saw is absent from the record rather than filled in.
+ * RELABELLED, NOT RECONSTRUCTED. Gaps are still gaps, jumps are still jumps,
+ * and a joint the detector never saw is ABSENT from the record rather than
+ * filled in. Anything cleverer belongs to the Motion Layer, where it can be
+ * recorded in provenance and paid for in confidence. Doing it here would hide
+ * it.
+ *
+ * THE TWO SPACES
+ *
+ * Observations arrive in the detector's frame and have to reach Clarity's.
+ * Those are different spaces, and conflating them is the classic way to spend
+ * an afternoon debugging an upside-down or mirrored body. So they are
+ * different TYPES, and the compiler keeps them apart:
+ *
+ *   CameraObservationFrame   Y-up, metres, origin at the hip midpoint, yaw
+ *                            still whatever the camera happened to be. One
+ *                            step from the detector.
+ *
+ *   WorldObservationFrame    Clarity world space: Y-up, metres, origin on the
+ *                            ground under the support centre, +X along the
+ *                            measured stance line. Anchored.
+ *
+ * The Motion Layer accepts only the second. Handing it the first is a
+ * compile error rather than a body lying on its side.
  */
-export interface NamedObservationFrame {
+interface NamedObservationFrameBase {
   readonly index: number;
   readonly timestampMs: TimestampMs;
   readonly detected: boolean;
@@ -86,18 +106,34 @@ export interface NamedObservationFrame {
   readonly club: ClubObservation | null;
 }
 
+/** One step from the detector: Y-up metres, hip-centred, camera yaw. */
+export interface CameraObservationFrame extends NamedObservationFrameBase {
+  readonly space: "camera";
+}
+
+/** Anchored into Clarity world space. The Motion Layer's input. */
+export interface WorldObservationFrame extends NamedObservationFrameBase {
+  readonly space: "world";
+}
+
+export type NamedObservationFrame = CameraObservationFrame | WorldObservationFrame;
+
 export interface ObservedJoint {
-  /** Clarity world space: metres, Y-UP, ground-plane origin. */
+  /** Metres, Y-UP. Which origin and yaw depends on the frame's `space`. */
   readonly position: readonly [number, number, number];
   /** Normalised image position, Y DOWN, for the video overlay. */
   readonly image: readonly [number, number];
   readonly visibility: Unit;
   readonly presence: Unit;
+  /**
+   * How many landmarks were combined for this joint. 1 for a direct mapping,
+   * more for a midpoint. A derived joint is only as good as its worst input,
+   * and `visibility` already reflects that -- this says it was derived at all.
+   */
+  readonly sourceCount: number;
 }
 
-/** A whole take, as observed. The Motion Layer's input. */
-export interface ObservationSequence {
-  readonly frames: readonly NamedObservationFrame[];
+interface ObservationSequenceBase {
   readonly fps: number;
   readonly width: number;
   readonly height: number;
@@ -105,3 +141,18 @@ export interface ObservationSequence {
   /** Which detector and model produced this, for the debug panel. */
   readonly detector: string;
 }
+
+/** A whole take, straight off the detector. */
+export interface CameraObservationSequence extends ObservationSequenceBase {
+  readonly space: "camera";
+  readonly frames: readonly CameraObservationFrame[];
+}
+
+/** A whole take, anchored. The Motion Layer's input. */
+export interface WorldObservationSequence extends ObservationSequenceBase {
+  readonly space: "world";
+  readonly frames: readonly WorldObservationFrame[];
+  readonly anchor: WorldFrameAnchor;
+}
+
+export type ObservationSequence = CameraObservationSequence | WorldObservationSequence;

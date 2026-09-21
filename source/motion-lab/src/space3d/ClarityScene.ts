@@ -348,17 +348,31 @@ export class ClarityScene {
       const from = frame.body.joints[bone.from];
       const to = frame.body.joints[bone.to];
       const offset = index * 6;
-      bonePositions[offset] = from[0];
-      bonePositions[offset + 1] = from[1];
-      bonePositions[offset + 2] = from[2];
-      bonePositions[offset + 3] = to[0];
-      bonePositions[offset + 4] = to[1];
-      bonePositions[offset + 5] = to[2];
+
+      const fromSource = frame.provenance.joints[bone.from].source;
+      const toSource = frame.provenance.joints[bone.to].source;
+
+      // A bone touching a joint that was never located has no endpoint to be
+      // drawn to. Collapsing it to a zero-length segment renders nothing,
+      // which is the honest picture: an absent limb, not a limb stretched to
+      // wherever the fallback position happened to be. Skipping the write
+      // instead would leave last frame's bone on screen.
+      if (fromSource === "missing" || toSource === "missing") {
+        for (let axis = 0; axis < 3; axis += 1) {
+          bonePositions[offset + axis] = from[axis];
+          bonePositions[offset + 3 + axis] = from[axis];
+        }
+      } else {
+        bonePositions[offset] = from[0];
+        bonePositions[offset + 1] = from[1];
+        bonePositions[offset + 2] = from[2];
+        bonePositions[offset + 3] = to[0];
+        bonePositions[offset + 4] = to[1];
+        bonePositions[offset + 5] = to[2];
+      }
 
       // A bone is only as trustworthy as its worse end, so it takes the
       // colour of whichever joint required more reconstruction.
-      const fromSource = frame.provenance.joints[bone.from].source;
-      const toSource = frame.provenance.joints[bone.to].source;
       const colour = colourByProvenance
         ? PROVENANCE_COLOURS[worseSource(fromSource, toSource)]
         : PALETTE.bone;
