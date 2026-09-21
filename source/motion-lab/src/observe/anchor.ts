@@ -47,8 +47,6 @@ import {
   qFromUnitVectors,
   qMultiply,
   qRotate,
-  scale,
-  sub,
   type Quat,
 } from "../contracts";
 import type {
@@ -366,42 +364,125 @@ interface Levelling {
   readonly samples: number;
 }
 
+/**
+ * How much of a reference must lie across the image to be worth reading.
+ *
+ * The angle is measured over this length, so it sets the precision: 14mm of
+ * landmark noise across 150mm is five degrees on one frame, which averages
+ * down to well under one over a few hundred. Below it the measurement is not
+ * merely noisy -- a stance line pointing at the camera carries no information
+ * about the roll at all, because turning the image about the lens axis cannot
+ * move a vector lying along it. Measured on a real down-the-line clip the
+ * stance line had 72mm of image extent, and the angle it produced was the
+ * camera's PITCH wearing the roll's name.
+ */
+const MIN_IMAGE_EXTENT_M = 0.15;
+
 const estimateLevelling = (
   frames: readonly CameraObservationFrame[],
   prior: Quat = [0, 0, 0, 1]
 ): Levelling => {
   const orient = (point: Vec3): Vec3 => qRotate(prior, point);
-  /*
-   * Averaged over every flat-footed frame, for the same reason the yaw is:
-   * planted feet do not move, so each frame is another measurement of one
-   * line, and one frame's detection noise on ankles 400mm apart is worth
-   * about two degrees all by itself.
-   *
-   * Flatness is judged on the RAW coordinates here, before any levelling,
-   * which is mildly circular -- but a roll mixes x into y and the heel-to-toe
-   * vector is almost entirely z, so the test barely notices a tilt it is
-   * being used to measure.
-   */
-  const candidates: { direction: Vec3; flatness: number }[] = [];
   const planted = findPlanted(frames, orient);
+
+  /*
+   * ONLY LINES THAT ARE REALLY HORIZONTAL, WHICH MEANS ONLY THE STANCE.
+   *
+   * The obvious second reference is each foot's heel-to-toe line: horizontal
+   * for the same reason as the stance, and square to it, so it would lie
+   * across the image exactly when the stance points at the camera. It was
+   * built that way and it does not work, because it is not horizontal.
+   *
+   * A detector's HEEL sits up on the calcaneus and its toe landmark sits at
+   * the ball, near the ground. Measured on two real clips, the toe came out
+   * 45 to 69mm BELOW the heel over a foot only 120mm long -- a line sloping
+   * about 25 degrees, on every frame of both. The fixture has both points on
+   * the ground, which is why the idea survived until real footage was tried.
+   *
+   * Averaging the two feet cancels their flare but not this, because it
+   * leans the same way on both. So the feet are left out, and when the
+   * stance line is the only reference and it is pointing at the camera, the
+   * answer is that the roll cannot be measured -- not a number derived from
+   * a line that slopes.
+   */
+  const references: { angleRad: number; extentM: number; flatness: number }[] = [];
 
   for (let entry = 0; entry < planted.indices.length; entry += 1) {
     const frame = frames[planted.indices[entry]];
-    const left = frame.joints.leftAnkle;
-    const right = frame.joints.rightAnkle;
-    if (!left || !right) continue;
+    const flatness = planted.flatness[entry];
 
-    // NOT ground-projected. The vertical component IS the tilt; projecting it
-    // away is exactly how this went unmeasured in the first place.
-    const offset = sub(orient(right.position as Vec3), orient(left.position as Vec3));
-    if (Math.hypot(...offset) < 1e-4) continue;
-    candidates.push({
-      direction: normalise(offset),
-      flatness: planted.flatness[entry],
-    });
+    const vectors: Vec3[] = [];
+    const between = (
+      a: ObservedJoint | undefined,
+      b: ObservedJoint | undefined
+    ): Vec3 | null => {
+      if (!a || !b) return null;
+      const from = orient(a.position as Vec3);
+      const to = orient(b.position as Vec3);
+      return [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
+    };
+
+    const stance = between(frame.joints.leftAnkle, frame.joints.rightAnkle);
+    if (stance) vectors.push(stance);
+
+    /*
+     * Heel-to-heel and toe-to-toe look like two more measurements of the same
+     * line, and they were tried as such. They are only parallel to the stance
+     * when the feet are flared alike, and golfers flare the lead foot out far
+     * more than the trail. On this fixture the mismatch biased the answer by
+     * 0.4 degrees at a hard angle -- small, but a bias rather than noise, so
+     * averaging more frames would never remove it.
+     */
+
+    for (const delta of vectors) {
+      /*
+       * READ FROM THE IMAGE PLANE ONLY -- x and y, never z.
+       *
+       * This is the whole correction, and it is exact rather than a
+       * mitigation. A roll of phi turns a horizontal vector's in-plane part
+       * from (a, 0) into (a cos phi, a sin phi), so phi is atan2(y, x) and
+       * the depth component never enters. Roll about the optical axis cannot
+       * move a vector along that axis, so there is nothing there to read.
+       *
+       * The previous version measured the angle against the FULL 3D length,
+       * which drags the depth component in -- and a detector's depth is the
+       * axis it resolves worst. Measured on a real down-the-line clip, where
+       * the stance line lies 99% along depth and the depth axis is compressed
+       * by about half, that inflated the roll to 13.1 degrees against 6.7 for
+       * the same vector uncompressed. Worse than inflated: down the line the
+       * stance line does not see the roll AT ALL and instead reads the
+       * camera's PITCH, so the old estimate was not a noisy roll but a
+       * different angle entirely.
+       */
+      const dx = delta[0];
+      const dy = delta[1];
+      // Oriented toward +x so every reference's angle clusters about zero
+      // rather than splitting into two groups 180 degrees apart.
+      const [ox, oy] = dx >= 0 ? [dx, dy] : [-dx, -dy];
+      /*
+       * The extent is the HORIZONTAL part alone, not the length of the
+       * projection.
+       *
+       * The angle is atan2(y, x), and what makes that precise is x -- the
+       * baseline the rise is measured against. Including y would let the
+       * rise itself pass for length, which is exactly the case that has to
+       * be rejected: square to the stance, twenty degrees of camera pitch
+       * gives the stance line a large VERTICAL extent in the image and no
+       * horizontal one at all, and every millimetre of it is pitch.
+       */
+      const extentM = ox;
+      /*
+       * A reference pointing at the camera has no image extent to measure an
+       * angle over, and atan2 on two small noisy numbers returns a confident
+       * nonsense. Dropping it is the right answer: down the line the stance
+       * line genuinely carries no information about the roll.
+       */
+      if (extentM < MIN_IMAGE_EXTENT_M) continue;
+      references.push({ angleRad: Math.atan2(oy, ox), extentM, flatness });
+    }
   }
 
-  if (candidates.length === 0) {
+  if (references.length === 0) {
     return { rotation: prior, tiltDeg: 0, samples: 0 };
   }
 
@@ -418,43 +499,50 @@ const estimateLevelling = (
    * feet planted throughout loses nothing, and one where the golfer is
    * shuffling keeps only the moments they were still.
    */
-  candidates.sort((a, b) => a.flatness - b.flatness);
-  const directions = candidates
-    .slice(0, Math.max(1, Math.ceil(candidates.length / 2)))
-    .map((entry) => entry.direction);
-  const samples = directions.length;
+  references.sort((a, b) => a.flatness - b.flatness);
+  const kept = references.slice(0, Math.max(1, Math.ceil(references.length / 2)));
 
   /*
-   * The MEDIAN direction, not the mean.
+   * The WEIGHTED MEDIAN angle, weighted by image extent.
    *
-   * "Both feet flat" admits a range: a heel a centimetre off the ground still
-   * passes, and that lifts one ankle enough to tilt the stance line by nearly
-   * two degrees on its own. A mean lets those frames pull the estimate; the
-   * median simply does not see them, because most of a swing has both heels
-   * genuinely down. Measured, it halves the error on a perfectly level clip.
+   * Median for the same reason as before: a heel a centimetre off the ground
+   * still passes the flatness test and tilts its line by nearly two degrees,
+   * and a mean lets those frames pull the estimate.
+   *
+   * Weighted because the references are not equally good. The angular error
+   * from a fixed position error falls as one over the length the angle is
+   * measured across, so the variance falls as one over the length SQUARED --
+   * which is the weight, and it is inverse-variance weighting rather than a
+   * preference. A 450mm stance line seen across the image is worth about a
+   * dozen 130mm feet, so face-on the feet barely register and the answer is
+   * the stance line's, as it was before.
+   *
+   * The weight falls to nothing exactly as a reference turns to point at the
+   * camera, which is what makes one piece of code right face-on and down the
+   * line without being told which it is looking at.
    */
-  const medianOf = (axis: 0 | 1 | 2) => {
-    const values = directions.map((d) => d[axis]).sort((a, b) => a - b);
-    return values[Math.floor(values.length / 2)];
-  };
-  const across = normalise([medianOf(0), medianOf(1), medianOf(2)]);
-  const assumedUp: Vec3 = [0, 1, 0];
-
-  // The smallest change to "up" that makes it perpendicular to the stance.
-  const corrected = normalise(sub(assumedUp, scale(across, dot(assumedUp, across))));
-  if (Math.hypot(...corrected) < 1e-6) {
-    // The stance line is parallel to the assumed vertical, which means the
-    // body is not being seen as a body. Nothing sensible to do.
-    return { rotation: prior, tiltDeg: 0, samples };
+  const sorted = [...kept].sort((a, b) => a.angleRad - b.angleRad);
+  const weightOf = (r: { extentM: number }) => r.extentM * r.extentM;
+  const total = sorted.reduce((sum, r) => sum + weightOf(r), 0);
+  let running = 0;
+  let angleRad = sorted[sorted.length - 1].angleRad;
+  for (const reference of sorted) {
+    running += weightOf(reference);
+    if (running >= total / 2) {
+      angleRad = reference.angleRad;
+      break;
+    }
   }
 
-  // Composed with whatever was already applied, so a second pass refines the
-  // first rather than replacing it.
-  const rotation = qMultiply(qFromUnitVectors(corrected, assumedUp), prior);
-  const total = qRotate(rotation, [0, 1, 0]);
-  const tiltRad = Math.acos(Math.min(1, Math.max(-1, dot(normalise(total), assumedUp))));
+  const assumedUp: Vec3 = [0, 1, 0];
+  // Undo the roll: a level camera has its horizontals at zero.
+  const corrected = normalise([-Math.sin(angleRad), Math.cos(angleRad), 0]);
 
-  return { rotation, tiltDeg: (tiltRad * 180) / Math.PI, samples };
+  const rotation = qMultiply(qFromUnitVectors(corrected, assumedUp), prior);
+  const total3 = qRotate(rotation, [0, 1, 0]);
+  const tiltRad = Math.acos(Math.min(1, Math.max(-1, dot(normalise(total3), assumedUp))));
+
+  return { rotation, tiltDeg: (tiltRad * 180) / Math.PI, samples: kept.length };
 };
 
 export const anchorSequence = (

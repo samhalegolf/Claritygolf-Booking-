@@ -404,13 +404,44 @@ detector's depth axis is compressed by roughly half: face-on the stance lies
 across the image and measures right; down the line it lies along depth and
 halves.
 
-**Which breaks the levelling down the line.** `gravityTiltDeg` is measured from
-the ankle-to-ankle line, and on that clip the line lies **99% along depth**. A
-depth axis compressed by half shrinks the horizontal part of that vector while
-leaving the vertical part alone, so the apparent roll roughly doubles: it read
-**13.1°**, against **6.7°** for the same vector with depth uncompressed. That is
-a real limitation of anatomical levelling on down-the-line footage, not a bad
-clip, and it is not yet fixed.
+### Levelling down the line: the answer is that you cannot
+
+`gravityTiltDeg` is measured from the ankle-to-ankle line, and square to the
+stance that line points **at the camera** — 99% along depth on the real clip.
+It then carries no information about the roll at all (turning the image about
+the lens axis cannot move a vector lying along it) and what it *does* carry is
+the camera's **pitch**, which a rotation about x tips straight into its y. So
+the old estimator wasn't returning a noisy roll; it returned a different angle
+and corrected the world by it — **13.1°, of which none was roll.**
+
+Two fixes, one of which failed and is worth recording:
+
+**The angle is now read from the image plane alone** — `atan2(dy, dx)`, never
+the 3D length. A roll φ turns a horizontal vector's in-plane part from `(a, 0)`
+to `(a cos φ, a sin φ)`, so depth never enters and the compression that was
+inflating the old reading cannot reach it. The extent that gates and weights
+each reference is the **horizontal** part only: 20° of pitch square-on gives
+the stance line a large *vertical* image extent, and every millimetre of it is
+pitch.
+
+**The foot line does not work.** Each foot's heel-to-toe line should have been
+the perfect second reference — horizontal, square to the stance, across the
+image exactly when the stance points away. It was built, and real footage
+killed it: a detector's heel landmark sits up on the calcaneus and its toe
+landmark sits at the ball, so the line **slopes**. Measured on two clips, the
+toe came out **45–69 mm below the heel** over a foot 120 mm long — about 25°,
+on every frame of both. The fixture puts both on the ground, which is why the
+idea survived until there was real video to try it on.
+
+So with no reference that is both horizontal and across the image, the roll is
+declined. On the real down-the-line clip `gravityTiltIsMeasured` is now
+**false** and nothing is applied — and the heel–toe reading it had been
+corrupting comes back to **47% of foot** with confidence 0.67, where the bogus
+roll had put it at −7%.
+
+The stance line is used for as long as it has 150 mm of horizontal image
+extent, which is a length rather than a yaw — so a wide stance survives further
+round than a narrow one, and that falls out instead of being special-cased.
 
 ### In the video path
 

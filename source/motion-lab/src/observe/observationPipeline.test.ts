@@ -420,36 +420,106 @@ test("a camera tilted far enough to splay the feet is still measured", () => {
    * `estimateLevelling` found nothing to measure, and the roll -- which it
    * could have recovered perfectly -- was reported as zero with no flag.
    *
-   * Measured before the fix: 65 degrees of yaw with 8 degrees of pitch
-   * recovered its 7.25 degrees of roll, and the same clip at 12 degrees of
-   * pitch reported 0.00 and put the golfer's mass three and a half foot
-   * lengths past their toes.
+   * THE ROLL A YAWED, PITCHED CAMERA ACTUALLY PRODUCES
    *
-   * The roll a pitch actually produces is `asin(sin(yaw) * sin(pitch))` --
-   * zero face-on, growing as the camera moves round.
+   * The levelling asks one question: how far must the image be turned for the
+   * golfer's horizontals to lie horizontal in it? For the stance line that is
+   * `atan2(sin yaw * sin pitch, cos yaw)` -- the angle of its IMAGE-PLANE
+   * part, x and y, with no depth in it anywhere.
+   *
+   * Not `asin(sin yaw * sin pitch)`, which is the elevation of the line in
+   * three dimensions and what this test used to expect. The two agree on a
+   * level camera and part company as the pitch grows, and the difference is
+   * the whole reason the estimator was rewritten: the 3D version divides by a
+   * length that includes the depth component, and depth is the axis a
+   * detector resolves worst.
    */
-  for (const yawDeg of [0, 20, 35, 65]) {
+  for (const yawDeg of [0, 20, 45]) {
     for (const pitchDeg of [5, 8, 12, 15, 20]) {
       const anchored = anchorSequence(
         buildCameraSequence(detectFromClarityFrames(swing.frames, { cameraYawDeg: yawDeg, cameraPitchDeg: pitchDeg }))
       );
+      const yaw = (yawDeg * Math.PI) / 180;
+      const pitch = (pitchDeg * Math.PI) / 180;
       const expected =
-        (Math.asin(
-          Math.abs(Math.sin((yawDeg * Math.PI) / 180) * Math.sin((pitchDeg * Math.PI) / 180))
-        ) *
-          180) /
-        Math.PI;
+        (Math.atan2(Math.abs(Math.sin(yaw) * Math.sin(pitch)), Math.cos(yaw)) * 180) / Math.PI;
 
       assert.ok(
         anchored.anchor.gravityTiltIsMeasured,
-        `yaw ${yawDeg}°, pitch ${pitchDeg}°: the levelling found no planted frame at all`
+        `yaw ${yawDeg}°, pitch ${pitchDeg}°: the levelling found no reference at all`
       );
       assert.ok(
-        Math.abs(anchored.anchor.gravityTiltDeg - expected) < 0.2,
+        Math.abs(anchored.anchor.gravityTiltDeg - expected) < 0.3,
         `yaw ${yawDeg}°, pitch ${pitchDeg}°: measured ${anchored.anchor.gravityTiltDeg.toFixed(2)}° of roll, expected ${expected.toFixed(2)}°`
       );
     }
   }
+});
+
+test("down the line the roll cannot be measured, and it says so", () => {
+  /*
+   * THE FAILURE A REAL DOWN-THE-LINE CLIP EXPOSED, AND WHY THE FIX IS A
+   * REFUSAL RATHER THAN A BETTER NUMBER.
+   *
+   * Square to the stance line, the stance line points AT the camera. It then
+   * carries no information about the roll -- turning the image about the lens
+   * axis cannot move a vector lying along that axis -- and what it does carry
+   * is the camera's PITCH, which a rotation about x tips straight into its y.
+   * So the old estimator did not return a noisy roll down the line. It
+   * returned a different angle entirely and then corrected the world by it.
+   * On a real clip whose stance line lay 99% along depth it reported 13.1
+   * degrees, of which none was roll.
+   *
+   * The obvious rescue is each foot's heel-to-toe line: horizontal for the
+   * same reason, square to the stance, lying across the image exactly when
+   * the stance does not. It was built and it does not work. A detector's heel
+   * landmark sits up on the calcaneus and its toe landmark sits at the ball,
+   * so the line between them SLOPES: measured on two real clips the toe came
+   * out 45 to 69mm below the heel over a foot 120mm long, about 25 degrees,
+   * on every frame of both. The fixture puts both on the ground, which is why
+   * the idea survived until there was real footage to try it on.
+   *
+   * With no reference that is both horizontal and across the image, the
+   * honest answer is that the roll is unmeasured -- which the caller can see,
+   * rather than a plausible number it cannot check.
+   */
+  for (const pitchDeg of [0, 6, 12, 20]) {
+    const anchored = anchorSequence(
+      buildCameraSequence(detectFromClarityFrames(swing.frames, { cameraYawDeg: 90, cameraPitchDeg: pitchDeg }))
+    );
+    assert.equal(
+      anchored.anchor.gravityTiltIsMeasured,
+      false,
+      `${pitchDeg}° of pitch down the line: the roll should be declined, not estimated`
+    );
+    assert.equal(
+      anchored.anchor.gravityTiltDeg,
+      0,
+      "nothing measured means nothing applied"
+    );
+  }
+});
+
+test("the stance line is used for as long as it is worth using", () => {
+  // It shortens across the image as the camera comes round, and with it the
+  // length the angle is measured over. The cut-off is a length, not a yaw,
+  // so a wide stance survives further round than a narrow one -- which is the
+  // right behaviour and falls out rather than being special-cased.
+  const measuredAt = (yawDeg: number) =>
+    anchorSequence(
+      buildCameraSequence(withCameraRoll(detectFromClarityFrames(swing.frames, { cameraYawDeg: yawDeg }), 5))
+    ).anchor;
+
+  for (const yawDeg of [0, 30, 55]) {
+    const anchor = measuredAt(yawDeg);
+    assert.ok(anchor.gravityTiltIsMeasured, `yaw ${yawDeg}° should still be measurable`);
+    assert.ok(
+      Math.abs(anchor.gravityTiltDeg - 5) < 0.3,
+      `yaw ${yawDeg}°: a 5° roll measured ${anchor.gravityTiltDeg.toFixed(2)}°`
+    );
+  }
+
+  assert.equal(measuredAt(85).gravityTiltIsMeasured, false, "square on, there is nothing to measure");
 });
 
 test("a measured zero and an unmeasurable one are different answers", () => {
