@@ -4,8 +4,24 @@
     {
       "name": "clarity-dev",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "source", "run", "dev"],
+      "runtimeArgs": [
+        "--prefix",
+        "source",
+        "run",
+        "dev"
+      ],
       "port": 5173
+    },
+    {
+      "name": "motion-lab",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "source",
+        "run",
+        "dev:lab"
+      ],
+      "port": 5180
     }
   ]
 }

@@ -1,0 +1,204 @@
+/**
+ * Units and frames of reference.
+ *
+ * Stated once here and relied on by every layer. If you find yourself
+ * wondering "is this metres or normalised?" the answer is in this file, and
+ * if the answer isn't here then the value crossing that boundary is a bug.
+ *
+ * WORLD SPACE (everything inside a ClarityFrame)
+ *
+ *   - Right-handed, Y-up, metres.
+ *   - Y is vertical, opposing gravity. The ground plane is Y = 0.
+ *   - The origin sits on the ground plane beneath the reference support
+ *     centre (see `WorldFrameAnchor`), so a frame's coordinates are relative
+ *     to where the golfer was standing, not to where the camera happened to
+ *     be.
+ *   - X and Z are fixed by the measured stance line, not by a target. See
+ *     `WorldFrameAnchor` below for why that distinction matters.
+ *
+ * OBSERVATION SPACE (everything a detector produces)
+ *
+ *   - Image coordinates are normalised 0..1, origin top-left, Y DOWN.
+ *   - World-landmark coordinates from MediaPipe are metres, hip-centred,
+ *     Y DOWN, and are NOT in the Clarity world frame.
+ *
+ * The Y-axis flip between those two is the single most common source of
+ * upside-down reconstructions. It is handled in exactly one place --
+ * `observe/toObservationFrame.ts` -- and nowhere else.
+ */
+
+/** Metres. */
+export type Metres = number;
+
+/** Milliseconds from the start of the source media. */
+export type TimestampMs = number;
+
+/** A unit interval, 0..1. Confidences and normalised ratios use this. */
+export type Unit = number;
+
+/** A point or vector in Clarity world space. Metres, Y-up, right-handed. */
+export type Vec3 = readonly [x: number, y: number, z: number];
+
+/** A rotation, as a quaternion in (x, y, z, w) order to match three.js. */
+export type Quat = readonly [x: number, y: number, z: number, w: number];
+
+export const ZERO_VEC3: Vec3 = [0, 0, 0];
+export const IDENTITY_QUAT: Quat = [0, 0, 0, 1];
+
+/**
+ * How Clarity world space was pinned to the golfer.
+ *
+ * The plan's rule is that reconstruction must not encode assumptions about
+ * what a golf swing looks like. A coordinate convention is not such an
+ * assumption -- but "+X points at the target" would be, because it requires
+ * knowing where the target is, which the video does not tell us.
+ *
+ * So the axes are derived from something we actually measure: the line
+ * through the two feet at the anchor frame.
+ *
+ *   +X  along the stance line, from the left foot toward the right foot
+ *   +Y  up
+ *   +Z  X cross Y -- which points BEHIND the golfer, toward their heels.
+ *       Their toes point along -Z.
+ *
+ * THAT LAST SIGN IS NOT A TYPO, AND IT USED TO BE WRONG HERE
+ *
+ * It reads backwards, which is exactly why it was documented backwards for
+ * so long. The mnemonic is East-North-Up: E cross N is Up, so E cross U is
+ * SOUTH. Right cross up points behind you, not in front.
+ *
+ * The cost of the old wording was not theoretical. The synthetic fixture was
+ * built to match it, so the fixture and this file agreed with each other and
+ * the whole suite passed while describing a mirror image of a human. Real
+ * footage disagreed the first time it was tried: MediaPipe on a face-on clip
+ * put the left ankle at image x 0.595 against the right at 0.398 -- correct
+ * for a golfer facing the lens -- with the toes toward the camera, giving
+ * `dot(R x U, toes)` of -0.996 where the fixture gave +0.993.
+ *
+ * Anything that needs to know which way is forward should MEASURE it from
+ * the feet rather than assume it from this axis. See `observe/foreAft`.
+ *
+ * Camera presets are then defined against these measured axes rather than
+ * against an assumed target direction. "Face-on" means looking down -Z at
+ * the stance line; it does not mean the golfer is aiming anywhere in
+ * particular.
+ */
+export interface WorldFrameAnchor {
+  /** The frame index whose stance defined the axes. */
+  readonly anchorFrameIndex: number;
+  /** Stance width at the anchor frame, metres, ankle to ankle. */
+  readonly stanceWidthM: Metres;
+  /**
+   * True when the anchor was chosen from a genuinely still, two-feet-visible
+   * frame. False means the axes were pinned from the best available frame and
+   * every world coordinate inherits that doubt.
+   */
+  readonly anchorIsStable: boolean;
+  /**
+   * How far the camera was tilted, in degrees, as measured from the golfer's
+   * own stance and corrected for.
+   *
+   * WHY THIS IS NOT TAKEN FROM THE IMAGE
+   *
+   * Nothing says a phone on a tripod is level, and a detector's world
+   * landmarks inherit whatever tilt it had: their "down" is the image's down,
+   * not gravity's. Assuming the two agree is assuming something nobody
+   * checked.
+   *
+   * It matters more than it sounds. The ground HEIGHT barely moves under
+   * tilt, so the reconstruction looks fine -- but every signal that compares
+   * a position at height h against the ground shifts by h·tan(tilt). Measured
+   * on a clip tilted two degrees, a balanced 47/53 address read as 38/62, and
+   * at five degrees as 24/76. A golfer who is square appears to be leaning on
+   * their trail foot.
+   *
+   * So it is measured from anatomy instead: the line between the ankles is
+   * horizontal when both feet are flat on the ground, and that is a fact
+   * about the golfer rather than about the camera.
+   */
+  readonly gravityTiltDeg: number;
+  /**
+   * Whether `gravityTiltDeg` was measured at all.
+   *
+   * False means no frame in the clip had the golfer standing on both feet, so
+   * there was no horizontal line to measure against and the world is level
+   * only because nothing was done to it. That is a different thing from a
+   * measured zero, and conflating the two is how a badly tilted clip passes
+   * for a well-shot one.
+   */
+  readonly gravityTiltIsMeasured: boolean;
+  /**
+   * How far the world was pitched to keep the golfer off the falling-over
+   * boundary, in degrees. Positive tips the top of the body toward the heels.
+   *
+   * THE ONE TILT THE STANCE LINE CANNOT SEE
+   *
+   * `gravityTiltDeg` is measured from the line between two flat feet, which is
+   * horizontal. One line gives one constraint, so it fixes the ROLL and says
+   * nothing about the pitch -- a rotation about that same line leaves it
+   * exactly where it was.
+   *
+   * What does see the pitch is the golfer's own balance. A person standing on
+   * both feet has their centre of mass over those feet; past the toes or
+   * behind the heels they are not standing, they are falling. That edge is
+   * the FALLING-OVER BOUNDARY, and it is physics rather than technique.
+   *
+   * So when the reconstructed mass lands outside it, the scene is not merely
+   * unlikely -- it is impossible, and the smallest pitch that brings the mass
+   * back to the boundary is a hard lower bound on how far the camera was
+   * tilted. That angle is applied here, and it is the SMALLEST one the
+   * evidence forces: usually zero, and never more than the golfer's own
+   * balance demands.
+   *
+   * It is a lower bound, not a solution. A camera tilted five degrees may
+   * only be caught out by two, because the reading has to travel all the way
+   * past the toes before it becomes impossible at all. Corrected, the scene
+   * is no longer impossible; it is not thereby right.
+   */
+  readonly pitchCorrectionDeg: number;
+  /**
+   * Where `pitchCorrectionDeg` came from.
+   *
+   * The two routes are not the same kind of claim and should never be read as
+   * though they were.
+   *
+   *   "falling-over-boundary"  A LOWER BOUND from the swing itself, free and
+   *                            always available. The camera was tilted at
+   *                            least this much; usually it was tilted more.
+   *
+   *   "standing-shot"          An ESTIMATE from a second clip of the golfer
+   *                            standing still, good to about a degree, and
+   *                            only as good as the instruction being followed.
+   *
+   * Averaging a bound with an estimate would produce a number that is neither,
+   * so they are kept apart and the provenance travels with the value.
+   */
+  readonly pitchCorrectionSource: "none" | "falling-over-boundary" | "standing-shot";
+  /**
+   * How high each foot landmark sits above the ground when that foot is flat,
+   * metres. Keyed by joint name.
+   *
+   * WHY THIS IS NOT ZERO, AND WHAT ASSUMING IT WAS COST
+   *
+   * A detector's HEEL landmark is not the bottom of the heel. It sits up on
+   * the calcaneus, while the toe landmark sits at the ball, near the ground.
+   * Measured on two real clips, a planted heel rested 15 to 65mm up and a
+   * planted toe within a few millimetres of nothing.
+   *
+   * Contact was tested as "within 35mm of the ground", so on real footage the
+   * heels NEVER counted as touching it. Every frame of both clips came back
+   * with two contact points instead of four -- the two toes -- which makes
+   * the support polygon a LINE. The golfer was modelled as balancing on their
+   * toe line for the whole swing, and the foot-load split and support centre
+   * were computed from that.
+   *
+   * So contact is measured against each landmark's own resting height rather
+   * than against zero. The heights are taken from the clip: a landmark's low
+   * percentile over the frames where it is down IS its resting height, so
+   * nothing has to be assumed about a particular detector's skeleton.
+   */
+  readonly footRestHeightM: Readonly<Record<string, Metres>>;
+}
+
+export const clampUnit = (value: number): Unit =>
+  value < 0 ? 0 : value > 1 ? 1 : Number.isFinite(value) ? value : 0;
