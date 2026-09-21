@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import { LabApp } from "./LabApp";
+import "./standalone.css";
 import "./lab.css";
 
 const container = document.getElementById("lab-root");

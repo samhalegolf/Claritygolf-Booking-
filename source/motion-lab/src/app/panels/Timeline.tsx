@@ -101,10 +101,10 @@ export function Timeline({
   const seconds = frame ? frame.timestampMs / 1000 : 0;
 
   return (
-    <div className="timeline">
-      <canvas ref={canvasRef} className="timeline-ribbon" />
+    <div className="lab-timeline">
+      <canvas ref={canvasRef} className="lab-timeline-ribbon" />
       <input
-        className="timeline-range"
+        className="lab-timeline-range"
         type="range"
         min={0}
         max={Math.max(0, sequence.frames.length - 1)}
@@ -113,7 +113,7 @@ export function Timeline({
         onChange={(event) => onSeek(Number(event.target.value))}
         aria-label="Frame"
       />
-      <div className="timeline-readout">
+      <div className="lab-timeline-readout">
         <span>
           frame {frameIndex} / {sequence.frames.length - 1}
         </span>

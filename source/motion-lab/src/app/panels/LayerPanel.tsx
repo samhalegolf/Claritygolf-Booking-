@@ -26,23 +26,23 @@ export function LayerPanel({
   onCameraPreset: (preset: CameraPreset) => void;
 }) {
   return (
-    <div className="panel">
-      <h2 className="panel-title">View</h2>
+    <div className="lab-panel">
+      <h2 className="lab-panel-title">View</h2>
 
-      <div className="camera-buttons">
+      <div className="lab-camera-buttons">
         {CAMERA_PRESETS.map((preset) => (
           <button
             key={preset.key}
             type="button"
             title={preset.hint}
-            className={preset.key === cameraPreset ? "chip chip-active" : "chip"}
+            className={preset.key === cameraPreset ? "lab-chip lab-chip-active" : "lab-chip"}
             onClick={() => onCameraPreset(preset.key)}
           >
             {preset.label}
           </button>
         ))}
       </div>
-      <p className="panel-note">
+      <p className="lab-panel-note">
         Presets are defined against the measured stance line, not an assumed target
         direction — the video never says where the target is. Drag to orbit,
         shift-drag or right-drag to pan, scroll to zoom.
@@ -50,10 +50,10 @@ export function LayerPanel({
 
       {GROUPS.map((group) => (
         <section key={group}>
-          <h3 className="panel-subtitle">{group}</h3>
+          <h3 className="lab-panel-subtitle">{group}</h3>
           {LAYER_DESCRIPTORS.filter((descriptor) => descriptor.group === group).map(
             (descriptor) => (
-              <label className="toggle" key={descriptor.key} title={descriptor.hint}>
+              <label className="lab-toggle" key={descriptor.key} title={descriptor.hint}>
                 <input
                   type="checkbox"
                   checked={layers[descriptor.key]}
@@ -66,13 +66,13 @@ export function LayerPanel({
         </section>
       ))}
 
-      <h3 className="panel-subtitle">Provenance key</h3>
-      <ul className="legend">
+      <h3 className="lab-panel-subtitle">Provenance key</h3>
+      <ul className="lab-legend">
         {(Object.keys(PROVENANCE_COLOURS) as (keyof typeof PROVENANCE_COLOURS)[]).map(
           (source) => (
             <li key={source}>
               <span
-                className="legend-swatch"
+                className="lab-legend-swatch"
                 style={{ background: hexToCss(PROVENANCE_COLOURS[source]) }}
               />
               {PROVENANCE_LABELS[source]}

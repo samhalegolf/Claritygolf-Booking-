@@ -7,25 +7,31 @@
  *              visualisation contract and the honesty layers against ground
  *              truth, which real footage can never provide.
  *
- *   VIDEO      MediaPipe on a real clip, through the real pipeline, rendered
- *              by the naive passthrough. No reconstruction yet -- holes stay
- *              holes. That is the control Build 3 will be measured against.
+ *   VIDEO      MediaPipe on a real clip, through the real pipeline, with the
+ *              Motion Layer switchable against the do-nothing baseline.
+ *
+ * The video half is the same set of panels the booking app mounts through
+ * embed/MotionLabView; what this shell adds is the synthetic source, the
+ * scenario picker and a file picker of its own.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import { ClaritySpace3D } from "../space3d/ClaritySpace3D";
 import type { CameraPreset } from "../space3d/cameraRig";
 import { DEFAULT_LAYERS, type SceneLayers } from "../space3d/layers";
-import type { StandingCalibration } from "../motion/level/standingShot";
 import { ConfidencePanel } from "./panels/ConfidencePanel";
 import { LayerPanel } from "./panels/LayerPanel";
 import { MassPanel } from "./panels/MassPanel";
+import { ObservationPanel } from "./panels/ObservationPanel";
+import { StandingShotButtons } from "./panels/StandingShotButtons";
 import { Timeline } from "./panels/Timeline";
+import { Transport } from "./panels/Transport";
 import { VideoPanel } from "./panels/VideoPanel";
 import { PIPELINE_MODES, SCENARIOS, type PipelineMode } from "./scenarios";
+import { useLabKeyboard } from "./useLabKeyboard";
 import { useSyntheticPipeline } from "./useSyntheticPipeline";
-import { PLAYBACK_SPEEDS, usePlayback } from "./usePlayback";
+import { usePlayback } from "./usePlayback";
 import { useVideoObservation } from "./useVideoObservation";
 
 type Source = "synthetic" | "video";
@@ -46,7 +52,6 @@ export function LabApp() {
   });
   const [videoUseMotionLayer, setVideoUseMotionLayer] = useState(true);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const standingInputRef = useRef<HTMLInputElement | null>(null);
 
   const scenario = SCENARIOS.find((entry) => entry.key === scenarioKey) ?? SCENARIOS[0];
   const synthetic = useSyntheticPipeline(scenario, pipelineMode, stages);
@@ -72,49 +77,9 @@ export function LabApp() {
     setCameraPreset((current) => (current === "free" ? current : "free"));
   }, []);
 
-  /* ---- keyboard ---- */
+  useLabKeyboard(playback, setCameraPreset);
 
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      // Never steal keys from a control the viewer is actually using.
-      const target = event.target as HTMLElement | null;
-      if (target && /^(INPUT|SELECT|TEXTAREA)$/.test(target.tagName)) return;
-
-      switch (event.key) {
-        case " ":
-          event.preventDefault();
-          playback.toggle();
-          break;
-        case "ArrowLeft":
-          event.preventDefault();
-          playback.step(event.shiftKey ? -10 : -1);
-          break;
-        case "ArrowRight":
-          event.preventDefault();
-          playback.step(event.shiftKey ? 10 : 1);
-          break;
-        case "1":
-          setCameraPreset("face-on");
-          break;
-        case "2":
-          setCameraPreset("down-the-line");
-          break;
-        case "3":
-          setCameraPreset("top");
-          break;
-        case "4":
-          setCameraPreset("free");
-          break;
-        default:
-          break;
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [playback]);
-
-  const { status, progress, error, result, videoUrl, fileName, calibration, calibrationFileName, levelling } =
-    video.state;
+  const { status, result, videoUrl, fileName, calibrationFileName } = video.state;
 
   return (
     <div className="lab">
@@ -124,18 +89,18 @@ export function LabApp() {
           <p>Google observes, Clarity reconstructs, the 3D Space renders Clarity.</p>
         </div>
 
-        <div className="source-picker">
-          <div className="camera-buttons">
+        <div className="lab-source-picker">
+          <div className="lab-camera-buttons">
             <button
               type="button"
-              className={source === "synthetic" ? "chip chip-active" : "chip"}
+              className={source === "synthetic" ? "lab-chip lab-chip-active" : "lab-chip"}
               onClick={() => setSource("synthetic")}
             >
               Synthetic
             </button>
             <button
               type="button"
-              className={source === "video" ? "chip chip-active" : "chip"}
+              className={source === "video" ? "lab-chip lab-chip-active" : "lab-chip"}
               onClick={() => setSource("video")}
             >
               Video
@@ -143,14 +108,14 @@ export function LabApp() {
           </div>
 
           {source === "synthetic" ? (
-            <div className="scenario-picker">
-              <div className="camera-buttons">
+            <div className="lab-scenario-picker">
+              <div className="lab-camera-buttons">
                 {PIPELINE_MODES.map((entry) => (
                   <button
                     key={entry.key}
                     type="button"
                     title={entry.hint}
-                    className={entry.key === pipelineMode ? "chip chip-active" : "chip"}
+                    className={entry.key === pipelineMode ? "lab-chip lab-chip-active" : "lab-chip"}
                     onClick={() => setPipelineMode(entry.key)}
                   >
                     {entry.label}
@@ -171,7 +136,7 @@ export function LabApp() {
               </select>
             </div>
           ) : (
-            <div className="scenario-picker">
+            <div className="lab-scenario-picker">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -183,60 +148,27 @@ export function LabApp() {
                   event.target.value = "";
                 }}
               />
-              <input
-                ref={standingInputRef}
-                type="file"
-                accept="video/*"
-                hidden
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) void video.runStandingShot(file);
-                  event.target.value = "";
-                }}
-              />
               <button
                 type="button"
-                className="chip"
+                className="lab-chip"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={status === "running"}
               >
                 {fileName ? "Choose another clip" : "Choose a clip"}
               </button>
-              {/*
-                The second clip, kept a separate button on purpose: it is a
-                different kind of evidence, it is optional, and loading one
-                must never be mistaken for loading a swing.
-              */}
-              <button
-                type="button"
-                className="chip"
-                onClick={() => standingInputRef.current?.click()}
-                disabled={status === "running"}
-                title="Two seconds of the golfer standing still, from the same camera"
-              >
-                {calibrationFileName ? "Replace standing shot" : "Add standing shot"}
-              </button>
-              {calibrationFileName && (
-                <button
-                  type="button"
-                  className="chip"
-                  onClick={video.clearStandingShot}
-                  disabled={status === "running"}
-                >
-                  Drop it
-                </button>
-              )}
-              {status === "running" && (
-                <button type="button" className="chip" onClick={video.cancel}>
-                  Cancel
-                </button>
-              )}
+              <StandingShotButtons
+                status={status}
+                calibrationFileName={calibrationFileName}
+                onPick={(file) => void video.runStandingShot(file)}
+                onClear={video.clearStandingShot}
+                onCancel={video.cancel}
+              />
             </div>
           )}
         </div>
       </header>
 
-      <p className="scenario-purpose">
+      <p className="lab-scenario-purpose">
         {source === "synthetic"
           ? scenario.purpose
           : "MediaPipe on a real clip, through the real pipeline. Toggle the Motion Layer to compare reconstruction against the do-nothing baseline. Add a standing shot — two seconds of the golfer standing still, same camera — to measure the camera's pitch instead of merely bounding it."}
@@ -252,17 +184,17 @@ export function LabApp() {
           />
 
           {source === "synthetic" && pipelineMode !== "truth" && (
-            <div className="panel">
-              <h2 className="panel-title">Against ground truth</h2>
-              <div className="score-headline">
-                <span className="score-value">
+            <div className="lab-panel">
+              <h2 className="lab-panel-title">Against ground truth</h2>
+              <div className="lab-score-headline">
+                <span className="lab-score-value">
                   {synthetic.errorVsTruthM === null
                     ? "—"
                     : (synthetic.errorVsTruthM * 1000).toFixed(1)}
                 </span>
-                <span className="score-scale">mm mean joint error</span>
+                <span className="lab-score-scale">mm mean joint error</span>
               </div>
-              <p className="panel-note">
+              <p className="lab-panel-note">
                 Averaged over every joint of every frame, against the body the
                 detector was shown. The only number here that measures whether the
                 reconstruction is <em>right</em> rather than merely smooth — switch
@@ -271,7 +203,7 @@ export function LabApp() {
 
               {pipelineMode === "motion-layer" && (
                 <>
-                  <h3 className="panel-subtitle">Stages</h3>
+                  <h3 className="lab-panel-subtitle">Stages</h3>
                   {(
                     [
                       ["rejectJumps", "Reject jumps"],
@@ -281,7 +213,7 @@ export function LabApp() {
                       ["smooth", "Smoothing"],
                     ] as const
                   ).map(([key, label]) => (
-                    <label className="toggle" key={key}>
+                    <label className="lab-toggle" key={key}>
                       <input
                         type="checkbox"
                         checked={stages[key]}
@@ -292,15 +224,15 @@ export function LabApp() {
                       <span>{label}</span>
                     </label>
                   ))}
-                  <p className="panel-note">
+                  <p className="lab-panel-note">
                     Turn one off and watch the error above. A stage that changes
                     nothing is not earning its place.
                   </p>
 
                   {synthetic.stageCounts && (
-                    <dl className="readout">
+                    <dl className="lab-readout">
                       {Object.entries(synthetic.stageCounts).map(([key, value]) => (
-                        <div className="readout-row" key={key}>
+                        <div className="lab-readout-row" key={key}>
                           <dt>{key.replace(/([A-Z])/g, " $1").toLowerCase()}</dt>
                           <dd>{value}</dd>
                         </div>
@@ -313,192 +245,18 @@ export function LabApp() {
           )}
 
           {source === "video" && (
-            <div className="panel">
-              <h2 className="panel-title">Observation</h2>
-              {status === "idle" && (
-                <>
-                  <p className="panel-note">
-                    Pick a clip. Every frame is seeked to and detected in order, so
-                    nothing is skipped — which is slower than playback and the reason
-                    a gap downstream means the detector lost the golfer rather than
-                    that we outran it.
-                  </p>
-                  {/*
-                    A standing shot can be loaded FIRST, and when it is there is
-                    no swing and no result to hang its verdict off. Showing it
-                    here is the difference between "measured, waiting for a
-                    swing" and the user believing nothing happened.
-                  */}
-                  {calibration && (
-                    <StandingShotReadout
-                      calibration={calibration}
-                      fileName={calibrationFileName}
-                    />
-                  )}
-                </>
-              )}
-              {status === "running" && progress && (
-                <>
-                  <dl className="readout">
-                    <div className="readout-row">
-                      <dt>Detecting</dt>
-                      <dd>{progress.phase === "standing" ? "standing shot" : "the swing"}</dd>
-                    </div>
-                    <div className="readout-row">
-                      <dt>Frame</dt>
-                      <dd>
-                        {progress.index} / {progress.total}
-                      </dd>
-                    </div>
-                    <div className="readout-row">
-                      <dt>Detected</dt>
-                      <dd>{progress.detected}</dd>
-                    </div>
-                  </dl>
-                  <span className="bar" aria-hidden="true">
-                    <span
-                      className="bar-fill"
-                      style={{
-                        width: `${
-                          progress.total > 0
-                            ? Math.round((progress.index / progress.total) * 100)
-                            : 0
-                        }%`,
-                      }}
-                    />
-                  </span>
-                </>
-              )}
-              {status === "error" && <p className="panel-error">{error}</p>}
-              {status === "ready" && result && (
-                <>
-                  <dl className="readout">
-                    <div className="readout-row">
-                      <dt>Detector</dt>
-                      <dd>{result.camera.detector}</dd>
-                    </div>
-                    <div className="readout-row">
-                      <dt>Frames</dt>
-                      <dd>{result.camera.frames.length}</dd>
-                    </div>
-                    <div className="readout-row">
-                      <dt>Measured fps</dt>
-                      <dd>{result.info.fps}</dd>
-                    </div>
-                    <div className="readout-row">
-                      <dt>Undetected</dt>
-                      <dd>{result.undetectedFrames}</dd>
-                    </div>
-                    <div className="readout-row">
-                      <dt>Duplicate decodes</dt>
-                      <dd>{result.duplicateDecodes}</dd>
-                    </div>
-                    <div className="readout-row">
-                      <dt>Clubhead found in</dt>
-                      <dd>
-                        {result.clubDetections} / {result.camera.frames.length}
-                      </dd>
-                    </div>
-                    <div className="readout-row">
-                      <dt>Anchor frame</dt>
-                      <dd>{result.world.anchor.anchorFrameIndex}</dd>
-                    </div>
-                    <div className="readout-row">
-                      <dt>Anchor stable</dt>
-                      <dd>{result.world.anchor.anchorIsStable ? "yes" : "no"}</dd>
-                    </div>
-                    <div className="readout-row">
-                      <dt>Stance width</dt>
-                      <dd>{result.world.anchor.stanceWidthM.toFixed(3)} m</dd>
-                    </div>
-                    <div className="readout-row">
-                      <dt>Standing shot</dt>
-                      <dd>
-                        {!calibration
-                          ? "none"
-                          : calibration.usable
-                            ? `${calibration.pitchDeg >= 0 ? "+" : ""}${calibration.pitchDeg.toFixed(2)}° pitch`
-                            : "refused"}
-                      </dd>
-                    </div>
-                    <div className="readout-row">
-                      <dt>Camera roll</dt>
-                      <dd>
-                        {result.world.anchor.gravityTiltIsMeasured
-                          ? `${result.world.anchor.gravityTiltDeg.toFixed(2)}°`
-                          : "not measured"}
-                      </dd>
-                    </div>
-                    <div className="readout-row">
-                      <dt>Took</dt>
-                      <dd>{(result.elapsedMs / 1000).toFixed(1)} s</dd>
-                    </div>
-                  </dl>
-                  {calibration && !calibration.usable && (
-                    <p className="panel-note">
-                      Standing shot refused: {calibration.reason}. The world is
-                      levelled from what the swing can prove on its own instead,
-                      which is a lower bound rather than a measurement.
-                    </p>
-                  )}
-                  {levelling?.agreement === "boundary-forced-more" && (
-                    <p className="panel-note">
-                      The standing shot and the swing disagree. The shot asked for{" "}
-                      {calibration?.pitchDeg.toFixed(2)}°, but the swing still put the
-                      golfer&rsquo;s mass outside their feet, so a further{" "}
-                      {levelling.boundaryResidualDeg.toFixed(2)}° was forced on top.
-                      Physics wins that argument — but the usual cause is the two
-                      clips being filmed from different places, which no correction
-                      can undo.
-                    </p>
-                  )}
-                  {levelling?.source === "standing-shot" &&
-                    levelling.agreement === "agree" &&
-                    !levelling.calibrationWithinBoundary && (
-                      <p className="panel-note">
-                        The standing shot claims a pitch the swing says is
-                        impossible. Treat this reconstruction as unreliable and
-                        check that both clips came from the same camera position.
-                      </p>
-                    )}
-                  {!result.world.anchor.gravityTiltIsMeasured && (
-                    <p className="panel-note">
-                      No frame had the golfer standing on both feet, so there was
-                      no horizontal line to measure against. This world is level
-                      only because nothing was done to it — which is not the same
-                      as a camera that was level.
-                    </p>
-                  )}
-                  {!result.world.anchor.anchorIsStable && (
-                    <p className="panel-note">
-                      No still frame with both feet visible was found, so the world
-                      axes are a best guess and every coordinate inherits that doubt.
-                    </p>
-                  )}
-                  <label className="toggle">
-                    <input
-                      type="checkbox"
-                      checked={showLowConfidence}
-                      onChange={(event) => setShowLowConfidence(event.target.checked)}
-                    />
-                    <span>Overlay: show low-confidence landmarks</span>
-                  </label>
-                  <label className="toggle">
-                    <input
-                      type="checkbox"
-                      checked={videoUseMotionLayer}
-                      onChange={(event) => setVideoUseMotionLayer(event.target.checked)}
-                    />
-                    <span>Reconstruct (Motion Layer)</span>
-                  </label>
-                </>
-              )}
-            </div>
+            <ObservationPanel
+              state={video.state}
+              showLowConfidence={showLowConfidence}
+              onShowLowConfidence={setShowLowConfidence}
+              useMotionLayer={videoUseMotionLayer}
+              onUseMotionLayer={setVideoUseMotionLayer}
+            />
           )}
         </aside>
 
         <main className="lab-stage">
-          <div className={source === "video" && videoUrl ? "stage-split" : "stage-single"}>
+          <div className={source === "video" && videoUrl ? "lab-stage-split" : "lab-stage-single"}>
             {source === "video" && videoUrl && (
               <VideoPanel
                 videoUrl={videoUrl}
@@ -509,7 +267,7 @@ export function LabApp() {
               />
             )}
 
-            <div className="stage-canvas">
+            <div className="lab-stage-canvas">
               {sequence && frame ? (
                 <ClaritySpace3D
                   sequence={sequence}
@@ -520,50 +278,14 @@ export function LabApp() {
                   onCameraTakenOver={onCameraTakenOver}
                 />
               ) : (
-                <div className="stage-empty">
+                <div className="lab-stage-empty">
                   {status === "running" ? "Detecting…" : "No sequence loaded."}
                 </div>
               )}
             </div>
           </div>
 
-          <div className="transport">
-            <button type="button" className="chip" onClick={playback.toggle} disabled={!sequence}>
-              {playback.playing ? "Pause" : "Play"}
-            </button>
-            <button type="button" className="chip" onClick={() => playback.step(-1)} disabled={!sequence}>
-              ‹ Frame
-            </button>
-            <button type="button" className="chip" onClick={() => playback.step(1)} disabled={!sequence}>
-              Frame ›
-            </button>
-
-            <div className="speed-group">
-              {PLAYBACK_SPEEDS.map((speed) => (
-                <button
-                  key={speed}
-                  type="button"
-                  className={speed === playback.speed ? "chip chip-active" : "chip"}
-                  onClick={() => playback.setSpeed(speed)}
-                >
-                  {speed}×
-                </button>
-              ))}
-            </div>
-
-            <label className="toggle">
-              <input
-                type="checkbox"
-                checked={playback.loop}
-                onChange={(event) => playback.setLoop(event.target.checked)}
-              />
-              <span>Loop</span>
-            </label>
-
-            <span className="transport-hint">
-              space play · ← → step · shift for ten · 1–4 cameras
-            </span>
-          </div>
+          <Transport playback={playback} enabled={Boolean(sequence)} />
 
           {sequence && (
             <Timeline
@@ -581,67 +303,13 @@ export function LabApp() {
               <MassPanel frame={frame} sequence={sequence} />
             </>
           ) : (
-            <div className="panel">
-              <h2 className="panel-title">Reconstruction confidence</h2>
-              <p className="panel-note">Nothing loaded.</p>
+            <div className="lab-panel">
+              <h2 className="lab-panel-title">Reconstruction confidence</h2>
+              <p className="lab-panel-note">Nothing loaded.</p>
             </div>
           )}
         </aside>
       </div>
     </div>
-  );
-}
-
-/**
- * What a standing shot measured, on its own terms.
- *
- * Shown before a swing has been loaded as well as after, because a standing
- * shot is evidence in its own right and the two clips can arrive in either
- * order. Without this, loading the calibration first looks like nothing
- * happened at all.
- */
-function StandingShotReadout({
-  calibration,
-  fileName,
-}: {
-  calibration: StandingCalibration;
-  fileName: string | null;
-}) {
-  return (
-    <>
-      <dl className="readout">
-        <div className="readout-row">
-          <dt>Standing shot</dt>
-          <dd>{fileName ?? "loaded"}</dd>
-        </div>
-        <div className="readout-row">
-          <dt>Camera pitch</dt>
-          <dd>
-            {calibration.usable
-              ? `${calibration.pitchDeg >= 0 ? "+" : ""}${calibration.pitchDeg.toFixed(2)}°`
-              : "refused"}
-          </dd>
-        </div>
-        <div className="readout-row">
-          <dt>Range</dt>
-          <dd>
-            {calibration.pitchRangeDeg[0].toFixed(2)}° … {calibration.pitchRangeDeg[1].toFixed(2)}°
-          </dd>
-        </div>
-        <div className="readout-row">
-          <dt>Stood off plumb by</dt>
-          <dd>{(calibration.standingBendM * 1000).toFixed(0)} mm</dd>
-        </div>
-        <div className="readout-row">
-          <dt>Still frames used</dt>
-          <dd>{calibration.samples}</dd>
-        </div>
-      </dl>
-      <p className="panel-note">
-        {calibration.usable
-          ? "Measured. Load a swing filmed from the same camera position and it will be levelled with this rather than with the lower bound the swing can prove on its own."
-          : `Refused: ${calibration.reason}.`}
-      </p>
-    </>
   );
 }

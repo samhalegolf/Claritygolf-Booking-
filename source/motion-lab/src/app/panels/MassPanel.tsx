@@ -24,9 +24,9 @@ export function MassPanel({
   const mass = frame.mass;
   if (!mass) {
     return (
-      <div className="panel">
-        <h2 className="panel-title">Mass and support</h2>
-        <p className="panel-note">
+      <div className="lab-panel">
+        <h2 className="lab-panel-title">Mass and support</h2>
+        <p className="lab-panel-note">
           No mass estimate: the body model is too incomplete to distribute mass over.
         </p>
       </div>
@@ -34,66 +34,66 @@ export function MassPanel({
   }
 
   return (
-    <div className="panel">
-      <h2 className="panel-title">Mass and support</h2>
+    <div className="lab-panel">
+      <h2 className="lab-panel-title">Mass and support</h2>
 
-      <h3 className="panel-subtitle">Upper mass map</h3>
-      <dl className="readout">
-        <div className="readout-row">
+      <h3 className="lab-panel-subtitle">Upper mass map</h3>
+      <dl className="lab-readout">
+        <div className="lab-readout-row">
           <dt>Centre height</dt>
           <dd>{mass.upperMassCentre[1].toFixed(3)} m</dd>
         </div>
-        <div className="readout-row">
+        <div className="lab-readout-row">
           <dt>Ground projection X</dt>
           <dd>{metres(mass.upperMassGround[0])}</dd>
         </div>
-        <div className="readout-row">
+        <div className="lab-readout-row">
           <dt>Ground projection Z</dt>
           <dd>{metres(mass.upperMassGround[2])}</dd>
         </div>
       </dl>
-      <p className="panel-note">
+      <p className="lab-panel-note">
         Mass from the hip joints up, projected straight down. It is not constrained
         to land under either foot, and often does not.
       </p>
 
-      <h3 className="panel-subtitle">Estimated support</h3>
-      <dl className="readout">
-        <div className="readout-row">
+      <h3 className="lab-panel-subtitle">Estimated support</h3>
+      <dl className="lab-readout">
+        <div className="lab-readout-row">
           <dt>Centre X</dt>
           <dd>{metres(mass.supportCentre[0])}</dd>
         </div>
-        <div className="readout-row">
+        <div className="lab-readout-row">
           <dt>Contact points</dt>
           <dd>{mass.supportPolygon.length === 0 ? "none" : mass.supportPolygon.length}</dd>
         </div>
-        <div className="readout-row">
+        <div className="lab-readout-row">
           <dt>Lead foot</dt>
           <dd>{Math.round(mass.footShare.left * 100)}%</dd>
         </div>
-        <div className="readout-row">
+        <div className="lab-readout-row">
           <dt>Trail foot</dt>
           <dd>{Math.round(mass.footShare.right * 100)}%</dd>
         </div>
-        <div className="readout-row">
+        <div className="lab-readout-row">
           <dt>Confidence</dt>
           <dd>{Math.round(mass.confidence * 100)}</dd>
         </div>
       </dl>
-      <p className="panel-note">
+      <p className="lab-panel-note">
         Estimated foot load from video, not force-plate data. No pressure is
         measured and no rotational force is modelled. With no foot in contact the
         confidence is zero and the even split above is the absence of a claim.
       </p>
 
-      <h3 className="panel-subtitle">Mass–support relationship</h3>
-      <dl className="readout">
-        <div className="readout-row">
+      <h3 className="lab-panel-subtitle">Mass–support relationship</h3>
+      <dl className="lab-readout">
+        <div className="lab-readout-row">
           <dt>Normalised separation</dt>
           <dd>{mass.normalisedSeparation.toFixed(3)}</dd>
         </div>
       </dl>
-      <p className="panel-note">
+      <p className="lab-panel-note">
         Upper mass ground position minus support centre, along the stance line,
         divided by stance width. Positive is toward the trail foot. An experimental
         descriptive signal — no biomechanical meaning is assigned to any value.
@@ -143,8 +143,8 @@ function ForeAftCheck({
   if (!sanity || sanity.verdict === "undetermined") {
     return (
       <>
-        <h3 className="panel-subtitle">Heel–toe reading</h3>
-        <p className="panel-note">
+        <h3 className="lab-panel-subtitle">Heel–toe reading</h3>
+        <p className="lab-panel-note">
           Not checked against the falling-over boundary: no frame in this clip
           had the golfer standing on two feet the detector could actually see. That is not the same as the reading
           being sound — there was simply nothing to check it against.
@@ -157,10 +157,10 @@ function ForeAftCheck({
 
   return (
     <>
-      <h3 className="panel-subtitle">Heel–toe reading</h3>
-      <dl className="readout">
+      <h3 className="lab-panel-subtitle">Heel–toe reading</h3>
+      <dl className="lab-readout">
         {Math.abs(appliedDeg) > 0.05 && (
-          <div className="readout-row">
+          <div className="lab-readout-row">
             <dt>World pitched by</dt>
             <dd>
               {degrees(appliedDeg)}
@@ -168,44 +168,44 @@ function ForeAftCheck({
             </dd>
           </div>
         )}
-        <div className="readout-row">
+        <div className="lab-readout-row">
           <dt>Mass along foot</dt>
           <dd>{alongFoot(sanity.reading.footFractionUnit)}</dd>
         </div>
-        <div className="readout-row">
+        <div className="lab-readout-row">
           <dt>From body shape alone</dt>
           <dd>{alongFoot(sanity.reading.bendFractionUnit)}</dd>
         </div>
-        <div className="readout-row">
+        <div className="lab-readout-row">
           <dt>Camera pitch consistent with</dt>
           <dd>
             {degrees(low)} … {degrees(high)}
           </dd>
         </div>
-        <div className="readout-row">
+        <div className="lab-readout-row">
           <dt>Least pitch that fits</dt>
           <dd>{degrees(sanity.fallingOverPitchDeg)}</dd>
         </div>
         {sanity.impossibleFrames > 0 && (
-          <div className="readout-row">
+          <div className="lab-readout-row">
             <dt>Outside the feet</dt>
             <dd>
               {sanity.impossibleFrames} / {sanity.samples} frames
             </dd>
           </div>
         )}
-        <div className="readout-row">
+        <div className="lab-readout-row">
           <dt>Detector foot</dt>
           <dd>{(sanity.reading.footScaleUnit * 100).toFixed(0)}% of anatomy</dd>
         </div>
-        <div className="readout-row">
+        <div className="lab-readout-row">
           <dt>Confidence</dt>
           <dd>{Math.round(sanity.confidence * 100)}</dd>
         </div>
       </dl>
 
       {sanity.reading.footScaleUnit < 0.75 && (
-        <p className="panel-note">
+        <p className="lab-panel-note">
           The detector&rsquo;s feet measure{" "}
           {(sanity.reading.footScaleUnit * 100).toFixed(0)}% of the length anatomy
           expects, which is why the base of support above is derived from the
@@ -217,7 +217,7 @@ function ForeAftCheck({
       )}
 
       {sanity.verdict === "corrected" && (
-        <p className="panel-note">
+        <p className="lab-panel-note">
           The mass still reads outside the falling-over boundary. A further{" "}
           {degrees(sanity.fallingOverPitchDeg)} of camera pitch would bring it to{" "}
           {alongFoot(sanity.correctedFootFractionUnit)}. This scene has not had
@@ -227,7 +227,7 @@ function ForeAftCheck({
       )}
 
       {sanity.verdict === "consistent" && Math.abs(appliedDeg) > 0.05 && (
-        <p className="panel-note">
+        <p className="lab-panel-note">
           {appliedFrom === "standing-shot" ? (
             <>
               The world has been pitched {degrees(appliedDeg)} from a shot of the
@@ -255,7 +255,7 @@ function ForeAftCheck({
       )}
 
       {sanity.verdict === "consistent" && Math.abs(appliedDeg) <= 0.05 && (
-        <p className="panel-note">
+        <p className="lab-panel-note">
           The mass stayed inside the falling-over boundary throughout, so no
           camera pitch is forced and none has been applied. That is not a level
           camera — anything in the range above would also fit. A clip whose mass
@@ -266,14 +266,14 @@ function ForeAftCheck({
       )}
 
       {sanity.verdict === "irreconcilable" && (
-        <p className="panel-note">
+        <p className="lab-panel-note">
           No single camera pitch keeps every frame inside the falling-over
           boundary, so the disagreement is not the camera. Either the feet moved during the frames treated as a
           stance, or the detector placed the body badly in some of them.
         </p>
       )}
 
-      <p className="panel-note">
+      <p className="lab-panel-note">
         &ldquo;From body shape alone&rdquo; is the part of the reading a camera
         angle cannot invent: the bend in the body, with any whole-body lean
         removed along with the tilt. Across this clip the bend moved the mass{" "}

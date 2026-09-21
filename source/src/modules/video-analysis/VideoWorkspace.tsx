@@ -1,6 +1,8 @@
 import React, {
   ChangeEvent,
   DragEvent,
+  Suspense,
+  lazy,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -8,6 +10,7 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { NATIVE } from "../auth/apiFetch";
 import { clamp, createId, FRAME_RATE_DEFAULT } from "./utils/frameMath";
 import { videoAnalysisThemeCss } from "./theme/videoAnalysisTheme";
 import { FocusPalette } from "./components/FocusPalette";
@@ -21,10 +24,12 @@ import {
   IconBack,
   IconCamera,
   IconEdit,
+  IconMotion3D,
   IconRecord,
   IconSettings,
   IconUpload,
 } from "./components/VideoIcons";
+import type { MotionLabSwing } from "../../../motion-lab/src/embed/MotionLabView";
 import {
   PlayerActionBar,
   PlayerToolRail,
@@ -201,6 +206,28 @@ interface CloudUploadFailureFeedback {
 /** One video engine, two control sets: the coach console and the player's
     simplified workspace. */
 export type VideoWorkspaceVariant = "coach" | "player";
+
+/**
+ * The motion lab, mounted over the workspace.
+ *
+ * Lazy because it carries three.js and the pose pipeline -- several hundred
+ * kilobytes nobody downloads until a coach asks for 3D motion. The import
+ * crosses into motion-lab/, which is allowed in this direction only: the lab
+ * imports nothing from src/, so the booking app can never break the lab and
+ * the lab's own tests stay meaningful. The pose worker and MediaPipe's WASM
+ * it needs are served by the lab's Vite plugins, wired into vite.config.ts.
+ *
+ * Web only for now. The native build does not carry the WASM (34 MB in the
+ * app bundle) and its Vite config does not run the lab's plugins, so the
+ * button that opens this is hidden there rather than shown and broken.
+ */
+const MotionLabView = lazy(() =>
+  import("../../../motion-lab/src/embed/MotionLabView").then((module) => ({
+    default: module.MotionLabView,
+  }))
+);
+
+const MOTION_LAB_AVAILABLE = !NATIVE;
 
 export interface VideoWorkspaceNavigationContext {
   playerId?: string;
@@ -651,6 +678,11 @@ export function VideoWorkspace({
   // swapping the active clip -- lives behind this gear instead of an
   // always-on console bar.
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // The swing handed to the motion lab, or null while it is closed. Held in
+  // state so its identity is stable: the lab re-detects when it changes.
+  const [motionLabSwing, setMotionLabSwing] = useState<MotionLabSwing | null>(null);
+  const [motionLabOpen, setMotionLabOpen] = useState(false);
+  const [motionLabError, setMotionLabError] = useState<string | null>(null);
 
   const timelineEngine = useMemo(() => new TimelineEngine(), []);
   const modeIsCompare = comparisonMode === "compare";
@@ -2674,7 +2706,8 @@ export function VideoWorkspace({
   );
 
   useKeyboardShortcuts({
-    enabled: true,
+    // The lab owns space and the arrows while it is open.
+    enabled: !motionLabOpen,
     onPlayPause: toggleSidePlayback,
     onPrevFrame: (heldFrames, shift) =>
       stepActiveSide(-1, {
@@ -3705,6 +3738,40 @@ export function VideoWorkspace({
   const saveBusy =
     saveStatus === "saving" || saveStatus === "sending" || saveStatus === "downloading";
 
+  /**
+   * Open the lab on the active clip.
+   *
+   * The workspace only holds the clip as an object URL (see loadClipFileForSide),
+   * so the bytes are read back through it. That is a blob: URL over memory the
+   * page already owns -- no copy, no network -- and it works the same for an
+   * uploaded file, a restored one and a live recording, which is why this does
+   * not go looking in the blob store for whichever of them it was.
+   */
+  const openMotionLab = useCallback(async () => {
+    const side = effectiveActiveSide;
+    const clip = side === "left" ? playerVideoLeft : playerVideoRight;
+    if (!clip) return;
+    setMotionLabError(null);
+    try {
+      const response = await fetch(clip.sourceUrl);
+      if (!response.ok) throw new Error(`The clip could not be read (${response.status}).`);
+      const blob = await response.blob();
+      setMotionLabSwing({ blob, name: clip.title || `${getSideTitle(side)} clip` });
+      setMotionLabOpen(true);
+    } catch (error) {
+      setMotionLabError(
+        error instanceof Error ? error.message : "The clip could not be read."
+      );
+    }
+  }, [effectiveActiveSide, playerVideoLeft, playerVideoRight]);
+
+  const closeMotionLab = useCallback(() => {
+    setMotionLabOpen(false);
+    // Dropping the swing unmounts the lab's detector and revokes its URL;
+    // reopening starts a fresh detection rather than showing a stale one.
+    setMotionLabSwing(null);
+  }, []);
+
   return (
     <div className={`video-analysis-shell is-${variant}`}>
       <style>{videoAnalysisThemeCss}</style>
@@ -3726,6 +3793,17 @@ export function VideoWorkspace({
             onClick={handleBackAction}
           />
           {playerName ? <span className="video-header-compact-title">{playerName}</span> : null}
+          {MOTION_LAB_AVAILABLE ? (
+            <ToolButton
+              icon={<IconMotion3D />}
+              label="3D motion"
+              tooltip="3D motion"
+              className="is-subtle video-header-motion-lab"
+              active={motionLabOpen}
+              disabled={saveBusy}
+              onClick={() => void openMotionLab()}
+            />
+          ) : null}
         </div>
       ) : (
         <div className="video-analysis-header">
@@ -3762,6 +3840,25 @@ export function VideoWorkspace({
         style={{ display: "none" }}
         onChange={(event) => handleUpload("right", event)}
       />
+
+      {motionLabError ? (
+        <div className="focus-artifacts-warning" role="alert">
+          3D motion could not open: {motionLabError}
+        </div>
+      ) : null}
+
+      {motionLabOpen ? (
+        <div className="va-motion-lab" role="dialog" aria-label="3D motion">
+          <Suspense fallback={<div className="va-motion-lab-loading">Loading 3D motion…</div>}>
+            <MotionLabView
+              swing={motionLabSwing}
+              title={playerName || undefined}
+              keysEnabled={!settingsOpen}
+              onClose={closeMotionLab}
+            />
+          </Suspense>
+        </div>
+      ) : null}
 
       {cloudUploadFailure ? (
         <section className="cloud-upload-failure-row" role="alert" aria-live="assertive">

@@ -180,6 +180,15 @@ export const IconSettings = ({ className }: IconProps) => (
   </Svg>
 );
 
+// A cube on its point: the one icon in the set that is not from the pack.
+// It opens the 3D motion lab, and the pack predates that.
+export const IconMotion3D = ({ className }: IconProps) => (
+  <Svg className={className}>
+    <path d="M12 3l7.5 4.3v8.6L12 20.2l-7.5-4.3V7.3z" />
+    <path d="M12 11.6l7.5-4.3M12 11.6L4.5 7.3M12 11.6v8.6" />
+  </Svg>
+);
+
 export const IconLibrary = ({ className }: IconProps) => (
   <Svg className={className}>
     <path d="M12 3v12M6 11l6 6 6-6" />

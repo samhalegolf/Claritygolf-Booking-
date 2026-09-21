@@ -28,6 +28,7 @@
   },
   "include": [
     "src",
-    "vite.lab.config.ts"
+    "vite.lab.config.ts",
+    "vite.plugins.ts"
   ]
 }

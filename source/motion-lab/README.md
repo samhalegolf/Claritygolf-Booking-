@@ -38,14 +38,32 @@ and confidence roll-up rather than a second copy free to drift from them. It
 may not use `observe/`: its whole purpose is proving the contract without a
 detector.
 
-## Insulation from the booking app
+## The wall is one-way
 
-- Own Vite config (`vite.lab.config.ts`), own `index.html`, own entry.
-- Own `tsconfig.json`. The root tsconfig's `include` is `["src"]`, so
-  `npm run typecheck` and `npm run build` do not compile the lab.
-- Imports nothing from `../src`. Code arrived by one-way copy.
-- `three` is a **devDependency**. If it ever appears in `dist/` or
-  `dist-app/`, something has imported across the wall.
+The booking app mounts the lab. Its video workspace
+(`src/modules/video-analysis/VideoWorkspace.tsx`) lazy-loads
+`src/embed/MotionLabView` behind a "3D motion" button, hands it the clip
+already on screen, and lets it detect, reconstruct and render in an overlay.
+The root `vite.config.ts` runs the lab's two plugins (`vite.plugins.ts`) so
+the pose worker and MediaPipe's WASM are served in dev and emitted into
+`dist/` on build. `three` therefore **does** appear in `dist/` -- in the
+lab's own chunk, downloaded only when a coach opens 3D motion.
+
+What has not changed is the other direction:
+
+- The lab imports nothing from `../src`. Code arrived by one-way copy, and
+  `contracts/boundary.test.ts` fails if any file under `src/` here resolves an
+  import above it.
+- Own Vite config (`vite.lab.config.ts`), own `index.html`, own entry, own
+  `tsconfig.json`. `npm run dev:lab` is unchanged and the synthetic source
+  lives only there.
+- Every class in `app/lab.css` carries the `lab-` prefix and hangs off `.lab`;
+  nothing in it touches `:root`, `body` or a bare element, so loading it inside
+  the workspace restyles nothing of the workspace's. `standalone.css` holds the
+  page-level rules the lab page needs and only `main.tsx` imports it.
+- The native build is out for now. `vite.app.config.ts` does not run the
+  plugins (the WASM would add 34 MB to the app bundle) and the workspace hides
+  the button when `NATIVE` is true.
 - Output is `dist-lab/`, which is nobody's `webDir` and is not deployed.
 
 ## Commands

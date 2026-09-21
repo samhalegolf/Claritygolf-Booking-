@@ -170,3 +170,32 @@ test("the observation layer does not reach into reconstruction or rendering", ()
       "stops being recoverable, and that distinction is the whole point of provenance."
   );
 });
+
+/**
+ * The outer wall, from the inside.
+ *
+ * The booking app may import the lab (its video workspace mounts
+ * embed/MotionLabView); the lab may never import the booking app. A single
+ * `../../src/...` would make the lab's tests depend on code they cannot see
+ * and let a change to the workspace break the standalone lab page. The
+ * layer tests above cannot catch it because app/ and embed/ may import any
+ * layer -- so this walks every file and refuses any relative import that
+ * resolves above motion-lab/src.
+ */
+test("nothing in the lab imports from outside the lab", () => {
+  const violations: string[] = [];
+  for (const file of sourceFilesUnder(LAB_SRC)) {
+    for (const specifier of importSpecifiers(readFileSync(file, "utf8"))) {
+      if (specifier.endsWith(".css")) continue;
+      const target = resolveLayer(file, specifier);
+      if (target.startsWith("OUTSIDE:")) {
+        violations.push(`  ${relative(LAB_SRC, file)} imports "${specifier}"`);
+      }
+    }
+  }
+  assert.equal(
+    violations.length,
+    0,
+    `The lab imports nothing from ../src. Code arrives by one-way copy.\n\nViolations:\n${violations.join("\n")}\n`
+  );
+});

@@ -43,7 +43,7 @@ export function VideoPanel({
   }, [frame]);
 
   return (
-    <div className="video-stage" style={{ aspectRatio: `${width} / ${height}` }}>
+    <div className="lab-video-stage" style={{ aspectRatio: `${width} / ${height}` }}>
       <video ref={videoRef} src={videoUrl} muted playsInline preload="auto" />
       <RawOverlay
         frame={frame}

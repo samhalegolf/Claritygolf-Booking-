@@ -1,0 +1,19 @@
+/*
+ * The standalone lab page. Only main.tsx imports this.
+ *
+ * lab.css deliberately owns nothing above `.lab`, so that the same sheet can
+ * be loaded inside the booking app without restyling its page. What a page
+ * of its own needs -- the document filling the window, no default margin --
+ * is here instead.
+ */
+
+html,
+body,
+#lab-root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #0b0f14;
+}

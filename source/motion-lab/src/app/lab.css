@@ -5,9 +5,17 @@
  * borrows nothing from src/ -- including CSS -- so that a change to either
  * one cannot surprise the other. Dark by default because a 3D view of a body
  * against a dark ground is easier to read for long stretches.
+ *
+ * EMBEDDABLE. Everything here hangs off `.lab`: the palette, the font, the
+ * background. Nothing touches `:root`, `body` or a bare element selector,
+ * and every class carries the `lab-` prefix, because this sheet is also
+ * loaded inside the booking app's video workspace and a `.panel` or
+ * `.timeline` rule here would land on that workspace's own panels and
+ * timeline. The page-level rules the standalone lab needs (html/body sizing)
+ * live in standalone.css, which only main.tsx imports.
  */
 
-:root {
+.lab {
   --lab-bg: #0b0f14;
   --lab-surface: #121922;
   --lab-surface-raised: #18212c;
@@ -17,32 +25,23 @@
   --lab-accent: #4fc3f7;
   --lab-accent-ink: #06202b;
   --lab-radius: 8px;
-}
 
-* {
-  box-sizing: border-box;
-}
-
-html,
-body,
-#lab-root {
-  height: 100%;
-  margin: 0;
-}
-
-body {
-  background: var(--lab-bg);
-  color: var(--lab-text);
-  font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  -webkit-font-smoothing: antialiased;
-}
-
-.lab {
   display: flex;
   flex-direction: column;
   height: 100%;
   padding: 16px;
   gap: 12px;
+  background: var(--lab-bg);
+  color: var(--lab-text);
+  font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  box-sizing: border-box;
+}
+
+.lab *,
+.lab *::before,
+.lab *::after {
+  box-sizing: border-box;
 }
 
 /* ---------------------------- header ---------------------------- */
@@ -68,20 +67,20 @@ body {
   max-width: 60ch;
 }
 
-.scenario-picker {
+.lab-scenario-picker {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.scenario-picker label {
+.lab-scenario-picker label {
   color: var(--lab-text-dim);
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
 
-.scenario-picker select {
+.lab-scenario-picker select {
   background: var(--lab-surface-raised);
   color: var(--lab-text);
   border: 1px solid var(--lab-border);
@@ -90,7 +89,7 @@ body {
   font: inherit;
 }
 
-.scenario-purpose {
+.lab-scenario-purpose {
   margin: 0;
   padding: 10px 12px;
   background: var(--lab-surface);
@@ -129,7 +128,7 @@ body {
   min-width: 0;
 }
 
-.stage-canvas {
+.lab-stage-canvas {
   position: relative;
   flex: 1;
   min-height: 260px;
@@ -155,14 +154,14 @@ body {
 
 /* ---------------------------- panels ---------------------------- */
 
-.panel {
+.lab-panel {
   background: var(--lab-surface);
   border: 1px solid var(--lab-border);
   border-radius: var(--lab-radius);
   padding: 12px;
 }
 
-.panel-title {
+.lab-panel-title {
   margin: 0 0 10px;
   font-size: 13px;
   text-transform: uppercase;
@@ -170,7 +169,7 @@ body {
   color: var(--lab-text-dim);
 }
 
-.panel-subtitle {
+.lab-panel-subtitle {
   margin: 14px 0 6px;
   font-size: 12px;
   text-transform: uppercase;
@@ -178,38 +177,38 @@ body {
   color: var(--lab-text-dim);
 }
 
-.panel-note {
+.lab-panel-note {
   margin: 8px 0 0;
   font-size: 12px;
   line-height: 1.45;
   color: var(--lab-text-dim);
 }
 
-.score-headline {
+.lab-score-headline {
   display: flex;
   align-items: baseline;
   gap: 6px;
 }
 
-.score-value {
+.lab-score-value {
   font-size: 34px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
-.score-scale {
+.lab-score-scale {
   color: var(--lab-text-dim);
   font-size: 13px;
 }
 
-.readout {
+.lab-readout {
   margin: 0;
   display: flex;
   flex-direction: column;
   gap: 3px;
 }
 
-.readout-row {
+.lab-readout-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -217,11 +216,11 @@ body {
   font-size: 12px;
 }
 
-.readout-row dt {
+.lab-readout-row dt {
   color: var(--lab-text-dim);
 }
 
-.readout-row dd {
+.lab-readout-row dd {
   margin: 0;
   display: flex;
   align-items: center;
@@ -229,7 +228,7 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-.bar {
+.lab-bar {
   display: inline-block;
   width: 60px;
   height: 5px;
@@ -238,7 +237,7 @@ body {
   overflow: hidden;
 }
 
-.bar-fill {
+.lab-bar-fill {
   display: block;
   height: 100%;
   /* One neutral colour at every value. A red-to-green scale would be this
@@ -249,7 +248,7 @@ body {
 
 /* --------------------------- controls --------------------------- */
 
-.chip {
+.lab-chip {
   background: var(--lab-surface-raised);
   color: var(--lab-text);
   border: 1px solid var(--lab-border);
@@ -260,25 +259,25 @@ body {
   cursor: pointer;
 }
 
-.chip:hover {
+.lab-chip:hover {
   border-color: var(--lab-accent);
 }
 
-.chip-active {
+.lab-chip-active {
   background: var(--lab-accent);
   border-color: var(--lab-accent);
   color: var(--lab-accent-ink);
   font-weight: 600;
 }
 
-.camera-buttons,
-.speed-group {
+.lab-camera-buttons,
+.lab-speed-group {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-.toggle {
+.lab-toggle {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -287,12 +286,12 @@ body {
   cursor: pointer;
 }
 
-.toggle input {
+.lab-toggle input {
   accent-color: var(--lab-accent);
   margin: 0;
 }
 
-.legend {
+.lab-legend {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -303,27 +302,27 @@ body {
   color: var(--lab-text-dim);
 }
 
-.legend li {
+.lab-legend li {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.legend-swatch {
+.lab-legend-swatch {
   width: 11px;
   height: 11px;
   border-radius: 3px;
   flex: none;
 }
 
-.transport {
+.lab-transport {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
 }
 
-.transport-hint {
+.lab-transport-hint {
   margin-left: auto;
   color: var(--lab-text-dim);
   font-size: 11.5px;
@@ -331,13 +330,13 @@ body {
 
 /* --------------------------- timeline --------------------------- */
 
-.timeline {
+.lab-timeline {
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
-.timeline-ribbon {
+.lab-timeline-ribbon {
   display: block;
   width: 100%;
   height: 34px;
@@ -345,7 +344,7 @@ body {
   border-radius: 4px;
 }
 
-.timeline-range {
+.lab-timeline-range {
   width: 100%;
   accent-color: var(--lab-accent);
   margin: 0;
@@ -354,7 +353,7 @@ body {
   background: transparent;
 }
 
-.timeline-readout {
+.lab-timeline-readout {
   display: flex;
   gap: 16px;
   color: var(--lab-text-dim);
@@ -365,40 +364,50 @@ body {
 /* --------------------------- narrow ----------------------------- */
 
 @media (max-width: 1100px) {
+  /* One column, scrolling. A column FLEX rather than a one-column grid:
+     with `min-height: 0` on the rails (which the wide layout needs so they
+     scroll inside their column) a grid sizes every auto row from a base of
+     zero and then hands each a third of the height, so the rail is cut off
+     mid-panel and the stage draws over the rest. Flex with `flex: none`
+     gives each block its content height and lets the body scroll. */
   .lab-body {
-    grid-template-columns: minmax(0, 1fr);
+    display: flex;
+    flex-direction: column;
     overflow-y: auto;
   }
 
-  .lab-rail {
+  .lab-rail,
+  .lab-stage {
+    flex: none;
     overflow: visible;
+    min-height: auto;
   }
 
-  .stage-canvas {
+  .lab-stage-canvas {
     min-height: 420px;
   }
 }
 
 /* --------------------------- video source ------------------------- */
 
-.source-picker {
+.lab-source-picker {
   display: flex;
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
 }
 
-.stage-single {
+.lab-stage-single {
   display: flex;
   flex: 1;
   min-height: 0;
 }
 
-.stage-single > .stage-canvas {
+.lab-stage-single > .lab-stage-canvas {
   flex: 1;
 }
 
-.stage-split {
+.lab-stage-split {
   display: grid;
   /* Two equal halves that can both shrink: `minmax(0, 1fr)` rather than 1fr,
      or the video's intrinsic size pushes the grid wider than the window. */
@@ -408,7 +417,7 @@ body {
   min-height: 0;
 }
 
-.video-stage {
+.lab-video-stage {
   position: relative;
   background: #000;
   border: 1px solid var(--lab-border);
@@ -419,14 +428,14 @@ body {
   max-height: 100%;
 }
 
-.video-stage video {
+.lab-video-stage video {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: contain;
 }
 
-.raw-overlay {
+.lab-raw-overlay {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -434,7 +443,7 @@ body {
   pointer-events: none;
 }
 
-.stage-empty {
+.lab-stage-empty {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -443,7 +452,7 @@ body {
   font-size: 13px;
 }
 
-.panel-error {
+.lab-panel-error {
   margin: 8px 0 0;
   padding: 8px 10px;
   border-radius: 6px;
@@ -456,13 +465,13 @@ body {
   overflow-wrap: anywhere;
 }
 
-.chip:disabled {
+.lab-chip:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
 
 @media (max-width: 1100px) {
-  .stage-split {
+  .lab-stage-split {
     grid-template-columns: minmax(0, 1fr);
   }
 }

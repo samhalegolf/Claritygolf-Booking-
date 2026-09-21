@@ -2416,3 +2416,36 @@
     --va-video-max-height: calc(100svh - 252px);
   }
 }
+
+/* --- 3D motion ---------------------------------------------------------
+   The motion lab, over the top of the workspace. An overlay rather than a
+   replacement for the stage: the video elements underneath keep their
+   mounted sources and playheads, so closing the lab returns the coach to
+   exactly where they were. The lab brings its own palette and typography
+   (motion-lab/src/app/lab.css, everything under .lab); this only gives it
+   a box that fills the window and sits above the settings sheet. */
+
+.va-motion-lab {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  overflow: auto;
+  background: var(--va-bg);
+}
+
+.va-motion-lab .lab {
+  min-height: 100%;
+}
+
+.va-motion-lab-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--va-muted);
+  font-size: 0.9rem;
+}
+
+.video-header-motion-lab {
+  margin-left: auto;
+}

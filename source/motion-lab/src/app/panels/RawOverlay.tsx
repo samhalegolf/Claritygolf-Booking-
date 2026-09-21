@@ -115,5 +115,5 @@ export function RawOverlay({ frame, width, height, showLowConfidence }: RawOverl
     });
   }, [frame, showLowConfidence, width, height]);
 
-  return <canvas ref={canvasRef} className="raw-overlay" />;
+  return <canvas ref={canvasRef} className="lab-raw-overlay" />;
 }
