@@ -663,6 +663,9 @@ export const generateSyntheticSwing = (
       // tilted and nothing to correct -- neither the roll the stance line
       // sees nor the pitch the falling-over boundary does.
       gravityTiltDeg: 0,
+      // Measured in the sense that matters: the fixture's own axes ARE the
+      // world's, so this zero is a fact rather than a failure to look.
+      gravityTiltIsMeasured: true,
       pitchCorrectionDeg: 0,
     },
     /*

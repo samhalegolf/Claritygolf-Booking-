@@ -202,7 +202,7 @@ const lowestFootY = (
 };
 
 /**
- * Is this foot flat on the ground?
+ * How far from flat this foot is, metres, or null when it cannot be seen.
  *
  * By comparing the heel's height to the toe's, NOT to the ground -- which is
  * the whole point. Detector world coordinates are re-centred on the hips
@@ -210,18 +210,6 @@ const lowestFootY = (
  * anchoring, and anchoring is what this is needed for. The difference between
  * two points on the same foot has no such problem: it does not care where the
  * origin is.
- */
-const isFootFlat = (
-  frame: CameraObservationFrame,
-  side: "left" | "right",
-  orient: (point: Vec3) => Vec3 = (point) => point
-): boolean => {
-  const tilt = footTilt(frame, side, orient);
-  return tilt !== null && tilt <= 0.025;
-};
-
-/**
- * How far this foot is from flat, metres, or null when it cannot be seen.
  *
  * `orient` is the current best guess at which way is up. It matters: measured
  * in a tilted frame, a flat foot looks tilted and a tilted one can look flat,
@@ -238,6 +226,80 @@ const footTilt = (
   return Math.abs(
     orient(heel.position as Vec3)[1] - orient(toe.position as Vec3)[1]
   );
+};
+
+/** How far the worse of the two feet is from flat. Null when either is unseen. */
+const frameFlatness = (
+  frame: CameraObservationFrame,
+  orient: (point: Vec3) => Vec3 = (point) => point
+): number | null => {
+  const left = footTilt(frame, "left", orient);
+  const right = footTilt(frame, "right", orient);
+  if (left === null || right === null) return null;
+  return Math.max(left, right);
+};
+
+/**
+ * How much more a frame's feet may splay than the clip's own planted
+ * baseline before it counts as a heel lift rather than a stance.
+ */
+const HEEL_LIFT_TOLERANCE_M = 0.02;
+/** Where the clip's "both feet down" baseline is read off its own frames. */
+const PLANTED_PERCENTILE = 0.2;
+
+interface Planted {
+  /** Frame indices with the golfer standing on both feet. */
+  readonly indices: readonly number[];
+  /** Flatness at each of those indices, metres. Same order. */
+  readonly flatness: readonly number[];
+}
+
+/**
+ * Which frames have the golfer standing on both feet.
+ *
+ * AGAINST THE CLIP'S OWN FLATTEST FRAMES, NOT AN ABSOLUTE TOLERANCE.
+ *
+ * The obvious test -- heel within a couple of centimetres of toe -- fails on
+ * exactly the clips this function exists to serve, and fails silently. A
+ * camera pitched by theta raises the toes above the heels by
+ * `footLength * sin(theta)`: 28mm at eight degrees on a 200mm foot, past any
+ * sane constant. Every frame in the clip then looks like a heel lift, no
+ * frame passes, and `estimateLevelling` returns no samples at all -- so the
+ * ROLL, which it could have measured perfectly well, goes unmeasured and is
+ * reported as zero.
+ *
+ * Measured before this was fixed: a clip at 65 degrees of yaw and 8 degrees
+ * of pitch recovered its 7.25 degrees of roll; the same clip at 12 degrees of
+ * pitch reported 0.00, and the mass then read at three and a half foot
+ * lengths past the toes. There was no flag, because nothing had gone wrong
+ * from the code's point of view -- it had simply found nothing to measure.
+ *
+ * A percentile of the clip's own flatness does not care. A camera tilt adds
+ * the same splay to every frame, so it moves the baseline and the frames
+ * together and cancels. A heel coming up is a CHANGE against that baseline,
+ * so it still shows.
+ */
+const findPlanted = (
+  frames: readonly CameraObservationFrame[],
+  orient: (point: Vec3) => Vec3 = (point) => point
+): Planted => {
+  const seen: { index: number; flatness: number }[] = [];
+  for (let index = 0; index < frames.length; index += 1) {
+    const frame = frames[index];
+    if (!frame.joints.leftAnkle || !frame.joints.rightAnkle) continue;
+    const flatness = frameFlatness(frame, orient);
+    if (flatness !== null) seen.push({ index, flatness });
+  }
+  if (seen.length === 0) return { indices: [], flatness: [] };
+
+  const sorted = seen.map((entry) => entry.flatness).sort((a, b) => a - b);
+  const baseline = sorted[Math.floor(sorted.length * PLANTED_PERCENTILE)];
+  const planted = seen.filter((entry) => entry.flatness <= baseline + HEEL_LIFT_TOLERANCE_M);
+
+  return {
+    indices: planted.map((entry) => entry.index),
+    flatness: planted.map((entry) => entry.flatness),
+  };
 };
 
 /** How close to the ground a foot point must be to count as bearing weight. */
@@ -316,15 +378,13 @@ const estimateLevelling = (
    * being used to measure.
    */
   const candidates: { direction: Vec3; flatness: number }[] = [];
+  const planted = findPlanted(frames, orient);
 
-  for (const frame of frames) {
+  for (let entry = 0; entry < planted.indices.length; entry += 1) {
+    const frame = frames[planted.indices[entry]];
     const left = frame.joints.leftAnkle;
     const right = frame.joints.rightAnkle;
     if (!left || !right) continue;
-    const leftTilt = footTilt(frame, "left", orient);
-    const rightTilt = footTilt(frame, "right", orient);
-    if (leftTilt === null || rightTilt === null) continue;
-    if (!isFootFlat(frame, "left", orient) || !isFootFlat(frame, "right", orient)) continue;
 
     // NOT ground-projected. The vertical component IS the tilt; projecting it
     // away is exactly how this went unmeasured in the first place.
@@ -332,7 +392,7 @@ const estimateLevelling = (
     if (Math.hypot(...offset) < 1e-4) continue;
     candidates.push({
       direction: normalise(offset),
-      flatness: Math.max(leftTilt, rightTilt),
+      flatness: planted.flatness[entry],
     });
   }
 
@@ -441,7 +501,17 @@ export const anchorSequence = (
   let sumZ = 0;
   const widths: number[] = [];
 
-  for (const frame of frames) {
+  /*
+   * Judged in the LEVELLED frame, not the raw one. Whether a foot is flat is
+   * a question about heights, and which direction is up is precisely what the
+   * levelling has just established -- asking before applying it would be
+   * measuring flatness against the camera's idea of down, which is the
+   * assumption this whole file exists to remove.
+   */
+  const plantedFrames = findPlanted(frames, level);
+
+  for (const index of plantedFrames.indices) {
+    const frame = frames[index];
     const left = frame.joints.leftAnkle;
     const right = frame.joints.rightAnkle;
     if (!left || !right) continue;
@@ -449,7 +519,6 @@ export const anchorSequence = (
     // about its toe and its ankle swings forward by up to 200mm -- so the
     // line between the ankles genuinely rotates, and averaging across the
     // follow-through measures the finish rather than the stance.
-    if (!isFootFlat(frame, "left") || !isFootFlat(frame, "right")) continue;
 
     const levelledLeft = level(left.position as Vec3);
     const levelledRight = level(right.position as Vec3);
@@ -512,6 +581,7 @@ export const anchorSequence = (
     stanceWidthM,
     anchorIsStable: choice.stable && stanceWidthM > 1e-4,
     gravityTiltDeg: levelling.tiltDeg,
+    gravityTiltIsMeasured: levelling.samples > 0,
     pitchCorrectionDeg: options.pitchCorrectionDeg ?? 0,
   };
 
@@ -557,8 +627,8 @@ export const anchorSequence = (
   const reference = new Map<string, Vec3>();
   {
     const sums = new Map<string, { x: number; y: number; z: number; n: number }>();
-    for (const frame of frames) {
-      if (!isFootFlat(frame, "left") || !isFootFlat(frame, "right")) continue;
+    for (const index of plantedFrames.indices) {
+      const frame = frames[index];
       for (const joint of FOOT_JOINTS) {
         const observed = frame.joints[joint];
         if (!observed) continue;

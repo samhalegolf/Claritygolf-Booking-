@@ -180,7 +180,17 @@ genuinely sitting 60mm back moved it 7%. The reading is about **five times
 more sensitive to the tripod than to the golfer**.
 
 Levelling from the stance line fixes the roll and is **blind to the pitch** — a
-rotation about that same line leaves the line exactly where it was. One thing
+rotation about that same line leaves the line exactly where it was.
+
+> Flatness is judged as a **spread against the clip's own flattest frames**, not
+> against an absolute tolerance. The absolute version failed silently on exactly
+> the clips that needed it: a pitch of θ raises the toes above the heels by
+> `footLength · sin θ` — 28mm at 8° on a 200mm foot — so past that, every frame
+> looked like a heel lift, nothing passed, and the roll was reported as **zero
+> with no flag**. `gravityTiltIsMeasured` now separates a measured zero from an
+> unmeasurable one. Measured roll matches the truth exactly from 0° to 20° of
+> pitch at every yaw tested.
+ One thing
 does see it: the golfer's own balance.
 
 A person standing on both feet has their mass over those feet. Past the toes or

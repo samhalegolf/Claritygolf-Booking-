@@ -356,10 +356,26 @@ export function LabApp() {
                       <dd>{result.world.anchor.stanceWidthM.toFixed(3)} m</dd>
                     </div>
                     <div className="readout-row">
+                      <dt>Camera roll</dt>
+                      <dd>
+                        {result.world.anchor.gravityTiltIsMeasured
+                          ? `${result.world.anchor.gravityTiltDeg.toFixed(2)}°`
+                          : "not measured"}
+                      </dd>
+                    </div>
+                    <div className="readout-row">
                       <dt>Took</dt>
                       <dd>{(result.elapsedMs / 1000).toFixed(1)} s</dd>
                     </div>
                   </dl>
+                  {!result.world.anchor.gravityTiltIsMeasured && (
+                    <p className="panel-note">
+                      No frame had the golfer standing on both feet, so there was
+                      no horizontal line to measure against. This world is level
+                      only because nothing was done to it — which is not the same
+                      as a camera that was level.
+                    </p>
+                  )}
                   {!result.world.anchor.anchorIsStable && (
                     <p className="panel-note">
                       No still frame with both feet visible was found, so the world

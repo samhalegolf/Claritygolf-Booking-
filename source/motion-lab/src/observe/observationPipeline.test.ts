@@ -344,6 +344,74 @@ test("a level camera is left alone rather than nudged", () => {
   );
 });
 
+test("a camera tilted far enough to splay the feet is still measured", () => {
+  /*
+   * The bug this pins down was silent, which is what made it dangerous.
+   *
+   * Flatness was judged against an absolute tolerance -- heel within 25mm of
+   * toe. A camera pitched by theta raises the toes above the heels by
+   * `footLength * sin(theta)`, which is 28mm at eight degrees on a 200mm
+   * foot. Past that, EVERY frame looked like a heel lift, no frame passed,
+   * `estimateLevelling` found nothing to measure, and the roll -- which it
+   * could have recovered perfectly -- was reported as zero with no flag.
+   *
+   * Measured before the fix: 65 degrees of yaw with 8 degrees of pitch
+   * recovered its 7.25 degrees of roll, and the same clip at 12 degrees of
+   * pitch reported 0.00 and put the golfer's mass three and a half foot
+   * lengths past their toes.
+   *
+   * The roll a pitch actually produces is `asin(sin(yaw) * sin(pitch))` --
+   * zero face-on, growing as the camera moves round.
+   */
+  for (const yawDeg of [0, 20, 35, 65]) {
+    for (const pitchDeg of [5, 8, 12, 15, 20]) {
+      const anchored = anchorSequence(
+        buildCameraSequence(detectFromClarityFrames(swing.frames, { cameraYawDeg: yawDeg, cameraPitchDeg: pitchDeg }))
+      );
+      const expected =
+        (Math.asin(
+          Math.abs(Math.sin((yawDeg * Math.PI) / 180) * Math.sin((pitchDeg * Math.PI) / 180))
+        ) *
+          180) /
+        Math.PI;
+
+      assert.ok(
+        anchored.anchor.gravityTiltIsMeasured,
+        `yaw ${yawDeg}°, pitch ${pitchDeg}°: the levelling found no planted frame at all`
+      );
+      assert.ok(
+        Math.abs(anchored.anchor.gravityTiltDeg - expected) < 0.2,
+        `yaw ${yawDeg}°, pitch ${pitchDeg}°: measured ${anchored.anchor.gravityTiltDeg.toFixed(2)}° of roll, expected ${expected.toFixed(2)}°`
+      );
+    }
+  }
+});
+
+test("a measured zero and an unmeasurable one are different answers", () => {
+  // The flag is the whole point. Without it a clip nobody could level looks
+  // exactly like a clip that needed no levelling.
+  const level = anchorSequence(buildCameraSequence(detectFromClarityFrames(swing.frames)));
+  assert.equal(level.anchor.gravityTiltDeg, 0);
+  assert.equal(level.anchor.gravityTiltIsMeasured, true);
+
+  const footless = anchorSequence(
+    buildCameraSequence(
+      withCameraRoll(
+        detectFromClarityFrames(swing.frames, {
+          dropouts: (["leftHeel", "rightHeel", "leftToe", "rightToe"] as const).map((joint) => ({
+            joint,
+            startFrame: 0,
+            length: swing.frames.length,
+          })),
+        }),
+        6
+      )
+    )
+  );
+  assert.equal(footless.anchor.gravityTiltDeg, 0);
+  assert.equal(footless.anchor.gravityTiltIsMeasured, false);
+});
+
 test("with no feet there is no vertical to measure, and it says so", () => {
   // The whole reference is anatomical, so cropping the feet removes it. The
   // flag is the only thing standing between that and a confidently level-

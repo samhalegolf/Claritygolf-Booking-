@@ -101,6 +101,16 @@ export interface WorldFrameAnchor {
    */
   readonly gravityTiltDeg: number;
   /**
+   * Whether `gravityTiltDeg` was measured at all.
+   *
+   * False means no frame in the clip had the golfer standing on both feet, so
+   * there was no horizontal line to measure against and the world is level
+   * only because nothing was done to it. That is a different thing from a
+   * measured zero, and conflating the two is how a badly tilted clip passes
+   * for a well-shot one.
+   */
+  readonly gravityTiltIsMeasured: boolean;
+  /**
    * How far the world was pitched to keep the golfer off the falling-over
    * boundary, in degrees. Positive tips the top of the body toward the heels.
    *
