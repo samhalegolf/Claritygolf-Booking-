@@ -280,7 +280,7 @@ export const passthroughSequence = (
     fps: sequence.fps,
     bodyModel,
     anchor: sequence.anchor,
-    massSanity: checkable.length > 0 ? checkMassAgainstShape(checkable) : null,
+    massSanity: checkable.length > 0 ? checkMassAgainstShape(checkable, bodyModel.estimatedHeightM) : null,
     confidence: {
       overall: mean((frame) => frame.confidence.overall),
       components: {

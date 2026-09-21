@@ -354,6 +354,37 @@ The two therefore fail in opposite directions, so what is reported is the
 was ambiguous, narrow when the golfer did what they were asked. A bend over
 50mm is refused outright, with the reason.
 
+### The foot model: direction from the feet, length from the golfer
+
+A foot points almost entirely along the **depth** axis — a detector's weakest —
+and face-on it is foreshortened on top of that. On a real face-on clip
+MediaPipe measured heel-to-toe as **119 mm**, where anatomy puts an adult's
+foot near 265 mm. Used as the support polygon that halves the base of support
+and doubles every fraction computed against it.
+
+So the feet give the **direction** (measured, never assumed — see the mirror
+above) and the golfer's own stature gives the **length**, at 0.152 × height —
+the same population ratio the fixture is built from, named as an assumption
+rather than buried.
+
+`depthScaleUnit` reports measured ÷ expected. The foot is a known length lying
+along depth, which makes it the clearest view the pipeline has of how far a
+clip's depth can be trusted: **0.98** on clean synthetic data, **0.47** on the
+real face-on clip. Below 0.75 the panel says so in as many words.
+
+What it bought on that clip:
+
+| | before | after |
+| --- | --- | --- |
+| support polygon | 119 mm | **252 mm** |
+| mass along foot | 221% | **78%** |
+| verdict | `irreconcilable` | **`corrected`, +4.2° applied** |
+| confidence | 0 | **65** |
+
+Still honest about the limit: at a depth scale of 0.47 the fore-aft readings
+inherit real error, and filming further round from face-on is the fix. Nothing
+in the arithmetic can recover depth a detector did not resolve.
+
 ### In the video path
 
 Two clips, **detected once each**. A swing, and optionally a standing shot,

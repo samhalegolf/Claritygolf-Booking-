@@ -92,7 +92,10 @@ export const reconstructLevelled = (
   const first = reconstruct(anchorSequence(camera, options.anchor), options.reconstruct);
 
   const checkable = checkableBodies(first.sequence.frames);
-  const sanity = checkable.length > 0 ? checkMassAgainstShape(checkable) : null;
+  const sanity =
+    checkable.length > 0
+      ? checkMassAgainstShape(checkable, first.bodyModel.estimatedHeightM)
+      : null;
   const pitchCorrectionDeg = sanity?.fallingOverPitchDeg ?? 0;
 
   if (options.reportOnly || Math.abs(pitchCorrectionDeg) < WORTH_APPLYING_DEG) {

@@ -256,8 +256,29 @@ export interface MassReading {
   readonly bendFractionUnit: number;
   /** Height of the mass centre above the ankles. The lever a pitch works through. */
   readonly massHeightM: Metres;
-  /** Heel to toe, metres. */
+  /**
+   * Heel to toe, metres -- the fore-aft size of the base of support.
+   *
+   * Derived from the golfer's estimated height at a population ratio, NOT
+   * measured between the foot landmarks. The measured distance lies almost
+   * entirely along the depth axis, which is a detector's weakest, and it is
+   * foreshortened again when the camera is anywhere near face-on. Measured on
+   * a real face-on clip it came to 119mm where anatomy puts an adult's foot
+   * near 265mm -- and using that would halve the base of support and double
+   * every fraction computed against it.
+   */
   readonly footSpanM: Metres;
+  /**
+   * What the foot landmarks actually measured, as a fraction of what anatomy
+   * expects. One means they agree.
+   *
+   * This is the clearest view the pipeline has of how much it can trust the
+   * DEPTH axis on a given clip, because the foot is a known length pointing
+   * almost entirely along it. Well below one means depth is compressed, and
+   * every fore-aft reading -- the heel-to-toe mass above all -- inherits
+   * that. On a real face-on clip it read 0.45.
+   */
+  readonly depthScaleUnit: Unit;
 }
 
 /**

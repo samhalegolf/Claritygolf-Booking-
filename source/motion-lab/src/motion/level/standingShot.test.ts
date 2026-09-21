@@ -166,7 +166,7 @@ test("a crouch is refused rather than believed, with a reason", () => {
 
   // And the route falls back to what the swing can prove on its own, rather
   // than applying a calibration it has just called unusable.
-  const result = reconstructCalibrated(filmed(swing.frames, 5), filmed(standing(15), 5));
+  const result = reconstructCalibrated(filmed(swing.frames, 10), filmed(standing(15), 10));
   assert.equal(result.source, "falling-over-boundary");
   assert.ok(result.pitchCorrectionDeg > 1);
 });

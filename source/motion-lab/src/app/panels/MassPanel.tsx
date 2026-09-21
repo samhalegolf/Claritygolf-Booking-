@@ -195,10 +195,27 @@ function ForeAftCheck({
           </div>
         )}
         <div className="readout-row">
+          <dt>Depth scale</dt>
+          <dd>{sanity.reading.depthScaleUnit.toFixed(2)}</dd>
+        </div>
+        <div className="readout-row">
           <dt>Confidence</dt>
           <dd>{Math.round(sanity.confidence * 100)}</dd>
         </div>
       </dl>
+
+      {sanity.reading.depthScaleUnit < 0.75 && (
+        <p className="panel-note">
+          <strong>The depth axis is not to be trusted on this clip.</strong> The
+          feet measure{" "}
+          {(sanity.reading.depthScaleUnit * 100).toFixed(0)}% of the length
+          anatomy expects, and a foot points almost entirely along depth — so
+          that number is the clearest view available of how far the detector&rsquo;s
+          depth is off. Every fore-aft reading here inherits it, the heel–toe
+          mass above all. Filming further round from face-on is the fix; nothing
+          in the arithmetic can recover depth a detector did not resolve.
+        </p>
+      )}
 
       {sanity.verdict === "corrected" && (
         <p className="panel-note">

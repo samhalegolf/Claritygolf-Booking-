@@ -73,6 +73,15 @@ import { buildMassCloud } from "./massModel";
  * physics below is what stays in the Motion Layer.
  */
 
+/**
+ * Foot length as a fraction of standing height.
+ *
+ * A population figure, stated as one. It is the same ratio the synthetic
+ * fixture is built from, which is not a coincidence -- it is where that came
+ * from too.
+ */
+export const FOOT_LENGTH_FRACTION_OF_HEIGHT = 0.152;
+
 export interface MassSanityOptions {
   /**
    * Where on the foot a still golfer's mass is allowed to be, as a fraction
@@ -109,7 +118,10 @@ const midpointOf = (lookup: JointLookup, a: ClarityJoint, b: ClarityJoint): Vec3
  * position with the profile's fitted slope taken out at the mass centre's own
  * height -- no second, parallel mass model required.
  */
-export const readMass = (lookup: JointLookup): MassReading | null => {
+export const readMass = (
+  lookup: JointLookup,
+  footLengthM: number
+): MassReading | null => {
   const joints = {} as Record<ClarityJoint, Vec3>;
   for (const joint of MASS_JOINTS) {
     const position = lookup(joint);
@@ -124,17 +136,30 @@ export const readMass = (lookup: JointLookup): MassReading | null => {
   if (!ankle || !heel || !toe || !forward) return null;
 
   /*
-   * Measured ALONG the feet, not along a world axis.
+   * The DIRECTION comes from the feet; the LENGTH does not.
    *
-   * Taking it as `toe.z - heel.z` assumes which way the toes point, and that
-   * assumption is how a mirrored body went unnoticed through the whole
-   * pipeline. Projected onto the direction the feet actually point, the span
-   * is positive by construction and the fraction below means what it says
+   * Direction, because assuming which way the toes point is how a mirrored
+   * body went unnoticed through the whole pipeline. Projected onto the
+   * direction the feet actually point, everything below means what it says
    * whichever way the world frame is turned.
+   *
+   * Length from the golfer's own height instead, because the measured
+   * heel-to-toe distance is the single worst thing to trust here. It lies
+   * almost entirely along the depth axis, which is a detector's weakest, and
+   * face-on it is foreshortened on top of that. Measured on a real face-on
+   * clip: 119mm, where anatomy puts an adult's foot near 265mm. Using that as
+   * the support polygon halves the base of support and doubles every fraction
+   * computed against it.
+   *
+   * 0.152 is foot length as a fraction of stature -- the same ratio the
+   * fixture is built from, and a population figure rather than anything about
+   * this golfer. It is an assumption, so it is named, and `depthScaleUnit`
+   * below reports how far the measurement disagreed with it.
    */
-  const footSpanM =
+  const measuredSpanM =
     (toe[0] - heel[0]) * forward[0] + (toe[2] - heel[2]) * forward[2];
-  if (footSpanM < 0.05) return null;
+  const footSpanM = footLengthM;
+  if (!(footSpanM > 0.05)) return null;
 
   const cloud = buildMassCloud(joints);
   let weightedX = 0;
@@ -162,6 +187,7 @@ export const readMass = (lookup: JointLookup): MassReading | null => {
     bendFractionUnit: bendAlongM / footSpanM,
     massHeightM,
     footSpanM,
+    depthScaleUnit: measuredSpanM / footSpanM,
   };
 };
 
@@ -180,7 +206,13 @@ const median = (values: readonly number[]): number => {
 
 const UNDETERMINED: MassSanity = {
   samples: 0,
-  reading: { footFractionUnit: 0.5, bendFractionUnit: 0.5, massHeightM: 0, footSpanM: 0 },
+  reading: {
+    footFractionUnit: 0.5,
+    bendFractionUnit: 0.5,
+    massHeightM: 0,
+    footSpanM: 0,
+    depthScaleUnit: 0,
+  },
   impossibleFrames: 0,
   pitchRangeDeg: [-90, 90],
   fallingOverPitchDeg: 0,
@@ -193,13 +225,23 @@ const UNDETERMINED: MassSanity = {
 
 export const checkMassAgainstShape = (
   bodies: readonly JointLookup[],
+  estimatedHeightM: number,
   options: MassSanityOptions = {}
 ): MassSanity => {
   const [low, high] = options.fallingOverBoundary ?? WHOLE_FOOT;
 
+  /*
+   * No height, no check. The base of support is derived from it, and falling
+   * back to the measured foot span would quietly reintroduce the very error
+   * this exists to avoid -- on the clip that prompted it, a 45% support
+   * polygon and a doubled mass fraction.
+   */
+  if (!(estimatedHeightM > 1) || !(estimatedHeightM < 2.6)) return UNDETERMINED;
+  const footLengthM = estimatedHeightM * FOOT_LENGTH_FRACTION_OF_HEIGHT;
+
   const readings: MassReading[] = [];
   for (const index of plantedIndices(bodies)) {
-    const reading = readMass(bodies[index]);
+    const reading = readMass(bodies[index], footLengthM);
     if (reading) readings.push(reading);
   }
   if (readings.length === 0) return UNDETERMINED;
@@ -237,6 +279,7 @@ export const checkMassAgainstShape = (
     bendFractionUnit: median(readings.map((r) => r.bendFractionUnit)),
     massHeightM: median(readings.map((r) => r.massHeightM)),
     footSpanM: median(readings.map((r) => r.footSpanM)),
+    depthScaleUnit: median(readings.map((r) => r.depthScaleUnit)),
   };
 
   const spread = (pick: (r: MassReading) => number): number => {

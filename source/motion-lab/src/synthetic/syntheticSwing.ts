@@ -753,7 +753,7 @@ export const generateSyntheticSwing = (
      */
     massSanity: (() => {
       const checkable = checkableBodies(frames);
-      return checkable.length > 0 ? checkMassAgainstShape(checkable) : null;
+      return checkable.length > 0 ? checkMassAgainstShape(checkable, props.heightM) : null;
     })(),
     confidence: summariseSequence(frames),
     source: options.source ?? "synthetic:right-handed-swing",

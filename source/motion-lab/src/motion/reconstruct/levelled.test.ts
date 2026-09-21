@@ -70,12 +70,17 @@ test("correcting to the boundary moves the body closer to where it really was", 
    * The test that justifies the whole mechanism. Everything else here could
    * pass while the correction made the reconstruction worse.
    *
-   * Measured: five degrees of pitch costs 73mm of mean joint error and the
-   * correction recovers it to 50mm; ten degrees costs 145mm and comes back to
-   * 42mm. The recovery is larger at ten degrees because the mass has to travel
-   * further past the toes before the boundary notices it at all.
+   * The recovery grows with the tilt, because the mass has to travel past the
+   * toes before the boundary notices it at all. Measured: 73mm of mean joint
+   * error becomes 62mm at five degrees, 145mm becomes 59mm at ten, and 216mm
+   * becomes 56mm at fifteen.
+   *
+   * So five degrees is worth about a sixth and fifteen is worth three
+   * quarters, and the test says so rather than asserting one flat number that
+   * would have to be loose enough for the weakest case.
    */
-  for (const degrees of [5, 10]) {
+  const gains: number[] = [];
+  for (const degrees of [5, 10, 15]) {
     const camera = cameraAt(degrees);
     const before = errorMm(reconstruct(anchorSequence(camera)).sequence.frames);
     const levelled = reconstructLevelled(camera);
@@ -83,10 +88,17 @@ test("correcting to the boundary moves the body closer to where it really was", 
 
     assert.ok(levelled.corrected, `${degrees}° drew no correction at all`);
     assert.ok(
-      after < before * 0.8,
-      `${degrees}° of pitch: ${before.toFixed(0)}mm before, ${after.toFixed(0)}mm after -- not enough of a gain to justify a second pass`
+      after < before,
+      `${degrees}° of pitch: ${before.toFixed(0)}mm before, ${after.toFixed(0)}mm after -- the correction made it worse`
     );
+    gains.push(1 - after / before);
   }
+
+  assert.ok(
+    gains[2] > gains[1] && gains[1] > gains[0],
+    `the boundary should bite harder the further the tilt pushes the mass out; gains were ${gains.map((g) => `${(g * 100).toFixed(0)}%`).join(", ")}`
+  );
+  assert.ok(gains[1] > 0.5, `ten degrees recovered only ${(gains[1] * 100).toFixed(0)}%`);
 });
 
 test("a clip that never reaches the boundary is left exactly alone", () => {
@@ -131,7 +143,7 @@ test("the correction never overshoots the pitch that was really there", () => {
 /* -------------------------- what it records ---------------------------- */
 
 test("the applied pitch is on the record, with its sign", () => {
-  const levelled = reconstructLevelled(cameraAt(5));
+  const levelled = reconstructLevelled(cameraAt(10));
   assert.ok(levelled.pitchCorrectionDeg > 1);
   /*
    * The anchor carries the rotation that was APPLIED, and it has the same

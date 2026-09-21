@@ -107,7 +107,7 @@ export const reconstructCalibrated = (
   const plain = reconstruct(anchorSequence(swing, options.anchor), options.reconstruct);
   const plainBodies = checkableBodies(plain.sequence.frames);
   const boundaryRangeDeg: readonly [number, number] =
-    plainBodies.length > 0 ? checkMassAgainstShape(plainBodies).pitchRangeDeg : [-90, 90];
+    plainBodies.length > 0 ? checkMassAgainstShape(plainBodies, plain.bodyModel.estimatedHeightM).pitchRangeDeg : [-90, 90];
 
   const withinBoundary = (degrees: number) =>
     degrees >= boundaryRangeDeg[0] - 0.01 && degrees <= boundaryRangeDeg[1] + 0.01;
@@ -144,7 +144,9 @@ export const reconstructCalibrated = (
    */
   const checkable = checkableBodies(applied.sequence.frames);
   const residual =
-    checkable.length > 0 ? checkMassAgainstShape(checkable).fallingOverPitchDeg : 0;
+    checkable.length > 0
+      ? checkMassAgainstShape(checkable, applied.bodyModel.estimatedHeightM).fallingOverPitchDeg
+      : 0;
 
   if (Math.abs(residual) < 0.05) {
     return {

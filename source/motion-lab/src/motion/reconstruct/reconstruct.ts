@@ -452,7 +452,7 @@ export const reconstruct = (
       bodyModel: model,
       anchor: observations.anchor,
       confidence: summarise(frames),
-      massSanity: checkable.length > 0 ? checkMassAgainstShape(checkable) : null,
+      massSanity: checkable.length > 0 ? checkMassAgainstShape(checkable, model.estimatedHeightM) : null,
       source: `clarity-motion-layer:${observations.detector}`,
     },
   };
