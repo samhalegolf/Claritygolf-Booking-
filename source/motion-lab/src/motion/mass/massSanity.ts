@@ -46,7 +46,7 @@
  * times sharper and is almost certainly true -- but the synthetic fixture
  * cannot calibrate it, because its address posture leans forward without
  * pushing the hips back and so places the upper mass ahead of the toes. That
- * number has to come from real footage, and `balanceBand` is where it goes
+ * number has to come from real footage, and `fallingOverBoundary` is where it goes
  * when it does.
  *
  * It also does not report a pitch when nothing forces one. A clip whose mass
@@ -82,10 +82,10 @@ export interface MassSanityOptions {
    * about how people stand, so it stays a caller's decision and needs real
    * footage behind it. See the header.
    */
-  readonly balanceBand?: readonly [number, number];
+  readonly fallingOverBoundary?: readonly [number, number];
 }
 
-const DEFAULT_BAND: readonly [number, number] = [0, 1];
+const WHOLE_FOOT: readonly [number, number] = [0, 1];
 const DEG = 180 / Math.PI;
 
 const midpointOf = (lookup: JointLookup, a: ClarityJoint, b: ClarityJoint): Vec3 | null => {
@@ -167,7 +167,7 @@ const UNDETERMINED: MassSanity = {
   reading: { footFractionUnit: 0.5, bendFractionUnit: 0.5, massHeightM: 0, footSpanM: 0 },
   impossibleFrames: 0,
   pitchRangeDeg: [-90, 90],
-  minimumPitchDeg: 0,
+  fallingOverPitchDeg: 0,
   correctedFootFractionUnit: 0.5,
   bendRangeM: 0,
   leanRangeM: 0,
@@ -179,7 +179,7 @@ export const checkMassAgainstShape = (
   bodies: readonly JointLookup[],
   options: MassSanityOptions = {}
 ): MassSanity => {
-  const [low, high] = options.balanceBand ?? DEFAULT_BAND;
+  const [low, high] = options.fallingOverBoundary ?? WHOLE_FOOT;
 
   const readings: MassReading[] = [];
   for (const index of plantedIndices(bodies)) {
@@ -214,7 +214,7 @@ export const checkMassAgainstShape = (
   // The smallest correction the interval permits. Zero whenever a level
   // camera is still on the table, which is the common and correct answer.
   const chosen = irreconcilable ? 0 : lower > 0 ? lower : upper < 0 ? upper : 0;
-  const minimumPitchDeg = Math.atan(chosen) * DEG;
+  const fallingOverPitchDeg = Math.atan(chosen) * DEG;
 
   const reading: MassReading = {
     footFractionUnit: median(readings.map((r) => r.footFractionUnit)),
@@ -255,14 +255,14 @@ export const checkMassAgainstShape = (
       Number.isFinite(lower) ? Math.atan(lower) * DEG : -90,
       Number.isFinite(upper) ? Math.atan(upper) * DEG : 90,
     ],
-    minimumPitchDeg,
+    fallingOverPitchDeg,
     correctedFootFractionUnit:
       reading.footFractionUnit - chosen * (reading.massHeightM / reading.footSpanM),
     bendRangeM,
     leanRangeM,
     verdict: irreconcilable
       ? "irreconcilable"
-      : Math.abs(minimumPitchDeg) > 0.05
+      : Math.abs(fallingOverPitchDeg) > 0.05
         ? "corrected"
         : "consistent",
     confidence,

@@ -33,6 +33,15 @@ export interface SyntheticDetectorOptions {
    * untested.
    */
   readonly cameraYawDeg?: number;
+  /**
+   * Pitch of the camera, degrees, as a tripod on a slope gives. Positive tips
+   * the lens down.
+   *
+   * The tilt the stance line cannot see: it rotates about that same line, so
+   * the anatomical levelling passes it straight through. What catches it is
+   * the falling-over boundary -- see `motion/reconstruct/levelled`.
+   */
+  readonly cameraPitchDeg?: number;
   /** Joints the detector cannot see, by frame window. */
   readonly dropouts?: readonly {
     readonly joint: ClarityJoint;
@@ -65,9 +74,27 @@ const rotateY = (point: Vec3, radians: number): Vec3 => {
  * Clarity world -> MediaPipe world. The exact inverse of `toClarityAxes`,
  * plus the hip re-centring the detector does and the camera yaw.
  */
-const toMediaPipeAxes = (point: Vec3, hipCentre: Vec3, yawRad: number): Vec3 => {
+const toMediaPipeAxes = (
+  point: Vec3,
+  hipCentre: Vec3,
+  yawRad: number,
+  pitchRad: number
+): Vec3 => {
   const relative = rotateY(sub(point, hipCentre), yawRad);
-  return [relative[0], -relative[1], -relative[2]];
+  const mp: Vec3 = [relative[0], -relative[1], -relative[2]];
+  if (pitchRad === 0) return mp;
+  /*
+   * The pitch goes in HERE, in the detector's own axes, because that is where
+   * a real one lands: a detector's world landmarks are aligned to the image,
+   * so a lens tilted down reports a body tilted back and calls it upright.
+   *
+   * The image landmarks are projected from these, so they inherit it too and
+   * the two stay consistent -- which matters, because the club's camera fit
+   * pairs the two together.
+   */
+  const cos = Math.cos(pitchRad);
+  const sin = Math.sin(pitchRad);
+  return [mp[0], mp[1] * cos - mp[2] * sin, mp[1] * sin + mp[2] * cos];
 };
 
 const landmark = (position: Vec3, visibility: number): RawLandmark => ({
@@ -99,6 +126,7 @@ export const detectFromClarityFrame = (
   options: SyntheticDetectorOptions = {}
 ): ObservationFrame => {
   const yawRad = (options.cameraYawDeg ?? 0) * DEG;
+  const pitchRad = (options.cameraPitchDeg ?? 0) * DEG;
   const visibility = options.visibility ?? 0.92;
   const joints = frame.body.joints;
 
@@ -127,7 +155,7 @@ export const detectFromClarityFrame = (
   const place = (index: number, position: Vec3, hidden: boolean) => {
     world[index] = hidden
       ? MISSING
-      : landmark(toMediaPipeAxes(position, hipCentre, yawRad), visibility);
+      : landmark(toMediaPipeAxes(position, hipCentre, yawRad, pitchRad), visibility);
   };
 
   // The stance axis is what the ears and knuckles are spread along. Derived
@@ -181,7 +209,7 @@ export const detectFromClarityFrame = (
     options.clubLostFrom != null && frame.index >= options.clubLostFrom;
   const club =
     frame.club && !clubLost
-      ? clubObservation(frame.club.head, hipCentre, yawRad, options)
+      ? clubObservation(frame.club.head, hipCentre, yawRad, pitchRad, options)
       : null;
 
   return {
@@ -198,9 +226,12 @@ const clubObservation = (
   head: Vec3,
   hipCentre: Vec3,
   yawRad: number,
+  // The club sees the same camera the body does. Leaving the pitch out here
+  // would put the clubhead in a different world from the hands holding it.
+  pitchRad: number,
   options: SyntheticDetectorOptions
 ): ObservationFrame["club"] => {
-  const converted = toMediaPipeAxes(head, hipCentre, yawRad);
+  const converted = toMediaPipeAxes(head, hipCentre, yawRad, pitchRad);
   const projected = toImageLandmarks([landmark(converted, 1)])[0];
   const noise = options.clubNoise ?? 0;
 

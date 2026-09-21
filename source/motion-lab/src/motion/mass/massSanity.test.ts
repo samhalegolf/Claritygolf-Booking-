@@ -111,21 +111,21 @@ test("the correction is never larger than the physics forces", () => {
   // Over-correcting would be inventing a camera angle, which is the exact
   // failure the whole module is built to avoid.
   for (const degrees of PITCHES) {
-    const { minimumPitchDeg } = check(swing.frames, degrees);
+    const { fallingOverPitchDeg } = check(swing.frames, degrees);
     assert.ok(
-      Math.abs(minimumPitchDeg) <= Math.abs(degrees) + 0.01,
-      `a ${degrees}° pitch drew a ${minimumPitchDeg.toFixed(2)}° correction`
+      Math.abs(fallingOverPitchDeg) <= Math.abs(degrees) + 0.01,
+      `a ${degrees}° pitch drew a ${fallingOverPitchDeg.toFixed(2)}° correction`
     );
     assert.ok(
-      minimumPitchDeg === 0 || Math.sign(minimumPitchDeg) === Math.sign(degrees),
-      `a ${degrees}° pitch drew a correction of the wrong sign, ${minimumPitchDeg.toFixed(2)}°`
+      fallingOverPitchDeg === 0 || Math.sign(fallingOverPitchDeg) === Math.sign(degrees),
+      `a ${degrees}° pitch drew a correction of the wrong sign, ${fallingOverPitchDeg.toFixed(2)}°`
     );
   }
 });
 
 test("a level camera draws no correction at all", () => {
   const level = check(swing.frames, 0);
-  assert.equal(level.minimumPitchDeg, 0);
+  assert.equal(level.fallingOverPitchDeg, 0);
   assert.equal(level.verdict, "consistent");
   assert.equal(level.impossibleFrames, 0);
 });
@@ -147,8 +147,8 @@ test("a mass reading beyond the toes is impossible, and proves a pitch", () => {
   );
   assert.equal(tilted.verdict, "corrected");
   assert.ok(
-    tilted.minimumPitchDeg > 1,
-    `only ${tilted.minimumPitchDeg.toFixed(2)}° was proven from a reading that far outside the foot`
+    tilted.fallingOverPitchDeg > 1,
+    `only ${tilted.fallingOverPitchDeg.toFixed(2)}° was proven from a reading that far outside the foot`
   );
   assert.ok(
     tilted.correctedFootFractionUnit <= 1.001 && tilted.correctedFootFractionUnit >= -0.001,
@@ -156,7 +156,7 @@ test("a mass reading beyond the toes is impossible, and proves a pitch", () => {
   );
 
   // Ten degrees is further outside, so more of it is provable.
-  assert.ok(check(swing.frames, 10).minimumPitchDeg > tilted.minimumPitchDeg);
+  assert.ok(check(swing.frames, 10).fallingOverPitchDeg > tilted.fallingOverPitchDeg);
 });
 
 test("more tilt is caught than not, but the clip has to get near the edge to pin it", () => {
@@ -165,7 +165,7 @@ test("more tilt is caught than not, but the clip has to get near the edge to pin
   // reported a pitch here would be guessing.
   const small = check(swing.frames, 2);
   assert.ok(small.reading.footFractionUnit < 1);
-  assert.equal(small.minimumPitchDeg, 0);
+  assert.equal(small.fallingOverPitchDeg, 0);
   assert.equal(small.verdict, "consistent");
   // and it says the reading is not pinned down
   assert.ok(small.confidence < 0.6, `confidence was ${small.confidence.toFixed(2)}`);
@@ -235,7 +235,7 @@ test("the tight mid-foot band is NOT sound on this fixture, which is why it is n
    * so nobody tightens the default until real footage says where people
    * actually stand.
    */
-  const tight = checkMassAgainstShape(bodiesOf(swing.frames, 0), { balanceBand: [0.35, 0.65] });
+  const tight = checkMassAgainstShape(bodiesOf(swing.frames, 0), { fallingOverBoundary: [0.35, 0.65] });
   const [low, high] = tight.pitchRangeDeg;
 
   assert.ok(high - low < 5, `the tight band should be sharp; it spanned ${(high - low).toFixed(1)}°`);
@@ -290,10 +290,10 @@ test("the finished sequence carries the verdict, and nothing else has moved", ()
 
   assert.ok(level.massSanity, "a clean clip should produce a verdict");
   assert.equal(level.massSanity?.verdict, "consistent");
-  assert.equal(level.massSanity?.minimumPitchDeg, 0);
+  assert.equal(level.massSanity?.fallingOverPitchDeg, 0);
 
   assert.equal(tilted.massSanity?.verdict, "corrected");
-  assert.ok((tilted.massSanity?.minimumPitchDeg ?? 0) > 1);
+  assert.ok((tilted.massSanity?.fallingOverPitchDeg ?? 0) > 1);
 
   // The geometry is untouched: the tilted clip's joints are exactly where the
   // anchoring left them, five degrees of error and all.
@@ -342,7 +342,7 @@ test("the passthrough reaches the same verdict as the Motion Layer", () => {
 
   assert.equal(raw.massSanity?.verdict, built.massSanity?.verdict);
   assert.ok(
-    Math.abs((raw.massSanity?.minimumPitchDeg ?? 0) - (built.massSanity?.minimumPitchDeg ?? 0)) < 0.5,
-    `passthrough proved ${raw.massSanity?.minimumPitchDeg.toFixed(2)}° and the Motion Layer ${built.massSanity?.minimumPitchDeg.toFixed(2)}°`
+    Math.abs((raw.massSanity?.fallingOverPitchDeg ?? 0) - (built.massSanity?.fallingOverPitchDeg ?? 0)) < 0.5,
+    `passthrough proved ${raw.massSanity?.fallingOverPitchDeg.toFixed(2)}° and the Motion Layer ${built.massSanity?.fallingOverPitchDeg.toFixed(2)}°`
   );
 });

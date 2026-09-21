@@ -54,6 +54,17 @@ export const SCENARIOS: readonly Scenario[] = [
     detector: { cameraYawDeg: DEMO_CAMERA_YAW_DEG },
   },
   {
+    key: "tilted-camera",
+    label: "Tilted camera",
+    purpose:
+      "A tripod pitched eight degrees down, filmed face-on. The stance line cannot see this tilt -- it rotates about that same line -- so the body looks fine while the mass reads past the toes, where a golfer would be falling over. The heel-toe readout says how far the world was pitched to put them back on their feet. Face-on deliberately: it is where a pitch is purely fore-aft, and also where the club's depth is weakest, so expect a poor club and a corrected body.",
+    options: { source: "synthetic:tilted-camera" },
+    // Yaw zero, not the demo angle. At an oblique yaw a camera pitch is mostly
+    // a ROLL as the golfer sees it, and the stance line already removes that --
+    // only the component along the stance line is what this scenario is about.
+    detector: { cameraYawDeg: 0, cameraPitchDeg: 8 },
+  },
+  {
     key: "pelvis-dropout",
     label: "Pelvis dropout",
     purpose:

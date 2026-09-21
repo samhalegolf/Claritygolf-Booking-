@@ -14,7 +14,7 @@ import { MediaPipeDetector } from "../observe/mediapipe/MediaPipeDetector";
 import type { ObservationFrame } from "../observe/observation";
 import { observeVideo, type ObservationResult } from "../observe/runObservation";
 import { passthroughSequence } from "../motion/passthrough";
-import { reconstruct } from "../motion/reconstruct/reconstruct";
+import { reconstructLevelled } from "../motion/reconstruct/levelled";
 
 export type ObservationStatus = "idle" | "running" | "ready" | "error";
 
@@ -119,7 +119,10 @@ export const useVideoObservation = () => {
           // Both, so the two can be compared on identical input without
           // re-running four seconds of detection.
           sequence: passthroughSequence(result.world),
-          reconstructed: reconstruct(result.world).sequence,
+          // The reconstruction is levelled against the falling-over boundary;
+          // the passthrough beside it is not, so the comparison stays honest
+          // about what each layer is actually doing.
+          reconstructed: reconstructLevelled(result.camera).sequence,
           raw: result.raw,
           videoUrl,
           fileName: file.name,

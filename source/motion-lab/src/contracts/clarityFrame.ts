@@ -282,20 +282,25 @@ export interface MassSanity {
   readonly samples: number;
   /** The median reading across those frames. */
   readonly reading: MassReading;
-  /** Frames whose mass fell outside the feet, which a standing golfer's cannot. */
+  /**
+   * Frames whose mass fell outside the falling-over boundary -- past the toes
+   * or behind the heels -- where the golfer would not have been standing.
+   */
   readonly impossibleFrames: number;
   /**
-   * The camera pitches consistent with every one of those frames, degrees.
-   * Unbounded ends are reported as +/- 90.
+   * The camera pitches that keep the golfer on the right side of the
+   * falling-over boundary in every one of those frames, degrees. Unbounded
+   * ends are reported as +/- 90.
    */
   readonly pitchRangeDeg: readonly [number, number];
   /**
    * The smallest pitch inside that range, degrees -- the least the camera can
-   * have been tilted given what the body did. Zero whenever a level camera is
-   * still possible, which is the common and correct answer.
+   * have been tilted given that the golfer was not falling over. Zero whenever
+   * a level camera still keeps them upright, which is the common and correct
+   * answer.
    */
-  readonly minimumPitchDeg: number;
-  /** What the reading becomes once `minimumPitchDeg` is allowed for. */
+  readonly fallingOverPitchDeg: number;
+  /** What the reading becomes once `fallingOverPitchDeg` is applied. */
   readonly correctedFootFractionUnit: number;
   /**
    * How far the BEND moved the mass across the clip, metres.

@@ -660,8 +660,10 @@ export const generateSyntheticSwing = (
       stanceWidthM,
       anchorIsStable: true,
       // The fixture is built in world axes, so there is no camera to be
-      // tilted and nothing to correct.
+      // tilted and nothing to correct -- neither the roll the stance line
+      // sees nor the pitch the falling-over boundary does.
       gravityTiltDeg: 0,
+      pitchCorrectionDeg: 0,
     },
     /*
      * Run on the fixture as well, where there is no camera to be wrong.

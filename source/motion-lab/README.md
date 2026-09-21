@@ -170,7 +170,7 @@ named for what it is: camera plus golfer, inseparable from one posture.
 so a body shaped like a plumb line declines to answer rather than reporting
 zero.
 
-## Sanity-checking the mass reading without calibrating the camera
+## The falling-over boundary
 
 "Where is the mass between heel and toe" is the most pitch-sensitive number
 here: the mass centre is ~920mm up and the foot is ~265mm long, so **one
@@ -179,41 +179,81 @@ the fixture, 5° of pitch moved it from 77% of the foot to 110%, while a golfer
 genuinely sitting 60mm back moved it 7%. The reading is about **five times
 more sensitive to the tripod than to the golfer**.
 
-`motion/mass/massSanity.ts` checks it two ways, neither needing a calibrated
-camera.
+Levelling from the stance line fixes the roll and is **blind to the pitch** — a
+rotation about that same line leaves the line exactly where it was. One thing
+does see it: the golfer's own balance.
 
-**Possibility.** A golfer standing on both feet has their mass over their feet
-— not as style, as not falling over. A reading past the toes is not surprising,
-it is *impossible*, and the excess is a hard lower bound on the pitch. Each
-planted frame gives one interval; they intersect; the correction applied is the
-**smallest pitch inside the result**, which is usually zero.
+A person standing on both feet has their mass over those feet. Past the toes or
+behind the heels they are not standing, they are falling. That edge is the
+**falling-over boundary**, and it is physics rather than technique — it says
+nothing about how anyone should address the ball, only that they were still on
+their feet while being filmed.
 
-| true pitch | raw reading | admissible range | correction | corrected |
+So a reading past the toes is not surprising, it is *impossible*, and the
+smallest pitch that brings the mass back onto the boundary is a hard lower
+bound on the camera's tilt. Each planted frame gives one interval; they
+intersect; the angle applied is the **smallest pitch inside the result**, which
+is usually zero.
+
+| true pitch | raw reading | admissible range | applied | mean joint error |
 | --- | --- | --- | --- | --- |
-| 0° | 0.76 | −3.8° … 11.3° | none | 0.76 |
-| 2° | 0.89 | −1.7° … 13.4° | none | 0.89 |
-| 5° | **1.09** | 1.6° … 16.5° | 1.6° | 0.99 |
-| 10° | **1.42** | 7.2° … 21.6° | 7.2° | 0.99 |
+| 0° | 0.76 | −3.8° … 11.3° | none | 5.7 → 5.7 mm |
+| 2° | 0.89 | −1.7° … 13.4° | none | 30.3 → 30.3 mm |
+| 5° | **1.09** | 1.6° … 16.5° | **1.60°** | **73.3 → 50.4 mm** |
+| 10° | **1.42** | 7.2° … 21.6° | **7.19°** | **145.2 → 41.9 mm** |
 
 The interval always contains the truth — that is the property the tests pin
 down, and it is why the correction can never invent a camera angle. Two degrees
 is unprovable because 89% of the foot, while ugly, is possible; saying so is
-the honest answer.
+the honest answer, and the bodies then come back bit-for-bit identical.
+
+The last column is what justifies the mechanism: the correction makes the
+reconstruction **measurably closer to the known body**, not merely tidier on
+the readout.
+
+### A floor, not a fix
+
+Five degrees of pitch is only caught out by 1.6, because the reading has to
+travel all the way past the toes before it becomes impossible at all. What
+comes back is a scene that is no longer impossible — it is not thereby right,
+and `anchor.pitchCorrectionDeg` is on the record so nobody has to guess whether
+something was done to it.
+
+The boundary also only catches a tilt pushing the golfer **toward an edge they
+were already near**. This fixture stands at 76% of its foot, so forward tilt is
+caught quickly and backward tilt has most of the foot to cross first — 10°
+backwards goes entirely undetected. A golfer nearer mid-foot would be caught
+about equally either way. There is a test holding that limit visible.
+
+### How it runs
+
+The evidence for the pitch is the mass model, which needs a reconstructed body,
+which needs an anchored sequence — and the anchoring is what the pitch has to go
+into. The dependency genuinely is a loop, so `reconstructLevelled` runs it as
+one: reconstruct, ask the boundary, re-anchor with the answer, reconstruct
+again. **Two passes, never three** — the correction puts the mass on the
+boundary by construction, so a second ask has nothing left to find and would
+only chase detector noise around the edge of the foot. Costs about 20ms.
+
+The angle goes in at the **anchor**, not onto the finished frames: rotating the
+output would leave the feet hanging off the ground, since the grounding, contact
+alignment and origin were all computed in the old frame.
+
+The baseline/passthrough view is deliberately **not** levelled. Its job is to
+show what arrives with nothing done to it.
 
 **Shape.** The mass centre is a weighted sum of body points, so it splits the
 same way the profile does: the bend part is pitch-free. Over 10° of pitch the
 raw reading moves ~175mm and `bendFractionUnit` moves ~10mm. A real squat moves
 the bend; a camera pitch does not.
 
-**Reported, not applied.** The verdict rides on `ClaritySequence.massSanity` —
-the clip level, because a camera's pitch is one number for a whole clip — and
-the mass panel reads it. **No coordinate is corrected.** Applying the pitch
-would mean re-levelling the world, and the levelling lives in `observe/`, which
-may not import the Motion Layer; that is a separate decision, deliberately not
-taken in the pipeline. The check runs on the Motion Layer and the passthrough
-alike, and only over frames whose **feet the detector actually saw** — measuring
-an invented mass against an invented foot would produce a number with no
-evidence in it that looked exactly like a real one.
+**Where it shows up.** The verdict rides on `ClaritySequence.massSanity` and the
+applied angle on `anchor.pitchCorrectionDeg` — both clip-level, because a
+camera's pitch is one number for a whole clip. The mass panel reads both, and
+says in as many words when a scene has been rotated. The check runs only over
+frames whose **feet the detector actually saw**: measuring an invented mass
+against an invented foot would produce a number with no evidence in it that
+looked exactly like a real one.
 
 ### The band that would make this sharp, and why it is not the default
 

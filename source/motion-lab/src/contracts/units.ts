@@ -100,6 +100,35 @@ export interface WorldFrameAnchor {
    * about the golfer rather than about the camera.
    */
   readonly gravityTiltDeg: number;
+  /**
+   * How far the world was pitched to keep the golfer off the falling-over
+   * boundary, in degrees. Positive tips the top of the body toward the heels.
+   *
+   * THE ONE TILT THE STANCE LINE CANNOT SEE
+   *
+   * `gravityTiltDeg` is measured from the line between two flat feet, which is
+   * horizontal. One line gives one constraint, so it fixes the ROLL and says
+   * nothing about the pitch -- a rotation about that same line leaves it
+   * exactly where it was.
+   *
+   * What does see the pitch is the golfer's own balance. A person standing on
+   * both feet has their centre of mass over those feet; past the toes or
+   * behind the heels they are not standing, they are falling. That edge is
+   * the FALLING-OVER BOUNDARY, and it is physics rather than technique.
+   *
+   * So when the reconstructed mass lands outside it, the scene is not merely
+   * unlikely -- it is impossible, and the smallest pitch that brings the mass
+   * back to the boundary is a hard lower bound on how far the camera was
+   * tilted. That angle is applied here, and it is the SMALLEST one the
+   * evidence forces: usually zero, and never more than the golfer's own
+   * balance demands.
+   *
+   * It is a lower bound, not a solution. A camera tilted five degrees may
+   * only be caught out by two, because the reading has to travel all the way
+   * past the toes before it becomes impossible at all. Corrected, the scene
+   * is no longer impossible; it is not thereby right.
+   */
+  readonly pitchCorrectionDeg: number;
 }
 
 export const clampUnit = (value: number): Unit =>

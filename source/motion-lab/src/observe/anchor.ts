@@ -75,6 +75,17 @@ export interface AnchorOptions {
    * that is perfectly frozen.
    */
   readonly stillnessThresholdM?: number;
+  /**
+   * Pitch the world by this many degrees about the stance line, on top of the
+   * roll measured from the feet.
+   *
+   * Not measured here, and cannot be: the evidence for it is the golfer's
+   * balance, which needs a mass model, which lives in the Motion Layer --
+   * and this layer may not import it. So the number arrives from outside,
+   * already derived, and this option is the hole it is poured into. See
+   * `WorldFrameAnchor.pitchCorrectionDeg`.
+   */
+  readonly pitchCorrectionDeg?: number;
 }
 
 const DEFAULTS = {
@@ -154,6 +165,19 @@ export const findAnchorFrame = (
 };
 
 /* ---------------------------- the transform --------------------------- */
+
+/**
+ * Rotate about X -- the stance line, once the yaw has been applied.
+ *
+ * This is the axis a camera pitch turns about, which is why the correction is
+ * applied here rather than folded into the levelling quaternion: the levelling
+ * is measured in detector axes, and the pitch is measured in world ones.
+ */
+const rotateX = (point: Vec3, cos: number, sin: number): Vec3 => [
+  point[0],
+  point[1] * cos - point[2] * sin,
+  point[1] * sin + point[2] * cos,
+];
 
 /** Rotate about Y. Kept local because the angle is derived, never passed around. */
 const rotateY = (point: Vec3, cos: number, sin: number): Vec3 => [
@@ -465,14 +489,30 @@ export const anchorSequence = (
     stanceWidthM = widths[Math.floor(widths.length / 2)];
   }
 
-  /** Detector axes to Clarity world axes: level first, then face the stance. */
-  const toWorldAxes = (point: Vec3): Vec3 => rotateY(level(point), cos, sin);
+  /*
+   * Detector axes to Clarity world axes: level, then face the stance, then
+   * take out any pitch the caller established from the golfer's balance.
+   *
+   * The pitch is LAST because it turns about the stance line, and the stance
+   * line is only the X axis once the yaw has been applied. Everything below --
+   * the grounding, the contact alignment, the origin -- runs on the output of
+   * this function, so the correction reaches all of it for free rather than
+   * having to be threaded through each step.
+   */
+  const pitchRad = ((options.pitchCorrectionDeg ?? 0) * Math.PI) / 180;
+  const pitchCos = Math.cos(pitchRad);
+  const pitchSin = Math.sin(pitchRad);
+  const toWorldAxes = (point: Vec3): Vec3 =>
+    pitchRad === 0
+      ? rotateY(level(point), cos, sin)
+      : rotateX(rotateY(level(point), cos, sin), pitchCos, pitchSin);
 
   const anchor: WorldFrameAnchor = {
     anchorFrameIndex: choice.index,
     stanceWidthM,
     anchorIsStable: choice.stable && stanceWidthM > 1e-4,
     gravityTiltDeg: levelling.tiltDeg,
+    pitchCorrectionDeg: options.pitchCorrectionDeg ?? 0,
   };
 
   /*

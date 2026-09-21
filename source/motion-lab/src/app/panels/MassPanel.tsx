@@ -99,7 +99,7 @@ export function MassPanel({
         descriptive signal — no biomechanical meaning is assigned to any value.
       </p>
 
-      <ForeAftCheck sanity={sequence.massSanity} />
+      <ForeAftCheck sanity={sequence.massSanity} appliedDeg={sequence.anchor.pitchCorrectionDeg} />
     </div>
   );
 }
@@ -115,14 +115,28 @@ export function MassPanel({
  * Nothing above has been corrected for it. The readout says what the physics
  * implies; applying it is a separate decision, not taken in the pipeline.
  */
-function ForeAftCheck({ sanity }: { sanity: MassSanity | null }) {
+function ForeAftCheck({
+  sanity,
+  appliedDeg,
+}: {
+  sanity: MassSanity | null;
+  /**
+   * The pitch already taken out of these coordinates, from the anchor.
+   *
+   * Separate from anything in `sanity`, and necessarily so: the check below
+   * ran on the CORRECTED scene, so it reports what is still forced, which
+   * after a correction is nothing. Without this the readout would say the
+   * clip was fine and never mention that it had been rotated to get there.
+   */
+  appliedDeg: number;
+}) {
   if (!sanity || sanity.verdict === "undetermined") {
     return (
       <>
         <h3 className="panel-subtitle">Heel–toe reading</h3>
         <p className="panel-note">
-          Not checked: no frame in this clip had the golfer standing on two feet
-          the detector could actually see. That is not the same as the reading
+          Not checked against the falling-over boundary: no frame in this clip
+          had the golfer standing on two feet the detector could actually see. That is not the same as the reading
           being sound — there was simply nothing to check it against.
         </p>
       </>
@@ -135,6 +149,12 @@ function ForeAftCheck({ sanity }: { sanity: MassSanity | null }) {
     <>
       <h3 className="panel-subtitle">Heel–toe reading</h3>
       <dl className="readout">
+        {Math.abs(appliedDeg) > 0.05 && (
+          <div className="readout-row">
+            <dt>World pitched by</dt>
+            <dd>{degrees(appliedDeg)}</dd>
+          </div>
+        )}
         <div className="readout-row">
           <dt>Mass along foot</dt>
           <dd>{alongFoot(sanity.reading.footFractionUnit)}</dd>
@@ -151,7 +171,7 @@ function ForeAftCheck({ sanity }: { sanity: MassSanity | null }) {
         </div>
         <div className="readout-row">
           <dt>Least pitch that fits</dt>
-          <dd>{degrees(sanity.minimumPitchDeg)}</dd>
+          <dd>{degrees(sanity.fallingOverPitchDeg)}</dd>
         </div>
         {sanity.impossibleFrames > 0 && (
           <div className="readout-row">
@@ -169,30 +189,42 @@ function ForeAftCheck({ sanity }: { sanity: MassSanity | null }) {
 
       {sanity.verdict === "corrected" && (
         <p className="panel-note">
-          The mass read outside the feet, which a golfer standing on both of them
-          cannot do. The least camera pitch explaining that is{" "}
-          {degrees(sanity.minimumPitchDeg)}, which would put the reading at{" "}
-          {alongFoot(sanity.correctedFootFractionUnit)}.{" "}
-          <strong>Nothing above has been corrected.</strong> The true pitch is at
-          least this much and may be more — the reading only has to get back
-          inside the foot to stop being impossible, not back to where it was.
+          The mass still reads outside the falling-over boundary. A further{" "}
+          {degrees(sanity.fallingOverPitchDeg)} of camera pitch would bring it to{" "}
+          {alongFoot(sanity.correctedFootFractionUnit)}. This scene has not had
+          that applied — either the levelling pass was not run, or it was asked
+          to report only.
         </p>
       )}
 
-      {sanity.verdict === "consistent" && (
+      {sanity.verdict === "consistent" && Math.abs(appliedDeg) > 0.05 && (
         <p className="panel-note">
-          The mass stayed over the feet throughout, so no camera pitch is forced
-          by the physics. That is not a level camera — anything in the range above
-          would also fit. A clip whose mass never approaches the edge of the foot
-          cannot pin the camera down, and the confidence reflects how wide that
-          range is rather than how good the swing was.
+          The mass read outside the falling-over boundary — past the toes or
+          behind the heels, where the golfer would not have been standing. The
+          world has been pitched {degrees(appliedDeg)} to bring it back, and
+          every coordinate in this scene is the corrected one.{" "}
+          <strong>That is a floor, not a fix.</strong> The camera was tilted at
+          least this much and may well be more: the reading only has to reach
+          the boundary to stop being impossible, not return to where it truly
+          was.
+        </p>
+      )}
+
+      {sanity.verdict === "consistent" && Math.abs(appliedDeg) <= 0.05 && (
+        <p className="panel-note">
+          The mass stayed inside the falling-over boundary throughout, so no
+          camera pitch is forced and none has been applied. That is not a level
+          camera — anything in the range above would also fit. A clip whose mass
+          never approaches the edge of the foot cannot pin the camera down, and
+          the confidence reflects how wide that range is rather than how good
+          the swing was.
         </p>
       )}
 
       {sanity.verdict === "irreconcilable" && (
         <p className="panel-note">
-          No single camera pitch makes every frame possible, so the disagreement
-          is not the camera. Either the feet moved during the frames treated as a
+          No single camera pitch keeps every frame inside the falling-over
+          boundary, so the disagreement is not the camera. Either the feet moved during the frames treated as a
           stance, or the detector placed the body badly in some of them.
         </p>
       )}

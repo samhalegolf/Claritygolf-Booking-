@@ -13,8 +13,9 @@ import { useMemo } from "react";
 
 import type { ClaritySequence, Vec3 } from "../contracts";
 import { passthroughSequence } from "../motion/passthrough";
-import { reconstruct, type ReconstructOptions } from "../motion/reconstruct/reconstruct";
+import type { ReconstructOptions } from "../motion/reconstruct/reconstruct";
 import { anchorSequence } from "../observe/anchor";
+import { reconstructLevelled } from "../motion/reconstruct/levelled";
 import type { CameraObservationSequence } from "../observe/observation";
 import { detectFromClarityFrames } from "../observe/syntheticDetector";
 import { toCameraFrame } from "../observe/toCameraFrame";
@@ -67,10 +68,17 @@ export const useSyntheticPipeline = (
       durationMs: (truth.frames.length / truth.fps) * 1000,
       detector: `synthetic:${scenario.key}`,
     };
-    const observations = anchorSequence(camera);
-
-    const report = mode === "motion-layer" ? reconstruct(observations, { stages }) : null;
-    const sequence = report ? report.sequence : passthroughSequence(observations);
+    /*
+     * The Motion Layer goes through the leveller, which reconstructs, asks the
+     * falling-over boundary whether the golfer could have been standing like
+     * that, and re-anchors with the answer if not.
+     *
+     * The baseline deliberately does not. The whole point of the baseline is
+     * to show what arrives with nothing done to it, and quietly rotating its
+     * world would make the comparison a lie.
+     */
+    const report = mode === "motion-layer" ? reconstructLevelled(camera, { reconstruct: { stages } }) : null;
+    const sequence = report ? report.sequence : passthroughSequence(anchorSequence(camera));
 
     let total = 0;
     let count = 0;
