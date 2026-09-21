@@ -45,6 +45,7 @@ export function LabApp() {
   });
   const [videoUseMotionLayer, setVideoUseMotionLayer] = useState(true);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const standingInputRef = useRef<HTMLInputElement | null>(null);
 
   const scenario = SCENARIOS.find((entry) => entry.key === scenarioKey) ?? SCENARIOS[0];
   const synthetic = useSyntheticPipeline(scenario, pipelineMode, stages);
@@ -111,7 +112,8 @@ export function LabApp() {
     return () => window.removeEventListener("keydown", onKey);
   }, [playback]);
 
-  const { status, progress, error, result, videoUrl, fileName } = video.state;
+  const { status, progress, error, result, videoUrl, fileName, calibration, calibrationFileName, levelling } =
+    video.state;
 
   return (
     <div className="lab">
@@ -180,6 +182,17 @@ export function LabApp() {
                   event.target.value = "";
                 }}
               />
+              <input
+                ref={standingInputRef}
+                type="file"
+                accept="video/*"
+                hidden
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) void video.runStandingShot(file);
+                  event.target.value = "";
+                }}
+              />
               <button
                 type="button"
                 className="chip"
@@ -188,6 +201,30 @@ export function LabApp() {
               >
                 {fileName ? "Choose another clip" : "Choose a clip"}
               </button>
+              {/*
+                The second clip, kept a separate button on purpose: it is a
+                different kind of evidence, it is optional, and loading one
+                must never be mistaken for loading a swing.
+              */}
+              <button
+                type="button"
+                className="chip"
+                onClick={() => standingInputRef.current?.click()}
+                disabled={status === "running"}
+                title="Two seconds of the golfer standing still, from the same camera"
+              >
+                {calibrationFileName ? "Replace standing shot" : "Add standing shot"}
+              </button>
+              {calibrationFileName && (
+                <button
+                  type="button"
+                  className="chip"
+                  onClick={video.clearStandingShot}
+                  disabled={status === "running"}
+                >
+                  Drop it
+                </button>
+              )}
               {status === "running" && (
                 <button type="button" className="chip" onClick={video.cancel}>
                   Cancel
@@ -201,7 +238,7 @@ export function LabApp() {
       <p className="scenario-purpose">
         {source === "synthetic"
           ? scenario.purpose
-          : "MediaPipe on a real clip, through the real pipeline. Toggle the Motion Layer to compare reconstruction against the do-nothing baseline."}
+          : "MediaPipe on a real clip, through the real pipeline. Toggle the Motion Layer to compare reconstruction against the do-nothing baseline. Add a standing shot — two seconds of the golfer standing still, same camera — to measure the camera's pitch instead of merely bounding it."}
       </p>
 
       <div className="lab-body">
@@ -356,6 +393,31 @@ export function LabApp() {
                       <dd>{result.world.anchor.stanceWidthM.toFixed(3)} m</dd>
                     </div>
                     <div className="readout-row">
+                      <dt>Standing shot</dt>
+                      <dd>
+                        {!calibration
+                          ? "none"
+                          : calibration.usable
+                            ? `${calibration.pitchDeg >= 0 ? "+" : ""}${calibration.pitchDeg.toFixed(2)}° pitch`
+                            : "refused"}
+                      </dd>
+                    </div>
+                    {calibration?.usable && (
+                      <>
+                        <div className="readout-row">
+                          <dt>Calibration range</dt>
+                          <dd>
+                            {calibration.pitchRangeDeg[0].toFixed(2)}° …{" "}
+                            {calibration.pitchRangeDeg[1].toFixed(2)}°
+                          </dd>
+                        </div>
+                        <div className="readout-row">
+                          <dt>Stood off plumb by</dt>
+                          <dd>{(calibration.standingBendM * 1000).toFixed(0)} mm</dd>
+                        </div>
+                      </>
+                    )}
+                    <div className="readout-row">
                       <dt>Camera roll</dt>
                       <dd>
                         {result.world.anchor.gravityTiltIsMeasured
@@ -368,6 +430,33 @@ export function LabApp() {
                       <dd>{(result.elapsedMs / 1000).toFixed(1)} s</dd>
                     </div>
                   </dl>
+                  {calibration && !calibration.usable && (
+                    <p className="panel-note">
+                      Standing shot refused: {calibration.reason}. The world is
+                      levelled from what the swing can prove on its own instead,
+                      which is a lower bound rather than a measurement.
+                    </p>
+                  )}
+                  {levelling?.agreement === "boundary-forced-more" && (
+                    <p className="panel-note">
+                      The standing shot and the swing disagree. The shot asked for{" "}
+                      {calibration?.pitchDeg.toFixed(2)}°, but the swing still put the
+                      golfer&rsquo;s mass outside their feet, so a further{" "}
+                      {levelling.boundaryResidualDeg.toFixed(2)}° was forced on top.
+                      Physics wins that argument — but the usual cause is the two
+                      clips being filmed from different places, which no correction
+                      can undo.
+                    </p>
+                  )}
+                  {levelling?.source === "standing-shot" &&
+                    levelling.agreement === "agree" &&
+                    !levelling.calibrationWithinBoundary && (
+                      <p className="panel-note">
+                        The standing shot claims a pitch the swing says is
+                        impossible. Treat this reconstruction as unreliable and
+                        check that both clips came from the same camera position.
+                      </p>
+                    )}
                   {!result.world.anchor.gravityTiltIsMeasured && (
                     <p className="panel-note">
                       No frame had the golfer standing on both feet, so there was
