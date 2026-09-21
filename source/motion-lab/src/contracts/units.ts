@@ -139,6 +139,24 @@ export interface WorldFrameAnchor {
    * is no longer impossible; it is not thereby right.
    */
   readonly pitchCorrectionDeg: number;
+  /**
+   * Where `pitchCorrectionDeg` came from.
+   *
+   * The two routes are not the same kind of claim and should never be read as
+   * though they were.
+   *
+   *   "falling-over-boundary"  A LOWER BOUND from the swing itself, free and
+   *                            always available. The camera was tilted at
+   *                            least this much; usually it was tilted more.
+   *
+   *   "standing-shot"          An ESTIMATE from a second clip of the golfer
+   *                            standing still, good to about a degree, and
+   *                            only as good as the instruction being followed.
+   *
+   * Averaging a bound with an estimate would produce a number that is neither,
+   * so they are kept apart and the provenance travels with the value.
+   */
+  readonly pitchCorrectionSource: "none" | "falling-over-boundary" | "standing-shot";
 }
 
 export const clampUnit = (value: number): Unit =>

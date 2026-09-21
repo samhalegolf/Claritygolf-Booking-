@@ -275,6 +275,62 @@ a mid-foot band, the check proves 2° of tilt on a level camera. There is a test
 that fails if anyone tightens the default before real footage says where people
 actually stand.
 
+## The standing shot
+
+The falling-over boundary is free and always available, but it only ever gives
+a **lower bound** — 8° of tilt caught out by 4.9°, and a clip whose mass never
+nears the edge of the foot proves nothing at all.
+
+Two seconds of the golfer **standing still**, filmed from the same camera,
+collapses it. At address the fore-aft profile carries a huge posture term (10.7°
+on a level camera); standing up, the body is close to a plumb line, so its slope
+is close to the camera's.
+
+| scenario | applied pitch | mean joint error |
+| --- | --- | --- |
+| Clean, level camera | — | 5.7 mm |
+| 8° tilt, boundary only | −4.9° | 45.5 mm |
+| 8° tilt **+ standing shot** | **−8.1°** | **6.1 mm** |
+| 8° tilt + a crouched standing shot | −4.9° (refused, fell back) | 45.5 mm |
+
+The standing shot returns the reconstruction to the accuracy it has on a level
+camera. All four rows are scenarios in the lab.
+
+### Two estimators, bracketed rather than averaged
+
+The raw slope is the pitch plus however far from vertical they stood. That
+residual can be removed *if* the only thing they did was tilt at the hip: an
+upright body rotated by φ about the hip has a profile slope of exactly
+`hipBend / hipHeight`, and `hipBend` is the pitch-free residual `foreAft`
+already measures. Exact to a hundredth of a degree from 0° to 15° of spine tilt.
+
+Exact for a narrow reason, though — that model has **one** posture degree of
+freedom. Push the hips *back*, a translation rather than a rotation, and the
+bend grows while the slope barely moves, so subtracting it over-corrects: hips
+60mm back makes a level camera read **−3.9°**. And pushing the hips back is the
+main thing a golfer's lower body does.
+
+The two therefore fail in opposite directions, so what is reported is the
+**bracket between them**, widened by a noise floor. Wide exactly when the pose
+was ambiguous, narrow when the golfer did what they were asked. A bend over
+50mm is refused outright, with the reason.
+
+### The blind spot, on the record
+
+After the calibration is applied, the boundary is asked again; anything it
+*still* forces means the standing shot under-corrected, and physics wins
+(`agreement: "boundary-forced-more"`).
+
+That cross-check is **one-sided**. It cannot catch a shot that corrected too
+*much*, because over-correcting drags the mass toward the heels — deeper inside
+the foot, where nothing is violated. Measured: a standing shot filmed at 10°
+applied to a level swing gives 152mm of error against 5.7mm for doing nothing,
+and every check passes. There is no geometric fix; the camera genuinely moved
+and no arrangement of the pixels says so. `boundaryRangeDeg` is the one hint —
+a calibration pressed against the edge of what the swing itself admits is one to
+distrust. Beyond that it is operational: film both from the same place. There is
+a test holding this limit visible.
+
 ## What the confidence score means
 
 How much reconstruction and assumption a frame required. **Not** whether the

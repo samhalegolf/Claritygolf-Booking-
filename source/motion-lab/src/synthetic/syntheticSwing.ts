@@ -667,6 +667,7 @@ export const generateSyntheticSwing = (
       // world's, so this zero is a fact rather than a failure to look.
       gravityTiltIsMeasured: true,
       pitchCorrectionDeg: 0,
+      pitchCorrectionSource: "none",
     },
     /*
      * Run on the fixture as well, where there is no camera to be wrong.

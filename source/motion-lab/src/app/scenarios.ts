@@ -42,6 +42,15 @@ export interface Scenario {
    * intact to compare against.
    */
   readonly detector?: SyntheticDetectorOptions;
+  /**
+   * A second clip of the golfer standing still, filmed through the same
+   * camera, to calibrate the pitch from.
+   *
+   * `spineTiltDeg` is how well they followed "stand up straight" -- zero is a
+   * cooperative golfer, fifteen is someone who crouched and whose shot should
+   * be refused.
+   */
+  readonly standingShot?: { readonly spineTiltDeg: number };
 }
 
 export const SCENARIOS: readonly Scenario[] = [
@@ -63,6 +72,24 @@ export const SCENARIOS: readonly Scenario[] = [
     // a ROLL as the golfer sees it, and the stance line already removes that --
     // only the component along the stance line is what this scenario is about.
     detector: { cameraYawDeg: 0, cameraPitchDeg: 8 },
+  },
+  {
+    key: "tilted-camera-calibrated",
+    label: "Tilted camera + standing shot",
+    purpose:
+      "The same eight-degree tilt, plus two seconds of the golfer standing still from the same camera. The swing alone can only prove the camera was tilted at LEAST so far; a standing body is nearly a plumb line, so its fore-aft slope is nearly the camera's. Watch the applied pitch go from a partial correction to the whole of it, and the error against the known body fall with it.",
+    options: { source: "synthetic:tilted-camera-calibrated" },
+    detector: { cameraYawDeg: 0, cameraPitchDeg: 8 },
+    standingShot: { spineTiltDeg: 0 },
+  },
+  {
+    key: "tilted-camera-crouched",
+    label: "Tilted camera + a bad standing shot",
+    purpose:
+      "The same again, but the golfer crouched instead of standing. The shot is refused rather than believed -- the readout says by how far they missed a plumb line -- and the world falls back to what the swing can prove on its own.",
+    options: { source: "synthetic:tilted-camera-crouched" },
+    detector: { cameraYawDeg: 0, cameraPitchDeg: 8 },
+    standingShot: { spineTiltDeg: 15 },
   },
   {
     key: "pelvis-dropout",

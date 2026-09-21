@@ -99,7 +99,11 @@ export function MassPanel({
         descriptive signal — no biomechanical meaning is assigned to any value.
       </p>
 
-      <ForeAftCheck sanity={sequence.massSanity} appliedDeg={sequence.anchor.pitchCorrectionDeg} />
+      <ForeAftCheck
+        sanity={sequence.massSanity}
+        appliedDeg={sequence.anchor.pitchCorrectionDeg}
+        appliedFrom={sequence.anchor.pitchCorrectionSource}
+      />
     </div>
   );
 }
@@ -118,6 +122,7 @@ export function MassPanel({
 function ForeAftCheck({
   sanity,
   appliedDeg,
+  appliedFrom,
 }: {
   sanity: MassSanity | null;
   /**
@@ -129,6 +134,11 @@ function ForeAftCheck({
    * clip was fine and never mention that it had been rotated to get there.
    */
   appliedDeg: number;
+  /**
+   * Where that pitch came from. A bound and an estimate are different claims
+   * and the readout should not let them look alike.
+   */
+  appliedFrom: ClaritySequence["anchor"]["pitchCorrectionSource"];
 }) {
   if (!sanity || sanity.verdict === "undetermined") {
     return (
@@ -152,7 +162,10 @@ function ForeAftCheck({
         {Math.abs(appliedDeg) > 0.05 && (
           <div className="readout-row">
             <dt>World pitched by</dt>
-            <dd>{degrees(appliedDeg)}</dd>
+            <dd>
+              {degrees(appliedDeg)}
+              {appliedFrom === "standing-shot" ? " · standing shot" : " · boundary"}
+            </dd>
           </div>
         )}
         <div className="readout-row">
@@ -199,14 +212,29 @@ function ForeAftCheck({
 
       {sanity.verdict === "consistent" && Math.abs(appliedDeg) > 0.05 && (
         <p className="panel-note">
-          The mass read outside the falling-over boundary — past the toes or
-          behind the heels, where the golfer would not have been standing. The
-          world has been pitched {degrees(appliedDeg)} to bring it back, and
-          every coordinate in this scene is the corrected one.{" "}
-          <strong>That is a floor, not a fix.</strong> The camera was tilted at
-          least this much and may well be more: the reading only has to reach
-          the boundary to stop being impossible, not return to where it truly
-          was.
+          {appliedFrom === "standing-shot" ? (
+            <>
+              The world has been pitched {degrees(appliedDeg)} from a shot of the
+              golfer standing still, and every coordinate in this scene is the
+              corrected one. A standing body is close to a plumb line, so its
+              fore-aft slope is close to the camera&rsquo;s — good to about a
+              degree, and only as good as the golfer standing where and how they
+              were asked. The mass then falls inside the falling-over boundary
+              with nothing further forced, which is the swing independently
+              agreeing.
+            </>
+          ) : (
+            <>
+              The mass read outside the falling-over boundary — past the toes or
+              behind the heels, where the golfer would not have been standing.
+              The world has been pitched {degrees(appliedDeg)} to bring it back,
+              and every coordinate in this scene is the corrected one.{" "}
+              <strong>That is a floor, not a fix.</strong> The camera was tilted
+              at least this much and may well be more: the reading only has to
+              reach the boundary to stop being impossible, not return to where it
+              truly was. A standing shot would pin it down properly.
+            </>
+          )}
         </p>
       )}
 

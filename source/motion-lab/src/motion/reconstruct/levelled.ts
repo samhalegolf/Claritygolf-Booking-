@@ -108,6 +108,7 @@ export const reconstructLevelled = (
     anchorSequence(camera, {
       ...options.anchor,
       pitchCorrectionDeg: -pitchCorrectionDeg,
+      pitchCorrectionSource: "falling-over-boundary",
     }),
     options.reconstruct
   );

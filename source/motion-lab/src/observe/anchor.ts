@@ -86,6 +86,11 @@ export interface AnchorOptions {
    * `WorldFrameAnchor.pitchCorrectionDeg`.
    */
   readonly pitchCorrectionDeg?: number;
+  /**
+   * Where the caller got `pitchCorrectionDeg` from. Recorded, never checked --
+   * this layer has no way to verify it and does not pretend to.
+   */
+  readonly pitchCorrectionSource?: WorldFrameAnchor["pitchCorrectionSource"];
 }
 
 const DEFAULTS = {
@@ -583,6 +588,9 @@ export const anchorSequence = (
     gravityTiltDeg: levelling.tiltDeg,
     gravityTiltIsMeasured: levelling.samples > 0,
     pitchCorrectionDeg: options.pitchCorrectionDeg ?? 0,
+    pitchCorrectionSource: options.pitchCorrectionDeg
+      ? (options.pitchCorrectionSource ?? "falling-over-boundary")
+      : "none",
   };
 
   /*
