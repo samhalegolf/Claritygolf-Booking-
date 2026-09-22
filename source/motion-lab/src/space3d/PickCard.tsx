@@ -25,9 +25,11 @@ const Row = ({ label, value }: { label: string; value: string }) => (
 );
 
 /**
- * What the detector's own confidence in this joint means, in words. The 3D
- * Space only carries visibility through, so this is coarser than the video
- * card, which also has presence.
+ * What the detector's own confidence in this joint means, in words. There is
+ * only ever one such number -- visibility -- and it says the body part is in
+ * the picture, not that the point landed in the right place on it. So this
+ * reads it as a floor on usability and leaves the question of correctness to
+ * provenance, which records what the body made of it.
  */
 const detectorVerdict = (rawConfidence: number, source: keyof typeof PROVENANCE_LABELS): string => {
   if (source === "derived") {

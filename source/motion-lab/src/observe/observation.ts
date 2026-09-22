@@ -25,10 +25,23 @@ export interface RawLandmark {
   readonly x: number;
   readonly y: number;
   readonly z: number;
-  /** Detector's belief the point is in frame and locatable. */
+  /**
+   * The detector's ONE belief about this point, and it is worth being precise
+   * about what it means, because the name invites a stronger reading than it
+   * can support.
+   *
+   * It answers "is this body part in the picture". It does NOT answer "did I
+   * put it in the right place". A landmark snapped onto the wrong part of the
+   * body is still in the picture, so a confidently mislocated point reports
+   * the same 1.0 as a correct one. Nothing downstream may treat this as an
+   * accuracy score; accuracy is what the Motion Layer measures against the
+   * body, from the bones.
+   *
+   * MediaPipe's underlying model also has a `presence` output, but the tasks
+   * API does not surface it, so there is no second opinion here to pair this
+   * one with.
+   */
   readonly visibility: Unit;
-  /** Detector's belief the body part exists in the image at all. */
-  readonly presence: Unit;
 }
 
 /**
@@ -124,7 +137,6 @@ export interface ObservedJoint {
   /** Normalised image position, Y DOWN, for the video overlay. */
   readonly image: readonly [number, number];
   readonly visibility: Unit;
-  readonly presence: Unit;
   /**
    * How many landmarks were combined for this joint. 1 for a direct mapping,
    * more for a midpoint. A derived joint is only as good as its worst input,

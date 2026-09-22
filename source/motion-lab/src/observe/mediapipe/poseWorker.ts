@@ -64,13 +64,20 @@ interface MediaPipeLandmark {
  * Treating undefined as zero would silently discard every world landmark, so
  * it is treated as "no opinion" and paired with the image landmark's value by
  * the caller.
+ *
+ * ONE NUMBER, NOT TWO. The tasks API surfaces `visibility` and nothing else.
+ * This used to also emit a `presence` field set to the same value, which made
+ * the overlay show two figures that always agreed because they were the same
+ * figure printed twice -- and gave the floors in `toCameraFrame` a second
+ * test that could never reject anything the first had not. A number Clarity
+ * invented, presented as a second opinion from the detector, is exactly the
+ * kind of thing the evidence layer exists not to do.
  */
 const normaliseLandmark = (landmark: MediaPipeLandmark, fallback: number): RawLandmark => ({
   x: landmark.x,
   y: landmark.y,
   z: landmark.z,
   visibility: landmark.visibility ?? fallback,
-  presence: landmark.visibility ?? fallback,
 });
 
 let landmarker: PoseLandmarker | null = null;
