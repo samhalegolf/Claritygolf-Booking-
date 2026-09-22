@@ -672,8 +672,8 @@ frames from the start:
 | joint | extrapolated | carried by the girdle |
 | --- | --- | --- |
 | far shoulder | 186 mm | 41 mm |
-| neck | 42 mm | 22 mm |
-| far elbow | 299 mm | 77 mm |
+| neck | 41 mm | 22 mm |
+| far elbow | 300 mm | 77 mm |
 
 The head and the hips pin the girdle's tilt and say nothing about its turn —
 both sit on its own vertical, and a point on an axis is unmoved by rotation
@@ -681,28 +681,61 @@ about that axis. Turn comes from the shoulders, from the arms hanging off
 them (a known elbow and a measured upper arm pin a shoulder to a sphere), or
 from the last frame that knew it.
 
-### Rigid, not welded
+### The sternum, and the two struts
 
-Scapulae retract and protract, so a girdle held perfectly rigid would iron out
-a real movement and do it silently. Every corner therefore gets an
-**allowance**, measured rather than chosen: the template is fitted on the
-frames that saw the girdle properly and the residual recorded, and the
-ninetieth percentile of those residuals is how far that corner was actually
-seen to wander on this clip. Inside it, a corner's own evidence stands. Outside
-it, the evidence is pulled back to the edge. The same measurement decides how
-much each corner is worth listening to when placing the others, so a floppy
-corner loses its vote without anyone having to write down that it is floppy.
+Clarity has one marker no detector reports. The neck is *defined* as the
+shoulder midpoint — BlazePose has no neck landmark — so shoulders and neck are
+three points on one line, and a line has no orientation about itself. The
+sternum sits off that line, on the midline below the shoulder midpoint, which
+makes the girdle a triangle with an orientation of its own.
 
-The constraint solver was taught the same lesson: a bone's tolerance is now the
-larger of the flat noise floor and the spread the body model measured for it.
-Otherwise the solver would take the allowance straight back out again.
+It is placed, not seen: at a fraction of this golfer's own measured shoulder
+width, in the same class of anatomy as the 93.5% of standing height the body
+model uses for the top of the skull. It is deliberately **not** offset
+forward, because no clip can measure how far forward it is and the choice is
+not cosmetic — a pivot in front of the shoulders and one behind them disagree
+about whether swinging the shoulders forward makes the pair wider or narrower,
+and picking one would assert the sign of a measurement nobody took.
 
-### What the allowance cannot see
+What it buys is the *kind* of deviation the girdle permits. A shoulder is not
+free to wander in a ball; it is on a strut of fixed length and can only swing
+about the sternum, the way a scapula protracts and retracts. The pair's width
+then follows from that angle — `w(1 − cos θ)` — instead of floating free
+beside it, and a reading with a shoulder drifting toward the midline is
+refused rather than absorbed.
 
-One shoulder sliding forward while the other holds is, to these landmarks, the
-same thing as the whole girdle turning a degree or two further, and nothing in
-shoulder, head and hip positions separates them. The fit absorbs it as turn and
-reports no deviation. What is measurable is the symmetric half of scapular
-travel — the pair narrowing and widening, and sliding relative to the head and
-the hips — and that is what the allowance learns. Separating the rest needs a
-landmark on the sternum, and there is not one.
+Both quantities are measured from the clip, and separately, because they are
+not the same kind of thing:
+
+| | what it is | measured on the fixture |
+| --- | --- | --- |
+| swing | movement a scapula really makes | 2.4–2.7° |
+| strut length | bone; whatever appears is the detector | 6 mm |
+
+Inside both, a corner's own evidence stands untouched. Outside either, it goes
+back on the strut. The constraint solver was taught the same lesson: a bone's
+tolerance is now the larger of the flat noise floor and the spread the body
+model measured for it, or it would take the allowance straight back out.
+
+### The known limit: scapular travel is not measurable here
+
+The struts make it tempting to read the swing allowance as a measurement of
+protraction. It is not, and the numbers above say so — 2.4° on a fixture whose
+girdle is perfectly rigid is the detector's scatter restated as an angle.
+
+**Asymmetric** travel — one shoulder forward while the other holds — is, to
+these landmarks, the same thing as the whole girdle turning a degree or two
+further. The fit absorbs it as turn, and nothing separates them without a
+marker the detector does not have.
+
+**Symmetric** travel — both forward together — is mostly a slide of the pair,
+which the fit also absorbs by placing the girdle slightly further forward;
+head and hips sit on the girdle's own vertical and object only weakly. What is
+left is the narrowing, and the narrowing is second order in the angle: eight
+degrees of swing moves a shoulder 29 mm fore and aft and takes 4 mm off the
+pair's width, which is under the noise on a shoulder marker.
+
+So the struts do not deliver a protraction reading. They deliver a deviation
+with a physical shape, a shoulder that lands on a sphere of known radius when
+the body hides it, and a width that follows from the geometry. A test holds
+this limit visible and fails if it ever moves.

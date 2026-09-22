@@ -22,6 +22,10 @@ const standingPose = (overrides: Partial<Record<ClarityJoint, Vec3>> = {}) => {
   const base: Record<ClarityJoint, Vec3> = {
     head: [0, 1.75, 0],
     neck: [0, 1.5, 0],
+    // On the midline and below the shoulder line, as the girdle places it.
+    // Symmetric about X like everything else here, so it cannot tip the
+    // expected mass centre off zero.
+    sternum: [0, 1.386, 0],
     leftShoulder: [-0.2, 1.45, 0],
     rightShoulder: [0.2, 1.45, 0],
     leftElbow: [-0.24, 1.15, 0.02],

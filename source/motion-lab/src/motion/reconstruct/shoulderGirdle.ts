@@ -42,43 +42,64 @@
  * the shoulders and from the arms hanging off them, or it is not known and
  * is carried forward from the last frame that did know it.
  *
- * THE CAVEAT: A GIRDLE IS RIGID, NOT WELDED
+ * THE STERNUM, AND THE TWO STRUTS
  *
- * Scapulae retract and protract. A shoulder rides forward at the top and
- * back through impact, and the two do not do it together. Treating the
- * girdle as perfectly rigid would be a cleaner assumption and a wrong one:
- * it would iron out a real movement, and worse, it would iron it out
- * silently.
+ * The girdle's own shape is a triangle, not a rod: sternum at the apex, a
+ * strut out to each shoulder. The sternum is placed rather than seen -- no
+ * detector reports one -- but placing it is what turns three collinear
+ * points into a body with an orientation, and it is what the shoulders
+ * actually ride on.
  *
- * So every corner gets an ALLOWANCE, and the allowance is measured, not
- * chosen. On the frames that saw the girdle properly, the template is fitted
- * and the residual recorded; the ninetieth percentile of those residuals is
- * how far that corner was actually seen to wander on this clip. Inside its
- * allowance a corner's own evidence stands untouched. Outside it, the
- * evidence is pulled back to the edge -- the same bubble the grip uses, for
- * the same reason.
+ * That changes the KIND of deviation the girdle permits, which is the point
+ * of having it. A shoulder is not free to wander in a ball. It is on a strut
+ * of fixed length, so the only thing it can do is swing: forward and back,
+ * about the sternum, the way a scapula protracts and retracts. The pair's
+ * width then follows from the angle -- w(1 - cos(theta)) -- instead of being
+ * free alongside it, and a reading that had a shoulder drifting toward the
+ * midline is refused rather than absorbed.
  *
- * That measurement does double duty. A corner that held its place is
- * trusted to place the others; one that wandered is not. A clip where the
- * head swivels independently of the shoulders -- which is every golf swing
- * -- measures a floppy head and gives it almost no say, without anybody
- * having to write down that a golfer keeps their head still.
+ * Both quantities are measured, and they are measured separately because
+ * they are not the same kind of thing. The swing is movement and can be
+ * degrees. The length is bone and cannot be anything; whatever appears in it
+ * is the detector missing the acromion, so it is held to the size of that
+ * scatter. Inside both, a corner's own evidence stands untouched. Outside
+ * either, it is put back on the strut.
  *
- * WHAT THE ALLOWANCE CANNOT SEE, AND WHY IT DOES NOT PRETEND TO
+ * THE ALLOWANCE IS MEASURED, NOT CHOSEN
  *
- * One shoulder sliding forward while the other holds is, to these
- * landmarks, the same thing as the whole girdle turning a degree or two
- * further. The fit absorbs it as turn and reports no deviation at all --
- * not because the deviation was ironed out, but because nothing in shoulder,
- * head and hip positions distinguishes the two. Separating them needs a
- * landmark on the sternum, and there is not one.
+ * On the frames that saw the girdle properly, the template is fitted and the
+ * residual recorded. The ninetieth percentile of those residuals is how far
+ * that corner was actually seen to wander on this clip, and the same figure
+ * decides how much the corner is worth listening to when placing the others.
+ * A clip where the head swivels independently of the shoulders -- which is
+ * every golf swing -- measures a floppy head and gives it almost no say,
+ * without anybody having to write down that a golfer keeps their head still.
  *
- * So what gets measured is the part that IS visible: the pair narrowing and
- * widening, and the pair sliding relative to the head and the hips. That is
- * the symmetric half of scapular travel, and it is real. The asymmetric half
- * is quietly counted as turn, which is the honest place to put evidence that
- * cannot tell the difference -- and one more reason the shoulder turn this
- * layer reports is a measurement of landmarks rather than of bone.
+ * WHAT NONE OF THIS CAN SEE, AND WHY IT DOES NOT PRETEND TO
+ *
+ * Scapular travel does not survive into the measurement, and it is worth
+ * being exact about why, because the struts make it tempting to read the
+ * swing allowance as a measurement of protraction. It is not.
+ *
+ * ASYMMETRIC travel -- one shoulder forward while the other holds -- is, to
+ * these landmarks, the same thing as the whole girdle turning a degree or
+ * two further. The fit absorbs it as turn. Nothing separates them without a
+ * marker the detector does not have.
+ *
+ * SYMMETRIC travel -- both forward together -- is mostly a slide of the pair,
+ * and the fit absorbs that too, by placing the girdle slightly further
+ * forward: head and hips sit on the girdle's own vertical and object only
+ * weakly. What is left over is the narrowing, and the narrowing is second
+ * order in the angle. Eight degrees of swing moves a shoulder 29mm fore and
+ * aft and takes 4mm off the pair's width, which is smaller than the
+ * detector's scatter on a shoulder marker.
+ *
+ * So the allowance these clips measure is detector noise, restated as an
+ * angle. What the struts buy is not a protraction reading; it is that the
+ * deviation they permit has a physical shape, that a shoulder lost behind
+ * the body lands on a sphere of known radius rather than anywhere in a ball,
+ * and that the width the model reports follows from the geometry. A test
+ * holds this limit visible.
  */
 
 import type {
@@ -100,7 +121,9 @@ import {
   fitRigidTransform,
   lerpVec,
   normalise,
+  qFromAxisAngle,
   qIdentity,
+  qRotate,
   scale,
   sub,
   unapplyRigidFit,
@@ -109,6 +132,39 @@ import {
 } from "../../contracts";
 import type { MeasuredBodyModel } from "./bodyModel";
 import { medianOf, type Tracks } from "./tracks";
+
+/**
+ * Where the sternum sits on the girdle, as a fraction of THIS golfer's
+ * measured shoulder width.
+ *
+ * On the midline, below the line between the shoulder markers, at that
+ * line's own depth. Each part of that is a decision worth stating.
+ *
+ * On the midline and below, because that is the one offset a body plan gives
+ * for free and the only one the girdle needs: it puts the third corner off
+ * the line the other two share, which is what makes the girdle a triangle
+ * with an orientation of its own rather than a rod.
+ *
+ * At the shoulder line's depth, and NOT forward of it, because no clip can
+ * measure how far forward it is and the choice is not cosmetic. A pivot in
+ * front of the shoulders and a pivot behind them disagree about whether
+ * swinging the shoulders forward makes the pair wider or narrower, and
+ * picking one would be asserting the sign of a measurement nobody took. A
+ * pivot level with them is the neutral answer: the resting girdle is the
+ * widest it gets, and a swing either way narrows it.
+ *
+ * The fraction is anatomy, in the same class as the 93.5% of standing height
+ * the body model uses for the top of the skull: it is scaled by something
+ * this golfer was measured for, and it says nothing about golf.
+ */
+export const STERNUM_BELOW_FRACTION = 0.16;
+
+/** The sternum's offset from the shoulder midpoint, in the girdle's own frame. */
+export const sternumOffset = (shoulderWidthM: number): Vec3 => [
+  0,
+  -STERNUM_BELOW_FRACTION * shoulderWidthM,
+  0,
+];
 
 export const GIRDLE_CORNERS = ["leftShoulder", "rightShoulder", "head", "pelvis"] as const;
 export type GirdleCorner = (typeof GIRDLE_CORNERS)[number];
@@ -138,6 +194,24 @@ export interface GirdleTemplate {
   readonly samples: Readonly<Record<GirdleCorner, number>>;
   /** Shoulder to shoulder, metres. */
   readonly widthM: number;
+  /** The sternum's place in the girdle's own frame. */
+  readonly sternumLocal: Vec3;
+  /** Each strut, sternum out to shoulder, metres. This length does not change. */
+  readonly strutM: Readonly<Record<Shoulder, number>>;
+  /**
+   * How far each strut was seen to swing off the girdle's resting shape,
+   * radians. This is the allowance, said in the units the movement happens
+   * in: a shoulder does not wander in a ball, it rides forward and back on a
+   * bone of fixed length.
+   */
+  readonly swingRad: Readonly<Record<Shoulder, number>>;
+  /**
+   * How much each strut's length appeared to change, metres. Bone does not
+   * change length, so this is the detector's own scatter on the shoulder
+   * marker -- and the stage leaves a reading alone inside it rather than
+   * snapping every frame onto an exact sphere and calling noise a violation.
+   */
+  readonly strutSlackM: Readonly<Record<Shoulder, number>>;
   /** Frames that saw the girdle well enough to measure it at all. */
   readonly sampleCount: number;
 }
@@ -159,6 +233,15 @@ export interface GirdleCell {
   source: ProvenanceSource;
   trust: Unit;
   correctionM: number;
+  /**
+   * Both are here for the sternum alone. It arrives at this stage looking
+   * like a track that was never seen -- because it is one -- and would carry
+   * a gap the length of the clip into its provenance and onto the debug
+   * panel. A joint that is built rather than tracked was never in a gap, so
+   * the stage says so.
+   */
+  framesSinceObserved: number;
+  gapLength: number;
 }
 
 export interface ShoulderGirdleInput {
@@ -190,6 +273,26 @@ export interface ShoulderGirdleOptions {
   readonly maxAllowanceFraction?: number;
   /** Residual, as a fraction of width, at which a corner counts as fully floppy. */
   readonly floppyFraction?: number;
+  /**
+   * Ceiling on the swing a strut may be given, radians. A clip that measures
+   * more than this has measured its own tracking rather than a scapula: at
+   * twenty degrees a shoulder would be free to travel a third of the way to
+   * the midline, which no girdle does.
+   */
+  readonly maxSwingRad?: number;
+  /**
+   * Ceiling on a strut's length slack, as a fraction of shoulder width.
+   *
+   * Much tighter than the swing's ceiling, and deliberately so: these are
+   * the two halves of the model and they are not the same kind of quantity.
+   * A strut is bone and does not get longer, so the only thing that can
+   * appear in its length is the detector missing the marker. A clip that
+   * measures more than this has not found a stretching collarbone, and
+   * letting the number through would turn the strut back into the bubble it
+   * replaced -- a shoulder free to drift toward the midline as well as
+   * forward and back.
+   */
+  readonly maxStrutSlackFraction?: number;
   /** Own-evidence weight below which a shoulder gets propped up by its arm. */
   readonly carryBelow?: number;
   /** Trust given to a carried shoulder, before the fit's own evidence scales it. */
@@ -203,6 +306,8 @@ const DEFAULTS = {
   allowancePercentile: 0.9,
   maxAllowanceFraction: 0.2,
   floppyFraction: 0.25,
+  maxSwingRad: 20 * (Math.PI / 180),
+  maxStrutSlackFraction: 0.03,
   carryBelow: 0.25,
   carriedTrust: 0.55,
   minBoneConfidence: 0.35,
@@ -254,11 +359,50 @@ const percentileOf = (values: readonly number[], fraction: number): number => {
   return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))];
 };
 
-/** The point, pulled to within `radiusM` of `centre` on its own bearing. */
-const intoBubble = (point: Vec3, centre: Vec3, radiusM: number): Vec3 => {
-  const d = distance(point, centre);
-  if (d <= radiusM) return point;
-  return add(centre, scale(sub(point, centre), radiusM / d));
+/**
+ * A shoulder put back on its strut.
+ *
+ * Two things at once, and they are different in kind. The LENGTH is not
+ * negotiable: the strut from the sternum to the shoulder is bone, so
+ * whatever the evidence said, the shoulder sits exactly that far out. The
+ * DIRECTION is, up to the swing this clip measured -- inside the cone the
+ * evidence stands untouched, and outside it the direction is turned back to
+ * the cone's edge along the shortest arc, which keeps whichever way the
+ * shoulder was heading.
+ *
+ * This is the whole difference between a strut and a bubble. A bubble lets a
+ * shoulder drift in and out as well as forward and back, so a reading that
+ * had the shoulder too close to the midline stayed too close. A strut cannot
+ * do that, and it means the pair's width follows from the swing rather than
+ * being free alongside it.
+ */
+const ontoStrut = (
+  point: Vec3,
+  sternum: Vec3,
+  restingDirection: Vec3,
+  strutM: number,
+  slackM: number,
+  maxSwingRad: number
+): Vec3 => {
+  const offset = sub(point, sternum);
+  if (dot(offset, offset) < 1e-12) return add(sternum, scale(restingDirection, strutM));
+  const direction = normalise(offset);
+
+  // The length, to within what the detector's own scatter on this marker was
+  // measured to be. Correcting inside that would be chasing noise.
+  const reachM = Math.hypot(offset[0], offset[1], offset[2]);
+  const heldM = Math.min(strutM + slackM, Math.max(strutM - slackM, reachM));
+
+  const swing = Math.acos(Math.max(-1, Math.min(1, dot(direction, restingDirection))));
+  if (swing <= maxSwingRad) return add(sternum, scale(direction, heldM));
+
+  // Turn the resting direction toward the evidence, but only as far as the
+  // cone goes. An exactly opposite reading has no shortest arc; the resting
+  // direction is then the only answer available.
+  const axis = cross(restingDirection, direction);
+  if (dot(axis, axis) < 1e-12) return add(sternum, scale(restingDirection, heldM));
+  const turned = qRotate(qFromAxisAngle(axis, maxSwingRad), restingDirection);
+  return add(sternum, scale(turned, heldM));
 };
 
 type CornerSet = Partial<Record<GirdleCorner, Vec3>>;
@@ -322,7 +466,13 @@ const measureTemplate = (
   tracks: Tracks,
   options: Required<Pick<
     ShoulderGirdleOptions,
-    "measureVisibility" | "minSamples" | "allowancePercentile" | "maxAllowanceFraction" | "floppyFraction"
+        | "measureVisibility"
+    | "minSamples"
+    | "allowancePercentile"
+    | "maxAllowanceFraction"
+    | "floppyFraction"
+    | "maxSwingRad"
+    | "maxStrutSlackFraction"
   >>
 ): { template: GirdleTemplate | null; skipped: string | null } => {
   const frameCount = tracks.leftShoulder.samples.length;
@@ -412,6 +562,34 @@ const measureTemplate = (
     local = refined;
   }
 
+  const widthM = distance(local.leftShoulder, local.rightShoulder);
+  if (!(widthM > 1e-3)) {
+    return { template: null, skipped: "the measured shoulders came out on top of each other" };
+  }
+
+  /*
+   * The sternum, and the struts out to the shoulders.
+   *
+   * Placed rather than measured -- nothing in the clip saw it -- but what it
+   * defines IS measured. Each strut's length is fixed by where the shoulders
+   * actually sit, and then the clip is asked two separate questions about
+   * every frame that saw the girdle: how far that strut swung off the
+   * resting shape, and how much its length appeared to change.
+   *
+   * Keeping them apart is the point. The swing is movement: a scapula
+   * riding forward and back is a real thing a body does, and it can be
+   * degrees. The length change is not -- a strut is bone -- so whatever
+   * appears there is the detector missing the acromion by a few millimetres,
+   * and it comes out noise-sized. Measuring both means the stage can leave
+   * the first alone and refuse the second without anyone deciding in advance
+   * which is which.
+   */
+  const sternumLocal = sternumOffset(widthM);
+  const strutM = {} as Record<Shoulder, number>;
+  for (const shoulder of SHOULDERS) {
+    strutM[shoulder] = distance(local[shoulder], sternumLocal);
+  }
+
   // What each corner actually did against the finished shape.
   const residuals: Record<GirdleCorner, number[]> = {
     leftShoulder: [],
@@ -419,6 +597,9 @@ const measureTemplate = (
     head: [],
     pelvis: [],
   };
+  const swings: Record<Shoulder, number[]> = { leftShoulder: [], rightShoulder: [] };
+  const strutErrors: Record<Shoulder, number[]> = { leftShoulder: [], rightShoulder: [] };
+
   const fits = fitOver(local);
   for (let index = 0; index < frames.length; index += 1) {
     const fit = fits[index];
@@ -428,11 +609,22 @@ const measureTemplate = (
       if (!point) continue;
       residuals[corner].push(distance(applyRigidFit(fit, local[corner]), point));
     }
-  }
 
-  const widthM = distance(local.leftShoulder, local.rightShoulder);
-  if (!(widthM > 1e-3)) {
-    return { template: null, skipped: "the measured shoulders came out on top of each other" };
+    const sternum = applyRigidFit(fit, sternumLocal);
+    for (const shoulder of SHOULDERS) {
+      const seen = frames[index][shoulder];
+      if (!seen) continue;
+      const armM = distance(seen, sternum);
+      strutErrors[shoulder].push(Math.abs(armM - strutM[shoulder]));
+      const resting = sub(applyRigidFit(fit, local[shoulder]), sternum);
+      const actual = sub(seen, sternum);
+      if (dot(resting, resting) < 1e-12 || dot(actual, actual) < 1e-12) continue;
+      swings[shoulder].push(
+        Math.acos(
+          Math.max(-1, Math.min(1, dot(normalise(resting), normalise(actual))))
+        )
+      );
+    }
   }
 
   const allowanceM = {} as Record<GirdleCorner, number>;
@@ -447,17 +639,42 @@ const measureTemplate = (
      * corner that flew ten centimetres off the shape should reach zero say
      * in the fit, and capping first would leave it with a vote it has not
      * earned.
+     *
+     * And a corner nobody saw often enough has not shown that it is rigid,
+     * so it gets no say at all rather than the benefit of the doubt.
      */
-    // A corner nobody saw often enough has not shown that it is rigid, so it
-    // gets no say at all rather than the benefit of the doubt.
     rigidity[corner] =
       samples[corner] >= options.minSamples
         ? clampUnit(1 - wander / (widthM * options.floppyFraction))
         : 0;
   }
 
+  const swingRad = {} as Record<Shoulder, number>;
+  const strutSlackM = {} as Record<Shoulder, number>;
+  for (const shoulder of SHOULDERS) {
+    swingRad[shoulder] = Math.min(
+      percentileOf(swings[shoulder], options.allowancePercentile),
+      options.maxSwingRad
+    );
+    strutSlackM[shoulder] = Math.min(
+      percentileOf(strutErrors[shoulder], options.allowancePercentile),
+      widthM * options.maxStrutSlackFraction
+    );
+  }
+
   return {
-    template: { local, rigidity, allowanceM, samples, widthM, sampleCount: frames.length },
+    template: {
+      local,
+      rigidity,
+      allowanceM,
+      samples,
+      widthM,
+      sternumLocal,
+      strutM,
+      swingRad,
+      strutSlackM,
+      sampleCount: frames.length,
+    },
     skipped: null,
   };
 };
@@ -598,6 +815,20 @@ export const fitShoulderGirdle = (
     // position. A carried shoulder is only as good as the fit that carried it.
     const fitStrength = clampUnit(fit.weight);
 
+    /*
+     * The sternum, placed before the shoulders because they hang off it.
+     * Never seen, always built, and never in a gap -- so it says so, rather
+     * than inheriting the clip-length hole its own track looks like.
+     */
+    const sternumCell = cells.sternum[index];
+    const sternum = applyRigidFit(fit, template.sternumLocal);
+    sternumCell.correctionM += 0;
+    sternumCell.position = sternum;
+    sternumCell.source = "derived";
+    sternumCell.trust = clampUnit(settings.carriedTrust * fitStrength);
+    sternumCell.framesSinceObserved = 0;
+    sternumCell.gapLength = 0;
+
     for (const shoulder of SHOULDERS) {
       const cell = cells[shoulder][index];
       const placed = applyRigidFit(fit, template.local[shoulder]);
@@ -613,13 +844,20 @@ export const fitShoulderGirdle = (
       }
 
       /*
-       * It has an idea of its own, so the idea stands -- as far as the
-       * girdle allows that corner to wander, and no further. A weak sighting
-       * or a bridge still knows which way the shoulder went; overruling it
-       * with the fit would throw away the only evidence specific to this
-       * frame.
+       * It has an idea of its own, so the idea stands -- as far as the strut
+       * allows it to swing, and no further. A weak sighting or a bridge
+       * still knows which way the shoulder went; overruling it with the fit
+       * would throw away the only evidence specific to this frame.
        */
-      const held = intoBubble(cell.position, placed, template.allowanceM[shoulder]);
+      const resting = normalise(sub(placed, sternum));
+      const held = ontoStrut(
+        cell.position,
+        sternum,
+        resting,
+        template.strutM[shoulder],
+        template.strutSlackM[shoulder],
+        template.swingRad[shoulder]
+      );
       const movedM = distance(cell.position, held);
       if (movedM <= 1e-9) continue;
       cell.correctionM += movedM;

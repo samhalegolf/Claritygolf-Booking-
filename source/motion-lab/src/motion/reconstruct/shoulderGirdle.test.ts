@@ -18,11 +18,11 @@ import { test } from "node:test";
 
 import {
   add,
-  cross,
   distance,
   lerpVec,
   normalise,
-  scale,
+  qFromAxisAngle,
+  qRotate,
   sub,
   type ClarityFrame,
   type ClarityJoint,
@@ -204,63 +204,130 @@ test("the stage can be switched off, and then does nothing", () => {
  * A girdle with scapulae on it
  * ------------------------------------------------------------------ */
 
-/** How much the shoulders close on each other over the clip, metres. */
-const PROTRACTION_M = 0.06;
+/** A physiological swing of the struts, fore and aft, degrees. */
+const PROTRACTION_DEG = 8;
 
 /**
  * The same swing with the scapulae working.
  *
- * Both shoulders wrap forward and in toward the midline and back out again
- * over the clip, which is what protraction and retraction do to a pair of
- * acromion landmarks: the girdle narrows and its corners slide forward of
- * the ribcage. It is deliberately the SYMMETRIC movement, because that is
- * the part of scapular travel these landmarks can actually see -- see the
- * module header on what they cannot.
+ * Both shoulders swing forward on their struts and back again over the clip,
+ * about the sternum, which is what protraction and retraction do: the strut
+ * keeps its length and only its angle changes. The two senses are opposite
+ * about the body's own vertical, so both shoulders go forward together and
+ * the pair NARROWS rather than turning -- by w(1 - cos(theta)), which is
+ * 4mm at eight degrees against 29mm of fore-aft travel.
+ *
+ * Deliberately symmetric. One shoulder swinging alone is indistinguishable
+ * from a degree or two more shoulder turn, and the fit absorbs it as turn --
+ * see the module header.
  */
-const protracting: ClarityFrame[] = swing.frames.map((frame, index) => {
-  const joints = frame.body.joints;
-  const across = normalise(sub(joints.rightShoulder, joints.leftShoulder));
-  const up = sub(
-    lerpVec(joints.leftShoulder, joints.rightShoulder, 0.5),
-    lerpVec(joints.leftHip, joints.rightHip, 0.5)
-  );
-  const foreAft = normalise(cross(across, normalise(up)));
-  const phase = Math.sin((index / swing.frames.length) * Math.PI * 2);
-  const inward = scale(across, (PROTRACTION_M / 2) * phase);
-  const forward = scale(foreAft, (PROTRACTION_M / 2) * phase);
-  return {
-    ...frame,
-    body: {
-      ...frame.body,
-      joints: {
-        ...joints,
-        leftShoulder: add(add(joints.leftShoulder, inward), forward),
-        rightShoulder: add(sub(joints.rightShoulder, inward), forward),
+const swungBy = (degrees: number): ClarityFrame[] =>
+  swing.frames.map((frame, index) => {
+    const joints = frame.body.joints;
+    const up = normalise(
+      sub(
+        lerpVec(joints.leftShoulder, joints.rightShoulder, 0.5),
+        lerpVec(joints.leftHip, joints.rightHip, 0.5)
+      )
+    );
+    const phase = Math.sin((index / swing.frames.length) * Math.PI * 2);
+    const onStrut = (shoulder: Vec3, sense: number): Vec3 =>
+      add(
+        joints.sternum,
+        qRotate(
+          qFromAxisAngle(up, sense * degrees * (Math.PI / 180) * phase),
+          sub(shoulder, joints.sternum)
+        )
+      );
+    return {
+      ...frame,
+      body: {
+        ...frame.body,
+        joints: {
+          ...joints,
+          leftShoulder: onStrut(joints.leftShoulder, 1),
+          rightShoulder: onStrut(joints.rightShoulder, -1),
+        },
       },
-    },
-  };
-});
+    };
+  });
+
+const protracting = swungBy(PROTRACTION_DEG);
 const protractingTruth = protracting.map((frame) => frame.body.joints);
 
-test("a scapula that works is measured working", () => {
-  const still = reconstruct(observe(rigid)).girdle?.template;
-  const moving = reconstruct(observe(protracting)).girdle?.template;
-  assert.ok(still && moving);
+test("the sternum is placed off the shoulder line and rides with the girdle", () => {
+  const report = reconstruct(observe(rigid));
+  const template = report.girdle?.template;
+  assert.ok(template);
 
-  // The allowance is evidence, not a setting: the clip where the girdle
-  // flexed has to report more room than the clip where it did not, on both
-  // shoulders, because both of them moved.
+  // A third corner that is not on the line through the other two -- which is
+  // the whole reason it exists, since the neck IS that line's midpoint.
+  assert.ok(
+    Math.abs(template.sternumLocal[1]) > template.widthM * 0.05,
+    "the sternum came out on the shoulder line, which makes the girdle a rod again"
+  );
+  assert.ok(Math.abs(template.sternumLocal[0]) < 1e-9, "the sternum is off the midline");
+
+  for (const frame of report.sequence.frames) {
+    const { sternum, leftShoulder, rightShoulder } = frame.body.joints;
+    // The struts hold their length. This is the claim the marker is for.
+    for (const [side, shoulder] of [["left", leftShoulder], ["right", rightShoulder]] as const) {
+      const strut = distance(sternum, shoulder);
+      const expected: number =
+        template.strutM[side === "left" ? "leftShoulder" : "rightShoulder"];
+      assert.ok(
+        Math.abs(strut - expected) < 0.02,
+        `frame ${frame.index}: ${side} strut ${(strut * 1000).toFixed(0)}mm against ${(expected * 1000).toFixed(0)}mm`
+      );
+    }
+    assert.equal(frame.provenance.joints.sternum.source, "derived");
+    // Built, never tracked, so it was never inside a gap either.
+    assert.equal(frame.provenance.joints.sternum.gapLength, 0);
+  }
+});
+
+test("a strut is bone: the clip is not allowed to stretch one", () => {
+  const still = reconstruct(observe(rigid)).girdle?.template ?? null;
+  const moving = reconstruct(observe(protracting)).girdle?.template ?? null;
+  assert.ok(still, "the still girdle was not measured");
+  assert.ok(moving, "the flexing girdle was not measured");
+
+  /*
+   * The half of the model that must not grow. The shoulders travelled 29mm
+   * fore and aft and the distance out from the sternum did not change,
+   * because they moved ON the strut rather than off it -- so the slack the
+   * clip measures stays the size of the detector's scatter on a shoulder
+   * marker, on both clips.
+   */
   for (const shoulder of ["leftShoulder", "rightShoulder"] as const) {
     assert.ok(
-      moving.allowanceM[shoulder] > still.allowanceM[shoulder] * 1.4,
-      `${shoulder}: flexing girdle allowed ${(moving.allowanceM[shoulder] * 1000).toFixed(0)}mm, still one ${(still.allowanceM[shoulder] * 1000).toFixed(0)}mm`
+      moving.strutSlackM[shoulder] < 0.02,
+      `${shoulder} strut was given ${(moving.strutSlackM[shoulder] * 1000).toFixed(0)}mm of stretch`
+    );
+    assert.ok(still.strutSlackM[shoulder] < 0.02);
+  }
+});
+
+test("the swing allowance is measured off the clip, not set", () => {
+  /*
+   * Twenty-five degrees, which no scapula does. The exaggeration is the
+   * point: at a physiological eight degrees the measurement does NOT move --
+   * see the next test for why -- so a clip that tests whether the allowance
+   * responds to evidence at all has to swing the struts far enough for the
+   * narrowing to clear the detector's own noise.
+   */
+  const still = reconstruct(observe(rigid)).girdle?.template ?? null;
+  const wide = reconstruct(observe(swungBy(25))).girdle?.template ?? null;
+  assert.ok(still && wide);
+
+  for (const shoulder of ["leftShoulder", "rightShoulder"] as const) {
+    const wideDeg: number = (wide.swingRad[shoulder] * 180) / Math.PI;
+    const stillDeg: number = (still.swingRad[shoulder] * 180) / Math.PI;
+    assert.ok(
+      wideDeg > stillDeg * 1.5,
+      `${shoulder}: ${wideDeg.toFixed(1)} degrees against ${stillDeg.toFixed(1)} on a still girdle`
     );
   }
-  // And the pelvis, which did not move, is not handed room it never used.
-  assert.ok(
-    moving.allowanceM.pelvis < still.allowanceM.pelvis + 0.005,
-    `the pelvis was given ${(moving.allowanceM.pelvis * 1000).toFixed(0)}mm it did not ask for`
-  );
 });
 
 test("scapular movement survives the pipeline instead of being ironed flat", () => {
@@ -274,27 +341,69 @@ test("scapular movement survives the pipeline instead of being ironed flat", () 
       protracting.length
     );
     /*
-     * A girdle held perfectly rigid would report each shoulder at its median
-     * place all clip, so its average error would be the mean of the movement
-     * it refused to show -- two thirds of the amplitude. Landing near
-     * detection noise instead means the movement came through.
+     * A girdle held to its resting shape would report each shoulder in the
+     * same place all clip and average about 19mm of error -- the mean of the
+     * travel it refused to show. Landing near detection noise instead means
+     * the movement came through.
      */
     assert.ok(
       error < 0.01,
-      `${shoulder} averaged ${(error * 1000).toFixed(0)}mm out on a clip where it moved ${((PROTRACTION_M / 2) * 1000).toFixed(0)}mm`
+      `${shoulder} averaged ${(error * 1000).toFixed(0)}mm out on a clip where it swung ${PROTRACTION_DEG} degrees`
     );
   }
 
-  // And the width itself has to still change. A girdle reported at one
-  // constant width is a girdle that was ironed flat.
-  const widths = report.sequence.frames.map((frame) =>
-    distance(frame.body.joints.leftShoulder, frame.body.joints.rightShoulder)
-  );
-  const swing_ = Math.max(...widths) - Math.min(...widths);
+  /*
+   * And the consequence the struts are for: the pair narrows, and it narrows
+   * BY WAY OF the angle rather than by the shoulders being free to slide
+   * inward. A reconstruction reporting one constant width has ironed the
+   * movement out.
+   */
+  const widthOf = (joints: Record<ClarityJoint, Vec3>) =>
+    distance(joints.leftShoulder, joints.rightShoulder);
+  const spread = (values: readonly number[]) => Math.max(...values) - Math.min(...values);
+  const truthSpread = spread(protractingTruth.map(widthOf));
+  const builtSpread = spread(report.sequence.frames.map((frame) => widthOf(frame.body.joints)));
   assert.ok(
-    swing_ > PROTRACTION_M * 0.6,
-    `width moved only ${(swing_ * 1000).toFixed(0)}mm of the ${(PROTRACTION_M * 1000).toFixed(0)}mm it was given`
+    truthSpread > 0.003,
+    `the fixture itself only narrowed by ${(truthSpread * 1000).toFixed(1)}mm`
   );
+  assert.ok(
+    builtSpread > truthSpread * 0.5,
+    `width moved ${(builtSpread * 1000).toFixed(1)}mm against the fixture's ${(truthSpread * 1000).toFixed(1)}mm`
+  );
+});
+
+test("a physiological scapular swing is below what these landmarks can measure", () => {
+  /*
+   * THE LIMIT, HELD VISIBLE.
+   *
+   * Eight degrees of symmetric swing moves each shoulder 29mm fore and aft
+   * and narrows the pair by 4mm. The fore-aft part is a slide of the whole
+   * pair, and the fit absorbs almost all of it by placing the girdle
+   * slightly further forward -- head and hips sit on the girdle's own
+   * vertical and object only weakly. What is left over is the 4mm of
+   * narrowing, and the detector's scatter on a shoulder marker is larger
+   * than that.
+   *
+   * So the allowance this clip measures is barely different from a clip
+   * where nothing moved at all. That is not the stage failing to notice; it
+   * is what these four landmarks can tell apart, and the number is worth
+   * pinning so nobody later reads the allowance as a measurement of
+   * scapular travel.
+   */
+  const still = reconstruct(observe(rigid)).girdle?.template ?? null;
+  const moving = reconstruct(observe(protracting)).girdle?.template ?? null;
+  assert.ok(still && moving);
+
+  for (const shoulder of ["leftShoulder", "rightShoulder"] as const) {
+    const movingDeg: number = (moving.swingRad[shoulder] * 180) / Math.PI;
+    const stillDeg: number = (still.swingRad[shoulder] * 180) / Math.PI;
+    assert.ok(
+      movingDeg < stillDeg + 2,
+      `${shoulder}: ${movingDeg.toFixed(1)} degrees against ${stillDeg.toFixed(1)} still -- ` +
+        "if this now separates them, the limit has moved and the note above is out of date"
+    );
+  }
 });
 
 test("a shoulder beyond anything the clip ever showed is pulled back in", () => {

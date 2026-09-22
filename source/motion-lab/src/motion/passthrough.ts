@@ -34,6 +34,7 @@ import type {
 } from "../contracts";
 import {
   CLARITY_JOINTS,
+  OBSERVABLE_JOINTS,
   JOINTS_BY_STRUCTURE,
   RIGID_BONES,
   boneKey,
@@ -207,7 +208,10 @@ export const passthroughSequence = (
       }
     }
 
-    const observedFraction = observedCount / CLARITY_JOINTS.length;
+    // Over what could have been seen. The sternum is derived by the Motion
+    // Layer and the passthrough has no Motion Layer, so it is not a joint
+    // this baseline ever had the chance to report.
+    const observedFraction = observedCount / OBSERVABLE_JOINTS.length;
     const structureInput = { joints, support };
 
     const components: ConfidenceComponents = {
@@ -251,7 +255,7 @@ export const passthroughSequence = (
       // from the hands alone would be a claim this layer cannot support.
       club: null,
       mass:
-        observedCount >= CLARITY_JOINTS.length * 0.6
+        observedCount >= OBSERVABLE_JOINTS.length * 0.6
           ? estimateMass({
               joints,
               stanceWidthM: sequence.anchor.stanceWidthM,

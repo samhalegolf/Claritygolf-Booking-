@@ -14,6 +14,7 @@ import { test } from "node:test";
 import {
   CLARITY_JOINTS,
   JOINTS_BY_STRUCTURE,
+  OBSERVABLE_JOINTS,
   RIGID_BONES,
   boneKey,
   distance,
@@ -84,7 +85,10 @@ test("clean input is not made worse", () => {
 
   for (const frame of rebuilt.frames) {
     assert.equal(frame.provenance.wholeFrameReconstructed, false);
-    for (const joint of CLARITY_JOINTS) {
+    // Over the joints a detector reports. The sternum is built by the girdle
+    // on every frame of every clip, so "was it left as seen?" is not a
+    // question about it.
+    for (const joint of OBSERVABLE_JOINTS) {
       const source = frame.provenance.joints[joint].source;
       // The feet are the leash's: held at their anchor, or moved onto the arc
       // a lifting heel takes. Everything else must be left exactly as seen.
