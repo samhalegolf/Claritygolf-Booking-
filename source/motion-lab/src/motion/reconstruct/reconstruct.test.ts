@@ -581,11 +581,35 @@ test("a landmark that slides onto the wrong part of the body and stays there is 
    * their readings, rather than being deleted for the crime of being attached
    * to a bad one. "Kept" is broader than "observed" on purpose: the solver
    * may still have MOVED one of them, which is a different complaint and the
-   * business of the trust cap, not of this stage. What matters here is that
-   * the reading was not thrown away and replaced by a reconstruction.
+   * business of the trust cap below, not of the rejection stage.
+   *
+   * The two bystanders are deliberately not held to the same standard,
+   * because the body's evidence about them is not the same.
+   *
+   *   leftElbow      is bonded to the slipped shoulder and to the wrist, and
+   *                  the wrist end is intact and well supported. The body can
+   *                  tell which of the two is wrong, so the elbow should come
+   *                  through almost untouched.
+   *
+   *   rightShoulder  cannot be resolved that cleanly, and the reason is worth
+   *                  recording. `neck` is BUILT as the midpoint of the two
+   *                  shoulder landmarks, so the slip drags it half way too --
+   *                  and the neck and the right shoulder then sit in exactly
+   *                  symmetric positions: one broken bone (to each other) and
+   *                  one intact one (to the head, to the right elbow). The
+   *                  bones genuinely cannot say which of the pair moved, so
+   *                  the solver splits the difference and the right shoulder
+   *                  takes some of it. That is a limit of deriving the neck
+   *                  from the joints it is meant to corroborate, not of the
+   *                  guards here, and no threshold fixes it.
    */
   const kept: readonly string[] = ["observed", "constrained", "anchored"];
-  for (const bystander of ["leftElbow", "rightShoulder"] as const) {
+  const expected = [
+    { bystander: "leftElbow", withStage: 0.012, withoutStage: 0.03 },
+    { bystander: "rightShoulder", withStage: 0.03, withoutStage: 0.06 },
+  ] as const;
+
+  for (const { bystander, withStage, withoutStage: withoutStageM } of expected) {
     const survived = plateau.filter((index) =>
       kept.includes(rebuilt.frames[index].provenance.joints[bystander].source)
     );
@@ -594,9 +618,29 @@ test("a landmark that slides onto the wrong part of the body and stays there is 
       plateau.length,
       `${bystander}'s observations were thrown away too: only ${survived.length} of ${plateau.length} kept`
     );
+
+    const on = meanError(rebuilt, plateau, [bystander]);
+    const off = meanError(withoutStage, plateau, [bystander]);
+    assert.ok(on < off, `${bystander} is no better off for the slip having been rejected`);
+
+    /*
+     * The trust cap, on its own terms.
+     *
+     * `withoutStage` is the harder case for it: the slipped shoulder is never
+     * rejected, so it reaches the solver still claiming to be an observation.
+     * With trust taken from the detector, the solver split the broken bones
+     * with it fifty-fifty and hauled these two out to 45mm and 65mm -- one bad
+     * landmark becoming three bad joints. Capping trust by what the body
+     * agrees with makes the contradicted joint yield instead, whether or not
+     * anything upstream caught the slip.
+     */
     assert.ok(
-      meanError(rebuilt, plateau, [bystander]) < meanError(withoutStage, plateau, [bystander]),
-      `${bystander} is no better off for the slipped shoulder having been rejected`
+      off < withoutStageM,
+      `${bystander} was dragged by the joint it is attached to: ${(off * 1000).toFixed(0)}mm`
+    );
+    assert.ok(
+      on < withStage,
+      `${bystander} should be little touched with both guards in: ${(on * 1000).toFixed(0)}mm`
     );
   }
 });

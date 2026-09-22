@@ -388,6 +388,42 @@ export const reconstruct = (
    * the damage.
    * ------------------------------------------------------------------ */
 
+  /*
+   * WHO YIELDS, AND WHY IT CANNOT BE THE DETECTOR'S ANSWER
+   *
+   * The solver splits every correction by trust: the better-known end moves
+   * less. That is the right rule, and it was being fed the wrong number.
+   *
+   * Trust started life as `sample.visibility`, which says the body part is in
+   * the picture and says nothing about whether the point landed in the right
+   * place on it. A landmark sitting on the spine reports the same 1.0 as a
+   * correct one, so a wrongly-placed shoulder and the good elbow hanging off
+   * it arrived at the solver as equals, split the broken humerus fifty-fifty,
+   * and the elbow was dragged half way to the error. One bad landmark became
+   * two bad joints; on the fixture the elbow went from 5mm out to 45mm and
+   * the opposite shoulder from 5mm to 65mm, purely as collateral.
+   *
+   * So trust is capped here by how much the rest of the body agrees with each
+   * joint WHERE IT CURRENTLY SITS. A joint whose bones all check out keeps
+   * what it had; one that disagrees with its neighbours yields to them.
+   *
+   * Two properties make this safe rather than merely clever:
+   *
+   *   It is relative. The solver only ever compares two joints' trust, so
+   *   scaling every joint on a uniformly noisy clip changes nothing. Only a
+   *   joint that disagrees MORE THAN ITS NEIGHBOURS moves more than them.
+   *
+   *   It cannot invent confidence. The factor is at most 1, so this only ever
+   *   takes trust away, and a joint with no confident neighbour has no
+   *   evidence against it and keeps what it had.
+   *
+   * This is the aggregate question -- "how much does the body disagree with
+   * this joint" -- which is what `structuralDisagreement` answers. The
+   * per-bone question, "is there any bone it still satisfies", belongs to
+   * contradiction.ts and is asked earlier, of the observations themselves.
+   */
+  const agreementScaleM = heightM * 0.02;
+
   const constrainPass = () => {
     for (let index = 0; index < frameCount; index += 1) {
       const joints = {} as Record<ClarityJoint, Vec3>;
@@ -400,7 +436,24 @@ export const reconstruct = (
           cells[joint][index].source === "missing" ? 0 : cells[joint][index].trust;
       }
 
-      const solved = applyConstraints({ joints, trust, model });
+      // Read off the positions above, before anything moves: the disagreement
+      // the solver is about to resolve is the evidence about who caused it.
+      const agreed = {} as Record<ClarityJoint, Unit>;
+      for (const joint of CLARITY_JOINTS) {
+        const { disagreementM, neighboursUsed } = structuralDisagreement(
+          joint,
+          joints[joint],
+          joints,
+          trust,
+          model
+        );
+        agreed[joint] =
+          neighboursUsed === 0
+            ? trust[joint]
+            : clampUnit(trust[joint] * penalise(disagreementM / neighboursUsed, agreementScaleM));
+      }
+
+      const solved = applyConstraints({ joints, trust: agreed, model });
       stageCounts.constraintViolations += solved.violations.size;
 
       for (const joint of CLARITY_JOINTS) {
