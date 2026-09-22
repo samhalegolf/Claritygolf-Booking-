@@ -829,6 +829,7 @@ export const generateSyntheticSwing = (
       // Measured in the sense that matters: the fixture's own axes ARE the
       // world's, so this zero is a fact rather than a failure to look.
       gravityTiltIsMeasured: true,
+      cameraPitchDeg: 0,
       pitchCorrectionDeg: 0,
       pitchCorrectionSource: "none",
       footRestHeightM,

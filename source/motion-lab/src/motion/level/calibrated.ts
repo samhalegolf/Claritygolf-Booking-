@@ -15,6 +15,15 @@
  * a standing body is nearly a plumb line and its fore-aft slope is nearly the
  * camera's. See `standingShot`.
  *
+ * NEITHER OF THEM IS THE LEVELLING.
+ *
+ * Both routes above are about the PITCH, the tilt about the stance line.
+ * Levelling -- the tilt of the stance line itself -- is the anchor's job, and
+ * square to the stance it cannot do it from the image. `stanceDrop` supplies
+ * that number instead, and it is applied before any of this, because every
+ * measurement here is taken in the world it levels. It is not a third pitch
+ * route, which is what it looked like and was briefly built as.
+ *
  * WHY THEY ARE NOT AVERAGED
  *
  * They are not two noisy measurements of the same thing. The boundary is a
@@ -51,7 +60,7 @@
  */
 
 import type { CameraObservationSequence } from "../../observe/observation";
-import { anchorSequence } from "../../observe/anchor";
+import { anchorSequence, type AnchorOptions } from "../../observe/anchor";
 import { checkableBodies, checkMassAgainstShape } from "../mass/massSanity";
 import { reconstruct } from "../reconstruct/reconstruct";
 import { reconstructLevelled, type LevelledOptions, type LevelledResult } from "../reconstruct/levelled";
@@ -60,12 +69,19 @@ import {
   type StandingCalibration,
   type StandingShotOptions,
 } from "./standingShot";
+import { measureStanceDropCameraPitch, type StanceDropCameraPitch } from "./stanceDrop";
 
 export interface CalibratedResult extends LevelledResult {
   /** Where the applied pitch came from. */
   readonly source: "standing-shot" | "falling-over-boundary" | "none";
   /** What the standing shot said, when one was given. */
   readonly calibration: StandingCalibration | null;
+  /**
+   * How the world was LEVELLED when the image could not do it -- from the
+   * stance line's drop against a stature-derived width. Unusable unless the
+   * camera is square to the stance. Not a pitch: see `stanceDrop`.
+   */
+  readonly stanceDrop: StanceDropCameraPitch;
   /**
    * Degrees of pitch the falling-over boundary STILL forced after the standing
    * shot's correction was applied. Non-zero means the two disagree, and that
@@ -82,7 +98,10 @@ export interface CalibratedResult extends LevelledResult {
    * nothing here can prove and only this can hint at.
    */
   readonly boundaryRangeDeg: readonly [number, number];
-  /** False when the standing shot claims a pitch the swing says is impossible. */
+  /**
+   * False when the APPLIED estimate -- whichever route produced it -- claims a
+   * pitch the swing itself says is impossible.
+   */
   readonly calibrationWithinBoundary: boolean;
   readonly agreement: "agree" | "boundary-forced-more" | "unchecked";
 }
@@ -104,7 +123,19 @@ export const reconstructCalibrated = (
    * The swing's own admissible range, measured before anything is applied.
    * It is the only independent opinion available about the calibration.
    */
-  const plain = reconstruct(anchorSequence(swing, options.anchor), options.reconstruct);
+  const firstPass = reconstruct(anchorSequence(swing, options.anchor), options.reconstruct);
+  /*
+   * Level first, from the stance line's drop, for clips square to the stance
+   * where the image cannot. Everything below is measured in the world this
+   * produces, so it has to happen before any of it.
+   */
+  const stanceDrop = measureStanceDropCameraPitch(swing, firstPass.bodyModel.estimatedHeightM);
+  const anchorOptions: AnchorOptions = stanceDrop.usable
+    ? { ...options.anchor, cameraPitchDeg: stanceDrop.cameraPitchDeg }
+    : (options.anchor ?? {});
+  const plain = stanceDrop.usable
+    ? reconstruct(anchorSequence(swing, anchorOptions), options.reconstruct)
+    : firstPass;
   const plainBodies = checkableBodies(plain.sequence.frames);
   const boundaryRangeDeg: readonly [number, number] =
     plainBodies.length > 0 ? checkMassAgainstShape(plainBodies, plain.bodyModel.estimatedHeightM).pitchRangeDeg : [-90, 90];
@@ -112,13 +143,14 @@ export const reconstructCalibrated = (
   const withinBoundary = (degrees: number) =>
     degrees >= boundaryRangeDeg[0] - 0.01 && degrees <= boundaryRangeDeg[1] + 0.01;
 
-  // No usable standing shot: fall back to what the swing can prove on its own.
+  // Nothing to apply: fall back to what the swing can prove on its own.
   if (!calibration?.usable || options.reportOnly) {
     const levelled = reconstructLevelled(swing, options);
     return {
       ...levelled,
       source: levelled.corrected ? "falling-over-boundary" : "none",
       calibration,
+      stanceDrop,
       boundaryResidualDeg: 0,
       boundaryRangeDeg,
       calibrationWithinBoundary: calibration ? withinBoundary(calibration.pitchDeg) : true,
@@ -128,7 +160,7 @@ export const reconstructCalibrated = (
 
   const applied = reconstruct(
     anchorSequence(swing, {
-      ...options.anchor,
+      ...anchorOptions,
       // Same sign, not the opposite: see the note in `reconstruct/levelled`.
       // Positive means the camera leaned the golfer toward their toes, and
       // the anchor's rotation tips the body back toward the heels.
@@ -155,6 +187,7 @@ export const reconstructCalibrated = (
       corrected: true,
       source: "standing-shot",
       calibration,
+      stanceDrop,
       boundaryResidualDeg: 0,
       boundaryRangeDeg,
       calibrationWithinBoundary: withinBoundary(calibration.pitchDeg),
@@ -165,7 +198,7 @@ export const reconstructCalibrated = (
   const total = calibration.pitchDeg + residual;
   const both = reconstruct(
     anchorSequence(swing, {
-      ...options.anchor,
+      ...anchorOptions,
       pitchCorrectionDeg: total,
       pitchCorrectionSource: "standing-shot",
     }),
@@ -178,6 +211,7 @@ export const reconstructCalibrated = (
     corrected: true,
     source: "standing-shot",
     calibration,
+    stanceDrop,
     boundaryResidualDeg: residual,
     boundaryRangeDeg,
     calibrationWithinBoundary: withinBoundary(calibration.pitchDeg),

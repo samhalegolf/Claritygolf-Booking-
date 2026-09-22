@@ -59,6 +59,7 @@
 import type { CameraObservationSequence } from "../../observe/observation";
 import { anchorSequence, type AnchorOptions } from "../../observe/anchor";
 import { checkableBodies, checkMassAgainstShape } from "../mass/massSanity";
+import { measureStanceDropCameraPitch } from "../level/stanceDrop";
 import { reconstruct, type ReconstructionReport, type ReconstructOptions } from "./reconstruct";
 
 export interface LevelledOptions {
@@ -91,15 +92,36 @@ export const reconstructLevelled = (
 ): LevelledResult => {
   const first = reconstruct(anchorSequence(camera, options.anchor), options.reconstruct);
 
-  const checkable = checkableBodies(first.sequence.frames);
+  /*
+   * Square to the stance the anchor cannot level at all -- the stance line
+   * points at the camera and has no width across the image to measure an
+   * angle over. Its drop is still there, and the golfer's stature supplies
+   * the baseline the image cannot. Measured here because it needs a body
+   * model, and handed back to the anchor as a plain number.
+   */
+  const stanceDrop = measureStanceDropCameraPitch(camera, first.bodyModel.estimatedHeightM);
+  const anchorOptions: AnchorOptions = stanceDrop.usable
+    ? { ...options.anchor, cameraPitchDeg: stanceDrop.cameraPitchDeg }
+    : (options.anchor ?? {});
+
+  /*
+   * Re-run with it before anything else, because every measurement below --
+   * the mass, the boundary, the body model itself -- is taken in the world
+   * this levels.
+   */
+  const levelledFirst = stanceDrop.usable
+    ? reconstruct(anchorSequence(camera, anchorOptions), options.reconstruct)
+    : first;
+
+  const checkable = checkableBodies(levelledFirst.sequence.frames);
   const sanity =
     checkable.length > 0
-      ? checkMassAgainstShape(checkable, first.bodyModel.estimatedHeightM)
+      ? checkMassAgainstShape(checkable, levelledFirst.bodyModel.estimatedHeightM)
       : null;
   const pitchCorrectionDeg = sanity?.fallingOverPitchDeg ?? 0;
 
   if (options.reportOnly || Math.abs(pitchCorrectionDeg) < WORTH_APPLYING_DEG) {
-    return { ...first, pitchCorrectionDeg, corrected: false };
+    return { ...levelledFirst, pitchCorrectionDeg, corrected: false };
   }
 
   /*
@@ -119,7 +141,7 @@ export const reconstructLevelled = (
    */
   const second = reconstruct(
     anchorSequence(camera, {
-      ...options.anchor,
+      ...anchorOptions,
       pitchCorrectionDeg,
       pitchCorrectionSource: "falling-over-boundary",
     }),

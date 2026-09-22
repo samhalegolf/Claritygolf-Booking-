@@ -155,6 +155,19 @@ export interface WorldFrameAnchor {
    * past the toes before it becomes impossible at all. Corrected, the scene
    * is no longer impossible; it is not thereby right.
    */
+  /**
+   * The CAMERA's own pitch that was taken out, degrees. Zero when none was.
+   *
+   * A third axis, distinct from both the roll above and the pitch below. The
+   * roll turns about the camera's depth axis; `pitchCorrectionDeg` turns about
+   * the stance line; this turns about the camera's horizontal. Square to the
+   * stance it is the ONLY one of the three that can undo the camera's tilt,
+   * and it is the only view where the roll cannot be measured at all.
+   *
+   * Measured from the stance line's own drop against a stature-derived width.
+   * See `motion/level/stanceDrop`.
+   */
+  readonly cameraPitchDeg: number;
   readonly pitchCorrectionDeg: number;
   /**
    * Where `pitchCorrectionDeg` came from.
@@ -170,10 +183,14 @@ export interface WorldFrameAnchor {
    *                            standing still, good to about a degree, and
    *                            only as good as the instruction being followed.
    *
+   *
    * Averaging a bound with an estimate would produce a number that is neither,
    * so they are kept apart and the provenance travels with the value.
    */
-  readonly pitchCorrectionSource: "none" | "falling-over-boundary" | "standing-shot";
+  readonly pitchCorrectionSource:
+    | "none"
+    | "falling-over-boundary"
+    | "standing-shot";
   /**
    * How high each foot landmark sits above the ground when that foot is flat,
    * metres. Keyed by joint name.

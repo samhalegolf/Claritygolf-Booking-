@@ -505,7 +505,47 @@ The anchor's own contact test still works against the ground, deliberately: its
 job is to pick points that do not *move* so frames can be aligned, and that is
 the toes — a resting heel is about to lift.
 
-### Levelling down the line: the answer is that you cannot
+### Down the line, the stance line gives the camera's pitch
+
+The line between the ankles is horizontal, so its drop down the image says the
+world is not level. The anchor reads that as `atan2(dy, dx)` — which needs the
+line to have width **across** the image. Square to the stance it has none, so
+the anchor declines.
+
+The drop is still there. What is missing is only a baseline to divide it by,
+and the golfer's stature supplies one: `asin(drop / stanceWidth)`. Validated
+against known tilts: at yaw 90, 4° reads 3.7 and 8° reads 7.7, and injecting
+roll moves it by under half a degree.
+
+**Three rotations get confused here, so they are worth naming together:**
+
+| | turns about | undoes |
+| --- | --- | --- |
+| the levelling | the camera's **depth** axis | a camera roll |
+| `pitchCorrectionDeg` | the **stance line** | a golfer leaning fore-aft |
+| `cameraPitchDeg` | the camera's **horizontal** | a camera pitch |
+
+Square to the stance, a camera pitch maps to the world's fore-aft axis — which
+is **neither of the other two**. Both were tried first: each turned a 90mm
+error into 120–123mm, **in either sign**, which is what a wrong axis looks like
+rather than a wrong direction. Given its own axis:
+
+| injected tilt | plain | corrected |
+| --- | --- | --- |
+| 6° | 90 mm | **7 mm** |
+| 10° | 150 mm | **7 mm** |
+| 15° | 223 mm | **7 mm** |
+
+On real footage the two down-the-line clips measure their own cameras at
+**−6.7° ± 2.2** and **−4.1° ± 1.2**, and the face-on clip declines (5% along
+depth) and keeps using the image, which needs no assumed width and is the
+better number where it exists.
+
+The two views are exact complements: **face-on gives the roll and cannot give
+the camera's pitch; down the line gives the camera's pitch and cannot give the
+roll.**
+
+### Levelling down the line: what still cannot be done
 
 `gravityTiltDeg` is measured from the ankle-to-ankle line, and square to the
 stance that line points **at the camera** — 99% along depth on the real clip.
@@ -534,9 +574,10 @@ toe came out **45–69 mm below the heel** over a foot 120 mm long — about 25�
 on every frame of both. The fixture puts both on the ground, which is why the
 idea survived until there was real video to try it on.
 
-So with no reference that is both horizontal and across the image, the roll is
-declined. On the real down-the-line clip `gravityTiltIsMeasured` is now
-**false** and nothing is applied — and the heel–toe reading it had been
+So with no reference that is both horizontal and across the image, the **roll**
+is declined — the camera's pitch is still recovered, by the section above. On
+the real down-the-line clip `gravityTiltIsMeasured` is **false** and no roll is
+applied — and the heel–toe reading it had been
 corrupting comes back to **47% of foot** with confidence 0.67, where the bogus
 roll had put it at −7%.
 

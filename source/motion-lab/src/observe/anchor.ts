@@ -89,6 +89,28 @@ export interface AnchorOptions {
    * this layer has no way to verify it and does not pretend to.
    */
   readonly pitchCorrectionSource?: WorldFrameAnchor["pitchCorrectionSource"];
+  /**
+   * The CAMERA's own pitch, degrees, which this undoes.
+   *
+   * A THIRD AXIS, AND THE ONE THAT WAS MISSING.
+   *
+   * The levelling turns about the camera's DEPTH axis, which undoes a camera
+   * roll. `pitchCorrectionDeg` turns about the STANCE LINE, which undoes a
+   * golfer leaning fore-aft. A camera's pitch turns about the camera's
+   * HORIZONTAL axis, and square to the stance that maps to the world's
+   * fore-aft axis -- neither of the other two.
+   *
+   * So a down-the-line clip's tilt could not be corrected at all. Measured on
+   * the fixture, feeding it to either existing knob turned a 90mm error into
+   * 120-123mm in EITHER sign, which is what a wrong axis looks like rather
+   * than a wrong direction. Given its own axis, the same clip comes back to
+   * 7mm.
+   *
+   * Not measured here: the stance line's drop gives it, but turning that drop
+   * into an angle needs a stance width, which needs a body model, which lives
+   * in the Motion Layer. See `motion/level/stanceDrop`.
+   */
+  readonly cameraPitchDeg?: number;
 }
 
 const DEFAULTS = {
@@ -606,7 +628,22 @@ export const anchorSequence = (
    * produced, removes that.
    */
   const levelling = estimateLevelling(frames, estimateLevelling(frames).rotation);
-  const level = (point: Vec3): Vec3 => qRotate(levelling.rotation, point);
+  /*
+   * In CAMERA space, before the yaw, because that is where the camera's own
+   * axes still are. Once the yaw has run, the camera's horizontal is mixed
+   * across the world's X and Z and there is no single axis left to turn
+   * about.
+   */
+  // Negated: the option carries the camera's pitch, and this undoes it.
+  const cameraPitchRad = ((-(options.cameraPitchDeg ?? 0)) * Math.PI) / 180;
+  const cameraPitchCos = Math.cos(cameraPitchRad);
+  const cameraPitchSin = Math.sin(cameraPitchRad);
+  const level = (point: Vec3): Vec3 => {
+    const levelled = qRotate(levelling.rotation, point);
+    return cameraPitchRad === 0
+      ? levelled
+      : rotateX(levelled, cameraPitchCos, cameraPitchSin);
+  };
 
   let sumX = 0;
   let sumZ = 0;
@@ -693,6 +730,7 @@ export const anchorSequence = (
     anchorIsStable: choice.stable && stanceWidthM > 1e-4,
     gravityTiltDeg: levelling.tiltDeg,
     gravityTiltIsMeasured: levelling.samples > 0,
+    cameraPitchDeg: options.cameraPitchDeg ?? 0,
     pitchCorrectionDeg: options.pitchCorrectionDeg ?? 0,
     pitchCorrectionSource: options.pitchCorrectionDeg
       ? (options.pitchCorrectionSource ?? "falling-over-boundary")
