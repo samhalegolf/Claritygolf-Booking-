@@ -71,6 +71,7 @@ import { applyFootLeash, type FootLeashReport } from "./footLeash";
 import { bridgeGap } from "./gaps";
 import { findJumps, repairJump } from "./jumps";
 import { ReacquisitionTracker, supportFromDisagreement } from "./reacquisition";
+import { fitShoulderGirdle, type ShoulderGirdleReport } from "./shoulderGirdle";
 import { smoothTrack } from "./smoothing";
 import { buildTracks, estimateNoise, findGaps, type Tracks } from "./tracks";
 
@@ -89,6 +90,8 @@ export interface ReconstructOptions {
     readonly bridgeGaps?: boolean;
     /** The foot leash: feet held at their reference until the knee pulls them off. */
     readonly leashFeet?: boolean;
+    /** The shoulder girdle, measured once and fitted as one body per frame. */
+    readonly fitGirdle?: boolean;
     /** The far arm, from the near hand, the grip and the measured bones. */
     readonly deriveArm?: boolean;
     readonly constrain?: boolean;
@@ -118,6 +121,8 @@ export interface ReconstructionReport {
   readonly feet: FootLeashReport | null;
   /** What the arm derivation did. Null when the stage was off. */
   readonly arm: ArmDerivationReport | null;
+  /** What the shoulder girdle did. Null when the stage was off. */
+  readonly girdle: ShoulderGirdleReport | null;
 }
 
 export const reconstruct = (
@@ -129,6 +134,7 @@ export const reconstruct = (
     validateReacquisition: true,
     bridgeGaps: true,
     leashFeet: true,
+    fitGirdle: true,
     deriveArm: true,
     constrain: true,
     smooth: true,
@@ -150,6 +156,8 @@ export const reconstruct = (
     feetAnchored: 0,
     heelReleases: 0,
     footReleases: 0,
+    shouldersCarried: 0,
+    shouldersReined: 0,
     armJointsDerived: 0,
   };
 
@@ -336,6 +344,18 @@ export const reconstruct = (
   }
 
   /*
+   * The shoulder girdle, before the arm derivation because the arm hangs off
+   * it: an elbow placed on the arc between a shoulder and a wrist is only as
+   * good as the shoulder, and down the line that is exactly the joint the
+   * detector loses.
+   */
+  const girdle = stages.fitGirdle ? fitShoulderGirdle({ cells, tracks, model }) : null;
+  if (girdle) {
+    stageCounts.shouldersCarried = girdle.carried.leftShoulder + girdle.carried.rightShoulder;
+    stageCounts.shouldersReined = girdle.reined.leftShoulder + girdle.reined.rightShoulder;
+  }
+
+  /*
    * The far arm, after the leash and before the solver for the same reason:
    * the derived joints carry middling trust, so the solver settles bone
    * lengths by moving them rather than the well-seen near side.
@@ -404,7 +424,15 @@ export const reconstruct = (
         column[index].correctionM += result.correctionM[index];
       }
     }
-    // Smoothing knows nothing about bones. Project back onto them.
+    /*
+     * Smoothing moves every joint along its own track, so it knows nothing
+     * about bones and nothing about the girdle. Refit the girdle -- on the
+     * template the first pass measured, not a fresh one taken off this
+     * stage's own output -- and then project back onto the bones.
+     */
+    if (girdle?.template) {
+      fitShoulderGirdle({ cells, tracks, model, template: girdle.template });
+    }
     if (stages.constrain) constrainPass();
   }
 
@@ -523,6 +551,7 @@ export const reconstruct = (
     stageCounts,
     feet,
     arm,
+    girdle,
     sequence: {
       frames,
       fps: observations.fps,

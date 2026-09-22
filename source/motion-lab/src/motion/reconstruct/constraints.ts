@@ -59,14 +59,23 @@ export interface ConstraintOptions {
    * Fractional length error below which a bone is left alone. Detection noise
    * puts every bone permanently a millimetre or two out, and chasing that
    * would have the solver fidgeting with every joint on every frame.
+   *
+   * This is a FLOOR, not the whole answer: see `toleranceFor`.
    */
   readonly toleranceFraction?: number;
+  /**
+   * Ceiling on the measured part of a bone's tolerance, as a fraction of its
+   * length. Without it a bone measured off bad data would report so much
+   * spread that the solver stopped enforcing it at all.
+   */
+  readonly maxToleranceFraction?: number;
 }
 
 const DEFAULTS = {
   iterations: 6,
   minBoneConfidence: 0.35,
   toleranceFraction: 0.02,
+  maxToleranceFraction: 0.12,
 } as const;
 
 export interface ConstraintResult {
@@ -86,6 +95,25 @@ export const applyConstraints = (
   const iterations = options.iterations ?? DEFAULTS.iterations;
   const minBoneConfidence = options.minBoneConfidence ?? DEFAULTS.minBoneConfidence;
   const tolerance = options.toleranceFraction ?? DEFAULTS.toleranceFraction;
+  const maxTolerance = options.maxToleranceFraction ?? DEFAULTS.maxToleranceFraction;
+
+  /*
+   * How far out a bone may be before the solver objects.
+   *
+   * The flat fraction is a noise floor and nothing more. What a bone is
+   * really allowed to vary by is what this clip MEASURED it varying by: the
+   * body model already records the spread of every length it took, so a
+   * femur that held to five millimetres is held to five millimetres, and a
+   * shoulder girdle that genuinely changed width as the scapulae retracted
+   * and protracted is not ironed flat to satisfy one median.
+   *
+   * That distinction matters most where a stage above has deliberately left
+   * a joint off its nominal place. The girdle allows its corners a measured
+   * wander; a solver running on one flat fraction would take it straight
+   * back out again, and the allowance would be decoration.
+   */
+  const toleranceFor = (target: number, spreadM: number): number =>
+    Math.max(target * tolerance, Math.min(spreadM, target * maxTolerance));
 
   const joints = { ...input.joints };
   const original = { ...input.joints };
@@ -99,24 +127,28 @@ export const applyConstraints = (
   // Record what was wrong before touching anything, so the report describes
   // the input rather than whatever the solver left behind.
   for (const bone of enforceable) {
-    const target = input.model.bones[boneKey(bone)].lengthM;
+    const measured = input.model.bones[boneKey(bone)];
     const actual = distance(joints[bone.from], joints[bone.to]);
-    const error = Math.abs(actual - target);
-    if (error > target * tolerance) violations.set(boneKey(bone), error);
+    const error = Math.abs(actual - measured.lengthM);
+    if (error > toleranceFor(measured.lengthM, measured.spreadM)) {
+      violations.set(boneKey(bone), error);
+    }
   }
 
   for (let pass = 0; pass < iterations; pass += 1) {
     let moved = false;
 
     for (const bone of enforceable) {
-      const target = input.model.bones[boneKey(bone)].lengthM;
+      const measured = input.model.bones[boneKey(bone)];
+      const target = measured.lengthM;
       const from = joints[bone.from];
       const to = joints[bone.to];
       const actual = distance(from, to);
 
       if (actual < 1e-9) continue;
       const error = actual - target;
-      if (Math.abs(error) <= target * tolerance) continue;
+      const allowed = toleranceFor(target, measured.spreadM);
+      if (Math.abs(error) <= allowed) continue;
 
       /*
        * Split the correction by inverse trust. A joint nobody has seen takes
@@ -130,9 +162,16 @@ export const applyConstraints = (
       const fromShare = toTrust / total;
       const toShare = fromTrust / total;
 
+      /*
+       * Correct only the excess. A bone sitting at the edge of what it was
+       * measured to vary by is not wrong, so pulling it all the way back to
+       * the median would be the solver asserting a precision the measurement
+       * never had.
+       */
+      const excess = error > 0 ? error - allowed : error + allowed;
       const direction = scale(sub(to, from), 1 / actual);
-      joints[bone.from] = add(from, scale(direction, error * fromShare));
-      joints[bone.to] = sub(to, scale(direction, error * toShare));
+      joints[bone.from] = add(from, scale(direction, excess * fromShare));
+      joints[bone.to] = sub(to, scale(direction, excess * toShare));
       moved = true;
     }
 
@@ -147,8 +186,9 @@ export const applyConstraints = (
 
   let residualM = 0;
   for (const bone of enforceable) {
-    const target = input.model.bones[boneKey(bone)].lengthM;
-    residualM += Math.abs(distance(joints[bone.from], joints[bone.to]) - target);
+    const measured = input.model.bones[boneKey(bone)];
+    const off = Math.abs(distance(joints[bone.from], joints[bone.to]) - measured.lengthM);
+    residualM += Math.max(0, off - toleranceFor(measured.lengthM, measured.spreadM));
   }
 
   return { joints, correctionM, residualM, violations };

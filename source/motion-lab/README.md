@@ -642,3 +642,55 @@ The upper mass map and the support estimate are separate on purpose. Upper
 mass may land outside the feet — often does. Support may not: it is
 constrained into the polygon of whichever foot points are actually on the
 ground, so a lifting heel genuinely shrinks it.
+
+## The shoulder girdle is a body, not two points
+
+A bone length says how far apart the shoulders are. It does not say where the
+second one is when the first is all you can see — a distance is a sphere, and
+down the line the far shoulder spends most of the backswing behind the near
+one. So the girdle is measured once over the clip as a **shape**: the corner
+offsets of the two shoulders, the head and the hip midpoint in the girdle's
+own frame, refined by fitting rather than read off one frame's axes. Per
+frame it is then placed by whatever corners that frame has, and a shoulder
+nobody saw is carried there instead of guessed at through time.
+
+On the fixture, with the far shoulder and the whole far arm hidden for sixty
+frames from the start:
+
+| joint | extrapolated | carried by the girdle |
+| --- | --- | --- |
+| far shoulder | 186 mm | 41 mm |
+| neck | 42 mm | 22 mm |
+| far elbow | 299 mm | 77 mm |
+
+The head and the hips pin the girdle's tilt and say nothing about its turn —
+both sit on its own vertical, and a point on an axis is unmoved by rotation
+about that axis. Turn comes from the shoulders, from the arms hanging off
+them (a known elbow and a measured upper arm pin a shoulder to a sphere), or
+from the last frame that knew it.
+
+### Rigid, not welded
+
+Scapulae retract and protract, so a girdle held perfectly rigid would iron out
+a real movement and do it silently. Every corner therefore gets an
+**allowance**, measured rather than chosen: the template is fitted on the
+frames that saw the girdle properly and the residual recorded, and the
+ninetieth percentile of those residuals is how far that corner was actually
+seen to wander on this clip. Inside it, a corner's own evidence stands. Outside
+it, the evidence is pulled back to the edge. The same measurement decides how
+much each corner is worth listening to when placing the others, so a floppy
+corner loses its vote without anyone having to write down that it is floppy.
+
+The constraint solver was taught the same lesson: a bone's tolerance is now the
+larger of the flat noise floor and the spread the body model measured for it.
+Otherwise the solver would take the allowance straight back out again.
+
+### What the allowance cannot see
+
+One shoulder sliding forward while the other holds is, to these landmarks, the
+same thing as the whole girdle turning a degree or two further, and nothing in
+shoulder, head and hip positions separates them. The fit absorbs it as turn and
+reports no deviation. What is measurable is the symmetric half of scapular
+travel — the pair narrowing and widening, and sliding relative to the head and
+the hips — and that is what the allowance learns. Separating the rest needs a
+landmark on the sternum, and there is not one.
