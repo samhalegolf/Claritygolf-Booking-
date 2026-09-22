@@ -93,9 +93,21 @@ world space, with a raw overlay that stays honest about what the detector
 could actually see. Measured: 1.6s to initialise, 23ms per 1080p frame.
 
 **Build 3 — the Clarity Motion Layer. Done.** Persistent body model measured
-from this golfer, outlier rejection by second difference, gap reconstruction
-from both sides, reacquisition with connected structures as evidence,
-evidence-driven smoothing, and per-structure confidence.
+from this golfer, outlier rejection by second difference, rejection of any
+observation the bones contradict, gap reconstruction from both sides,
+reacquisition with connected structures as evidence, evidence-driven
+smoothing, and per-structure confidence.
+
+The contradiction check is the one that does not care whether a reading was
+surprising. The others are all shaped around a joint that disappears or
+spikes, and a landmark which slides onto the wrong part of the body and stays
+there does neither — it never goes missing, and a constant error has no second
+difference. The detector is no help: its `visibility` says the body part is in
+the picture, not that the point landed in the right place on it, so a landmark
+on the spine reports the same 1.0 as a correct one. The bones are the only
+witness, and they are now asked about every observation rather than only about
+the ones something else had already doubted. They also decide who yields when
+the solver has to break a tie, in place of the detector's own number.
 
 ### Does it work?
 

@@ -321,7 +321,6 @@ test("a sustained false detection is rejected, not followed", () => {
       position: [real[0] + 0.45, real[1] + 0.3, real[2]] as Vec3,
       image: [0.5, 0.5],
       visibility: 0.8,
-      presence: 0.8,
       sourceCount: 1,
     };
   }
@@ -479,4 +478,169 @@ test("no club evidence at all leaves the club null, not guessed", () => {
   assert.equal(rebuilt.frames[60].confidence.components.clubPoint, 0);
   // And the body is still fine.
   assert.ok(rebuilt.frames[60].confidence.overall > 0.85);
+});
+
+test("a landmark that slides onto the wrong part of the body and stays there is rejected", () => {
+  /*
+   * The failure this was written for: a left shoulder walking onto the middle
+   * of the back, at full detector confidence, and staying there.
+   *
+   * It is deliberately NOT a spike. The two guards that existed before this
+   * both need one -- reacquisition validation only judges a joint that went
+   * MISSING and came back, and the second difference of a constant error is
+   * zero, so only the two frames at the seam deviate at all. Everything in
+   * between used to sail through fully trusted.
+   *
+   * The slip is expressed in the BODY's frame, not the world's, because that
+   * is what the detector actually does: the landmark sits at an anatomical
+   * place it does not belong to and travels with the golfer. A fixed world
+   * offset would rotate relative to the shoulder line through the swing, and
+   * a fixed offset that happens to lie along a bone is a different and much
+   * harder problem -- see the header of contradiction.ts.
+   *
+   * The neck is dragged half as far, because that is what really happens: it
+   * is built as the midpoint of the two shoulder landmarks, so a shoulder
+   * displaced by e moves it by e/2.
+   */
+  const plateau = range(40, 12);
+  const towardSpine = 0.45; // fraction of the way across to the other shoulder
+  const observations = observe();
+
+  for (const index of plateau) {
+    const joints = observations.frames[index].joints as Record<string, { position: Vec3 }>;
+    const left = joints.leftShoulder.position;
+    const right = joints.rightShoulder.position;
+    const slip: Vec3 = [
+      (right[0] - left[0]) * towardSpine,
+      (right[1] - left[1]) * towardSpine,
+      (right[2] - left[2]) * towardSpine,
+    ];
+    for (const [joint, share] of [["leftShoulder", 1], ["neck", 0.5]] as const) {
+      const observed = joints[joint];
+      joints[joint] = {
+        ...observed,
+        position: [
+          observed.position[0] + slip[0] * share,
+          observed.position[1] + slip[1] * share,
+          observed.position[2] + slip[2] * share,
+        ],
+      };
+    }
+  }
+
+  const baseline = passthroughSequence(observations);
+  const rebuilt = reconstruct(observations).sequence;
+  // The same data with only this stage switched off, to show it is the one
+  // paying for the difference rather than the guards that were already here.
+  const withoutStage = reconstruct(observations, {
+    stages: { rejectContradictions: false },
+  }).sequence;
+
+  const baselineError = meanError(baseline, plateau, ["leftShoulder"]);
+  const rebuiltError = meanError(rebuilt, plateau, ["leftShoulder"]);
+  const unguardedError = meanError(withoutStage, plateau, ["leftShoulder"]);
+
+  assert.ok(
+    baselineError > 0.15,
+    `the baseline should render the slip, got ${(baselineError * 1000).toFixed(0)}mm`
+  );
+  /*
+   * Without this stage the older guards do NOT leave the slip untouched --
+   * the constraint solver hauls the shoulder part of the way back to satisfy
+   * the bones it is breaking. But it gets there by splitting every correction
+   * with the joint at the other end, so it drags good observations along with
+   * it, and what it settles on is still a shoulder several centimetres from
+   * the body. Rejecting the reading beats negotiating with it.
+   */
+  assert.ok(
+    unguardedError > 0.04,
+    "without this stage the shoulder should still be badly placed, got " +
+      `${(unguardedError * 1000).toFixed(0)}mm`
+  );
+  assert.ok(
+    rebuiltError < unguardedError * 0.6,
+    "the slipped shoulder should be rejected and bridged: " +
+      `${(rebuiltError * 1000).toFixed(0)}mm vs ${(unguardedError * 1000).toFixed(0)}mm with the stage off`
+  );
+  assert.ok(
+    meanError(rebuilt, plateau) < meanError(withoutStage, plateau),
+    "the whole body should be closer to the truth, not just the one joint"
+  );
+
+  // The observations were refused, not merely smoothed.
+  const refused = plateau.filter(
+    (index) => rebuilt.frames[index].provenance.joints.leftShoulder.source !== "observed"
+  );
+  assert.ok(
+    refused.length >= plateau.length - 1,
+    `only ${refused.length} of ${plateau.length} plateau frames stopped being "observed"`
+  );
+
+  /*
+   * And the innocent joints on the other ends of those broken bones keep
+   * their readings, rather than being deleted for the crime of being attached
+   * to a bad one. "Kept" is broader than "observed" on purpose: the solver
+   * may still have MOVED one of them, which is a different complaint and the
+   * business of the trust cap below, not of the rejection stage.
+   *
+   * The two bystanders are deliberately not held to the same standard,
+   * because the body's evidence about them is not the same.
+   *
+   *   leftElbow      is bonded to the slipped shoulder and to the wrist, and
+   *                  the wrist end is intact and well supported. The body can
+   *                  tell which of the two is wrong, so the elbow should come
+   *                  through almost untouched.
+   *
+   *   rightShoulder  cannot be resolved that cleanly, and the reason is worth
+   *                  recording. `neck` is BUILT as the midpoint of the two
+   *                  shoulder landmarks, so the slip drags it half way too --
+   *                  and the neck and the right shoulder then sit in exactly
+   *                  symmetric positions: one broken bone (to each other) and
+   *                  one intact one (to the head, to the right elbow). The
+   *                  bones genuinely cannot say which of the pair moved, so
+   *                  the solver splits the difference and the right shoulder
+   *                  takes some of it. That is a limit of deriving the neck
+   *                  from the joints it is meant to corroborate, not of the
+   *                  guards here, and no threshold fixes it.
+   */
+  const kept: readonly string[] = ["observed", "constrained", "anchored"];
+  const expected = [
+    { bystander: "leftElbow", withStage: 0.012, withoutStage: 0.03 },
+    { bystander: "rightShoulder", withStage: 0.03, withoutStage: 0.06 },
+  ] as const;
+
+  for (const { bystander, withStage, withoutStage: withoutStageM } of expected) {
+    const survived = plateau.filter((index) =>
+      kept.includes(rebuilt.frames[index].provenance.joints[bystander].source)
+    );
+    assert.equal(
+      survived.length,
+      plateau.length,
+      `${bystander}'s observations were thrown away too: only ${survived.length} of ${plateau.length} kept`
+    );
+
+    const on = meanError(rebuilt, plateau, [bystander]);
+    const off = meanError(withoutStage, plateau, [bystander]);
+    assert.ok(on < off, `${bystander} is no better off for the slip having been rejected`);
+
+    /*
+     * The trust cap, on its own terms.
+     *
+     * `withoutStage` is the harder case for it: the slipped shoulder is never
+     * rejected, so it reaches the solver still claiming to be an observation.
+     * With trust taken from the detector, the solver split the broken bones
+     * with it fifty-fifty and hauled these two out to 45mm and 65mm -- one bad
+     * landmark becoming three bad joints. Capping trust by what the body
+     * agrees with makes the contradicted joint yield instead, whether or not
+     * anything upstream caught the slip.
+     */
+    assert.ok(
+      off < withoutStageM,
+      `${bystander} was dragged by the joint it is attached to: ${(off * 1000).toFixed(0)}mm`
+    );
+    assert.ok(
+      on < withStage,
+      `${bystander} should be little touched with both guards in: ${(on * 1000).toFixed(0)}mm`
+    );
+  }
 });

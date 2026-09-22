@@ -11,32 +11,41 @@ import type { ObservationFrame, RawLandmark } from "../../observe/observation";
 import { OBSERVATION_FLOORS } from "../../observe/toCameraFrame";
 
 /**
- * What the detector itself believed about a point.
+ * What the detector itself believed about a point -- and, just as important,
+ * what it did not.
  *
  * MediaPipe never says "derived": it emits a position for all 33 landmarks
- * every frame. What it does report is two beliefs -- visibility (can it see
- * the point in the image) and presence (does it think the point is in the
- * picture at all) -- and read together they separate a point it saw, a
- * point it inferred from the rest of the body, and a point it made up.
+ * every frame. It reports ONE belief about each, `visibility`, and this card
+ * used to show a second one beside it called presence. That was Clarity's
+ * own invention -- the tasks API surfaces only `visibility`, and the worker
+ * was copying it into both fields, so two figures that read as corroborating
+ * witnesses were one figure printed twice. The branch here for "in frame but
+ * hidden" needed visibility under the half and presence over it, which a copy
+ * can never be, so it never once fired.
+ *
+ * What is left is the honest reading, and it is narrower than the word
+ * suggests: visibility answers "is this body part in the picture", not "is
+ * this the right place for it". A landmark snapped onto the spine is still in
+ * the picture, and reports the same 1.0 as a correct one. So the wording
+ * below does not let "seen in the image" be read as "seen correctly".
+ * Whether a point is in the right place is the body's question, and the
+ * Motion Layer answers it from the bones.
  */
 const detectorVerdict = (landmark: RawLandmark): string => {
-  if (landmark.visibility >= 0.5) return "seen in the image";
-  if (landmark.presence >= 0.5) {
-    return "in frame but hidden — MediaPipe inferred it from the rest of the body";
+  if (landmark.visibility >= 0.5) {
+    return "this body part is in the picture — which is not a claim about where on it the point landed";
   }
   return "MediaPipe does not believe this point is in the picture — the position is a guess with nothing behind it";
 };
 
 const clarityVerdict = (landmark: RawLandmark, index: number): string => {
   if (JOINT_SOURCES.every((source) => !source.from.includes(index))) return "not used";
-  const kept =
-    landmark.visibility >= OBSERVATION_FLOORS.visibilityFloor &&
-    landmark.presence >= OBSERVATION_FLOORS.presenceFloor;
+  const kept = landmark.visibility >= OBSERVATION_FLOORS.visibilityFloor;
   if (!kept) {
     return `discarded — under the ${(OBSERVATION_FLOORS.visibilityFloor * 100).toFixed(0)}% floor, treated as not observed`;
   }
   return landmark.visibility >= 0.5
-    ? "used as an observation"
+    ? "used as an observation — then checked against the body, every frame"
     : `used, at ${(landmark.visibility * 100).toFixed(0)}% trust — bones and smoothing lean on it less`;
 };
 
@@ -93,10 +102,6 @@ export function LandmarkCard({
               {(landmark.visibility * 100).toFixed(0)}%
               {landmark.visibility < 0.5 ? " — drawn amber" : ""}
             </span>
-          </div>
-          <div className="lab-pick-row">
-            <span>Presence</span>
-            <span>{(landmark.presence * 100).toFixed(0)}%</span>
           </div>
           <div className="lab-pick-row">
             <span>Image</span>

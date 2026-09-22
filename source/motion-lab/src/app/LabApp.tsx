@@ -44,6 +44,7 @@ export function LabApp() {
   const [showLowConfidence, setShowLowConfidence] = useState(true);
   const [pipelineMode, setPipelineMode] = useState<PipelineMode>("truth");
   const [stages, setStages] = useState({
+    rejectContradictions: true,
     rejectJumps: true,
     validateReacquisition: true,
     bridgeGaps: true,
@@ -206,6 +207,7 @@ export function LabApp() {
                   <h3 className="lab-panel-subtitle">Stages</h3>
                   {(
                     [
+                      ["rejectContradictions", "Reject contradictions"],
                       ["rejectJumps", "Reject jumps"],
                       ["validateReacquisition", "Validate returns"],
                       ["bridgeGaps", "Bridge gaps"],

@@ -45,8 +45,6 @@ export interface ToCameraFrameOptions {
    * from the Motion Layer, which is better equipped to weigh it.
    */
   readonly visibilityFloor?: number;
-  /** Same, for presence: the detector's belief the part is in the image at all. */
-  readonly presenceFloor?: number;
 }
 
 /**
@@ -56,7 +54,6 @@ export interface ToCameraFrameOptions {
  */
 export const OBSERVATION_FLOORS = {
   visibilityFloor: 0.1,
-  presenceFloor: 0.1,
 } as const;
 
 const DEFAULTS = OBSERVATION_FLOORS;
@@ -70,12 +67,11 @@ export const toClarityAxes = (landmark: RawLandmark): [number, number, number] =
 
 const isUsable = (
   landmark: RawLandmark | undefined,
-  visibilityFloor: number,
-  presenceFloor: number
+  visibilityFloor: number
 ): landmark is RawLandmark => {
   if (!landmark) return false;
   if (!Number.isFinite(landmark.x + landmark.y + landmark.z)) return false;
-  return landmark.visibility >= visibilityFloor && landmark.presence >= presenceFloor;
+  return landmark.visibility >= visibilityFloor;
 };
 
 export const toCameraFrame = (
@@ -83,7 +79,6 @@ export const toCameraFrame = (
   options: ToCameraFrameOptions = {}
 ): CameraObservationFrame => {
   const visibilityFloor = options.visibilityFloor ?? DEFAULTS.visibilityFloor;
-  const presenceFloor = options.presenceFloor ?? DEFAULTS.presenceFloor;
 
   const joints: Partial<Record<ClarityJoint, ObservedJoint>> = {};
 
@@ -101,7 +96,7 @@ export const toCameraFrame = (
       // Every contributing landmark must be usable. A midpoint built from one
       // good and one missing landmark is not a midpoint, it is a guess sitting
       // half a shoulder-width from the truth.
-      if (!landmarks.every((entry) => isUsable(entry, visibilityFloor, presenceFloor))) {
+      if (!landmarks.every((entry) => isUsable(entry, visibilityFloor))) {
         continue;
       }
 
@@ -113,7 +108,6 @@ export const toCameraFrame = (
         image: averageImage(imageLandmarks, usable),
         // A derived joint is only as trustworthy as its worst input.
         visibility: clampUnit(Math.min(...usable.map((entry) => entry.visibility))),
-        presence: clampUnit(Math.min(...usable.map((entry) => entry.presence))),
         sourceCount: usable.length,
       };
     }

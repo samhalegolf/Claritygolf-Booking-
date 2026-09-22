@@ -110,10 +110,9 @@ const landmark = (position: Vec3, visibility: number): RawLandmark => ({
   y: position[1],
   z: position[2],
   visibility,
-  presence: visibility,
 });
 
-const MISSING: RawLandmark = { x: 0, y: 0, z: 0, visibility: 0, presence: 0 };
+const MISSING: RawLandmark = { x: 0, y: 0, z: 0, visibility: 0 };
 
 /**
  * Landmarks Clarity derives rather than reads, rebuilt so the derivation has
@@ -274,7 +273,6 @@ const toImageLandmarks = (world: readonly RawLandmark[]): RawLandmark[] =>
       y: 0.5 + entry.y * scaleFactor,
       z: entry.z,
       visibility: entry.visibility,
-      presence: entry.presence,
     };
   });
 

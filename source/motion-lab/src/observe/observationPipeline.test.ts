@@ -42,15 +42,15 @@ const runPipeline = (options: Parameters<typeof detectFromClarityFrames>[1] = {}
 /* ------------------------- the axis conversion ------------------------- */
 
 test("toClarityAxes flips Y and Z, and keeps the frame right-handed", () => {
-  const point: RawLandmark = { x: 0.3, y: 0.7, z: 0.2, visibility: 1, presence: 1 };
+  const point: RawLandmark = { x: 0.3, y: 0.7, z: 0.2, visibility: 1 };
   assert.deepEqual(toClarityAxes(point), [0.3, -0.7, -0.2]);
 
   // Handedness is the thing that matters. MediaPipe's basis is (right, down,
   // into-screen), which is right-handed; ours must be too. Negating Y alone
   // would mirror the golfer -- and a mirrored swing still looks like a swing.
-  const right = toClarityAxes({ x: 1, y: 0, z: 0, visibility: 1, presence: 1 });
-  const down = toClarityAxes({ x: 0, y: 1, z: 0, visibility: 1, presence: 1 });
-  const into = toClarityAxes({ x: 0, y: 0, z: 1, visibility: 1, presence: 1 });
+  const right = toClarityAxes({ x: 1, y: 0, z: 0, visibility: 1 });
+  const down = toClarityAxes({ x: 0, y: 1, z: 0, visibility: 1 });
+  const into = toClarityAxes({ x: 0, y: 0, z: 1, visibility: 1 });
 
   // right x up should be toward the camera, which is where -into landed.
   const up: Vec3 = [-down[0], -down[1], -down[2]];
@@ -74,7 +74,7 @@ test("a joint is dropped when any landmark it is built from is missing", () => {
   // observed. Better to have no head than a confidently wrong one.
   const [raw] = detectFromClarityFrames([swing.frames[0]]);
   const world = [...(raw.world ?? [])];
-  world[7] = { x: 0, y: 0, z: 0, visibility: 0, presence: 0 }; // left ear
+  world[7] = { x: 0, y: 0, z: 0, visibility: 0 }; // left ear
 
   const frame = toCameraFrame({ ...raw, world });
   assert.equal(frame.joints.head, undefined, "head should be absent, not approximated");
@@ -96,7 +96,7 @@ test("low visibility is dropped, not silently trusted", () => {
   assert.equal(Object.keys(frame.joints).length, 0);
 
   // The floor is configurable, and a permissive floor keeps the evidence.
-  const permissive = toCameraFrame({ ...raw, world }, { visibilityFloor: 0, presenceFloor: 0 });
+  const permissive = toCameraFrame({ ...raw, world }, { visibilityFloor: 0 });
   assert.ok(Object.keys(permissive.joints).length > 15);
 });
 
