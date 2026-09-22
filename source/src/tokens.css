@@ -58,6 +58,23 @@
   --c-success-wash: #eef8ef;
   --c-danger-wash: #fff3f0;
 
+  /* Pressure / load. One scale for both feet, so a heatmap can be read as an
+     ordered thing rather than a set of unrelated colours: lightness rises
+     with load, which keeps the order intact in greyscale and for a reader who
+     cannot separate the hues. It reverses between schemes rather than
+     recolouring -- peak is the darkest stop on a light page and the brightest
+     on a dark one -- so the peak is always the mark furthest from the page
+     behind it. Nothing else in the palette is a ramp; the heatmap is the only
+     thing here that measures rather than names. */
+  --c-load-0: #efeee4;
+  --c-load-1: #ddd6b6;
+  --c-load-2: #c5b57e;
+  --c-load-3: #a78f4d;
+  --c-load-4: #85692f;
+  --c-load-5: #5f481f;
+  --c-load-6: #3b2b14;
+  --c-load-7: #1d1408;
+
   /* The sandbox bar. Deliberately outside the palette above: everything else
      here is a shade of the product, and this has to read as "you are not in
      the product" at a glance, in either scheme, on every screen. Purple
@@ -97,6 +114,16 @@
   --dark-text-disabled: rgba(244, 247, 242, 0.38);
   --dark-success-wash: rgba(183, 224, 189, 0.14);
   --dark-danger-wash: rgba(255, 138, 138, 0.14);
+  /* The ramp, flipped: the peak is the brightest stop here for the same
+     reason it is the darkest one above. */
+  --dark-load-0: #191d16;
+  --dark-load-1: #2d3423;
+  --dark-load-2: #474c29;
+  --dark-load-3: #6a6130;
+  --dark-load-4: #937b36;
+  --dark-load-5: #bc9a41;
+  --dark-load-6: #ddc073;
+  --dark-load-7: #f7ecc9;
   /* The wall's surfaces, unlike the bricks laid into it, are surfaces: mortar
      and unfilled slots follow the page. */
   --dark-mortar: #14180f;
@@ -194,9 +221,18 @@
 
 /* --- Dark, trigger one: the coach app's explicit toggle --------------------
  * A saved preference, because the coach is on their own machine all day and
- * chose it. */
+ * chose it.
+ *
+ * The two video selectors below are not a preference. The workspace is a
+ * video surface and a bright surround changes how you read what is on the
+ * frame, so it takes dark unconditionally -- no .theme-dark class, nothing to
+ * toggle, in the coach's console and the player's portal alike. It rides in
+ * this block rather than a fourth one because a fourth block is a fourth
+ * thing to keep in step. */
 .app-shell.theme-dark,
-.login-shell.theme-dark {
+.login-shell.theme-dark,
+.video-analysis-shell,
+.player-portal-video-host {
   --c-page: var(--dark-page);
   --c-surface: var(--dark-surface);
   --c-surface-soft: var(--dark-surface-soft);
@@ -222,6 +258,14 @@
   --c-mortar: var(--dark-mortar);
   --c-brick-blank: var(--dark-brick-blank);
   --c-brick-blank-border: var(--dark-brick-blank-border);
+  --c-load-0: var(--dark-load-0);
+  --c-load-1: var(--dark-load-1);
+  --c-load-2: var(--dark-load-2);
+  --c-load-3: var(--dark-load-3);
+  --c-load-4: var(--dark-load-4);
+  --c-load-5: var(--dark-load-5);
+  --c-load-6: var(--dark-load-6);
+  --c-load-7: var(--dark-load-7);
 }
 
 /* --- Dark, trigger two: the player's device, unless they say otherwise ------
@@ -262,6 +306,14 @@
     --c-mortar: var(--dark-mortar);
     --c-brick-blank: var(--dark-brick-blank);
     --c-brick-blank-border: var(--dark-brick-blank-border);
+    --c-load-0: var(--dark-load-0);
+    --c-load-1: var(--dark-load-1);
+    --c-load-2: var(--dark-load-2);
+    --c-load-3: var(--dark-load-3);
+    --c-load-4: var(--dark-load-4);
+    --c-load-5: var(--dark-load-5);
+    --c-load-6: var(--dark-load-6);
+    --c-load-7: var(--dark-load-7);
   }
 }
 
@@ -298,6 +350,34 @@
     --c-mortar: var(--dark-mortar);
     --c-brick-blank: var(--dark-brick-blank);
     --c-brick-blank-border: var(--dark-brick-blank-border);
+    --c-load-0: var(--dark-load-0);
+    --c-load-1: var(--dark-load-1);
+    --c-load-2: var(--dark-load-2);
+    --c-load-3: var(--dark-load-3);
+    --c-load-4: var(--dark-load-4);
+    --c-load-5: var(--dark-load-5);
+    --c-load-6: var(--dark-load-6);
+    --c-load-7: var(--dark-load-7);
+}
+
+/* --- The app's palette, captured -------------------------------------------
+ * The video workspace shadows --c-* for everything inside it, and a custom
+ * property cannot read the value it is shadowing. One strip in there is not on
+ * video at all -- the coach console's action bar sits on the app's own page
+ * card -- so it needs the app's ink, not the workspace's. Copied here, on the
+ * shell that decides it, above the shadowing: these follow the coach's
+ * light/dark toggle because they are resolved on .app-shell, where that toggle
+ * lives. Only the roles that strip reads. Not a second palette, and not for
+ * anything that is not an island.
+ */
+.app-shell {
+  --app-text: var(--c-text);
+  --app-text-body: var(--c-text-body);
+  --app-muted: var(--c-muted);
+  --app-hover: var(--c-hover);
+  --app-accent: var(--c-accent);
+  --app-accent-text: var(--c-accent-text);
+  --app-success-text: var(--c-success-text);
 }
 
 /* --- Density ---------------------------------------------------------------

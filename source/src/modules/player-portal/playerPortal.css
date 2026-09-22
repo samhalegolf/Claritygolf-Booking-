@@ -917,9 +917,12 @@
   /* The workspace is never light -- a bright surround changes how you read
      what is on the frame. It used to reach that by painting each video card
      dark; now that the card has no box of its own, the screen it sits on
-     carries the colour. --va-bg is the workspace's own token, published on
-     :root by the theme block the workspace renders. */
-  background: var(--va-bg);
+     carries the colour. This host is in the explicit-dark trigger in
+     tokens.css for that reason, so the page colour here is already the dark
+     one whatever the player's portal is set to. It used to read --va-bg,
+     which the workspace published on :root; that block is scoped to the
+     workspace's own element now and does not reach out here. */
+  background: var(--c-page);
 }
 
 .player-portal-video-host > * {

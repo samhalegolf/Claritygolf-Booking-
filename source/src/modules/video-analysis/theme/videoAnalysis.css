@@ -4,10 +4,10 @@
   min-height: 100vh;
   padding: 16px;
   background:
-    radial-gradient(circle at 20% 10%, rgba(87, 229, 156, 0.16), transparent 24%),
-    radial-gradient(circle at 80% 25%, rgba(50, 201, 205, 0.12), transparent 30%),
-    linear-gradient(155deg, #05070d, #0d1324 38%, #05070d 100%);
-  color: var(--va-text, #e9f0ff);
+    radial-gradient(circle at 20% 10%, var(--va-accent-wash), transparent 24%),
+    radial-gradient(circle at 80% 25%, color-mix(in srgb, var(--va-accent-soft) 12%, transparent), transparent 30%),
+    linear-gradient(155deg, var(--va-bg), var(--va-panel) 38%, var(--va-bg) 100%);
+  color: var(--va-text);
   font-family: "Inter Tight", "Inter", "Segoe UI", Arial, sans-serif;
 }
 
@@ -54,7 +54,7 @@
   font-family: "Montserrat", "Inter", sans-serif;
   font-size: 0.98rem;
   font-weight: 600;
-  color: var(--va-text, #e9f0ff);
+  color: var(--va-text);
 }
 
 .video-analysis-shell h1 {
@@ -66,7 +66,7 @@
 
 .video-analysis-shell .subtitle {
   margin: 0 0 18px;
-  color: var(--va-muted, #a3adc2);
+  color: var(--va-muted);
   font-size: 0.92rem;
 }
 
@@ -78,10 +78,10 @@
   gap: 14px;
   margin: 0 0 14px;
   padding: 12px;
-  border: 1px solid rgba(255, 174, 194, 0.34);
+  border: 1px solid color-mix(in srgb, var(--va-danger) 35%, transparent);
   border-radius: 8px;
-  background: rgba(38, 18, 28, 0.84);
-  box-shadow: 0 12px 24px rgba(6, 10, 20, 0.18);
+  background: var(--va-danger-wash);
+  box-shadow: 0 12px 24px var(--va-shadow);
 }
 
 .cloud-upload-failure-copy {
@@ -91,13 +91,13 @@
 }
 
 .cloud-upload-failure-copy strong {
-  color: #fff3f6;
+  color: var(--va-danger-ink);
   font-size: 0.95rem;
   line-height: 1.2;
 }
 
 .cloud-upload-failure-copy span:last-child {
-  color: rgba(255, 225, 232, 0.9);
+  color: var(--va-danger-ink);
   font-size: 0.86rem;
   line-height: 1.35;
 }
@@ -105,9 +105,9 @@
 .cloud-upload-failure-stage {
   width: fit-content;
   padding: 2px 7px;
-  border: 1px solid rgba(255, 210, 222, 0.28);
+  border: 1px solid color-mix(in srgb, var(--va-danger) 35%, transparent);
   border-radius: 999px;
-  color: #ffdbe4;
+  color: var(--va-danger-text);
   font-size: 0.72rem;
   font-weight: 700;
   text-transform: uppercase;
@@ -128,7 +128,7 @@
 
 .cloud-upload-failure-diagnostics {
   min-width: min(100%, 220px);
-  color: rgba(255, 225, 232, 0.9);
+  color: var(--va-danger-ink);
   font-size: 0.78rem;
 }
 
@@ -137,7 +137,7 @@
   display: inline-flex;
   align-items: center;
   cursor: pointer;
-  color: rgba(255, 225, 232, 0.88);
+  color: var(--va-danger-ink);
 }
 
 .cloud-upload-failure-diagnostics dl {
@@ -153,13 +153,13 @@
 }
 
 .cloud-upload-failure-diagnostics dt {
-  color: rgba(255, 225, 232, 0.68);
+  color: var(--va-danger-text);
 }
 
 .cloud-upload-failure-diagnostics dd {
   margin: 0;
   overflow-wrap: anywhere;
-  color: #fff8fa;
+  color: var(--va-danger-ink);
 }
 
 .video-tool-btn {
@@ -167,9 +167,9 @@
   width: 34px;
   height: 34px;
   border-radius: 9px;
-  border: 1px solid rgba(145, 165, 210, 0.2);
-  background: linear-gradient(155deg, rgba(19, 28, 50, 0.98), rgba(15, 20, 32, 0.96));
-  color: #f7fbff;
+  border: 1px solid var(--va-border);
+  background: linear-gradient(155deg, var(--va-panel-soft), var(--va-panel));
+  color: var(--va-text);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -195,9 +195,9 @@
   transform: translateX(-50%) translateY(-4px);
   padding: 3px 8px;
   border-radius: 6px;
-  background: rgba(6, 16, 10, 0.94);
-  border: 1px solid rgba(119, 255, 224, 0.28);
-  color: #f2fff8;
+  background: var(--va-scrim);
+  border: 1px solid color-mix(in srgb, var(--va-marker) 30%, transparent);
+  color: var(--va-accent-ink);
   font-size: 11px;
   line-height: 1.4;
   white-space: nowrap;
@@ -215,20 +215,20 @@
 
 .video-tool-btn:hover {
   transform: translateY(-1px);
-  border-color: rgba(119, 255, 224, 0.52);
-  box-shadow: 0 0 0 1px rgba(87, 229, 156, 0.2);
-  background: linear-gradient(155deg, rgba(26, 40, 70, 0.9), rgba(16, 21, 36, 0.84));
+  border-color: color-mix(in srgb, var(--va-marker) 55%, transparent);
+  box-shadow: 0 0 0 1px var(--va-accent-glow);
+  background: linear-gradient(155deg, var(--va-active), var(--va-hover));
 }
 
 .video-tool-btn.active {
-  border-color: var(--va-accent, #57e59c);
-  color: #fafff0;
-  background: linear-gradient(155deg, rgba(45, 79, 60, 0.9), rgba(19, 45, 30, 0.84));
-  box-shadow: 0 0 0 1px rgba(50, 201, 205, 0.48), 0 0 18px rgba(87, 229, 156, 0.2);
+  border-color: var(--va-accent);
+  color: var(--va-accent-ink);
+  background: linear-gradient(155deg, var(--va-accent-wash-strong), var(--va-accent-wash));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--va-accent-soft) 48%, transparent), 0 0 18px var(--va-accent-glow);
 }
 
 .video-tool-btn:focus-visible {
-  outline: 2px solid rgba(119, 255, 224, 0.58);
+  outline: 2px solid color-mix(in srgb, var(--va-marker) 60%, transparent);
   outline-offset: 1px;
 }
 
@@ -271,9 +271,9 @@
 }
 
 .comparison-video-panel {
-  border: 1px solid rgba(148, 169, 222, 0.18);
+  border: 1px solid var(--va-line-soft);
   border-radius: 16px;
-  background: #05070d;
+  background: var(--va-bg);
   padding: 8px;
   display: grid;
   gap: 8px;
@@ -282,8 +282,8 @@
 }
 
 .comparison-video-panel.is-active {
-  border-color: rgba(87, 229, 156, 0.34);
-  box-shadow: 0 0 0 1px rgba(50, 201, 205, 0.2), 0 11px 20px rgba(6, 10, 20, 0.28);
+  border-color: color-mix(in srgb, var(--va-accent) 35%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--va-accent-soft) 20%, transparent), 0 11px 20px var(--va-shadow);
 }
 
 .comparison-video-panel.is-focus-source::before {
@@ -292,13 +292,13 @@
   inset: 0 auto auto 0;
   width: 100%;
   height: 3px;
-  background: linear-gradient(90deg, rgba(87, 229, 156, 0.01), rgba(87, 229, 156, 0.82), rgba(87, 229, 156, 0.01));
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--va-accent) 82%, transparent), transparent);
   pointer-events: none;
 }
 
 .video-canvas-shell {
-  border: 1px solid rgba(148, 169, 222, 0.2);
-  background: #05070d;
+  border: 1px solid var(--va-border);
+  background: var(--va-bg);
   border-radius: 16px;
   overflow: hidden;
   position: relative;
@@ -323,7 +323,7 @@
   gap: 14px;
   padding: 22px;
   text-align: center;
-  border: 1px solid rgba(148, 169, 222, 0.2);
+  border: 1px solid var(--va-border);
   border-radius: 16px;
   background: var(--va-bg);
   /* A definite width with the ratio deriving the height. Left to `width: auto`
@@ -348,8 +348,8 @@
 }
 
 .video-capture-stage.is-dragging {
-  border-color: rgba(87, 229, 156, 0.68);
-  box-shadow: inset 0 0 0 1px rgba(87, 229, 156, 0.18), 0 0 18px rgba(87, 229, 156, 0.12);
+  border-color: color-mix(in srgb, var(--va-accent) 70%, transparent);
+  box-shadow: inset 0 0 0 1px var(--va-accent-glow), 0 0 18px var(--va-accent-wash);
 }
 
 /* `.video-analysis-page p` is not a rule today, but panel text has been lost
@@ -365,17 +365,17 @@
 }
 
 .video-capture-stage .video-capture-message.is-warning {
-  color: rgba(255, 174, 194, 0.96);
+  color: var(--va-danger-text);
 }
 
 .video-upload-card {
   appearance: none;
   width: 100%;
   min-height: min(420px, var(--va-video-max-height, 420px));
-  border: 1px dashed rgba(148, 169, 222, 0.36);
+  border: 1px dashed var(--va-border-strong);
   border-radius: 16px;
-  background: #05070d;
-  color: var(--va-text, #e9f0ff);
+  background: var(--va-bg);
+  color: var(--va-text);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -394,8 +394,8 @@
 .video-upload-card:hover,
 .video-upload-card:focus-visible,
 .video-upload-card.is-dragging {
-  border-color: rgba(87, 229, 156, 0.68);
-  box-shadow: inset 0 0 0 1px rgba(87, 229, 156, 0.18), 0 0 18px rgba(87, 229, 156, 0.12);
+  border-color: color-mix(in srgb, var(--va-accent) 70%, transparent);
+  box-shadow: inset 0 0 0 1px var(--va-accent-glow), 0 0 18px var(--va-accent-wash);
   outline: 0;
 }
 
@@ -405,9 +405,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid rgba(148, 169, 222, 0.24);
+  border: 1px solid var(--va-border);
   border-radius: 16px;
-  background: rgba(16, 24, 43, 0.72);
+  background: var(--va-panel);
 }
 
 .video-upload-icon svg {
@@ -421,21 +421,21 @@
 }
 
 .video-upload-copy {
-  color: var(--va-muted, #a3adc2);
+  color: var(--va-muted);
   font-size: 0.84rem;
 }
 
 .video-upload-error {
-  color: rgba(255, 174, 194, 0.96);
+  color: var(--va-danger-text);
   font-size: 0.84rem;
 }
 
 .upload-button {
   border-radius: 12px;
-  border: 1px solid var(--va-border, rgba(148, 169, 222, 0.2));
+  border: 1px solid var(--va-border);
   padding: 10px 14px;
-  background: linear-gradient(155deg, #1a2340, #131a2e);
-  color: var(--va-text, #e9f0ff);
+  background: linear-gradient(155deg, var(--va-panel-soft), var(--va-panel));
+  color: var(--va-text);
   cursor: pointer;
 }
 
@@ -487,9 +487,9 @@
   align-items: center;
   gap: 8px;
   padding: 8px;
-  border: 1px solid rgba(148, 169, 222, 0.24);
+  border: 1px solid var(--va-border);
   border-radius: 12px;
-  background: rgba(11, 17, 31, 0.86);
+  background: var(--va-scrim);
   backdrop-filter: blur(10px);
 }
 
@@ -497,44 +497,44 @@
   display: grid;
   gap: 4px;
   min-width: min(100%, 190px);
-  color: var(--va-muted, #a3adc2);
+  color: var(--va-muted);
   font-size: 11px;
 }
 
 .live-recording-toolbar select {
   min-height: 38px;
   border-radius: 10px;
-  border: 1px solid rgba(148, 169, 222, 0.24);
-  background: #101a30;
-  color: var(--va-text, #e9f0ff);
+  border: 1px solid var(--va-border);
+  background: var(--va-panel-soft);
+  color: var(--va-text);
   padding: 0 10px;
 }
 
 .video-record-stop {
-  border-color: rgba(255, 107, 138, 0.46);
-  background: linear-gradient(155deg, #3c1c2b, #24131b);
+  border-color: color-mix(in srgb, var(--va-danger) 45%, transparent);
+  background: linear-gradient(155deg, var(--va-danger-wash), var(--va-panel));
 }
 
 .live-recording-status {
-  color: var(--va-muted, #a3adc2);
+  color: var(--va-muted);
   font-size: 12px;
 }
 
 .live-recording-status.is-recording {
-  color: rgba(255, 174, 194, 0.96);
+  color: var(--va-danger-text);
 }
 
 .live-recording-status.is-ready {
-  color: rgba(142, 244, 186, 0.94);
+  color: var(--va-accent-text);
 }
 
 .live-recording-status.is-error {
-  color: rgba(255, 174, 194, 0.96);
+  color: var(--va-danger-text);
 }
 
 .video-frame {
   position: relative;
-  background: #000;
+  background: var(--va-bg);
   border-radius: 12px;
   overflow: hidden;
   /* Hug the video exactly: the drawing overlay is measured from this box,
@@ -560,7 +560,7 @@
   max-width: 100%;
   max-height: var(--va-video-max-height, calc(100svh - 300px));
   display: block;
-  background: #000;
+  background: var(--va-bg);
 }
 
 .video-overlay {
@@ -577,8 +577,8 @@
 
 .timeline-wrap {
   margin-top: 8px;
-  background: rgba(16, 24, 43, 0.92);
-  border: 1px solid rgba(148, 169, 222, 0.2);
+  background: var(--va-panel);
+  border: 1px solid var(--va-border);
   border-radius: 12px;
   padding: 14px 12px 12px;
 }
@@ -604,8 +604,8 @@
   position: relative;
   height: 44px;
   border-radius: 10px;
-  background: linear-gradient(90deg, rgba(10, 18, 36, 0.9), rgba(10, 18, 36, 0.7));
-  border: 1px solid rgba(148, 169, 222, 0.16);
+  background: linear-gradient(90deg, var(--va-panel-soft), var(--va-panel));
+  border: 1px solid var(--va-line-soft);
   overflow: hidden;
   cursor: pointer;
 }
@@ -620,7 +620,7 @@
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: linear-gradient(90deg, rgba(87, 229, 156, 0.18), rgba(87, 229, 156, 0));
+  background: linear-gradient(90deg, var(--va-accent-glow), transparent);
   width: var(--playhead-pos, 0%);
 }
 
@@ -629,8 +629,8 @@
   top: -3px;
   width: 2px;
   height: 100%;
-  background: #ffffff;
-  box-shadow: 0 0 12px rgba(255, 255, 255, 0.6);
+  background: var(--va-on-scrim);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--va-on-scrim) 60%, transparent);
   left: 0;
   transform: translateX(-50%);
 }
@@ -640,7 +640,7 @@
   top: 6px;
   width: 2px;
   height: 16px;
-  background: var(--va-marker, #77ffe0);
+  background: var(--va-marker);
   border-radius: 2px;
   transform: translateX(-50%);
 }
@@ -651,17 +651,17 @@
   transform: translateX(-50%);
   font-size: 10px;
   letter-spacing: 0.03em;
-  color: rgba(225, 236, 255, 0.78);
+  color: var(--va-text-soft);
 }
 
 .timeline-thumb-preview {
   position: absolute;
   top: -78px;
   transform: translateX(-50%);
-  background: #111a2f;
-  border: 1px solid rgba(148, 169, 222, 0.35);
-  box-shadow: 0 14px 28px rgba(4, 8, 20, 0.34);
-  color: #e5edff;
+  background: var(--va-panel);
+  border: 1px solid var(--va-border-strong);
+  box-shadow: 0 14px 28px var(--va-shadow);
+  color: var(--va-text-body);
   border-radius: 8px;
   padding: 8px 9px;
   font-size: 11px;
@@ -676,7 +676,7 @@
 .timeline-thumb-label {
   font-size: 11px;
   letter-spacing: 0.02em;
-  color: rgba(236, 243, 255, 0.96);
+  color: var(--va-text);
 }
 
 .timeline-thumb-image {
@@ -685,32 +685,32 @@
   height: 76px;
   object-fit: cover;
   object-position: center;
-  border: 1px solid rgba(148, 169, 222, 0.35);
+  border: 1px solid var(--va-border-strong);
 }
 
 .timeline-thumb-fallback {
   height: 76px;
   border-radius: 6px;
-  border: 1px dashed rgba(146, 168, 206, 0.28);
+  border: 1px dashed var(--va-border);
   background: linear-gradient(
     130deg,
-    rgba(15, 20, 34, 0.95),
-    rgba(10, 16, 32, 0.76)
+    var(--va-panel-soft),
+    var(--va-panel)
   );
 }
 
 .timeline-thumb-preview .mini {
   margin-top: 4px;
-  color: #a5afd3;
+  color: var(--va-muted);
 }
 
 .status-panel {
   margin-top: 8px;
-  border: 1px solid rgba(148, 169, 222, 0.2);
-  background: rgba(13, 18, 32, 0.82);
+  border: 1px solid var(--va-border);
+  background: var(--va-panel);
   border-radius: 11px;
   padding: 8px 10px;
-  color: #d1daf1;
+  color: var(--va-text-body);
   font-size: 12px;
 }
 
@@ -727,11 +727,11 @@
 }
 
 .status-grid span:first-child {
-  color: #a5afd5;
+  color: var(--va-muted);
 }
 
 .drawing-handle {
-  filter: drop-shadow(0 1px 2px rgba(5, 10, 18, 0.35));
+  filter: drop-shadow(0 1px 2px var(--va-shadow));
 }
 
 .drawing-handle-hit {
@@ -752,8 +752,8 @@
   position: absolute;
   left: 0;
   top: 42px;
-  background: #0d162c;
-  border: 1px solid rgba(148, 169, 222, 0.26);
+  background: var(--va-panel);
+  border: 1px solid var(--va-border);
   border-radius: 10px;
   padding: 6px;
   display: inline-flex;
@@ -778,14 +778,14 @@
   right: -6px;
   top: -2px;
   font-size: 8px;
-  color: rgba(167, 182, 212, 0.85);
+  color: var(--va-muted);
   font-weight: 700;
 }
 
 .focus-selection-overlay {
   position: absolute;
-  border: 1px dashed rgba(119, 255, 224, 0.65);
-  background: rgba(119, 255, 224, 0.1);
+  border: 1px dashed color-mix(in srgb, var(--va-marker) 65%, transparent);
+  background: var(--va-marker-wash);
   pointer-events: none;
   z-index: 3;
 }
@@ -798,9 +798,9 @@
 .capture-box {
   position: absolute;
   z-index: 3;
-  border: 1px dashed rgba(233, 240, 255, 0.85);
-  box-shadow: 0 0 0 1px rgba(8, 12, 22, 0.55);
-  background: rgba(233, 240, 255, 0.06);
+  border: 1px dashed color-mix(in srgb, var(--va-on-scrim) 85%, transparent);
+  box-shadow: 0 0 0 1px var(--va-scrim-soft);
+  background: color-mix(in srgb, var(--va-on-scrim) 6%, transparent);
   pointer-events: none;
 }
 
@@ -811,7 +811,7 @@
   margin-bottom: 4px;
   padding: 2px 6px;
   border-radius: var(--c-radius-pill, 999px);
-  background: rgba(8, 12, 22, 0.82);
+  background: var(--va-scrim);
   backdrop-filter: blur(8px);
   color: var(--va-text);
   font-size: 10px;
@@ -828,29 +828,29 @@
   display: grid;
   place-items: center;
   pointer-events: none;
-  background: rgba(255, 255, 255, 0);
+  background: transparent;
   animation: va-shutter-flash 480ms ease-out both;
 }
 
 .video-capture-flash span {
   width: 54px;
   height: 54px;
-  border: 2px solid rgba(255, 255, 255, 0.92);
+  border: 2px solid color-mix(in srgb, var(--va-on-scrim) 92%, transparent);
   border-radius: 50%;
-  box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.42);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--va-on-scrim) 42%, transparent);
   animation: va-shutter-ring 480ms ease-out both;
 }
 
 @keyframes va-shutter-flash {
-  0% { background: rgba(255, 255, 255, 0); }
-  16% { background: rgba(255, 255, 255, 0.46); }
-  100% { background: rgba(255, 255, 255, 0); }
+  0% { background: transparent; }
+  16% { background: color-mix(in srgb, var(--va-on-scrim) 46%, transparent); }
+  100% { background: transparent; }
 }
 
 @keyframes va-shutter-ring {
   0% { opacity: 0; transform: scale(0.72); }
   20% { opacity: 1; transform: scale(0.9); }
-  100% { opacity: 0; transform: scale(1.35); box-shadow: 0 0 0 18px rgba(255, 255, 255, 0); }
+  100% { opacity: 0; transform: scale(1.35); box-shadow: 0 0 0 18px transparent; }
 }
 
 /* The capture in flight.
@@ -868,12 +868,12 @@
   transform-origin: top left;
   will-change: transform;
   border-radius: 4px;
-  box-shadow: 0 18px 38px rgba(3, 6, 15, 0.55);
+  box-shadow: 0 18px 38px var(--va-shadow-strong);
 }
 
 .video-capture-lift.is-cutout {
   border-radius: 3px;
-  outline: 1px solid rgba(119, 255, 224, 0.55);
+  outline: 1px solid color-mix(in srgb, var(--va-marker) 55%, transparent);
   outline-offset: 0;
 }
 
@@ -883,8 +883,8 @@
   position: absolute;
   z-index: 4;
   pointer-events: none;
-  border: 1px dashed rgba(119, 255, 224, 0.5);
-  background: rgba(4, 8, 18, 0.72);
+  border: 1px dashed color-mix(in srgb, var(--va-marker) 50%, transparent);
+  background: var(--va-scrim);
   border-radius: 3px;
   animation: va-cutout-close 520ms ease-out both;
 }
@@ -910,9 +910,9 @@
   gap: 6px;
   padding: 8px;
   border-radius: 12px;
-  border: 1px solid rgba(87, 229, 156, 0.38);
-  background: linear-gradient(150deg, rgba(18, 28, 50, 0.96), rgba(11, 17, 31, 0.95));
-  box-shadow: 0 18px 40px rgba(3, 6, 15, 0.58);
+  border: 1px solid color-mix(in srgb, var(--va-accent) 40%, transparent);
+  background: linear-gradient(150deg, var(--va-panel-soft), var(--va-panel));
+  box-shadow: 0 18px 40px var(--va-shadow-strong);
   color: var(--va-text);
   animation: va-composer-arrive 320ms ease-out both;
 }
@@ -937,7 +937,7 @@
   place-items: center;
   border: 0;
   border-radius: 50%;
-  background: rgba(8, 13, 26, 0.7);
+  background: var(--va-scrim-soft);
   color: var(--va-muted);
   font-size: 14px;
   line-height: 1;
@@ -947,15 +947,15 @@
 
 .snapshot-composer-dismiss:hover {
   color: var(--va-text);
-  background: rgba(20, 30, 52, 0.9);
+  background: var(--va-hover);
 }
 
 .snapshot-composer-thumb {
   display: block;
   object-fit: cover;
   border-radius: 8px;
-  border: 1px solid rgba(148, 169, 222, 0.4);
-  background: rgba(5, 9, 20, 0.9);
+  border: 1px solid var(--va-border-strong);
+  background: var(--va-bg);
 }
 
 .snapshot-composer-meta {
@@ -968,8 +968,8 @@
   min-height: 54px;
   resize: vertical;
   border-radius: 8px;
-  border: 1px solid rgba(145, 165, 210, 0.3);
-  background: rgba(5, 10, 22, 0.78);
+  border: 1px solid var(--va-border);
+  background: var(--va-bg);
   color: var(--va-text);
   padding: 6px 7px;
   font: inherit;
@@ -978,14 +978,14 @@
 }
 
 .snapshot-composer-note:focus {
-  outline: 2px solid rgba(87, 229, 156, 0.5);
+  outline: 2px solid color-mix(in srgb, var(--va-accent) 50%, transparent);
   outline-offset: 1px;
 }
 
 .snapshot-composer-save {
-  border: 1px solid rgba(87, 229, 156, 0.55);
+  border: 1px solid color-mix(in srgb, var(--va-accent) 55%, transparent);
   border-radius: 9px;
-  background: linear-gradient(155deg, rgba(35, 86, 66, 0.95), rgba(20, 46, 38, 0.95));
+  background: linear-gradient(155deg, var(--va-accent-wash-strong), var(--va-accent-wash));
   color: var(--va-accent);
   font-size: 12px;
   font-weight: 600;
@@ -994,12 +994,12 @@
 }
 
 .snapshot-composer-save:hover {
-  border-color: rgba(87, 229, 156, 0.8);
-  background: linear-gradient(155deg, rgba(45, 106, 80, 0.98), rgba(26, 58, 47, 0.98));
+  border-color: color-mix(in srgb, var(--va-accent) 80%, transparent);
+  background: linear-gradient(155deg, color-mix(in srgb, var(--va-accent) 34%, transparent), var(--va-accent-wash-strong));
 }
 
 .snapshot-composer-save:focus-visible {
-  outline: 2px solid rgba(87, 229, 156, 0.6);
+  outline: 2px solid color-mix(in srgb, var(--va-accent) 60%, transparent);
   outline-offset: 2px;
 }
 
@@ -1008,18 +1008,18 @@
   right: 16px;
   bottom: 16px;
   width: 246px;
-  border: 1px solid rgba(87, 229, 156, 0.34);
+  border: 1px solid color-mix(in srgb, var(--va-accent) 35%, transparent);
   border-radius: 12px;
   padding: 10px;
-  color: #c4cfeb;
-  background: linear-gradient(140deg, rgba(17, 27, 49, 0.94), rgba(12, 19, 34, 0.92));
-  box-shadow: 0 14px 34px rgba(7, 11, 26, 0.48);
+  color: var(--va-text-body);
+  background: linear-gradient(140deg, var(--va-panel-soft), var(--va-panel));
+  box-shadow: 0 14px 34px var(--va-shadow);
   z-index: 20;
   transition: transform 160ms ease, box-shadow 160ms ease;
 }
 
 .focus-window:hover {
-  box-shadow: 0 14px 34px rgba(10, 16, 34, 0.58);
+  box-shadow: 0 14px 34px var(--va-shadow-strong);
 }
 
 .focus-window-header {
@@ -1032,7 +1032,7 @@
 .focus-window-title {
   display: grid;
   gap: 2px;
-  color: #dbe6ff;
+  color: var(--va-text);
 }
 
 .focus-window-subtitle {
@@ -1042,8 +1042,8 @@
 
 .focus-window-preview-shell {
   border-radius: 10px;
-  border: 1px dashed rgba(148, 169, 222, 0.32);
-  background: #060b17;
+  border: 1px dashed var(--va-border-strong);
+  background: var(--va-bg);
   overflow: hidden;
   min-height: 100px;
   display: grid;
@@ -1063,7 +1063,7 @@
   min-height: 100px;
   display: grid;
   place-content: center;
-  color: #96a5ca;
+  color: var(--va-muted);
   font-size: 11px;
   text-align: center;
   padding: 8px;
@@ -1072,7 +1072,7 @@
 
 .focus-window-metadata {
   margin-top: 8px;
-  color: rgba(188, 210, 236, 0.9);
+  color: var(--va-text-soft);
   font-size: 11px;
   min-height: 30px;
 }
@@ -1096,11 +1096,11 @@
 
 .focus-window-control {
   border-radius: 10px;
-  border: 1px solid rgba(145, 165, 210, 0.26);
+  border: 1px solid var(--va-border);
   padding: 4px 8px;
   font-size: 11px;
-  color: #dbe6ff;
-  background: linear-gradient(155deg, #1c2b4b, #141e33);
+  color: var(--va-text-body);
+  background: linear-gradient(155deg, var(--va-panel-soft), var(--va-panel));
   cursor: pointer;
 }
 
@@ -1109,16 +1109,16 @@
 }
 
 .focus-window-control--danger {
-  border-color: rgba(255, 107, 138, 0.43);
-  color: #ffe8ee;
-  background: linear-gradient(155deg, #3c1c2b, #2d1821);
+  border-color: color-mix(in srgb, var(--va-danger) 45%, transparent);
+  color: var(--va-danger-ink);
+  background: linear-gradient(155deg, var(--va-danger-wash), var(--va-panel));
 }
 
 .focus-window-control--disabled {
   opacity: 0.6;
   cursor: not-allowed;
-  color: rgba(188, 210, 236, 0.68);
-  background: linear-gradient(155deg, rgba(10, 14, 25, 0.92), rgba(12, 16, 30, 0.9));
+  color: var(--va-muted);
+  background: linear-gradient(155deg, var(--va-panel), var(--va-bg));
 }
 
 .focus-window-feedback {
@@ -1128,19 +1128,19 @@
   border-radius: 8px;
   font-size: 10px;
   transition: opacity 140ms ease;
-  color: rgba(188, 210, 236, 0.86);
+  color: var(--va-text-soft);
 }
 
 .focus-window-feedback--saving {
-  color: rgba(164, 196, 255, 0.9);
+  color: var(--c-info-text);
 }
 
 .focus-window-feedback--success {
-  color: #74ffaf;
+  color: var(--va-accent-text);
 }
 
 .focus-window-feedback--error {
-  color: #ff9e9e;
+  color: var(--va-danger-text);
 }
 
 .focus-window-feedback--idle {
@@ -1149,11 +1149,11 @@
 
 .focus-artifacts {
   margin-top: 10px;
-  border: 1px solid rgba(148, 169, 222, 0.2);
+  border: 1px solid var(--va-border);
   border-radius: 12px;
-  background: rgba(13, 18, 32, 0.82);
+  background: var(--va-panel);
   padding: 8px 10px 10px;
-  color: #c7d5f1;
+  color: var(--va-text-body);
 }
 
 .focus-artifacts-title {
@@ -1170,20 +1170,20 @@
   align-items: baseline;
   gap: 6px;
   font-size: 12px;
-  color: #d6e0fa;
+  color: var(--va-text);
   margin: 0;
   letter-spacing: 0.01em;
 }
 
 .focus-artifacts-title span {
-  color: #8ca4ce;
+  color: var(--va-muted);
   font-size: 11px;
 }
 
 .focus-artifacts-clear {
-  border: 1px solid rgba(255, 107, 138, 0.35);
-  background: rgba(60, 28, 44, 0.55);
-  color: #ffd2dc;
+  border: 1px solid color-mix(in srgb, var(--va-danger) 35%, transparent);
+  background: var(--va-danger-wash);
+  color: var(--va-danger-text);
   border-radius: 8px;
   font-size: 10px;
   padding: 3px 8px;
@@ -1194,16 +1194,16 @@
 .focus-artifacts-clear:hover,
 .focus-artifacts-clear:focus-visible {
   outline: 0;
-  color: #ffe7ed;
-  border-color: rgba(255, 143, 173, 0.55);
-  background: rgba(90, 33, 54, 0.78);
+  color: var(--va-danger-ink);
+  border-color: color-mix(in srgb, var(--va-danger) 55%, transparent);
+  background: color-mix(in srgb, var(--va-danger) 26%, transparent);
 }
 
 .focus-artifacts-warning {
-  border: 1px solid rgba(255, 188, 105, 0.35);
+  border: 1px solid color-mix(in srgb, var(--va-warn) 35%, transparent);
   border-radius: 8px;
-  background: rgba(74, 48, 20, 0.32);
-  color: #ffd7a8;
+  background: var(--va-warn-wash);
+  color: var(--va-warn-text);
   padding: 6px 8px;
   font-size: 10px;
   margin-bottom: 6px;
@@ -1220,11 +1220,11 @@
 
 .focus-artifacts-empty {
   min-height: 56px;
-  border: 1px dashed rgba(148, 169, 222, 0.22);
+  border: 1px dashed var(--va-border);
   border-radius: 10px;
   display: grid;
   place-items: center;
-  color: #8ea3cc;
+  color: var(--va-muted);
   font-size: 11px;
 }
 
@@ -1234,9 +1234,9 @@
   gap: 8px;
   align-items: center;
   position: relative;
-  border: 1px solid rgba(148, 169, 222, 0.2);
+  border: 1px solid var(--va-border);
   border-radius: 10px;
-  background: rgba(10, 16, 32, 0.64);
+  background: var(--va-panel);
   padding: 5px 8px;
   transition: border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease;
   isolation: isolate;
@@ -1244,9 +1244,9 @@
 
 .focus-artifact:hover,
 .focus-artifact:focus-within {
-  border-color: rgba(145, 191, 255, 0.45);
-  background: rgba(14, 24, 46, 0.8);
-  box-shadow: 0 0 0 1px rgba(145, 191, 255, 0.2);
+  border-color: var(--va-border-strong);
+  background: var(--va-panel-soft);
+  box-shadow: 0 0 0 1px var(--va-border);
 }
 
 .focus-artifact-preview-button {
@@ -1265,7 +1265,7 @@
   /* Rule 11: no transform on hover. Nothing sets one on this button; the
      hover state is the border and the shadow. */
   transition: border-color 160ms ease, box-shadow 160ms ease;
-  border: 1px solid rgba(125, 149, 196, 0.2);
+  border: 1px solid var(--va-line-soft);
 }
 
 .focus-artifact-preview-button.is-expanded {
@@ -1275,8 +1275,8 @@
 .focus-artifact-preview-button:hover,
 .focus-artifact-preview-button:focus-visible,
 .focus-artifact-preview-button.is-expanded {
-  border-color: rgba(167, 191, 238, 0.6);
-  box-shadow: 0 8px 16px rgba(4, 7, 16, 0.45);
+  border-color: var(--va-border-strong);
+  box-shadow: 0 8px 16px var(--va-shadow);
 }
 
 .focus-artifact-preview-button:focus-visible {
@@ -1291,18 +1291,18 @@
   top: 0;
   object-fit: cover;
   border-radius: 8px;
-  border: 1px solid rgba(148, 169, 222, 0.35);
+  border: 1px solid var(--va-border-strong);
   transform-origin: top left;
   transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
   z-index: 1;
-  background: #070b17;
+  background: var(--va-bg);
 }
 
 .focus-artifact-preview-button:hover .focus-artifact-thumb,
 .focus-artifact.is-expanded .focus-artifact-thumb {
   transform: scale(2);
-  border-color: rgba(167, 191, 238, 0.7);
-  box-shadow: 0 10px 22px rgba(4, 7, 16, 0.65);
+  border-color: var(--va-border-strong);
+  box-shadow: 0 10px 22px var(--va-shadow-strong);
   z-index: 2;
 }
 
@@ -1318,7 +1318,7 @@
 }
 
 .focus-artifact-note span {
-  color: #8ca6d0;
+  color: var(--va-muted);
   font-size: 9px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -1328,17 +1328,17 @@
   width: var(--c-w-prose, 100%);
   min-height: 42px;
   resize: vertical;
-  border: 1px solid rgba(145, 165, 210, 0.26);
+  border: 1px solid var(--va-border);
   border-radius: 7px;
-  background: rgba(5, 10, 22, 0.7);
-  color: #eef4ff;
+  background: var(--va-bg);
+  color: var(--va-text);
   padding: 6px 7px;
   font: inherit;
   line-height: 1.35;
 }
 
 .focus-artifact-note textarea:focus {
-  outline: 2px solid rgba(145, 191, 255, 0.45);
+  outline: 2px solid color-mix(in srgb, var(--va-accent) 50%, transparent);
   outline-offset: 1px;
 }
 
@@ -1363,9 +1363,9 @@
   height: 28px;
   display: grid;
   place-items: center;
-  border: 1px solid rgba(145, 165, 210, 0.26);
+  border: 1px solid var(--va-border);
   border-radius: 8px;
-  background: rgba(12, 20, 38, 0.6);
+  background: var(--va-panel);
   color: var(--va-muted);
   padding: 0;
   cursor: pointer;
@@ -1375,8 +1375,8 @@
 .focus-artifact-edit:focus-visible {
   outline: 0;
   color: var(--va-accent);
-  border-color: rgba(87, 229, 156, 0.5);
-  background: rgba(18, 38, 34, 0.7);
+  border-color: color-mix(in srgb, var(--va-accent) 50%, transparent);
+  background: var(--va-accent-wash);
 }
 
 .focus-artifact-edit-icon {
@@ -1386,12 +1386,12 @@
 
 .focus-artifact-title {
   font-size: 11px;
-  color: #f0f5ff;
+  color: var(--va-text);
 }
 
 .focus-artifact-meta {
   font-size: 10px;
-  color: #8ca6d0;
+  color: var(--va-muted);
 }
 
 .focus-artifact-actions {
@@ -1403,10 +1403,10 @@
 }
 
 .focus-artifact-action {
-  border: 1px solid rgba(145, 165, 210, 0.26);
-  background: rgba(60, 28, 44, 0.28);
+  border: 1px solid var(--va-border);
+  background: var(--va-panel);
   border-radius: 8px;
-  color: #ccd4f3;
+  color: var(--va-text-body);
   padding: 4px 7px;
   font-size: 10px;
   cursor: pointer;
@@ -1414,19 +1414,19 @@
 }
 
 .focus-artifact-action:hover {
-  border-color: rgba(145, 191, 255, 0.55);
-  background: rgba(45, 73, 127, 0.4);
+  border-color: var(--va-border-strong);
+  background: var(--va-hover);
 }
 
 .focus-artifact-action--danger {
-  border: 1px solid rgba(255, 107, 138, 0.34);
-  background: rgba(60, 28, 44, 0.6);
-  color: #ffd2dc;
+  border: 1px solid color-mix(in srgb, var(--va-danger) 35%, transparent);
+  background: var(--va-danger-wash);
+  color: var(--va-danger-text);
 }
 
 .focus-artifact-action--danger:hover {
-  border-color: rgba(255, 107, 138, 0.55);
-  background: rgba(82, 36, 58, 0.74);
+  border-color: color-mix(in srgb, var(--va-danger) 55%, transparent);
+  background: color-mix(in srgb, var(--va-danger) 26%, transparent);
 }
 
 .focus-artifacts-clear:hover,
@@ -1440,8 +1440,8 @@
 }
 
 .video-tool-btn.is-linked.active {
-  border-color: rgba(87, 229, 156, 0.62);
-  box-shadow: 0 0 0 1px rgba(87, 229, 156, 0.3), 0 0 10px rgba(87, 229, 156, 0.16);
+  border-color: color-mix(in srgb, var(--va-accent) 60%, transparent);
+  box-shadow: 0 0 0 1px var(--va-accent-wash-strong), 0 0 10px var(--va-accent-wash);
 }
 
 .video-record-button {
@@ -1456,16 +1456,16 @@
 }
 
 .video-record-button.is-recording {
-  border-color: rgba(255, 107, 138, 0.62);
-  color: #ffd8e1;
-  background: rgba(120, 26, 46, 0.5);
+  border-color: color-mix(in srgb, var(--va-danger) 60%, transparent);
+  color: var(--va-danger-text);
+  background: var(--va-danger-wash);
 }
 
 .video-note-panel {
   margin-top: 14px;
-  border: 1px solid var(--va-border, rgba(148, 169, 222, 0.22));
+  border: 1px solid var(--va-border);
   border-radius: var(--va-radius-md, 13px);
-  background: rgba(13, 18, 32, 0.82);
+  background: var(--va-panel);
   padding: 12px 14px;
   display: grid;
   gap: 10px;
@@ -1475,26 +1475,26 @@
   margin: 0;
   font-size: 13px;
   letter-spacing: 0.02em;
-  color: var(--va-text, #e9f0ff);
+  color: var(--va-text);
 }
 
 /* The note panel borrows the shared Clarity Voice panel, which is styled for
    light surfaces. Pull it onto the dark analysis theme. */
 .video-note-panel .clarityVoiceTextOutput,
 .video-note-panel .clarityVoiceInterim {
-  color: var(--va-muted, #a3adc2);
+  color: var(--va-muted);
 }
 
 .video-note-panel .clarityVoiceTextOutput textarea {
-  background: rgba(6, 10, 20, 0.72);
-  border-color: var(--va-border, rgba(148, 169, 222, 0.22));
-  color: var(--va-text, #e9f0ff);
+  background: var(--va-bg);
+  border-color: var(--va-border);
+  color: var(--va-text);
 }
 
 .video-note-panel .clarityVoiceMicButton {
-  background: rgba(6, 10, 20, 0.72);
-  border-color: var(--va-border, rgba(148, 169, 222, 0.22));
-  color: var(--va-text, #e9f0ff);
+  background: var(--va-bg);
+  border-color: var(--va-border);
+  color: var(--va-text);
 }
 
 .workspace-bottom {
@@ -1542,14 +1542,14 @@
 /* Drag-to-trash target over the video overlay (ported) */
 .video-trash-target {
   position: absolute;
-  border: 1px solid rgba(255, 173, 112, 0.22);
+  border: 1px solid color-mix(in srgb, var(--va-warn) 25%, transparent);
   border-radius: 10px;
   background: linear-gradient(
     130deg,
-    rgba(54, 30, 20, 0.74),
-    rgba(58, 26, 10, 0.4)
+    var(--va-warn-wash),
+    transparent
   );
-  color: rgba(255, 196, 140, 0.78);
+  color: var(--va-warn-text);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1563,9 +1563,9 @@
 .video-trash-target.is-active {
   opacity: 1;
   transform: scale(1.06);
-  color: rgba(255, 214, 170, 0.95);
-  border-color: rgba(255, 131, 76, 0.62);
-  box-shadow: 0 0 0 1px rgba(255, 131, 76, 0.28), 0 8px 16px rgba(34, 13, 1, 0.42);
+  color: var(--va-warn-text);
+  border-color: color-mix(in srgb, var(--va-warn) 60%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--va-warn) 30%, transparent), 0 8px 16px var(--va-shadow);
 }
 
 .video-trash-target svg {
@@ -1581,29 +1581,29 @@
   gap: 10px;
   padding: 28px 20px;
   text-align: center;
-  border: 1px solid rgba(148, 169, 222, 0.22);
+  border: 1px solid var(--va-border);
   border-radius: 16px;
-  background: rgba(11, 17, 31, 0.88);
+  background: var(--va-panel);
 }
 
 .compare-rotate-gate h2 {
   margin: 0;
   font-family: "Montserrat", "Inter", sans-serif;
   font-size: 1.05rem;
-  color: #eef4ff;
+  color: var(--va-text);
 }
 
 .compare-rotate-gate p {
   margin: 0;
   max-width: 30ch;
-  color: var(--va-muted, #a3adc2);
+  color: var(--va-muted);
   font-size: 0.88rem;
   line-height: 1.45;
 }
 
 .compare-rotate-gate-icon {
   display: inline-flex;
-  color: var(--va-accent, #57e59c);
+  color: var(--va-accent);
 }
 
 .compare-rotate-gate-icon svg {
@@ -1852,7 +1852,7 @@
   justify-content: center;
   border: 0;
   border-radius: 50%;
-  background: rgba(8, 12, 22, 0.82);
+  background: var(--va-scrim);
   backdrop-filter: blur(8px);
   color: var(--va-text);
   cursor: pointer;
@@ -1865,7 +1865,7 @@
 }
 
 .va-rail-toggle:hover {
-  background: rgba(20, 28, 46, 0.88);
+  background: color-mix(in srgb, var(--va-on-scrim) 12%, var(--va-scrim));
 }
 
 /* Pressed-in rather than a second colour: the rail being open is a state of
@@ -1899,7 +1899,7 @@
   gap: 2px;
   padding: 5px;
   border-radius: var(--c-radius-pill, 999px);
-  background: rgba(8, 12, 22, 0.82);
+  background: var(--va-scrim);
   backdrop-filter: blur(8px);
   transform: translateX(calc(-100% - 12px));
   opacity: 0;
@@ -1934,7 +1934,7 @@
 }
 
 .va-rail-btn:hover:not(:disabled) {
-  background: rgba(233, 240, 255, 0.12);
+  background: var(--va-hover);
 }
 
 .va-rail-btn.is-active {
@@ -1960,7 +1960,7 @@
   width: 22px;
   height: 1px;
   margin: 3px 0;
-  background: rgba(233, 240, 255, 0.22);
+  background: var(--va-border);
 }
 
 /* --- The action bar ------------------------------------------------------- */
@@ -2015,7 +2015,7 @@
 }
 
 .va-bar-btn:hover {
-  background: rgba(233, 240, 255, 0.1);
+  background: var(--va-hover);
 }
 
 /* Pressed-in rather than a second colour: the rail being open is a state of
@@ -2122,19 +2122,26 @@
    than its own. --va-* is for what sits on video, where it has to stay legible
    over grass and sky and a white shirt; this strip is under the picture, on
    the app's own surface, so it takes the app's own ink and follows the coach's
-   light/dark toggle for free. */
+   light/dark toggle for free.
+
+   It reads --app-*, not --c-*, and that is not a second palette: tokens.css
+   turns the whole shell dark, so --c-* in here is the workspace's dark, not
+   the app's. --app-* is the same values copied on .app-shell, above the
+   shell that shadows them. Without it this row is near-white ink on a white
+   card -- the exact bug the paragraph above describes, arriving from the
+   other side. */
 
 .video-analysis-shell.is-coach .va-bar-btn {
-  color: var(--c-text);
+  color: var(--app-text);
 }
 
 .video-analysis-shell.is-coach .va-bar-btn:hover {
-  background: var(--c-hover);
+  background: var(--app-hover);
 }
 
 .video-analysis-shell.is-coach .va-bar-btn.is-active {
-  background: var(--c-accent);
-  color: var(--c-accent-text);
+  background: var(--app-accent);
+  color: var(--app-accent-text);
 }
 
 /* Save is the filled control here. On the player's dark screen it is the
@@ -2145,23 +2152,23 @@
    mode. */
 .video-analysis-shell.is-coach .va-bar-text-btn {
   padding: 0 18px;
-  background: var(--c-accent);
-  color: var(--c-accent-text);
+  background: var(--app-accent);
+  color: var(--app-accent-text);
   font-weight: 700;
 }
 
 .video-analysis-shell.is-coach .va-bar-text-btn:hover:not(:disabled) {
-  background: var(--c-text-body);
-  color: var(--c-accent-text);
+  background: var(--app-text-body);
+  color: var(--app-accent-text);
 }
 
 .video-analysis-shell.is-coach .va-player-status {
-  color: var(--c-muted);
+  color: var(--app-muted);
 }
 
 .video-analysis-shell.is-coach .va-player-status.is-saved {
   /* The mint accent is tuned to sit on video, not on a page card. */
-  color: var(--c-success-text);
+  color: var(--app-success-text);
 }
 
 /* --- The settings sheet -----------------------------------------------
@@ -2176,7 +2183,7 @@
   inset: 0;
   z-index: 30;
   border: 0;
-  background: rgba(3, 5, 10, 0.5);
+  background: var(--va-scrim-soft);
   cursor: default;
 }
 
@@ -2190,11 +2197,11 @@
   max-height: min(70svh, 520px);
   overflow-y: auto;
   padding: 8px;
-  border: 1px solid var(--va-border, rgba(148, 169, 222, 0.22));
+  border: 1px solid var(--va-border);
   border-radius: 16px;
-  background: rgba(13, 18, 32, 0.97);
+  background: var(--va-panel);
   backdrop-filter: blur(10px);
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 18px 40px var(--va-shadow);
 }
 
 .va-sheet-handle {
@@ -2203,7 +2210,7 @@
   height: 3px;
   margin: 2px auto 8px;
   border-radius: 2px;
-  background: rgba(233, 240, 255, 0.28);
+  background: var(--va-border-strong);
 }
 
 .va-sheet-row {
@@ -2215,7 +2222,7 @@
   border: 0;
   border-radius: 9px;
   background: transparent;
-  color: var(--va-text, #e9f0ff);
+  color: var(--va-text);
   font: inherit;
   font-size: 0.86rem;
   text-align: left;
@@ -2226,11 +2233,11 @@
   width: 17px;
   height: 17px;
   flex: none;
-  color: var(--va-muted, #a3adc2);
+  color: var(--va-muted);
 }
 
 .va-sheet-row-btn:hover:not(:disabled) {
-  background: rgba(233, 240, 255, 0.08);
+  background: var(--va-hover);
 }
 
 .va-sheet-row-btn:disabled {
@@ -2239,11 +2246,11 @@
 }
 
 .va-sheet-row-danger {
-  color: rgba(255, 174, 194, 0.96);
+  color: var(--va-danger-text);
 }
 
 .va-sheet-row-danger svg {
-  color: rgba(255, 174, 194, 0.8);
+  color: color-mix(in srgb, var(--va-danger-text) 80%, transparent);
 }
 
 .va-sheet-toggle {
@@ -2252,7 +2259,7 @@
   height: 17px;
   flex: none;
   border-radius: 999px;
-  background: rgba(233, 240, 255, 0.18);
+  background: var(--va-active);
   position: relative;
 }
 
@@ -2264,12 +2271,12 @@
   width: 13px;
   height: 13px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--va-text);
   transition: left 140ms ease;
 }
 
 .va-sheet-toggle.is-on {
-  background: var(--va-accent, #57e59c);
+  background: var(--va-accent);
 }
 
 .va-sheet-toggle.is-on::after {
@@ -2280,12 +2287,12 @@
   display: block;
   height: 1px;
   margin: 4px 8px;
-  background: rgba(233, 240, 255, 0.1);
+  background: var(--va-line-soft);
 }
 
 .va-sheet-note {
   margin: 0 8px 6px;
-  color: var(--va-muted, #a3adc2);
+  color: var(--va-muted);
   font-size: 0.76rem;
 }
 
@@ -2346,11 +2353,11 @@
 }
 
 .va-sheet .va-camera-option-btn:hover {
-  background: rgba(233, 240, 255, 0.08);
+  background: var(--va-hover);
 }
 
 .va-sheet .va-camera-option-btn.is-selected {
-  background: rgba(87, 229, 156, 0.08);
+  background: var(--va-accent-wash);
 }
 
 .va-sheet .va-camera-dot {
@@ -2358,7 +2365,7 @@
   height: 15px;
   flex: none;
   border-radius: 50%;
-  border: 1.5px solid rgba(233, 240, 255, 0.34);
+  border: 1.5px solid var(--va-border-strong);
   position: relative;
 }
 
@@ -2390,12 +2397,12 @@
    leaving the setting looking empty. */
 .va-sheet .va-camera-option.is-missing .va-camera-state {
   flex: none;
-  color: rgba(255, 174, 194, 0.96);
+  color: var(--va-danger-text);
   font-size: 0.76rem;
 }
 
 .va-sheet-icon-recording {
-  color: rgba(255, 107, 138, 0.9) !important;
+  color: var(--va-danger) !important;
 }
 
 /* The timeline keeps its track -- it is how you jump across the whole clip --
