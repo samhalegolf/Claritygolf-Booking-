@@ -49,10 +49,17 @@ export interface ToCameraFrameOptions {
   readonly presenceFloor?: number;
 }
 
-const DEFAULTS = {
+/**
+ * Exported so the overlay can say, per landmark, whether Clarity kept it.
+ * The floors are the one lossy decision in this file, and a reading that
+ * fell under them should be visibly discarded rather than quietly absent.
+ */
+export const OBSERVATION_FLOORS = {
   visibilityFloor: 0.1,
   presenceFloor: 0.1,
 } as const;
+
+const DEFAULTS = OBSERVATION_FLOORS;
 
 /** MediaPipe world landmarks -> Clarity axes. The whole conversion, in one line. */
 export const toClarityAxes = (landmark: RawLandmark): [number, number, number] => [

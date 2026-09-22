@@ -24,6 +24,19 @@ const Row = ({ label, value }: { label: string; value: string }) => (
   </div>
 );
 
+/**
+ * What the detector's own confidence in this joint means, in words. The 3D
+ * Space only carries visibility through, so this is coarser than the video
+ * card, which also has presence.
+ */
+const detectorVerdict = (rawConfidence: number, source: keyof typeof PROVENANCE_LABELS): string => {
+  if (source === "reconstructed" || source === "extrapolated" || source === "missing") {
+    return "nothing usable this frame — the detector's reading was under Clarity's floor or absent";
+  }
+  if (rawConfidence >= 0.5) return "seen in the image";
+  return "not confident it could see this — the reading is an inference, used at low trust";
+};
+
 const describeSource = (source: keyof typeof PROVENANCE_LABELS): string => {
   switch (source) {
     case "observed":
@@ -64,6 +77,7 @@ export function PickCard({
         { label: "Provenance", value: PROVENANCE_LABELS[provenance.source] },
         { label: "Moved from raw", value: mm(provenance.correctionM) },
         { label: "Detector confidence", value: pct(provenance.rawConfidence) },
+        { label: "Detector", value: detectorVerdict(provenance.rawConfidence, provenance.source) },
         { label: "Frames since seen", value: String(provenance.framesSinceObserved) },
         { label: "Position", value: at(frame.body.joints[pick.joint]) },
       ];

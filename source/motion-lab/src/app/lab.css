@@ -497,6 +497,14 @@
   text-align: right;
 }
 
+.lab-pick-verdict {
+  margin-top: 4px;
+}
+
+.lab-pick-verdict > span:last-child {
+  max-width: 170px;
+}
+
 .lab-stage-empty {
   display: flex;
   align-items: center;

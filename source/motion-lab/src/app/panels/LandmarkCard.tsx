@@ -7,7 +7,38 @@
  */
 
 import { JOINT_SOURCES, MP } from "../../observe/mediapipe/landmarks";
-import type { ObservationFrame } from "../../observe/observation";
+import type { ObservationFrame, RawLandmark } from "../../observe/observation";
+import { OBSERVATION_FLOORS } from "../../observe/toCameraFrame";
+
+/**
+ * What the detector itself believed about a point.
+ *
+ * MediaPipe never says "derived": it emits a position for all 33 landmarks
+ * every frame. What it does report is two beliefs -- visibility (can it see
+ * the point in the image) and presence (does it think the point is in the
+ * picture at all) -- and read together they separate a point it saw, a
+ * point it inferred from the rest of the body, and a point it made up.
+ */
+const detectorVerdict = (landmark: RawLandmark): string => {
+  if (landmark.visibility >= 0.5) return "seen in the image";
+  if (landmark.presence >= 0.5) {
+    return "in frame but hidden — MediaPipe inferred it from the rest of the body";
+  }
+  return "MediaPipe does not believe this point is in the picture — the position is a guess with nothing behind it";
+};
+
+const clarityVerdict = (landmark: RawLandmark, index: number): string => {
+  if (JOINT_SOURCES.every((source) => !source.from.includes(index))) return "not used";
+  const kept =
+    landmark.visibility >= OBSERVATION_FLOORS.visibilityFloor &&
+    landmark.presence >= OBSERVATION_FLOORS.presenceFloor;
+  if (!kept) {
+    return `discarded — under the ${(OBSERVATION_FLOORS.visibilityFloor * 100).toFixed(0)}% floor, treated as not observed`;
+  }
+  return landmark.visibility >= 0.5
+    ? "used as an observation"
+    : `used, at ${(landmark.visibility * 100).toFixed(0)}% trust — bones and smoothing lean on it less`;
+};
 
 /** Index -> MediaPipe's name for it. */
 const LANDMARK_NAMES: readonly string[] = Object.entries(MP)
@@ -72,6 +103,14 @@ export function LandmarkCard({
             <span>
               {(landmark.x * 100).toFixed(1)}%, {(landmark.y * 100).toFixed(1)}%
             </span>
+          </div>
+          <div className="lab-pick-row lab-pick-verdict">
+            <span>MediaPipe says</span>
+            <span>{detectorVerdict(landmark)}</span>
+          </div>
+          <div className="lab-pick-row lab-pick-verdict">
+            <span>Clarity</span>
+            <span>{clarityVerdict(landmark, index)}</span>
           </div>
         </>
       ) : (
