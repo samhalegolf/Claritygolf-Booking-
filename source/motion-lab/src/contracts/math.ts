@@ -345,3 +345,148 @@ export const solveTwoBone = (
     underreachM,
   };
 };
+
+/* --------------------------- rigid fits ---------------------------- */
+
+/** One point of a body, and where this frame's evidence puts it. */
+export interface Correspondence {
+  /** The point in the body's own frame. */
+  readonly from: Vec3;
+  /** Where the evidence says it is, in the world. */
+  readonly to: Vec3;
+  /** How much this pair counts. Pairs at zero are ignored entirely. */
+  readonly weight: number;
+}
+
+export interface RigidFit {
+  readonly rotation: Quat;
+  readonly translation: Vec3;
+  /** Sum of the weights that actually bore on the fit. */
+  readonly weight: number;
+}
+
+/** Carry a point of the body into the world. */
+export const applyRigidFit = (fit: RigidFit, point: Vec3): Vec3 =>
+  add(qRotate(fit.rotation, point), fit.translation);
+
+/** And back: where a world point sits in the body's own frame. */
+export const unapplyRigidFit = (fit: RigidFit, point: Vec3): Vec3 =>
+  qRotate(qConjugate(fit.rotation), sub(point, fit.translation));
+
+/**
+ * The rotation and translation that best carry `from` onto `to`.
+ *
+ * Horn's quaternion method: the best rotation is the principal eigenvector
+ * of a 4x4 built from the weighted covariance, and it is found by power
+ * iteration rather than by a general eigensolver -- four dimensions, one
+ * dominant eigenvalue, and no need for a matrix library.
+ *
+ * WHY IT IS SEEDED
+ *
+ * Underdetermined input is the normal case here, not the exception. Two
+ * points leave the rotation about the line between them free; points on one
+ * axis leave the rotation about that axis free. A solver that answered such
+ * a case with an arbitrary rotation would make a body flip between frames
+ * for want of evidence either way.
+ *
+ * Seeding fixes that, and it does so by the maths rather than by a special
+ * case: an undetermined direction is one where the top eigenvalues are equal,
+ * so the iteration never rotates the seed's component out of it. The free
+ * part of the answer is simply whatever it was last frame. With no rotational
+ * information at all the seed is returned untouched.
+ */
+export const fitRigidTransform = (
+  pairs: readonly Correspondence[],
+  seed: Quat = qIdentity()
+): RigidFit | null => {
+  let weight = 0;
+  let fromX = 0;
+  let fromY = 0;
+  let fromZ = 0;
+  let toX = 0;
+  let toY = 0;
+  let toZ = 0;
+
+  for (const pair of pairs) {
+    if (!(pair.weight > 0)) continue;
+    weight += pair.weight;
+    fromX += pair.from[0] * pair.weight;
+    fromY += pair.from[1] * pair.weight;
+    fromZ += pair.from[2] * pair.weight;
+    toX += pair.to[0] * pair.weight;
+    toY += pair.to[1] * pair.weight;
+    toZ += pair.to[2] * pair.weight;
+  }
+  if (weight <= 0) return null;
+
+  const fromCentre: Vec3 = [fromX / weight, fromY / weight, fromZ / weight];
+  const toCentre: Vec3 = [toX / weight, toY / weight, toZ / weight];
+
+  // Weighted covariance of the centred clouds.
+  const s = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+  for (const pair of pairs) {
+    if (!(pair.weight > 0)) continue;
+    const a = sub(pair.from, fromCentre);
+    const b = sub(pair.to, toCentre);
+    for (let row = 0; row < 3; row += 1) {
+      for (let column = 0; column < 3; column += 1) {
+        s[row * 3 + column] += pair.weight * a[row] * b[column];
+      }
+    }
+  }
+
+  /*
+   * Scaled to unit magnitude before the iteration. The shift below has to
+   * make the matrix positive definite, and a shift much larger than the
+   * eigenvalues themselves crushes the gap between them -- which is what
+   * power iteration converges on. Un-normalised, a body measured in metres
+   * has a covariance of order a hundredth, the shift swamps it, and the
+   * answer comes back a third of a millimetre out. Scaling is free: it
+   * multiplies every eigenvalue alike and leaves the eigenvectors alone.
+   */
+  let magnitude = 0;
+  for (const value of s) magnitude = Math.max(magnitude, Math.abs(value));
+  if (magnitude < 1e-12) {
+    // No rotational information at all -- a single point, or none. The seed
+    // is the whole answer.
+    const rotation = qNormalise(seed);
+    return { rotation, translation: sub(toCentre, qRotate(rotation, fromCentre)), weight };
+  }
+  for (let index = 0; index < s.length; index += 1) s[index] /= magnitude;
+
+  const [xx, xy, xz, yx, yy, yz, zx, zy, zz] = s;
+  // Horn's N, in (w, x, y, z) order.
+  const n = [
+    [xx + yy + zz, yz - zy, zx - xz, xy - yx],
+    [yz - zy, xx - yy - zz, xy + yx, zx + xz],
+    [zx - xz, xy + yx, -xx + yy - zz, yz + zy],
+    [xy - yx, zx + xz, yz + zy, -xx - yy + zz],
+  ];
+
+  /*
+   * Shifted so every eigenvalue is positive and the largest is the one power
+   * iteration converges on. Gershgorin bounds the spectrum.
+   */
+  let shift = 0;
+  for (const row of n) {
+    shift = Math.max(shift, Math.abs(row[0]) + Math.abs(row[1]) + Math.abs(row[2]) + Math.abs(row[3]));
+  }
+  for (let index = 0; index < 4; index += 1) n[index][index] += shift;
+
+  // Seed in Horn's order, and never the zero vector.
+  let v = [seed[3], seed[0], seed[1], seed[2]];
+  if (Math.hypot(v[0], v[1], v[2], v[3]) < 1e-9) v = [1, 0, 0, 0];
+
+  for (let iteration = 0; iteration < 160; iteration += 1) {
+    const next = [0, 0, 0, 0];
+    for (let row = 0; row < 4; row += 1) {
+      next[row] = n[row][0] * v[0] + n[row][1] * v[1] + n[row][2] * v[2] + n[row][3] * v[3];
+    }
+    const norm = Math.hypot(next[0], next[1], next[2], next[3]);
+    if (norm < 1e-12) break;
+    v = [next[0] / norm, next[1] / norm, next[2] / norm, next[3] / norm];
+  }
+
+  const rotation = qNormalise([v[1], v[2], v[3], v[0]]);
+  return { rotation, translation: sub(toCentre, qRotate(rotation, fromCentre)), weight };
+};

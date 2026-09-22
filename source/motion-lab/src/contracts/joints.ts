@@ -18,6 +18,22 @@
 export const CLARITY_JOINTS = [
   "head",
   "neck",
+  /**
+   * The one marker no detector reports.
+   *
+   * The shoulder girdle needs a third point to be a body at all: the neck is
+   * defined as the shoulder midpoint, so shoulders and neck are three points
+   * on one line, and a line has no orientation about itself. The sternum is
+   * off that line, which makes the girdle a triangle, and it is the point the
+   * shoulders actually ride on -- the two struts out to the acromia hold
+   * their length while their angle opens and closes, which is what
+   * protraction and retraction do.
+   *
+   * It is placed by `motion/reconstruct/shoulderGirdle`, from the golfer's
+   * own measured shoulder width, and its provenance is always "derived".
+   * Nothing in `observe/` emits it, which is why OBSERVABLE_JOINTS exists.
+   */
+  "sternum",
   "leftShoulder",
   "rightShoulder",
   "leftElbow",
@@ -42,6 +58,34 @@ export type ClarityJoint = (typeof CLARITY_JOINTS)[number];
 
 export const isClarityJoint = (value: string): value is ClarityJoint =>
   (CLARITY_JOINTS as readonly string[]).includes(value);
+
+/**
+ * The joints a detector can actually produce.
+ *
+ * The difference matters wherever the question is "how much of this frame was
+ * seen?". Dividing by every Clarity joint would score a perfect frame at
+ * 20/21, because the sternum is derived by construction and can never be
+ * observed -- and then every frame in every clip would report as partly
+ * reconstructed. The denominator has to be what was available to see.
+ */
+export const DERIVED_JOINTS: readonly ClarityJoint[] = ["sternum"];
+
+export const OBSERVABLE_JOINTS: readonly ClarityJoint[] = CLARITY_JOINTS.filter(
+  (joint) => !DERIVED_JOINTS.includes(joint)
+);
+
+/**
+ * A structure's joints, minus the ones that are always built.
+ *
+ * Structure confidence answers "how well was this structure SEEN?", and a
+ * marker that is derived on every frame of every clip cannot help answer it.
+ * Left in, the sternum would hold the thorax's score at a constant fraction
+ * of the truth whatever the detector managed, which reads as a permanently
+ * mediocre thorax rather than as what it is -- one joint that was never up
+ * for observation.
+ */
+export const observedJointsOf = (structure: ClarityStructure): readonly ClarityJoint[] =>
+  JOINTS_BY_STRUCTURE[structure].filter((joint) => !DERIVED_JOINTS.includes(joint));
 
 /**
  * Structures that carry their own confidence.
@@ -88,6 +132,21 @@ export const CLARITY_BONES: readonly Bone[] = [
   { from: "neck", to: "rightShoulder", structure: "thorax", rigid: true },
   { from: "leftShoulder", to: "rightShoulder", structure: "thorax", rigid: true },
 
+  /*
+   * The girdle's struts, from the sternum out to each shoulder.
+   *
+   * Rigid in the strongest sense in the skeleton: this is the link whose
+   * length does not change while the shoulder rides forward and back on it.
+   * The constraint solver never enforces them, and that is correct rather
+   * than an oversight -- their length is not measured from two observed ends,
+   * because one end is never observed, so the body model has no figure for
+   * them and skips them. The girdle stage places both ends together and
+   * satisfies them by construction; a solver re-deriving that would only be
+   * able to make it worse.
+   */
+  { from: "sternum", to: "leftShoulder", structure: "thorax", rigid: true },
+  { from: "sternum", to: "rightShoulder", structure: "thorax", rigid: true },
+
   // The spine link is NOT rigid: thorax-to-pelvis separation genuinely
   // changes with flexion and extension, and pinning it would manufacture
   // stability the observations do not support.
@@ -125,7 +184,7 @@ export const RIGID_BONES: readonly Bone[] = CLARITY_BONES.filter((bone) => bone.
 
 /** Which joints the given structure is built from. Used to roll confidence up. */
 export const JOINTS_BY_STRUCTURE: Readonly<Record<ClarityStructure, readonly ClarityJoint[]>> = {
-  thorax: ["neck", "leftShoulder", "rightShoulder"],
+  thorax: ["neck", "sternum", "leftShoulder", "rightShoulder"],
   pelvis: ["leftHip", "rightHip"],
   head: ["head", "neck"],
   leftArm: ["leftShoulder", "leftElbow", "leftWrist"],

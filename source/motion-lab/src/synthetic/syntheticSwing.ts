@@ -37,8 +37,11 @@ import type {
 } from "../contracts";
 import {
   CLARITY_JOINTS,
-  JOINTS_BY_STRUCTURE,
+  DERIVED_JOINTS,
+  OBSERVABLE_JOINTS,
+  CLARITY_STRUCTURES,
   RIGID_BONES,
+  observedJointsOf,
   add,
   boneKey,
   clampUnit,
@@ -58,6 +61,7 @@ import {
 import { buildFrameConfidence, penalise, PENALTY_SCALES } from "../motion/confidence/confidence";
 import { estimateMass } from "../motion/mass/massModel";
 import { checkableBodies, checkMassAgainstShape } from "../motion/mass/massSanity";
+import { sternumOffset } from "../motion/reconstruct/shoulderGirdle";
 import { gaussian, makeRng, proportionsForHeight, type Proportions } from "./proportions";
 import {
   RIGHT_HANDED_SWING,
@@ -285,6 +289,20 @@ const torsoCore = (key: InterpolatedKey, props: Proportions, hipY: number) => {
   // it a few centimetres higher would be testing the pipeline against a
   // definition the pipeline cannot produce.
   const neck = thoraxCentre;
+  /*
+   * The sternum rides the thorax rigidly, which is the fixture's whole claim
+   * about it: it is the point the shoulders swing on, so it must not swing
+   * with them.
+   *
+   * The offset comes from the Motion Layer's own rule rather than a second
+   * copy of the fractions. A fixture that placed it by its own arithmetic
+   * would agree with the reconstruction because both were written on the
+   * same afternoon, and stop agreeing the first time one of them changed.
+   */
+  const sternum = add(
+    thoraxCentre,
+    qRotate(thoraxQ, sternumOffset(props.shoulderHalfWidth * 2))
+  );
   // The head stays quieter than the thorax -- it is not rigidly welded to it.
   const headQ = spineOrientation(
     key.thoraxYaw * DEG * 0.35,
@@ -301,6 +319,7 @@ const torsoCore = (key: InterpolatedKey, props: Proportions, hipY: number) => {
     spineLength,
     leftShoulder: sub(thoraxCentre, shoulderOffset),
     rightShoulder: add(thoraxCentre, shoulderOffset),
+    sternum,
     leftHip: sub(pelvisCentre, hipOffset),
     rightHip: add(pelvisCentre, hipOffset),
     neck,
@@ -439,6 +458,7 @@ const buildPose = (
   joints.neck = torso.neck;
   joints.leftShoulder = torso.leftShoulder;
   joints.rightShoulder = torso.rightShoulder;
+  joints.sternum = torso.sternum;
   joints.leftHip = torso.leftHip;
   joints.rightHip = torso.rightHip;
 
@@ -882,6 +902,23 @@ const assembleFrame = (input: AssembleInput): ClarityFrame => {
   let observedCount = 0;
 
   for (const joint of CLARITY_JOINTS) {
+    /*
+     * The sternum is built from the thorax, here as in the Motion Layer, so
+     * no detector ever had a chance at it. It is neither observed nor
+     * dropped out, and it is not part of the fraction that says how much of
+     * this frame was seen.
+     */
+    if (DERIVED_JOINTS.includes(joint)) {
+      provenanceByJoint[joint] = {
+        source: "derived",
+        correctionM: 0,
+        framesSinceObserved: 0,
+        gapLength: 0,
+        rawConfidence: 0,
+      };
+      continue;
+    }
+
     const dropout = (degradation.dropouts ?? []).find(
       (entry) =>
         entry.joint === joint &&
@@ -930,12 +967,19 @@ const assembleFrame = (input: AssembleInput): ClarityFrame => {
     }
   }
 
-  const observedFraction = observedCount / CLARITY_JOINTS.length;
+  const observedFraction = observedCount / OBSERVABLE_JOINTS.length;
 
   const jointSupport = Object.fromEntries(
     CLARITY_JOINTS.map((joint) => [
       joint,
-      provenanceByJoint[joint].source === "observed" ? 1 : 0.35,
+      /*
+       * A dropped-out joint is a guess and scores like one. A DERIVED joint
+       * is not: the fixture builds the sternum from a thorax it knows
+       * exactly, so in ground truth it is as well known as the shoulders it
+       * came from. Scoring it as a guess would make every frame of a clean
+       * clip look partly invented.
+       */
+      provenanceByJoint[joint].source === "reconstructed" ? 0.35 : 1,
     ])
   ) as Record<ClarityJoint, Unit>;
 
@@ -944,11 +988,11 @@ const assembleFrame = (input: AssembleInput): ClarityFrame => {
   const components: ConfidenceComponents = {
     directObservation: observedFraction,
     trackingContinuity: penalise(
-      CLARITY_JOINTS.length - observedCount,
+      OBSERVABLE_JOINTS.length - observedCount,
       PENALTY_SCALES.gapFrames
     ),
     jumpCorrection: penalise(jumpTotalM, PENALTY_SCALES.jumpM),
-    gapReconstruction: penalise(gapTotal / CLARITY_JOINTS.length, PENALTY_SCALES.gapFrames),
+    gapReconstruction: penalise(gapTotal / OBSERVABLE_JOINTS.length, PENALTY_SCALES.gapFrames),
     bodyConstraintCorrection: penalise(noiseM * 3, PENALTY_SCALES.constraintCorrectionM),
     clubPoint: club.confidence,
   };
@@ -1025,14 +1069,12 @@ const rollUpStructures = (
   clubConfidence: Unit
 ): Record<ClarityStructure, Unit> => {
   const out = {} as Record<ClarityStructure, Unit>;
-  for (const [structure, structureJoints] of Object.entries(JOINTS_BY_STRUCTURE) as [
-    ClarityStructure,
-    readonly ClarityJoint[],
-  ][]) {
+  for (const structure of CLARITY_STRUCTURES) {
     if (structure === "club") {
       out.club = clubConfidence;
       continue;
     }
+    const structureJoints = observedJointsOf(structure);
     if (structureJoints.length === 0) {
       out[structure] = 0;
       continue;

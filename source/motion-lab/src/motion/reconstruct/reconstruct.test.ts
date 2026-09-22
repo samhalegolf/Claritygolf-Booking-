@@ -14,6 +14,7 @@ import { test } from "node:test";
 import {
   CLARITY_JOINTS,
   JOINTS_BY_STRUCTURE,
+  OBSERVABLE_JOINTS,
   RIGID_BONES,
   boneKey,
   distance,
@@ -84,7 +85,10 @@ test("clean input is not made worse", () => {
 
   for (const frame of rebuilt.frames) {
     assert.equal(frame.provenance.wholeFrameReconstructed, false);
-    for (const joint of CLARITY_JOINTS) {
+    // Over the joints a detector reports. The sternum is built by the girdle
+    // on every frame of every clip, so "was it left as seen?" is not a
+    // question about it.
+    for (const joint of OBSERVABLE_JOINTS) {
       const source = frame.provenance.joints[joint].source;
       // The feet are the leash's: held at their anchor, or moved onto the arc
       // a lifting heel takes. Everything else must be left exactly as seen.
@@ -545,15 +549,20 @@ test("a landmark that slides onto the wrong part of the body and stays there is 
     `the baseline should render the slip, got ${(baselineError * 1000).toFixed(0)}mm`
   );
   /*
-   * Without this stage the older guards do NOT leave the slip untouched --
-   * the constraint solver hauls the shoulder part of the way back to satisfy
-   * the bones it is breaking. But it gets there by splitting every correction
-   * with the joint at the other end, so it drags good observations along with
-   * it, and what it settles on is still a shoulder several centimetres from
-   * the body. Rejecting the reading beats negotiating with it.
+   * Without this stage the other guards do NOT leave the slip untouched. The
+   * constraint solver hauls the shoulder part of the way back to satisfy the
+   * bones it is breaking, and the shoulder girdle reins the reading toward
+   * the shape the rest of the clip measured; between them 187mm of slip comes
+   * down to about 16mm. Neither of them is free of it, though. The solver
+   * gets there by splitting every correction with the joint at the other end,
+   * so it drags good observations along with it, and the girdle can only pull
+   * a reading back to the edge of what this golfer's girdle was seen to do --
+   * which is still a shoulder three times the detector's own noise off the
+   * body. Rejecting the reading beats negotiating with it, and the full
+   * pipeline lands at 5mm.
    */
   assert.ok(
-    unguardedError > 0.04,
+    unguardedError > 0.012,
     "without this stage the shoulder should still be badly placed, got " +
       `${(unguardedError * 1000).toFixed(0)}mm`
   );

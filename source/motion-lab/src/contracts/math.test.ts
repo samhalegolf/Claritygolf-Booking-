@@ -12,11 +12,13 @@ import { test } from "node:test";
 
 import {
   add,
+  applyRigidFit,
   centroid,
   clamp,
   cross,
   distance,
   dot,
+  fitRigidTransform,
   lerpVec,
   normalise,
   projectToGround,
@@ -251,4 +253,76 @@ test("solveTwoBone survives coincident endpoints and a parallel pole", () => {
   assert.ok(Number.isFinite(parallel.joint[1]));
   closeTo(distance([0, 0, 0], parallel.joint), 0.7, 1e-6);
   closeTo(distance([1, 0, 0], parallel.joint), 0.7, 1e-6);
+});
+
+/* --------------------------- rigid fits ---------------------------- */
+
+test("a rigid fit recovers the transform that made the data", () => {
+  const rotation = qFromAxisAngle([0.3, 1, 0.2], 0.7);
+  const translation: Vec3 = [0.4, -1.2, 0.25];
+  const body: Vec3[] = [
+    [-0.2, 0, 0],
+    [0.2, 0, 0],
+    [0, 0.21, 0.02],
+    [0, -0.52, 0],
+  ];
+  const fit = fitRigidTransform(
+    body.map((point) => ({
+      from: point,
+      to: add(qRotate(rotation, point), translation),
+      weight: 1,
+    }))
+  );
+  assert.ok(fit);
+  for (const point of body) {
+    const expected = add(qRotate(rotation, point), translation);
+    assert.ok(
+      distance(applyRigidFit(fit, point), expected) < 1e-6,
+      `point came back ${(distance(applyRigidFit(fit, point), expected) * 1000).toFixed(3)}mm out`
+    );
+  }
+});
+
+test("a rigid fit leaves an undetermined rotation where the seed put it", () => {
+  // One correspondence fixes the translation and says nothing about the
+  // rotation. An arbitrary answer here would flip a body between frames for
+  // want of evidence either way, so the seed has to survive untouched.
+  const seed = qFromAxisAngle([0, 1, 0], 1.1);
+  const fit = fitRigidTransform([{ from: [0.2, 0, 0], to: [1, 2, 3], weight: 1 }], seed);
+  assert.ok(fit);
+  assert.ok(
+    qAngleBetween(fit.rotation, seed) < 1e-6,
+    `the seed moved by ${((qAngleBetween(fit.rotation, seed) * 180) / Math.PI).toFixed(3)} degrees`
+  );
+  assert.ok(distance(applyRigidFit(fit, [0.2, 0, 0]), [1, 2, 3]) < 1e-9);
+});
+
+test("a rigid fit ignores pairs at zero weight", () => {
+  const good: Vec3[] = [
+    [-0.2, 0, 0],
+    [0.2, 0, 0],
+    [0, 0.3, 0],
+  ];
+  const withNonsense = fitRigidTransform([
+    ...good.map((point) => ({ from: point, to: add(point, [0, 1, 0] as Vec3), weight: 1 })),
+    { from: [0, 0, 0] as Vec3, to: [99, -40, 12] as Vec3, weight: 0 },
+  ]);
+  assert.ok(withNonsense);
+  assert.ok(distance(applyRigidFit(withNonsense, good[0]), add(good[0], [0, 1, 0])) < 1e-6);
+  assert.equal(fitRigidTransform([{ from: [0, 0, 0], to: [1, 1, 1], weight: 0 }]), null);
+});
+
+test("a rigid fit takes the best compromise when nothing fits exactly", () => {
+  // Two points pulled apart by the same amount in opposite directions: the
+  // fit cannot satisfy either, and the answer has to split the difference
+  // rather than pick a side.
+  const fit = fitRigidTransform([
+    { from: [-0.2, 0, 0], to: [-0.25, 0, 0], weight: 1 },
+    { from: [0.2, 0, 0], to: [0.25, 0, 0], weight: 1 },
+  ]);
+  assert.ok(fit);
+  const left = applyRigidFit(fit, [-0.2, 0, 0]);
+  const right = applyRigidFit(fit, [0.2, 0, 0]);
+  assert.ok(Math.abs(distance(left, right) - 0.4) < 1e-6, "the body stretched");
+  assert.ok(Math.abs(left[0] + 0.2) < 1e-6 && Math.abs(right[0] - 0.2) < 1e-6);
 });

@@ -13,7 +13,13 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
-import { CLARITY_JOINTS, distance, type ClarityJoint, type Vec3 } from "../contracts";
+import {
+  CLARITY_JOINTS,
+  OBSERVABLE_JOINTS,
+  distance,
+  type ClarityJoint,
+  type Vec3,
+} from "../contracts";
 import { generateSyntheticSwing } from "../synthetic/syntheticSwing";
 import { anchorSequence, detectionRate, findAnchorFrame } from "./anchor";
 import type { CameraObservationSequence, ObservationFrame, RawLandmark } from "./observation";
@@ -630,8 +636,10 @@ test("and the support polygon survives it, where before it collapsed to a line",
     buildCameraSequence(withRaisedHeels(detectFromClarityFrames(swing.frames), raised))
   );
   const address = anchored.frames[0];
+  // Over what the detector reports: an observation frame has no sternum,
+  // because nothing in observe/ can produce one.
   const joints = Object.fromEntries(
-    CLARITY_JOINTS.map((joint) => [joint, address.joints[joint]!.position as Vec3])
+    OBSERVABLE_JOINTS.map((joint) => [joint, address.joints[joint]!.position as Vec3])
   ) as Record<ClarityJoint, Vec3>;
 
   const blind = estimateMass({ joints, stanceWidthM: anchored.anchor.stanceWidthM });
