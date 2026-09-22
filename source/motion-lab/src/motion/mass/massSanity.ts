@@ -353,7 +353,7 @@ export const checkableBodies = (frames: readonly ClarityFrame[]): readonly Joint
         frame.mass !== null &&
         FOOT_JOINTS.every((joint) => {
           const source = frame.provenance.joints[joint].source;
-          return source === "observed" || source === "constrained";
+          return source === "observed" || source === "anchored" || source === "constrained";
         })
     )
     .map((frame) => (joint: ClarityJoint) => frame.body.joints[joint]);

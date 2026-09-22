@@ -557,6 +557,7 @@ export class ClarityScene {
 
 const SOURCE_SEVERITY = {
   observed: 0,
+  anchored: 0,
   constrained: 1,
   reconstructed: 2,
   extrapolated: 3,

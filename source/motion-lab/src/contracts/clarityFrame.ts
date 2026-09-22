@@ -31,6 +31,12 @@ export type ProvenanceSource =
   | "observed"
   /** Seen, but moved by the constraint solver to keep the body coherent. */
   | "constrained"
+  /**
+   * Held at a Clarity world anchor -- a foot on the ground, kept at its
+   * reference stance until the knee proves it has moved. The detector's
+   * reading of the joint was set aside, not blended in.
+   */
+  | "anchored"
   /** Not seen. Rebuilt from observations on BOTH sides of a gap. */
   | "reconstructed"
   /** Not seen, and no later observation to close the gap. Forward guess only. */

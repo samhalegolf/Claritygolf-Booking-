@@ -13,6 +13,7 @@ import { test } from "node:test";
 
 import {
   CLARITY_JOINTS,
+  JOINTS_BY_STRUCTURE,
   RIGID_BONES,
   boneKey,
   distance,
@@ -83,10 +84,18 @@ test("clean input is not made worse", () => {
 
   for (const frame of rebuilt.frames) {
     assert.equal(frame.provenance.wholeFrameReconstructed, false);
-    assert.ok(
-      frame.provenance.observedFraction > 0.99,
-      `frame ${frame.index} lost observations it should have kept`
-    );
+    for (const joint of CLARITY_JOINTS) {
+      const source = frame.provenance.joints[joint].source;
+      // The feet are the leash's: held at their anchor, or moved onto the arc
+      // a lifting heel takes. Everything else must be left exactly as seen.
+      const allowed: readonly string[] = JOINTS_BY_STRUCTURE.feet.includes(joint)
+        ? ["observed", "anchored", "constrained"]
+        : ["observed"];
+      assert.ok(
+        allowed.includes(source),
+        `frame ${frame.index} ${joint} is ${source}, should have been kept as observed`
+      );
+    }
   }
   assert.ok(rebuilt.confidence.overall > 0.85);
 });

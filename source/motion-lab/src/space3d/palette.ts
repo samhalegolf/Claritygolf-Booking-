@@ -49,6 +49,7 @@ export const PALETTE = {
  */
 export const PROVENANCE_COLOURS: Readonly<Record<ProvenanceSource, number>> = {
   observed: 0x7cf6a0,
+  anchored: 0x4fc3f7,
   constrained: 0xffd54f,
   reconstructed: 0xff8a65,
   extrapolated: 0xba68c8,
@@ -57,6 +58,7 @@ export const PROVENANCE_COLOURS: Readonly<Record<ProvenanceSource, number>> = {
 
 export const PROVENANCE_LABELS: Readonly<Record<ProvenanceSource, string>> = {
   observed: "Observed",
+  anchored: "Anchored",
   constrained: "Constrained",
   reconstructed: "Reconstructed",
   extrapolated: "Extrapolated",

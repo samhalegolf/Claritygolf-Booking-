@@ -66,6 +66,7 @@ import { estimateClub, type ClubFrameInput } from "../club/clubModel";
 import { bodyObstacles } from "../club/occupancy";
 import { measureBodyModel, type MeasuredBodyModel } from "./bodyModel";
 import { applyConstraints, structuralDisagreement } from "./constraints";
+import { applyFootLeash, type FootLeashReport } from "./footLeash";
 import { bridgeGap } from "./gaps";
 import { findJumps, repairJump } from "./jumps";
 import { ReacquisitionTracker, supportFromDisagreement } from "./reacquisition";
@@ -85,6 +86,8 @@ export interface ReconstructOptions {
     readonly rejectJumps?: boolean;
     readonly validateReacquisition?: boolean;
     readonly bridgeGaps?: boolean;
+    /** The foot leash: feet held at their reference until the knee pulls them off. */
+    readonly leashFeet?: boolean;
     readonly constrain?: boolean;
     readonly smooth?: boolean;
   };
@@ -108,6 +111,8 @@ export interface ReconstructionReport {
   /** Per joint: how many samples each stage touched. For the debug panel. */
   readonly stageCounts: Readonly<Record<string, number>>;
   readonly bodyModel: MeasuredBodyModel;
+  /** What the foot leash did, per side and per frame. Null when the stage was off. */
+  readonly feet: FootLeashReport | null;
 }
 
 export const reconstruct = (
@@ -118,6 +123,7 @@ export const reconstruct = (
     rejectJumps: true,
     validateReacquisition: true,
     bridgeGaps: true,
+    leashFeet: true,
     constrain: true,
     smooth: true,
     ...options.stages,
@@ -135,6 +141,9 @@ export const reconstruct = (
     framesExtrapolated: 0,
     framesMissing: 0,
     constraintViolations: 0,
+    feetAnchored: 0,
+    heelReleases: 0,
+    footReleases: 0,
   };
 
   /* ------------------------------------------------------------------ *
@@ -295,7 +304,32 @@ export const reconstruct = (
   }
 
   /* ------------------------------------------------------------------ *
-   * 5 & 6. Constrain, smooth, then constrain again
+   * 5. The foot leash
+   *
+   * Before the constraint solver, so that a taut tibia is resolved by moving
+   * the KNEE toward the anchored foot rather than the foot toward a knee the
+   * detector guessed the depth of. Re-applied after the final constraint
+   * pass, with the same phases, because smoothing and the solver both move
+   * joints without knowing which ones are anchors.
+   * ------------------------------------------------------------------ */
+
+  const leashInput = {
+    cells,
+    tracks,
+    model,
+    heightM,
+    anchorFrameIndex: observations.anchor.anchorFrameIndex,
+    fps: observations.fps,
+  };
+  const feet = stages.leashFeet ? applyFootLeash(leashInput) : null;
+  if (feet) {
+    stageCounts.feetAnchored = feet.feetAnchored;
+    stageCounts.heelReleases = feet.heelReleases;
+    stageCounts.footReleases = feet.footReleases;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 6. Constrain, smooth, then constrain again
    *
    * The order is not cosmetic. Smoothing moves joints independently along
    * their own tracks, so it does not know about bones and will happily pull a
@@ -357,6 +391,18 @@ export const reconstruct = (
     if (stages.constrain) constrainPass();
   }
 
+  // Neither the smoother nor the solver knows which joints are anchors, so
+  // the feet are pinned again, on the frames the first pass decided.
+  if (feet) {
+    applyFootLeash({
+      ...leashInput,
+      phases: {
+        left: feet.states.left.map((state) => state.phase),
+        right: feet.states.right.map((state) => state.phase),
+      },
+    });
+  }
+
   /* ------------------------------------------------------------------ *
    * 7. The club
    * ------------------------------------------------------------------ */
@@ -372,15 +418,27 @@ export const reconstruct = (
     const joints = {} as Record<ClarityJoint, Vec3>;
     for (const joint of CLARITY_JOINTS) joints[joint] = cells[joint][index].position;
 
-    // The camera is fitted from joints that were actually SEEN -- their image
-    // position is the evidence. A reconstructed joint has a position but no
-    // pixel to justify it, so it cannot calibrate anything.
+    /*
+     * The camera is fitted from joints that were actually SEEN -- their image
+     * position is the evidence. A reconstructed joint has a position but no
+     * pixel to justify it, so it cannot calibrate anything.
+     *
+     * And it is fitted from the positions the detector SAW, not the ones the
+     * reconstruction settled on. The pixel and the detector's 3D lift are one
+     * measurement of one thing; pairing that pixel with a position some
+     * later stage moved teaches the camera a correspondence nobody observed.
+     * It also made the club hostage to every stage above it: the foot leash
+     * pulling a knee a few millimetres toward its anchored ankle shifted the
+     * per-frame cameras enough to move the shaft length estimate by 12mm
+     * and mirror the finish. Fitted from the observations, the camera does
+     * not change when the body reconstruction does.
+     */
     const correspondences = CLARITY_JOINTS.flatMap((joint) => {
       const observed = observation.joints[joint];
       if (!observed) return [];
       return [
         {
-          world: cells[joint][index].position,
+          world: observed.position as Vec3,
           image: observed.image,
           weight: observed.visibility,
         },
@@ -446,6 +504,7 @@ export const reconstruct = (
   return {
     bodyModel: model,
     stageCounts,
+    feet,
     sequence: {
       frames,
       fps: observations.fps,
@@ -653,7 +712,8 @@ const assembleFrame = (
     joints[joint] = cell.position;
     support[joint] = cell.trust;
 
-    if (cell.source === "observed") observedCount += 1;
+    // An anchored foot was seen; the anchor only decided where it was.
+    if (cell.source === "observed" || cell.source === "anchored") observedCount += 1;
     correctionTotal += cell.correctionM;
     gapTotal += cell.gapLength;
     largestGap = Math.max(largestGap, cell.gapLength);
