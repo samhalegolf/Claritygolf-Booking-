@@ -110,16 +110,41 @@ const SET_FROM_JS: Array<{ name: string; setBy: string }> = [
   { name: "--coach-secondary", setBy: "App.tsx" },
   { name: "--coach-accent", setBy: "App.tsx" },
   { name: "--coach-neutral", setBy: "App.tsx" },
-  // The video workspace's own palette, applied by its theme module.
+  // The video workspace's tokens, applied by its theme module. The chrome
+  // aliases onto --c-*; the signal colours are its own -- see the module.
   { name: "--va-bg", setBy: "videoAnalysisTheme.ts" },
-  { name: "--va-text", setBy: "videoAnalysisTheme.ts" },
-  { name: "--va-muted", setBy: "videoAnalysisTheme.ts" },
-  { name: "--va-accent", setBy: "videoAnalysisTheme.ts" },
-  { name: "--va-accent-glow", setBy: "videoAnalysisTheme.ts" },
-  { name: "--va-border", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-panel", setBy: "videoAnalysisTheme.ts" },
   { name: "--va-panel-soft", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-text", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-text-body", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-text-soft", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-muted", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-line-soft", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-border", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-border-strong", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-hover", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-active", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-scrim", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-scrim-soft", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-on-scrim", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-accent", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-accent-soft", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-accent-glow", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-accent-wash", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-accent-wash-strong", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-accent-text", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-accent-ink", setBy: "videoAnalysisTheme.ts" },
   { name: "--va-marker", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-marker-wash", setBy: "videoAnalysisTheme.ts" },
   { name: "--va-danger", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-danger-wash", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-danger-text", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-danger-ink", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-warn", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-warn-wash", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-warn-text", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-shadow", setBy: "videoAnalysisTheme.ts" },
+  { name: "--va-shadow-strong", setBy: "videoAnalysisTheme.ts" },
   { name: "--va-radius-md", setBy: "videoAnalysisTheme.ts" },
   // Live measurements: where a tile flew from, how far a band is scrolled.
   { name: "--dock-fly-x", setBy: "App.tsx" },
@@ -471,7 +496,7 @@ test("no field is a bare width:100%", () => {
  * has always had rough edges.
  */
 test("literal hex colours are not spreading", () => {
-  const BASELINE = 769;
+  const BASELINE = 693;
   let count = 0;
   for (const file of files) {
     if (file === TOKENS) continue;
