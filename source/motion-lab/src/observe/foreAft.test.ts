@@ -327,7 +327,6 @@ test("a golfer shaped like a plumb line cannot be separated, and says so", () =>
           position: [0, height, footZ - height * Math.tan((5 * Math.PI) / 180)] as const,
           image: [0.5, 0.5] as const,
           visibility: 1,
-          presence: 1,
           sourceCount: 1,
         },
       ])

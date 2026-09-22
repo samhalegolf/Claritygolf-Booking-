@@ -321,7 +321,6 @@ test("a sustained false detection is rejected, not followed", () => {
       position: [real[0] + 0.45, real[1] + 0.3, real[2]] as Vec3,
       image: [0.5, 0.5],
       visibility: 0.8,
-      presence: 0.8,
       sourceCount: 1,
     };
   }
