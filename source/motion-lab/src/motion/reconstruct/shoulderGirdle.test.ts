@@ -1,16 +1,24 @@
 /**
  * The shoulder girdle, checked on its promises.
  *
- * Two of them, and they pull in opposite directions, which is the point.
+ * Three of them, and the first two pull in opposite directions, which is the
+ * point.
  *
  * It is rigid enough to carry a shoulder the detector never saw -- not to
  * the right distance from the other one, which a bone length already did,
  * but to the right PLACE.
  *
- * And it is not so rigid that it irons out the movement a real girdle has.
- * A scapula that protracts twenty-five millimetres through the clip is
- * measured doing it, allowed to keep doing it, and still reined in when a
- * reading puts a shoulder somewhere this golfer's girdle never went.
+ * It is not so rigid that it irons out the movement a real girdle has. A
+ * scapula that swings eight degrees on its strut through the clip keeps that
+ * movement all the way to the output, and the pair's width narrows with it,
+ * while a reading that puts a shoulder somewhere this golfer's girdle never
+ * went is still reined back in.
+ *
+ * And it does not claim more than it can see. The last test here pins the
+ * limit: at a physiological swing the allowance does NOT move, because the
+ * fit absorbs the travel and what is left is smaller than the detector's own
+ * scatter. If that test ever starts failing, the girdle has become able to
+ * measure scapular travel and the module header needs rewriting.
  */
 
 import { strict as assert } from "node:assert";
