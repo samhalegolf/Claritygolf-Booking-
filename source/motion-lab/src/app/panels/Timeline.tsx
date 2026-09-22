@@ -124,7 +124,7 @@ export function Timeline({
   );
 }
 
-const SEVERITY = ["observed", "anchored", "constrained", "reconstructed", "extrapolated", "missing"] as const;
+const SEVERITY = ["observed", "anchored", "constrained", "derived", "reconstructed", "extrapolated", "missing"] as const;
 
 const worstProvenance = (frame: ClaritySequence["frames"][number]) => {
   let worstIndex = 0;

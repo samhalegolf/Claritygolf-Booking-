@@ -30,6 +30,9 @@ const Row = ({ label, value }: { label: string; value: string }) => (
  * card, which also has presence.
  */
 const detectorVerdict = (rawConfidence: number, source: keyof typeof PROVENANCE_LABELS): string => {
+  if (source === "derived") {
+    return "too weak to use — the position comes from the body's geometry instead";
+  }
   if (source === "reconstructed" || source === "extrapolated" || source === "missing") {
     return "nothing usable this frame — the detector's reading was under Clarity's floor or absent";
   }
@@ -45,6 +48,8 @@ const describeSource = (source: keyof typeof PROVENANCE_LABELS): string => {
       return "Held at its address stance by the foot leash. The detector's reading was set aside until the knee proves the foot moved.";
     case "constrained":
       return "Seen, but moved to keep the body coherent — bone length, a jump repair, or a foot released onto its arc.";
+    case "derived":
+      return "Not seen well enough to use. Placed from the near hand and the grip this clip taught, on bones this clip measured — anatomy, not a guess through time.";
     case "reconstructed":
       return "Not seen on this frame. Rebuilt from observations either side of a gap.";
     case "extrapolated":

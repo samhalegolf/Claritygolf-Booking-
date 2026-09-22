@@ -120,9 +120,15 @@ test("a gap across steady motion is reconstructed tightly", () => {
     `a 14-frame elbow gap through the takeaway should land within 30mm, got ${(rebuiltError * 1000).toFixed(0)}mm`
   );
 
-  // And it says that it reconstructed them.
+  // And it says that it reconstructed them -- or, where the bridge strayed
+  // off the arm's own bone lengths and the arm stage pulled it back on,
+  // that anatomy had the final say.
   for (const index of gapFrames) {
-    assert.equal(rebuilt.frames[index].provenance.joints.rightElbow.source, "reconstructed");
+    const source = rebuilt.frames[index].provenance.joints.rightElbow.source;
+    assert.ok(
+      source === "reconstructed" || source === "derived",
+      `frame ${index} elbow is ${source}`
+    );
     assert.equal(rebuilt.frames[index].provenance.joints.rightElbow.gapLength, dropout.length);
   }
   assert.equal(rebuilt.confidence.largestGapFrames, dropout.length);

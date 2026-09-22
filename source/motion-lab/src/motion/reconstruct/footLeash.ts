@@ -63,15 +63,14 @@ import type { ClarityJoint, ProvenanceSource, Unit, Vec3 } from "../../contracts
 import {
   add,
   boneKey,
-  cross,
   distance,
-  dot,
   normalise,
   qFromUnitVectors,
   qRotate,
   scale,
   sub,
 } from "../../contracts";
+import { pointOnArc } from "./arc";
 import type { MeasuredBodyModel } from "./bodyModel";
 import { medianOf, type Tracks } from "./tracks";
 
@@ -199,56 +198,6 @@ const nudge = (cell: LeashCell, position: Vec3, minTrust: Unit, noticeableM: num
   const source =
     cell.source === "observed" && movedM > noticeableM ? "constrained" : cell.source;
   place(cell, position, source, Math.max(cell.trust, minTrust));
-};
-
-/**
- * A point at a fixed distance from each of two others, nearest a third.
- *
- * The set of such points is a circle -- where a sphere of `farM` about
- * `far` meets a sphere of `nearM` about `near` -- and `preferred` picks the
- * point on it. This is the heel-up ankle (tibia length from the knee, foot
- * length from the toe), and it is also how the reference foot is made
- * consistent with the body model's bone lengths.
- *
- * If the spheres do not meet the far point is out of reach, and for the
- * ankle the caller has already decided the foot is free; this only has to
- * cope with the far point being too CLOSE, which a real leg cannot do and
- * noise occasionally can.
- */
-const pointOnArc = (
-  far: Vec3,
-  near: Vec3,
-  farM: number,
-  nearM: number,
-  preferred: Vec3
-): Vec3 => {
-  const toFar = sub(far, near);
-  const d = distance(far, near);
-  if (d < 1e-6) return add(near, [0, nearM, 0]);
-  const axis = scale(toFar, 1 / d);
-
-  // Spheres that do not meet: too close, or the far point out of reach while
-  // the caller is still deciding the foot is free. Either way the nearest
-  // the point can get is straight along the line between them.
-  if (d <= Math.abs(farM - nearM) || d >= farM + nearM) {
-    return add(near, scale(axis, nearM));
-  }
-
-  const along = (nearM * nearM - farM * farM + d * d) / (2 * d);
-  const radius = Math.sqrt(Math.max(0, nearM * nearM - along * along));
-  const centre = add(near, scale(axis, along));
-
-  // The direction on the circle nearest the preferred point.
-  const offset = sub(preferred, centre);
-  let radial = sub(offset, scale(axis, dot(offset, axis)));
-  if (dot(radial, radial) < 1e-10) {
-    // Preferred point sits on the axis: fall back to "as high as possible",
-    // which is where a lifted heel puts an ankle.
-    const up: Vec3 = [0, 1, 0];
-    radial = sub(up, scale(axis, dot(up, axis)));
-    if (dot(radial, radial) < 1e-10) radial = cross(axis, [1, 0, 0]);
-  }
-  return add(centre, scale(normalise(radial), radius));
 };
 
 export const applyFootLeash = (

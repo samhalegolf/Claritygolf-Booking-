@@ -66,6 +66,7 @@ import { estimateClub, type ClubFrameInput } from "../club/clubModel";
 import { bodyObstacles } from "../club/occupancy";
 import { measureBodyModel, type MeasuredBodyModel } from "./bodyModel";
 import { applyConstraints, structuralDisagreement } from "./constraints";
+import { deriveFarArm, type ArmDerivationReport } from "./armDerivation";
 import { applyFootLeash, type FootLeashReport } from "./footLeash";
 import { bridgeGap } from "./gaps";
 import { findJumps, repairJump } from "./jumps";
@@ -88,6 +89,8 @@ export interface ReconstructOptions {
     readonly bridgeGaps?: boolean;
     /** The foot leash: feet held at their reference until the knee pulls them off. */
     readonly leashFeet?: boolean;
+    /** The far arm, from the near hand, the grip and the measured bones. */
+    readonly deriveArm?: boolean;
     readonly constrain?: boolean;
     readonly smooth?: boolean;
   };
@@ -113,6 +116,8 @@ export interface ReconstructionReport {
   readonly bodyModel: MeasuredBodyModel;
   /** What the foot leash did, per side and per frame. Null when the stage was off. */
   readonly feet: FootLeashReport | null;
+  /** What the arm derivation did. Null when the stage was off. */
+  readonly arm: ArmDerivationReport | null;
 }
 
 export const reconstruct = (
@@ -124,6 +129,7 @@ export const reconstruct = (
     validateReacquisition: true,
     bridgeGaps: true,
     leashFeet: true,
+    deriveArm: true,
     constrain: true,
     smooth: true,
     ...options.stages,
@@ -144,6 +150,7 @@ export const reconstruct = (
     feetAnchored: 0,
     heelReleases: 0,
     footReleases: 0,
+    armJointsDerived: 0,
   };
 
   /* ------------------------------------------------------------------ *
@@ -328,6 +335,16 @@ export const reconstruct = (
     stageCounts.footReleases = feet.footReleases;
   }
 
+  /*
+   * The far arm, after the leash and before the solver for the same reason:
+   * the derived joints carry middling trust, so the solver settles bone
+   * lengths by moving them rather than the well-seen near side.
+   */
+  const arm = stages.deriveArm ? deriveFarArm({ cells, tracks, model }) : null;
+  if (arm) {
+    stageCounts.armJointsDerived = arm.derived.elbow + arm.derived.wrist + arm.derived.hand;
+  }
+
   /* ------------------------------------------------------------------ *
    * 6. Constrain, smooth, then constrain again
    *
@@ -505,6 +522,7 @@ export const reconstruct = (
     bodyModel: model,
     stageCounts,
     feet,
+    arm,
     sequence: {
       frames,
       fps: observations.fps,

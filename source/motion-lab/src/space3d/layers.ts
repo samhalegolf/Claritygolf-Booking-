@@ -55,7 +55,7 @@ export const LAYER_DESCRIPTORS: readonly LayerDescriptor[] = [
     key: "provenanceColouring",
     label: "Colour by provenance",
     group: "Body",
-    hint: "Green observed, blue anchored, amber constrained, orange reconstructed, purple extrapolated, dark red missing.",
+    hint: "Green observed, blue anchored, amber constrained, teal derived, orange reconstructed, purple extrapolated, dark red missing.",
   },
   { key: "thorax", label: "Thorax body", group: "Body", hint: "The persistent rib-cage structure and its orientation." },
   { key: "pelvis", label: "Pelvis body", group: "Body", hint: "The persistent pelvis structure and its orientation." },

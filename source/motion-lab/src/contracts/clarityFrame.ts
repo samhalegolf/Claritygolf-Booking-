@@ -37,6 +37,12 @@ export type ProvenanceSource =
    * reading of the joint was set aside, not blended in.
    */
   | "anchored"
+  /**
+   * Placed from the body's own geometry rather than seen: the far arm, from
+   * the near hand and the grip the clip taught, on bones the clip measured.
+   * Not a bridge through time -- a construction from anatomy.
+   */
+  | "derived"
   /** Not seen. Rebuilt from observations on BOTH sides of a gap. */
   | "reconstructed"
   /** Not seen, and no later observation to close the gap. Forward guess only. */
