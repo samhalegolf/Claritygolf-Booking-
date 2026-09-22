@@ -7,22 +7,31 @@
  *   1. MEASURE THE BODY. Everything downstream needs this golfer's real bone
  *      lengths, and they are measured from the frames that saw both ends.
  *
- *   2. VALIDATE RETURNING OBSERVATIONS. A joint reappearing somewhere the
+ *   2. REJECT OBSERVATIONS THE BODY CONTRADICTS, on every frame. A landmark
+ *      that slides onto the wrong part of the body and STAYS there is
+ *      invisible to both of the guards below -- it never goes missing, and a
+ *      constant error has no second difference -- so the bones are asked
+ *      about every observation rather than only about surprising ones.
+ *
+ *   3. VALIDATE RETURNING OBSERVATIONS. A joint reappearing somewhere the
  *      rest of the body contradicts is rejected before it can do damage.
  *      This comes BEFORE gap bridging because a bridge lands exactly on its
  *      endpoint -- so a bad endpoint does not merely add one wrong frame, it
- *      drags the entire reconstructed span toward it.
+ *      drags the entire reconstructed span toward it. It comes AFTER step 2
+ *      because step 2 is what turns a bad plateau into a gap, and the
+ *      observations on the far side of that gap are then returns to judge.
  *
- *   3. REJECT ISOLATED JUMPS, by second difference, never by speed.
+ *   4. REJECT ISOLATED JUMPS, by second difference, never by speed.
  *
- *   4. BRIDGE GAPS using both sides.
+ *   5. BRIDGE GAPS using both sides.
  *
- *   5. ENFORCE PHYSICAL CONSTRAINTS per frame, with the better-known joint
- *      yielding less.
+ *   6. ENFORCE PHYSICAL CONSTRAINTS per frame, with the better-known joint
+ *      yielding less -- and with trust capped by how well the body agrees
+ *      with each joint, not by what the detector claimed about it.
  *
- *   6. SMOOTH, by evidence, with a fit that preserves acceleration exactly.
+ *   7. SMOOTH, by evidence, with a fit that preserves acceleration exactly.
  *
- *   7. SCORE what all of that cost, per structure and overall.
+ *   8. SCORE what all of that cost, per structure and overall.
  *
  * Nothing in here knows what a golf swing looks like. There is no swing
  * plane, no expected hand path, no assumed sequencing. The only assumptions
@@ -66,6 +75,7 @@ import { estimateClub, type ClubFrameInput } from "../club/clubModel";
 import { bodyObstacles } from "../club/occupancy";
 import { measureBodyModel, type MeasuredBodyModel } from "./bodyModel";
 import { applyConstraints, structuralDisagreement } from "./constraints";
+import { rejectContradictedObservations, type ContradictionReport } from "./contradiction";
 import { deriveFarArm, type ArmDerivationReport } from "./armDerivation";
 import { applyFootLeash, type FootLeashReport } from "./footLeash";
 import { bridgeGap } from "./gaps";
@@ -84,6 +94,8 @@ const EMPTY_STRUCTURE: RigidStructure = {
 export interface ReconstructOptions {
   /** Turn individual stages off, to see what each one is actually buying. */
   readonly stages?: {
+    /** The bones' opinion of every observation, every frame -- not only surprising ones. */
+    readonly rejectContradictions?: boolean;
     readonly rejectJumps?: boolean;
     readonly validateReacquisition?: boolean;
     readonly bridgeGaps?: boolean;
@@ -118,6 +130,8 @@ export interface ReconstructionReport {
   readonly feet: FootLeashReport | null;
   /** What the arm derivation did. Null when the stage was off. */
   readonly arm: ArmDerivationReport | null;
+  /** Which observations the body refused, per joint. Null when the stage was off. */
+  readonly contradictions: ContradictionReport | null;
 }
 
 export const reconstruct = (
@@ -125,6 +139,7 @@ export const reconstruct = (
   options: ReconstructOptions = {}
 ): ReconstructionReport => {
   const stages = {
+    rejectContradictions: true,
     rejectJumps: true,
     validateReacquisition: true,
     bridgeGaps: true,
@@ -141,6 +156,7 @@ export const reconstruct = (
   const heightM = model.estimatedHeightM;
 
   const stageCounts: Record<string, number> = {
+    contradictionsRejected: 0,
     jumpsRejected: 0,
     reacquisitionsDoubted: 0,
     framesBridged: 0,
@@ -154,7 +170,20 @@ export const reconstruct = (
   };
 
   /* ------------------------------------------------------------------ *
-   * 2. Validate returning observations against the rest of the body
+   * 2. Reject observations the body contradicts, on every frame
+   *
+   * The only guard that can see a landmark which settles on the wrong part
+   * of the body and stays there at full detector confidence. See
+   * contradiction.ts for why neither of the two below can.
+   * ------------------------------------------------------------------ */
+
+  const contradictions = stages.rejectContradictions
+    ? rejectContradictedObservations(tracks, model, frameCount, { heightM })
+    : null;
+  if (contradictions) stageCounts.contradictionsRejected = contradictions.total;
+
+  /* ------------------------------------------------------------------ *
+   * 3. Validate returning observations against the rest of the body
    * ------------------------------------------------------------------ */
 
   if (stages.validateReacquisition) {
@@ -167,7 +196,7 @@ export const reconstruct = (
   }
 
   /* ------------------------------------------------------------------ *
-   * 3 & 4. Reject isolated jumps, then bridge what is left
+   * 4 & 5. Reject isolated jumps, then bridge what is left
    * ------------------------------------------------------------------ */
 
   const cells = {} as Record<ClarityJoint, Cell[]>;
@@ -311,7 +340,7 @@ export const reconstruct = (
   }
 
   /* ------------------------------------------------------------------ *
-   * 5. The foot leash
+   * 6. The foot leash
    *
    * Before the constraint solver, so that a taut tibia is resolved by moving
    * the KNEE toward the anchored foot rather than the foot toward a knee the
@@ -346,7 +375,7 @@ export const reconstruct = (
   }
 
   /* ------------------------------------------------------------------ *
-   * 6. Constrain, smooth, then constrain again
+   * 7. Constrain, smooth, then constrain again
    *
    * The order is not cosmetic. Smoothing moves joints independently along
    * their own tracks, so it does not know about bones and will happily pull a
@@ -421,7 +450,7 @@ export const reconstruct = (
   }
 
   /* ------------------------------------------------------------------ *
-   * 7. The club
+   * 8. The club
    * ------------------------------------------------------------------ */
 
   /*
@@ -493,7 +522,7 @@ export const reconstruct = (
   stageCounts.clubSegmentsFlipped = club.mirrored ? 1 : 0;
 
   /* ------------------------------------------------------------------ *
-   * 8. Assemble
+   * 9. Assemble
    * ------------------------------------------------------------------ */
 
   const frames = observations.frames.map((observation, index) =>
@@ -523,6 +552,7 @@ export const reconstruct = (
     stageCounts,
     feet,
     arm,
+    contradictions,
     sequence: {
       frames,
       fps: observations.fps,
