@@ -7,9 +7,11 @@
  * useful or merely something pretty.
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { ObservationFrame } from "../../observe/observation";
+import type { SceneLayers } from "../../space3d/layers";
+import { LandmarkCard } from "./LandmarkCard";
 import { RawOverlay } from "./RawOverlay";
 
 export interface VideoPanelProps {
@@ -18,6 +20,8 @@ export interface VideoPanelProps {
   readonly width: number;
   readonly height: number;
   readonly showLowConfidence: boolean;
+  /** The 3D Space's toggles. Skeleton and joint markers apply here too. */
+  readonly layers: SceneLayers;
 }
 
 export function VideoPanel({
@@ -26,8 +30,10 @@ export function VideoPanel({
   width,
   height,
   showLowConfidence,
+  layers,
 }: VideoPanelProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [selected, setSelected] = useState<number | null>(null);
 
   // Drive the video from the playhead rather than letting it play. The
   // overlay has one set of landmarks, for one frame; a video running at its
@@ -50,7 +56,14 @@ export function VideoPanel({
         width={width}
         height={height}
         showLowConfidence={showLowConfidence}
+        showSkeleton={layers.skeleton}
+        showLandmarks={layers.joints}
+        selected={selected}
+        onSelect={setSelected}
       />
+      {selected !== null && (
+        <LandmarkCard frame={frame} index={selected} onClose={() => setSelected(null)} />
+      )}
     </div>
   );
 }

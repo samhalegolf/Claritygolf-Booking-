@@ -49,8 +49,8 @@ export interface LayerDescriptor {
 }
 
 export const LAYER_DESCRIPTORS: readonly LayerDescriptor[] = [
-  { key: "skeleton", label: "Skeleton", group: "Body", hint: "Bones between the reconstructed joints." },
-  { key: "joints", label: "Joint markers", group: "Body", hint: "One marker per Clarity joint." },
+  { key: "skeleton", label: "Skeleton", group: "Body", hint: "Bones between the joints. Both views: reconstructed bones in the 3D Space, MediaPipe's own connections on the video." },
+  { key: "joints", label: "Joint markers", group: "Body", hint: "Both views: one marker per Clarity joint in the 3D Space, MediaPipe's 33 landmarks on the video." },
   {
     key: "provenanceColouring",
     label: "Colour by provenance",

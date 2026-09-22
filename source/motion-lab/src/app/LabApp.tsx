@@ -264,6 +264,7 @@ export function LabApp() {
                 width={result?.info.width ?? 16}
                 height={result?.info.height ?? 9}
                 showLowConfidence={showLowConfidence}
+                layers={layers}
               />
             )}
 

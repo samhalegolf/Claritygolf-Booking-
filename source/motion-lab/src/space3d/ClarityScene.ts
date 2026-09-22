@@ -32,14 +32,16 @@ import {
   Mesh,
   MeshBasicMaterial,
   Quaternion,
+  Raycaster,
   RingGeometry,
   Scene,
   SphereGeometry,
+  Vector2,
   Vector3,
   WebGLRenderer,
 } from "three";
 
-import type { ClarityFrame, ClaritySequence, Vec3 } from "../contracts";
+import type { ClarityFrame, ClarityJoint, ClaritySequence, Vec3 } from "../contracts";
 import { CLARITY_BONES, CLARITY_JOINTS } from "../contracts";
 import { CameraRig, type CameraPreset } from "./cameraRig";
 import type { SceneLayers } from "./layers";
@@ -56,8 +58,23 @@ export interface SceneSubject {
   readonly ballPosition?: Vec3;
 }
 
+/**
+ * What a click in the 3D Space landed on. Only things that are drawn can be
+ * picked, so a hidden layer cannot be hit.
+ */
+export type ScenePick =
+  | { readonly kind: "joint"; readonly joint: ClarityJoint }
+  | { readonly kind: "clubHead" }
+  | { readonly kind: "cbp" }
+  | { readonly kind: "upperMass" }
+  | { readonly kind: "upperMassGround" }
+  | { readonly kind: "support" }
+  | { readonly kind: "ball" };
+
 export class ClarityScene {
   readonly rig: CameraRig;
+  private readonly raycaster = new Raycaster();
+  private readonly pointerNdc = new Vector2();
 
   private readonly renderer: WebGLRenderer;
   private readonly scene = new Scene();
@@ -524,6 +541,42 @@ export class ClarityScene {
   }
 
   /* ------------------------------------------------------------------ */
+
+  /**
+   * What sits under a point of the canvas, in normalised device coordinates
+   * (-1..1, y up). Nearest hit wins; nothing hidden by a layer toggle counts.
+   */
+  pick(ndcX: number, ndcY: number): ScenePick | null {
+    this.pointerNdc.set(ndcX, ndcY);
+    this.raycaster.setFromCamera(this.pointerNdc, this.rig.camera);
+
+    const targets: { object: Mesh | InstancedMesh; pick: (instance?: number) => ScenePick }[] = [
+      {
+        object: this.jointMarkers,
+        pick: (instance) => ({ kind: "joint", joint: CLARITY_JOINTS[instance ?? 0] }),
+      },
+      { object: this.clubHeadMarker, pick: () => ({ kind: "clubHead" }) },
+      { object: this.cbpMarker, pick: () => ({ kind: "cbp" }) },
+      { object: this.upperMassMarker, pick: () => ({ kind: "upperMass" }) },
+      { object: this.upperMassGroundRing, pick: () => ({ kind: "upperMassGround" }) },
+      { object: this.supportRing, pick: () => ({ kind: "support" }) },
+    ];
+    if (this.ballMarker) targets.push({ object: this.ballMarker, pick: () => ({ kind: "ball" }) });
+
+    let best: { distance: number; pick: ScenePick } | null = null;
+    for (const target of targets) {
+      if (!target.object.visible) continue;
+      // Picking is generous: a marker a couple of centimetres across is a
+      // small target from across the room.
+      const hits = this.raycaster.intersectObject(target.object, false);
+      for (const hit of hits) {
+        if (!best || hit.distance < best.distance) {
+          best = { distance: hit.distance, pick: target.pick(hit.instanceId) };
+        }
+      }
+    }
+    return best?.pick ?? null;
+  }
 
   setCameraPreset(preset: CameraPreset, immediate = false) {
     this.rig.applyPreset(preset, immediate);
