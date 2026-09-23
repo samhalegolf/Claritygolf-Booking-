@@ -37,16 +37,37 @@
  *                 outside is pulled to the bubble's edge, on the same
  *                 bearing. With neither, the learned median offset.
  *   elbow         On the circle the two bone lengths fix between the
- *                 shoulder and the wrist. A reading or a bridge picks the
- *                 point on it; with neither, the near elbow mirrored across
- *                 the body's midline does -- the two arms hang to the same
- *                 grip, so where one elbow points is the best available
- *                 evidence for the other.
+ *                 shoulder and the wrist. A bridge picks the point on it.
+ *                 Anything less -- a weak reading, an extrapolation, nothing
+ *                 -- and the point is picked BEHIND THE NEAR ELBOW: see
+ *                 below. With no camera to say what "behind" is, the near
+ *                 elbow mirrored across the body's midline picks it instead.
  *   shoulder      Left alone; the thorax already holds it.
  *
  * Only on frames where the far joint is poorly known. Where the detector saw
  * it properly, the observation stands -- so on a face-on clip, where both
  * arms are seen, this stage does almost nothing.
+ *
+ * NOT SEEN IS EVIDENCE: BEHIND THE NEAR ONE
+ *
+ * An elbow the detector could not find is not somewhere unknown. It is
+ * somewhere the camera could not see, and down the line the thing in the
+ * way is the near arm. Picking the far elbow on the bone circle from a weak
+ * reading -- or a mirror built off a far shoulder that is itself carried --
+ * could put it out in open picture, where the detector would have found it
+ * had it really been there. The pick card said so: "in plain view".
+ *
+ * So the pick is made on the near elbow's own line of sight: the same pixel,
+ * further from the lens by however far the far shoulder sits behind the near
+ * one along that line. That depth is the girdle's, placed before this stage,
+ * so it is square alignment until the shoulders prove otherwise -- open them
+ * to the camera and the far elbow comes forward with them. Once they are
+ * open past forty-five degrees the far shoulder is more beside the near one
+ * than behind it, the far arm is out in the picture rather than hidden, and
+ * the mirror is used instead. Face on, that is always.
+ *
+ * The bones still decide. This only chooses which point on the circle; a
+ * shoulder and wrist that allow nothing hidden get the nearest they allow.
  *
  * WHICH ARM IS "FAR"
  *
@@ -55,9 +76,10 @@
  */
 
 import type { ClarityJoint, ProvenanceSource, Unit, Vec3 } from "../../contracts";
-import { add, boneKey, cross, distance, dot, lerpVec, normalise, scale, sub } from "../../contracts";
+import { CLARITY_JOINTS, add, boneKey, cross, distance, dot, lerpVec, normalise, scale, sub } from "../../contracts";
 import { pointOnArc } from "./arc";
 import type { MeasuredBodyModel } from "./bodyModel";
+import { hiddenBehind } from "./contextBids";
 import { medianOf, type Tracks } from "./tracks";
 
 export type ArmSide = "left" | "right";
@@ -67,6 +89,8 @@ export interface ArmDerivationReport {
   readonly farSide: ArmSide | null;
   /** Frames on which each far joint was placed by this stage, beyond confirming what was there. */
   readonly derived: Readonly<Record<"elbow" | "wrist" | "hand", number>>;
+  /** Of the derived elbows, how many were picked behind the near one. */
+  readonly elbowsBehind: number;
   /** Frames the grip bubble was learned from. */
   readonly gripSamples: number;
   /** How far the far wrist may sit from the near one, metres. */
@@ -86,6 +110,8 @@ export interface ArmDerivationInput {
   readonly cells: Readonly<Record<ClarityJoint, DerivationCell[]>>;
   readonly tracks: Tracks;
   readonly model: MeasuredBodyModel;
+  /** Camera centre per frame, world metres; null where none was fitted. */
+  readonly cameras?: readonly (Vec3 | null)[];
 }
 
 export interface ArmDerivationOptions {
@@ -100,6 +126,9 @@ export interface ArmDerivationOptions {
   /** Slack added to the learned grip radius, as a fraction of it. */
   readonly bubbleSlack?: number;
 }
+
+/** How hidden a weak reading's elbow must sit for the reading to be heard. */
+const HIDDEN_ENOUGH_TO_HEAR = 0.5;
 
 const DEFAULTS = {
   deriveBelowTrust: 0.5,
@@ -186,6 +215,32 @@ const mirrorAcross = (point: Vec3, on: Vec3, normal: Vec3): Vec3 => {
   return sub(point, scale(n, 2 * depth));
 };
 
+/**
+ * The point hidden behind `near` from the camera: on its line of sight, as
+ * much further out as the far shoulder sits behind the near one.
+ *
+ * Null unless the far shoulder really is behind the near one -- more of the
+ * pair's separation along the line of sight than across it. Face on, the far
+ * arm is across the picture, not behind anything, and hiding it would be
+ * wrong; the mirror is the better guess there.
+ */
+const behindNearOne = (
+  near: Vec3,
+  camera: Vec3,
+  nearShoulder: Vec3,
+  farShoulder: Vec3
+): Vec3 | null => {
+  const sight = sub(near, camera);
+  const range = Math.sqrt(dot(sight, sight));
+  if (range < 1e-6) return null;
+  const direction = scale(sight, 1 / range);
+  const apart = sub(farShoulder, nearShoulder);
+  const depthM = dot(apart, direction);
+  const acrossM = distance(apart, scale(direction, depthM));
+  if (depthM <= acrossM) return null;
+  return add(camera, scale(direction, range + depthM));
+};
+
 /** The point, pulled to within `radiusM` of `centre` on its own bearing. */
 const intoBubble = (point: Vec3, centre: Vec3, radiusM: number): Vec3 => {
   const d = distance(point, centre);
@@ -209,6 +264,7 @@ export const deriveFarArm = (
   const none = (skipped: string): ArmDerivationReport => ({
     farSide: null,
     derived: { elbow: 0, wrist: 0, hand: 0 },
+    elbowsBehind: 0,
     gripSamples: 0,
     gripRadiusM: 0,
     skipped,
@@ -284,6 +340,7 @@ export const deriveFarArm = (
     cell.source !== "observed" || cell.trust < deriveBelow;
 
   const derived = { elbow: 0, wrist: 0, hand: 0 };
+  let elbowsBehind = 0;
 
   for (let index = 0; index < frameCount; index += 1) {
     const nearWristCell = cells[near.wrist][index];
@@ -330,22 +387,51 @@ export const deriveFarArm = (
       const wrist = wristCell.position;
 
       /*
-       * Who picks the point on the circle. A reading the detector made, or
-       * a bridge between two it made, knows which way the elbow went and is
-       * consulted. An extrapolation knows nothing -- it is the thing being
-       * replaced -- so the near elbow stands in, mirrored across the plane
-       * between the shoulders. Both arms hang to the same grip, so where one
-       * elbow points is the best evidence available for the other.
+       * Who picks the point on the circle. A bridge between two readings
+       * knows which way the elbow went and is consulted. Anything less was
+       * not seen, and not being seen says where it is: behind the near
+       * elbow, on its line of sight, as deep as the far shoulder sits behind
+       * the near one. With no camera, or shoulders that leave nothing
+       * hidden, the near elbow mirrored across the plane between the
+       * shoulders stands in -- both arms hang to the same grip.
        */
       const nearShoulder = cells[near.shoulder][index].position;
-      const shoulderMid = lerpVec(shoulder, nearShoulder, 0.5);
-      const mirrored = mirrorAcross(nearElbowCell.position, shoulderMid, sub(shoulder, nearShoulder));
-      const preferred = hasSomeIdea(elbowCell) ? elbowCell.position : mirrored;
+      const camera = input.cameras?.[index] ?? null;
+      let preferred: Vec3;
+      let hidden = false;
+      /*
+       * A weak reading that would sit hidden is consistent with not having
+       * been seen, and is heard. One that would sit in open picture is
+       * contradicted by the fact the detector could not find it there.
+       */
+      const weakButHidden = (): boolean => {
+        if (elbowCell.source !== "observed" || !camera) return false;
+        const joints = {} as Record<ClarityJoint, Vec3>;
+        for (const joint of CLARITY_JOINTS) joints[joint] = cells[joint][index].position;
+        joints[far.elbow] = pointOnArc(shoulder, wrist, upperArmM, forearmM, elbowCell.position);
+        return (
+          hiddenBehind(far.elbow, joints, camera, model.estimatedHeightM).amount >=
+          HIDDEN_ENOUGH_TO_HEAR
+        );
+      };
+      if (elbowCell.source === "reconstructed" || weakButHidden()) {
+        preferred = elbowCell.position;
+      } else {
+        const behind = camera
+          ? behindNearOne(nearElbowCell.position, camera, nearShoulder, shoulder)
+          : null;
+        const shoulderMid = lerpVec(shoulder, nearShoulder, 0.5);
+        preferred = behind ?? mirrorAcross(nearElbowCell.position, shoulderMid, sub(shoulder, nearShoulder));
+        hidden = behind !== null;
+      }
 
       const onArc = pointOnArc(shoulder, wrist, upperArmM, forearmM, preferred);
-      if (place(elbowCell, onArc, derivedTrust, noticeableM)) derived.elbow += 1;
+      if (place(elbowCell, onArc, derivedTrust, noticeableM)) {
+        derived.elbow += 1;
+        if (hidden) elbowsBehind += 1;
+      }
     }
   }
 
-  return { farSide: far.side, derived, gripSamples: wristLocal.length, gripRadiusM, skipped: null };
+  return { farSide: far.side, derived, elbowsBehind, gripSamples: wristLocal.length, gripRadiusM, skipped: null };
 };

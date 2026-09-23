@@ -73,6 +73,34 @@ export interface JointProvenance {
    * be fitted, because then there was no line of sight to reason about.
    */
   readonly context?: JointContext;
+  /**
+   * What moved a constrained joint: the markers that forced it and the rule
+   * they enforced. Present only on a joint labelled constrained, so the
+   * label never stands without its reason.
+   */
+  readonly constrainedBy?: ConstraintCause;
+}
+
+/**
+ * Why a seen joint was moved off where the detector put it.
+ *
+ * `by` names markers, not stages, because a marker is what can be looked at:
+ * the 3D Space rings each in red beside the yellow joint it moved. A rule
+ * with no other marker behind it leaves `by` empty: a jump repair is the
+ * joint's own frames either side, and the words say so instead.
+ */
+export interface ConstraintCause {
+  /** The markers whose positions forced the move. */
+  readonly by: readonly ClarityJoint[];
+  /** The rule they enforced, in words: "upper arm length", "shin length". */
+  readonly rule: string;
+  /**
+   * Of everything the solver moved this joint on this frame, how much this
+   * cause accounted for, 0..1. 1 when a single rule did it all.
+   */
+  readonly share: Unit;
+  /** How far this cause moved the joint, metres. */
+  readonly movedM: Metres;
 }
 
 export interface JointContext {

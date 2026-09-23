@@ -104,6 +104,7 @@
 
 import type {
   ClarityJoint,
+  ConstraintCause,
   ClarityStructure,
   ProvenanceSource,
   Quat,
@@ -242,6 +243,7 @@ export interface GirdleCell {
    */
   framesSinceObserved: number;
   gapLength: number;
+  constrainedBy?: ConstraintCause;
 }
 
 export interface ShoulderGirdleInput {
@@ -863,6 +865,14 @@ export const fitShoulderGirdle = (
       cell.correctionM += movedM;
       cell.position = held;
       if (movedM > noticeableM && cell.source === "observed") cell.source = "constrained";
+      if (cell.source === "constrained" && movedM > (cell.constrainedBy?.movedM ?? 0)) {
+        cell.constrainedBy = {
+          by: ["sternum"],
+          rule: `${shoulder === "leftShoulder" ? "left" : "right"} sternum strut — swung further than the clip ever showed`,
+          share: 1,
+          movedM,
+        };
+      }
       reined[shoulder] += 1;
     }
 
@@ -881,6 +891,14 @@ export const fitShoulderGirdle = (
       neck.trust = clampUnit(settings.carriedTrust * fitStrength);
     } else if (neckMovedM > noticeableM && neck.source === "observed") {
       neck.source = "constrained";
+    }
+    if (neck.source === "constrained" && neckMovedM > (neck.constrainedBy?.movedM ?? 0)) {
+      neck.constrainedBy = {
+        by: ["leftShoulder", "rightShoulder"],
+        rule: "the neck is the midpoint of the shoulders",
+        share: 1,
+        movedM: neckMovedM,
+      };
     }
   }
 

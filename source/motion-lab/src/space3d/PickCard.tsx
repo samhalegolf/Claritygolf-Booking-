@@ -8,7 +8,13 @@
  * it open shows the numbers change.
  */
 
-import type { ClarityFrame, ClaritySequence, JointContext, Vec3 } from "../contracts";
+import type {
+  ClarityFrame,
+  ClaritySequence,
+  ConstraintCause,
+  JointContext,
+  Vec3,
+} from "../contracts";
 import type { ScenePick } from "./ClarityScene";
 import { PROVENANCE_LABELS } from "./palette";
 
@@ -42,6 +48,24 @@ const detectorVerdict = (rawConfidence: number, source: keyof typeof PROVENANCE_
   return "not confident it could see this — the reading is an inference, used at low trust";
 };
 
+const jointName = (joint: string) => joint.replace(/([A-Z])/g, " $1").toLowerCase();
+
+/** What moved a constrained joint, in words. The Space rings the same markers. */
+const causeRows = (cause: ConstraintCause): { label: string; value: string }[] => [
+  {
+    label: "Moved by",
+    value: cause.by.length > 0 ? cause.by.map(jointName).join(" and ") : "its own frames either side",
+  },
+  { label: "Rule", value: cause.rule },
+  {
+    label: "Of the move",
+    value:
+      cause.share >= 0.995
+        ? `all of it — ${mm(cause.movedM)}`
+        : `${pct(cause.share)} — ${mm(cause.movedM)}; other bones did the rest`,
+  },
+];
+
 const describeSource = (source: keyof typeof PROVENANCE_LABELS): string => {
   switch (source) {
     case "observed":
@@ -49,9 +73,9 @@ const describeSource = (source: keyof typeof PROVENANCE_LABELS): string => {
     case "anchored":
       return "Held at its address stance by the foot leash. The detector's reading was set aside until the knee proves the foot moved.";
     case "constrained":
-      return "Seen, but moved to keep the body coherent — bone length, a jump repair, or a foot released onto its arc.";
+      return "Seen, but moved to keep the body coherent. The marker that moved it is ringed in red in the Space.";
     case "derived":
-      return "Not seen well enough to use. Placed from the near hand and the grip this clip taught, on bones this clip measured — anatomy, not a guess through time.";
+      return "Not seen well enough to use. Placed from anatomy — the near hand and the grip this clip taught, on bones this clip measured — and, where the far shoulder is behind the near one, behind the near elbow, where the camera could not have seen it. Not a guess through time.";
     case "reconstructed":
       return "Not seen on this frame. Rebuilt from observations either side of a gap.";
     case "extrapolated":
@@ -112,6 +136,7 @@ export function PickCard({
         { label: "Detector confidence", value: pct(provenance.rawConfidence) },
         { label: "Detector", value: detectorVerdict(provenance.rawConfidence, provenance.source) },
         { label: "Frames since seen", value: String(provenance.framesSinceObserved) },
+        ...(provenance.constrainedBy ? causeRows(provenance.constrainedBy) : []),
         ...(provenance.context ? contextRows(provenance.context) : []),
         { label: "Position", value: at(frame.body.joints[pick.joint]) },
       ];

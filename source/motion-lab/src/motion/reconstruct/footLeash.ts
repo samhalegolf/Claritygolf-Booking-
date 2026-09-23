@@ -57,9 +57,30 @@
  * around the anchor frame. Not the flat-footed frames the world anchor
  * chose, because judging flatness is the thing this stage exists to stop
  * relying on.
+ *
+ * BOTH FEET ON ONE FLOOR
+ *
+ * At address the golfer is standing on the ground, and the ground is flat.
+ * Neither can be proved from a down-the-line clip -- the stance runs along
+ * the lens, where the detector's depth is a guess -- and that is exactly why
+ * it is assumed rather than left to the guess: a far foot placed 40mm up in
+ * the air is not a measurement, it is depth error wearing a height.
+ *
+ * So the worse-seen foot is set on the better-seen one's floor. Not lifted
+ * straight down: moved along its own line of sight, so it stays on the pixel
+ * the detector found it at and only its depth -- the guessed part -- gives.
+ * But only a little of it: the rest of the leg does not follow, so a long
+ * slide down a shallow line of sight walks the foot out from under its own
+ * knee, the tibia goes taut and the leash lets the foot go. Past a
+ * twentieth of height, the move is made straight down.
+ * Sole height is compared heel-and-toe against heel-and-toe, so the
+ * detector's heel riding up on the calcaneus is the same on both feet and
+ * cancels. Where the line of sight is too flat to meet the floor within a
+ * plausible distance, the foot is set down vertically instead: the floor is
+ * the assumption, and the pixel yields to it.
  */
 
-import type { ClarityJoint, ProvenanceSource, Unit, Vec3 } from "../../contracts";
+import type { ClarityJoint, ConstraintCause, ProvenanceSource, Unit, Vec3 } from "../../contracts";
 import {
   add,
   boneKey,
@@ -94,6 +115,16 @@ export interface FootLeashReport {
   readonly feetAnchored: number;
   readonly heelReleases: number;
   readonly footReleases: number;
+  /**
+   * How far the worse-seen foot was moved to stand on the other's floor,
+   * metres, and how: along its line of sight, or straight down. Null side
+   * when there was no second foot to share a floor with.
+   */
+  readonly grounded: {
+    readonly side: FootSide | null;
+    readonly movedM: number;
+    readonly along: "sight" | "vertical" | null;
+  };
   /** Why a side could not be leashed at all, or null when it was. */
   readonly skipped: Readonly<Record<FootSide, string | null>>;
 }
@@ -104,6 +135,7 @@ export interface LeashCell {
   source: ProvenanceSource;
   trust: Unit;
   correctionM: number;
+  constrainedBy?: ConstraintCause;
 }
 
 export interface FootLeashInput {
@@ -114,6 +146,8 @@ export interface FootLeashInput {
   readonly heightM: number;
   readonly anchorFrameIndex: number;
   readonly fps: number;
+  /** Camera centre per frame, world metres; null where none was fitted. */
+  readonly cameras?: readonly (Vec3 | null)[];
   /**
    * Phases already decided by an earlier pass. When given, the state machine
    * is skipped and only the positions are re-applied -- so a second
@@ -138,9 +172,15 @@ export interface FootLeashOptions {
    */
   readonly replantFraction?: number;
   readonly minBoneConfidence?: number;
+  /**
+   * Furthest the far foot may travel along its line of sight to reach the
+   * floor, as a fraction of height. Beyond it the ray is too flat to trust.
+   */
+  readonly maxGroundTravelFraction?: number;
 }
 
 const DEFAULTS = {
+  maxGroundTravelFraction: 0.05,
   referenceWindowSeconds: 0.25,
   releaseFrames: 2,
   slackFraction: 0.005,
@@ -193,11 +233,20 @@ const place = (cell: LeashCell, position: Vec3, source: ProvenanceSource, trust:
  * nudge inside detection noise leaves it "observed"; a real move marks it
  * "constrained". A joint nobody saw keeps whatever source it had.
  */
-const nudge = (cell: LeashCell, position: Vec3, minTrust: Unit, noticeableM: number) => {
+const nudge = (
+  cell: LeashCell,
+  position: Vec3,
+  minTrust: Unit,
+  noticeableM: number,
+  cause: Omit<ConstraintCause, "movedM" | "share">
+) => {
   const movedM = distance(cell.position, position);
   const source =
     cell.source === "observed" && movedM > noticeableM ? "constrained" : cell.source;
   place(cell, position, source, Math.max(cell.trust, minTrust));
+  if (source === "constrained" && movedM > (cell.constrainedBy?.movedM ?? 0)) {
+    cell.constrainedBy = { ...cause, share: 1, movedM };
+  }
 };
 
 export const applyFootLeash = (
@@ -223,6 +272,17 @@ export const applyFootLeash = (
   let feetAnchored = 0;
   let heelReleases = 0;
   let footReleases = 0;
+
+  interface Reference {
+    readonly tibiaM: number;
+    readonly tibiaSpreadM: number;
+    ankle: Vec3;
+    heel: Vec3;
+    toe: Vec3;
+    /** Sole height off the raw medians, before squaring moved anything. */
+    readonly soleY: number;
+  }
+  const references: Partial<Record<FootSide, Reference>> = {};
 
   for (const { side, knee, ankle, heel, toe } of SIDES) {
     const tibia = model.bones[boneKey({ from: knee, to: ankle, structure: "feet", rigid: true })];
@@ -266,9 +326,31 @@ export const applyFootLeash = (
     const refHeel =
       ankleHeelM && heelToeM ? pointOnArc(refAnkle, refToe, ankleHeelM, heelToeM, rawHeel) : rawHeel;
 
-    const tibiaM = tibia.lengthM;
+    references[side] = {
+      tibiaM: tibia.lengthM,
+      tibiaSpreadM: tibia.spreadM,
+      ankle: refAnkle,
+      heel: refHeel,
+      toe: refToe,
+      soleY: (rawHeel[1] + refToe[1]) / 2,
+    };
+  }
+
+  const { shift: groundShift, ...grounded } = groundFarFoot(
+    references,
+    tracks,
+    windowFrom,
+    windowTo,
+    input.cameras?.[input.anchorFrameIndex] ?? null,
+    heightM * (options.maxGroundTravelFraction ?? DEFAULTS.maxGroundTravelFraction)
+  );
+
+  for (const { side, knee, ankle, heel, toe } of SIDES) {
+    const reference = references[side];
+    if (!reference) continue;
+    const { tibiaM, ankle: refAnkle, heel: refHeel, toe: refToe } = reference;
     const footM = distance(refAnkle, refToe);
-    const toleranceM = Math.max(heightM * slackFraction, 2 * tibia.spreadM);
+    const toleranceM = Math.max(heightM * slackFraction, 2 * reference.tibiaSpreadM);
     const reachM = tibiaM + footM + toleranceM;
     const given = input.phases?.[side];
 
@@ -281,7 +363,13 @@ export const applyFootLeash = (
     for (let index = 0; index < frameCount; index += 1) {
       const kneeCell = cells[knee][index];
       const kneeKnown = kneeCell.source !== "missing";
-      const kneeAt = kneeCell.position;
+      /*
+       * The far knee is judged with the foot's correction applied: whatever
+       * depth error lifted the foot off the floor lifted the shin above it
+       * too, and a knee left up there would read as a taut tibia and release
+       * the very foot that was just set down.
+       */
+      const kneeAt = side === grounded.side ? add(kneeCell.position, groundShift) : kneeCell.position;
       const tautM = kneeKnown ? distance(kneeAt, refAnkle) - tibiaM : 0;
 
       if (given) {
@@ -340,8 +428,10 @@ export const applyFootLeash = (
           // the toe by whatever turned the reference ankle onto its new spot.
           const turn = qFromUnitVectors(sub(refAnkle, refToe), sub(placedAnkle, refToe));
           const placedHeel = add(refToe, qRotate(turn, sub(refHeel, refToe)));
-          nudge(ankleCell, placedAnkle, 0.6, noticeableM);
-          nudge(cells[heel][index], placedHeel, 0.6, noticeableM);
+          // The knee pulled the tibia taut; that is the whole reason.
+          const cause = { by: [knee], rule: `${side} shin length — heel released` };
+          nudge(ankleCell, placedAnkle, 0.6, noticeableM, cause);
+          nudge(cells[heel][index], placedHeel, 0.6, noticeableM, cause);
           place(cells[toe][index], refToe, "anchored", 1);
           lastAnkle = placedAnkle;
           break;
@@ -355,5 +445,81 @@ export const applyFootLeash = (
     states[side] = sideStates;
   }
 
-  return { states, feetAnchored, heelReleases, footReleases, skipped };
+  return { states, feetAnchored, heelReleases, footReleases, grounded, skipped };
+};
+
+/** Mean detector visibility of a foot over the reference window. */
+const footVisibility = (
+  tracks: Tracks,
+  joints: readonly ClarityJoint[],
+  from: number,
+  to: number
+): number => {
+  let total = 0;
+  let count = 0;
+  for (const joint of joints) {
+    for (let index = from; index <= to; index += 1) {
+      total += tracks[joint].samples[index]?.visibility ?? 0;
+      count += 1;
+    }
+  }
+  return count === 0 ? 0 : total / count;
+};
+
+/**
+ * Set the worse-seen foot's reference on the better-seen one's floor, in
+ * place. See "BOTH FEET ON ONE FLOOR" above.
+ */
+const groundFarFoot = (
+  references: Partial<
+    Record<FootSide, { ankle: Vec3; heel: Vec3; toe: Vec3; readonly soleY: number }>
+  >,
+  tracks: Tracks,
+  from: number,
+  to: number,
+  camera: Vec3 | null,
+  maxTravelM: number
+): FootLeashReport["grounded"] & { readonly shift: Vec3 } => {
+  const left = references.left;
+  const right = references.right;
+  if (!left || !right) return { side: null, movedM: 0, along: null, shift: [0, 0, 0] };
+
+  const [leftSide, rightSide] = SIDES;
+  const seen = (s: (typeof SIDES)[number]) =>
+    footVisibility(tracks, [s.ankle, s.heel, s.toe], from, to);
+  const farSide: FootSide = seen(leftSide) <= seen(rightSide) ? "left" : "right";
+  const far = farSide === "left" ? left : right;
+  const near = farSide === "left" ? right : left;
+
+  /*
+   * Heights off the raw medians. The squared reference is shaped by bone
+   * lengths through a direction the detector's depth guessed, so its heel
+   * height carries that guess -- and along a shallow line of sight every
+   * millimetre of it becomes several of travel.
+   */
+  const dropM = near.soleY - far.soleY;
+  const farSole = scale(add(far.heel, far.toe), 0.5);
+
+  let shift: Vec3 = [0, dropM, 0];
+  let along: "sight" | "vertical" = "vertical";
+  if (camera) {
+    const sight = normalise(sub(farSole, camera));
+    if (Math.abs(sight[1]) > 1e-6) {
+      const travel = dropM / sight[1];
+      if (Math.abs(travel) <= maxTravelM) {
+        shift = scale(sight, travel);
+        along = "sight";
+      }
+    }
+  }
+
+  far.ankle = add(far.ankle, shift);
+  far.heel = add(far.heel, shift);
+  far.toe = add(far.toe, shift);
+  return {
+    side: farSide,
+    movedM: Math.sqrt(shift[0] ** 2 + shift[1] ** 2 + shift[2] ** 2),
+    along,
+    shift,
+  };
 };

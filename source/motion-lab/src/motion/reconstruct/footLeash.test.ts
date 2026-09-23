@@ -253,3 +253,53 @@ test("the leash can be switched off, and then does nothing", () => {
     }
   }
 });
+
+test("down the line, the far foot is stood on the near foot's floor", () => {
+  /*
+   * The stance runs along the lens, so the far foot's height is depth error
+   * wearing a height. Lift it 40mm, as a guessed depth under a pitched
+   * camera would, and see it put back on the floor the near foot stands on.
+   */
+  const raw = detectFromClarityFrames(swing.frames, { cameraYawDeg: -90 });
+  const clean = anchorSequence({
+    space: "camera",
+    frames: raw.map((frame) => toCameraFrame(frame)),
+    fps: swing.fps,
+    width: 1920,
+    height: 1080,
+    durationMs: (swing.frames.length / swing.fps) * 1000,
+    detector: "synthetic",
+  });
+  const lifted: WorldObservationSequence = {
+    ...clean,
+    frames: clean.frames.map((frame) => {
+      const joints = { ...frame.joints };
+      // The knee too: a depth error lifts the whole lower leg, and lifting the
+      // foot alone would teach the body model a short tibia.
+      for (const joint of ["leftKnee", "leftAnkle", "leftHeel", "leftToe"] as const) {
+        const seen = joints[joint];
+        if (!seen) continue;
+        joints[joint] = {
+          ...seen,
+          visibility: seen.visibility * 0.6,
+          position: [seen.position[0], seen.position[1] + 0.04, seen.position[2]] as Vec3,
+        };
+      }
+      return { ...frame, joints };
+    }),
+  };
+
+  const report = reconstruct(lifted);
+  assert.equal(report.feet?.grounded.side, "left");
+  assert.ok((report.feet?.grounded.movedM ?? 0) > 0.03, "the far foot should have been moved");
+
+  for (const index of ADDRESS_FRAMES) {
+    const joints = report.sequence.frames[index].body.joints;
+    const left = (joints.leftHeel[1] + joints.leftToe[1]) / 2;
+    const right = (joints.rightHeel[1] + joints.rightToe[1]) / 2;
+    assert.ok(
+      Math.abs(left - right) < 0.01,
+      `frame ${index}: feet ${((left - right) * 1000).toFixed(0)}mm apart in height`
+    );
+  }
+});

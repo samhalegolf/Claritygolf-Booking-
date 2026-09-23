@@ -166,3 +166,65 @@ test("the stage can be switched off, and then does nothing", () => {
   assert.equal(report.arm, null);
   assert.equal(report.stageCounts.armJointsDerived, 0);
 });
+
+/*
+ * Down the line, the way MediaPipe actually fails: the far elbow is not
+ * dropped, it is REPORTED -- weakly, and often out in open picture where
+ * nothing hides it. Not being seen is evidence it was not there.
+ */
+const downTheLine = (elbowShift: Vec3): WorldObservationSequence => {
+  const raw = detectFromClarityFrames(swing.frames, { cameraYawDeg: -90 });
+  const sequence = anchorSequence({
+    space: "camera",
+    frames: raw.map((frame) => toCameraFrame(frame)),
+    fps: swing.fps,
+    width: 1920,
+    height: 1080,
+    durationMs: (swing.frames.length / swing.fps) * 1000,
+    detector: "synthetic",
+  });
+  return {
+    ...sequence,
+    frames: sequence.frames.map((frame, index) => {
+      if (index >= 40) return frame;
+      const joints = { ...frame.joints };
+      for (const joint of FAR_ARM) {
+        const seen = joints[joint];
+        if (!seen) continue;
+        const shift: Vec3 = joint === "leftElbow" ? elbowShift : [0, 0, 0];
+        joints[joint] = {
+          ...seen,
+          visibility: 0.3,
+          position: [
+            seen.position[0] + shift[0],
+            seen.position[1] + shift[1],
+            seen.position[2] + shift[2],
+          ] as Vec3,
+        };
+      }
+      return { ...frame, joints };
+    }),
+  };
+};
+
+test("a weak far elbow read out in open picture is put behind the near one", () => {
+  // Across the picture, away from the body: somewhere the camera would
+  // have seen it.
+  const report = reconstruct(downTheLine([0, 0, -0.25]));
+  assert.equal(report.arm?.farSide, "left");
+  assert.equal(report.arm?.elbowsBehind, 40);
+  const error = meanError(report.sequence.frames, "leftElbow", 0, 40);
+  assert.ok(error < 0.1, `elbow ${(error * 1000).toFixed(0)}mm off; the reading was 250mm out`);
+  let hidden = 0;
+  for (let index = 0; index < 40; index += 1) {
+    hidden += report.context?.hiding.leftElbow[index].amount ?? 0;
+  }
+  assert.ok(hidden / 40 > 0.5, `the elbow should end up hidden, was ${(hidden / 40).toFixed(2)}`);
+});
+
+test("a weak far elbow read somewhere hidden is heard, not overruled", () => {
+  const report = reconstruct(downTheLine([0, 0, 0]));
+  const error = meanError(report.sequence.frames, "leftElbow", 0, 40);
+  assert.ok(error < 0.02, `a right reading behind the body should stand: ${(error * 1000).toFixed(0)}mm`);
+  assert.ok((report.arm?.elbowsBehind ?? 0) <= 4);
+});

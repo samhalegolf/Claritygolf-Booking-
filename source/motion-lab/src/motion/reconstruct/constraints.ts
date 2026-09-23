@@ -34,7 +34,7 @@
  * degrades good observations to satisfy a bone length measured from bad ones.
  */
 
-import type { ClarityJoint, Metres, Unit, Vec3 } from "../../contracts";
+import type { ClarityJoint, ConstraintCause, Metres, Unit, Vec3 } from "../../contracts";
 import { RIGID_BONES, add, boneKey, distance, dot, scale, sub } from "../../contracts";
 import type { MeasuredBodyModel } from "./bodyModel";
 
@@ -100,7 +100,34 @@ export interface ConstraintResult {
   readonly residualM: Metres;
   /** Bones that were violated before solving, with their initial error. */
   readonly violations: ReadonlyMap<string, Metres>;
+  /**
+   * Per moved joint, the neighbour whose bone moved it most, and how much
+   * of the joint's movement that bone accounted for.
+   */
+  readonly causes: Partial<Record<ClarityJoint, ConstraintCause>>;
 }
+
+const side = (joint: ClarityJoint): string =>
+  joint.startsWith("left") ? "left " : joint.startsWith("right") ? "right " : "";
+
+/** A bone's length rule, in words a coach would use. */
+export const boneRule = (a: ClarityJoint, b: ClarityJoint): string => {
+  const pair = new Set([a, b].map((joint) => joint.replace(/^(left|right)/, "").toLowerCase()));
+  const has = (...names: string[]) => names.every((name) => pair.has(name));
+  const s = side(a.startsWith("left") || a.startsWith("right") ? a : b);
+  if (has("shoulder") && pair.size === 1) return "shoulder width";
+  if (has("hip") && pair.size === 1) return "hip width";
+  if (has("shoulder", "elbow")) return `${s}upper arm length`;
+  if (has("elbow", "wrist")) return `${s}forearm length`;
+  if (has("wrist", "hand")) return `${s}hand length`;
+  if (has("hip", "knee")) return `${s}thigh length`;
+  if (has("knee", "ankle")) return `${s}shin length`;
+  if (has("neck", "shoulder")) return `${s}collarbone length`;
+  if (has("sternum", "shoulder")) return `${s}sternum strut`;
+  if (has("head", "neck")) return "neck length";
+  if (pair.has("heel") || pair.has("toe")) return `${s}foot shape`;
+  return `${a} to ${b} length`;
+};
 
 export const applyConstraints = (
   input: ConstraintInput,
@@ -132,6 +159,13 @@ export const applyConstraints = (
   const joints = { ...input.joints };
   const original = { ...input.joints };
   const violations = new Map<string, number>();
+  /** Per joint, per pushing neighbour: how far that bone moved it, summed over passes. */
+  const pushes = new Map<ClarityJoint, Map<ClarityJoint, number>>();
+  const push = (joint: ClarityJoint, by: ClarityJoint, step: Vec3) => {
+    const byJoint = pushes.get(joint) ?? new Map<ClarityJoint, number>();
+    byJoint.set(by, (byJoint.get(by) ?? 0) + Math.sqrt(dot(step, step)));
+    pushes.set(joint, byJoint);
+  };
 
   const enforceable = RIGID_BONES.filter((bone) => {
     const measured = input.model.bones[boneKey(bone)];
@@ -204,8 +238,12 @@ export const applyConstraints = (
        * the median would be the solver asserting a precision the measurement
        * never had.
        */
-      joints[bone.from] = add(from, scale(fromStep, excess / total));
-      joints[bone.to] = sub(to, scale(toStep, excess / total));
+      const fromMove = scale(fromStep, excess / total);
+      const toMove = scale(toStep, -excess / total);
+      joints[bone.from] = add(from, fromMove);
+      joints[bone.to] = add(to, toMove);
+      push(bone.from, bone.to, fromMove);
+      push(bone.to, bone.from, toMove);
       moved = true;
     }
 
@@ -225,7 +263,28 @@ export const applyConstraints = (
     residualM += Math.max(0, off - toleranceFor(measured.lengthM, measured.spreadM));
   }
 
-  return { joints, correctionM, residualM, violations };
+  /*
+   * The cause is the neighbour that pushed hardest. Path length, not net
+   * displacement: two bones pushing a joint opposite ways both did work,
+   * and the one that did more of it is the one to point at.
+   */
+  const causes: Partial<Record<ClarityJoint, ConstraintCause>> = {};
+  for (const [joint, byJoint] of pushes) {
+    let total = 0;
+    let best: ClarityJoint | null = null;
+    let bestM = 0;
+    for (const [by, movedM] of byJoint) {
+      total += movedM;
+      if (movedM > bestM) {
+        best = by;
+        bestM = movedM;
+      }
+    }
+    if (!best || total <= 0) continue;
+    causes[joint] = { by: [best], rule: boneRule(joint, best), share: bestM / total, movedM: bestM };
+  }
+
+  return { joints, correctionM, residualM, violations, causes };
 };
 
 /**

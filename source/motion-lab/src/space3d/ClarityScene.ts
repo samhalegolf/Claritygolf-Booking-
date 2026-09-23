@@ -111,6 +111,13 @@ export class ClarityScene {
 
   private ballMarker: Mesh | null = null;
 
+  /** The joint the viewer picked, whose constraint cause is drawn. */
+  private focus: ClarityJoint | null = null;
+  /** Red rings round the markers that moved the focused joint. Up to two: the neck has two. */
+  private readonly causeRings: Mesh[];
+  private readonly causeLines: LineSegments;
+  private readonly causeLinePositions: BufferAttribute;
+
   private readonly scratchVector = new Vector3();
   private readonly scratchVectorB = new Vector3();
   private readonly scratchQuat = new Quaternion();
@@ -220,6 +227,36 @@ export class ClarityScene {
       new LineBasicMaterial({ color: PALETTE.supportPolygon, transparent: true, opacity: 0.7 })
     );
     this.supportPolygonLine.frustumCulled = false;
+
+    /* ---- constraint cause ---- */
+
+    this.causeRings = [0, 1].map(() => {
+      const ring = new Mesh(
+        new RingGeometry(JOINT_RADIUS_M * 1.7, JOINT_RADIUS_M * 2.3, 32),
+        new MeshBasicMaterial({
+          color: PALETTE.constraintCause,
+          side: DoubleSide,
+          depthTest: false,
+          transparent: true,
+        })
+      );
+      // Drawn over the body: a cause hidden behind the torso is still the cause.
+      ring.renderOrder = 10;
+      ring.visible = false;
+      return ring;
+    });
+    this.causeLinePositions = new BufferAttribute(new Float32Array(2 * 2 * 3), 3);
+    this.causeLinePositions.setUsage(DynamicDrawUsage);
+    const causeGeometry = new BufferGeometry();
+    causeGeometry.setAttribute("position", this.causeLinePositions);
+    this.causeLines = new LineSegments(
+      causeGeometry,
+      new LineBasicMaterial({ color: PALETTE.constraintCause, depthTest: false, transparent: true })
+    );
+    this.causeLines.renderOrder = 10;
+    this.causeLines.frustumCulled = false;
+    this.causeLines.visible = false;
+    this.bodyGroup.add(...this.causeRings, this.causeLines);
 
     this.bodyGroup.add(
       this.massCloud,
@@ -425,6 +462,8 @@ export class ClarityScene {
     this.jointMarkers.instanceMatrix.needsUpdate = true;
     if (this.jointMarkers.instanceColor) this.jointMarkers.instanceColor.needsUpdate = true;
 
+    this.showCause(frame);
+
     /* ---- persistent structures ---- */
 
     applyRigid(this.thoraxBox, frame.body.thorax, this.scratchVector, this.scratchQuat);
@@ -578,6 +617,35 @@ export class ClarityScene {
     return best?.pick ?? null;
   }
 
+  /**
+   * Which joint the viewer is looking at. When it is constrained, the markers
+   * that moved it are ringed in red and joined to it, on every frame, so
+   * scrubbing shows the cause change with the playhead.
+   */
+  setFocus(joint: ClarityJoint | null) {
+    this.focus = joint;
+    if (this.lastFrame) this.showCause(this.lastFrame);
+  }
+
+  private showCause(frame: ClarityFrame) {
+    const provenance = this.focus ? frame.provenance.joints[this.focus] : null;
+    const cause =
+      provenance?.source === "constrained" ? provenance.constrainedBy?.by ?? [] : [];
+    const positions = this.causeLinePositions.array as Float32Array;
+    positions.fill(0);
+    this.causeRings.forEach((ring, slot) => {
+      const by = cause[slot];
+      ring.visible = by !== undefined;
+      if (!by || !this.focus) return;
+      toVector(frame.body.joints[by], ring.position);
+      const from = frame.body.joints[by];
+      const to = frame.body.joints[this.focus];
+      positions.set([...from, ...to], slot * 6);
+    });
+    this.causeLines.visible = cause.length > 0;
+    this.causeLinePositions.needsUpdate = true;
+  }
+
   setCameraPreset(preset: CameraPreset, immediate = false) {
     this.rig.applyPreset(preset, immediate);
   }
@@ -590,6 +658,10 @@ export class ClarityScene {
 
   render(deltaSeconds: number) {
     this.rig.update(deltaSeconds);
+    // The rings face the viewer, so a circle reads as a circle from any orbit.
+    for (const ring of this.causeRings) {
+      if (ring.visible) ring.quaternion.copy(this.rig.camera.quaternion);
+    }
     this.renderer.render(this.scene, this.rig.camera);
   }
 

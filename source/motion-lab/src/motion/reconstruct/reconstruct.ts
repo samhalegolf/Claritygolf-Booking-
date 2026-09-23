@@ -47,6 +47,7 @@ import type {
   ClaritySequence,
   ClarityStructure,
   ConfidenceComponents,
+  ConstraintCause,
   JointProvenance,
   ProvenanceSource,
   RigidStructure,
@@ -132,6 +133,8 @@ interface Cell {
   smoothingStrength: number;
   /** What the hidden-by-body bid multiplied trust by. Absent when it did nothing. */
   hiddenTrust?: Unit;
+  /** What moved it, when something did. Kept from whichever pass moved it most. */
+  constrainedBy?: ConstraintCause;
 }
 
 export interface ReconstructionReport {
@@ -205,6 +208,8 @@ export const reconstruct = (
   const cameras = observations.frames.map((observation) =>
     fitCamera(correspondencesOf(observation))
   );
+  /** Where the lens was, for the stages that ask what it could see. */
+  const lensAt = cameraCentres(cameras);
 
   /* ------------------------------------------------------------------ *
    * 2. Reject observations the body contradicts, on every frame
@@ -288,6 +293,16 @@ export const reconstruct = (
         // job is the weak ones. An outlier we already replaced gets pulled
         // hard, because its neighbours are all the evidence there is.
         smoothingStrength: repaired ? 0.75 : Math.max(noiseStrength, clampUnit((1 - sample.visibility) * 0.6)),
+        ...(repaired
+          ? {
+              constrainedBy: {
+                by: [],
+                rule: "jump repair — it leapt away from its own frames either side and came straight back",
+                share: 1,
+                movedM: distance(repaired, sample.position),
+              },
+            }
+          : {}),
       };
     }
 
@@ -393,6 +408,7 @@ export const reconstruct = (
     heightM,
     anchorFrameIndex: observations.anchor.anchorFrameIndex,
     fps: observations.fps,
+    cameras: lensAt,
   };
   const feet = stages.leashFeet ? applyFootLeash(leashInput) : null;
   if (feet) {
@@ -418,7 +434,7 @@ export const reconstruct = (
    * the derived joints carry middling trust, so the solver settles bone
    * lengths by moving them rather than the well-seen near side.
    */
-  const arm = stages.deriveArm ? deriveFarArm({ cells, tracks, model }) : null;
+  const arm = stages.deriveArm ? deriveFarArm({ cells, tracks, model, cameras: lensAt }) : null;
   if (arm) {
     stageCounts.armJointsDerived = arm.derived.elbow + arm.derived.wrist + arm.derived.hand;
   }
@@ -447,7 +463,7 @@ export const reconstruct = (
             return joints;
           },
           tracks,
-          cameras: cameraCentres(cameras),
+          cameras: lensAt,
           heightM,
           frameCount,
         })
@@ -595,6 +611,16 @@ export const reconstruct = (
         // Being moved by a constraint is itself a fact about the frame.
         if (cell.source === "observed" && solved.correctionM[joint] > heightM * 0.01) {
           cell.source = "constrained";
+        }
+        // And so is what moved it. The pass that moved it most names it.
+        const cause = solved.causes[joint];
+        if (
+          cell.source === "constrained" &&
+          cause &&
+          solved.correctionM[joint] > heightM * 0.01 &&
+          cause.movedM > (cell.constrainedBy?.movedM ?? 0)
+        ) {
+          cell.constrainedBy = cause;
         }
       }
     }
@@ -970,6 +996,9 @@ const assembleFrame = (
       framesSinceObserved: cell.framesSinceObserved,
       gapLength: cell.gapLength,
       rawConfidence: cell.rawConfidence,
+      ...(cell.source === "constrained" && cell.constrainedBy
+        ? { constrainedBy: cell.constrainedBy }
+        : {}),
       ...(context && context.cameras[index]
         ? {
             context: {

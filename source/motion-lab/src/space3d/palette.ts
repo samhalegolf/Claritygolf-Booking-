@@ -38,6 +38,13 @@ export const PALETTE = {
 
   ball: 0xffffff,
   targetLine: 0x37474f,
+
+  /**
+   * What moved a constrained joint. A true red, well clear of the salmon
+   * "reconstructed" and the dark "missing", because it is not a provenance:
+   * it is a pointer from a yellow joint to the marker that pushed it.
+   */
+  constraintCause: 0xff3b30,
 } as const;
 
 /**

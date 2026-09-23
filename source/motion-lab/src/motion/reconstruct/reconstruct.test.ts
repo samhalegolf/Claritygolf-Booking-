@@ -653,3 +653,42 @@ test("a landmark that slides onto the wrong part of the body and stays there is 
     );
   }
 });
+
+test("every constrained joint says which marker moved it", () => {
+  // Noisy and down the line, so the solver, the girdle and the leash all
+  // have work to do.
+  const noisy = generateSyntheticSwing({ degradation: { noiseM: 0.014 } });
+  const raw = detectFromClarityFrames(noisy.frames, { cameraYawDeg: -90 });
+  const report = reconstruct(
+    anchorSequence({
+      space: "camera",
+      frames: raw.map((frame) => toCameraFrame(frame)),
+      fps: noisy.fps,
+      width: 1920,
+      height: 1080,
+      durationMs: (noisy.frames.length / noisy.fps) * 1000,
+      detector: "synthetic",
+    })
+  );
+
+  let constrained = 0;
+  const rules = new Set<string>();
+  for (const frame of report.sequence.frames) {
+    for (const joint of CLARITY_JOINTS) {
+      const provenance = frame.provenance.joints[joint];
+      if (provenance.source !== "constrained") {
+        assert.equal(provenance.constrainedBy, undefined, `${joint} is not constrained but names a cause`);
+        continue;
+      }
+      constrained += 1;
+      const cause = provenance.constrainedBy;
+      assert.ok(cause, `frame ${frame.index}: ${joint} is constrained with no cause`);
+      assert.ok(!cause.by.includes(joint), `${joint} cannot be its own cause`);
+      assert.ok(cause.share > 0 && cause.share <= 1);
+      rules.add(cause.rule.replace(/^(left|right) /, ""));
+    }
+  }
+  assert.ok(constrained > 0, "the fixture should constrain something");
+  // A bone rule, in words, not a key.
+  assert.ok([...rules].some((rule) => rule.endsWith("length")), [...rules].join(", "));
+});

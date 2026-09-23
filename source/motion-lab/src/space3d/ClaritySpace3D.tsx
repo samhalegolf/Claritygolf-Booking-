@@ -184,6 +184,10 @@ export function ClaritySpace3D(props: ClaritySpace3DProps) {
   }, [props.layers]);
 
   useEffect(() => {
+    sceneRef.current?.setFocus(pick?.kind === "joint" ? pick.joint : null);
+  }, [pick]);
+
+  useEffect(() => {
     sceneRef.current?.showFrame(props.frame);
   }, [props.frame]);
 

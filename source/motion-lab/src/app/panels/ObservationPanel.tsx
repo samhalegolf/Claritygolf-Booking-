@@ -169,10 +169,12 @@ export function ObservationPanel({
             )}
           {!result.world.anchor.gravityTiltIsMeasured && (
             <p className="lab-panel-note">
-              No frame had the golfer standing on both feet, so there was no
-              horizontal line to measure against. This world is level only
-              because nothing was done to it — which is not the same as a camera
-              that was level.
+              No horizontal line across the picture to measure the roll against:
+              either no frame had the golfer standing on both feet, or — down the
+              line — the stance pointed at the lens, where it cannot show a roll.
+              This world is level only because nothing was done to it, which is
+              not the same as a camera that was level. The feet are still stood
+              on one floor.
             </p>
           )}
           {!result.world.anchor.anchorIsStable && (
