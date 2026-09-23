@@ -12182,7 +12182,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     const booking = dockBookings.find((candidate) => candidate.id === bookingId);
     setDockBookings((current) => current.filter((candidate) => candidate.id !== bookingId));
     setActiveDockBookingId((current) => (current === bookingId ? "" : current));
-    if (booking) setToast({ message: `${booking.client}'s parked lesson was removed.` });
+    if (!booking) return;
+    // A tile shelved from the calendar is only hidden there, never edited, so
+    // closing it is a cancel: the lesson reappears where it was.
+    const sourceItemId = booking.sourceItemId;
+    if (sourceItemId) {
+      setShelvedItemIds((current) => current.filter((id) => id !== sourceItemId));
+      setToast({ message: `${booking.client}'s lesson is back where it was.` });
+      return;
+    }
+    setToast({ message: `${booking.client}'s parked lesson was removed.` });
   }
 
   function quickCreatePopoverStyle(): CSSProperties {
@@ -23410,7 +23419,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     </span>
                     <button
                       className="dock-remove"
-                      aria-label={`Remove ${booking.client} from dock`}
+                      aria-label={
+                        booking.sourceItemId
+                          ? `Put ${booking.client} back on the calendar`
+                          : `Remove ${booking.client} from dock`
+                      }
                       onClick={(event) => {
                         event.stopPropagation();
                         removeDockBooking(booking.id);
