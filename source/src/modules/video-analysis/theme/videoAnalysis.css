@@ -2690,3 +2690,35 @@
   line-height: 1.45;
   color: var(--va-muted);
 }
+
+/* --- Swing phases -------------------------------------------------------
+   The rail button that puts the timeline markers on the swing the lab found.
+   While detection runs its ring fills with progress; the button is the only
+   place that says detection is happening, so it has to show it. */
+
+.va-rail-btn-phases {
+  position: relative;
+}
+
+.va-rail-btn-phases.is-running::before {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: conic-gradient(var(--va-accent) var(--va-phase-progress, 0%), transparent 0);
+  -webkit-mask: radial-gradient(circle, transparent 15px, black 16px);
+  mask: radial-gradient(circle, transparent 15px, black 16px);
+}
+
+.va-rail-btn-phases.is-running:disabled {
+  opacity: 1;
+  cursor: progress;
+}
+
+.va-rail-btn-phases.is-running svg {
+  opacity: 0.5;
+}
+
+.va-rail-btn-phases.is-failed {
+  color: var(--va-warn-text);
+}

@@ -37,6 +37,7 @@ import {
 } from "./components/PlayerVideoControls";
 import { VideoSettingsSheet } from "./components/VideoSettingsSheet";
 import { LivePoseLayer } from "./components/LivePoseLayer";
+import { useSwingPhaseMarkers, type SwingPhaseClip } from "./hooks/useSwingPhaseMarkers";
 import { ToolButton } from "./components/ToolButton";
 import {
   ComparisonSide,
@@ -999,6 +1000,56 @@ export function VideoWorkspace({
     },
     [leftStore, rightStore]
   );
+
+  // Each panel's markers follow the swing the motion lab finds in its clip.
+  // Web coach console only, for the same reason as the 3D button: the pose
+  // worker and its WASM are served by the web build.
+  const swingPhasesEnabled = MOTION_LAB_AVAILABLE && !isPlayerVariant;
+  const leftPhaseClip = useMemo<SwingPhaseClip | null>(
+    () =>
+      playerVideoLeft
+        ? {
+            id: playerVideoLeft.id,
+            sourceUrl: playerVideoLeft.sourceUrl,
+            duration: playerVideoLeft.duration || leftCurrentDuration || 0,
+            fps: playerVideoLeft.fps,
+          }
+        : null,
+    // Re-detect on a new clip, not on every duration tick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [playerVideoLeft?.id, playerVideoLeft?.sourceUrl]
+  );
+  const rightPhaseClip = useMemo<SwingPhaseClip | null>(
+    () =>
+      playerVideoRight
+        ? {
+            id: playerVideoRight.id,
+            sourceUrl: playerVideoRight.sourceUrl,
+            duration: playerVideoRight.duration || rightCurrentDuration || 0,
+            fps: playerVideoRight.fps,
+          }
+        : null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [playerVideoRight?.id, playerVideoRight?.sourceUrl]
+  );
+  const getDefaultMarkers = useCallback(
+    (duration: number) => timelineEngine.getDefaultMarkers(duration),
+    [timelineEngine]
+  );
+  const leftPhases = useSwingPhaseMarkers({
+    enabled: swingPhasesEnabled,
+    clip: leftPhaseClip,
+    markers: leftMarkers,
+    defaults: getDefaultMarkers,
+    apply: (next) => syncMarkersWithAnalysis("left", next),
+  });
+  const rightPhases = useSwingPhaseMarkers({
+    enabled: swingPhasesEnabled && modeIsCompare,
+    clip: rightPhaseClip,
+    markers: rightMarkers,
+    defaults: getDefaultMarkers,
+    apply: (next) => syncMarkersWithAnalysis("right", next),
+  });
 
   const playPauseSide = useCallback(
     (side: ComparisonSide) => {
@@ -3741,6 +3792,8 @@ export function VideoWorkspace({
               onToggleMarkers={() => setShowBodyMarkers((previous) => !previous)}
               showGroundForce={showGroundForce}
               onToggleGroundForce={() => setShowGroundForce((previous) => !previous)}
+              onSnapPhases={swingPhasesEnabled ? (isLeft ? leftPhases : rightPhases).snap : undefined}
+              phaseState={(isLeft ? leftPhases : rightPhases).state}
             />
           ) : null}
           <div

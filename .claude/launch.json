@@ -22,6 +22,21 @@
         "dev:lab"
       ],
       "port": 5180
+    },
+    {
+      "name": "clarity-dev-alt",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "source",
+        "run",
+        "dev",
+        "--",
+        "--port",
+        "5174",
+        "--strictPort"
+      ],
+      "port": 5174
     }
   ]
 }

@@ -7,6 +7,8 @@ import { isBookingEmbedMode, isPlayerBookingMode, isReviewShareMode, isVideoShar
 import { lastVisitorWasCoach } from "./modules/shared/workspaceStorage";
 import { installOptixOriginFeedback } from "./optix-origin-feedback";
 import { installBoxAudit } from "./lib/boxAudit";
+import { AppErrorBoundary } from "./modules/shared/AppErrorBoundary";
+import { installStaleDeployReload } from "./modules/shared/staleDeploy";
 // Tokens first: styles.css and every module stylesheet read --c-*.
 import "./tokens.css";
 import "./styles.css";
@@ -17,6 +19,10 @@ import "./switches.css";
 // The nesting law is a property of the rendered page, not the stylesheet, so
 // it is checked in the browser rather than by uiRules.test.ts. Dev only.
 installBoxAudit();
+
+// Before anything lazy is imported: a tab open across a deploy reloads once
+// rather than going white on its first panel.
+installStaleDeployReload();
 
 // Both shells are lazy so a player never downloads the coach workspace, and a
 // visitor at the login screen downloads neither. This is why the login form
@@ -197,6 +203,8 @@ function Root() {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <Root />
+    <AppErrorBoundary>
+      <Root />
+    </AppErrorBoundary>
   </StrictMode>,
 );

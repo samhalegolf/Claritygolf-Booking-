@@ -1,5 +1,6 @@
 import React from "react";
 import { DrawingTool } from "../models/Drawing";
+import type { PhaseDetectionState } from "../hooks/useSwingPhaseMarkers";
 import {
   IconFocus,
   IconPause,
@@ -224,6 +225,31 @@ const IconGroundForce = () => (
   </svg>
 );
 
+/** Timeline ticks snapping onto a swing arc: "put the markers on the swing". */
+const IconSwingPhases = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+    <path d="M4 15c2-7 6-10 8-10s6 3 8 10" strokeLinecap="round" />
+    <path d="M4 20h16" strokeLinecap="round" />
+    <path d="M6 17.5V20M12 17.5V20M18 17.5V20" strokeLinecap="round" />
+    <circle cx="12" cy="5" r="1.4" fill="currentColor" stroke="none" />
+  </svg>
+);
+
+const phaseTitle = (state: PhaseDetectionState) => {
+  switch (state.kind) {
+    case "running":
+      return `Finding the swing… ${Math.round(state.progress * 100)}%`;
+    case "failed":
+      return `Swing not found: ${state.message}`;
+    case "ready":
+      return state.placed
+        ? "Markers are on the swing. Press to snap them back."
+        : "Snap the markers to the swing";
+    default:
+      return "Snap the markers to the swing";
+  }
+};
+
 export type AnalysisRailProps = {
   /** Unset where the 3D lab cannot run (the native shell). */
   onOpen3D?: () => void;
@@ -233,6 +259,9 @@ export type AnalysisRailProps = {
   onToggleMarkers: () => void;
   showGroundForce: boolean;
   onToggleGroundForce: () => void;
+  /** Moves every timeline marker onto the swing the lab found. */
+  onSnapPhases?: () => void;
+  phaseState?: PhaseDetectionState;
 };
 
 /**
@@ -248,7 +277,11 @@ export function AnalysisRail({
   onToggleMarkers,
   showGroundForce,
   onToggleGroundForce,
+  onSnapPhases,
+  phaseState = { kind: "idle" },
 }: AnalysisRailProps) {
+  const phaseLabel = phaseTitle(phaseState);
+  const running = phaseState.kind === "running";
   return (
     <div className="va-analysis-rail" role="toolbar" aria-label="Body analysis">
       {onOpen3D ? (
@@ -287,6 +320,27 @@ export function AnalysisRail({
       >
         <IconGroundForce />
       </button>
+      {onSnapPhases ? (
+        <>
+          <span className="va-rail-rule" aria-hidden="true" />
+          <button
+            type="button"
+            className={`va-rail-btn va-rail-btn-phases is-${phaseState.kind}`}
+            aria-label={phaseLabel}
+            title={phaseLabel}
+            aria-busy={running}
+            disabled={running}
+            onClick={onSnapPhases}
+            style={
+              running
+                ? ({ "--va-phase-progress": `${Math.round(phaseState.progress * 100)}%` } as React.CSSProperties)
+                : undefined
+            }
+          >
+            <IconSwingPhases />
+          </button>
+        </>
+      ) : null}
     </div>
   );
 }
