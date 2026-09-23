@@ -63,20 +63,22 @@ import {
   clampUnit,
   distance,
   lerpVec,
+  normalise,
   qIdentity,
   scale,
   sub,
 } from "../../contracts";
-import type { WorldObservationSequence } from "../../observe/observation";
+import type { WorldObservationFrame, WorldObservationSequence } from "../../observe/observation";
 import { buildFrameConfidence, penalise, PENALTY_SCALES } from "../confidence/confidence";
 import { estimateMass } from "../mass/massModel";
 import { checkableBodies, checkMassAgainstShape } from "../mass/massSanity";
 import { buildPelvis, buildThorax } from "../body/structures";
-import { fitCamera } from "../club/camera";
+import { fitCamera, type Correspondence } from "../club/camera";
 import { estimateClub, type ClubFrameInput } from "../club/clubModel";
 import { bodyObstacles } from "../club/occupancy";
 import { measureBodyModel, type MeasuredBodyModel } from "./bodyModel";
-import { applyConstraints, structuralDisagreement } from "./constraints";
+import { applyConstraints, structuralDisagreement, type DepthDoubt } from "./constraints";
+import { cameraCentres, computeContextBids, type ContextBidReport } from "./contextBids";
 import { rejectContradictedObservations, type ContradictionReport } from "./contradiction";
 import { deriveFarArm, type ArmDerivationReport } from "./armDerivation";
 import { applyFootLeash, type FootLeashReport } from "./footLeash";
@@ -108,6 +110,10 @@ export interface ReconstructOptions {
     readonly fitGirdle?: boolean;
     /** The far arm, from the near hand, the grip and the measured bones. */
     readonly deriveArm?: boolean;
+    /** Context bid: a joint gives way along the camera's line of sight first. */
+    readonly depthBid?: boolean;
+    /** Context bid: a joint hidden behind the body holds its ground less. */
+    readonly hiddenBid?: boolean;
     readonly constrain?: boolean;
     readonly smooth?: boolean;
   };
@@ -124,6 +130,8 @@ interface Cell {
   gapLength: number;
   /** How much the smoother is allowed to move this sample. */
   smoothingStrength: number;
+  /** What the hidden-by-body bid multiplied trust by. Absent when it did nothing. */
+  hiddenTrust?: Unit;
 }
 
 export interface ReconstructionReport {
@@ -139,6 +147,8 @@ export interface ReconstructionReport {
   readonly girdle: ShoulderGirdleReport | null;
   /** Which observations the body refused, per joint. Null when the stage was off. */
   readonly contradictions: ContradictionReport | null;
+  /** The context bids, and what they measured. Null when both were off. */
+  readonly context: ContextBidReport | null;
 }
 
 export const reconstruct = (
@@ -153,6 +163,8 @@ export const reconstruct = (
     leashFeet: true,
     fitGirdle: true,
     deriveArm: true,
+    depthBid: true,
+    hiddenBid: true,
     constrain: true,
     smooth: true,
     ...options.stages,
@@ -177,7 +189,22 @@ export const reconstruct = (
     shouldersCarried: 0,
     shouldersReined: 0,
     armJointsDerived: 0,
+    framesHidden: 0,
   };
+
+  /*
+   * Where the camera was, per frame.
+   *
+   * From the observations alone -- the pixel a joint was seen at and the 3D
+   * position the detector lifted it to are one measurement, and pairing the
+   * pixel with anything a later stage moved would teach the camera a
+   * correspondence nobody observed. So it can be fitted here, before any
+   * stage runs, and shared: the context bids need the line of sight and the
+   * club needs the rays its head lies on.
+   */
+  const cameras = observations.frames.map((observation) =>
+    fitCamera(correspondencesOf(observation))
+  );
 
   /* ------------------------------------------------------------------ *
    * 2. Reject observations the body contradicts, on every frame
@@ -397,6 +424,83 @@ export const reconstruct = (
   }
 
   /* ------------------------------------------------------------------ *
+   * Context bids
+   *
+   * After every stage that places joints and before the solver, because the
+   * solver is what they steer: who gives way when a bone is out. Read off
+   * the body as it stands, so "what was in front of the far hip" is asked of
+   * a body with its far arm and girdle already in place.
+   *
+   * Only an observation is discounted. A bridged or derived joint was never
+   * the detector's claim, so how well the detector could see it is not a
+   * question about it -- and an anchored foot was deliberately held in place
+   * of what the detector said.
+   * ------------------------------------------------------------------ */
+
+  const fromDetector = (cell: Cell) => cell.source === "observed" || cell.source === "constrained";
+  const context =
+    stages.depthBid || stages.hiddenBid
+      ? computeContextBids({
+          positions: (index) => {
+            const joints = {} as Record<ClarityJoint, Vec3>;
+            for (const joint of CLARITY_JOINTS) joints[joint] = cells[joint][index].position;
+            return joints;
+          },
+          tracks,
+          cameras: cameraCentres(cameras),
+          heightM,
+          frameCount,
+        })
+      : null;
+
+  if (context && stages.hiddenBid) {
+    for (const joint of CLARITY_JOINTS) {
+      for (let index = 0; index < frameCount; index += 1) {
+        const cell = cells[joint][index];
+        const factor = context.hiddenTrust[joint][index];
+        if (!fromDetector(cell) || factor >= 1) continue;
+        cell.trust = clampUnit(cell.trust * factor);
+        /*
+         * And it settles harder toward its neighbours. Read as a blend of two
+         * estimates, the factor is the observation's variance going up by
+         * 1/factor, and the fit's share rises to match -- the same rule the
+         * smoother applies along the line of sight. Never less than it was.
+         */
+        const strength = cell.smoothingStrength;
+        cell.smoothingStrength = strength / (strength + factor * (1 - strength));
+        cell.hiddenTrust = factor;
+        stageCounts.framesHidden += 1;
+      }
+    }
+  }
+
+  /**
+   * The line-of-sight doubt on one joint on one frame, from where it is now.
+   * Both the solver and the smoother take it: the solver to decide which way
+   * a joint gives when a bone is out, the smoother to settle depth jitter
+   * harder than jitter across the picture.
+   */
+  const depthDoubtOf = (joint: ClarityJoint, index: number, position: Vec3): DepthDoubt | null => {
+    const camera = context?.cameras[index];
+    if (!context || !stages.depthBid || !camera) return null;
+    const ratio = context.depthDoubt[joint];
+    if (ratio <= 1 || !fromDetector(cells[joint][index])) return null;
+    return { ray: normalise(sub(position, camera)), ratio };
+  };
+
+  const depthDoubtAt = (
+    index: number,
+    joints: Readonly<Record<ClarityJoint, Vec3>>
+  ): Partial<Record<ClarityJoint, DepthDoubt>> => {
+    const doubt: Partial<Record<ClarityJoint, DepthDoubt>> = {};
+    for (const joint of CLARITY_JOINTS) {
+      const entry = depthDoubtOf(joint, index, joints[joint]);
+      if (entry) doubt[joint] = entry;
+    }
+    return doubt;
+  };
+
+  /* ------------------------------------------------------------------ *
    * 7. Constrain, smooth, then constrain again
    *
    * The order is not cosmetic. Smoothing moves joints independently along
@@ -475,7 +579,12 @@ export const reconstruct = (
             : clampUnit(trust[joint] * penalise(disagreementM / neighboursUsed, agreementScaleM));
       }
 
-      const solved = applyConstraints({ joints, trust: agreed, model });
+      const solved = applyConstraints({
+        joints,
+        trust: agreed,
+        model,
+        depthDoubt: depthDoubtAt(index, joints),
+      });
       stageCounts.constraintViolations += solved.violations.size;
 
       for (const joint of CLARITY_JOINTS) {
@@ -502,6 +611,7 @@ export const reconstruct = (
         strength: column.map((cell) =>
           cell.source === "missing" ? 0 : cell.smoothingStrength
         ),
+        doubt: column.map((cell, index) => depthDoubtOf(joint, index, cell.position)),
       });
       for (let index = 0; index < frameCount; index += 1) {
         column[index].position = result.positions[index];
@@ -547,33 +657,6 @@ export const reconstruct = (
     const joints = {} as Record<ClarityJoint, Vec3>;
     for (const joint of CLARITY_JOINTS) joints[joint] = cells[joint][index].position;
 
-    /*
-     * The camera is fitted from joints that were actually SEEN -- their image
-     * position is the evidence. A reconstructed joint has a position but no
-     * pixel to justify it, so it cannot calibrate anything.
-     *
-     * And it is fitted from the positions the detector SAW, not the ones the
-     * reconstruction settled on. The pixel and the detector's 3D lift are one
-     * measurement of one thing; pairing that pixel with a position some
-     * later stage moved teaches the camera a correspondence nobody observed.
-     * It also made the club hostage to every stage above it: the foot leash
-     * pulling a knee a few millimetres toward its anchored ankle shifted the
-     * per-frame cameras enough to move the shaft length estimate by 12mm
-     * and mirror the finish. Fitted from the observations, the camera does
-     * not change when the body reconstruction does.
-     */
-    const correspondences = CLARITY_JOINTS.flatMap((joint) => {
-      const observed = observation.joints[joint];
-      if (!observed) return [];
-      return [
-        {
-          world: observed.position as Vec3,
-          image: observed.image,
-          weight: observed.visibility,
-        },
-      ];
-    });
-
     const usable = (joint: ClarityJoint) => cells[joint][index].source !== "missing";
     const hands =
       usable("leftHand") && usable("rightHand")
@@ -595,7 +678,7 @@ export const reconstruct = (
         sub(joints.leftElbow, joints.leftWrist),
         sub(joints.rightElbow, joints.rightWrist),
       ],
-      camera: fitCamera(correspondences),
+      camera: cameras[index],
       observation: observation.club,
     };
   });
@@ -615,7 +698,8 @@ export const reconstruct = (
       cells,
       observations,
       heightM,
-      club.frames[index] ?? null
+      club.frames[index] ?? null,
+      context
     )
   );
 
@@ -637,6 +721,7 @@ export const reconstruct = (
     arm,
     girdle,
     contradictions,
+    context,
     sequence: {
       frames,
       fps: observations.fps,
@@ -693,6 +778,34 @@ const bodyContradicts = (
   // 4% of standing height -- about 70mm on a 1.8m golfer -- is a broken limb.
   return disagreementM / neighboursUsed > heightM * 0.04;
 };
+
+/**
+ * What one frame can teach a camera: every SEEN joint's 3D position and the
+ * pixel it was seen at.
+ *
+ * A reconstructed joint has a position but no pixel to justify it, so it
+ * cannot calibrate anything. And it is the position the detector SAW, not
+ * the one the reconstruction settled on. The pixel and the detector's 3D
+ * lift are one measurement of one thing; pairing that pixel with a position
+ * some later stage moved teaches the camera a correspondence nobody
+ * observed. It also made the club hostage to every stage above it: the foot
+ * leash pulling a knee a few millimetres toward its anchored ankle shifted
+ * the per-frame cameras enough to move the shaft length estimate by 12mm and
+ * mirror the finish. Fitted from the observations, the camera does not
+ * change when the body reconstruction does.
+ */
+const correspondencesOf = (observation: WorldObservationFrame): Correspondence[] =>
+  CLARITY_JOINTS.flatMap((joint) => {
+    const observed = observation.joints[joint];
+    if (!observed) return [];
+    return [
+      {
+        world: observed.position as Vec3,
+        image: observed.image,
+        weight: observed.visibility,
+      },
+    ];
+  });
 
 /* ------------------------------------------------------------------ *
  * Reacquisition validation
@@ -828,7 +941,8 @@ const assembleFrame = (
   cells: Record<ClarityJoint, Cell[]>,
   observations: WorldObservationSequence,
   heightM: number,
-  club: ClubEstimate | null
+  club: ClubEstimate | null,
+  context: ContextBidReport | null
 ): ClarityFrame => {
   const joints = {} as Record<ClarityJoint, Vec3>;
   const provenance = {} as Record<ClarityJoint, JointProvenance>;
@@ -856,6 +970,19 @@ const assembleFrame = (
       framesSinceObserved: cell.framesSinceObserved,
       gapLength: cell.gapLength,
       rawConfidence: cell.rawConfidence,
+      ...(context && context.cameras[index]
+        ? {
+            context: {
+              depthDoubt:
+                cell.source === "observed" || cell.source === "constrained"
+                  ? context.depthDoubt[joint]
+                  : 1,
+              hidden: context.hiding[joint][index].amount,
+              hiddenBy: context.hiding[joint][index].by,
+              hiddenTrust: cell.hiddenTrust ?? 1,
+            },
+          }
+        : {}),
     };
   }
 

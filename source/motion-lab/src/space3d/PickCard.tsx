@@ -8,7 +8,7 @@
  * it open shows the numbers change.
  */
 
-import type { ClarityFrame, ClaritySequence, Vec3 } from "../contracts";
+import type { ClarityFrame, ClaritySequence, JointContext, Vec3 } from "../contracts";
 import type { ScenePick } from "./ClarityScene";
 import { PROVENANCE_LABELS } from "./palette";
 
@@ -61,6 +61,32 @@ const describeSource = (source: keyof typeof PROVENANCE_LABELS): string => {
   }
 };
 
+/**
+ * The context bids on a joint, in words: how good a witness the detector was
+ * from where the camera stood. Neither says where the joint is -- only how
+ * hard it held its ground when the bones disagreed with it.
+ */
+const contextRows = (context: JointContext): { label: string; value: string }[] => {
+  const sight =
+    context.depthDoubt > 1.05
+      ? `depth ${Math.sqrt(context.depthDoubt).toFixed(1)}× noisier than the picture — bone fixes move it toward or away from the lens first`
+      : "depth as good as the picture";
+
+  let hidden = "in plain view";
+  if (context.hidden > 0.05) {
+    const behind = `${pct(context.hidden)} behind the ${context.hiddenBy}`;
+    hidden =
+      context.hiddenTrust < 0.995
+        ? `${behind} — trust ×${context.hiddenTrust.toFixed(2)}, gives way to its neighbours`
+        : `${behind} — not charged, hidden joints were no noisier on this clip`;
+  }
+
+  return [
+    { label: "Line of sight", value: sight },
+    { label: "Hidden", value: hidden },
+  ];
+};
+
 export function PickCard({
   pick,
   frame,
@@ -86,6 +112,7 @@ export function PickCard({
         { label: "Detector confidence", value: pct(provenance.rawConfidence) },
         { label: "Detector", value: detectorVerdict(provenance.rawConfidence, provenance.source) },
         { label: "Frames since seen", value: String(provenance.framesSinceObserved) },
+        ...(provenance.context ? contextRows(provenance.context) : []),
         { label: "Position", value: at(frame.body.joints[pick.joint]) },
       ];
       note = describeSource(provenance.source);
