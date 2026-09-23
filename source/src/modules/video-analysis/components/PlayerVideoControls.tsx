@@ -205,6 +205,92 @@ export function PlayerToolRail({
   );
 }
 
+const IconMarkers = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+    <circle cx="12" cy="4.5" r="1.8" />
+    <path d="M12 7.5v6.5M7 10l5-1.5 5 1.5M12 14l-3.5 6M12 14l3.5 6" strokeLinecap="round" strokeLinejoin="round" />
+    <circle cx="7" cy="10" r="1.1" fill="currentColor" stroke="none" />
+    <circle cx="17" cy="10" r="1.1" fill="currentColor" stroke="none" />
+    <circle cx="8.5" cy="20" r="1.1" fill="currentColor" stroke="none" />
+    <circle cx="15.5" cy="20" r="1.1" fill="currentColor" stroke="none" />
+  </svg>
+);
+
+const IconGroundForce = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+    <path d="M8 3.5c2 0 3 1.8 3 4.3 0 2.2-.9 3.6-.9 5.6s.6 3.2.3 4.9c-.3 1.6-1.4 2.2-2.6 2.2S5.5 19.6 5.5 18c0-1.8.6-3 .3-5C5.4 11 5 9.7 5.2 7.6 5.5 5 6.6 3.5 8 3.5Z" />
+    <path d="M16 3.5c-2 0-3 1.8-3 4.3 0 2.2.9 3.6.9 5.6s-.6 3.2-.3 4.9c.3 1.6 1.4 2.2 2.6 2.2s2.3-.9 2.3-2.5c0-1.8-.6-3-.3-5 .4-2 .8-3.3.6-5.4C18.5 5 17.4 3.5 16 3.5Z" />
+    <path d="M7.5 15.5h1M15.5 15.5h1" strokeLinecap="round" />
+  </svg>
+);
+
+export type AnalysisRailProps = {
+  /** Unset where the 3D lab cannot run (the native shell). */
+  onOpen3D?: () => void;
+  motionLabOpen: boolean;
+  motionLabDisabled?: boolean;
+  showMarkers: boolean;
+  onToggleMarkers: () => void;
+  showGroundForce: boolean;
+  onToggleGroundForce: () => void;
+};
+
+/**
+ * The drawing rail's mirror on the right edge: the reads of the body rather
+ * than marks on the picture. Always out -- three buttons do not need putting
+ * away, and each is a state worth seeing at a glance.
+ */
+export function AnalysisRail({
+  onOpen3D,
+  motionLabOpen,
+  motionLabDisabled,
+  showMarkers,
+  onToggleMarkers,
+  showGroundForce,
+  onToggleGroundForce,
+}: AnalysisRailProps) {
+  return (
+    <div className="va-analysis-rail" role="toolbar" aria-label="Body analysis">
+      {onOpen3D ? (
+        <>
+          <button
+            type="button"
+            className={`va-rail-btn va-rail-btn-3d${motionLabOpen ? " is-active" : ""}`}
+            aria-label="3D motion"
+            title="3D motion"
+            aria-pressed={motionLabOpen}
+            disabled={motionLabDisabled}
+            onClick={onOpen3D}
+          >
+            3D
+          </button>
+          <span className="va-rail-rule" aria-hidden="true" />
+        </>
+      ) : null}
+      <button
+        type="button"
+        className={`va-rail-btn${showMarkers ? " is-active" : ""}`}
+        aria-label="Live body markers"
+        title="Live body markers"
+        aria-pressed={showMarkers}
+        onClick={onToggleMarkers}
+      >
+        <IconMarkers />
+      </button>
+      <button
+        type="button"
+        className={`va-rail-btn${showGroundForce ? " is-active" : ""}`}
+        aria-label="Ground force heat map"
+        title="Ground force heat map"
+        aria-pressed={showGroundForce}
+        onClick={onToggleGroundForce}
+      >
+        <IconGroundForce />
+      </button>
+    </div>
+  );
+}
+
 export type PlayerActionBarProps = {
   isPlaying: boolean;
   onTogglePlay: () => void;

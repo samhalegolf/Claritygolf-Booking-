@@ -34,6 +34,8 @@ export interface VideoCanvasProps {
   overlayDimensions: Dimensions;
   onDimensionsChange: (dimensions: Dimensions) => void;
   onTogglePlay?: () => void;
+  /** Drawn under the markings, inside the box that hugs the picture. */
+  underlay?: React.ReactNode;
 }
 
 const toPath = (points: DrawingPoint[], width: number, height: number) => {
@@ -115,6 +117,7 @@ export function VideoCanvas({
   overlayDimensions,
   onDimensionsChange,
   onTogglePlay,
+  underlay,
 }: VideoCanvasProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const dimensionsRef = useRef(overlayDimensions);
@@ -330,6 +333,7 @@ export function VideoCanvas({
         onLoadedMetadata={liveStream ? undefined : onLoadMetadata}
       />
       <div className="video-overlay">
+        {underlay}
         {captureBox ? (
           <div
             className="capture-box"

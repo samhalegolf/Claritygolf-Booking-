@@ -40,10 +40,10 @@ export interface PoseProviderOptions {
   minTrackingConfidence?: number;
 }
 
-const DEFAULT_WASM_ROOT =
-  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm";
-const DEFAULT_MODULE_URL =
-  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.mjs";
+// The same self-hosted WASM the motion lab loads (motion-lab/vite.plugins.ts
+// serves it at this route in dev and emits it on build), and the package the
+// lab pins -- not jsDelivr's @latest, which could change under a live clip.
+const DEFAULT_WASM_ROOT = "/mediapipe-wasm";
 const DEFAULT_MODEL =
   "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task";
 
@@ -55,7 +55,7 @@ export class MediaPipePoseProvider {
   async initialise() {
     if (this.landmarker) return;
 
-    const module = (await import(/* @vite-ignore */ DEFAULT_MODULE_URL)) as MediaPipeVisionModule;
+    const module = (await import("@mediapipe/tasks-vision")) as unknown as MediaPipeVisionModule;
     const fileset = await module.FilesetResolver.forVisionTasks(
       this.options.wasmRoot || DEFAULT_WASM_ROOT
     );

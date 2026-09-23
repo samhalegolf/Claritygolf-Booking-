@@ -2441,6 +2441,252 @@
   font-size: 0.9rem;
 }
 
-.video-header-motion-lab {
+/* --- The body-analysis rail -------------------------------------------
+   The drawing rail's mirror on the right edge of the frame: 3D, live body
+   markers, ground force. Always out -- it is three buttons, and whether the
+   markers or the force card are on is worth seeing without opening
+   anything. Same surface and buttons as the drawing rail, so the two edges
+   read as one set of chrome. */
+
+.va-analysis-rail {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 5px;
+  border-radius: var(--c-radius-pill, 999px);
+  background: var(--va-scrim);
+  backdrop-filter: blur(8px);
+}
+
+/* A word, not a glyph: "3D" is what coaches call it, and it is the one
+   button on either rail that opens somewhere else. */
+.va-rail-btn-3d {
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+/* --- Live pose ----------------------------------------------------------
+   The markers canvas lives inside .video-overlay, so it is measured from
+   the box that hugs the picture -- the same one the drawings use. It never
+   takes a pointer: the drawings above it still need every press. */
+
+.va-pose-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.va-pose-status {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 5px 11px;
+  border-radius: var(--c-radius-pill, 999px);
+  background: var(--va-scrim);
+  color: var(--va-on-scrim);
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.va-pose-status.is-error {
+  color: var(--va-danger-text);
+}
+
+/* --- Ground force card ----------------------------------------------------
+   The "Estimated" state of the Clarity Pressure View widget. It docks in the
+   panel's bottom-right corner, beside the picture rather than on it, and
+   the dock itself never takes a pointer so the empty corner stays video. */
+
+.va-force-dock {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 6;
+  pointer-events: none;
+}
+
+.va-force-card {
+  width: 264px;
+  border: 1px solid var(--va-border);
+  border-radius: 12px;
+  background: var(--va-panel);
+  color: var(--va-text);
+  box-shadow: var(--va-shadow-strong);
+  overflow: hidden;
+  pointer-events: auto;
+}
+
+.va-force-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding-left: 12px;
+  border-bottom: 1px solid var(--va-line-soft);
+}
+
+.va-force-head h2 {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.va-force-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 8px;
+  border: 1px solid var(--va-border-strong);
+  border-radius: var(--c-radius-pill, 999px);
+  color: var(--va-text-body);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+.va-force-tag svg {
+  width: 9px;
+  height: 9px;
+  fill: none;
+  stroke: var(--c-load-6);
+  stroke-width: 1.7;
+  stroke-linecap: round;
+}
+
+.va-force-close {
+  width: 40px;
+  height: 40px;
   margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--va-text-soft);
+  cursor: pointer;
+}
+
+.va-force-close:hover {
+  color: var(--va-text);
+}
+
+.va-force-close svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+}
+
+.va-force-feet {
+  display: block;
+  width: calc(100% - 16px);
+  height: auto;
+  margin: 8px 8px 4px;
+}
+
+.va-force-area {
+  fill: var(--va-bg);
+  stroke: var(--va-line-soft);
+  stroke-width: 1;
+}
+
+.va-force-foot-label {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  fill: var(--va-muted);
+}
+
+.va-force-caption {
+  font-size: 10.5px;
+  fill: var(--va-muted);
+}
+
+.va-force-sole {
+  fill: none;
+  stroke: var(--va-border-strong);
+  stroke-width: 2.4;
+}
+
+.va-force-hatch-line {
+  stroke: rgba(244, 247, 242, 0.16);
+  stroke-width: 2.5;
+}
+
+.va-force-split {
+  padding: 0 12px 12px;
+}
+
+.va-force-split-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.va-force-split-row b {
+  width: 36px;
+  flex: none;
+  font-size: 1rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.va-force-split-row b:last-child {
+  text-align: right;
+}
+
+.va-force-bar {
+  flex: 1;
+  display: flex;
+  height: 10px;
+  border-radius: var(--c-radius-pill, 999px);
+  overflow: hidden;
+  background: var(--va-hover);
+}
+
+.va-force-bar > span {
+  display: block;
+  transition: width 120ms linear;
+}
+
+.va-force-bar .va-force-bar-gap {
+  width: 2px;
+  flex: none;
+  background: var(--va-panel);
+}
+
+.va-force-split-names {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 3px;
+  font-size: 0.6875rem;
+  color: var(--va-muted);
+}
+
+.va-force-empty {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--va-muted);
+}
+
+.va-force-note {
+  margin: 6px 0 0;
+  font-size: 0.6875rem;
+  line-height: 1.45;
+  color: var(--va-muted);
 }

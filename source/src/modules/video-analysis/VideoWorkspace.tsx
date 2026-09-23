@@ -24,18 +24,19 @@ import {
   IconBack,
   IconCamera,
   IconEdit,
-  IconMotion3D,
   IconRecord,
   IconSettings,
   IconUpload,
 } from "./components/VideoIcons";
 import type { MotionLabSwing } from "../../../motion-lab/src/embed/MotionLabView";
 import {
+  AnalysisRail,
   PlayerActionBar,
   PlayerToolRail,
   PlayerToolRailToggle,
 } from "./components/PlayerVideoControls";
 import { VideoSettingsSheet } from "./components/VideoSettingsSheet";
+import { LivePoseLayer } from "./components/LivePoseLayer";
 import { ToolButton } from "./components/ToolButton";
 import {
   ComparisonSide,
@@ -683,6 +684,24 @@ export function VideoWorkspace({
   const [motionLabSwing, setMotionLabSwing] = useState<MotionLabSwing | null>(null);
   const [motionLabOpen, setMotionLabOpen] = useState(false);
   const [motionLabError, setMotionLabError] = useState<string | null>(null);
+  // The right rail's two live reads. Shared by both panels in compare mode,
+  // like the drawing rail: a toggle is a way of looking, not a clip setting.
+  const [showBodyMarkers, setShowBodyMarkers] = useState(false);
+  const [showGroundForce, setShowGroundForce] = useState(false);
+  // Each panel's slot for the ground-force card. Stable callbacks, so React
+  // does not detach and reattach the ref on every render.
+  const [forceHosts, setForceHosts] = useState<Record<ComparisonSide, HTMLElement | null>>({
+    left: null,
+    right: null,
+  });
+  const setLeftForceHost = useCallback(
+    (element: HTMLElement | null) => setForceHosts((current) => ({ ...current, left: element })),
+    []
+  );
+  const setRightForceHost = useCallback(
+    (element: HTMLElement | null) => setForceHosts((current) => ({ ...current, right: element })),
+    []
+  );
 
   const timelineEngine = useMemo(() => new TimelineEngine(), []);
   const modeIsCompare = comparisonMode === "compare";
@@ -826,6 +845,8 @@ export function VideoWorkspace({
   });
 
   const effectiveActiveSide: ComparisonSide = modeIsCompare ? activeSide : "left";
+  // The body-analysis rail is coach console only, like the 3D lab it opens.
+  const showAnalysisRail = !isPlayerVariant;
   const activePlayback =
     effectiveActiveSide === "left" ? leftPlayback : rightPlayback;
   const activeDrawing = effectiveActiveSide === "left" ? leftDrawing : rightDrawing;
@@ -3671,6 +3692,18 @@ export function VideoWorkspace({
               setActiveSideInCompare(side);
               playPauseSide(side);
             }}
+            underlay={
+              showAnalysisRail ? (
+                <LivePoseLayer
+                  videoRef={isLeft ? leftVideoRef : rightVideoRef}
+                  showMarkers={showBodyMarkers}
+                  showGroundForce={showGroundForce}
+                  dimensions={overlayDimensions}
+                  widgetHost={forceHosts[side]}
+                  onCloseGroundForce={() => setShowGroundForce(false)}
+                />
+              ) : null
+            }
           />
           {hasSelectionDraft ? <div className="focus-selection-overlay" style={draftStyle || undefined} /> : null}
           {captureAnimation?.side === side ? (
@@ -3698,6 +3731,21 @@ export function VideoWorkspace({
             captureTooltip={
               captureBox ? "Screenshot the box (Space)" : "Screenshot the frame (Space)"
             }
+          />
+          {showAnalysisRail ? (
+            <AnalysisRail
+              onOpen3D={MOTION_LAB_AVAILABLE ? () => void openMotionLab() : undefined}
+              motionLabOpen={motionLabOpen}
+              motionLabDisabled={saveBusy}
+              showMarkers={showBodyMarkers}
+              onToggleMarkers={() => setShowBodyMarkers((previous) => !previous)}
+              showGroundForce={showGroundForce}
+              onToggleGroundForce={() => setShowGroundForce((previous) => !previous)}
+            />
+          ) : null}
+          <div
+            className="va-force-dock"
+            ref={isLeft ? setLeftForceHost : setRightForceHost}
           />
         </div>
         <Timeline
@@ -3793,17 +3841,6 @@ export function VideoWorkspace({
             onClick={handleBackAction}
           />
           {playerName ? <span className="video-header-compact-title">{playerName}</span> : null}
-          {MOTION_LAB_AVAILABLE ? (
-            <ToolButton
-              icon={<IconMotion3D />}
-              label="3D motion"
-              tooltip="3D motion"
-              className="is-subtle video-header-motion-lab"
-              active={motionLabOpen}
-              disabled={saveBusy}
-              onClick={() => void openMotionLab()}
-            />
-          ) : null}
         </div>
       ) : (
         <div className="video-analysis-header">
