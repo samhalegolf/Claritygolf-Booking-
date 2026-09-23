@@ -146,6 +146,14 @@ export const SCENARIOS: readonly Scenario[] = [
     detector: { cameraYawDeg: DEMO_CAMERA_YAW_DEG },
   },
   {
+    key: "depth-guessed",
+    label: "Depth guessed, down the line",
+    purpose:
+      "20mm of noise on the detector's DEPTH only, filmed down the line -- the picture is exact, the lift into 3D is not, which is how a real detector fails. Click a joint: the card says how much worse depth measured than the picture, and bone fixes move joints along the line of sight first. The far hip, knee and ankle read as hidden behind the near leg.",
+    options: { source: "synthetic:depth-guessed" },
+    detector: { cameraYawDeg: -90, depthNoiseM: 0.02 },
+  },
+  {
     key: "messy",
     label: "Everything at once",
     purpose:

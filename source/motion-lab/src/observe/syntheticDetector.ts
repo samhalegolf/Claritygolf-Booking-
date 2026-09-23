@@ -60,7 +60,34 @@ export interface SyntheticDetectorOptions {
   /** Jitter on the detected clubhead, in normalised image units. */
   readonly clubNoise?: number;
   readonly clubConfidence?: number;
+  /**
+   * Noise on the detector's DEPTH only, metres, standard deviation. Real
+   * detectors place a point well across the picture and badly along the
+   * line of sight; this is that, applied to the 3D landmarks after the image
+   * is taken, so the pixels stay honest and only the lift is wrong.
+   */
+  readonly depthNoiseM?: number;
+  /**
+   * Extra noise on one joint's 3D landmark, in every direction, metres --
+   * for a detector that does worse on some joints on some frames, as it does
+   * on a joint it cannot see. Also after the image, for the same reason.
+   */
+  readonly jointNoiseM?: (joint: ClarityJoint, frameIndex: number) => number;
 }
+
+/**
+ * A standard normal from integers, deterministically. A fixture that flakes
+ * is worse than one that is slightly unrealistic.
+ */
+const gaussianAt = (a: number, b: number, c: number): number => {
+  const hash = (seed: number) => {
+    const x = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
+    return x - Math.floor(x);
+  };
+  const u = Math.max(1e-9, hash(a * 7919 + b * 104729 + c * 1299709 + 1));
+  const v = hash(a * 6271 + b * 15487 + c * 32452843 + 2);
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+};
 
 const DEG = Math.PI / 180;
 
@@ -158,11 +185,14 @@ export const detectFromClarityFrame = (
     );
 
   const world: RawLandmark[] = new Array(MP_LANDMARK_COUNT).fill(MISSING);
+  // Which Clarity joint each landmark was placed for, so its noise can be.
+  const placedFor: (ClarityJoint | null)[] = new Array(MP_LANDMARK_COUNT).fill(null);
 
-  const place = (index: number, position: Vec3, hidden: boolean) => {
+  const place = (index: number, position: Vec3, hidden: boolean, joint?: ClarityJoint) => {
     world[index] = hidden
       ? MISSING
       : landmark(toMediaPipeAxes(position, hipCentre, yawRad, pitchRad), visibility);
+    placedFor[index] = joint ?? null;
   };
 
   // The stance axis is what the ears and knuckles are spread along. Derived
@@ -170,39 +200,57 @@ export const detectFromClarityFrame = (
   const across = sub(joints.rightShoulder, joints.leftShoulder);
 
   const [leftEar, rightEar] = spreadPair(joints.head, across, 0.075);
-  place(MP.LEFT_EAR, leftEar, isHidden("head"));
-  place(MP.RIGHT_EAR, rightEar, isHidden("head"));
+  place(MP.LEFT_EAR, leftEar, isHidden("head"), "head");
+  place(MP.RIGHT_EAR, rightEar, isHidden("head"), "head");
   // The nose is not used by the mapping, but a detector would report it and
   // the overlay draws whatever it is given.
-  place(MP.NOSE, add(joints.head, scale(normalise(sub(joints.head, joints.neck)), 0.02)), isHidden("head"));
+  place(MP.NOSE, add(joints.head, scale(normalise(sub(joints.head, joints.neck)), 0.02)), isHidden("head"), "head");
 
-  place(MP.LEFT_SHOULDER, joints.leftShoulder, isHidden("leftShoulder"));
-  place(MP.RIGHT_SHOULDER, joints.rightShoulder, isHidden("rightShoulder"));
-  place(MP.LEFT_ELBOW, joints.leftElbow, isHidden("leftElbow"));
-  place(MP.RIGHT_ELBOW, joints.rightElbow, isHidden("rightElbow"));
-  place(MP.LEFT_WRIST, joints.leftWrist, isHidden("leftWrist"));
-  place(MP.RIGHT_WRIST, joints.rightWrist, isHidden("rightWrist"));
+  place(MP.LEFT_SHOULDER, joints.leftShoulder, isHidden("leftShoulder"), "leftShoulder");
+  place(MP.RIGHT_SHOULDER, joints.rightShoulder, isHidden("rightShoulder"), "rightShoulder");
+  place(MP.LEFT_ELBOW, joints.leftElbow, isHidden("leftElbow"), "leftElbow");
+  place(MP.RIGHT_ELBOW, joints.rightElbow, isHidden("rightElbow"), "rightElbow");
+  place(MP.LEFT_WRIST, joints.leftWrist, isHidden("leftWrist"), "leftWrist");
+  place(MP.RIGHT_WRIST, joints.rightWrist, isHidden("rightWrist"), "rightWrist");
 
   const handAxis = sub(joints.rightHand, joints.leftHand);
   const [leftIndex, leftPinky] = spreadPair(joints.leftHand, handAxis, 0.028);
-  place(MP.LEFT_INDEX, leftIndex, isHidden("leftHand"));
-  place(MP.LEFT_PINKY, leftPinky, isHidden("leftHand"));
+  place(MP.LEFT_INDEX, leftIndex, isHidden("leftHand"), "leftHand");
+  place(MP.LEFT_PINKY, leftPinky, isHidden("leftHand"), "leftHand");
   const [rightIndex, rightPinky] = spreadPair(joints.rightHand, handAxis, 0.028);
-  place(MP.RIGHT_INDEX, rightIndex, isHidden("rightHand"));
-  place(MP.RIGHT_PINKY, rightPinky, isHidden("rightHand"));
+  place(MP.RIGHT_INDEX, rightIndex, isHidden("rightHand"), "rightHand");
+  place(MP.RIGHT_PINKY, rightPinky, isHidden("rightHand"), "rightHand");
 
-  place(MP.LEFT_HIP, joints.leftHip, isHidden("leftHip"));
-  place(MP.RIGHT_HIP, joints.rightHip, isHidden("rightHip"));
-  place(MP.LEFT_KNEE, joints.leftKnee, isHidden("leftKnee"));
-  place(MP.RIGHT_KNEE, joints.rightKnee, isHidden("rightKnee"));
-  place(MP.LEFT_ANKLE, joints.leftAnkle, isHidden("leftAnkle"));
-  place(MP.RIGHT_ANKLE, joints.rightAnkle, isHidden("rightAnkle"));
-  place(MP.LEFT_HEEL, joints.leftHeel, isHidden("leftHeel"));
-  place(MP.RIGHT_HEEL, joints.rightHeel, isHidden("rightHeel"));
-  place(MP.LEFT_FOOT_INDEX, joints.leftToe, isHidden("leftToe"));
-  place(MP.RIGHT_FOOT_INDEX, joints.rightToe, isHidden("rightToe"));
+  place(MP.LEFT_HIP, joints.leftHip, isHidden("leftHip"), "leftHip");
+  place(MP.RIGHT_HIP, joints.rightHip, isHidden("rightHip"), "rightHip");
+  place(MP.LEFT_KNEE, joints.leftKnee, isHidden("leftKnee"), "leftKnee");
+  place(MP.RIGHT_KNEE, joints.rightKnee, isHidden("rightKnee"), "rightKnee");
+  place(MP.LEFT_ANKLE, joints.leftAnkle, isHidden("leftAnkle"), "leftAnkle");
+  place(MP.RIGHT_ANKLE, joints.rightAnkle, isHidden("rightAnkle"), "rightAnkle");
+  place(MP.LEFT_HEEL, joints.leftHeel, isHidden("leftHeel"), "leftHeel");
+  place(MP.RIGHT_HEEL, joints.rightHeel, isHidden("rightHeel"), "rightHeel");
+  place(MP.LEFT_FOOT_INDEX, joints.leftToe, isHidden("leftToe"), "leftToe");
+  place(MP.RIGHT_FOOT_INDEX, joints.rightToe, isHidden("rightToe"), "rightToe");
 
   const image = toImageLandmarks(world);
+
+  // Noise on the lift, after the pixels were taken from the clean body.
+  const depthNoiseM = options.depthNoiseM ?? 0;
+  if (depthNoiseM > 0 || options.jointNoiseM) {
+    for (let index = 0; index < world.length; index += 1) {
+      const entry = world[index];
+      if (entry.visibility <= 0) continue;
+      const joint = placedFor[index];
+      const extra = joint && options.jointNoiseM ? options.jointNoiseM(joint, frame.index) : 0;
+      // MediaPipe's world Z is the camera's depth axis.
+      world[index] = {
+        ...entry,
+        x: entry.x + gaussianAt(frame.index, index, 0) * extra,
+        y: entry.y + gaussianAt(frame.index, index, 1) * extra,
+        z: entry.z + gaussianAt(frame.index, index, 2) * Math.hypot(depthNoiseM, extra),
+      };
+    }
+  }
 
   /*
    * The clubhead, projected the same way the body landmarks are.

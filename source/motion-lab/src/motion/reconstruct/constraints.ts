@@ -35,7 +35,7 @@
  */
 
 import type { ClarityJoint, Metres, Unit, Vec3 } from "../../contracts";
-import { RIGID_BONES, add, boneKey, distance, scale, sub } from "../../contracts";
+import { RIGID_BONES, add, boneKey, distance, dot, scale, sub } from "../../contracts";
 import type { MeasuredBodyModel } from "./bodyModel";
 
 export interface ConstraintInput {
@@ -43,6 +43,20 @@ export interface ConstraintInput {
   /** How well each joint is known, 0..1. Drives who yields. */
   readonly trust: Readonly<Record<ClarityJoint, Unit>>;
   readonly model: MeasuredBodyModel;
+  /**
+   * Joints whose position is doubted more along one direction than across
+   * it: the camera's line of sight, and how much worse depth is, as a
+   * variance ratio. See contextBids.ts. A joint absent here, or with a ratio
+   * of 1, yields the same in every direction.
+   */
+  readonly depthDoubt?: Readonly<Partial<Record<ClarityJoint, DepthDoubt>>>;
+}
+
+export interface DepthDoubt {
+  /** Unit vector from the camera toward the joint. */
+  readonly ray: Vec3;
+  /** Depth variance over picture variance. 1 is no doubt; larger yields more along `ray`. */
+  readonly ratio: number;
 }
 
 export interface ConstraintOptions {
@@ -135,6 +149,15 @@ export const applyConstraints = (
     }
   }
 
+  /** W·direction for one joint: which way, and how readily, it gives. */
+  const yieldAlong = (joint: ClarityJoint, direction: Vec3): Vec3 => {
+    const inverseTrust = 1 / ((input.trust[joint] ?? 0) + 1e-3);
+    const doubt = input.depthDoubt?.[joint];
+    if (!doubt || doubt.ratio <= 1) return scale(direction, inverseTrust);
+    const along = dot(doubt.ray, direction) * (doubt.ratio - 1);
+    return scale(add(direction, scale(doubt.ray, along)), inverseTrust);
+  };
+
   for (let pass = 0; pass < iterations; pass += 1) {
     let moved = false;
 
@@ -155,12 +178,25 @@ export const applyConstraints = (
        * the whole move; two equally confident joints share it. The epsilons
        * stop two fully trusted joints from deadlocking -- something has to
        * give, and without them neither would.
+       *
+       * With a line-of-sight doubt, "how easily does this joint move" is no
+       * longer one number: it moves easily along the ray and stiffly across
+       * it. That is an inverse mass MATRIX rather than a scalar,
+       *
+       *     W = (I + (ratio - 1) * ray rayᵀ) / trust
+       *
+       * and the projection is the standard one for it: each end moves along
+       * W·direction, scaled so the bone's length error is removed to first
+       * order. The joint therefore gives way toward or away from the lens,
+       * where the detector was guessing, and holds its place in the picture,
+       * where it was not. With no doubt W is the scalar above and the split
+       * is exactly the one it always was.
        */
-      const fromTrust = (input.trust[bone.from] ?? 0) + 1e-3;
-      const toTrust = (input.trust[bone.to] ?? 0) + 1e-3;
-      const total = fromTrust + toTrust;
-      const fromShare = toTrust / total;
-      const toShare = fromTrust / total;
+      const excess = error > 0 ? error - allowed : error + allowed;
+      const direction = scale(sub(to, from), 1 / actual);
+      const fromStep = yieldAlong(bone.from, direction);
+      const toStep = yieldAlong(bone.to, direction);
+      const total = dot(fromStep, direction) + dot(toStep, direction);
 
       /*
        * Correct only the excess. A bone sitting at the edge of what it was
@@ -168,10 +204,8 @@ export const applyConstraints = (
        * the median would be the solver asserting a precision the measurement
        * never had.
        */
-      const excess = error > 0 ? error - allowed : error + allowed;
-      const direction = scale(sub(to, from), 1 / actual);
-      joints[bone.from] = add(from, scale(direction, excess * fromShare));
-      joints[bone.to] = sub(to, scale(direction, excess * toShare));
+      joints[bone.from] = add(from, scale(fromStep, excess / total));
+      joints[bone.to] = sub(to, scale(toStep, excess / total));
       moved = true;
     }
 

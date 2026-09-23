@@ -28,7 +28,8 @@
  */
 
 import type { Unit, Vec3 } from "../../contracts";
-import { clamp, lerpVec } from "../../contracts";
+import { add, clamp, dot, scale, sub } from "../../contracts";
+import type { DepthDoubt } from "./constraints";
 
 export interface SmoothingOptions {
   /**
@@ -113,6 +114,12 @@ export interface SmoothInput {
    * its own visibility suggests, so it is passed in rather than derived here.
    */
   readonly strength: readonly Unit[];
+  /**
+   * Per-frame line-of-sight doubt, from contextBids.ts: the camera ray and
+   * how much worse depth was than the picture, as a variance ratio. Null or
+   * absent smooths the same in every direction.
+   */
+  readonly doubt?: readonly (DepthDoubt | null)[];
 }
 
 export interface SmoothResult {
@@ -155,7 +162,7 @@ export const smoothTrack = (
     ];
 
     const original = input.positions[index];
-    const blended = lerpVec(original, fitted, strength);
+    const blended = blendWithDoubt(original, fitted, strength, input.doubt?.[index] ?? null);
     positions.push(blended);
     correctionM.push(
       Math.hypot(
@@ -167,4 +174,33 @@ export const smoothTrack = (
   }
 
   return { positions, correctionM };
+};
+
+/**
+ * Move toward the fit, further along the line of sight than across it.
+ *
+ * The strength is read as the share a blend of two estimates gives the fit:
+ * the observation's variance over the sum of both. Along the ray the
+ * observation's variance is `ratio` times larger, so the fit's share there
+ * is
+ *
+ *     ratio * s / (ratio * s + (1 - s))
+ *
+ * which is `s` again when the ratio is one, and never less than `s`. Depth
+ * is only ever smoothed MORE; the picture keeps exactly the strength it had.
+ */
+const blendWithDoubt = (
+  original: Vec3,
+  fitted: Vec3,
+  strength: number,
+  doubt: DepthDoubt | null
+): Vec3 => {
+  const step = sub(fitted, original);
+  if (!doubt || doubt.ratio <= 1 || strength >= 1) return add(original, scale(step, strength));
+
+  const alongStrength = (doubt.ratio * strength) / (doubt.ratio * strength + (1 - strength));
+  const along = dot(step, doubt.ray);
+  const alongStep = scale(doubt.ray, along);
+  const acrossStep = sub(step, alongStep);
+  return add(original, add(scale(acrossStep, strength), scale(alongStep, alongStrength)));
 };

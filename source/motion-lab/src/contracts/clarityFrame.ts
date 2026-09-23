@@ -67,6 +67,29 @@ export interface JointProvenance {
   readonly gapLength: number;
   /** The detector's own confidence in the observation, if there was one. */
   readonly rawConfidence: Unit;
+  /**
+   * The context bids on this joint this frame: how good a witness the
+   * detector was, from where the camera stood. Absent when no camera could
+   * be fitted, because then there was no line of sight to reason about.
+   */
+  readonly context?: JointContext;
+}
+
+export interface JointContext {
+  /**
+   * How much worse this clip placed the joint along the camera's line of
+   * sight than across the picture, as a variance ratio. 1 means no worse,
+   * and when a bone is out the joint gives way toward or away from the lens
+   * that many times more readily than sideways. 1 for a joint that was not
+   * observed this frame, since the doubt is about the detector's reading.
+   */
+  readonly depthDoubt: number;
+  /** 0..1: how squarely another part of the body stood between it and the camera. */
+  readonly hidden: Unit;
+  /** What was in the way, in words. Null when nothing was. */
+  readonly hiddenBy: string | null;
+  /** What being hidden multiplied the joint's trust by. 1 when it did nothing. */
+  readonly hiddenTrust: Unit;
 }
 
 export interface FrameProvenance {
