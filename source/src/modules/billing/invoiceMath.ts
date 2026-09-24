@@ -65,7 +65,7 @@ export type InvoiceTotals = {
 };
 
 export function computeInvoiceTotals(
-  draft: Pick<InvoiceDraft, "lines" | "discountAmount" | "taxInclusive">,
+  draft: Pick<InvoiceDraft, "lines" | "discountAmount" | "discountPercent" | "taxInclusive">,
   taxRate: number,
 ): InvoiceTotals {
   let lineSubtotal = 0;
@@ -74,7 +74,13 @@ export function computeInvoiceTotals(
     lineSubtotal += invoiceLineNet(line);
     lineDiscountTotal += lineDiscountAmount(line);
   }
-  const discountTotal = Math.min(lineSubtotal, Math.max(0, Number(draft.discountAmount) || 0));
+  // A percentage discount is re-figured from the current subtotal, so adding or
+  // removing lines moves it; otherwise it is the fixed amount typed in.
+  const discountPercent = Math.max(0, Math.min(100, Number(draft.discountPercent) || 0));
+  const rawDiscount = discountPercent > 0
+    ? Math.round(lineSubtotal * discountPercent) / 100
+    : Math.max(0, Number(draft.discountAmount) || 0);
+  const discountTotal = Math.min(lineSubtotal, rawDiscount);
   const taxableSubtotal = Math.max(0, lineSubtotal - discountTotal);
   const taxRatePct = Math.max(0, Number(taxRate) || 0);
   // Inclusive: prices already contain tax, so tax is the rate/(100+rate) fraction

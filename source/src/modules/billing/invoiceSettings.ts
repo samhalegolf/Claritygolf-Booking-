@@ -22,6 +22,7 @@ export const defaultInvoiceSettings: InvoiceSettings = {
   taxName: "GST",
   taxNumber: "",
   taxRate: DEFAULT_TAX_RATE,
+  taxInclusive: false,
   bankAccount: "",
   paymentTermsDays: 7,
   businessAddress: "",
@@ -145,6 +146,7 @@ export function cleanInvoiceSettings(settings?: Partial<InvoiceSettings>): Invoi
         : defaultInvoiceSettings.taxName,
     taxNumber: typeof settings?.taxNumber === "string" ? settings.taxNumber.trim().slice(0, 80) : "",
     taxRate: Number.isFinite(taxRate) ? clamp(taxRate, 0, 30) : defaultInvoiceSettings.taxRate,
+    taxInclusive: settings?.taxInclusive === true,
     bankAccount: typeof settings?.bankAccount === "string" ? settings.bankAccount.trim().slice(0, 120) : "",
     paymentTermsDays: Number.isFinite(paymentTermsDays)
       ? clamp(Math.round(paymentTermsDays), 0, 120)

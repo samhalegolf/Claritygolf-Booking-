@@ -166,6 +166,7 @@ const defaultInvoiceSettings = {
   taxName: "GST",
   taxNumber: "",
   taxRate: 15,
+  taxInclusive: false,
   bankAccount: "",
   paymentTermsDays: 7,
   businessAddress: "",
@@ -1106,6 +1107,7 @@ function cleanInvoiceSettings(settings = {}, country = FALLBACK_PHONE_COUNTRY) {
     taxRate: Number.isFinite(taxRate)
       ? Math.max(0, Math.min(30, taxRate))
       : defaultInvoiceSettings.taxRate,
+    taxInclusive: settings?.taxInclusive === true,
     bankAccount: cleanString(settings?.bankAccount, "", 120),
     paymentTermsDays: Number.isFinite(paymentTermsDays)
       ? Math.max(0, Math.min(120, Math.round(paymentTermsDays)))

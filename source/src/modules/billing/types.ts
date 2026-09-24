@@ -26,6 +26,9 @@ export type InvoiceSettings = {
   taxName: string;
   taxNumber: string;
   taxRate: number;
+  // Whether new invoices treat line prices as already containing tax. A
+  // business-wide choice made once in Billing Settings, not per invoice.
+  taxInclusive: boolean;
   bankAccount: string;
   paymentTermsDays: number;
   businessAddress: string;
@@ -154,6 +157,10 @@ export type InvoiceDraft = {
   reference: string;
   discountLabel: string;
   discountAmount: number;
+  // Set when the invoice discount is a percentage (e.g. a "20%" preset). The
+  // dollar figure then tracks the subtotal as lines change; discountAmount is
+  // only the fixed figure. 0/absent = fixed amount.
+  discountPercent?: number;
   message: string;
   lineSearch: string;
   taxInclusive: boolean;

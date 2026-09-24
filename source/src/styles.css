@@ -9541,41 +9541,139 @@ button {
   min-width: 0;
 }
 
-.ip-discount-amount {
-  width: 74px;
-  text-align: right;
-}
-
-.ip-tax-mode {
-  display: flex;
-  justify-content: flex-end;
-  padding-top: 8px;
-}
-
-/* One button, not a two-up segmented control: inclusive and on-top are the
-   same setting seen from either side, and the label says which side you are
-   on rather than making you read two and spot the highlight. */
-.ip-tax-mode button {
-  height: 26px;
-  padding: 0 10px;
+/* A money or percent box: the symbol sits inside the dashed border, so a
+   figure never reads as a bare number. The border lives on the wrapper, so it
+   takes the focus style from :focus-within instead of the input. */
+.ip-paper .ip-affix {
   display: inline-flex;
   align-items: center;
-  border: 1px dashed var(--c-border-soft);
-  border-radius: var(--c-radius-pill);
-  background: var(--c-surface);
-  color: var(--c-text-soft);
-  font-size: 11.5px;
-  font-weight: 600;
-  cursor: pointer;
-  transition:
-    border-color var(--c-t-hover),
-    color var(--c-t-hover);
+  gap: 2px;
+  min-width: 0;
+  cursor: text;
 }
 
-.ip-tax-mode button:hover,
-.ip-tax-mode button:focus-visible {
-  border-color: var(--c-pencil);
+.ip-paper .ip-affix:focus-within {
+  border-style: solid;
+  border-color: var(--c-text);
+}
+
+.ip-paper .ip-affix > span,
+.ip-paper .ip-affix > i {
+  flex: none;
+  color: var(--c-text-soft);
+  font-style: normal;
+}
+
+/* Sized by flex, not a width: the wrapper is the field; this just fills it. */
+.ip-paper .ip-affix input {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: right;
+  outline: none;
+}
+
+.ip-drawer-field .ip-affix {
+  min-height: 32px;
+  padding: 0 8px;
+  font-size: 13px;
+}
+
+.ip-totals .ip-discount-amount {
+  width: 92px;
+}
+
+.ip-totals .ip-discount-done {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-pill);
+  background: var(--c-surface);
   color: var(--c-text);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* An applied discount is just another totals row: name, then the dollars it
+   comes to, then a remove that only shows itself on hover. */
+.ip-totals .ip-discount-name {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ip-totals .ip-discount-name:hover,
+.ip-totals .ip-discount-name:focus-visible {
+  color: var(--c-text);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+.ip-totals .ip-discount-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: inherit;
+}
+
+.ip-totals .ip-discount-remove {
+  width: 18px;
+  height: 18px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--c-text-soft);
+  opacity: 0.45;
+  cursor: pointer;
+  transition:
+    opacity var(--c-t-hover),
+    background var(--c-t-hover);
+}
+
+.ip-discount-applied:hover .ip-discount-remove,
+.ip-totals .ip-discount-remove:focus-visible {
+  opacity: 1;
+  background: var(--c-active);
+}
+
+.ip-totals .ip-discount-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 6px 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--c-text-soft);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ip-totals .ip-discount-add:hover,
+.ip-totals .ip-discount-add:focus-visible {
+  color: var(--c-text);
+}
+
+.ip-totals .ip-tax-note {
+  margin: 6px 0 0;
+  color: var(--c-text-soft);
+  font-size: 11.5px;
+  text-align: right;
 }
 
 /* --- Note and footer ------------------------------------------------------ */
@@ -14242,7 +14340,7 @@ button {
   border: 1px dashed var(--c-pencil);
 }
 
-.it-tax-mode {
+.invoice-template .it-tax-mode {
   height: 28px;
   padding: 0 var(--c-space-5);
   display: inline-flex;
@@ -14253,12 +14351,6 @@ button {
   color: var(--c-text-body);
   font-size: var(--c-size-meta);
   font-weight: 600;
-  cursor: pointer;
-}
-
-.it-tax-mode:hover {
-  border-color: var(--c-pencil);
-  color: var(--c-text);
 }
 
 .it-width {

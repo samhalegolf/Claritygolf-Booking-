@@ -4855,7 +4855,8 @@ function emptyInvoiceDraft(settings = defaultInvoiceSettings, coachId = defaultC
     // Customer note starts empty - not pre-filled from the default-note setting.
     message: "",
     lineSearch: "",
-    taxInclusive: false,
+    // Set once in Billing Settings, not chosen per invoice.
+    taxInclusive: settings.taxInclusive,
     lines: [],
   };
 }
@@ -7407,7 +7408,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           : openedInvoiceStatus === "void"
             ? "Void"
             : "Draft";
-  const invoiceDiscountLabel = invoiceDraft.discountLabel.trim() || "Discount / coupon";
+  // "The Range 20%" for a percentage discount, the plain name for a fixed one.
+  const invoiceDiscountLabel = [
+    invoiceDraft.discountLabel.trim() || "Discount",
+    invoiceDraft.discountPercent ? `${invoiceDraft.discountPercent}%` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
   const discountSet = invoiceDiscountTotal > 0 || invoiceDraft.discountLabel.trim() !== "";
   const invoiceEmailSubject = `${activeInvoiceNumber} from ${coachAccount.businessName}`;
   const invoiceEmailBody = [
@@ -15418,7 +15425,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     markInvoiceDraftDirty();
     setInvoiceDraft((current) => ({
       ...current,
-      lines: current.lines.map((line) => (line.id === id ? { ...line, [field]: value } : line)),
+      lines: current.lines.map((line) => {
+        if (line.id !== id) return line;
+        // One pulled lesson carries its date. Once the quantity goes past one
+        // the line covers more than that day, so the date no longer describes it.
+        if (field === "quantity" && Number(value) > 1 && Number(line.quantity) <= 1) {
+          return { ...line, quantity: Number(value), serviceDate: "" };
+        }
+        return { ...line, [field]: value };
+      }),
     }));
   }
 
@@ -17174,14 +17189,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     const preset = discountPresets.find((candidate) => candidate.id === presetId);
     if (!preset) return;
     markInvoiceDraftDirty();
-    const amount =
-      preset.discountType === "percentage"
-        ? Math.round(((invoiceLineSubtotal * preset.value) / 100) * 100) / 100
-        : Math.round(preset.value * 100) / 100;
+    // A percentage preset stays a percentage (computeInvoiceTotals re-figures
+    // the dollars from the live subtotal); a fixed preset is just its amount.
+    const isPercent = preset.discountType === "percentage";
     setInvoiceDraft((current) => ({
       ...current,
       discountLabel: preset.name,
-      discountAmount: amount,
+      discountPercent: isPercent ? preset.value : 0,
+      discountAmount: isPercent ? 0 : Math.round(preset.value * 100) / 100,
     }));
     // Applying a preset is an atomic "set" - collapse straight to the plain line.
     setDiscountEditing(false);
@@ -17191,7 +17206,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     markInvoiceDraftDirty();
     setSelectedDiscountPresetId("");
     setDiscountEditing(false);
-    setInvoiceDraft((current) => ({ ...current, discountLabel: "", discountAmount: 0 }));
+    setInvoiceDraft((current) => ({ ...current, discountLabel: "", discountAmount: 0, discountPercent: 0 }));
   }
 
   async function addExpenseCategory() {
@@ -17488,7 +17503,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     customerNote?: string;
     items?: Array<Record<string, unknown>>;
   }): InvoiceDraft {
-    return {
+    const draft: InvoiceDraft = {
       ...emptyInvoiceDraft(invoiceSettings, activeCoachId),
       payerId: invoice.customerId || "",
       payerName: invoice.customerName || "",
@@ -17521,6 +17536,22 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         tag: String(item.tag || ""),
       })),
     };
+    // The backend stores the invoice discount as a resolved amount. When it was a
+    // percentage preset (same name, and the amount is exactly that % of the
+    // subtotal) put it back as a percentage, so adding lines keeps it tracking.
+    const discountTotal = Number(invoice.discountTotal) || 0;
+    const label = draft.discountLabel.trim();
+    if (label && discountTotal > 0) {
+      const { lineSubtotal } = computeInvoiceTotals({ ...draft, discountAmount: 0 }, 0);
+      const preset = discountPresets.find(
+        (candidate) =>
+          candidate.discountType === "percentage" &&
+          candidate.name.trim() === label &&
+          Math.abs(Math.round(lineSubtotal * candidate.value) / 100 - discountTotal) < 0.011,
+      );
+      if (preset) draft.discountPercent = preset.value;
+    }
+    return draft;
   }
 
   // Open an invoice from the Recent invoices list. Drafts open editable (PUT on
@@ -17582,7 +17613,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         reference: invoiceDraft.reference,
         customerNote: invoiceDraft.message,
         discountLabel: invoiceDraft.discountLabel,
-        discountAmount: invoiceDraft.discountAmount,
+        // The resolved figure, so a percentage discount saves at what it came to
+        // on this invoice's lines.
+        discountAmount: invoiceDiscountTotal,
         taxInclusive: invoiceDraft.taxInclusive,
         items: billableLines.map((line) => ({
           sourceType: billingSourceType(line.source),
@@ -26979,9 +27012,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                               <div className="ip-line ip-line-plain" key={line.id}>
                                 <span className="ip-line-desc">
                                   {line.description}
-                                  {(line.serviceDate || line.tag) && (
+                                  {/* A date only describes a single lesson; a line of several has none. */}
+                                  {((line.serviceDate && line.quantity <= 1) || line.tag) && (
                                     <em className="ip-line-meta">
-                                      {[line.serviceDate ? formatDateForDisplay(line.serviceDate) : "", invoiceLineTagLabel(line.tag)]
+                                      {[line.serviceDate && line.quantity <= 1 ? formatDateForDisplay(line.serviceDate) : "", invoiceLineTagLabel(line.tag)]
                                         .filter(Boolean)
                                         .join(" · ")}
                                     </em>
@@ -27027,14 +27061,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 type="text"
                                 aria-label="Quantity"
                               />
-                              <input
-                                className="ip-dash ip-line-unit"
-                                value={line.unitPrice}
-                                inputMode="decimal"
-                                onChange={(event) => updateInvoiceLine(line.id, "unitPrice", parseMoneyInput(event.target.value))}
-                                type="text"
-                                aria-label={`Unit price in ${invoiceSettings.currency}`}
-                              />
+                              <label className="ip-dash ip-line-unit ip-affix">
+                                <span aria-hidden="true">{currencySymbol(invoiceSettings.currency)}</span>
+                                <input
+                                  value={line.unitPrice}
+                                  inputMode="decimal"
+                                  onChange={(event) => updateInvoiceLine(line.id, "unitPrice", parseMoneyInput(event.target.value))}
+                                  type="text"
+                                  aria-label={`Unit price in ${invoiceSettings.currency}`}
+                                />
+                              </label>
                               <span className="ip-line-amount">
                                 <strong>{formatMoney(invoiceLineNet(line), invoiceSettings.currency)}</strong>
                                 {lineDiscountAmount(line) > 0 && (
@@ -27073,34 +27109,38 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                   {customDiscountOpen ? (
                                     <>
                                       <label className="ip-drawer-field ip-drawer-money">
-                                        <span>{currencySymbol(invoiceSettings.currency)} Discount</span>
-                                        <input
-                                          className="ip-dash"
-                                          value={line.discountKind === "amount" ? line.discountValue || "" : ""}
-                                          inputMode="decimal"
-                                          onChange={(event) => {
-                                            const raw = event.target.value;
-                                            setInvoiceLineDiscount(line.id, raw ? "amount" : "");
-                                            if (raw) updateInvoiceLine(line.id, "discountValue", parseMoneyInput(raw));
-                                          }}
-                                          placeholder="0.00"
-                                          type="text"
-                                        />
+                                        <span>Amount off</span>
+                                        <div className="ip-dash ip-affix">
+                                          <i aria-hidden="true">{currencySymbol(invoiceSettings.currency)}</i>
+                                          <input
+                                            value={line.discountKind === "amount" ? line.discountValue || "" : ""}
+                                            inputMode="decimal"
+                                            onChange={(event) => {
+                                              const raw = event.target.value;
+                                              setInvoiceLineDiscount(line.id, raw ? "amount" : "");
+                                              if (raw) updateInvoiceLine(line.id, "discountValue", parseMoneyInput(raw));
+                                            }}
+                                            placeholder="0.00"
+                                            type="text"
+                                          />
+                                        </div>
                                       </label>
                                       <label className="ip-drawer-field ip-drawer-percent">
-                                        <span>% Discount</span>
-                                        <input
-                                          className="ip-dash"
-                                          value={line.discountKind === "percent" ? line.discountValue || "" : ""}
-                                          inputMode="decimal"
-                                          onChange={(event) => {
-                                            const raw = event.target.value;
-                                            setInvoiceLineDiscount(line.id, raw ? "percent" : "");
-                                            if (raw) updateInvoiceLine(line.id, "discountValue", parseMoneyInput(raw));
-                                          }}
-                                          placeholder="0"
-                                          type="text"
-                                        />
+                                        <span>Percent off</span>
+                                        <div className="ip-dash ip-affix">
+                                          <input
+                                            value={line.discountKind === "percent" ? line.discountValue || "" : ""}
+                                            inputMode="decimal"
+                                            onChange={(event) => {
+                                              const raw = event.target.value;
+                                              setInvoiceLineDiscount(line.id, raw ? "percent" : "");
+                                              if (raw) updateInvoiceLine(line.id, "discountValue", parseMoneyInput(raw));
+                                            }}
+                                            placeholder="0"
+                                            type="text"
+                                          />
+                                          <i aria-hidden="true">%</i>
+                                        </div>
                                       </label>
                                       {activeDiscountPresets.length > 0 && (
                                         <button
@@ -27227,13 +27267,38 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             </div>
                           )}
                           {invoiceLocked ? (
-                            (invoiceDiscountTotal > 0 || invoiceDraft.discountLabel.trim()) && (
+                            discountSet && (
                               <div className="ip-total-row">
                                 <span>{invoiceDiscountLabel}</span>
                                 <span>− {formatMoney(invoiceDiscountTotal, invoiceSettings.currency)}</span>
                               </div>
                             )
-                          ) : (
+                          ) : discountSet && !discountEditing ? (
+                            // Applied: reads as part of the totals, with a quiet
+                            // remove. Clicking the name reopens the controls.
+                            <div className="ip-total-row ip-discount-applied">
+                              <button
+                                className="ip-discount-name"
+                                onClick={() => setDiscountEditing(true)}
+                                title="Change discount"
+                                type="button"
+                              >
+                                {invoiceDiscountLabel}
+                              </button>
+                              <span className="ip-discount-value">
+                                − {formatMoney(invoiceDiscountTotal, invoiceSettings.currency)}
+                                <button
+                                  className="ip-discount-remove"
+                                  onClick={clearInvoiceDiscount}
+                                  aria-label="Remove discount"
+                                  title="Remove discount"
+                                  type="button"
+                                >
+                                  <X size={12} />
+                                </button>
+                              </span>
+                            </div>
+                          ) : discountEditing ? (
                             <div className="ip-total-row ip-discount-row">
                               {discountPresets.some((preset) => preset.active) && (
                                 <select
@@ -27260,22 +27325,39 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 className="ip-dash ip-discount-label"
                                 value={invoiceDraft.discountLabel}
                                 onChange={(event) => updateInvoiceDraft("discountLabel", event.target.value)}
-                                placeholder="Invoice discount"
+                                placeholder="Discount name"
                                 aria-label="Invoice discount label"
                               />
-                              <input
-                                className="ip-dash ip-discount-amount"
-                                value={invoiceDraft.discountAmount}
-                                inputMode="decimal"
-                                onChange={(event) => updateInvoiceDraft("discountAmount", parseMoneyInput(event.target.value))}
-                                type="text"
-                                aria-label={`Invoice discount amount in ${invoiceSettings.currency}`}
-                              />
+                              <label className="ip-dash ip-discount-amount ip-affix">
+                                <span aria-hidden="true">{currencySymbol(invoiceSettings.currency)}</span>
+                                <input
+                                  value={invoiceDraft.discountPercent ? invoiceDiscountTotal.toFixed(2) : invoiceDraft.discountAmount || ""}
+                                  inputMode="decimal"
+                                  placeholder="0.00"
+                                  onChange={(event) => {
+                                    // Typing a figure makes it a fixed amount.
+                                    markInvoiceDraftDirty();
+                                    setSelectedDiscountPresetId("");
+                                    const amount = parseMoneyInput(event.target.value);
+                                    setInvoiceDraft((current) => ({ ...current, discountAmount: amount, discountPercent: 0 }));
+                                  }}
+                                  type="text"
+                                  aria-label={`Invoice discount amount in ${invoiceSettings.currency}`}
+                                />
+                              </label>
+                              <button className="ip-discount-done" onClick={() => setDiscountEditing(false)} type="button">
+                                Done
+                              </button>
                             </div>
+                          ) : (
+                            <button className="ip-discount-add" onClick={() => setDiscountEditing(true)} type="button">
+                              <Plus size={12} />
+                              Add discount
+                            </button>
                           )}
                           <div className="ip-total-row">
                             <span>
-                              {invoiceSettings.taxName} {invoiceSettings.taxRate}%{invoiceDraft.taxInclusive ? " (included)" : ""}
+                              {invoiceSettings.taxName} {invoiceSettings.taxRate}%{invoiceDraft.taxInclusive ? " (included)" : " (added)"}
                             </span>
                             <span>{formatMoney(invoiceTaxTotal, invoiceSettings.currency)}</span>
                           </div>
@@ -27284,17 +27366,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             <span>{formatMoney(invoiceTotal, invoiceSettings.currency)}</span>
                           </div>
                           {!invoiceLocked && (
-                            <div className="ip-tax-mode">
-                              <button
-                                onClick={() => updateInvoiceDraft("taxInclusive", !invoiceDraft.taxInclusive)}
-                                title={`Inclusive prices already contain ${invoiceSettings.taxName}; on top adds it to the total`}
-                                type="button"
-                              >
-                                {invoiceDraft.taxInclusive
-                                  ? `${invoiceSettings.taxName} inclusive`
-                                  : `${invoiceSettings.taxName} on top`}
-                              </button>
-                            </div>
+                            <p className="ip-tax-note">
+                              {invoiceDraft.taxInclusive
+                                ? `Prices include ${invoiceSettings.taxName}`
+                                : `${invoiceSettings.taxName} added on top of prices`}{" "}
+                              · set in Billing Settings
+                            </p>
                           )}
                         </div>
                       </div>
@@ -28710,6 +28787,17 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         type="text"
                       />
                     </label>
+                    <label className="settings-field">
+                      <span>Prices and {invoiceSettingsDraft.taxName}</span>
+                      <select
+                        value={invoiceSettingsDraft.taxInclusive ? "inclusive" : "exclusive"}
+                        disabled={billingSettingsIsLocked}
+                        onChange={(event) => updateBillingAccountDraft("taxInclusive", event.target.value === "inclusive")}
+                      >
+                        <option value="inclusive">Prices include {invoiceSettingsDraft.taxName}</option>
+                        <option value="exclusive">Add {invoiceSettingsDraft.taxName} on top</option>
+                      </select>
+                    </label>
                   </div>
                   <label className="settings-field">
                     <span>Unpaid invoice loudness</span>
@@ -30103,6 +30191,17 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         onChange={(event) => updateBillingAccountDraft("taxRate", parseMoneyInput(event.target.value))}
                           type="text"
                         />
+                      </label>
+                      <label className="settings-field">
+                        <span>Prices and {invoiceSettingsDraft.taxName}</span>
+                        <select
+                          value={invoiceSettingsDraft.taxInclusive ? "inclusive" : "exclusive"}
+                          disabled={billingSettingsIsLocked}
+                          onChange={(event) => updateBillingAccountDraft("taxInclusive", event.target.value === "inclusive")}
+                        >
+                          <option value="inclusive">Prices include {invoiceSettingsDraft.taxName}</option>
+                          <option value="exclusive">Add {invoiceSettingsDraft.taxName} on top</option>
+                        </select>
                       </label>
                     </div>
                     <div className="service-form-row">

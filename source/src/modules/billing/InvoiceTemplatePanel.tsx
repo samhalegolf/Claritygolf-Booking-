@@ -110,9 +110,9 @@ export function InvoiceTemplatePanel({
   const [editing, setEditing] = useState<InvoiceTemplateField | "">("");
   const [draft, setDraft] = useState("");
   const [narrow, setNarrow] = useState(false);
-  // Preview-only. Whether an invoice is tax-inclusive is decided per invoice,
-  // not here — this just shows the template both ways round.
-  const [taxInclusive, setTaxInclusive] = useState(true);
+  // Follows the business-wide Billing Settings choice, so the sample reads the
+  // way real invoices will.
+  const taxInclusive = settings.taxInclusive;
 
   const totals = computeInvoiceTotals(
     { lines: EXAMPLE_LINES, discountAmount: 0, taxInclusive },
@@ -200,14 +200,9 @@ export function InvoiceTemplatePanel({
           <span className="it-dashed-swatch" />
           Dashed is yours to write
         </span>
-        <button
-          className="it-tax-mode"
-          onClick={() => setTaxInclusive((current) => !current)}
-          title={`Inclusive prices already contain ${settings.taxName}; on top adds it to the total`}
-          type="button"
-        >
-          {taxInclusive ? `${settings.taxName} inclusive` : `${settings.taxName} on top`}
-        </button>
+        <span className="it-tax-mode">
+          {taxInclusive ? `Prices include ${settings.taxName}` : `${settings.taxName} added on top`}
+        </span>
         <button
           className={`it-width${narrow ? " is-active" : ""}`}
           onClick={() => setNarrow((current) => !current)}

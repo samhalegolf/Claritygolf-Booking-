@@ -3,13 +3,13 @@ import assert from "node:assert/strict";
 import { computeInvoiceTotals } from "./invoiceMath.ts";
 import type { InvoiceDraft } from "./types.ts";
 
-function draft(partial: Partial<Pick<InvoiceDraft, "lines" | "discountAmount" | "taxInclusive">>) {
+function draft(partial: Partial<Pick<InvoiceDraft, "lines" | "discountAmount" | "discountPercent" | "taxInclusive">>) {
   return {
     lines: [],
     discountAmount: 0,
     taxInclusive: false,
     ...partial,
-  } as Pick<InvoiceDraft, "lines" | "discountAmount" | "taxInclusive">;
+  } as Pick<InvoiceDraft, "lines" | "discountAmount" | "discountPercent" | "taxInclusive">;
 }
 
 function line(
@@ -109,4 +109,18 @@ test("negative quantities/prices and bad tax rate are floored to zero", () => {
   assert.equal(t.lineSubtotal, 0);
   assert.equal(t.taxRatePct, 0);
   assert.equal(t.total, 0);
+});
+
+test("a percentage invoice discount re-figures from the subtotal as lines change", () => {
+  // The screenshot case: $1,710 of lessons at 20% -> $342, GST-inclusive.
+  const before = computeInvoiceTotals(draft({ lines: [line(1, 1710)], discountPercent: 20, taxInclusive: true }), 15);
+  assert.equal(before.discountTotal, 342);
+  assert.equal(before.total, 1368);
+  // Add a $140 lesson: the discount follows, rather than staying at $342.
+  const after = computeInvoiceTotals(
+    draft({ lines: [line(1, 1710), line(1, 140)], discountPercent: 20, discountAmount: 999, taxInclusive: true }),
+    15,
+  );
+  assert.equal(after.discountTotal, 370);
+  assert.equal(after.total, 1480);
 });
