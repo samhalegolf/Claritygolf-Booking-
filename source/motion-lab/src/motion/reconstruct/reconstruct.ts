@@ -83,6 +83,7 @@ import { cameraCentres, computeContextBids, type ContextBidReport } from "./cont
 import { rejectContradictedObservations, type ContradictionReport } from "./contradiction";
 import { deriveFarArm, type ArmDerivationReport } from "./armDerivation";
 import { applyFootLeash, type FootLeashReport } from "./footLeash";
+import { zeroFarSide, type NeutralFarSideReport } from "./neutralFarSide";
 import { bridgeGap } from "./gaps";
 import { findJumps, repairJump } from "./jumps";
 import { ReacquisitionTracker, supportFromDisagreement } from "./reacquisition";
@@ -107,6 +108,8 @@ export interface ReconstructOptions {
     readonly bridgeGaps?: boolean;
     /** The foot leash: feet held at their reference until the knee pulls them off. */
     readonly leashFeet?: boolean;
+    /** Down the line, zero the far leg's depth to a neutral stance at address. */
+    readonly neutralFarSide?: boolean;
     /** The shoulder girdle, measured once and fitted as one body per frame. */
     readonly fitGirdle?: boolean;
     /** The far arm, from the near hand, the grip and the measured bones. */
@@ -144,6 +147,8 @@ export interface ReconstructionReport {
   readonly bodyModel: MeasuredBodyModel;
   /** What the foot leash did, per side and per frame. Null when the stage was off. */
   readonly feet: FootLeashReport | null;
+  /** What zeroing the far side did. Null when the stage was off. */
+  readonly neutral: NeutralFarSideReport | null;
   /** What the arm derivation did. Null when the stage was off. */
   readonly arm: ArmDerivationReport | null;
   /** What the shoulder girdle did. Null when the stage was off. */
@@ -164,6 +169,7 @@ export const reconstruct = (
     validateReacquisition: true,
     bridgeGaps: true,
     leashFeet: true,
+    neutralFarSide: true,
     fitGirdle: true,
     deriveArm: true,
     depthBid: true,
@@ -175,8 +181,6 @@ export const reconstruct = (
 
   const frameCount = observations.frames.length;
   const tracks = buildTracks(observations);
-  const model = measureBodyModel(tracks, frameCount);
-  const heightM = model.estimatedHeightM;
 
   const stageCounts: Record<string, number> = {
     contradictionsRejected: 0,
@@ -210,6 +214,25 @@ export const reconstruct = (
   );
   /** Where the lens was, for the stages that ask what it could see. */
   const lensAt = cameraCentres(cameras);
+
+  /*
+   * The far side's zero point, on the observations themselves and before
+   * the body is measured: a far leg splayed in depth would otherwise teach
+   * the body model a long shin, and every stage after it would defend the
+   * splay. Height for the stage comes off a first measurement; the model
+   * the rest of the pipeline uses is taken after.
+   */
+  const neutral = stages.neutralFarSide
+    ? zeroFarSide({
+        tracks,
+        cameras: lensAt,
+        anchorFrameIndex: observations.anchor.anchorFrameIndex,
+        fps: observations.fps,
+        heightM: measureBodyModel(tracks, frameCount).estimatedHeightM,
+      })
+    : null;
+  const model = measureBodyModel(tracks, frameCount);
+  const heightM = model.estimatedHeightM;
 
   /* ------------------------------------------------------------------ *
    * 2. Reject observations the body contradicts, on every frame
@@ -744,6 +767,7 @@ export const reconstruct = (
     bodyModel: model,
     stageCounts,
     feet,
+    neutral,
     arm,
     girdle,
     contradictions,

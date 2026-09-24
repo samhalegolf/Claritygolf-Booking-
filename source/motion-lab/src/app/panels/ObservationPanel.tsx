@@ -10,6 +10,15 @@
 import type { StandingCalibration } from "../../motion/level/standingShot";
 import type { VideoObservationState } from "../useVideoObservation";
 
+
+/** The biggest far-leg correction, signed: + is away from the lens. */
+const farLegShiftCm = (shiftM: Readonly<Record<string, number | undefined>>): string => {
+  const values = Object.values(shiftM).filter((value): value is number => value !== undefined);
+  if (values.length === 0) return "";
+  const largest = values.reduce((a, b) => (Math.abs(b) > Math.abs(a) ? b : a));
+  const cm = (largest * 100).toFixed(0);
+  return `${largest >= 0 ? "+" : ""}${cm} cm ${largest >= 0 ? "away from" : "toward"} the lens`;
+};
 export function ObservationPanel({
   state,
   showLowConfidence,
@@ -128,6 +137,16 @@ export function ObservationPanel({
                     : "refused"}
               </dd>
             </div>
+            {levelling?.neutral && (
+              <div className="lab-readout-row">
+                <dt>Far leg depth</dt>
+                <dd>
+                  {levelling.neutral.applied
+                    ? `zeroed ${farLegShiftCm(levelling.neutral.shiftM)}`
+                    : "measured"}
+                </dd>
+              </div>
+            )}
             <div className="lab-readout-row">
               <dt>Camera roll</dt>
               <dd>
@@ -175,6 +194,16 @@ export function ObservationPanel({
               This world is level only because nothing was done to it, which is
               not the same as a camera that was level. The feet are still stood
               on one floor.
+            </p>
+          )}
+          {levelling?.neutral?.applied && (
+            <p className="lab-panel-note">
+              Down the line, nothing can see along the target line, so the{" "}
+              {levelling.neutral.farSide} leg&rsquo;s depth was zeroed to a neutral
+              stance at address — weight 50/50, stacked under the hips like the
+              near leg. Only the detector&rsquo;s constant bias was taken off; what the
+              leg does through the swing is still what it saw. A face-on clip of the
+              same swing would be what proves otherwise.
             </p>
           )}
           {!result.world.anchor.anchorIsStable && (

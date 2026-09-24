@@ -5674,26 +5674,32 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     notesStamps: {},
     createdStamps: {},
   }));
-  // Player Profiles promotes a client when a lesson note, saved video, or cloud
-  // import references them -- but those sources load independently and at
-  // different speeds. Track when each has settled at least once so the page
-  // can show a loading state instead of a misleading "No player profiles yet"
-  // while some are still in flight. Cloud imports are deliberately not in
-  // this set: they come back from Google, and a profile that exists only
-  // because of a cloud video simply joins the list when they land. The list
-  // waits on the two server reads (both prefetched by the entry point for a
-  // returning coach) and the local video scan, and no longer on the slowest
-  // thing on the page.
+  // Player Profiles promotes a client when a lesson note, portal access, saved
+  // video, or cloud import references them -- but those sources load
+  // independently and at different speeds. Track when each has settled at
+  // least once so the page can show a loading state instead of a misleading
+  // "No player profiles yet" while some are still in flight. Cloud imports are
+  // deliberately not in this set: they come back from Google, and a profile
+  // that exists only because of a cloud video simply joins the list when they
+  // land. The list waits on the three server reads (all prefetched with the
+  // shell for a returning coach) and the local video scan, and no longer on
+  // the slowest thing on the page. Portal access is in the set because a
+  // portal-only player used to join the list one round trip after it had
+  // already been declared ready, so the row set visibly shifted after paint.
   const [playerProfilesSourcesReady, setPlayerProfilesSourcesReady] = useState({
     people: false,
     notes: false,
+    portal: false,
     videos: false,
   });
   const markPlayerProfilesSourceReady = useCallback((source: keyof typeof playerProfilesSourcesReady) => {
     setPlayerProfilesSourcesReady((current) => (current[source] ? current : { ...current, [source]: true }));
   }, []);
   const playerProfilesDataReady =
-    playerProfilesSourcesReady.people && playerProfilesSourcesReady.notes && playerProfilesSourcesReady.videos;
+    playerProfilesSourcesReady.people &&
+    playerProfilesSourcesReady.notes &&
+    playerProfilesSourcesReady.portal &&
+    playerProfilesSourcesReady.videos;
   const [savedVideoItems, setSavedVideoItems] = useState<SavedVideoItem[]>([]);
   const [legacyVideoRecords, setLegacyVideoRecords] = useState<StoredVideoRecord[]>([]);
   const [uploadingSavedVideoIds, setUploadingSavedVideoIds] = useState<Set<string>>(() => new Set());
@@ -8475,6 +8481,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     // trip after the page already looked ready.
     window.setTimeout(() => void refreshPeopleList({ maxAgeMs: 30_000 }), 0);
     window.setTimeout(() => void refreshLessonNotes({ maxAgeMs: 30_000 }), 0);
+    window.setTimeout(() => void refreshPortalPlayers(), 0);
     setCalendarFeedStatus("checking");
     setCalendarSaveStatus("idle");
     setCalendarSaveError("");
@@ -18638,6 +18645,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   }
 
   async function refreshPortalPlayers() {
+    if (isEmbedMode || authStatus !== "authenticated") return;
     try {
       const response = await fetch("/api/portal-players", {
         credentials: "same-origin",
@@ -18654,6 +18662,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       // Portal access is additive to the profile; a failed read should not
       // stop the rest of Player Profiles rendering.
       setPortalPlayers([]);
+    } finally {
+      markPlayerProfilesSourceReady("portal");
     }
   }
 
@@ -25721,9 +25731,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     <span>
                       Updating player activity
                       <small>
-                        ${[
+                        {[
                           !playerProfilesSourcesReady.people ? "clients" : "",
                           !playerProfilesSourcesReady.notes ? "lesson notes" : "",
+                          !playerProfilesSourcesReady.portal ? "portal access" : "",
                           !playerProfilesSourcesReady.videos ? "videos" : "",
                         ]
                           .filter(Boolean)

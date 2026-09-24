@@ -22,6 +22,7 @@
 
 import type { ClaritySequence } from "../contracts";
 import { reconstructCalibrated, type CalibratedResult } from "../motion/level/calibrated";
+import type { NeutralFarSideReport } from "../motion/reconstruct/neutralFarSide";
 import type { StandingCalibration } from "../motion/level/standingShot";
 import { passthroughSequence } from "../motion/passthrough";
 import type {
@@ -37,6 +38,8 @@ export interface LevellingReadout {
   readonly boundaryResidualDeg: number;
   readonly boundaryRangeDeg: readonly [number, number];
   readonly calibrationWithinBoundary: boolean;
+  /** Down the line, the far leg's zero point. Null when the stage was off. */
+  readonly neutral: NeutralFarSideReport | null;
 }
 
 export interface VideoSequences {
@@ -79,6 +82,7 @@ export const buildVideoSequences = (
       boundaryResidualDeg: built.boundaryResidualDeg,
       boundaryRangeDeg: built.boundaryRangeDeg,
       calibrationWithinBoundary: built.calibrationWithinBoundary,
+      neutral: built.neutral,
     },
     calibration: built.calibration,
   };
