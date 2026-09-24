@@ -11504,6 +11504,337 @@ button {
   width: min(480px, calc(100vw - 32px));
 }
 
+/* The checkout keeps to what nearly every sale needs: who, what, how much, how
+   paid. Everything else is one tap away (product search, the amount field,
+   coupon / note / receipt text), so each block below is a compact summary
+   that opens in place. */
+.pos-checkout-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--c-space-4);
+}
+
+.pos-checkout-head h2 {
+  margin: 0;
+  font-size: var(--c-size-screen-title);
+}
+
+.pos-checkout-head + .pos-error {
+  margin-top: var(--c-space-5);
+}
+
+.pos-customer,
+.pos-customer-edit,
+.pos-add-customer,
+.pos-order,
+.pos-pay,
+.pos-extras {
+  margin-top: var(--c-space-6);
+}
+
+.pos-text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--c-space-1);
+  padding: var(--c-space-1) 0;
+  border: 0;
+  background: none;
+  color: var(--c-text);
+  font: inherit;
+  font-size: var(--c-size-meta);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.pos-customer {
+  display: flex;
+  align-items: center;
+  gap: var(--c-space-5);
+}
+
+.pos-customer-initials {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--c-radius-pill);
+  background: var(--c-active);
+  color: var(--c-text-body);
+  font-size: var(--c-size-meta);
+  font-weight: 700;
+}
+
+.pos-customer-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.pos-customer-text strong {
+  font-size: var(--c-size-body);
+}
+
+.pos-customer-text em,
+.pos-order-name em {
+  overflow: hidden;
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pos-order {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-card);
+  overflow: hidden;
+}
+
+.pos-order-line {
+  display: flex;
+  align-items: center;
+  gap: var(--c-space-4);
+  padding: var(--c-space-5) var(--c-space-6);
+  border-bottom: 1px solid var(--c-border-soft);
+}
+
+.pos-order-name {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.pos-order-name strong {
+  font-size: var(--c-size-body);
+}
+
+.pos-order-price {
+  font-size: var(--c-size-body);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.pos-order-describe {
+  padding: var(--c-space-5) var(--c-space-6);
+  border-bottom: 1px solid var(--c-border-soft);
+}
+
+.pos-order-add {
+  display: flex;
+  align-items: center;
+  gap: var(--c-space-3);
+  min-height: var(--c-h-touch);
+  padding: 0 var(--c-space-6);
+  border: 0;
+  border-bottom: 1px solid var(--c-border-soft);
+  background: none;
+  color: var(--c-text-body);
+  font: inherit;
+  font-size: var(--c-size-secondary);
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pos-order-add:hover {
+  background: var(--c-hover);
+}
+
+.pos-order-search {
+  display: flex;
+  flex-direction: column;
+  gap: var(--c-space-3);
+  padding: var(--c-space-5) var(--c-space-6);
+  border-bottom: 1px solid var(--c-border-soft);
+  background: var(--c-surface-soft);
+}
+
+.pos-order-search-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--c-space-3);
+}
+
+.pos-order-search-bar input {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--c-h-control);
+  padding: 0 var(--c-space-4);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  color: var(--c-text);
+  font: inherit;
+  font-size: var(--c-size-secondary);
+}
+
+.pos-order-search .pos-product-options {
+  margin-top: 0;
+}
+
+.pos-order-total {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--c-space-4);
+  min-height: 56px;
+  padding: var(--c-space-3) var(--c-space-6);
+  background: var(--c-surface-soft);
+}
+
+.pos-order-total-label {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--c-space-4);
+  color: var(--c-text-body);
+  font-size: var(--c-size-secondary);
+  font-weight: 600;
+}
+
+.pos-order-total-label .pos-text-button {
+  color: var(--c-text-soft);
+  font-size: var(--c-size-group);
+}
+
+.pos-order-amount-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--c-space-3);
+  padding: var(--c-space-1) 0;
+  border: 0;
+  background: none;
+  color: var(--c-text);
+  font: inherit;
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.pos-order-amount-button svg {
+  color: var(--c-pencil);
+}
+
+.pos-order-amount-button:hover svg {
+  color: var(--c-pencil-hover);
+}
+
+.pos-order-amount {
+  width: var(--c-w-price);
+  min-height: var(--c-h-control);
+  padding: 0 var(--c-space-4);
+  border: 1px solid var(--c-accent);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  color: var(--c-text);
+  font: inherit;
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.pos-order-coupon {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--c-space-4);
+  padding: var(--c-space-2) var(--c-space-6) var(--c-space-4);
+  background: var(--c-surface-soft);
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+}
+
+.pos-pay {
+  display: flex;
+  flex-direction: column;
+  gap: var(--c-space-3);
+}
+
+.pos-section-label {
+  color: var(--c-text-soft);
+  font-size: var(--c-size-group);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.pos-pay .pos-pass-list .field-help {
+  margin: 0;
+}
+
+.pos-extras {
+  border-top: 1px solid var(--c-border-soft);
+}
+
+.pos-extras-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--c-space-3);
+  width: 100%;
+  min-height: var(--c-h-touch);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--c-text-body);
+  font: inherit;
+  font-size: var(--c-size-secondary);
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pos-extras-toggle > span {
+  flex: 1;
+}
+
+.pos-extras-toggle em {
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+  font-style: normal;
+  font-weight: 400;
+}
+
+.pos-extras-body {
+  display: grid;
+  gap: var(--c-space-5);
+  padding: var(--c-space-1) 0 var(--c-space-3);
+}
+
+/* Pinned to the bottom of the scrolling modal so the pay button never scrolls
+   out of reach when search or the extras are open. The negative margins cancel
+   the panel's 20px padding so the bar runs edge to edge. */
+.pos-checkout-footer {
+  position: sticky;
+  bottom: -20px;
+  display: grid;
+  gap: var(--c-space-2);
+  margin: var(--c-space-6) -20px -20px;
+  padding: var(--c-space-5) 20px var(--c-space-6);
+  border-top: 1px solid var(--c-border-soft);
+  background: var(--c-surface);
+}
+
+.pos-checkout-footer .primary-button {
+  min-height: 52px;
+  border-radius: var(--c-radius-card);
+  font-size: 16px;
+}
+
+.pos-checkout-footer .field-help {
+  margin: 0;
+  color: var(--c-text-soft);
+  text-align: center;
+}
+
 .pos-error {
   margin: 0 0 12px;
   padding: 8px 10px;
@@ -11535,33 +11866,38 @@ button {
   cursor: pointer;
 }
 
+/* Four across on the modal's width, so Clarity Pay, Cash, Eftpos and On
+   account sit in one row; a fifth wraps rather than squashing. */
 .pos-method-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 8px;
-  margin-top: 6px;
+  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
+  gap: var(--c-space-3);
 }
 
 .pos-method-button {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  min-height: 46px;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: #fff;
-  color: inherit;
+  gap: 1px;
+  min-height: 48px;
+  padding: var(--c-space-1) var(--c-space-2);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  color: var(--c-text);
   font: inherit;
+  font-size: var(--c-size-meta);
   font-weight: 600;
+  line-height: 1.2;
+  text-align: center;
   cursor: pointer;
 }
 
 .pos-method-button.active {
-  border-color: #171717;
-  background: #171717;
-  color: #fff;
+  border-color: var(--c-accent);
+  background: var(--c-accent);
+  color: var(--c-accent-text);
 }
 
 .pos-method-tag {

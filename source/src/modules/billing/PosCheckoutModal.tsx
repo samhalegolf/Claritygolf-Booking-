@@ -14,7 +14,7 @@ import { Loading } from "../shared/Loading";
 // POS-#### receipt number and is never summed into invoice revenue or aging.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Check, CreditCard, ExternalLink, Minus, Plus, RotateCcw, Ticket, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, ChevronUp, ExternalLink, Minus, Pencil, Plus, RotateCcw, Ticket, X } from "lucide-react";
 import type {
   BillingCatalogItem,
   BillingCoupon,
@@ -46,6 +46,11 @@ export type PosCheckoutModalProps = {
 };
 
 const NO_CLIENT_NAMES: ReadonlyMap<string, string> = new Map();
+
+function initialsOf(name: string) {
+  const parts = name.trim().split(/[\s@.]+/).filter(Boolean);
+  return ((parts[0]?.[0] || "") + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
+}
 
 export function PosCheckoutModal({
   context,
@@ -98,6 +103,14 @@ export function PosCheckoutModal({
 
   const descriptionTouched = useRef(false);
 
+  // What the form keeps folded away until asked. A lesson arrives priced, so
+  // its amount reads as a total; a free-form sale has nothing to show yet, so
+  // its amount field starts ready to type into.
+  const [editingCustomer, setEditingCustomer] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [editingAmount, setEditingAmount] = useState(!(context.amount > 0));
+  const [extrasOpen, setExtrasOpen] = useState(false);
+
   const amount = Number(amountInput);
   const amountValid = Number.isFinite(amount) && amount > 0;
   const selectedMethod = methods.find((method) => method.id === methodId) || null;
@@ -134,6 +147,25 @@ export function PosCheckoutModal({
       )
       .slice(0, 8);
   }, [products, productSearch]);
+
+  // With nothing on the order yet (a free-form sale), what it is for is the
+  // first thing to type, so the description sits in the order itself. Once a
+  // lesson or a product names the sale it moves under the extras row.
+  const describeInline = !context.description && !lines.length;
+  const extrasSummary = [
+    !passId && coupon ? coupon.code : "",
+    note.trim() ? "Note" : "",
+    !describeInline && descriptionTouched.current ? "Receipt text" : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const ctaHint = passId || payByCoupon
+    ? ""
+    : selectedMethod?.kind === "clarity_pay"
+      ? "Shows a QR code the customer scans to pay."
+      : selectedMethod && !selectedMethod.settlesImmediately
+        ? "Recorded as owed. Mark it paid from the POS list once settled."
+        : "";
 
   const qrMarkup = useMemo(() => (checkoutUrl ? renderQrSvg(checkoutUrl) : ""), [checkoutUrl]);
 
@@ -252,6 +284,7 @@ export function PosCheckoutModal({
     const passMethod = methods.find((method) => method.kind === "pass") || null;
     if (payByCoupon && coupon && !couponCovers) {
       // Not enough on it: confirm before anything is recorded.
+      setExtrasOpen(true);
       setConfirmingCoupon(true);
       return;
     }
@@ -270,10 +303,12 @@ export function PosCheckoutModal({
       return;
     }
     if (!description.trim()) {
+      if (!describeInline) setExtrasOpen(true);
       setError("Add a description so the receipt makes sense later.");
       return;
     }
     if (!amountValid) {
+      setEditingAmount(true);
       setError("Enter an amount greater than zero.");
       return;
     }
@@ -399,161 +434,243 @@ export function PosCheckoutModal({
           if (event.key === "Escape") closeModal();
         }}
       >
-        <div className="panel-header">
-          <span>Point of sale</span>
+        <div className="pos-checkout-head">
+          <h2 id="pos-checkout-title">{heading}</h2>
           <button className="icon-button small" onClick={closeModal} type="button" aria-label="Close checkout">
             <X size={17} />
           </button>
         </div>
-        <h2 id="pos-checkout-title">{heading}</h2>
 
         {error && <p className="pos-error">{error}</p>}
 
         {stage === "form" && (
           <>
-            <div className="settings-field">
-              <label htmlFor="pos-product-search">Products and packages</label>
-              <input
-                id="pos-product-search"
-                value={productSearch}
-                onChange={(event) => setProductSearch(event.target.value)}
-                placeholder="Search products and packages"
-              />
-              <div className="pos-product-options">
-                {productMatches.map((product) => (
-                  <button
-                    key={product.id}
-                    className="pos-product-option"
-                    onClick={() => applyLines(addToBasket(lines, product))}
-                    type="button"
-                  >
-                    <span>
-                      {product.name}
-                      {product.kind === "package" && <Ticket size={12} />}
-                      {isLowStock(product) && <AlertTriangle size={12} />}
-                    </span>
-                    <em>
-                      {formatMoney(product.price, currency)}
-                      {product.trackStock ? ` - ${product.stockLevel ?? 0} left` : ""}
-                    </em>
-                  </button>
-                ))}
-                {!productMatches.length && (
-                  <p className="field-help">
-                    {productSearch.trim()
-                      ? "Nothing matches that. Packages are found by name -- try the package's own name."
-                      : "Search to add a product or a package. Nothing on the shelf yet? Add items under Billing > Products."}
-                  </p>
-                )}
+            {/* Who is paying. On a lesson this is already known, so it reads as
+                one line and only turns into fields when someone asks to change it. */}
+            {editingCustomer ? (
+              <div className="settings-field-row pos-customer-edit">
+                <div className="settings-field">
+                  <label htmlFor="pos-customer-name">Customer</label>
+                  <input
+                    id="pos-customer-name"
+                    value={customerName}
+                    onChange={(event) => setCustomerName(event.target.value)}
+                    placeholder="Optional"
+                    autoFocus
+                  />
+                </div>
+                <div className="settings-field">
+                  <label htmlFor="pos-customer-email">Email</label>
+                  <input
+                    id="pos-customer-email"
+                    type="email"
+                    value={customerEmail}
+                    onChange={(event) => setCustomerEmail(event.target.value)}
+                    placeholder="Optional"
+                  />
+                </div>
               </div>
-            </div>
-
-            {lines.length > 0 && (
-              <div className="pos-basket">
-                {lines.map((line) => (
-                  <div key={line.productId} className="pos-basket-line">
-                    <span>
-                      <strong>{line.name}</strong>
-                      <em>{formatMoney(line.unitPrice, currency)} each</em>
-                    </span>
-                    <div className="pos-basket-qty">
-                      <button
-                        className="icon-button small"
-                        onClick={() => applyLines(setBasketQuantity(lines, line.productId, line.quantity - 1))}
-                        type="button"
-                        aria-label={`One fewer ${line.name}`}
-                      >
-                        <Minus size={14} />
-                      </button>
-                      <b>{line.quantity}</b>
-                      <button
-                        className="icon-button small"
-                        onClick={() => applyLines(setBasketQuantity(lines, line.productId, line.quantity + 1))}
-                        type="button"
-                        aria-label={`One more ${line.name}`}
-                      >
-                        <Plus size={14} />
-                      </button>
-                    </div>
-                    <strong>{formatMoney(lineTotal(line), currency)}</strong>
-                    <button
-                      className="icon-button small"
-                      onClick={() => applyLines(setBasketQuantity(lines, line.productId, 0))}
-                      type="button"
-                      aria-label={`Remove ${line.name}`}
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                ))}
+            ) : customerName.trim() || customerEmail.trim() ? (
+              <div className="pos-customer">
+                <span className="pos-customer-initials" aria-hidden="true">
+                  {initialsOf(customerName || customerEmail)}
+                </span>
+                <span className="pos-customer-text">
+                  <strong>{customerName.trim() || customerEmail.trim()}</strong>
+                  {customerName.trim() && customerEmail.trim() && <em>{customerEmail.trim()}</em>}
+                </span>
+                <button className="pos-text-button" onClick={() => setEditingCustomer(true)} type="button">
+                  Change
+                </button>
               </div>
+            ) : (
+              <button className="pos-text-button pos-add-customer" onClick={() => setEditingCustomer(true)} type="button">
+                <Plus size={14} /> Add customer
+              </button>
             )}
 
-            <div className="settings-field">
-              <label htmlFor="pos-description">Description</label>
-              <input
-                id="pos-description"
-                value={description}
-                onChange={(event) => {
-                  descriptionTouched.current = true;
-                  setDescription(event.target.value);
-                }}
-                placeholder="What is being paid for"
-              />
-            </div>
+            {/* The order: what opened the checkout, anything rung up on top of
+                it, and the total. Search and the amount field stay folded away
+                until they are wanted. */}
+            <div className="pos-order">
+              {context.description ? (
+                <div className="pos-order-line">
+                  <span className="pos-order-name">
+                    <strong>{context.serviceName || context.description}</strong>
+                    {context.serviceName && customerName.trim() && <em>{customerName.trim()}</em>}
+                  </span>
+                  {baseAmount > 0 && <strong className="pos-order-price">{formatMoney(baseAmount, currency)}</strong>}
+                </div>
+              ) : (
+                describeInline && (
+                  <div className="settings-field pos-order-describe">
+                    <label htmlFor="pos-description">What is being paid for</label>
+                    <input
+                      id="pos-description"
+                      value={description}
+                      onChange={(event) => {
+                        descriptionTouched.current = true;
+                        setDescription(event.target.value);
+                      }}
+                      placeholder="e.g. Club fitting"
+                    />
+                  </div>
+                )
+              )}
 
-            <div className="settings-field pos-amount-field">
-              <label htmlFor="pos-amount">Amount</label>
-              <input
-                id="pos-amount"
-                type="number"
-                inputMode="decimal"
-                min="0"
-                step="0.01"
-                value={amountInput}
-                onChange={(event) => setAmountInput(event.target.value)}
-              />
-              {listedAmount !== null && (
-                <p className="field-help">
-                  Listed at {formatMoney(listedAmount, currency)}
-                  {amountChanged && (
+              {lines.map((line) => (
+                <div key={line.productId} className="pos-order-line">
+                  <span className="pos-order-name">
+                    <strong>{line.name}</strong>
+                    <em>{formatMoney(line.unitPrice, currency)} each</em>
+                  </span>
+                  <div className="pos-basket-qty">
                     <button
-                      className="pos-reset-amount"
+                      className="icon-button small"
+                      onClick={() => applyLines(setBasketQuantity(lines, line.productId, line.quantity - 1))}
+                      type="button"
+                      aria-label={`One fewer ${line.name}`}
+                    >
+                      <Minus size={14} />
+                    </button>
+                    <b>{line.quantity}</b>
+                    <button
+                      className="icon-button small"
+                      onClick={() => applyLines(setBasketQuantity(lines, line.productId, line.quantity + 1))}
+                      type="button"
+                      aria-label={`One more ${line.name}`}
+                    >
+                      <Plus size={14} />
+                    </button>
+                  </div>
+                  <strong className="pos-order-price">{formatMoney(lineTotal(line), currency)}</strong>
+                  <button
+                    className="icon-button small"
+                    onClick={() => applyLines(setBasketQuantity(lines, line.productId, 0))}
+                    type="button"
+                    aria-label={`Remove ${line.name}`}
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              ))}
+
+              {searchOpen ? (
+                <div className="pos-order-search">
+                  <div className="pos-order-search-bar">
+                    <input
+                      aria-label="Search products and packages"
+                      value={productSearch}
+                      onChange={(event) => setProductSearch(event.target.value)}
+                      placeholder="Search products and packages"
+                      autoFocus
+                    />
+                    <button
+                      className="pos-text-button"
+                      onClick={() => {
+                        setSearchOpen(false);
+                        setProductSearch("");
+                      }}
+                      type="button"
+                    >
+                      Done
+                    </button>
+                  </div>
+                  <div className="pos-product-options">
+                    {productMatches.map((product) => (
+                      <button
+                        key={product.id}
+                        className="pos-product-option"
+                        onClick={() => {
+                          applyLines(addToBasket(lines, product));
+                          setSearchOpen(false);
+                          setProductSearch("");
+                        }}
+                        type="button"
+                      >
+                        <span>
+                          {product.name}
+                          {product.kind === "package" && <Ticket size={12} />}
+                          {isLowStock(product) && <AlertTriangle size={12} />}
+                        </span>
+                        <em>
+                          {formatMoney(product.price, currency)}
+                          {product.trackStock ? ` - ${product.stockLevel ?? 0} left` : ""}
+                        </em>
+                      </button>
+                    ))}
+                    {!productMatches.length && (
+                      <p className="field-help">
+                        {productSearch.trim()
+                          ? "Nothing matches that. Packages are found by name -- try the package's own name."
+                          : "Nothing on the shelf yet? Add items under Billing > Products."}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <button className="pos-order-add" onClick={() => setSearchOpen(true)} type="button">
+                  <Plus size={15} /> Add product or package
+                </button>
+              )}
+
+              <div className="pos-order-total">
+                <span className="pos-order-total-label">
+                  Total
+                  {amountChanged && listedAmount !== null && (
+                    <button
+                      className="pos-text-button"
                       type="button"
                       onClick={() => setAmountInput(String(listedAmount))}
                     >
-                      <RotateCcw size={12} /> Reset
+                      <RotateCcw size={12} /> Reset to {formatMoney(listedAmount, currency)}
                     </button>
                   )}
-                </p>
+                </span>
+                {editingAmount ? (
+                  <input
+                    className="pos-order-amount"
+                    aria-label="Amount"
+                    type="number"
+                    inputMode="decimal"
+                    min="0"
+                    step="0.01"
+                    value={amountInput}
+                    onChange={(event) => setAmountInput(event.target.value)}
+                    onBlur={() => {
+                      if (amountValid) setEditingAmount(false);
+                    }}
+                    autoFocus={context.amount > 0}
+                    placeholder="0.00"
+                  />
+                ) : (
+                  <button
+                    className="pos-order-amount-button"
+                    type="button"
+                    onClick={() => setEditingAmount(true)}
+                    aria-label={`Total ${amountValid ? formatMoney(amount, currency) : ""}. Change amount`}
+                  >
+                    {amountValid ? formatMoney(amount, currency) : "Set amount"}
+                    <Pencil size={13} />
+                  </button>
+                )}
+              </div>
+              {appliedCoupon > 0 && (
+                <div className="pos-order-coupon">
+                  <span>Coupon {coupon?.code}</span>
+                  <span>
+                    -{formatMoney(appliedCoupon, currency)} · {formatMoney(dueNow, currency)} due
+                  </span>
+                </div>
               )}
             </div>
 
-            <div className="settings-field-row">
-              <div className="settings-field">
-                <label htmlFor="pos-customer-name">Customer</label>
-                <input
-                  id="pos-customer-name"
-                  value={customerName}
-                  onChange={(event) => setCustomerName(event.target.value)}
-                  placeholder="Optional"
-                />
-              </div>
-              <div className="settings-field">
-                <label htmlFor="pos-customer-email">Email</label>
-                <input
-                  id="pos-customer-email"
-                  type="email"
-                  value={customerEmail}
-                  onChange={(event) => setCustomerEmail(event.target.value)}
-                  placeholder="Optional"
-                />
-              </div>
-            </div>
+            <div className="pos-pay">
+              <span className="pos-section-label">
+                {passId ? "Paying with a pass" : appliedCoupon > 0 ? `Remaining ${formatMoney(dueNow, currency)} paid by` : "Pay with"}
+              </span>
 
-            {passOptions.length > 0 && (
-              <div className="settings-field">
-                <label>Passes</label>
+              {passOptions.length > 0 && (
                 <div className="pos-pass-list">
                   {passOptions.map((option) => (
                     <button
@@ -588,75 +705,25 @@ export function PosCheckoutModal({
                       </span>
                     </button>
                   ))}
-                </div>
-                {passId ? (
-                  <p className="field-help">
-                    {selectedPassOption?.paymentKind === "cross_redemption" ? (
-                      <>
-                        Using balance will leave {selectedPassOption.remainingCreditsAfter ?? 0} whole entitlement
-                        {(selectedPassOption.remainingCreditsAfter ?? 0) === 1 ? "" : "s"}
-                        {selectedPassOption.residualValueCentsAfter
-                          ? ` and ${formatMoney(selectedPassOption.residualValueCentsAfter / 100, selectedPassOption.currency || currency)} credit`
-                          : ""}.
-                      </>
-                    ) : (
-                      <>One native entitlement will be used. Flexible credit stays untouched.</>
-                    )}
-                  </p>
-                ) : null}
-              </div>
-            )}
-
-            {!passId && (
-              <div className="settings-field">
-                <label>Coupon</label>
-                <CouponPicker
-                  book={couponBook}
-                  held={coupon}
-                  applyAmount={couponAmount}
-                  applied={couponApplied}
-                  clientNames={clientNames}
-                  formatMoney={formatMoney}
-                  onHold={(picked) => {
-                    setCoupon(picked);
-                    setCouponApplied(false);
-                    setPayByCoupon(false);
-                  }}
-                  onRelease={releaseCoupon}
-                  disabled={busy}
-                />
-                {confirmingCoupon && coupon && (
-                  <div className="pos-coupon-confirm">
-                    <p>
-                      {coupon.code} has {formatMoney(coupon.remainingValue, coupon.currency)} on it, which covers{" "}
-                      {formatMoney(couponAmount, currency)} of {formatMoney(amount, currency)}. Put it down as paid
-                      credit and choose how the remaining {formatMoney(amount - couponAmount, currency)} is paid?
+                  {passId ? (
+                    <p className="field-help">
+                      {selectedPassOption?.paymentKind === "cross_redemption" ? (
+                        <>
+                          Using balance will leave {selectedPassOption.remainingCreditsAfter ?? 0} whole entitlement
+                          {(selectedPassOption.remainingCreditsAfter ?? 0) === 1 ? "" : "s"}
+                          {selectedPassOption.residualValueCentsAfter
+                            ? ` and ${formatMoney(selectedPassOption.residualValueCentsAfter / 100, selectedPassOption.currency || currency)} credit`
+                            : ""}
+                          .
+                        </>
+                      ) : (
+                        <>One native entitlement will be used. Flexible credit stays untouched.</>
+                      )}
                     </p>
-                    <div className="panel-actions">
-                      <button className="outline-button" onClick={() => setConfirmingCoupon(false)} type="button">
-                        Back
-                      </button>
-                      <button
-                        className="primary-button"
-                        onClick={() => {
-                          setCouponApplied(true);
-                          setPayByCoupon(false);
-                          setConfirmingCoupon(false);
-                        }}
-                        type="button"
-                      >
-                        Use {formatMoney(couponAmount, currency)} credit
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
+                  ) : null}
+                </div>
+              )}
 
-            <div className="settings-field">
-              <label>
-                {passId ? "Payment method (not used)" : appliedCoupon > 0 ? `Remaining ${formatMoney(dueNow, currency)} paid by` : "Payment method"}
-              </label>
               {!methodsLoaded && <Loading what="payment methods" className="field-help" />}
               {methodsLoaded && !methods.length && (
                 <p className="field-help">No payment methods yet - add one under Billing &gt; Settings.</p>
@@ -671,8 +738,8 @@ export function PosCheckoutModal({
                       setConfirmingCoupon(false);
                     }}
                   >
-                    <Ticket size={15} />
-                    Pay with coupon
+                    <span>Coupon</span>
+                    <span className="pos-method-tag">{coupon.code}</span>
                   </button>
                 )}
                 {methods.filter((method) => method.kind !== "pass" && method.kind !== "coupon").map((method) => (
@@ -687,28 +754,108 @@ export function PosCheckoutModal({
                       setMethodId(method.id);
                     }}
                   >
-                    {method.kind === "clarity_pay" && <CreditCard size={15} />}
-                    {method.name}
-                    {!method.settlesImmediately && <span className="pos-method-tag">owed</span>}
+                    <span>{method.name}</span>
+                    {method.kind === "clarity_pay" ? (
+                      <span className="pos-method-tag">Card / QR</span>
+                    ) : (
+                      !method.settlesImmediately && <span className="pos-method-tag">Owed</span>
+                    )}
                   </button>
                 ))}
               </div>
             </div>
 
-            <div className="settings-field">
-              <label htmlFor="pos-note">Note</label>
-              <input
-                id="pos-note"
-                value={note}
-                onChange={(event) => setNote(event.target.value)}
-                placeholder="Optional - shows on the POS list only"
-              />
+            {/* Everything a sale rarely needs, folded into one row. The row says
+                what is set inside it so nothing hides unnoticed. */}
+            <div className="pos-extras">
+              <button
+                className="pos-extras-toggle"
+                type="button"
+                aria-expanded={extrasOpen}
+                aria-controls="pos-extras-body"
+                onClick={() => setExtrasOpen((current) => !current)}
+              >
+                <span>{passId ? "Note & receipt text" : "Coupon, note & receipt text"}</span>
+                <em>{extrasOpen ? "" : extrasSummary || "Optional"}</em>
+                {extrasOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+              </button>
+              {extrasOpen && (
+                <div className="pos-extras-body" id="pos-extras-body">
+                  {!passId && (
+                    <div className="settings-field">
+                      <label>Coupon</label>
+                      <CouponPicker
+                        book={couponBook}
+                        held={coupon}
+                        applyAmount={couponAmount}
+                        applied={couponApplied}
+                        clientNames={clientNames}
+                        formatMoney={formatMoney}
+                        onHold={(picked) => {
+                          setCoupon(picked);
+                          setCouponApplied(false);
+                          setPayByCoupon(false);
+                        }}
+                        onRelease={releaseCoupon}
+                        disabled={busy}
+                      />
+                      {confirmingCoupon && coupon && (
+                        <div className="pos-coupon-confirm">
+                          <p>
+                            {coupon.code} has {formatMoney(coupon.remainingValue, coupon.currency)} on it, which covers{" "}
+                            {formatMoney(couponAmount, currency)} of {formatMoney(amount, currency)}. Put it down as paid
+                            credit and choose how the remaining {formatMoney(amount - couponAmount, currency)} is paid?
+                          </p>
+                          <div className="panel-actions">
+                            <button className="outline-button" onClick={() => setConfirmingCoupon(false)} type="button">
+                              Back
+                            </button>
+                            <button
+                              className="primary-button"
+                              onClick={() => {
+                                setCouponApplied(true);
+                                setPayByCoupon(false);
+                                setConfirmingCoupon(false);
+                              }}
+                              type="button"
+                            >
+                              Use {formatMoney(couponAmount, currency)} credit
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {!describeInline && (
+                    <div className="settings-field">
+                      <label htmlFor="pos-description">Receipt description</label>
+                      <input
+                        id="pos-description"
+                        value={description}
+                        onChange={(event) => {
+                          descriptionTouched.current = true;
+                          setDescription(event.target.value);
+                        }}
+                        placeholder="What is being paid for"
+                      />
+                    </div>
+                  )}
+
+                  <div className="settings-field">
+                    <label htmlFor="pos-note">Note</label>
+                    <input
+                      id="pos-note"
+                      value={note}
+                      onChange={(event) => setNote(event.target.value)}
+                      placeholder="Optional - shows on the POS list only"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
 
-            <div className="panel-actions">
-              <button className="outline-button" onClick={closeModal} type="button">
-                Cancel
-              </button>
+            <div className="pos-checkout-footer">
               <button
                 className="primary-button"
                 disabled={busy || confirmingCoupon || (!selectedMethod && !passId && !payByCoupon)}
@@ -725,8 +872,11 @@ export function PosCheckoutModal({
                         : "Pay with coupon"
                       : selectedMethod?.kind === "clarity_pay"
                         ? `Charge ${amountValid ? formatMoney(dueNow, currency) : ""}`.trim()
-                        : `Record ${amountValid ? formatMoney(dueNow, currency) : "payment"}`}
+                        : selectedMethod && !selectedMethod.settlesImmediately
+                          ? `Record ${amountValid ? formatMoney(dueNow, currency) : "payment"} as owed`
+                          : `Record ${amountValid ? formatMoney(dueNow, currency) : "payment"}`}
               </button>
+              {ctaHint && <p className="field-help">{ctaHint}</p>}
             </div>
           </>
         )}
