@@ -2498,6 +2498,10 @@ export async function renderInvoicePdf(invoice: InvoiceApi, branding: InvoiceBra
   if ((Number(invoice.discountTotal) || 0) > 0) {
     totalRow(invoice.discountLabel || "Discount", `- ${formatMoney(invoice.discountTotal, currency)}`);
   }
+  if ((Number(invoice.taxTotal) || 0) > 0) {
+    const taxName = branding.taxName || "Tax";
+    totalRow(`Total excl. ${taxName}`, formatMoney(round2((Number(invoice.total) || 0) - (Number(invoice.taxTotal) || 0)), currency));
+  }
   // Exclusive tax is a line added before the total; inclusive tax is shown as a
   // note under the total (it's already inside the prices).
   if (!invoice.taxInclusive && (Number(invoice.taxTotal) || 0) > 0) {

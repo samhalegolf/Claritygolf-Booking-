@@ -315,8 +315,12 @@ export function InvoiceTemplatePanel({
               </div>
             )}
             <div className="it-total-row">
+              <span>Total excl. {settings.taxName}</span>
+              <span>{formatMoney(totals.total - totals.taxTotal)}</span>
+            </div>
+            <div className="it-total-row">
               <span>
-                {settings.taxName} {settings.taxRate}%{taxInclusive ? " (included)" : ""}
+                {settings.taxName} {settings.taxRate}%{taxInclusive ? " (included)" : " (added)"}
               </span>
               <span>{formatMoney(totals.taxTotal)}</span>
             </div>

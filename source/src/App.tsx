@@ -27356,6 +27356,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             </button>
                           )}
                           <div className="ip-total-row">
+                            <span>Total excl. {invoiceSettings.taxName}</span>
+                            <span>{formatMoney(invoiceTotal - invoiceTaxTotal, invoiceSettings.currency)}</span>
+                          </div>
+                          <div className="ip-total-row">
                             <span>
                               {invoiceSettings.taxName} {invoiceSettings.taxRate}%{invoiceDraft.taxInclusive ? " (included)" : " (added)"}
                             </span>
