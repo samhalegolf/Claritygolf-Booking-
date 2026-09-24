@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { cancellationFreesResource, externalResourceProviderFor } from "./resource-handler.mts";
+import { cancellationFreesResource, EXTERNAL_RESOURCE_PROVIDER_IDS, resourceProviderById } from "./resource-handler.mts";
 
 const options = { nowMs: Date.UTC(2026, 8, 25, 0, 0), defaultTimeZone: "Pacific/Auckland" };
 // Week offsets are relative to the current week, so pick lessons far enough
@@ -9,11 +9,15 @@ const options = { nowMs: Date.UTC(2026, 8, 25, 0, 0), defaultTimeZone: "Pacific/
 const future = { id: "a", kind: "appointment", status: "booked", week: 400, day: 1, start: 600, duration: 60 };
 const past = { ...future, week: -400 };
 
-test("every business routes to a provider that can hold, move and release", () => {
-  const provider = externalResourceProviderFor("any-account");
-  for (const method of ["hold", "holdIfAutomatic", "queueHold", "move", "release", "sweepQueuedHolds"] as const) {
-    assert.equal(typeof provider[method], "function", method);
+test("every provider can hold, move, release and sweep; an unknown id falls back to the webhook", () => {
+  for (const id of EXTERNAL_RESOURCE_PROVIDER_IDS) {
+    const provider = resourceProviderById(id);
+    assert.equal(provider.id, id);
+    for (const method of ["hold", "holdIfAutomatic", "queueHold", "move", "release", "sweepQueuedHolds"] as const) {
+      assert.equal(typeof provider[method], "function", `${id}.${method}`);
+    }
   }
+  assert.equal(resourceProviderById("nope").id, "webhook");
 });
 
 test("cancelling a lesson that is still ahead frees its resource", () => {

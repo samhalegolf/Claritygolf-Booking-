@@ -110,6 +110,7 @@ import {
   cleanPhoneCountry,
   phoneCountryOptions,
 } from "../netlify/functions/_shared/phone.mts";
+import { ResourceSystemPanel } from "./modules/integrations/ResourceSystemPanel";
 import {
   cleanLocationKind,
   cleanLocationResources,
@@ -21703,7 +21704,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   {locationEditor.resourceSource === "external" ? (
                     <p className="field-help">
                       Clarity won't limit bookings here. The other system decides which bay or room is free. Connect it
-                      under Settings › Integrations.
+                      under Settings › Booking › Bay &amp; room system.
                     </p>
                   ) : null}
                   {(locationEditor.resources ?? []).map((resource, index) => (
@@ -30516,6 +30517,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               {isAdminUser ? coachesSettingsPanel : null}
               {isAdminUser ? locationsSettingsPanel : null}
               {availabilitySettingsPanel}
+              {isAdminUser ? (
+                <SettingsGroup id="resource-system" section="booking" title="Bay & room system">
+                  <div className="data-card wide">
+                    <ResourceSystemPanel canEdit={isAdminUser} />
+                  </div>
+                </SettingsGroup>
+              ) : null}
               {bookingSettingsPanel}
               {isAdminUser ? playerBookingEmbedPanel : null}
               <SettingsGroup id="coach-account" section="account" title="Coach account" className="notification-card account-card">

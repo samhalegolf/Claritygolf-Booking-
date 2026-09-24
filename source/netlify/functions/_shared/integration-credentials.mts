@@ -33,7 +33,7 @@ import { getDatabase } from "./database.mts";
 export type CredentialReader = (name: string) => string;
 
 /** Integrations a business connects itself, and so may store credentials for. */
-export const TENANT_INTEGRATION_IDS = ["optix", "akahu", "stripe"] as const;
+export const TENANT_INTEGRATION_IDS = ["optix", "akahu", "stripe", "resource-webhook"] as const;
 export type TenantIntegrationId = (typeof TENANT_INTEGRATION_IDS)[number];
 
 export function isTenantIntegration(id: string): id is TenantIntegrationId {

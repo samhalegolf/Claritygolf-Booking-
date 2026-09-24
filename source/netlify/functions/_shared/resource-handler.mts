@@ -26,9 +26,9 @@
  *   because deferred work on this platform often dies (see
  *   queueHold / sweepQueuedHolds).
  *
- * Today there is one provider. The Optix-specific code sits behind it
- * unchanged, in optix-book-resource.mts and optix-cancel.mts. A generic webhook
- * provider is the next one to join.
+ * Two providers: the generic webhook (resource-webhook-provider.mts), which
+ * any venue's system can answer, and Optix (optix-book-resource.mts and
+ * optix-cancel.mts, unchanged), for the business already connected to it.
  */
 import { getDatabase } from "@netlify/database";
 
@@ -45,12 +45,47 @@ import {
 import { cancelOptixBayForCalendarItem, type OptixBayCancellationResult } from "./optix-cancel.mts";
 import { bayFollowsReschedule } from "./optix-reconcile.mts";
 
-export type ExternalResourceProviderId = "optix";
+import {
+  webhookHold,
+  webhookHoldIfAutomatic,
+  webhookMove,
+  webhookQueueHold,
+  webhookRelease,
+  webhookSweepQueuedHolds,
+} from "./resource-webhook-provider.mts";
 
-export type ResourceHoldOutcome = Awaited<ReturnType<typeof bookOneResource>>;
-export type ResourceMoveOutcome = BayRebookOutcome;
-export type ResourceReleaseOutcome = OptixBayCancellationResult;
-export type ResourceSweepOutcome = AutoBookSweepOutcome;
+export const EXTERNAL_RESOURCE_PROVIDER_IDS = ["optix", "webhook"] as const;
+export type ExternalResourceProviderId = (typeof EXTERNAL_RESOURCE_PROVIDER_IDS)[number];
+
+/** Settings key naming the system that keeps this business's external resources. */
+export const RESOURCE_PROVIDER_SETTING = "resourceProviderId";
+
+export type ResourceHoldOutcome = {
+  ok: boolean;
+  alreadyBooked?: boolean;
+  error?: string;
+  message?: string;
+  [key: string]: unknown;
+};
+export type ResourceMoveOutcome = {
+  moved: boolean;
+  method?: "amended" | "unchanged" | "rebooked";
+  skipped?: "no_synced_bay";
+  error?: string;
+};
+export type ResourceReleaseOutcome = {
+  ok: true;
+  skipped: boolean;
+  reason?: "no_bay_booking" | "already_cancelled";
+  optixBookingId?: string;
+};
+export type ResourceSweepOutcome = {
+  claimed: number;
+  synced: number;
+  failed: number;
+  settled: number;
+  items: Array<{ calendarItemId: string; outcome: string }>;
+};
 
 export type ExternalResourceProvider = {
   id: ExternalResourceProviderId;
@@ -71,38 +106,101 @@ export type ExternalResourceProvider = {
   move(accountId: string, calendarItemId: string): Promise<ResourceMoveOutcome>;
   /** Let go of the lesson's resource. Throws when the other system refuses. */
   release(accountId: string, calendarItemId: string): Promise<ResourceReleaseOutcome>;
-  /** Finish queued holds that no attempt answered. */
+  /** Finish queued holds that no attempt answered, for this provider's rows only. */
   sweepQueuedHolds(options?: { budgetMs?: number; nowMs?: number }): Promise<ResourceSweepOutcome>;
 };
 
 const optixProvider: ExternalResourceProvider = {
   id: "optix",
-  hold: (accountId, calendarItemId) => bookOneResource(accountId, calendarItemId),
+  hold: (accountId, calendarItemId) => bookOneResource(accountId, calendarItemId) as Promise<ResourceHoldOutcome>,
   holdIfAutomatic: (accountId, calendarItemId, serviceId) =>
     autoBookResourceForNewBooking(accountId, calendarItemId, serviceId),
   queueHold: (accountId, calendarItemId, serviceId) => queueAutoBookResource(accountId, calendarItemId, serviceId),
-  move: (accountId, calendarItemId) => rebookResourceAfterReschedule(accountId, calendarItemId),
+  move: (accountId, calendarItemId): Promise<ResourceMoveOutcome> =>
+    rebookResourceAfterReschedule(accountId, calendarItemId) as Promise<BayRebookOutcome>,
   // The lesson's own row decides whose credentials release it, so the account
   // is not passed on. It stays in the signature for providers that need it.
-  release: (_accountId, calendarItemId) => cancelOptixBayForCalendarItem(calendarItemId),
-  sweepQueuedHolds: (options) => sweepQueuedAutoBooks(options),
+  release: (_accountId, calendarItemId): Promise<ResourceReleaseOutcome> =>
+    cancelOptixBayForCalendarItem(calendarItemId) as Promise<OptixBayCancellationResult>,
+  sweepQueuedHolds: (options): Promise<ResourceSweepOutcome> => sweepQueuedAutoBooks(options) as Promise<AutoBookSweepOutcome>,
+};
+
+const webhookProvider: ExternalResourceProvider = {
+  id: "webhook",
+  hold: webhookHold,
+  holdIfAutomatic: webhookHoldIfAutomatic,
+  queueHold: webhookQueueHold,
+  move: webhookMove,
+  release: webhookRelease,
+  sweepQueuedHolds: webhookSweepQueuedHolds,
 };
 
 const PROVIDERS: Record<ExternalResourceProviderId, ExternalResourceProvider> = {
   optix: optixProvider,
+  webhook: webhookProvider,
 };
 
+export function resourceProviderById(id: string): ExternalResourceProvider {
+  return PROVIDERS[(EXTERNAL_RESOURCE_PROVIDER_IDS as readonly string[]).includes(id) ? (id as ExternalResourceProviderId) : "webhook"];
+}
+
+function db() {
+  return getDatabase();
+}
+
 /**
- * The provider that keeps this business's external resources.
+ * Which system this business chose, or the one it has been using.
  *
- * Every business routes to the same one today. Each provider's own setting
- * still decides whether a lesson type holds anything (for Optix, the lesson
- * type's Resources config), so a business that connected nothing gets a
- * no-op, exactly as before this module existed. When a second provider joins,
- * this reads which one the business chose.
+ * An explicit choice (Settings › Bay & room system) wins. Without one, a
+ * business that already has Optix lesson types switched on stays on Optix --
+ * that is every business that used bays before this setting existed -- and
+ * everyone else gets the generic webhook, which does nothing until connected.
  */
-export function externalResourceProviderFor(_accountId: string): ExternalResourceProvider {
-  return PROVIDERS.optix;
+export async function chosenResourceProviderId(accountId: string): Promise<ExternalResourceProviderId> {
+  if (!accountId) return "webhook";
+  const rows = await db().sql`
+    SELECT key, value FROM settings
+    WHERE account_id = ${accountId}
+      AND key IN (${RESOURCE_PROVIDER_SETTING}, 'optixBookingTypeConfigJson')
+  `;
+  const byKey = new Map(rows.map((row: any) => [String(row.key), String(row.value ?? "")]));
+  const chosen = String(byKey.get(RESOURCE_PROVIDER_SETTING) || "").trim();
+  if ((EXTERNAL_RESOURCE_PROVIDER_IDS as readonly string[]).includes(chosen)) return chosen as ExternalResourceProviderId;
+  try {
+    const optixTypes = JSON.parse(byKey.get("optixBookingTypeConfigJson") || "{}");
+    if (optixTypes && typeof optixTypes === "object" && Object.values(optixTypes).some((entry: any) => entry?.enabled === true)) {
+      return "optix";
+    }
+  } catch {
+    // Unreadable settings fall through to the default.
+  }
+  return "webhook";
+}
+
+/** The business's chosen provider. For new holds. */
+export async function externalResourceProviderFor(accountId: string): Promise<ExternalResourceProvider> {
+  return PROVIDERS[await chosenResourceProviderId(accountId)];
+}
+
+/**
+ * The provider that already holds something for this lesson, falling back to
+ * the business's choice. A move or release must go to whoever made the hold,
+ * even if the business has since switched systems.
+ */
+async function providerForLesson(accountId: string, calendarItemId: string): Promise<ExternalResourceProvider> {
+  try {
+    const rows = await db().sql`
+      SELECT provider FROM optix_booking_sync
+      WHERE calendar_item_id = ${calendarItemId}
+        AND (account_id = ${accountId} OR account_id IS NULL)
+      LIMIT 1
+    `;
+    const provider = String(rows[0]?.provider || "");
+    if (provider) return resourceProviderById(provider);
+  } catch {
+    // No ledger yet (fresh database): nothing is held, so the choice decides.
+  }
+  return externalResourceProviderFor(accountId);
 }
 
 /** Every provider, for work that is not tied to one business (the sweep). */
@@ -110,24 +208,39 @@ export function allExternalResourceProviders(): ExternalResourceProvider[] {
   return Object.values(PROVIDERS);
 }
 
-export function holdResource(accountId: string, calendarItemId: string) {
-  return externalResourceProviderFor(accountId).hold(accountId, calendarItemId);
+export async function holdResource(accountId: string, calendarItemId: string) {
+  return (await providerForLesson(accountId, calendarItemId)).hold(accountId, calendarItemId);
 }
 
-export function holdResourceIfAutomatic(accountId: string, calendarItemId: string, serviceId: string) {
-  return externalResourceProviderFor(accountId).holdIfAutomatic(accountId, calendarItemId, serviceId);
+export async function holdResourceIfAutomatic(accountId: string, calendarItemId: string, serviceId: string) {
+  try {
+    return await (await externalResourceProviderFor(accountId)).holdIfAutomatic(accountId, calendarItemId, serviceId);
+  } catch (error) {
+    console.error("resource_hold_if_automatic_failed", {
+      calendarItemId,
+      error: error instanceof Error ? error.message.slice(0, 300) : String(error || ""),
+    });
+  }
 }
 
-export function queueResourceHold(accountId: string, calendarItemId: string, serviceId: string) {
-  return externalResourceProviderFor(accountId).queueHold(accountId, calendarItemId, serviceId);
+export async function queueResourceHold(accountId: string, calendarItemId: string, serviceId: string) {
+  try {
+    return await (await externalResourceProviderFor(accountId)).queueHold(accountId, calendarItemId, serviceId);
+  } catch (error) {
+    console.error("resource_queue_hold_failed", {
+      calendarItemId,
+      error: error instanceof Error ? error.message.slice(0, 300) : String(error || ""),
+    });
+    return false;
+  }
 }
 
-export function moveResource(accountId: string, calendarItemId: string) {
-  return externalResourceProviderFor(accountId).move(accountId, calendarItemId);
+export async function moveResource(accountId: string, calendarItemId: string) {
+  return (await providerForLesson(accountId, calendarItemId)).move(accountId, calendarItemId);
 }
 
-export function releaseResource(accountId: string, calendarItemId: string) {
-  return externalResourceProviderFor(accountId).release(accountId, calendarItemId);
+export async function releaseResource(accountId: string, calendarItemId: string) {
+  return (await providerForLesson(accountId, calendarItemId)).release(accountId, calendarItemId);
 }
 
 export async function sweepQueuedResourceHolds(options: { budgetMs?: number; nowMs?: number } = {}) {
@@ -155,10 +268,6 @@ export async function sweepQueuedResourceHolds(options: { budgetMs?: number; now
 // ---------------------------------------------------------------------------
 
 export type ResourceAction = "move" | "release";
-
-function db() {
-  return getDatabase();
-}
 
 /** How long the after-response attempt gets before the sweep steps in. */
 const ACTION_GRACE_SECONDS = 90;

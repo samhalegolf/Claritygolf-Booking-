@@ -58,6 +58,8 @@ export const config: Config = {
     "/api/practice-blocks",
     "/api/practice-blocks/complete",
     "/api/practice-block-presets",
+    "/api/resource-webhook",
+    "/api/resource-webhook-settings",
     "/api/practice-block-types",
     "/api/public-booking",
     "/api/public-booking-catalog",

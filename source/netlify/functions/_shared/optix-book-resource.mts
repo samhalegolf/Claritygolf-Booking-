@@ -51,7 +51,8 @@ export async function ensureOptixSyncTable() {
       ADD COLUMN IF NOT EXISTS pending_action TEXT,
       ADD COLUMN IF NOT EXISTS pending_since TIMESTAMPTZ,
       ADD COLUMN IF NOT EXISTS pending_claimed_at TIMESTAMPTZ,
-      ADD COLUMN IF NOT EXISTS pending_attempts INTEGER NOT NULL DEFAULT 0
+      ADD COLUMN IF NOT EXISTS pending_attempts INTEGER NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS resource_name TEXT
   `;
 }
 
@@ -695,6 +696,7 @@ export async function sweepQueuedAutoBooks(
         SELECT calendar_item_id
         FROM optix_booking_sync
         WHERE sync_status = 'pending'
+          AND COALESCE(provider, 'optix') = 'optix'
           AND created_at < NOW() - (${SWEEP_GRACE_SECONDS}::int * INTERVAL '1 second')
           AND (last_attempted_at IS NULL
                OR last_attempted_at < NOW() - (${SWEEP_CLAIM_SECONDS}::int * INTERVAL '1 second'))

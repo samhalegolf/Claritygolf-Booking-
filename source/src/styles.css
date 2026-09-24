@@ -16641,3 +16641,193 @@ button {
   background: var(--c-active);
   font-weight: 700;
 }
+
+/* Settings › Booking › Bay & room system. Scoped under .resource-system so the
+   .data-card descendant rules (0-1-1) cannot outrank these. */
+.resource-system {
+  display: grid;
+  gap: 16px;
+}
+
+.resource-system .resource-system-status {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 10px;
+  row-gap: 2px;
+  align-items: center;
+}
+
+.resource-system .resource-system-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--c-text-disabled);
+}
+
+.resource-system .resource-system-dot.is-on {
+  background: var(--c-success-text);
+}
+
+.resource-system .resource-system-status small {
+  grid-column: 2;
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+}
+
+.resource-system .resource-system-choice {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.resource-system .resource-system-option {
+  display: grid;
+  gap: 3px;
+  padding: 10px 14px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  color: var(--c-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.resource-system .resource-system-option.is-selected {
+  border-color: var(--c-text);
+  box-shadow: inset 0 0 0 1px var(--c-text);
+  background: var(--c-active);
+}
+
+.resource-system .resource-system-option small {
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+}
+
+.resource-system .resource-system-steps {
+  display: grid;
+  gap: 18px;
+  margin: 0;
+  padding-left: 22px;
+}
+
+/* A list item, not a grid: a grid item loses its step number. */
+.resource-system .resource-system-steps > li {
+  display: list-item;
+  color: var(--c-text);
+}
+
+.resource-system .resource-system-steps > li > * + * {
+  margin-top: 6px;
+}
+
+.resource-system .resource-system-steps > li::marker {
+  font-weight: 700;
+}
+
+.resource-system .resource-system-steps > li > p {
+  margin-bottom: 0;
+  color: var(--c-text-body);
+  font-size: var(--c-size-secondary);
+  max-width: var(--c-w-prose);
+}
+
+.resource-system code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--c-surface-soft);
+  color: var(--c-text);
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+}
+
+.resource-system .resource-system-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.resource-system .resource-system-row input:not([type="checkbox"]) {
+  flex: 1 1 280px;
+  min-width: 0;
+  min-height: var(--c-h-control);
+  padding: 0 10px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  color: var(--c-text);
+  font: inherit;
+}
+
+.resource-system .resource-system-secret {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.resource-system .resource-system-secret small {
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+}
+
+.resource-system .resource-system-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.resource-system .resource-system-tabs button {
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-pill);
+  background: var(--c-surface);
+  color: var(--c-text);
+  font: inherit;
+  font-size: var(--c-size-meta);
+  cursor: pointer;
+}
+
+.resource-system .resource-system-tabs button.is-selected {
+  border-color: var(--c-text);
+  background: var(--c-active);
+  font-weight: 700;
+}
+
+.resource-system .resource-system-code {
+  max-height: 320px;
+  margin: 0;
+  padding: 12px 14px;
+  overflow: auto;
+  border: 1px solid var(--c-border-soft);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface-soft);
+  color: var(--c-text);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.resource-system .resource-system-url {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+
+.resource-system .resource-system-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.resource-system .resource-system-test {
+  font-size: var(--c-size-secondary);
+}
+
+.resource-system .resource-system-test.is-ok {
+  color: var(--c-success-text);
+}
+
+.resource-system .resource-system-test.is-failed {
+  color: var(--c-error-text);
+}
