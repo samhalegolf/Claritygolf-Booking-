@@ -1,5 +1,5 @@
 import type { Config } from "@netlify/functions";
-import { sweepQueuedAutoBooks } from "./_shared/optix-book-resource.mts";
+import { sweepQueuedResourceHolds } from "./_shared/resource-handler.mts";
 
 // Scheduled catch-up for Optix bay auto-booking.
 //
@@ -17,8 +17,9 @@ import { sweepQueuedAutoBooks } from "./_shared/optix-book-resource.mts";
 
 export default async function handler() {
   try {
-    const outcome = await sweepQueuedAutoBooks({ budgetMs: 4_000 });
-    if (outcome.claimed) console.log("optix_auto_book_sweep:done", outcome);
+    for (const { provider, outcome } of await sweepQueuedResourceHolds({ budgetMs: 4_000 })) {
+      if (outcome.claimed) console.log("optix_auto_book_sweep:done", { provider, ...outcome });
+    }
     return new Response("ok");
   } catch (error) {
     console.error("optix_auto_book_sweep:failed", error instanceof Error ? error.message : error);

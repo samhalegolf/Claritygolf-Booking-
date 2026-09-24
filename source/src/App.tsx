@@ -8247,6 +8247,25 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         lastPersistedCalendarFingerprintRef.current = calendarStateFingerprint(persistedItems, persistedSyncKey);
         lastPersistedCalendarItemsRef.current = persistedItems;
         if (recoveredFromConflict && !calendarItemsEquivalent(persistedItems, desiredItems)) setItems(persistedItems);
+        // The server picks each lesson's bay or room during the save. Copy that
+        // back onto the cards; resourceId is outside the save fingerprint, so
+        // this cannot start another save.
+        const savedResourceIds = new Map(
+          (Array.isArray(data.items) ? data.items : []).map((item) => [item.id, item.resourceId || ""]),
+        );
+        if (savedResourceIds.size) {
+          setItems((current) => {
+            let changed = false;
+            const next = current.map((item) => {
+              if (!savedResourceIds.has(item.id)) return item;
+              const resourceId = savedResourceIds.get(item.id) || "";
+              if ((item.resourceId || "") === resourceId) return item;
+              changed = true;
+              return { ...item, resourceId: resourceId || undefined };
+            });
+            return changed ? next : current;
+          });
+        }
         if (typeof data.syncKey === "string" && data.syncKey !== calendarSyncKey) setCalendarSyncKey(data.syncKey);
         if (Array.isArray(data.notifications)) setNotifications(cleanNotificationRecords(data.notifications));
         const clientSyncWarning = Array.isArray(data.warnings)

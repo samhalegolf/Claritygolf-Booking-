@@ -14,12 +14,14 @@ import {
   syncGoogleCalendarNow,
 } from "./google-calendar-sync.mts";
 import { inferBookingAction, notifyBookingEvent, sendCoachPushForBooking } from "./notification-engine.mts";
-import { cancelOptixBayForCalendarItem, cancelOptixCustomerBooking } from "./_shared/optix-cancel.mts";
+import { cancelOptixCustomerBooking } from "./_shared/optix-cancel.mts";
 import {
-  autoBookResourceForNewBooking,
-  queueAutoBookResource,
-  rebookResourceAfterReschedule,
-} from "./_shared/optix-book-resource.mts";
+  cancellationFreesResource,
+  holdResourceIfAutomatic,
+  moveResource,
+  queueResourceHold,
+  releaseResource,
+} from "./_shared/resource-handler.mts";
 import { bayBookingMatchesSlot, bayFollowsReschedule } from "./_shared/optix-reconcile.mts";
 import { calendarSlot, MINUTES_IN_DAY } from "./_shared/calendar-slot.mts";
 import { cleanHandedness, handednessFromNote, handednessNoteLine } from "./_shared/handedness.mts";
@@ -6588,9 +6590,52 @@ function deferOptixBayRebook(accountId: string, calendarItemIds, netlifyContext 
   console.info("optix_bay_rebook_scheduled", { accountId, calendarItemIds: ids });
   const task = (async () => {
     for (const id of ids) {
-      await rebookResourceAfterReschedule(accountId, id);
+      await moveResource(accountId, id);
     }
   })().catch((error) => console.error("optix_bay_rebook_deferred_failed", error));
+  if (netlifyContext && typeof netlifyContext.waitUntil === "function") {
+    netlifyContext.waitUntil(task);
+  }
+}
+
+/**
+ * Lessons this save cancelled while their time was still ahead.
+ *
+ * Marking a lesson cancelled (rather than deleting it) used to leave its bay
+ * held in the other system: the rebook skips anything not booked, and nothing
+ * else released it. Only a real cancellation counts -- a no-show was a bay
+ * that got used, or at least paid for -- and only while the lesson has not
+ * ended, because releasing a bay for time that has passed frees nothing.
+ */
+function appointmentsWhoseResourceIsFreed(previousItemsById: Map<any, any>, items: any[]) {
+  const options = { nowMs: Date.now(), defaultTimeZone: defaultTimeZone() };
+  return (items || [])
+    .filter((item) => cancellationFreesResource(previousItemsById.get(item?.id), item, options))
+    .map((item) => item.id);
+}
+
+/**
+ * Release the resources of lessons that were just cancelled. Deferred like the
+ * rebook so a save never waits on the other system. A refusal is logged and
+ * left on the ledger row as failed, where the bay card shows it.
+ */
+function deferResourceRelease(accountId: string, calendarItemIds, netlifyContext = null) {
+  const ids = (calendarItemIds || []).filter(Boolean);
+  if (!ids.length) return;
+  console.info("resource_release_scheduled", { accountId, calendarItemIds: ids });
+  const task = (async () => {
+    for (const id of ids) {
+      try {
+        const outcome = await releaseResource(accountId, id);
+        console.info("resource_release_after_cancel", { calendarItemId: id, ...outcome });
+      } catch (error) {
+        console.error("resource_release_after_cancel_failed", {
+          calendarItemId: id,
+          error: error instanceof Error ? error.message.slice(0, 300) : String(error || "").slice(0, 300),
+        });
+      }
+    }
+  })().catch((error) => console.error("resource_release_deferred_failed", error));
   if (netlifyContext && typeof netlifyContext.waitUntil === "function") {
     netlifyContext.waitUntil(task);
   }
@@ -6671,7 +6716,7 @@ function deferOptixAutoBook(accountId: string, appointments: any[], netlifyConte
   }
   const task = (async () => {
     for (const appointment of pending) {
-      await autoBookResourceForNewBooking(accountId, appointment.id, appointment.serviceId);
+      await holdResourceIfAutomatic(accountId, appointment.id, appointment.serviceId);
     }
   })().catch((error) => console.error("optix_auto_book_deferred_failed", error));
   if (netlifyContext && typeof netlifyContext.waitUntil === "function") {
@@ -6794,7 +6839,7 @@ async function queueOptixAutoBook(accountId: string, appointments: any[]) {
   if (!pending.length) return;
   if (pending.length > OPTIX_AUTO_BOOK_MAX_PER_SAVE) return;
   for (const appointment of pending) {
-    await queueAutoBookResource(accountId, appointment.id, appointment.serviceId);
+    await queueResourceHold(accountId, appointment.id, appointment.serviceId);
   }
 }
 
@@ -6928,6 +6973,7 @@ async function writeCalendarState(accountId: string, nextState: Record<string, a
     appointmentsWhoseBayFollows(previousItemsById, items).map((item) => item.id),
     netlifyContext,
   );
+  deferResourceRelease(accountId, appointmentsWhoseResourceIsFreed(previousItemsById, items), netlifyContext);
   // Lessons the coach just created get the same Auto-book treatment a client
   // booking gets. The ask is recorded first (a pending sync row the scheduled
   // sweep will honour if the attempt below is cut short), then attempted.
@@ -7062,7 +7108,7 @@ async function deleteCalendarItemById(accountId: string, id, context = null, net
   let optixBayWarning = "";
   if (existingItem?.kind === "appointment") {
     try {
-      await cancelOptixBayForCalendarItem(cleanId);
+      await releaseResource(accountId, cleanId);
     } catch (error) {
       // A bay Optix will not release must not strand the lesson in Clarity.
       // Blocking the delete here is what left an undeletable ghost on the
@@ -7324,14 +7370,14 @@ function schedulePublicBookingSideEffects(accountId: string, context, appointmen
     // bookings. Never throws; on failure the card simply shows no bay and the
     // coach books it manually as before.
     if (options.autoBookResource === true) {
-      await autoBookResourceForNewBooking(accountId, appointment.id, appointment.serviceId);
+      await holdResourceIfAutomatic(accountId, appointment.id, appointment.serviceId);
     }
     // A client rescheduled: cancel the bay at the old slot and book a fresh
     // one at the new slot. Same helper the admin drag uses, deferred the same
     // way — the client's confirmation screen must not wait on two Optix round
     // trips. Never throws, and skips lessons that had no bay to begin with.
     if (options.rebookResource === true) {
-      await rebookResourceAfterReschedule(accountId, appointment.id);
+      await moveResource(accountId, appointment.id);
     }
     // A client just booked. This path sends its confirmation through
     // sendBookingNotifications above rather than notifyBookingEvent, so the
@@ -7370,7 +7416,7 @@ async function writePublicBookingAppointment(accountId: string, currentState: Re
   // booked quickly, and also where it silently gets lost. The pending row is
   // what the scheduled sweep honours when that happens.
   if (options.autoBookResource === true) {
-    await queueAutoBookResource(accountId, savedAppointment.id, savedAppointment.serviceId);
+    await queueResourceHold(accountId, savedAppointment.id, savedAppointment.serviceId);
   }
   schedulePublicBookingSideEffects(accountId, context, savedAppointment, options);
   return {
@@ -10975,7 +11021,7 @@ function publicSlotRelevantResourceItems(items = [], service, state = {}) {
   return items.filter((item) => publicSlotItemMayAffectService(item, service, state));
 }
 
-function publicSlotsForService(accountState, service, week, ignoreId = "") {
+function publicSlotsForService(accountState, service, week, ignoreId = "", handedness = null) {
   const ignoredItemId = cleanString(ignoreId, "", 160);
   const items = ignoredItemId ? accountState.items.filter((item) => item.id !== ignoredItemId) : accountState.items;
   const serviceCoachId = service.coachId || defaultCoachId(accountState.coaches || []);
@@ -11028,6 +11074,8 @@ function publicSlotsForService(accountState, service, week, ignoreId = "") {
           day,
           start,
           duration: service.duration,
+          // Narrows which bays count as free. Unknown offers any of them.
+          handedness,
         };
         if (
           !isSlotInPast(week, day, start, slotTimeZone) &&
@@ -11056,6 +11104,14 @@ export function publicBookingSlots(state, options = {}) {
   const ignoreId = cleanString(options.ignoreId, "", 160);
   const metrics = options.metrics;
   const services = publicBookableServices(accountState.services);
+  // The player's handedness when the page sends it; for a reschedule, the one
+  // already on the booking being moved.
+  const handedness =
+    options.handedness === "left" || options.handedness === "right"
+      ? options.handedness
+      : ignoreId
+        ? handednessFromNote((accountState.items || []).find((item) => item.id === ignoreId)?.note)
+        : null;
   const totalPublicItemCount = accountState.items.length;
   if (metrics) {
     metrics.serviceId = serviceId;
@@ -11089,7 +11145,7 @@ export function publicBookingSlots(state, options = {}) {
     // hours would offer the player a choice that means nothing.
     const serviceSlots = isVideoReviewService(service)
       ? []
-      : publicSlotsForService(serviceState, service, week, ignoreId);
+      : publicSlotsForService(serviceState, service, week, ignoreId, handedness);
     servicesById[service.id] = { serviceId: service.id, week, slots: serviceSlots.map((slot) => ({ ...slot })) };
   }
   // safeJsonStringify deliberately rejects shared references, so retain the
@@ -11139,6 +11195,7 @@ export async function handlePublicBookingSlotsRequest(req, options = {}) {
       serviceId,
       week,
       ignoreId: url.searchParams.get("ignoreId") || "",
+      handedness: url.searchParams.get("handedness") || "",
       metrics,
     });
     metrics.slotCalculationMs = Date.now() - slotCalculationStartedAt;
@@ -11167,7 +11224,13 @@ export async function handlePublicBookingSlotsRequest(req, options = {}) {
 
 function publicSlotUnavailableError(detail) {
   console.warn("public_booking:slot_rejected", detail);
-  return Object.assign(new Error("That time is no longer available."), {
+  // Every bay is taken, not the coach: say so, so the player picks another
+  // time rather than retrying this one.
+  const message =
+    detail?.reason === "resource_full"
+      ? "No bay or room is free at that time. Please choose another time."
+      : "That time is no longer available.";
+  return Object.assign(new Error(message), {
     status: 409,
     detail,
   });
@@ -13518,6 +13581,7 @@ async function routeBookingApiRequest(
             appointmentsWhoseBayFollows(previousById, [item]).map((entry) => entry.id),
             context,
           );
+          deferResourceRelease(requestContext.accountId, appointmentsWhoseResourceIsFreed(previousById, [item]), context);
           // A lesson created through this route (no previous row) is as new as
           // one from a whole-calendar save, and gets the same Auto-book.
           if (!previousItem) {
