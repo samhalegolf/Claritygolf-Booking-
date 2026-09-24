@@ -175,3 +175,15 @@ test("an unnamed bay shows its resource id rather than nothing", () => {
   assert.equal(bayLabel({ resourceId: "600011", bayName: "" }), "Resource 600011");
   assert.equal(bayLabel({ resourceId: "", bayName: "" }), "");
 });
+
+test("a queued auto-book reads as in progress, and the button still books it now", () => {
+  const outcome = describeStatusRecord(
+    record({ syncStatus: "pending", errorCode: "queued", errorMessage: "", resourceId: "", bayName: "" }),
+    NOW,
+  );
+  assert.equal(outcome.tone, "idle");
+  assert.equal(outcome.title, "Bay booking queued");
+  assert.equal(outcome.canRetry, true, "the coach must be able to book it immediately");
+  assert.equal(outcome.needsOptixCheckFirst, false);
+  assert.equal(outcome.staleAttemptAt, null);
+});

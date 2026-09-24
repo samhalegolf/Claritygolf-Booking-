@@ -144,3 +144,53 @@ test("reads resource map JSON from environment", () => {
   );
   assert.equal(parsed.resourceMap["location:three-kings"], "resource-33");
 });
+
+// ---------------------------------------------------------------------------
+// bayFollowsReschedule: which slot changes are allowed to reach Optix.
+//
+// The incident: a completed lesson from the previous week was nudged one row
+// on the calendar and back, and Optix received two booking amendments for a
+// bay that had been used and released days earlier.
+// ---------------------------------------------------------------------------
+
+import { bayFollowsReschedule } from "./optix-reconcile.mts";
+
+// Week 8 day 2 = Wednesday 29 July 2026 (base is Monday 1 June 2026). 14:00
+// Auckland in July is NZST, UTC+12, so the lesson ends at 03:00Z.
+const LESSON_END_MS = Date.parse("2026-07-29T03:00:00Z");
+const followOptions = (nowMs: number) => ({ nowMs, defaultTimeZone: "Pacific/Auckland" });
+
+test("a booked lesson that has not happened yet takes its bay with it", () => {
+  assert.equal(bayFollowsReschedule(appointment, followOptions(LESSON_END_MS - 24 * 3600_000)), true);
+});
+
+test("a completed lesson never moves its bay, even to a future slot", () => {
+  assert.equal(
+    bayFollowsReschedule({ ...appointment, status: "completed" }, followOptions(LESSON_END_MS - 24 * 3600_000)),
+    false,
+  );
+});
+
+test("cancelled and no-show lessons do not move a bay", () => {
+  for (const status of ["cancelled", "no_show"]) {
+    assert.equal(bayFollowsReschedule({ ...appointment, status }, followOptions(LESSON_END_MS - 3600_000)), false, status);
+  }
+});
+
+test("a booked lesson whose new slot has already ended does not reach Optix", () => {
+  assert.equal(bayFollowsReschedule(appointment, followOptions(LESSON_END_MS + 60_000)), false);
+});
+
+test("a lesson still in progress keeps following its bay", () => {
+  assert.equal(bayFollowsReschedule(appointment, followOptions(LESSON_END_MS - 60_000)), true);
+});
+
+test("a lesson with no location timezone is judged in the deployment default", () => {
+  const noLocation = { ...appointment, location: null };
+  assert.equal(bayFollowsReschedule(noLocation, followOptions(LESSON_END_MS - 60_000)), true);
+  assert.equal(bayFollowsReschedule(noLocation, followOptions(LESSON_END_MS + 60_000)), false);
+});
+
+test("blocks are not lessons and never move a bay", () => {
+  assert.equal(bayFollowsReschedule({ ...appointment, kind: "block" }, followOptions(0)), false);
+});

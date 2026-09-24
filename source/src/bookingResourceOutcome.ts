@@ -189,6 +189,17 @@ export function describeStatusRecord(
     };
   }
 
+  if (status === "pending") {
+    // Queued when the lesson was saved; Clarity books it in the background
+    // and a scheduled sweep catches whatever the background did not answer.
+    // The button stays: pressing it books the bay now and settles the row.
+    return {
+      ...base,
+      title: "Bay booking queued",
+      line: "Clarity is booking a bay for this lesson in the background. Book bay does it right now instead.",
+    };
+  }
+
   if (status === "cancelled") {
     // Two very different things used to share this status. Bays being switched
     // off for a lesson type is a setting working as configured; a released bay

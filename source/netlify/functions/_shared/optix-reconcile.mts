@@ -40,7 +40,8 @@ export type OptixSyncRecord = {
   startTimestamp: number;
   endTimestamp: number;
   fingerprint: string;
-  syncStatus: "synced" | "failed" | "token_expired" | "cancelled";
+  /** 'pending' is a queued auto-book that nothing has finished yet. */
+  syncStatus: "synced" | "failed" | "token_expired" | "cancelled" | "pending";
   errorCode: string;
   errorMessage: string;
 };
@@ -140,6 +141,48 @@ export function bayBookingMatchesSlot(
       timeZone,
     }) === stamp
   );
+}
+
+/**
+ * Whether a lesson's bay should follow it when its slot changes.
+ *
+ * A reschedule moves the bay so the customer still has somewhere to hit. That
+ * only makes sense for a lesson that is still going to happen. Two cases do
+ * not qualify, and both used to send an amend to Optix all the same:
+ *
+ * - The lesson is completed, cancelled or a no-show. Nobody is coming, so a
+ *   bay at a new time is a bay held for nobody -- and for a completed lesson
+ *   it also rewrites the record of the bay that was actually used.
+ * - The lesson's new slot has already ended. Nudging last week's card by one
+ *   row on the grid (a click that drifted into a drag) is a bookkeeping change
+ *   on Clarity's side, not a booking change, and Optix should not hear of it.
+ *
+ * Judged on the slot the lesson is moving TO: a past lesson dragged into the
+ * future is a genuine reschedule and its bay goes with it.
+ */
+export function bayFollowsReschedule(
+  appointment: {
+    kind?: string;
+    status?: string;
+    week?: number | null;
+    day?: number | null;
+    start?: number | null;
+    duration?: number | null;
+    location?: { timezone?: string } | null;
+  },
+  options: { nowMs: number; defaultTimeZone: string },
+): boolean {
+  if ((appointment.kind || "appointment") !== "appointment") return false;
+  const status = String(appointment.status || "booked");
+  if (status !== "booked") return false;
+  const date = datePartsForSlot(Number(appointment.week || 0), Number(appointment.day || 0));
+  const timeZone = String(appointment.location?.timezone || "").trim() || options.defaultTimeZone;
+  const endsAt = wallClockToUnixSeconds({
+    ...date,
+    minutes: Number(appointment.start || 0) + Number(appointment.duration || 0),
+    timeZone,
+  });
+  return endsAt * 1000 > options.nowMs;
 }
 
 function zonedParts(timestamp: number, timeZone: string) {

@@ -71,6 +71,7 @@ import {
 } from "lucide-react";
 import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { Session } from "./modules/auth/session";
+import type { TillLesson } from "./modules/billing/tillLessons";
 import { WORKSPACE_ACCOUNTS_STORAGE_KEY } from "./modules/shared/workspaceStorage";
 import { useBackNavigation } from "./modules/shared/backNavigation";
 import { Loading, loadingLabel } from "./modules/shared/Loading";
@@ -2242,6 +2243,11 @@ const COACH_ACCOUNT_STORAGE_KEY = "clarity-booking-coach-account";
 const RESCHEDULE_LOGIN_STORAGE_KEY = "clarity-booking-reschedule-login";
 const PAST_ADMIN_LESSON_WARNING =
   "This lesson is in the past. It will be saved for records only and no emails will be sent.";
+// A completed card is a record, and a click that drifts into a drag should not
+// rewrite it. One completed lesson was nudged a row and back in September 2026
+// and Optix received two booking changes for a bay used a week earlier.
+const COMPLETED_LESSON_MOVE_WARNING =
+  "This lesson is already marked completed. Move it anyway? Its Optix bay booking will stay where it was.";
 
 const baseWeekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const fullDayNames = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -7250,6 +7256,42 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         .map((item) => item.id),
     [coachAccount, coachProfiles, isAdminUser, items, services, serviceScopeCoachId],
   );
+  // Lessons the till can take money for: booked, not cancelled, priced, and
+  // with nothing on record against them -- no till sale, no pass, no invoice.
+  // Past and upcoming alike; the till's search finds them by client name.
+  // "Nothing on record" is not proof nobody paid (see bookingPaymentBadge), so
+  // the till lists them as lessons with no payment recorded, never "owing".
+  const tillUnpaidLessons = useMemo<TillLesson[]>(() => {
+    const lessons: TillLesson[] = [];
+    for (const item of items) {
+      if (item.kind !== "appointment" || item.status === "cancelled" || item.syntheticGroupSlot) continue;
+      if (!item.client?.trim() || posPaidBookings[item.id] || invoicedBookingIds[item.id]) continue;
+      if (!itemInCoachScope(item)) continue;
+      const service = itemService(item, services);
+      const isCustomGroup = isCustomGroupService(service);
+      const price = isCustomGroup && service
+        ? calculateCustomGroupPrice(service, attendeeListWithBooker(item).length)
+        : Number(service?.price ?? item.calculatedPrice ?? 0);
+      if (!(price > 0)) continue;
+      const startsAt = dateForSlot(itemWeek(item), item.day);
+      startsAt.setHours(Math.floor(item.start / 60), item.start % 60, 0, 0);
+      const serviceId = service?.id || item.serviceId || "";
+      lessons.push({
+        bookingId: item.id,
+        personId: item.personId || "",
+        clientName: item.client.trim(),
+        clientEmail: item.email || "",
+        serviceName: service?.name || item.title || "Lesson",
+        catalogItemId: serviceId ? `lesson:${serviceId}` : "",
+        price,
+        startsAt: startsAt.toISOString(),
+        ownerLabel: isExternallyOwned(item) ? externalProviderLabel(item) : "",
+      });
+    }
+    return lessons;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [coachAccount, coachProfiles, invoicedBookingIds, isAdminUser, items, posPaidBookings, services, serviceScopeCoachId]);
+
   // "Ready to Pull" with an adjustable date range, per the billing build plan.
   // itemDateValue converts a calendar item's week/day slot back into a real
   // calendar date the same way the rest of the app already does (dateForSlot),
@@ -9554,6 +9596,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     return byAppointment;
   }, [accountItems, activeAccountId, coachAccount, coachProfiles, isAdminUser, notifications, services, serviceScopeCoachId]);
 
+  // For the checkout's coupon search: a voucher filed under a client is found
+  // by that client's name.
+  const clientNamesById = useMemo(() => new Map(clients.map((client) => [client.id, client.name])), [clients]);
   const selectedClient =
     !isAddingClient && selectedClientId ? clients.find((client) => client.id === selectedClientId) ?? null : null;
   const selectedClientAppointments = useMemo(() => {
@@ -11713,6 +11758,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     if (!movedItem) return;
 
     if (sameSlot(movedItem, activeDraft)) {
+      clearGesture();
+      return;
+    }
+
+    if (
+      movedItem.kind === "appointment" &&
+      movedItem.status === "completed" &&
+      !window.confirm(COMPLETED_LESSON_MOVE_WARNING)
+    ) {
       clearGesture();
       return;
     }
@@ -16159,20 +16213,25 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       next[index] = sale;
       return next;
     });
-    if (sale.bookingId) {
+    // A till sale can pay for several lessons at once; every one of them is
+    // paid, not just the first.
+    const saleBookingIds = [...new Set([sale.bookingId, ...(sale.bookingIds || [])].filter(Boolean))];
+    if (saleBookingIds.length) {
       setPosPaidBookings((current) => {
         const next = { ...current };
-        if (sale.status === "paid") {
-          next[sale.bookingId] = {
-            id: sale.id,
-            receiptNumber: sale.receiptNumber,
-            amount: sale.amount,
-            currency: sale.currency,
-            paymentMethodName: sale.paymentMethodName,
-            paidAt: sale.paidAt,
-          };
-        } else {
-          delete next[sale.bookingId];
+        for (const bookingId of saleBookingIds) {
+          if (sale.status === "paid") {
+            next[bookingId] = {
+              id: sale.id,
+              receiptNumber: sale.receiptNumber,
+              amount: sale.amount,
+              currency: sale.currency,
+              paymentMethodName: sale.paymentMethodName,
+              paidAt: sale.paidAt,
+            };
+          } else {
+            delete next[bookingId];
+          }
         }
         return next;
       });
@@ -16552,6 +16611,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   // "+ Add" on the Sell screen's customer search. Same PUT /api/people write the
   // rest of the app uses; the till only ever has a name to go on, so email and
   // phone are filled in later from Clients.
+  // An emailed receipt wrote a new address onto a client who had none. The
+  // server did the write (into an empty field only); this keeps the local list
+  // in step so the profile and the next checkout show it without a reload.
+  function handleClientEmailSaved(clientId: string, email: string) {
+    if (!clientId || !email) return;
+    setPeople(people.map((person) => (person.id === clientId && !person.email ? { ...person, email } : person)));
+  }
+
   async function createClientFromTill(name: string) {
     const cleanName = name.trim();
     if (!cleanName) return null;
@@ -25880,6 +25947,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               onCreateClient={createClientFromTill}
               onSaleCompleted={handlePosSaleChanged}
               onToast={(message) => setToast({ message })}
+              lessons={tillUnpaidLessons}
+              onOpenClientProfile={(clientId) => {
+                const client = clients.find((entry) => entry.id === clientId);
+                if (client) openClientProfile(client);
+                else setToast({ message: "That client's profile could not be found." });
+              }}
+              onClientEmailSaved={handleClientEmailSaved}
             />
           </Suspense>
         )}
@@ -32622,6 +32696,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             onClose={() => setPosCheckout(null)}
             onCompleted={handlePosSaleChanged}
             onToast={(message) => setToast({ message })}
+            clientNames={clientNamesById}
+            onClientEmailSaved={handleClientEmailSaved}
           />
         </Suspense>
       )}

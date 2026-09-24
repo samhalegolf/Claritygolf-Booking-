@@ -117,6 +117,11 @@ export type SellLine = {
   quantity: number;
   unitPrice: number;
   taxRate: number;
+  // Set when the line pays for a booked lesson. Always quantity 1: a lesson
+  // happens once, and two of them are two lines with two booking ids.
+  bookingId?: string;
+  // Shown under the name, e.g. when the lesson was.
+  detail?: string;
 };
 
 export function addSellLine(lines: SellLine[], item: BillingCatalogItem, quantity = 1): SellLine[] {

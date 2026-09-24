@@ -15,7 +15,17 @@ import { Loading } from "../shared/Loading";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Check, CreditCard, ExternalLink, Minus, Plus, RotateCcw, Ticket, X } from "lucide-react";
-import type { BillingCatalogItem, PassOption, PosCheckoutContext, PosPaymentMethod, PosTransaction } from "./types";
+import type {
+  BillingCatalogItem,
+  BillingCoupon,
+  PassOption,
+  PosCheckoutContext,
+  PosPaymentMethod,
+  PosTransaction,
+} from "./types";
+import { couponApplyAmount, remainingAfterCoupon } from "./couponMath";
+import { CouponPicker, useSpendableCoupons } from "./CouponPicker";
+import { ReceiptEmailPrompt } from "./ReceiptEmailPrompt";
 import { postPosJson, renderQrSvg, usePosPaymentPoll } from "./posCheckoutPoll";
 import { addToBasket, basketTotal, describeBasket, isLowStock, lineTotal, round2, setBasketQuantity } from "./stockMath";
 import type { BasketLine } from "./stockMath";
@@ -29,7 +39,13 @@ export type PosCheckoutModalProps = {
   // lists. May fire twice for a Clarity Pay sale: once on create, once on paid.
   onCompleted: (transaction: PosTransaction) => void;
   onToast: (message: string) => void;
+  // customerId -> name, so the coupon search finds a voucher by its client.
+  clientNames?: ReadonlyMap<string, string>;
+  // An emailed receipt saved a new address to the client's profile.
+  onClientEmailSaved?: (clientId: string, email: string) => void;
 };
+
+const NO_CLIENT_NAMES: ReadonlyMap<string, string> = new Map();
 
 export function PosCheckoutModal({
   context,
@@ -38,6 +54,8 @@ export function PosCheckoutModal({
   onClose,
   onCompleted,
   onToast,
+  clientNames = NO_CLIENT_NAMES,
+  onClientEmailSaved,
 }: PosCheckoutModalProps) {
   const [methods, setMethods] = useState<PosPaymentMethod[]>([]);
   const [methodsLoaded, setMethodsLoaded] = useState(false);
@@ -63,6 +81,15 @@ export function PosCheckoutModal({
   const [products, setProducts] = useState<BillingCatalogItem[]>([]);
   const [productSearch, setProductSearch] = useState("");
 
+  // A held gift voucher, exactly as on the Sell screen: held until "Pay with
+  // coupon" is chosen, then either the whole payment or credit put down before
+  // the rest is taken on another method.
+  const couponBook = useSpendableCoupons();
+  const [coupon, setCoupon] = useState<BillingCoupon | null>(null);
+  const [couponApplied, setCouponApplied] = useState(false);
+  const [payByCoupon, setPayByCoupon] = useState(false);
+  const [confirmingCoupon, setConfirmingCoupon] = useState(false);
+
   const [stage, setStage] = useState<"form" | "qr" | "done">("form");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -74,6 +101,11 @@ export function PosCheckoutModal({
   const amount = Number(amountInput);
   const amountValid = Number.isFinite(amount) && amount > 0;
   const selectedMethod = methods.find((method) => method.id === methodId) || null;
+  const couponMethod = methods.find((method) => method.kind === "coupon") || null;
+  const couponAmount = coupon && amountValid ? couponApplyAmount(coupon, amount) : 0;
+  const couponCovers = couponAmount > 0 && couponAmount >= amount;
+  const appliedCoupon = couponApplied ? couponAmount : 0;
+  const dueNow = amountValid ? remainingAfterCoupon(amount, appliedCoupon) : 0;
   const selectedPassOption = passOptions.find((option) => option.passId === passId) || null;
   const linesTotal = basketTotal(lines);
   // Products are added *to* whatever opened the modal, not instead of it - a
@@ -121,7 +153,9 @@ export function PosCheckoutModal({
         // The pass method is never picked from the grid -- it is what the Use
         // pass block selects -- so it is not offered as a way to pay by hand.
         // Choosing it without a pass would write a $0 sale settled by nothing.
-        setMethodId((current) => current || active.find((method) => method.kind !== "pass")?.id || "");
+        setMethodId(
+          (current) => current || active.find((method) => method.kind !== "pass" && method.kind !== "coupon")?.id || "",
+        );
       } catch (loadError) {
         if (!cancelled) setError(loadError instanceof Error ? loadError.message : "Could not load payment methods.");
       } finally {
@@ -204,15 +238,33 @@ export function PosCheckoutModal({
     () => setError("Stopped checking for payment. Cancel the sale and start it again."),
   );
 
+  function releaseCoupon() {
+    setCoupon(null);
+    setCouponApplied(false);
+    setPayByCoupon(false);
+    setConfirmingCoupon(false);
+  }
+
   async function takePayment() {
     // Paying with a pass swaps the method out from under the grid: the sale is
     // recorded against the Pass method, not whatever was highlighted before.
+    // A coupon that covers the whole sale does the same with the Coupon method.
     const passMethod = methods.find((method) => method.kind === "pass") || null;
-    const payingMethod = passId ? passMethod : selectedMethod;
+    if (payByCoupon && coupon && !couponCovers) {
+      // Not enough on it: confirm before anything is recorded.
+      setConfirmingCoupon(true);
+      return;
+    }
+    const payingMethod = passId ? passMethod : payByCoupon ? couponMethod : selectedMethod;
     if (passId && !passMethod) {
       setError("This account has no Pass payment method yet. Reopen the checkout and try again.");
       return;
     }
+    if (payByCoupon && !couponMethod) {
+      setError("This account has no Coupon payment method yet. Reopen the checkout and try again.");
+      return;
+    }
+    const spendCoupon = !passId && Boolean(coupon) && (payByCoupon || couponApplied);
     if (!payingMethod) {
       setError("Choose a payment method.");
       return;
@@ -247,6 +299,8 @@ export function PosCheckoutModal({
             })),
             currency,
             paymentMethodId: payingMethod.id,
+            couponId: spendCoupon ? coupon?.id || "" : "",
+            couponAmount: spendCoupon ? couponAmount : 0,
             passId,
             serviceId: context.serviceId || "",
             customerId: context.customerId || "",
@@ -261,6 +315,7 @@ export function PosCheckoutModal({
       if (!sale) throw new Error("Payment could not be recorded.");
       setTransaction(sale);
       onCompleted(sale);
+      if (spendCoupon) couponBook.reload();
       if (created?.issuedPasses?.length) {
         onToast(
           created.issuedPasses.length === 1
@@ -507,7 +562,11 @@ export function PosCheckoutModal({
                       className={`pos-pass-option${option.passId === passId ? " active" : ""}`}
                       disabled={!option.covered}
                       aria-pressed={option.passId === passId}
-                      onClick={() => setPassId((current) => (current === option.passId ? "" : option.passId))}
+                      onClick={() => {
+                        setPassId((current) => (current === option.passId ? "" : option.passId));
+                        // A lesson is settled by a pass or by money, not both.
+                        releaseCoupon();
+                      }}
                     >
                       <span className="pos-pass-name">
                         <Ticket size={15} />
@@ -548,20 +607,83 @@ export function PosCheckoutModal({
               </div>
             )}
 
+            {!passId && (
+              <div className="settings-field">
+                <label>Coupon</label>
+                <CouponPicker
+                  book={couponBook}
+                  held={coupon}
+                  applyAmount={couponAmount}
+                  applied={couponApplied}
+                  clientNames={clientNames}
+                  formatMoney={formatMoney}
+                  onHold={(picked) => {
+                    setCoupon(picked);
+                    setCouponApplied(false);
+                    setPayByCoupon(false);
+                  }}
+                  onRelease={releaseCoupon}
+                  disabled={busy}
+                />
+                {confirmingCoupon && coupon && (
+                  <div className="pos-coupon-confirm">
+                    <p>
+                      {coupon.code} has {formatMoney(coupon.remainingValue, coupon.currency)} on it, which covers{" "}
+                      {formatMoney(couponAmount, currency)} of {formatMoney(amount, currency)}. Put it down as paid
+                      credit and choose how the remaining {formatMoney(amount - couponAmount, currency)} is paid?
+                    </p>
+                    <div className="panel-actions">
+                      <button className="outline-button" onClick={() => setConfirmingCoupon(false)} type="button">
+                        Back
+                      </button>
+                      <button
+                        className="primary-button"
+                        onClick={() => {
+                          setCouponApplied(true);
+                          setPayByCoupon(false);
+                          setConfirmingCoupon(false);
+                        }}
+                        type="button"
+                      >
+                        Use {formatMoney(couponAmount, currency)} credit
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="settings-field">
-              <label>{passId ? "Payment method (not used)" : "Payment method"}</label>
+              <label>
+                {passId ? "Payment method (not used)" : appliedCoupon > 0 ? `Remaining ${formatMoney(dueNow, currency)} paid by` : "Payment method"}
+              </label>
               {!methodsLoaded && <Loading what="payment methods" className="field-help" />}
               {methodsLoaded && !methods.length && (
                 <p className="field-help">No payment methods yet - add one under Billing &gt; Settings.</p>
               )}
               <div className="pos-method-grid">
-                {methods.filter((method) => method.kind !== "pass").map((method) => (
+                {coupon && !couponApplied && !passId && couponAmount > 0 && (
+                  <button
+                    type="button"
+                    className={`pos-method-button${payByCoupon ? " active" : ""}`}
+                    onClick={() => {
+                      setPayByCoupon(true);
+                      setConfirmingCoupon(false);
+                    }}
+                  >
+                    <Ticket size={15} />
+                    Pay with coupon
+                  </button>
+                )}
+                {methods.filter((method) => method.kind !== "pass" && method.kind !== "coupon").map((method) => (
                   <button
                     key={method.id}
                     type="button"
-                    className={`pos-method-button${method.id === methodId && !passId ? " active" : ""}`}
+                    className={`pos-method-button${method.id === methodId && !passId && !payByCoupon ? " active" : ""}`}
                     onClick={() => {
                       setPassId("");
+                      setPayByCoupon(false);
+                      setConfirmingCoupon(false);
                       setMethodId(method.id);
                     }}
                   >
@@ -589,7 +711,7 @@ export function PosCheckoutModal({
               </button>
               <button
                 className="primary-button"
-                disabled={busy || (!selectedMethod && !passId)}
+                disabled={busy || confirmingCoupon || (!selectedMethod && !passId && !payByCoupon)}
                 onClick={takePayment}
                 type="button"
               >
@@ -597,9 +719,13 @@ export function PosCheckoutModal({
                   ? "Working..."
                   : passId
                     ? "Use pass"
-                    : selectedMethod?.kind === "clarity_pay"
-                      ? `Charge ${amountValid ? formatMoney(amount, currency) : ""}`.trim()
-                      : `Record ${amountValid ? formatMoney(amount, currency) : "payment"}`}
+                    : payByCoupon
+                      ? couponCovers
+                        ? `Pay ${formatMoney(amount, currency)} with coupon`
+                        : "Pay with coupon"
+                      : selectedMethod?.kind === "clarity_pay"
+                        ? `Charge ${amountValid ? formatMoney(dueNow, currency) : ""}`.trim()
+                        : `Record ${amountValid ? formatMoney(dueNow, currency) : "payment"}`}
               </button>
             </div>
           </>
@@ -637,11 +763,25 @@ export function PosCheckoutModal({
                 </span>
               </div>
             </div>
+            {(transaction.couponAmount ?? 0) > 0 && (
+              <p className="field-help">
+                {formatMoney(transaction.couponAmount ?? 0, transaction.currency)} of it paid by coupon
+                {coupon ? ` ${coupon.code}` : ""}.
+              </p>
+            )}
             {transaction.status === "pending" && (
               <p className="field-help">
                 Recorded as owed on {transaction.paymentMethodName}. Mark it paid from the POS list once it is settled.
               </p>
             )}
+            <ReceiptEmailPrompt
+              key={transaction.id}
+              transactionId={transaction.id}
+              email={customerEmail.trim() || transaction.customerEmail || ""}
+              clientId={context.customerId || ""}
+              clientName={customerName.trim()}
+              onClientEmailSaved={onClientEmailSaved}
+            />
             <div className="panel-actions">
               <button className="primary-button" onClick={onClose} type="button">
                 Done

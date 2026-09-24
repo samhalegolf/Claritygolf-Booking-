@@ -15396,3 +15396,397 @@ button {
   align-items: center;
   gap: var(--c-space-1);
 }
+
+/* --- Till: coupon search, unpaid lessons, receipt email (2026-09-24) ---
+   Shared by the Sell screen and the checkout modal. Colours read --c-* tokens
+   directly so both themes follow without a dark twin here. */
+
+.coupon-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 0 10px;
+  border: 1px dashed var(--c-border);
+  border-radius: 10px;
+  color: var(--c-muted);
+}
+
+.coupon-search input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 0;
+  border: none;
+  background: none;
+  color: var(--c-text);
+  font: inherit;
+}
+
+.coupon-search input:focus {
+  outline: none;
+}
+
+/* Floats like the customer results, so the docket does not jump while typing. */
+.coupon-search-results {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--c-border);
+  border-radius: 10px;
+  background: var(--c-surface);
+  box-shadow: 0 12px 28px var(--c-scrim-soft);
+}
+
+.coupon-search-results .field-help {
+  margin: 2px 6px;
+}
+
+.coupon-search-match {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--c-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.coupon-search-match:hover {
+  background: var(--c-hover);
+}
+
+.coupon-search-match span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.coupon-search-match strong {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+}
+
+.coupon-search-match em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--c-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.coupon-search-match b {
+  font-size: 13px;
+}
+
+.coupon-held {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 9px 10px;
+  border: 1px dashed var(--c-accent);
+  border-radius: 10px;
+  color: var(--c-text);
+}
+
+.coupon-held.applied {
+  border-style: solid;
+  background: var(--c-success-wash);
+}
+
+.coupon-held span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.coupon-held strong {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.coupon-held em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--c-muted);
+}
+
+.coupon-held > button:last-child {
+  margin-left: auto;
+}
+
+.sell-coupon-pay {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin: 4px 0 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--c-accent);
+  border-radius: 12px;
+  background: var(--c-tone-wash);
+  color: var(--c-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sell-coupon-pay:hover:not(:disabled) {
+  background: var(--c-hover);
+}
+
+.sell-coupon-pay span {
+  display: flex;
+  flex-direction: column;
+}
+
+.sell-coupon-pay em {
+  font-style: normal;
+  font-size: 12px;
+  color: var(--c-muted);
+}
+
+.sell-coupon-paid {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--c-success-wash);
+  color: var(--c-success-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.sell-coupon-paid .text-link-button {
+  margin-left: auto;
+}
+
+.pos-coupon-confirm {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--c-border);
+  border-radius: 10px;
+  background: var(--c-surface-soft);
+  color: var(--c-text);
+  font-size: 13px;
+}
+
+.pos-coupon-confirm p {
+  margin: 0 0 8px;
+}
+
+/* The customer's name on the docket opens their profile. */
+.sell-customer-open {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--c-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sell-customer-open strong {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-decoration: underline;
+  text-decoration-color: var(--c-border);
+  text-underline-offset: 3px;
+}
+
+.sell-customer-open:hover strong {
+  text-decoration-color: currentColor;
+}
+
+.sell-customer-open em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--c-muted);
+}
+
+/* Unpaid lessons, above the tiles while a client's name is searched. */
+.sell-lessons {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.sell-lessons h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--c-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.sell-lesson-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sell-lesson-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sell-lesson-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--c-border);
+  border-radius: 10px;
+  background: var(--c-surface-soft);
+  color: var(--c-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sell-lesson-group-toggle svg {
+  flex: none;
+  transform: rotate(-90deg);
+  transition: transform var(--c-t-expand);
+}
+
+.sell-lesson-group-toggle svg.open {
+  transform: none;
+}
+
+.sell-lesson-group-toggle em {
+  margin-left: auto;
+  font-style: normal;
+  font-size: 12px;
+  color: var(--c-muted);
+  white-space: nowrap;
+}
+
+.sell-lesson {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--c-border);
+  border-radius: 10px;
+  background: none;
+  color: var(--c-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sell-lesson-group-head + .sell-lesson,
+.sell-lesson-group-head ~ .sell-lesson {
+  margin-left: 18px;
+}
+
+.sell-lesson:hover {
+  border-color: var(--c-accent);
+}
+
+.sell-lesson span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.sell-lesson strong {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sell-lesson em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--c-muted);
+}
+
+.sell-lesson b {
+  font-size: 13px;
+}
+
+/* "Email a receipt?" on the done screen. */
+.receipt-email {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0 4px;
+  padding: 12px;
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  color: var(--c-text);
+}
+
+.receipt-email-question {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-weight: 600;
+}
+
+.receipt-email input {
+  padding: 9px 10px;
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  background: var(--c-surface);
+  color: var(--c-text);
+  font: inherit;
+}
+
+.receipt-email .field-help,
+.receipt-email .pos-error {
+  margin: 0;
+}
+
+.receipt-email-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.receipt-email.sent {
+  flex-direction: row;
+  align-items: center;
+  background: var(--c-success-wash);
+  color: var(--c-success-text);
+  border-color: transparent;
+  font-size: 13px;
+}

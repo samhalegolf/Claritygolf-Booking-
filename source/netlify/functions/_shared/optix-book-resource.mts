@@ -41,6 +41,13 @@ async function ensureOptixSyncTable() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `;
+  // How many times the background sweep has picked this row up. Added by the
+  // 20260924000100 migration; repeated here so an environment whose migrations
+  // have not run still has the column the sweep relies on.
+  await db().sql`
+    ALTER TABLE optix_booking_sync
+      ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0
+  `;
 }
 
 /**
@@ -132,7 +139,10 @@ function rowToSyncRecord(row: any): OptixSyncRecord {
     startTimestamp: Number(row.start_timestamp || 0),
     endTimestamp: Number(row.end_timestamp || 0),
     fingerprint: String(row.fingerprint || ""),
-    syncStatus: ["synced", "failed", "token_expired", "cancelled"].includes(row.sync_status)
+    // 'pending' is a queued auto-book that no attempt has finished yet (see
+    // queueAutoBookResource). It used to be read as 'failed', which would have
+    // made reconcile treat a row nothing had tried as a terminal refusal.
+    syncStatus: ["synced", "failed", "token_expired", "cancelled", "pending"].includes(row.sync_status)
       ? row.sync_status
       : "failed",
     errorCode: String(row.error_code || ""),
@@ -525,10 +535,237 @@ export async function autoBookResourceForNewBooking(
       error: (outcome as { error?: string }).error || (outcome as { result?: OptixSyncRecord }).result?.errorCode || "",
     });
   } catch (error) {
-    console.error("optix_auto_book_resource_failed", {
-      calendarItemId,
-      serviceId,
+    const message = error instanceof Error ? error.message.slice(0, 300) : String(error || "").slice(0, 300);
+    console.error("optix_auto_book_resource_failed", { calendarItemId, serviceId, error: message });
+    // Leave the outcome on the row, not only in a log nobody reads. Only a
+    // queued row is touched: a lesson that already holds a bay must not have
+    // its synced row overwritten because a later lookup hiccuped.
+    await markQueuedAutoBook(calendarItemId, "failed", "auto_book_exception", message).catch(() => undefined);
+  }
+}
+
+/**
+ * Bay bookings that were asked for but have not been answered.
+ *
+ * Both doors that create a lesson (the coach's calendar save and the public
+ * booking page) hand the Optix round trip to a task that runs after the
+ * response has gone out. In practice that task survives only a few seconds:
+ * the live database showed four bays booked automatically out of twenty-three
+ * lessons in September 2026, and the nineteen others left no row at all -- no
+ * failure, no attempt, nothing for the coach to see.
+ *
+ * So the ask is now written down before the response: a 'pending' row in
+ * optix_booking_sync, inserted only when the lesson type has Auto-book ticked.
+ * The after-response attempt still runs and usually answers within seconds.
+ * When it does not, sweepQueuedAutoBooks (a scheduled function) finds the row
+ * and books the bay itself. Either way the row ends up 'synced' or 'failed',
+ * and the card can say which.
+ *
+ * Never throws: a public booking must not fail because the queue could not
+ * be written. Returns whether a row was queued.
+ */
+export async function queueAutoBookResource(
+  accountId: string,
+  calendarItemId: string,
+  serviceId: string,
+): Promise<boolean> {
+  const cleanId = String(calendarItemId || "").trim();
+  const cleanService = String(serviceId || "").trim();
+  if (!accountId || !cleanId || !cleanService) return false;
+  try {
+    await ensureOptixSyncTable();
+    // One statement: the Auto-book tick is read from the account's settings
+    // inside the INSERT, so a lesson type without it never gets a row. An
+    // existing row -- a bay already held, an earlier failure the coach can
+    // see -- is left exactly as it is.
+    const rows = await db().sql`
+      INSERT INTO optix_booking_sync (
+        calendar_item_id, optix_booking_id, optix_booking_session_id, resource_id,
+        start_timestamp, end_timestamp, fingerprint, sync_status, error_code,
+        error_message, last_attempted_at, last_synced_at, created_at, updated_at
+      )
+      SELECT ${cleanId}, '', '', '', 0, 0, '', 'pending', 'queued',
+             'Waiting for Clarity to book a bay in the background.',
+             NULL, NULL, NOW(), NOW()
+      WHERE EXISTS (
+        SELECT 1
+        FROM settings
+        WHERE account_id = ${accountId}
+          AND key = 'optixBookingTypeConfigJson'
+          AND COALESCE((NULLIF(value, '')::jsonb -> ${cleanService} ->> 'enabled')::boolean, FALSE)
+          AND COALESCE((NULLIF(value, '')::jsonb -> ${cleanService} ->> 'autoBook')::boolean, FALSE)
+      )
+      ON CONFLICT (calendar_item_id) DO NOTHING
+      RETURNING calendar_item_id
+    `;
+    const queued = rows.length > 0;
+    console.info("optix_auto_book_queued", { calendarItemId: cleanId, serviceId: cleanService, queued });
+    return queued;
+  } catch (error) {
+    console.error("optix_auto_book_queue_failed", {
+      calendarItemId: cleanId,
+      serviceId: cleanService,
       error: error instanceof Error ? error.message.slice(0, 300) : String(error || "").slice(0, 300),
     });
+    return false;
   }
+}
+
+/** Settle a queued row without touching one that has already been answered. */
+async function markQueuedAutoBook(
+  calendarItemId: string,
+  status: "failed" | "cancelled",
+  errorCode: string,
+  errorMessage: string,
+) {
+  await db().sql`
+    UPDATE optix_booking_sync
+    SET sync_status = ${status},
+        error_code = ${errorCode},
+        error_message = ${errorMessage.slice(0, 600)},
+        last_attempted_at = NOW(),
+        updated_at = NOW()
+    WHERE calendar_item_id = ${calendarItemId}
+      AND sync_status = 'pending'
+  `;
+}
+
+/** How long the after-response attempt gets before the sweep steps in. */
+const SWEEP_GRACE_SECONDS = 90;
+/** A claimed row is left alone this long, in case its attempt is still running. */
+const SWEEP_CLAIM_SECONDS = 150;
+/**
+ * After this many sweep attempts a row that is still pending is given up on.
+ * A finished attempt always writes synced or failed, so reaching this means
+ * every attempt was cut off before it could answer -- the coach books by hand.
+ */
+const SWEEP_MAX_ATTEMPTS = 4;
+
+export type AutoBookSweepOutcome = {
+  claimed: number;
+  synced: number;
+  failed: number;
+  settled: number;
+  items: Array<{ calendarItemId: string; outcome: string }>;
+};
+
+/**
+ * Book the bays that queued auto-book attempts never answered.
+ *
+ * Claims one pending row at a time, oldest first, and books it through the
+ * same bookOneResource the Book bay button uses, so the result lands on the
+ * row in the same shape. The claim is an UPDATE that stamps
+ * last_attempted_at, so two overlapping runs cannot pick the same row and a
+ * row whose attempt is still in flight is not picked again for a while.
+ *
+ * `budgetMs` bounds how late a NEW attempt may start: an attempt already
+ * running is allowed its full 25 seconds, so the caller's function timeout
+ * has to cover budgetMs plus that.
+ *
+ * The one thing this cannot rule out: an after-response attempt that Optix
+ * accepted but that was cut off before the booking id was saved. The sweep
+ * would then hold a second bay for the same lesson. The 90-second grace makes
+ * that window small (the attempt either answered or died well within it),
+ * and the Book bay card shows the bay that was recorded.
+ */
+export async function sweepQueuedAutoBooks(
+  options: { budgetMs?: number; nowMs?: number } = {},
+): Promise<AutoBookSweepOutcome> {
+  const startedAt = options.nowMs ?? Date.now();
+  const budgetMs = options.budgetMs ?? 5_000;
+  const outcome: AutoBookSweepOutcome = { claimed: 0, synced: 0, failed: 0, settled: 0, items: [] };
+  await ensureOptixSyncTable();
+
+  while (Date.now() - startedAt < budgetMs) {
+    const claimed = await db().sql`
+      UPDATE optix_booking_sync s
+      SET last_attempted_at = NOW(),
+          attempt_count = s.attempt_count + 1,
+          updated_at = NOW()
+      WHERE s.calendar_item_id = (
+        SELECT calendar_item_id
+        FROM optix_booking_sync
+        WHERE sync_status = 'pending'
+          AND created_at < NOW() - (${SWEEP_GRACE_SECONDS}::int * INTERVAL '1 second')
+          AND (last_attempted_at IS NULL
+               OR last_attempted_at < NOW() - (${SWEEP_CLAIM_SECONDS}::int * INTERVAL '1 second'))
+        ORDER BY created_at
+        LIMIT 1
+        FOR UPDATE SKIP LOCKED
+      )
+      RETURNING s.calendar_item_id, s.attempt_count
+    `;
+    if (!claimed[0]) break;
+    outcome.claimed += 1;
+    const calendarItemId = String(claimed[0].calendar_item_id || "");
+    const attemptCount = Number(claimed[0].attempt_count || 0);
+    const record = (label: string) => outcome.items.push({ calendarItemId, outcome: label });
+
+    try {
+      if (attemptCount > SWEEP_MAX_ATTEMPTS) {
+        await markQueuedAutoBook(
+          calendarItemId,
+          "failed",
+          "auto_book_abandoned",
+          `Clarity tried ${SWEEP_MAX_ATTEMPTS} times to book a bay in the background and never got an answer. Press Book bay to book it now.`,
+        );
+        outcome.settled += 1;
+        record("abandoned");
+        continue;
+      }
+
+      const lessons = await db().sql`
+        SELECT account_id, service_id, status
+        FROM calendar_items
+        WHERE id = ${calendarItemId} AND kind = 'appointment'
+        LIMIT 1
+      `;
+      const lesson = lessons[0];
+      if (!lesson) {
+        await markQueuedAutoBook(calendarItemId, "cancelled", "lesson_deleted", "The lesson was removed before a bay was booked.");
+        outcome.settled += 1;
+        record("lesson_deleted");
+        continue;
+      }
+      if (["cancelled", "no_show"].includes(String(lesson.status || ""))) {
+        await markQueuedAutoBook(calendarItemId, "cancelled", "lesson_inactive", "The lesson was cancelled before a bay was booked.");
+        outcome.settled += 1;
+        record("lesson_inactive");
+        continue;
+      }
+      const accountId = String(lesson.account_id || "");
+      const serviceId = String(lesson.service_id || "");
+      const bookingType = await readBookingTypeConfig(accountId, serviceId);
+      if (bookingType?.enabled !== true || bookingType?.autoBook !== true) {
+        await markQueuedAutoBook(calendarItemId, "cancelled", "optix_disabled", "Auto-book was switched off for this lesson type before a bay was booked.");
+        outcome.settled += 1;
+        record("optix_disabled");
+        continue;
+      }
+
+      const result = await bookOneResource(accountId, calendarItemId);
+      if (result.ok === true) {
+        outcome.synced += 1;
+        record((result as { alreadyBooked?: boolean }).alreadyBooked ? "already_booked" : "synced");
+      } else {
+        // bookOneResource has already written the failed row with Optix's
+        // reason; only a refusal before it got that far leaves 'pending'.
+        const reason =
+          (result as { message?: string }).message ||
+          (result as { result?: OptixSyncRecord }).result?.errorMessage ||
+          "Optix did not book a bay.";
+        await markQueuedAutoBook(calendarItemId, "failed", (result as { error?: string }).error || "auto_book_failed", reason);
+        outcome.failed += 1;
+        record("failed");
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message.slice(0, 300) : String(error || "").slice(0, 300);
+      console.error("optix_auto_book_sweep_item_failed", { calendarItemId, error: message });
+      await markQueuedAutoBook(calendarItemId, "failed", "auto_book_exception", message).catch(() => undefined);
+      outcome.failed += 1;
+      record("exception");
+    }
+  }
+
+  return outcome;
 }

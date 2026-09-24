@@ -3067,11 +3067,12 @@ const DEFAULT_PAYMENT_METHODS = [
   { name: "Cash", kind: "custom", settles_immediately: true, sort_order: 20 },
   { name: "Eftpos", kind: "custom", settles_immediately: true, sort_order: 30 },
   { name: "On account", kind: "custom", settles_immediately: false, sort_order: 40 },
-  // The method a sale lands on when a voucher covered the whole thing. It is an
-  // ordinary manual method as far as the table is concerned; what makes it a
-  // coupon payment is billing_pos_transactions.coupon_amount, and posSummary
-  // nets that off so the cash drawer never appears to hold voucher money.
-  { name: "Coupon", kind: "custom", settles_immediately: true, sort_order: 50 },
+  // The method a sale lands on when a voucher covered the whole thing. What
+  // makes it a coupon payment in the numbers is still
+  // billing_pos_transactions.coupon_amount, which posSummary nets off so the
+  // cash drawer never appears to hold voucher money; the kind is so the till
+  // can find it without trusting a name.
+  { name: "Coupon", kind: "coupon", settles_immediately: true, sort_order: 50 },
 ];
 
 // The method a lesson lands on when a pass covered it. Unlike the rest of this
@@ -3090,9 +3091,8 @@ const PASS_METHOD = {
  *
  * The seed above only runs when an account has *no* payment methods at all, so
  * a method added to that list later never reaches an account that already has
- * one -- which is every account by now. (The same gap is why COUPON_METHOD_NAME
- * below is dead code: the Coupon row it names was added to the seed after the
- * fact and no existing account was ever given one.)
+ * one -- which is every account by now. The Coupon method had the same gap and
+ * is topped up the same way, by ensureCouponPaymentMethod below.
  *
  * Passes cannot be spent without this row, so it is topped up explicitly rather
  * than left to a seed that will not fire.
@@ -3119,15 +3119,52 @@ async function ensurePassPaymentMethod(accountId: string, rows: Record<string, u
   }
 }
 
-// Name of the seeded method above. Matched by name because the row is seeded
-// per account and has no stable id.
-const COUPON_METHOD_NAME = "Coupon";
+const COUPON_METHOD = {
+  name: "Coupon",
+  kind: "coupon",
+  settles_immediately: true,
+  sort_order: 50,
+};
+
+/**
+ * Make sure this account has the Coupon method.
+ *
+ * Pressing "Pay with coupon" has to land a sale somewhere, and without this row
+ * a sale settled entirely by a voucher was recorded under whichever method the
+ * coach happened to tap -- usually Cash, which then over-reported the drawer.
+ * An older account may hold the row under the old `custom` kind (the migration
+ * re-kinds those); anything else gets one.
+ */
+async function ensureCouponPaymentMethod(accountId: string, rows: Record<string, unknown>[]) {
+  if (rows.some((row) => row.kind === "coupon")) return rows;
+  const row = {
+    id: randomUUID(),
+    account_id: accountId,
+    ...COUPON_METHOD,
+    active: true,
+    created_at: nowIso(),
+    updated_at: nowIso(),
+  };
+  try {
+    await supabase("billing_payment_methods", { method: "POST", body: [row], prefer: "return=minimal" });
+    return [...rows, row];
+  } catch (error) {
+    if ((error as { supabaseStatus?: number })?.supabaseStatus !== 409) throw error;
+    return supabase("billing_payment_methods", {
+      query: `select=*&account_id=eq.${encodeFilter(accountId)}&order=sort_order.asc,name.asc`,
+    });
+  }
+}
+
+function paymentMethodKind(value: unknown) {
+  return value === "clarity_pay" || value === "pass" || value === "coupon" ? String(value) : "custom";
+}
 
 function paymentMethodRowToApi(row: Record<string, unknown>) {
   return {
     id: String(row.id ?? ""),
     name: String(row.name ?? ""),
-    kind: row.kind === "clarity_pay" || row.kind === "pass" ? String(row.kind) : "custom",
+    kind: paymentMethodKind(row.kind),
     settlesImmediately: row.settles_immediately !== false,
     sortOrder: Number(row.sort_order) || 0,
     active: row.active !== false,
@@ -3174,6 +3211,7 @@ async function listPaymentMethods(accountId: string) {
     }
   }
   rows = await ensurePassPaymentMethod(accountId, rows);
+  rows = await ensureCouponPaymentMethod(accountId, rows);
   return {
     paymentMethods: rows.map(paymentMethodRowToApi),
     // The Clarity Pay row is seeded for every account whether or not Stripe is
@@ -3215,6 +3253,24 @@ async function updatePaymentMethod(accountId: string, id: string, body: Record<s
   return { paymentMethod: paymentMethodRowToApi(rows[0]) };
 }
 
+// Every lesson a sale paid for. Older rows only have booking_id; newer ones
+// carry the full list in booking_ids with the first of them mirrored into
+// booking_id, so the union is right for both.
+function posBookingIds(row: Record<string, unknown>) {
+  const list = Array.isArray(row.booking_ids) ? (row.booking_ids as unknown[]).map((id) => String(id ?? "")) : [];
+  const first = String(row.booking_id ?? "");
+  return [...new Set([first, ...list].filter(Boolean))];
+}
+
+function cleanBookingIds(body: Record<string, unknown>) {
+  const list = Array.isArray(body?.bookingIds) ? (body.bookingIds as unknown[]) : [];
+  return [
+    ...new Set(
+      [body?.bookingId, ...list].map((id) => cleanString(id, "", 160)).filter(Boolean),
+    ),
+  ].slice(0, 50);
+}
+
 function posRowToApi(row: Record<string, unknown>) {
   return {
     id: String(row.id ?? ""),
@@ -3222,10 +3278,7 @@ function posRowToApi(row: Record<string, unknown>) {
     status: String(row.status ?? "paid"),
     paymentMethodId: String(row.payment_method_id ?? ""),
     paymentMethodName: String(row.payment_method_name ?? ""),
-    paymentMethodKind:
-      row.payment_method_kind === "clarity_pay" || row.payment_method_kind === "pass"
-        ? String(row.payment_method_kind)
-        : "custom",
+    paymentMethodKind: paymentMethodKind(row.payment_method_kind),
     description: String(row.description ?? ""),
     amount: Number(row.amount) || 0,
     listedAmount: row.listed_amount === null || row.listed_amount === undefined ? null : Number(row.listed_amount),
@@ -3234,6 +3287,7 @@ function posRowToApi(row: Record<string, unknown>) {
     customerName: String(row.customer_name ?? ""),
     customerEmail: String(row.customer_email ?? ""),
     bookingId: String(row.booking_id ?? ""),
+    bookingIds: posBookingIds(row),
     source: String(row.source ?? "counter"),
     note: String(row.note ?? ""),
     couponId: String(row.coupon_id ?? ""),
@@ -3659,6 +3713,10 @@ async function createPosTransaction(accountId: string, body: Record<string, unkn
   // and `amount` stops being the thing that has to be positive -- what has to
   // be positive is the value being covered, which lands in listed_amount.
   const settledByPass = method.kind === "pass";
+  // "Pay with coupon" only means the voucher paid for all of it. A voucher
+  // that covers part of a sale is recorded on whichever method took the rest,
+  // with coupon_amount carrying the voucher's slice.
+  const settledByCoupon = method.kind === "coupon";
   if (!settledByPass && amount <= 0) {
     throw Object.assign(new Error("Enter an amount greater than zero."), { status: 400 });
   }
@@ -3680,11 +3738,20 @@ async function createPosTransaction(accountId: string, body: Record<string, unkn
   const couponId = cleanString(body?.couponId, "", 160);
   let couponAmount = 0;
   let couponBalance: number | null = null;
+  if (settledByCoupon && !couponId) {
+    throw Object.assign(new Error("Choose a coupon to pay with."), { status: 400, code: "COUPON_REQUIRED" });
+  }
   if (couponId) {
     const requested = round2(cleanNumber(body?.couponAmount, 0, { min: 0 }));
     couponAmount = Math.min(requested > 0 ? requested : amount, amount);
     if (couponAmount <= 0) {
       throw Object.assign(new Error("The coupon amount must be greater than zero."), { status: 400 });
+    }
+    if (settledByCoupon && couponAmount < amount) {
+      throw Object.assign(
+        new Error("That coupon does not cover the whole sale. Take the rest on another method."),
+        { status: 400, code: "COUPON_SHORT" },
+      );
     }
     couponBalance = await redeemCouponValue(accountId, couponId, couponAmount);
     if (couponBalance === null) {
@@ -3725,6 +3792,7 @@ async function createPosTransaction(accountId: string, body: Record<string, unkn
     });
   }
 
+  const bookingIds = cleanBookingIds(body);
   const row = {
     id: randomUUID(),
     account_id: accountId,
@@ -3754,7 +3822,8 @@ async function createPosTransaction(accountId: string, body: Record<string, unkn
       || await resolveCustomerIdByEmail(accountId, body?.customerEmail),
     customer_name: cleanString(body?.customerName, "", 140) || null,
     customer_email: cleanString(body?.customerEmail, "", 180) || null,
-    booking_id: cleanString(body?.bookingId, "", 160) || null,
+    booking_id: bookingIds[0] || null,
+    booking_ids: bookingIds,
     source,
     stripe_session_id: null as string | null,
     stripe_payment_intent_id: null as string | null,
@@ -3891,6 +3960,130 @@ async function updatePosTransactionStatus(accountId: string, id: string, body: R
   return { transaction: refreshed, issuedPasses };
 }
 
+// The till's receipt, by email. A POS sale has never had one: the receipt
+// number was on screen and nowhere else, so a customer who bought a pass had
+// nothing to show for it but the pass. No PDF -- an invoice is a document
+// someone files, a receipt is a line in an inbox.
+//
+// When the till typed the address in because the client had none, it is also
+// written to their profile -- but only into an empty field. A receipt going to
+// a different address than the one on file is a one-off, not a correction.
+async function emailPosReceipt(accountId: string, id: string, body: Record<string, unknown>) {
+  const transaction = await getPosTransaction(accountId, id);
+  if (!transaction) throw Object.assign(new Error("Transaction not found."), { status: 404 });
+  const to = cleanString(body?.email, "", 180).toLowerCase() || cleanString(transaction.customerEmail, "", 180);
+  if (!to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
+    throw Object.assign(new Error("Enter a valid email address."), { status: 400, code: "MISSING_RECIPIENT" });
+  }
+
+  const branding = await resolveInvoiceBranding(accountId);
+  const currency = transaction.currency || "NZD";
+  const couponAmount = round2(Number(transaction.couponAmount) || 0);
+  const paidOnMethod = round2(Math.max(0, transaction.amount - couponAmount));
+  const paidAt = new Date(transaction.paidAt || transaction.createdAt || Date.now());
+  const dateLabel = Number.isFinite(paidAt.getTime())
+    ? paidAt.toLocaleDateString("en-NZ", { day: "numeric", month: "short", year: "numeric" })
+    : "";
+
+  const itemLines = transaction.items.length
+    ? transaction.items.map((item) => ({
+        label: item.quantity > 1 ? `${item.name} x${item.quantity}` : item.name,
+        amount: item.lineTotal,
+      }))
+    : [{ label: transaction.description, amount: transaction.amount }];
+  const paymentLines = [
+    couponAmount > 0 ? { label: "Paid by gift voucher", amount: couponAmount } : null,
+    transaction.paymentMethodKind === "coupon" || (couponAmount > 0 && paidOnMethod <= 0)
+      ? null
+      : { label: `Paid by ${transaction.paymentMethodName || "card"}`, amount: paidOnMethod },
+  ].filter(Boolean) as Array<{ label: string; amount: number }>;
+  const pending = transaction.status === "pending";
+
+  const subject = `Receipt ${transaction.receiptNumber} from ${branding.businessName}`;
+  const plain = [
+    `Hi ${transaction.customerName || "there"},`,
+    "",
+    `Thanks for your purchase. Here is your receipt.`,
+    "",
+    `Receipt: ${transaction.receiptNumber}${dateLabel ? ` - ${dateLabel}` : ""}`,
+    ...itemLines.map((line) => `${line.label}: ${formatMoney(line.amount, currency)}`),
+    `Total: ${formatMoney(transaction.amount, currency)}`,
+    ...paymentLines.map((line) => `${line.label}: ${formatMoney(line.amount, currency)}`),
+    pending ? "Status: payment still owed" : "",
+    "",
+    "Thanks,",
+    branding.businessName,
+  ]
+    .filter((line, index, all) => line !== "" || all[index - 1] !== "")
+    .join("\n");
+
+  const row = (label: string, amount: string, bold = false) =>
+    `<tr><td style="padding:4px 0;${bold ? "font-weight:600;" : ""}">${escapeHtml(label)}</td>` +
+    `<td style="padding:4px 0;text-align:right;${bold ? "font-weight:600;" : ""}">${escapeHtml(amount)}</td></tr>`;
+  const html =
+    `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#1a1c1f;max-width:480px">` +
+    `<p style="margin:0 0 8px">Hi ${escapeHtml(transaction.customerName || "there")},</p>` +
+    `<p style="margin:0 0 16px">Thanks for your purchase. Here is your receipt.</p>` +
+    `<p style="margin:0 0 8px;color:#5b6068">${escapeHtml(transaction.receiptNumber)}${dateLabel ? ` &middot; ${escapeHtml(dateLabel)}` : ""}</p>` +
+    `<table style="width:100%;border-collapse:collapse;border-top:1px solid #d9dce1;border-bottom:1px solid #d9dce1">` +
+    itemLines.map((line) => row(line.label, formatMoney(line.amount, currency))).join("") +
+    row("Total", formatMoney(transaction.amount, currency), true) +
+    paymentLines.map((line) => row(line.label, formatMoney(line.amount, currency))).join("") +
+    `</table>` +
+    (pending ? `<p style="margin:12px 0 0">Payment for this sale is still owed.</p>` : "") +
+    `<p style="margin:16px 0 0">Thanks,<br/>${escapeHtml(branding.businessName)}</p>` +
+    `</div>`;
+
+  const result = await deliverEmail({
+    accountId,
+    to,
+    subject,
+    text: plain,
+    html,
+    replyTo: branding.contactEmail || undefined,
+    idempotencyKey: `pos-receipt-${id}-${to}-${Date.now()}`,
+  });
+  if (!result.sent) {
+    if (result.reason === "missing_resend_key") {
+      throw Object.assign(new Error("Email sending is not configured (missing RESEND_API_KEY)."), {
+        status: 503,
+        code: "EMAIL_NOT_CONFIGURED",
+      });
+    }
+    throw Object.assign(new Error(`The receipt could not be sent (${result.reason}).`), {
+      status: 502,
+      code: "EMAIL_SEND_FAILED",
+    });
+  }
+
+  // The sale itself keeps the address it was sent to, when it had none.
+  if (!transaction.customerEmail) {
+    await supabase("billing_pos_transactions", {
+      method: "PATCH",
+      query: `id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}`,
+      body: { customer_email: to, updated_at: nowIso() },
+      prefer: "return=minimal",
+    }).catch(() => null);
+  }
+
+  let savedToClient = false;
+  if (body?.saveToClient === true && transaction.customerId && !transaction.customerId.startsWith("appointment-")) {
+    // The empty-field guard is in the filter, not a read beforehand, so a
+    // profile edited in another tab a second ago is never overwritten.
+    const updated = (await supabase("people", {
+      method: "PATCH",
+      query:
+        `id=eq.${encodeFilter(transaction.customerId)}&account_id=eq.${encodeFilter(accountId)}` +
+        `&or=${encodeURIComponent("(email.is.null,email.eq.)")}`,
+      body: { email: to, updated_at: nowIso() },
+      prefer: "return=representation",
+    }).catch(() => [])) as unknown[];
+    savedToClient = updated.length > 0;
+  }
+
+  return { sent: true, recipient: to, savedToClient };
+}
+
 // Clarity Pay at the counter: create a Stripe Checkout session for this sale.
 // The client renders the returned URL as a QR code so the customer can pay
 // contactless from their own phone (Apple Pay / Google Pay), or opens it
@@ -3981,32 +4174,39 @@ async function syncPosCheckout(accountId: string, id: string) {
 // sales count: a pending Clarity Pay session is not money in the till.
 async function posBookingPayments(accountId: string, bookingIds: string[]) {
   if (!bookingIds.length) return { payments: {} as Record<string, unknown> };
-  const list = bookingIds.slice(0, 400).map((id) => `"${id.replace(/"/g, "")}"`).join(",");
-  const rows = await supabase("billing_pos_transactions", {
-    query:
-      `select=id,receipt_number,booking_id,amount,currency,payment_method_name,payment_method_kind,paid_at` +
-      `&account_id=eq.${encodeFilter(accountId)}&status=eq.paid&booking_id=in.(${encodeURIComponent(list)})`,
-  });
+  const wanted = bookingIds.slice(0, 400);
+  const list = wanted.map((id) => `"${id.replace(/"/g, "")}"`).join(",");
+  // booking_id for sales written before booking_ids existed (and for the first
+  // lesson on every sale since); booking_ids for the rest of a multi-lesson one.
+  // Two reads rather than one `or=`: the id list is already most of a URL, and
+  // doubling it is how a lookup starts coming back 414.
+  const base =
+    `select=id,receipt_number,booking_id,booking_ids,amount,currency,payment_method_name,payment_method_kind,paid_at` +
+    `&account_id=eq.${encodeFilter(accountId)}&status=eq.paid`;
+  const [byFirst, byList] = await Promise.all([
+    supabase("billing_pos_transactions", { query: `${base}&booking_id=in.(${encodeURIComponent(list)})` }),
+    supabase("billing_pos_transactions", { query: `${base}&booking_ids=ov.${encodeURIComponent(`{${list}}`)}` }),
+  ]);
+  const rows = [...(byFirst as unknown[]), ...(byList as unknown[])];
+  const wantedSet = new Set(wanted);
   const payments: Record<string, unknown> = {};
   for (const row of rows as Array<Record<string, unknown>>) {
-    const bookingId = String(row.booking_id || "");
-    if (!bookingId) continue;
-    payments[bookingId] = {
-      id: row.id,
-      receiptNumber: row.receipt_number,
-      amount: Number(row.amount) || 0,
-      currency: row.currency || "NZD",
-      paymentMethodName: row.payment_method_name,
-      // Carried as well as the name because a pass is not money and the two
-      // must be distinguishable without reading a label somebody renamed. A
-      // lesson settled with a credit shows a $0 sale, and "paid $0.00" on a
-      // profile is worse than saying nothing.
-      paymentMethodKind:
-        row.payment_method_kind === "clarity_pay" || row.payment_method_kind === "pass"
-          ? String(row.payment_method_kind)
-          : "custom",
-      paidAt: row.paid_at || "",
-    };
+    for (const bookingId of posBookingIds(row)) {
+      if (!wantedSet.has(bookingId)) continue;
+      payments[bookingId] = {
+        id: row.id,
+        receiptNumber: row.receipt_number,
+        amount: Number(row.amount) || 0,
+        currency: row.currency || "NZD",
+        paymentMethodName: row.payment_method_name,
+        // Carried as well as the name because a pass is not money and the two
+        // must be distinguishable without reading a label somebody renamed. A
+        // lesson settled with a credit shows a $0 sale, and "paid $0.00" on a
+        // profile is worse than saying nothing.
+        paymentMethodKind: paymentMethodKind(row.payment_method_kind),
+        paidAt: row.paid_at || "",
+      };
+    }
   }
   return { payments };
 }
@@ -5027,6 +5227,10 @@ export default async function handler(req: Request) {
     if (action.startsWith("pos/transactions/") && action.endsWith("/checkout") && req.method === "POST") {
       const transactionId = action.slice("pos/transactions/".length, -"/checkout".length);
       return json(await createPosCheckout(accountId, transactionId, req));
+    }
+    if (action.startsWith("pos/transactions/") && action.endsWith("/receipt") && req.method === "POST") {
+      const transactionId = action.slice("pos/transactions/".length, -"/receipt".length);
+      return json(await emailPosReceipt(accountId, transactionId, await parseBody(req)));
     }
     if (action.startsWith("pos/transactions/") && action.endsWith("/checkout-status") && req.method === "GET") {
       const transactionId = action.slice("pos/transactions/".length, -"/checkout-status".length);

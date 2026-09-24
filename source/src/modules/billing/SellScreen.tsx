@@ -16,7 +16,9 @@ import { Loading } from "../shared/Loading";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
+  CalendarClock,
   Check,
+  ChevronDown,
   CreditCard,
   ExternalLink,
   Minus,
@@ -29,7 +31,11 @@ import {
   X,
 } from "lucide-react";
 import type { BillingCatalogItem, BillingCatalogKind, BillingCoupon, PosPaymentMethod, PosTransaction } from "./types";
-import { couponApplyAmount, couponBlockedReason, remainingAfterCoupon } from "./couponMath";
+import { couponApplyAmount, remainingAfterCoupon } from "./couponMath";
+import { CouponPicker, useSpendableCoupons } from "./CouponPicker";
+import { ReceiptEmailPrompt } from "./ReceiptEmailPrompt";
+import { tillLessonGroups, tillLessonIsUpcoming, tillLessonWhen } from "./tillLessons";
+import type { TillLesson } from "./tillLessons";
 import {
   addCustomSellLine,
   addSellLine,
@@ -64,6 +70,15 @@ export type SellScreenProps = {
   onCreateClient: (name: string) => Promise<{ id: string; name: string; email?: string } | null>;
   onSaleCompleted: (transaction: PosTransaction) => void;
   onToast: (message: string) => void;
+  // Lessons with no payment on record, past and upcoming. Built by App, which
+  // holds the calendar and the paid/invoiced maps; searched here by name.
+  lessons: TillLesson[];
+  // Opens the client's profile over the till. Closing it lands back here with
+  // the sale untouched, because the till never unmounts.
+  onOpenClientProfile: (clientId: string) => void;
+  // A receipt emailed to an address the client did not have yet saved it to
+  // their profile; App updates its copy so the till and the list agree.
+  onClientEmailSaved: (clientId: string, email: string) => void;
 };
 
 type TabKey = "all" | BillingCatalogKind;
@@ -91,6 +106,11 @@ type ParkedSale = {
   customerName: string;
   customerEmail: string;
   customerId: string;
+  // A voucher held against the sale is parked with it. Only held, never spent:
+  // nothing comes off a voucher until the sale is recorded, so a parked sale
+  // cannot be sitting on anyone's money.
+  coupon?: BillingCoupon | null;
+  couponApplied?: boolean;
 };
 
 function readParked(): ParkedSale[] {
@@ -124,6 +144,9 @@ export function SellScreen({
   onCreateClient,
   onSaleCompleted,
   onToast,
+  lessons,
+  onOpenClientProfile,
+  onClientEmailSaved,
 }: SellScreenProps) {
   const [methods, setMethods] = useState<PosPaymentMethod[]>([]);
 
@@ -143,15 +166,21 @@ export function SellScreen({
 
   const [parked, setParked] = useState<ParkedSale[]>(() => (typeof window === "undefined" ? [] : readParked()));
 
-  // A voucher put against this sale. It pays the total down; whatever is left
-  // is taken on a normal method, which is why it lives outside payStage.
+  // A voucher held against this sale. Held is all it is until "Pay with
+  // coupon" is pressed: then either it covers everything and the sale is done,
+  // or it is put down as paid credit (couponApplied) and the rest is taken on a
+  // normal method. Its value only comes off the voucher when the sale is
+  // recorded, in the same request -- which is why this lives outside payStage.
   const [coupon, setCoupon] = useState<BillingCoupon | null>(null);
-  const [couponCode, setCouponCode] = useState("");
-  const [couponError, setCouponError] = useState("");
-  const [couponBusy, setCouponBusy] = useState(false);
+  const [couponApplied, setCouponApplied] = useState(false);
+  const couponBook = useSpendableCoupons();
 
-  // Payment overlay. "closed" -> "method" -> ("cash" for tendering) -> "qr" -> "done".
-  const [payStage, setPayStage] = useState<"closed" | "method" | "cash" | "qr" | "done">("closed");
+  // Folded client groups the coach has opened in the lesson results.
+  const [openLessonGroups, setOpenLessonGroups] = useState<string[]>([]);
+
+  // Payment overlay. "closed" -> "method" -> ("coupon" to confirm a part
+  // payment, "cash" for tendering) -> "qr" -> "done".
+  const [payStage, setPayStage] = useState<"closed" | "method" | "coupon" | "cash" | "qr" | "done">("closed");
   const [methodId, setMethodId] = useState("");
   const [tendered, setTendered] = useState("");
   const [busy, setBusy] = useState(false);
@@ -172,7 +201,26 @@ export function SellScreen({
   // Capped by the balance and by the sale: a $100 voucher against a $40 sale
   // spends $40 and keeps $60, it does not hand out change.
   const couponAmount = coupon ? couponApplyAmount(coupon, total) : 0;
-  const dueNow = remainingAfterCoupon(total, couponAmount);
+  const couponCovers = Boolean(coupon) && couponAmount > 0 && couponAmount >= total;
+  // Only credit that has been put down counts against what is owed. A held
+  // voucher is shown, not subtracted.
+  const appliedCoupon = couponApplied ? couponAmount : 0;
+  const dueNow = remainingAfterCoupon(total, appliedCoupon);
+  const couponMethod = methods.find((method) => method.kind === "coupon") || null;
+  // The grid is for money. Coupon has its own button, and Pass settles a
+  // booked lesson from the checkout modal, not a walk-up docket.
+  const payMethods = methods.filter((method) => method.kind !== "coupon" && method.kind !== "pass");
+  const bookingIds = lines.map((line) => line.bookingId || "").filter(Boolean);
+  const clientNames = useMemo(() => new Map(clients.map((client) => [client.id, client.name])), [clients]);
+  const lessonGroups = useMemo(
+    () => tillLessonGroups(lessons, search, new Set(bookingIds)),
+    // bookingIds is derived from lines; keyed on its contents, not its identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [lessons, search, bookingIds.join(",")],
+  );
+  // Credits land on a profile. With nobody attached there is no profile, and
+  // the server skips issuing rather than fail a sale -- so the till asks first.
+  const needsCustomerForPackage = !customerId && lines.some((line) => line.kind === "package");
   const tenderedValue = Number(tendered);
   const change = changeDue(tenderedValue, dueNow);
 
@@ -256,8 +304,7 @@ export function SellScreen({
     setTendered("");
     setError("");
     setCoupon(null);
-    setCouponCode("");
-    setCouponError("");
+    setCouponApplied(false);
     setIssuedCoupons([]);
     setPayStage("closed");
     searchRef.current?.focus();
@@ -267,6 +314,44 @@ export function SellScreen({
     setLines((current) => addSellLine(current, item));
     setSearch("");
     searchRef.current?.focus();
+  }
+
+  // A lesson goes on as its own line, tied to its booking, so paying the sale
+  // is what marks that lesson paid. Rung up against its lesson type when that
+  // type is still in the catalog; as plain money when it is not, so a retired
+  // lesson type never makes an old lesson impossible to settle.
+  function addLesson(lesson: TillLesson) {
+    if (lines.some((line) => line.bookingId === lesson.bookingId)) return;
+    const inCatalog = Boolean(lesson.catalogItemId) && catalog.some((item) => item.id === lesson.catalogItemId);
+    setLines((current) => [
+      ...current,
+      {
+        key: `booking:${lesson.bookingId}`,
+        productId: inCatalog ? lesson.catalogItemId : "",
+        name: lesson.serviceName || "Lesson",
+        detail: tillLessonWhen(lesson.startsAt),
+        sku: "",
+        kind: "service",
+        quantity: 1,
+        unitPrice: lesson.price,
+        taxRate: defaultTaxRate,
+        bookingId: lesson.bookingId,
+      },
+    ]);
+    // Paying for someone's lesson is paying as them, unless the coach has
+    // already said who is paying.
+    if (!customerName && lesson.personId) {
+      setCustomerId(lesson.personId);
+      setCustomerName(lesson.clientName);
+      setCustomerEmail(lesson.clientEmail);
+      setCustomerSearch("");
+    }
+  }
+
+  function toggleLessonGroup(key: string) {
+    setOpenLessonGroups((current) =>
+      current.includes(key) ? current.filter((entry) => entry !== key) : [...current, key],
+    );
   }
 
   function addCustom() {
@@ -293,6 +378,8 @@ export function SellScreen({
       customerId,
       customerName,
       customerEmail,
+      coupon,
+      couponApplied,
     };
     const next = [entry, ...parked].slice(0, 12);
     setParked(next);
@@ -309,6 +396,10 @@ export function SellScreen({
     setCustomerId(entry.customerId);
     setCustomerName(entry.customerName);
     setCustomerEmail(entry.customerEmail);
+    // The held voucher comes back as held. Whether it is still spendable is
+    // settled by the server at pay time; the balance may have moved since.
+    setCoupon(entry.coupon || null);
+    setCouponApplied(Boolean(entry.coupon && entry.couponApplied));
     const next = parked.filter((item) => item.id !== entry.id);
     setParked(next);
     writeParked(next);
@@ -322,53 +413,38 @@ export function SellScreen({
 
   // --- Payment ---------------------------------------------------------------
 
-  async function applyCoupon() {
-    const code = couponCode.trim();
-    if (!code) return;
-    setCouponBusy(true);
-    setCouponError("");
-    try {
-      const response = await fetch(`/api/billing/coupons/lookup?code=${encodeURIComponent(code)}`, {
-        credentials: "same-origin",
-        cache: "no-store",
-      });
-      const data = (await response.json().catch(() => null)) as { coupon?: BillingCoupon; message?: string } | null;
-      if (!response.ok || !data?.coupon) {
-        setCouponError(data?.message || "No coupon with that code.");
-        return;
-      }
-      // The balance shown here is a read; the SQL guard at pay time is what
-      // actually stops a voucher being spent twice.
-      const blocked = couponBlockedReason(data.coupon);
-      if (blocked) {
-        setCouponError(blocked);
-        return;
-      }
-      setCoupon(data.coupon);
-      setCouponCode("");
-    } catch {
-      setCouponError("Could not check that code.");
-    } finally {
-      setCouponBusy(false);
-    }
-  }
-
   function openPayment() {
     if (!lines.length) return;
-    setError("");
-    setTendered("");
-    // Nothing left to tender: the sale is settled entirely by the voucher, so
-    // asking which card machine to use would be a question with no answer. It
-    // still lands on a payment method - the seeded "Coupon" one - so the
-    // takings report has somewhere to put it.
-    const couponMethod = methods.find((method) => method.name.toLowerCase() === "coupon");
-    if (coupon && dueNow <= 0 && couponMethod) {
-      setMethodId(couponMethod.id);
-      void takePayment(couponMethod);
-      setPayStage("method");
+    if (needsCustomerForPackage) {
+      onToast("Add the customer first - a package puts credits on their profile.");
       return;
     }
-    setMethodId((current) => current || methods[0]?.id || "");
+    setError("");
+    setTendered("");
+    setMethodId((current) => current || payMethods[0]?.id || "");
+    setPayStage("method");
+  }
+
+  // "Pay with coupon". Enough on it: the sale is recorded on the Coupon method
+  // and is done. Not enough: ask, then put what it has down as paid credit and
+  // let the coach choose how the rest is paid.
+  function payWithCoupon() {
+    if (!coupon || couponAmount <= 0) return;
+    setError("");
+    if (couponCovers) {
+      if (!couponMethod) {
+        setError("This account has no Coupon payment method yet. Close this and press Pay again.");
+        return;
+      }
+      setMethodId(couponMethod.id);
+      void takePayment(couponMethod);
+      return;
+    }
+    setPayStage("coupon");
+  }
+
+  function confirmCouponCredit() {
+    setCouponApplied(true);
     setPayStage("method");
   }
 
@@ -390,9 +466,15 @@ export function SellScreen({
     setError("");
     try {
       const description = lines
-        .map((line) => (line.quantity > 1 ? `${line.name} x${line.quantity}` : line.name))
+        .map((line) => {
+          const label = line.detail ? `${line.name} (${line.detail})` : line.name;
+          return line.quantity > 1 ? `${label} x${line.quantity}` : label;
+        })
         .join(", ")
         .slice(0, 300);
+      // The voucher is only spent when it was chosen to be: as the whole
+      // payment, or as credit put down before the rest.
+      const spendCoupon = Boolean(coupon) && (method.kind === "coupon" || couponApplied);
 
       // Reuse an already-created sale if only the Stripe step failed - pressing
       // Pay again must not mint a second receipt number.
@@ -403,8 +485,9 @@ export function SellScreen({
             description,
             amount: total,
             listedAmount: total,
-            couponId: coupon?.id || "",
-            couponAmount,
+            couponId: spendCoupon ? coupon?.id || "" : "",
+            couponAmount: spendCoupon ? couponAmount : 0,
+            bookingIds,
             items: lines
               .filter((line) => line.productId)
               .map((line) => ({ productId: line.productId, quantity: line.quantity, unitPrice: line.unitPrice })),
@@ -429,6 +512,8 @@ export function SellScreen({
       if (response?.issuedPasses?.length) setIssuedPasses(response.issuedPasses);
       setSale(created);
       onSaleCompleted(created);
+      // Balances moved; the next search should see them.
+      if (spendCoupon) couponBook.reload();
 
       if (method.kind !== "clarity_pay") {
         setPayStage("done");
@@ -480,6 +565,8 @@ export function SellScreen({
         if (data.transaction) onSaleCompleted(data.transaction);
       }
       onToast(`${sale.receiptNumber} cancelled.`);
+      // Voiding puts any voucher value back; show the restored balance.
+      if (sale.couponId) couponBook.reload();
     } catch {
       onToast("Could not cancel the sale - check the POS list.");
     } finally {
@@ -584,8 +671,68 @@ export function SellScreen({
               : `${offTabMatches} matches from other categories are shown below.`}
           </p>
         )}
-        {catalogState === "loaded" && !tiles.length && (
+        {catalogState === "loaded" && !tiles.length && !lessonGroups.length && (
           <p className="field-help">Nothing here. Try another category, or add items under Billing &gt; Products.</p>
+        )}
+
+        {lessonGroups.length > 0 && (
+          <div className="sell-lessons" aria-label="Unpaid lessons">
+            <h3>
+              <CalendarClock size={14} /> Lessons with no payment recorded
+            </h3>
+            {lessonGroups.map((group) => {
+              const open = !group.collapsed || openLessonGroups.includes(group.key);
+              const groupTotal = group.lessons.reduce((sum, lesson) => sum + lesson.price, 0);
+              return (
+                <div key={group.key} className="sell-lesson-group">
+                  {group.collapsed && (
+                    <div className="sell-lesson-group-head">
+                      <button
+                        className="sell-lesson-group-toggle"
+                        onClick={() => toggleLessonGroup(group.key)}
+                        aria-expanded={open}
+                        type="button"
+                      >
+                        <ChevronDown size={15} className={open ? "open" : ""} />
+                        <strong>{group.clientName}</strong>
+                        <em>
+                          {group.lessons.length} lessons - {formatMoney(groupTotal, currency)}
+                        </em>
+                      </button>
+                      <button
+                        className="outline-button"
+                        onClick={() => group.lessons.forEach((lesson) => addLesson(lesson))}
+                        type="button"
+                      >
+                        Add all
+                      </button>
+                    </div>
+                  )}
+                  {open &&
+                    group.lessons.map((lesson) => (
+                      <button
+                        key={lesson.bookingId}
+                        className="sell-lesson"
+                        onClick={() => addLesson(lesson)}
+                        type="button"
+                      >
+                        <span>
+                          <strong>
+                            {group.collapsed ? lesson.serviceName : `${lesson.clientName} - ${lesson.serviceName}`}
+                          </strong>
+                          <em>
+                            {tillLessonWhen(lesson.startsAt)}
+                            {tillLessonIsUpcoming(lesson.startsAt) ? " - upcoming" : ""}
+                            {lesson.ownerLabel ? ` - booked in ${lesson.ownerLabel}` : ""}
+                          </em>
+                        </span>
+                        <b>{formatMoney(lesson.price, currency)}</b>
+                      </button>
+                    ))}
+                </div>
+              );
+            })}
+          </div>
         )}
 
         <div className="sell-grid">
@@ -621,10 +768,22 @@ export function SellScreen({
         {customerName ? (
           <div className="sell-customer-chip">
             <User size={15} />
-            <span>
-              <strong>{customerName}</strong>
-              {customerEmail && <em>{customerEmail}</em>}
-            </span>
+            {customerId && !customerId.startsWith("appointment-") ? (
+              <button
+                className="sell-customer-open"
+                onClick={() => onOpenClientProfile(customerId)}
+                type="button"
+                title="Open their profile"
+              >
+                <strong>{customerName}</strong>
+                {customerEmail && <em>{customerEmail}</em>}
+              </button>
+            ) : (
+              <span>
+                <strong>{customerName}</strong>
+                {customerEmail && <em>{customerEmail}</em>}
+              </span>
+            )}
             <button
               className="icon-button small"
               onClick={() => {
@@ -687,10 +846,16 @@ export function SellScreen({
               <div className="sell-line-name">
                 <strong>{line.name}</strong>
                 <em>
-                  {line.sku ? `${line.sku} - ` : ""}
-                  {formatMoney(line.unitPrice, currency)} each
+                  {line.detail
+                    ? line.detail
+                    : `${line.sku ? `${line.sku} - ` : ""}${formatMoney(line.unitPrice, currency)} each`}
                 </em>
               </div>
+              {line.bookingId ? (
+                <div className="sell-line-qty">
+                  <b>1</b>
+                </div>
+              ) : (
               <div className="sell-line-qty">
                 <button
                   className="icon-button small"
@@ -710,6 +875,7 @@ export function SellScreen({
                   <Plus size={13} />
                 </button>
               </div>
+              )}
               <input
                 className="sell-line-price"
                 type="number"
@@ -739,20 +905,20 @@ export function SellScreen({
               <span>{formatMoney(taxIncluded, currency)}</span>
             </div>
           )}
-          <div className={`sell-total-row${couponAmount > 0 ? "" : " grand"}`}>
+          <div className={`sell-total-row${appliedCoupon > 0 ? "" : " grand"}`}>
             <span>
               Total
               {itemCount > 0 && <em> {itemCount} item{itemCount === 1 ? "" : "s"}</em>}
             </span>
             <span>{formatMoney(total, currency)}</span>
           </div>
-          {couponAmount > 0 && coupon && (
+          {appliedCoupon > 0 && coupon && (
             <>
               <div className="sell-total-row coupon">
                 <span>
-                  <Ticket size={13} /> {coupon.code}
+                  <Ticket size={13} /> Paid by coupon {coupon.code}
                 </span>
-                <span>-{formatMoney(couponAmount, currency)}</span>
+                <span>-{formatMoney(appliedCoupon, currency)}</span>
               </div>
               <div className="sell-total-row grand">
                 <span>To pay</span>
@@ -762,56 +928,35 @@ export function SellScreen({
           )}
         </div>
 
-        {coupon ? (
-          <div className="sell-coupon-applied">
-            <Ticket size={14} />
-            <span>
-              <strong>{coupon.code}</strong>
-              <em>
-                {formatMoney(coupon.remainingValue, coupon.currency)} on it
-                {couponAmount < coupon.remainingValue
-                  ? ` - ${formatMoney(coupon.remainingValue - couponAmount, coupon.currency)} left after this`
-                  : ""}
-              </em>
-            </span>
-            <button
-              className="icon-button small"
-              onClick={() => setCoupon(null)}
-              type="button"
-              aria-label="Remove coupon"
-            >
-              <X size={13} />
-            </button>
-          </div>
-        ) : (
-          <div className="sell-coupon-entry">
-            <Ticket size={14} />
-            <input
-              value={couponCode}
-              onChange={(event) => {
-                setCouponCode(event.target.value);
-                setCouponError("");
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") void applyCoupon();
-              }}
-              placeholder="Coupon code"
-            />
-            <button
-              className="outline-button"
-              disabled={couponBusy || !couponCode.trim()}
-              onClick={() => void applyCoupon()}
-              type="button"
-            >
-              {couponBusy ? "..." : "Apply"}
-            </button>
-          </div>
+        <CouponPicker
+          book={couponBook}
+          held={coupon}
+          applyAmount={couponAmount}
+          applied={couponApplied}
+          clientNames={clientNames}
+          formatMoney={formatMoney}
+          onHold={(picked) => {
+            setCoupon(picked);
+            setCouponApplied(false);
+          }}
+          onRelease={() => {
+            setCoupon(null);
+            setCouponApplied(false);
+          }}
+        />
+        {needsCustomerForPackage && (
+          <p className="field-help">A package puts credits on a profile - add the customer before taking payment.</p>
         )}
-        {couponError && <p className="sell-coupon-error">{couponError}</p>}
 
         <div className="sell-actions">
-          <button className="outline-button" disabled={!lines.length} onClick={parkSale} type="button">
-            Park
+          <button
+            className="outline-button"
+            disabled={!lines.length}
+            onClick={parkSale}
+            type="button"
+            title="Put this sale aside and start another. It waits under Parked on this device."
+          >
+            Park sale
           </button>
           <button className="sell-pay-button" disabled={!lines.length} onClick={openPayment} type="button">
             Pay {formatMoney(dueNow, currency)}
@@ -867,14 +1012,39 @@ export function SellScreen({
             {payStage === "method" && (
               <>
                 <h2 className="sell-pay-total">{formatMoney(dueNow, currency)}</h2>
-                {couponAmount > 0 && coupon && (
-                  <p className="field-help">
-                    {formatMoney(couponAmount, currency)} covered by {coupon.code}.
-                  </p>
+                {appliedCoupon > 0 && coupon && (
+                  <div className="sell-coupon-paid">
+                    <Check size={15} />
+                    <span>
+                      {formatMoney(appliedCoupon, currency)} paid by coupon {coupon.code}
+                    </span>
+                    <button
+                      className="text-link-button"
+                      disabled={busy}
+                      onClick={() => setCouponApplied(false)}
+                      type="button"
+                    >
+                      Undo
+                    </button>
+                  </div>
                 )}
-                <p className="field-help">How is the rest being paid?</p>
+                {coupon && !couponApplied && couponAmount > 0 && (
+                  <button className="sell-coupon-pay" disabled={busy} onClick={payWithCoupon} type="button">
+                    <Ticket size={16} />
+                    <span>
+                      <strong>Pay with coupon</strong>
+                      <em>
+                        {coupon.code} - {formatMoney(coupon.remainingValue, coupon.currency)} available
+                        {couponCovers ? "" : ` (covers ${formatMoney(couponAmount, currency)})`}
+                      </em>
+                    </span>
+                  </button>
+                )}
+                <p className="field-help">
+                  {appliedCoupon > 0 ? "How is the rest being paid?" : "How is it being paid?"}
+                </p>
                 <div className="pos-method-grid">
-                  {methods.map((method) => (
+                  {payMethods.map((method) => (
                     <button
                       key={method.id}
                       className="pos-method-button"
@@ -888,7 +1058,29 @@ export function SellScreen({
                     </button>
                   ))}
                 </div>
-                {!methods.length && <p className="field-help">No payment methods - add one under Billing &gt; Settings.</p>}
+                {!payMethods.length && <p className="field-help">No payment methods - add one under Billing &gt; Settings.</p>}
+              </>
+            )}
+
+            {payStage === "coupon" && coupon && (
+              <>
+                <h2 className="sell-pay-total">{formatMoney(couponAmount, currency)}</h2>
+                <p>
+                  {coupon.code} has {formatMoney(coupon.remainingValue, coupon.currency)} on it, which covers{" "}
+                  {formatMoney(couponAmount, currency)} of this {formatMoney(total, currency)} sale.
+                </p>
+                <p className="field-help">
+                  Put it down as paid credit and choose how the remaining {formatMoney(total - couponAmount, currency)} is
+                  paid. The voucher is charged when the sale is completed, so backing out leaves it untouched.
+                </p>
+                <div className="panel-actions">
+                  <button className="outline-button" onClick={() => setPayStage("method")} type="button">
+                    Back
+                  </button>
+                  <button className="primary-button" onClick={confirmCouponCredit} type="button">
+                    Use {formatMoney(couponAmount, currency)} credit
+                  </button>
+                </div>
               </>
             )}
 
@@ -967,6 +1159,12 @@ export function SellScreen({
                     </span>
                   </div>
                 </div>
+                {(sale.couponAmount ?? 0) > 0 && (
+                  <p className="field-help">
+                    {formatMoney(sale.couponAmount ?? 0, sale.currency)} of it paid by coupon
+                    {coupon ? ` ${coupon.code}` : ""}.
+                  </p>
+                )}
                 {tendered !== "" && change > 0 && (
                   <div className="sell-change">
                     <span>Change</span>
@@ -999,6 +1197,17 @@ export function SellScreen({
                     is settled.
                   </p>
                 )}
+                <ReceiptEmailPrompt
+                  key={sale.id}
+                  transactionId={sale.id}
+                  email={customerEmail || sale.customerEmail || ""}
+                  clientId={customerId}
+                  clientName={customerName}
+                  onClientEmailSaved={(clientId, email) => {
+                    if (clientId === customerId) setCustomerEmail(email);
+                    onClientEmailSaved(clientId, email);
+                  }}
+                />
                 <div className="panel-actions">
                   <button className="primary-button" onClick={resetSale} type="button">
                     New sale

@@ -310,7 +310,10 @@ export type BillingExpenseCategory = {
 // the backend). Everything else is a manual method the coach defines.
 // "pass" settles a sale from an entitlement rather than money: the row is
 // written at 0 with listed_amount carrying what it would have cost.
-export type PosPaymentMethodKind = "clarity_pay" | "custom" | "pass";
+// "coupon" is the method a sale lands on when a gift voucher paid all of it. A
+// voucher that paid part of a sale is recorded on the method that took the
+// rest, with couponAmount carrying the voucher's share.
+export type PosPaymentMethodKind = "clarity_pay" | "custom" | "pass" | "coupon";
 
 export type PosPaymentMethod = {
   id: string;
@@ -362,6 +365,9 @@ export type PosTransaction = {
   customerName: string;
   customerEmail: string;
   bookingId: string;
+  // Every lesson the sale paid for; bookingId is the first of them. Missing on
+  // a sale from a backend deployed before multi-lesson sales.
+  bookingIds?: string[];
   source: PosTransactionSource;
   note: string;
   // A sale can be part voucher, part card. `amount` is still the whole sale;

@@ -15,8 +15,12 @@ import {
 } from "./google-calendar-sync.mts";
 import { inferBookingAction, notifyBookingEvent, sendCoachPushForBooking } from "./notification-engine.mts";
 import { cancelOptixBayForCalendarItem, cancelOptixCustomerBooking } from "./_shared/optix-cancel.mts";
-import { autoBookResourceForNewBooking, rebookResourceAfterReschedule } from "./_shared/optix-book-resource.mts";
-import { bayBookingMatchesSlot } from "./_shared/optix-reconcile.mts";
+import {
+  autoBookResourceForNewBooking,
+  queueAutoBookResource,
+  rebookResourceAfterReschedule,
+} from "./_shared/optix-book-resource.mts";
+import { bayBookingMatchesSlot, bayFollowsReschedule } from "./_shared/optix-reconcile.mts";
 import { calendarSlot, MINUTES_IN_DAY } from "./_shared/calendar-slot.mts";
 import { planExternalReschedule, sameSlot } from "./_shared/external-reschedule.mts";
 import { legacyOriginalWorkspaceId, defaultCalendarSlug } from "./_shared/account.mts";
@@ -6519,6 +6523,7 @@ function deferGoogleCalendarAvailabilitySync(accountId, netlifyContext = null) {
 function deferOptixBayRebook(accountId: string, calendarItemIds, netlifyContext = null) {
   const ids = (calendarItemIds || []).filter(Boolean);
   if (!ids.length) return;
+  console.info("optix_bay_rebook_scheduled", { accountId, calendarItemIds: ids });
   const task = (async () => {
     for (const id of ids) {
       await rebookResourceAfterReschedule(accountId, id);
@@ -6609,6 +6614,47 @@ function deferOptixAutoBook(accountId: string, appointments: any[], netlifyConte
   })().catch((error) => console.error("optix_auto_book_deferred_failed", error));
   if (netlifyContext && typeof netlifyContext.waitUntil === "function") {
     netlifyContext.waitUntil(task);
+  }
+}
+
+/**
+ * The saved appointments whose bay should move with them.
+ *
+ * Slot changed, and the lesson is still one worth holding a bay for: booked,
+ * and not already over. A completed lesson nudged a row on the grid, or last
+ * week's card dragged and dropped back, used to reach Optix as a booking
+ * change; see bayFollowsReschedule for the rule.
+ */
+function appointmentsWhoseBayFollows(previousItemsById: Map<any, any>, items: any[]) {
+  const options = { nowMs: Date.now(), defaultTimeZone: defaultTimeZone() };
+  return (items || []).filter((item) => {
+    if (!appointmentSlotChanged(previousItemsById.get(item.id), item)) return false;
+    if (bayFollowsReschedule(item, options)) return true;
+    console.info("optix_bay_rebook_skipped", {
+      calendarItemId: item.id,
+      status: item.status || "booked",
+      reason: (item.status || "booked") !== "booked" ? "lesson_not_booked" : "slot_already_ended",
+    });
+    return false;
+  });
+}
+
+/**
+ * Write the ask down before anything is deferred.
+ *
+ * The after-response attempt is what books the bay quickly when it works, and
+ * it is also the thing that silently vanishes when it does not. The pending
+ * row is what survives that: the scheduled sweep (optix-auto-book-sweep) picks
+ * it up and books the bay, and until then the card says "queued" instead of
+ * nothing. Awaited on purpose -- one small insert per new lesson, inside the
+ * save, is the whole point.
+ */
+async function queueOptixAutoBook(accountId: string, appointments: any[]) {
+  const pending = (appointments || []).filter(Boolean);
+  if (!pending.length) return;
+  if (pending.length > OPTIX_AUTO_BOOK_MAX_PER_SAVE) return;
+  for (const appointment of pending) {
+    await queueAutoBookResource(accountId, appointment.id, appointment.serviceId);
   }
 }
 
@@ -6727,24 +6773,21 @@ async function writeCalendarState(accountId: string, nextState: Record<string, a
     clearItems: nextState?.clearItems === true,
     accountId: context?.accountId,
   });
-  // Bay bookings follow their lessons: every appointment whose slot changed in
-  // this save gets its Optix bay cancelled and rebooked in the background.
+  // Bay bookings follow their lessons: every still-live appointment whose slot
+  // changed in this save gets its Optix bay moved in the background.
   deferOptixBayRebook(
     accountId,
-    items
-      .filter((item) => appointmentSlotChanged(previousItemsById.get(item.id), item))
-      .map((item) => item.id),
+    appointmentsWhoseBayFollows(previousItemsById, items).map((item) => item.id),
     netlifyContext,
   );
   // Lessons the coach just created get the same Auto-book treatment a client
-  // booking gets. Runs after the rebook scheduling above and never overlaps
-  // with it: an appointment is either new to this save or it already existed,
-  // never both.
-  deferOptixAutoBook(
-    accountId,
-    newlyCreatedAutoBookableAppointments(previousItemsById, items, current.services),
-    netlifyContext,
-  );
+  // booking gets. The ask is recorded first (a pending sync row the scheduled
+  // sweep will honour if the attempt below is cut short), then attempted.
+  // Never overlaps with the rebook above: an appointment is either new to this
+  // save or it already existed, never both.
+  const newAppointments = newlyCreatedAutoBookableAppointments(previousItemsById, items, current.services);
+  await queueOptixAutoBook(accountId, newAppointments);
+  deferOptixAutoBook(accountId, newAppointments, netlifyContext);
   const updatedAt = nowIso();
   await setSettingsBulk(accountId, { syncKey, updatedAt });
   // The response payload rebuilds the whole admin state. None of these reads depend on each
@@ -7160,6 +7203,13 @@ async function writePublicBookingAppointment(accountId: string, currentState: Re
   const updatedAt = nowIso();
   await setSetting(accountId, "updatedAt", updatedAt);
   const savedAppointment = cleanItems.find((item) => item.id === appointment.id) || appointment;
+  // Record the bay ask before the response goes out, for the same reason the
+  // calendar save does: the side-effects task below is where the bay gets
+  // booked quickly, and also where it silently gets lost. The pending row is
+  // what the scheduled sweep honours when that happens.
+  if (options.autoBookResource === true) {
+    await queueAutoBookResource(accountId, savedAppointment.id, savedAppointment.serviceId);
+  }
   schedulePublicBookingSideEffects(accountId, context, savedAppointment, options);
   return {
     syncKey: currentState.syncKey,
@@ -13050,10 +13100,21 @@ async function routeBookingApiRequest(
           });
           const updatedAt = nowIso();
           await setSetting(await currentAccountId(req), "updatedAt", updatedAt);
-          // A moved lesson takes its Optix bay with it — cancel and rebook in
-          // the background (see deferOptixBayRebook).
-          if (appointmentSlotChanged(previousItem, item)) {
-            deferOptixBayRebook(requestContext.accountId, [item.id], context);
+          // A moved lesson takes its Optix bay with it — moved in the
+          // background (see deferOptixBayRebook). Only while the lesson is
+          // still live: a completed or already-finished lesson keeps its record.
+          const previousById = new Map(previousItem ? [[previousItem.id, previousItem]] : []);
+          deferOptixBayRebook(
+            requestContext.accountId,
+            appointmentsWhoseBayFollows(previousById, [item]).map((entry) => entry.id),
+            context,
+          );
+          // A lesson created through this route (no previous row) is as new as
+          // one from a whole-calendar save, and gets the same Auto-book.
+          if (!previousItem) {
+            const created = newlyCreatedAutoBookableAppointments(previousById, [savedItem || item], current.services);
+            await queueOptixAutoBook(requestContext.accountId, created);
+            deferOptixAutoBook(requestContext.accountId, created, context);
           }
           // Keep Google Calendar in step with every single-booking change (drag
           // reschedule, edit, lesson-complete). Deferred like the other save
