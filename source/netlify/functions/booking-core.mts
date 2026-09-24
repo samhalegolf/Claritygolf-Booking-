@@ -22,7 +22,15 @@ import {
 } from "./_shared/optix-book-resource.mts";
 import { bayBookingMatchesSlot, bayFollowsReschedule } from "./_shared/optix-reconcile.mts";
 import { calendarSlot, MINUTES_IN_DAY } from "./_shared/calendar-slot.mts";
-import { cleanHandedness, handednessNoteLine } from "./_shared/handedness.mts";
+import { cleanHandedness, handednessFromNote, handednessNoteLine } from "./_shared/handedness.mts";
+import {
+  clarityResourcesApply,
+  cleanLocationKind,
+  cleanLocationResources,
+  cleanResourceSource,
+  cleanServiceResourceIds,
+  pickFreeResource,
+} from "./_shared/resources.mts";
 import { planExternalReschedule, sameSlot } from "./_shared/external-reschedule.mts";
 import { legacyOriginalWorkspaceId, defaultCalendarSlug } from "./_shared/account.mts";
 import {
@@ -847,6 +855,13 @@ function cleanService(service, index = 0, accountId = "") {
     priceMode,
     color: cleanHexColor(service?.color, defaultServiceColor(index)),
     locationId: cleanSlug(service?.locationId, "") || undefined,
+    // Whether a booking holds one of the location's resources, and which ones
+    // it may take (none listed = any). A review is not at a location at all.
+    needsResource: !videoReview && lessonFormat !== "package" && service?.needsResource === true ? true : undefined,
+    resourceIds:
+      !videoReview && lessonFormat !== "package" && service?.needsResource === true
+        ? cleanServiceResourceIds(service?.resourceIds)
+        : undefined,
     lessonNote: cleanEditableServiceText(service?.lessonNote, lessonNoteFallback, 180),
     location: cleanEditableServiceText(service?.location, locationFallback, 160),
     packageAllowance: lessonFormat === "package" ? packageAllowance : undefined,
@@ -1519,11 +1534,17 @@ function cleanLocation(raw = {}, fallback = defaultLocationFromCoachAccount(), i
     accountId: cleanSlug(raw?.accountId, fallback.accountId || ""),
     name,
     shortName,
-    address: cleanString(raw?.address, fallback.address || "", 240),
+    // An online location has no address; without this the first location
+    // would inherit the venue's.
+    address: cleanLocationKind(raw?.kind) === "online" ? "" : cleanString(raw?.address, fallback.address || "", 240),
     mapUrl: cleanUrl(raw?.mapUrl, "", 300) || undefined,
     arrivalInstructions: cleanString(raw?.arrivalInstructions, "", 500) || undefined,
     publicNotes: cleanString(raw?.publicNotes, "", 500) || undefined,
     timezone: cleanString(raw?.timezone, fallback.timezone, 80),
+    // Physical or online, and the bays or rooms it has. See _shared/resources.mts.
+    kind: cleanLocationKind(raw?.kind),
+    resourceSource: cleanResourceSource(raw?.resourceSource),
+    resources: cleanLocationResources(raw?.resources),
     active: raw?.active !== false,
     archived: raw?.archived === true,
     isDefault: raw?.isDefault === true || fallback.isDefault === true,
@@ -2141,6 +2162,7 @@ async function ensureCoreTables() {
   ddl.sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS location JSONB`;
   ddl.sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS custom_group JSONB`;
   ddl.sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS completed_at TEXT`;
+  ddl.sql`ALTER TABLE calendar_items ADD COLUMN IF NOT EXISTS resource_id TEXT`;
   ddl.sql`
     CREATE INDEX IF NOT EXISTS idx_calendar_items_slot
     ON calendar_items (week, day, start)
@@ -2827,6 +2849,9 @@ function rowToItem(row) {
     externalBookingId: row.external_booking_id || "",
     bayBooked,
     bayResourceId: row.bay_resource_id || "",
+    // The Clarity resource this lesson holds. Server-owned: writeItems never
+    // writes it, assignClarityResources does.
+    resourceId: row.resource_id || "",
     updatedAt,
     completedAt,
     ...(cancelledGroupSession ? { readOnly: true, groupSlot: true } : {}),
@@ -6662,6 +6687,84 @@ function deferOptixAutoBook(accountId: string, appointments: any[], netlifyConte
  * week's card dragged and dropped back, used to reach Optix as a booking
  * change; see bayFollowsReschedule for the rule.
  */
+/**
+ * Give each lesson in `itemIds` the Clarity resource it should hold, and take
+ * it away from any that no longer needs one (cancelled, moved to an online
+ * location, lesson type no longer needs a bay).
+ *
+ * The server owns resource_id: a calendar save never writes it, so this runs
+ * after one. A lesson keeps its own resource whenever that is still free, and
+ * is left with none when nothing is -- a coach can overbook on purpose, and it
+ * then counts as using one up until something frees. Returns the items with
+ * resourceId filled from the database's view, not the client's.
+ */
+async function assignClarityResources(accountId: string, items: any[], state: any, itemIds: string[]) {
+  const working = (items || []).map((item) => ({ ...item }));
+  const ids = new Set((itemIds || []).filter(Boolean));
+  if (!ids.size) return working;
+  const services = state.services || [];
+  const locations = state.locations || [];
+  const account = state.account || defaultCoachAccount();
+  const updates: Array<{ id: string; resourceId: string }> = [];
+  for (const item of working) {
+    if (!ids.has(item.id)) continue;
+    const service = services.find((candidate) => candidate.id === item.serviceId);
+    let next = "";
+    if (item.kind === "appointment" && !isInactiveForConflict(item) && service) {
+      const locationId = resolvedCalendarItemLocationId(item, service, locations, account);
+      const held = clarityResourceFor(
+        working,
+        { ...item, week: itemWeek(item), locationId },
+        service,
+        { ...state, services, locations, account },
+        { ignoreId: item.id, preferResourceId: item.resourceId || "" },
+      );
+      next = held.applies ? held.resource?.id || "" : "";
+    }
+    if ((item.resourceId || "") !== next) {
+      item.resourceId = next;
+      updates.push({ id: item.id, resourceId: next });
+    }
+  }
+  try {
+    for (const update of updates) {
+      await db().sql`
+        UPDATE calendar_items
+        SET resource_id = ${update.resourceId || null}
+        WHERE id = ${update.id} AND account_id = ${accountId}
+      `;
+    }
+  } catch (error) {
+    // The booking itself is saved. A missing column (migration not yet run)
+    // or a failed write leaves the lesson without a recorded bay, which still
+    // counts against the location's capacity.
+    console.warn("clarity_resources:assign_failed", {
+      accountId,
+      count: updates.length,
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+  if (updates.length) console.info("clarity_resources:assigned", { accountId, updates });
+  return working;
+}
+
+/** New lessons, and lessons whose time, place, type or status changed. */
+function itemsNeedingResourceCheck(previousItemsById: Map<any, any>, items: any[]) {
+  return (items || [])
+    .filter((item) => {
+      if (item.kind !== "appointment") return false;
+      const previous = previousItemsById.get(item.id);
+      if (!previous) return true;
+      return (
+        appointmentSlotChanged(previous, item) ||
+        (previous.locationId || "") !== (item.locationId || "") ||
+        (previous.serviceId || "") !== (item.serviceId || "") ||
+        (previous.status || "booked") !== (item.status || "booked")
+      );
+    })
+    .map((item) => item.id);
+}
+
 function appointmentsWhoseBayFollows(previousItemsById: Map<any, any>, items: any[]) {
   const options = { nowMs: Date.now(), defaultTimeZone: defaultTimeZone() };
   return (items || []).filter((item) => {
@@ -6805,11 +6908,19 @@ async function writeCalendarState(accountId: string, nextState: Record<string, a
     peopleAccountId,
   );
   const itemsToWrite = stampResolvedPersonIds(requestedItems, peopleSync.resolvedIds);
-  const items = await writeItems(itemsToWrite, {
+  const writtenItems = await writeItems(itemsToWrite, {
     replaceItems: nextState?.replaceItems === true || nextState?.itemsOperation === "replace",
     clearItems: nextState?.clearItems === true,
     accountId: context?.accountId,
   });
+  // resource_id is the database's, never the client's: start from what was
+  // stored, then re-pick only for lessons this save changed.
+  const items = await assignClarityResources(
+    accountId,
+    writtenItems.map((item) => ({ ...item, resourceId: previousItemsById.get(item.id)?.resourceId || "" })),
+    current,
+    itemsNeedingResourceCheck(previousItemsById, writtenItems),
+  );
   // Bay bookings follow their lessons: every still-live appointment whose slot
   // changed in this save gets its Optix bay moved in the background.
   deferOptixBayRebook(
@@ -7237,10 +7348,23 @@ function schedulePublicBookingSideEffects(accountId: string, context, appointmen
 }
 
 async function writePublicBookingAppointment(accountId: string, currentState: Record<string, any>, appointment: Record<string, any>, context = null, options = {}) {
-  const cleanItems = await writeItems([appointment], { accountId });
+  const writtenItems = await writeItems([appointment], { accountId });
   const updatedAt = nowIso();
   await setSetting(accountId, "updatedAt", updatedAt);
-  const savedAppointment = cleanItems.find((item) => item.id === appointment.id) || appointment;
+  const written = writtenItems.find((item) => item.id === appointment.id) || appointment;
+  // Take a bay or room if the location keeps its own. A reschedule keeps the
+  // one it had whenever that is still free at the new time.
+  const placed = await assignClarityResources(
+    accountId,
+    [
+      ...(currentState.items || []).filter((item) => item.id !== appointment.id),
+      { ...written, resourceId: appointment.resourceId || "" },
+    ],
+    currentState,
+    [appointment.id],
+  );
+  const savedAppointment = placed.find((item) => item.id === appointment.id) || written;
+  const cleanItems = writtenItems.map((item) => (item.id === savedAppointment.id ? savedAppointment : item));
   // Record the bay ask before the response goes out, for the same reason the
   // calendar save does: the side-effects task below is where the bay gets
   // booked quickly, and also where it silently gets lost. The pending row is
@@ -10616,6 +10740,64 @@ function conflictItemSummary(item, state = {}) {
   };
 }
 
+/**
+ * The lessons at a location that hold, or are owed, one of its Clarity
+ * resources, in the shape pickFreeResource wants.
+ */
+function clarityResourceHolders(items, locationId, state = {}) {
+  const services = state.services || defaultServices;
+  const locations = state.locations || [];
+  const account = state.account || defaultCoachAccount();
+  return (items || [])
+    .filter((item) => {
+      if (item.kind !== "appointment" || isInactiveForConflict(item)) return false;
+      const itemService = services.find((candidateService) => candidateService.id === item.serviceId);
+      if (itemService?.needsResource !== true) return false;
+      return resolvedCalendarItemLocationId(item, itemService, locations, account) === locationId;
+    })
+    .map((item) => ({
+      id: item.id,
+      week: itemWeek(item),
+      day: Number(item.day),
+      start: Number(item.start),
+      duration: Number(item.duration),
+      resourceId: item.resourceId || "",
+    }));
+}
+
+/**
+ * Which of the location's resources this booking would hold. `applies` is
+ * false when the location or lesson type does not use Clarity resources, so
+ * the caller can tell "no resource needed" from "none free".
+ */
+function clarityResourceFor(items, candidate, service, state = {}, { ignoreId = "", preferResourceId = "" } = {}) {
+  const location = candidate.locationId
+    ? (state.locations || []).find((entry) => entry.id === candidate.locationId)
+    : serviceLocation(service, state.locations || [], state.account || defaultCoachAccount());
+  if (!clarityResourcesApply(location, service) || isScheduledGroupService(service)) {
+    return { applies: false, resource: null };
+  }
+  const handedness =
+    candidate.handedness === "left" || candidate.handedness === "right"
+      ? candidate.handedness
+      : handednessFromNote(candidate.note);
+  const resource = pickFreeResource({
+    location,
+    service,
+    slot: {
+      week: Number(candidate.week ?? 0),
+      day: Number(candidate.day),
+      start: Number(candidate.start),
+      duration: Number(candidate.duration),
+    },
+    holders: clarityResourceHolders(items, location.id, state),
+    handedness,
+    ignoreId: ignoreId || candidate.id || "",
+    preferResourceId,
+  });
+  return { applies: true, resource };
+}
+
 function findCollision(items, candidate, service, state = {}) {
   const services = state.services || defaultServices;
   const coaches = state.coaches || [];
@@ -10659,7 +10841,13 @@ function findCollision(items, candidate, service, state = {}) {
   );
   if (!isScheduledGroupService(service)) {
     const item = overlapping.find(isAppointmentConflict);
-    return item ? { reason: "blocking_item", item, candidateCoachId, candidateLocationId } : null;
+    if (item) return { reason: "blocking_item", item, candidateCoachId, candidateLocationId };
+    // Every bay or room this lesson could take is held for some of the time.
+    const held = clarityResourceFor(conflictItems, { ...candidate, locationId: candidateLocationId }, service, state);
+    if (held.applies && !held.resource) {
+      return { reason: "resource_full", item: null, candidateCoachId, candidateLocationId };
+    }
+    return null;
   }
   const blockingItem = overlapping.find(
     (item) => (item.kind !== "appointment" || item.serviceId !== service.id) && isAppointmentConflict(item),
@@ -10768,7 +10956,15 @@ function publicSlotItemMayAffectService(item, service, state = {}) {
 
   if (item.kind === "appointment") {
     if (!itemCoachId || !serviceCoachId) return true;
-    return itemCoachId === serviceCoachId;
+    if (itemCoachId === serviceCoachId) return true;
+    // Another coach's lesson still matters when both hold the same location's
+    // resources: it may have the last free bay.
+    const location = (locations || []).find((entry) => entry.id === serviceLocationId);
+    return (
+      itemLocationId === serviceLocationId &&
+      clarityResourcesApply(location, service) &&
+      itemService?.needsResource === true
+    );
   }
 
   if (!itemCoachId || !itemLocationId || !serviceCoachId || !serviceLocationId) return true;
@@ -11085,7 +11281,13 @@ async function createPublicBooking(accountId: string, payload: Record<string, an
       availability: accountState.availability[day] || [],
     });
   } else {
-    const collision = findCollision(accountState.items, slot, service, accountState);
+    // The player's handedness narrows which bays count as free.
+    const collision = findCollision(
+      accountState.items,
+      { ...slot, handedness: payload?.handedness ? handedness : null },
+      service,
+      accountState,
+    );
     if (collision) {
       throw publicSlotUnavailableError({
         ...rejectionBase,
@@ -13290,10 +13492,21 @@ async function routeBookingApiRequest(
           const nextItems = previousItem
             ? current.items.map((existing) => (existing.id === item.id ? item : existing))
             : [...current.items, item];
-          const savedItem = await writeItems([item], {
+          const writtenItem = await writeItems([item], {
             returnMode: "single",
             accountId: requestContext.accountId,
           });
+          const [savedItem] = (
+            await assignClarityResources(
+              requestContext.accountId,
+              [
+                ...current.items.filter((existing) => existing.id !== item.id),
+                { ...(writtenItem || item), resourceId: previousItem?.resourceId || "" },
+              ],
+              current,
+              itemsNeedingResourceCheck(new Map(previousItem ? [[previousItem.id, previousItem]] : []), [writtenItem || item]),
+            )
+          ).filter((entry) => entry.id === item.id);
           const updatedAt = nowIso();
           await setSetting(await currentAccountId(req), "updatedAt", updatedAt);
           // A moved lesson takes its Optix bay with it — moved in the

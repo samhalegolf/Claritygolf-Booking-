@@ -5,6 +5,7 @@ import { legacyOriginalWorkspaceId, defaultCalendarSlug } from "./_shared/accoun
 import { currencyForCountry } from "./_shared/locale.mts";
 import { FALLBACK_PHONE_COUNTRY } from "./_shared/phone.mts";
 import { bayBookingMatchesSlot } from "./_shared/optix-reconcile.mts";
+import { cleanLocationKind, cleanLocationResources, cleanResourceSource } from "./_shared/resources.mts";
 import {
   requireCoachActor,
   recordBelongsToAccountStrict,
@@ -517,6 +518,11 @@ function normalizeLocations(rawLocations: unknown, account = defaultCoachAccount
       arrivalInstructions: cleanString(item.arrivalInstructions, "", 500) || undefined,
       publicNotes: cleanString(item.publicNotes, "", 500) || undefined,
       timezone: cleanString(item.timezone, fallback.timezone, 80),
+      // Mirrors booking-core's cleanLocation. Leave these out and the first
+      // calendar load hands the app a location with no resources.
+      kind: cleanLocationKind(item.kind),
+      resourceSource: cleanResourceSource(item.resourceSource),
+      resources: cleanLocationResources(item.resources),
       active: item.active !== false,
       archived: item.archived === true,
       isDefault: item.isDefault === true || index === 0,
@@ -647,6 +653,8 @@ function rowToItem(row: Record<string, unknown>) {
     externalBookingId: cleanString(row.external_booking_id, "", 160),
     bayBooked,
     bayResourceId: cleanString(row.bay_resource_id, "", 80),
+    // The Clarity resource this lesson holds. Server-owned, like the bay.
+    resourceId: cleanString(row.resource_id, "", 80),
     updatedAt: cleanString(typeof row.updated_at === "string" ? row.updated_at : String(row.updated_at || ""), "", 120),
     completedAt: cleanString(typeof row.completed_at === "string" ? row.completed_at : String(row.completed_at || ""), "", 120),
     ...(cancelledGroupSession ? { readOnly: true, groupSlot: true } : {}),

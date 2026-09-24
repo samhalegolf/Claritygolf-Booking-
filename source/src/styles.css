@@ -16493,3 +16493,151 @@ button {
 .availability-layout .availability-window-location:not([style]) {
   --location-mark: 0;
 }
+
+/* Locations › facility: physical or online, and the bays or rooms it has. */
+.location-facility {
+  display: grid;
+  gap: 14px;
+  margin: 14px 0;
+}
+
+.location-facility .location-facility-kind {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 8px;
+}
+
+.location-facility .location-kind-option {
+  display: grid;
+  gap: 3px;
+  padding: 10px 14px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  color: var(--c-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.location-facility .location-kind-option:hover {
+  background: var(--c-hover);
+}
+
+.location-facility .location-kind-option.is-selected {
+  border-color: var(--c-text);
+  box-shadow: inset 0 0 0 1px var(--c-text);
+  background: var(--c-active);
+}
+
+.location-facility .location-kind-option small,
+.location-facility .location-resources-header small {
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+}
+
+.location-facility .location-resources {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--c-border-soft);
+  border-radius: var(--c-radius-card);
+  background: var(--c-surface-soft);
+}
+
+.location-facility .location-resources-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  justify-content: space-between;
+}
+
+.location-facility .location-resources-header > div {
+  display: grid;
+  gap: 3px;
+  max-width: 46ch;
+}
+
+.location-facility .location-resources-header strong {
+  color: var(--c-text);
+}
+
+.location-facility .location-resource-source select {
+  min-height: var(--c-h-control);
+  font: inherit;
+}
+
+.location-facility .location-resource-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 12rem) auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.location-facility .location-resource-row input:not([type="checkbox"]),
+.location-facility .location-resource-row select {
+  min-width: 0;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  color: var(--c-text);
+  font: inherit;
+}
+
+.location-facility .location-resource-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+@media (max-width: 640px) {
+  .location-facility .location-resource-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .location-facility .location-resource-row select {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
+/* Lesson types › Resource. */
+.service-resource-field {
+  display: grid;
+  align-content: center;
+  gap: 4px;
+}
+
+.service-resource-field .service-resource-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-top: 6px;
+}
+
+.service-resource-field small {
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+}
+
+.service-resource-field .service-resource-chip {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-pill);
+  background: var(--c-surface);
+  color: var(--c-text);
+  font: inherit;
+  font-size: var(--c-size-meta);
+  cursor: pointer;
+}
+
+.service-resource-field .service-resource-chip.is-selected {
+  border-color: var(--c-text);
+  background: var(--c-active);
+  font-weight: 700;
+}
