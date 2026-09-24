@@ -1367,7 +1367,7 @@ function defaultCoachProfileFromAccount(account = defaultCoachAccount()) {
     accountId: workspaceAccount.id,
     name: clean.coachName,
     displayName: clean.coachName || clean.businessName,
-    shortName: "Sam",
+    shortName: clean.coachName.split(/\s+/)[0] || "",
     email: clean.contactEmail,
     active: true,
     archived: false,
@@ -2324,13 +2324,28 @@ async function ensureAuthReady() {
   logAuthTiming("ensureAuthReady", startedAt, { cache: cacheState });
 }
 
-async function defaultSettings() {
-  const account = defaultCoachAccount();
+/**
+ * The settings rows a business starts with.
+ *
+ * The CLARITY_* env values and defaultServices/defaultAvailability are the
+ * original workspace's own details -- its name, venue, lesson list, working
+ * week, inbox and phone number. They seed that workspace and nothing else.
+ * Every other account, a sandbox included, starts neutral: the reads already
+ * fall back to neutral for a missing row, but a seeded row beats the fallback,
+ * so seeding the original's values here is exactly what leaked them.
+ */
+async function defaultSettings(accountId = "", identity: Partial<ReturnType<typeof neutralCoachAccount>> = {}) {
+  const scopedAccountId = cleanSlug(accountId, "");
+  const original = !scopedAccountId || isOriginalWorkspace(scopedAccountId);
+  const account = original
+    ? defaultCoachAccount()
+    : { ...neutralCoachAccount(scopedAccountId), ...identity };
+  const originalEnv = (name: string) => (original ? env(name, "") : "");
   return {
-    syncKey: env("CLARITY_CALENDAR_SYNC_KEY") || generateSyncKey(),
-    notificationEmail: env("CLARITY_NOTIFICATION_EMAIL", ""),
-    coachEmail: env("CLARITY_COACH_EMAIL", ""),
-    replyToEmail: env("CLARITY_REPLY_TO_EMAIL", ""),
+    syncKey: originalEnv("CLARITY_CALENDAR_SYNC_KEY") || generateSyncKey(),
+    notificationEmail: originalEnv("CLARITY_NOTIFICATION_EMAIL"),
+    coachEmail: originalEnv("CLARITY_COACH_EMAIL"),
+    replyToEmail: originalEnv("CLARITY_REPLY_TO_EMAIL"),
     notificationDelaySeconds: "30",
     sendClientEmail: "true",
     sendCoachEmail: "true",
@@ -2341,9 +2356,9 @@ async function defaultSettings() {
     clientEmailFooter: defaultEmailTemplates.clientEmailFooter,
     adminEmailSubject: defaultEmailTemplates.adminEmailSubject,
     adminEmailIntro: defaultEmailTemplates.adminEmailIntro,
-    smsProviderName: env("CLARITY_SMS_PROVIDER"),
-    smsWebhookUrl: env("CLARITY_SMS_WEBHOOK_URL"),
-    smsFromNumber: env("CLARITY_SMS_FROM_NUMBER"),
+    smsProviderName: originalEnv("CLARITY_SMS_PROVIDER"),
+    smsWebhookUrl: originalEnv("CLARITY_SMS_WEBHOOK_URL"),
+    smsFromNumber: originalEnv("CLARITY_SMS_FROM_NUMBER"),
     sendClientSms: "false",
     sendAdminSms: "false",
     accountId: account.id,
@@ -2362,8 +2377,8 @@ async function defaultSettings() {
     coachProfilesJson: JSON.stringify(normalizeCoachProfiles([], account)),
     appUsersJson: JSON.stringify([defaultAppUserFromAccount(account)]),
     locationsJson: JSON.stringify(normalizeLocations([], account)),
-    servicesJson: JSON.stringify(defaultServices),
-    availabilityJson: JSON.stringify(defaultAvailability),
+    servicesJson: JSON.stringify(original ? defaultServices : []),
+    availabilityJson: JSON.stringify(original ? defaultAvailability : [[], [], [], [], [], [], []]),
     brandLogoName: "",
     brandLogoPreview: "",
     brandShowLogo: "false",
@@ -2382,7 +2397,7 @@ async function defaultSettings() {
 // DO NOTHING, not DO UPDATE: these are defaults, so an existing value wins.
 async function seedSettings(accountId: string) {
   if (!accountId) throw missingAccountScope("seed_settings");
-  const entries = Object.entries(await defaultSettings()).filter(([key]) => key);
+  const entries = Object.entries(await defaultSettings(accountId)).filter(([key]) => key);
   if (!entries.length) return;
 
   const params = [];
@@ -9076,6 +9091,57 @@ async function destroyPortalPlayerSessions(portalPlayerId) {
 }
 
 /**
+ * Starts the player's own account-deletion process.
+ *
+ * This is deliberately a request rather than a direct call to
+ * hardDeletePerson(): bookings and financial records can have retention
+ * obligations, and the Supabase Auth identity may also be the player's
+ * Clarity Caddy login. The authenticated player supplies no identity fields;
+ * every value is taken from the session the server already trusts.
+ */
+async function requestPlayerAccountDeletion(session) {
+  const accountId = cleanSlug(session?.accountId, "");
+  const personId = cleanString(session?.personId, "", 160);
+  if (!accountId || !personId) {
+    throw Object.assign(new Error("This player account cannot be deleted from the app yet."), {
+      status: 400,
+      code: "PLAYER_DELETION_IDENTITY_REQUIRED",
+    });
+  }
+
+  const existing = await db().sql`
+    SELECT id, status, requested_at
+    FROM public.player_account_deletion_requests
+    WHERE account_id = ${accountId}
+      AND person_id = ${personId}
+      AND status IN ('pending', 'processing')
+    ORDER BY requested_at DESC
+    LIMIT 1
+  `;
+  if (existing[0]) {
+    return {
+      ok: true,
+      alreadyRequested: true,
+      status: existing[0].status,
+      requestedAt: existing[0].requested_at,
+    };
+  }
+
+  const id = randomUUID();
+  await db().sql`
+    INSERT INTO public.player_account_deletion_requests (
+      id, account_id, person_id, portal_player_id, auth_user_id, email,
+      status, requested_at, updated_at
+    ) VALUES (
+      ${id}, ${accountId}, ${personId}, ${cleanString(session.portalPlayerId, "", 160) || null},
+      ${cleanString(session.authUserId, "", 160) || null}, ${cleanEmail(session.email, "")},
+      'pending', NOW(), NOW()
+    )
+  `;
+  return { ok: true, alreadyRequested: false, status: "pending", requestedAt: nowIso() };
+}
+
+/**
  * The portal half of a login, for an auth user whose password /api/auth/login
  * has already checked.
  *
@@ -9951,15 +10017,85 @@ function publicWorkspaceAccount(state = {}) {
   return workspaceAccountForId(accountId, state);
 }
 
+// Who a sandbox says it is. Deliberately nobody: a sandbox that opened on the
+// live business's name, venue, lesson list and booking slug was showing the
+// coach their own data and calling it test data -- and its embed pointed at the
+// live booking page.
+const SANDBOX_IDENTITY = {
+  coachName: "Demo Coach",
+  businessName: "Demo Golf (Sandbox)",
+  venueName: "Demo Range",
+  venueShortName: "Demo Range",
+};
+
+// Bumped whenever what a fresh sandbox looks like changes. A sandbox whose
+// settings carry an older version is rebuilt from scratch on its next visit.
+const SANDBOX_SEED_VERSION = "2";
+
+/**
+ * Give a sandbox the settings of a brand-new business.
+ *
+ * Overwrites rather than seeds (seedSettings is DO NOTHING, so it cannot undo a
+ * row that is already there). Only country, timezone and currency come from the
+ * live business: they are facts about where the coach works, not their data,
+ * and a sandbox pricing in the wrong currency tests nothing. The plan is left
+ * alone so a plan the coach picked survives the rebuild.
+ */
+async function writeFreshSandboxSettings(sandboxId: string, parentId: string) {
+  const parentSettings = await readSettingsMap(parentId);
+  const ownWorkspace = parseSettingJson(await readSettingsMap(sandboxId), "workspaceAccountsJson", []);
+  const ownEntry = Array.isArray(ownWorkspace) ? ownWorkspace.find((entry) => entry?.id === sandboxId) : null;
+  const parentWorkspace = parseSettingJson(parentSettings, "workspaceAccountsJson", []);
+  const parentEntry = Array.isArray(parentWorkspace)
+    ? parentWorkspace.find((entry) => entry?.id === parentId)
+    : null;
+  const livePlanKey = accountPlanCatalog[parentEntry?.planKey] ? parentEntry.planKey : "solo";
+
+  const fresh = await defaultSettings(sandboxId, SANDBOX_IDENTITY);
+  await setSettingsBulk(sandboxId, {
+    ...fresh,
+    accountCountry: settingValue(parentSettings, "accountCountry"),
+    accountTimezone: settingValue(parentSettings, "accountTimezone") || fresh.accountTimezone,
+    accountCurrency: settingValue(parentSettings, "accountCurrency"),
+    // The plan is a copy of the live one, so entitlement checks run for real
+    // rather than being bypassed. subscriptionStatus 'internal' is an existing
+    // status isAccountActive() accepts, so the sandbox is entitled without
+    // being billed. The coach can change it afterwards.
+    workspaceAccountsJson: JSON.stringify([
+      {
+        id: sandboxId,
+        name: SANDBOX_IDENTITY.businessName,
+        slug: sandboxId,
+        planKey: accountPlanCatalog[ownEntry?.planKey] ? ownEntry.planKey : livePlanKey,
+        subscriptionStatus: "internal",
+        billingProvider: "none",
+        active: true,
+      },
+    ]),
+    sandboxSeedVersion: SANDBOX_SEED_VERSION,
+  });
+  await db().sql`
+    UPDATE accounts SET business_name = ${SANDBOX_IDENTITY.businessName}
+    WHERE id = ${sandboxId} AND kind = 'sandbox'
+  `;
+}
+
+/** Rebuild a sandbox seeded before SANDBOX_SEED_VERSION. Cheap when current. */
+async function freshenSandboxIfStale(sandbox) {
+  if (!sandbox?.id) return sandbox;
+  const settings = await readSettingsMap(sandbox.id);
+  if (settingValue(settings, "sandboxSeedVersion") === SANDBOX_SEED_VERSION) return sandbox;
+  await writeFreshSandboxSettings(sandbox.id, sandbox.sandboxOfAccountId);
+  return (await readSandboxForAccount(sandbox.sandboxOfAccountId)) || sandbox;
+}
+
 /**
  * Create this business's sandbox, or hand back the one it already has.
  *
  * A sandbox is an ordinary account, so creating one is the ordinary account
- * creation path: insert the row, then seedSettings() gives it the same 45
- * defaults any new business gets -- its own services, location, availability and
- * coach profile, and none of the live account's data. That is asserted by
- * tenant-boundary.test.mts for a new business and is true here for the same
- * reason.
+ * creation path: insert the row, then give it a new business's settings -- no
+ * services, closed hours, a demo name, its own slug, and none of the live
+ * account's data. See writeFreshSandboxSettings.
  *
  * Idempotent twice over: ON CONFLICT DO NOTHING on the id, and a unique index on
  * sandbox_of_account_id. A second call returns the first sandbox rather than
@@ -9970,53 +10106,16 @@ async function ensureSandboxForAccount(liveAccountId: string) {
   if (!parentId) throw missingAccountScope("ensure_sandbox");
 
   const existing = await readSandboxForAccount(parentId);
-  if (existing) return existing;
+  if (existing) return freshenSandboxIfStale(existing);
 
   const sandboxId = sandboxAccountIdFor(parentId);
-  const parentSettings = await readSettingsMap(parentId);
-  const parentName =
-    cleanString(settingValue(parentSettings, "accountBusinessName"), "", 120) || parentId;
-  const sandboxName = `${parentName} (Sandbox)`;
-
   await db().sql`
     INSERT INTO accounts (id, slug, business_name, status, kind, sandbox_of_account_id)
-    VALUES (${sandboxId}, ${sandboxId}, ${sandboxName}, 'active', 'sandbox', ${parentId})
+    VALUES (${sandboxId}, ${sandboxId}, ${SANDBOX_IDENTITY.businessName}, 'active', 'sandbox', ${parentId})
     ON CONFLICT (id) DO NOTHING
   `;
 
-  await seedSettings(sandboxId);
-
-  // The plan the sandbox runs on is a copy of the live one, so entitlement
-  // checks run for real rather than being bypassed. subscriptionStatus is
-  // 'internal' -- an existing status isAccountActive() already accepts -- so the
-  // sandbox is entitled without being billed. The coach can change the plan
-  // afterwards to see what a smaller one feels like.
-  const parentWorkspace = parseSettingJson(parentSettings, "workspaceAccountsJson", []);
-  const parentEntry = Array.isArray(parentWorkspace)
-    ? parentWorkspace.find((entry) => entry?.id === parentId)
-    : null;
-  const planKey = accountPlanCatalog[parentEntry?.planKey] ? parentEntry.planKey : "solo";
-
-  await setSettingsBulk(sandboxId, {
-    accountId: sandboxId,
-    accountBusinessName: sandboxName,
-    // Start where the live business is, so the first thing a tester sees is
-    // their own configuration rather than a default one. All of it is editable.
-    accountCountry: settingValue(parentSettings, "accountCountry"),
-    accountTimezone: settingValue(parentSettings, "accountTimezone"),
-    accountCurrency: settingValue(parentSettings, "accountCurrency"),
-    workspaceAccountsJson: JSON.stringify([
-      {
-        id: sandboxId,
-        name: sandboxName,
-        slug: sandboxId,
-        planKey,
-        subscriptionStatus: "internal",
-        billingProvider: "none",
-        active: true,
-      },
-    ]),
-  });
+  await writeFreshSandboxSettings(sandboxId, parentId);
 
   // Two players, because "create a player" is not the workflow anyone opens the
   // sandbox to test -- everything downstream of having one is. Bookings, passes
@@ -12393,6 +12492,18 @@ async function routeBookingApiRequest(
       return json(await readPlayerProfile(session));
     }
 
+    // App Store account-deletion initiation. This queues a reviewed deletion
+    // rather than erasing coach-owned or legally retained records in a single
+    // tap; Apple permits a manual completion process when its timing is made
+    // clear to the player.
+    if (req.method === "POST" && pathname === "/api/player/account-deletion") {
+      const session = await readPlayerSession(playerSessionTokenFromRequest(req));
+      if (!session) {
+        return json({ error: "unauthorized", message: "Player login required." }, 401);
+      }
+      return json({ ...(await requestPlayerAccountDeletion(session)), expectedCompletionDays: 7 }, 202);
+    }
+
     // Player-side "Mark Complete." Player-session-authenticated, ahead of the
     // admin gate below, same shape as /api/player/profile above.
     if (req.method === "POST" && pathname === "/api/practice-blocks/complete") {
@@ -13539,7 +13650,7 @@ async function routeBookingApiRequest(
     if (req.method === "GET" && pathname === "/api/sandbox") {
       const actor = await currentActor(req);
       const parentId = actor.sandboxOfAccountId || actor.accountId;
-      const sandbox = await readSandboxForAccount(parentId);
+      const sandbox = await freshenSandboxIfStale(await readSandboxForAccount(parentId));
       return json({
         liveAccountId: parentId,
         inSandbox: Boolean(actor.sandboxOfAccountId),

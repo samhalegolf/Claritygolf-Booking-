@@ -125,7 +125,8 @@ export function SwingReviewFlow({
           </>
         ) : (
           <p className="player-portal-empty">
-            You have no review credits left, and card payments are not set up. Ask your coach.
+            You do not have a review credit available in this app. Credits already added to your
+            account will appear here.
           </p>
         )}
 

@@ -260,6 +260,9 @@ function shouldUseDevicePicker() {
 
 /** Kept in step with the slide-out in playerPortal.css. */
 const WORKSPACE_EXIT_MS = 190;
+const PRIVACY_URL = "https://claritygolf.app/privacy";
+const SUPPORT_URL = "https://claritygolf.app/support";
+const TERMS_URL = "https://claritygolf.app/terms";
 
 export type PlayerPortalProps = {
   session: Session;
@@ -313,6 +316,10 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   const [purchaseNote, setPurchaseNote] = useState("");
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileError, setProfileError] = useState("");
+  const [deletionOpen, setDeletionOpen] = useState(false);
+  const [deletionBusy, setDeletionBusy] = useState(false);
+  const [deletionMessage, setDeletionMessage] = useState("");
+  const [deletionError, setDeletionError] = useState("");
   const [expandedPracticeId, setExpandedPracticeId] = useState<string | null>(null);
   /** Which swing review is open. Empty means the list, which is how it lands. */
   const [openReviewId, setOpenReviewId] = useState("");
@@ -414,10 +421,16 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
       setPassCurrency(String(data.passCurrency || ""));
       // Empty when the business has no card payments set up, which is the
       // server's answer rather than something the portal works out.
-      setShop(Array.isArray(data.shop) ? data.shop : []);
+      // The App Store build is a companion to the coach's service. Existing
+      // passes work here, but this binary never sells or links out to buy one.
+      setShop(NATIVE ? [] : Array.isArray(data.shop) ? data.shop : []);
       // Null when the coach sells no video review, or sells more than one and
       // the catalogue cannot say which is "the" review.
-      setReviewOffer(data.review || null);
+      setReviewOffer(
+        data.review
+          ? { ...data.review, canBuy: NATIVE ? false : Boolean(data.review.canBuy) }
+          : null,
+      );
       setBookingEmbed(isPlayerBookingEmbedConfigured(data.bookingEmbed) ? data.bookingEmbed : null);
       if (data.player?.email) setPlayerEmail(data.player.email);
       if (data.player?.name) setPlayerName(data.player.name);
@@ -607,6 +620,41 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
     onSignedOut();
   }
 
+  const requestAccountDeletion = useCallback(async () => {
+    if (isGuest || deletionBusy) return;
+    const confirmed = window.confirm(
+      "Request deletion of your Clarity Player account and associated personal data? " +
+        "Some booking or payment records may be retained where legally required. We will email you when the review is complete.",
+    );
+    if (!confirmed) return;
+
+    setDeletionBusy(true);
+    setDeletionError("");
+    setDeletionMessage("");
+    try {
+      const response = await apiFetch("/api/player/account-deletion", { method: "POST" });
+      const data = (await response.json().catch(() => ({}))) as {
+        message?: string;
+        requestedAt?: string;
+        expectedCompletionDays?: number;
+      };
+      if (response.status === 401) {
+        onSignedOut();
+        return;
+      }
+      if (!response.ok) throw new Error(data.message || "Could not submit the deletion request.");
+      setDeletionMessage(
+        `Request received. We will review it and email you within ${data.expectedCompletionDays || 7} days.`,
+      );
+    } catch (error) {
+      setDeletionError(
+        error instanceof Error ? error.message : "Could not submit the deletion request.",
+      );
+    } finally {
+      setDeletionBusy(false);
+    }
+  }, [deletionBusy, isGuest, onSignedOut]);
+
   const openCaddy = useCallback(() => {
     if (!caddy?.appUrl) return;
     window.open(caddy.appUrl, "_blank", "noopener,noreferrer");
@@ -618,6 +666,9 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
    * catalogue, because a price that came from the browser is a price the
    * browser can change. */
   const buyShopItem = useCallback(async (serviceId: string) => {
+    // The native App Store binary is a companion app. Existing entitlements
+    // remain usable, but purchase and purchase links belong to the web client.
+    if (NATIVE) return;
     setBuyingId(serviceId);
     setPurchaseNote("");
     try {
@@ -665,7 +716,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
    * The URL is cleaned either way: a session id left in the address bar is
    * something a player can bookmark, share, or re-trigger by reloading. */
   useEffect(() => {
-    if (isGuest) return;
+    if (NATIVE || isGuest) return;
     const params = new URLSearchParams(window.location.search);
     const purchase = params.get("purchase");
     const reservation = params.get("reservation");
@@ -2414,7 +2465,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                       Absent entirely when the business has not set up card
                       payments: the server sends an empty shop, and a "Buy"
                       button that cannot take money is worse than no button. */}
-                  {shop.length > 0 && (
+                  {!NATIVE && shop.length > 0 && (
                     <section className="player-portal-section">
                       <h2>{passes.length ? "Buy more" : "Buy lessons or a review"}</h2>
                       <p className="player-portal-lead">
@@ -2450,8 +2501,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
 
                   {!passes.length && !shop.length && (
                     <p className="player-portal-empty">
-                      Nothing here yet. Passes your coach gives you, and anything you buy, show up
-                      on this screen.
+                      Nothing here yet. Passes added to your account show up on this screen.
                     </p>
                   )}
                 </>
@@ -2701,6 +2751,50 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
               )}
             </>
           )}
+
+          <footer className="player-portal-legal">
+            <nav aria-label="Legal and support">
+              <a href={PRIVACY_URL} target="_blank" rel="noreferrer noopener">Privacy Policy</a>
+              <a href={SUPPORT_URL} target="_blank" rel="noreferrer noopener">Support</a>
+              <a href={TERMS_URL} target="_blank" rel="noreferrer noopener">Terms</a>
+              {!isGuest && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDeletionOpen((current) => !current);
+                    setDeletionError("");
+                  }}
+                  aria-expanded={deletionOpen}
+                >
+                  Delete account
+                </button>
+              )}
+            </nav>
+
+            {!isGuest && deletionOpen && (
+              <section className="player-account-deletion" aria-label="Delete account">
+                <strong>Delete your account</strong>
+                <p>
+                  This requests deletion of your player login and associated personal data. We review
+                  booking and payment records before removal because some records may need to be retained
+                  by law. Your Clarity Caddy login may use the same identity and will be included in that review.
+                </p>
+                {deletionMessage ? (
+                  <p className="player-account-deletion-success" role="status">{deletionMessage}</p>
+                ) : (
+                  <button
+                    className="player-account-deletion-submit"
+                    type="button"
+                    disabled={deletionBusy}
+                    onClick={() => void requestAccountDeletion()}
+                  >
+                    {deletionBusy ? "Submitting…" : "Request account deletion"}
+                  </button>
+                )}
+                {deletionError && <p className="player-portal-error-line" role="alert">{deletionError}</p>}
+              </section>
+            )}
+          </footer>
         </div>
       </div>
     </div>

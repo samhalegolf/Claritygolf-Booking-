@@ -32,8 +32,21 @@ const json = (value: unknown, status = 200) =>
  * Google connection read below took whichever business connected most recently
  * -- so one coach's panel could show another coach's Google account email.
  */
-async function requireAccountId(req: Request): Promise<string> {
-  return (await requireCoachActor(req)).accountId;
+async function requireAccount(req: Request): Promise<{ accountId: string; sandbox: boolean }> {
+  const actor = await requireCoachActor(req);
+  return { accountId: actor.accountId, sandbox: Boolean(actor.sandboxOfAccountId) };
+}
+
+/**
+ * What a sandbox is told about an integration: that it is not connected.
+ *
+ * The field scan reads deployment-wide env vars, so on its own it reports the
+ * live business's Optix, Akahu and Google app as "connected" inside every
+ * sandbox. Nothing in a sandbox leaves Clarity, so none of them is connected
+ * there, whatever the environment holds.
+ */
+function asSandbox<T extends Record<string, unknown>>(entry: T): T {
+  return { ...entry, configured: false, connectedAs: "", connectionError: "" };
 }
 
 function env(name: string) {
@@ -191,8 +204,9 @@ export default async function handler(req: Request) {
   if (req.method !== "GET") return json({ error: "method_not_allowed" }, 405);
 
   let accountId = "";
+  let sandbox = false;
   try {
-    accountId = await requireAccountId(req);
+    ({ accountId, sandbox } = await requireAccount(req));
   } catch (error) {
     const status = (error as { status?: number })?.status === 403 ? 403 : 401;
     return json(
@@ -221,12 +235,14 @@ export default async function handler(req: Request) {
     const oauth = await oauthState(accountId);
     return json({
       integrations: cards.map((entry) =>
-        // An OAuth integration reports what the token store says, not what the
-        // field scan guessed. Connected wins over "fields missing": you cannot
-        // have signed in without an app to sign into.
-        entry.needsAuthorisation
-          ? { ...entry, configured: oauth.connected || entry.configured, connectedAs: oauth.account, connectionError: oauth.error }
-          : entry,
+        sandbox
+          ? asSandbox(entry)
+          : // An OAuth integration reports what the token store says, not what the
+            // field scan guessed. Connected wins over "fields missing": you cannot
+            // have signed in without an app to sign into.
+            entry.needsAuthorisation
+            ? { ...entry, configured: oauth.connected || entry.configured, connectedAs: oauth.account, connectionError: oauth.error }
+            : entry,
       ),
     });
   }
@@ -260,6 +276,7 @@ export default async function handler(req: Request) {
       capabilities: descriptor.category === "resource-booking" ? providerCapabilities(descriptor.id) : null,
       ...integrationStatus(descriptor),
       ...(oauth?.connected ? { configured: true } : {}),
+      ...(sandbox ? { configured: false } : {}),
     },
     connections: descriptor.connections.map((connection) => ({
       kind: connection.kind,

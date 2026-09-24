@@ -1,12 +1,12 @@
 import { Loading, loadingLabel } from "../shared/Loading";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { ArrowLeft, ArrowRight, Check, Clock, X } from "lucide-react";
 import { apiFetch } from "../auth/apiFetch";
 import { appearsOnCurrentPublicBookingScreen } from "./bookingScreen";
 
 type Service = { id: string; name: string; duration: number; price: number; priceMode?: string; description?: string; lessonNote?: string; location?: string; lessonFormat?: string; reviewTurnaroundDays?: number; customGroup?: boolean; customGroupEnabled?: boolean; minParticipants?: number; bookingScreenIds?: string[] };
 type Slot = { week: number; day: number; start: number; remainingSpots?: number; locationId?: string; coachId?: string };
-type Brand = { logoPreview?: string; showLogo?: boolean };
+type Brand = { logoPreview?: string; showLogo?: boolean; neutral?: string; primary?: string; secondary?: string; accent?: string; bookingTheme?: string };
 type Account = { businessName?: string; coachName?: string; venueShortName?: string };
 type Form = { firstName: string; lastName: string; phone: string; email: string };
 export type PublicBookingCustomer = { name?: string; email?: string; phone?: string };
@@ -41,6 +41,20 @@ const handednessOptions: Array<{ value: Handedness; label: string; explainer: st
   { value: "right", label: "Right handed", explainer: "You stand on the left side of the ball, with your left shoulder closest to the target. Most players swing this way." },
   { value: "left", label: "Left handed", explainer: "You stand on the right side of the ball, with your right shoulder closest to the target. We'll book you into one of our left-handed-friendly bays." },
 ];
+/** The frame the coach app's Booking page preview gives this same markup:
+ *  .app-shell for the compatibility variables every booking rule reads
+ *  (--coach-primary, --panel, --border ...), the business's brand colours from
+ *  the catalogue, and the booking theme the coach chose. Without it the page
+ *  rendered with those variables unset, so every colour-mix of them was
+ *  dropped -- selected lessons, days and times showed no fill and the brand
+ *  header lost its gradient. */
+function BookingFrame({ brand, children }: { brand: Brand; children: ReactNode }) {
+  const style = Object.fromEntries(
+    ([["--coach-neutral", brand.neutral], ["--coach-primary", brand.primary], ["--coach-secondary", brand.secondary], ["--coach-accent", brand.accent]] as const)
+      .filter(([, value]) => typeof value === "string" && /^#[0-9a-f]{3,8}$/i.test(value)),
+  ) as CSSProperties;
+  return <div className="app-shell embed-mode public-booking-frame" style={style}>{children}</div>;
+}
 function manageBookingUrl() { const url = new URL(location.href); url.searchParams.set("embed", "booking"); url.searchParams.set("mode", "reschedule"); return url.toString(); }
 
 /** Customer-only booking surface.  It intentionally owns no coach session,
@@ -129,10 +143,11 @@ export default function PublicBookingApp({ customer, onBookingComplete }: Public
   }
 
   const weekLabel = `${dateFor(week, 0).toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${dateFor(week, 6).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+  const theme = catalogue.brand.bookingTheme === "dark" ? "dark" : "light";
   const brandName = catalogue.account.businessName || catalogue.account.coachName || "Clarity Golf";
-  if (submitState === "done") return <main className="public-booking"><div className="booking-brand"><strong>{brandName}</strong></div><div className="booking-card booking-confirmation"><Check size={24} /><h1>Booking confirmed</h1><p>{videoReview ? "Your confirmation is on its way by email. Send your swing from the player portal whenever you are ready — your coach works to the turnaround from there." : "Your confirmation is on its way by email."}</p><button className="primary-button" onClick={() => { setSubmitState("idle"); setSlot(null); setDay(null); setNotes(""); }} type="button">Book another lesson</button></div></main>;
+  if (submitState === "done") return <BookingFrame brand={catalogue.brand}><main className={`public-booking booking-theme-${theme}`}><div className="booking-brand"><strong>{brandName}</strong></div><div className="booking-card booking-confirmation"><Check size={24} /><h1>Booking confirmed</h1><p>{videoReview ? "Your confirmation is on its way by email. Send your swing from the player portal whenever you are ready — your coach works to the turnaround from there." : "Your confirmation is on its way by email."}</p><button className="primary-button" onClick={() => { setSubmitState("idle"); setSlot(null); setDay(null); setNotes(""); }} type="button">Book another lesson</button></div></main></BookingFrame>;
 
-  return <main className="public-booking">
+  return <BookingFrame brand={catalogue.brand}><main className={`public-booking booking-theme-${theme}`}>
     <div className="booking-brand">{catalogue.brand.showLogo && catalogue.brand.logoPreview ? <img src={catalogue.brand.logoPreview} alt={`${brandName} logo`} /> : <strong>{brandName}</strong>}<em>{catalogue.account.venueShortName}</em></div>
     <div className="booking-toolbar"><a className="booking-login-trigger" href={manageBookingUrl()}>Manage / reschedule a booking</a></div>
     <div className="booking-columns booking-progressive-flow">
@@ -140,5 +155,5 @@ export default function PublicBookingApp({ customer, onBookingComplete }: Public
       <section className={`booking-progressive-section ${service ? "is-open" : ""}`}><div className="booking-progressive-title"><span className="booking-progressive-title-label">{videoReview ? "2. Turnaround" : "2. Date & Time"}</span><span className="booking-progressive-title-state">{!service ? "Locked" : videoReview ? "No time needed" : slotsState === "loading" ? loadingLabel() : "In progress"}</span></div>{service && videoReview ? <div className="booking-progressive-body"><div className="booking-review-turnaround"><p>Send your swing from the player portal once you have booked. There is no appointment to attend.</p><p><strong>Back with you by {reviewDueDate(service).label}</strong> — within {reviewDueDate(service).days} day{reviewDueDate(service).days === 1 ? "" : "s"}.</p></div></div> : service ? <div className="booking-progressive-body"><div className="booking-week-controls"><button onClick={() => { setWeek((value) => value - 1); setSlot(null); }} type="button"><ArrowLeft size={15} /><span>Previous week</span></button><strong>{weekLabel}</strong><button onClick={() => { setWeek((value) => value + 1); setSlot(null); }} type="button"><span>Next week</span><ArrowRight size={15} /></button></div>{!scheduledGroup ? <div className="booking-days">{dayNames.map((name, index) => <button className={day === index ? "selected-day" : ""} key={name} onClick={() => { setDay(index); setSlot(null); }} type="button"><strong>{name.slice(0, 3)}</strong><em>{dateFor(week, index).getDate()}</em></button>)}</div> : null}<div className="time-slots">{slotsState === "loading" ? <Loading what="available times" /> : slotsState === "error" ? <p role="alert">Available times could not be loaded.</p> : !scheduledGroup && day === null ? <p>Choose a day first.</p> : availableSlots.length ? availableSlots.map((candidate) => <button className={slot?.start === candidate.start && slot?.day === candidate.day ? "selected-time" : ""} key={`${candidate.day}-${candidate.start}`} onClick={() => setSlot(candidate)} type="button"><Clock size={15} />{scheduledGroup ? `${dateFor(candidate.week, candidate.day).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })} · ` : ""}{time(candidate.start)}{candidate.remainingSpots ? ` · ${candidate.remainingSpots} spots left` : ""}</button>) : <p>No public times available for this day.</p>}</div></div> : null}</section>
       <section className={`booking-progressive-section ${readyForDetails ? "is-open" : ""}`}><div className="booking-progressive-title"><span className="booking-progressive-title-label">3. Your Information</span><span className="booking-progressive-title-state">{readyForDetails ? "In progress" : "Locked"}</span></div>{readyForDetails ? <div className="booking-progressive-body"><div className="booking-form">{(["firstName", "lastName", "phone", "email"] as const).map((key) => <input className={key === "email" ? "w-email" : "w-name"} key={key} value={form[key]} type={key === "email" ? "email" : key === "phone" ? "tel" : "text"} autoComplete={key === "firstName" ? "given-name" : key === "lastName" ? "family-name" : key === "phone" ? "tel" : "email"} onChange={(event) => setForm((current) => ({ ...current, [key]: event.target.value }))} placeholder={key === "firstName" ? "First name *" : key === "lastName" ? "Last name *" : key === "phone" ? "Phone" : "Email *"} />)}<fieldset className="booking-handedness"><legend>Which way do you swing?</legend><div className="booking-handedness-options" role="radiogroup" aria-label="Handedness">{handednessOptions.map((option) => <button aria-checked={handedness === option.value} aria-describedby={`handedness-tip-${option.value}`} className={handedness === option.value ? "selected-handedness" : ""} key={option.value} onClick={() => setHandedness(option.value)} role="radio" type="button">{option.label}<span className="booking-handedness-tip" id={`handedness-tip-${option.value}`} role="tooltip">{option.explainer}</span></button>)}</div></fieldset><textarea aria-label="Notes for your coach" className="booking-notes" maxLength={800} onChange={(event) => setNotes(event.target.value)} placeholder="Notes for your coach (optional) — what you'd like to work on, injuries, anything useful" value={notes} /></div>{customGroup ? <div className="booking-form"><p>Additional attendees</p>{attendees.map((attendee, index) => <div key={index}><input value={attendee.name} onChange={(event) => setAttendees((current) => current.map((item, position) => position === index ? { ...item, name: event.target.value } : item))} placeholder="Name" /><input value={attendee.email} onChange={(event) => setAttendees((current) => current.map((item, position) => position === index ? { ...item, email: event.target.value } : item))} placeholder="Email" type="email" /><button onClick={() => setAttendees((current) => current.filter((_, position) => position !== index))} type="button">Remove</button></div>)}<button onClick={() => setAttendees((current) => [...current, { name: "", email: "" }])} type="button">Add attendee</button></div> : null}{error ? <p className="email-status failed" role="alert"><X size={17} />{error}</p> : null}<button className="primary-button confirm-booking" disabled={!canSubmit || submitState === "saving"} onClick={() => void submit()} type="button">{submitState === "saving" ? "Confirming…" : "Confirm Appointment"}</button></div> : null}</section>
     </div>
-  </main>;
+  </main></BookingFrame>;
 }

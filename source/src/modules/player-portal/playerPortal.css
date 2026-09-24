@@ -2174,3 +2174,69 @@
   border-radius: 0;
   background: transparent;
 }
+
+.player-portal-legal {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 18px;
+  border-top: 1px solid var(--pt-border-soft);
+}
+
+.player-portal-legal nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+}
+
+.player-portal-legal a,
+.player-portal-legal nav button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--pt-text-soft);
+  font: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.player-account-deletion {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--pt-border);
+  border-radius: 10px;
+  background: var(--pt-surface-soft);
+}
+
+.player-account-deletion p {
+  margin: 0;
+  color: var(--pt-text-soft);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.player-account-deletion-submit {
+  justify-self: start;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--c-danger-border);
+  border-radius: 9px;
+  background: transparent;
+  color: var(--c-danger-text);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.player-account-deletion-submit:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.player-account-deletion .player-account-deletion-success {
+  color: var(--pt-text);
+  font-weight: 700;
+}

@@ -2874,7 +2874,8 @@ button {
 
 /* Handedness toggle and player notes on the public booking page. The option
    buttons borrow every theme's day-picker look (their selectors sit beside
-   .booking-days above); this only lays them out and adds the explainer. */
+   .booking-days above); this only lays them out and adds the explainer. The
+   notes box reads the booking theme's input colours so it matches the fields. */
 .booking-handedness {
   display: grid;
   gap: var(--c-space-2);
@@ -2901,18 +2902,6 @@ button {
   font: inherit;
   font-weight: 700;
   text-align: center;
-}
-
-/* The standalone booking page sits outside .app-shell, so --coach-primary is
-   unset there and the shared selected-state fill (a colour-mix of it) is
-   dropped, leaving only a border. A two-way toggle has to show which side is
-   on, so it paints from tokens that always exist. The themed .app-shell rules
-   are more specific and still win inside the player portal. */
-.booking-handedness button.selected-handedness,
-.booking-handedness button.selected-handedness:hover {
-  border-color: var(--c-accent);
-  background: var(--c-accent);
-  color: var(--c-accent-text);
 }
 
 /* The explainer. Shown on hover and on keyboard focus; the same sentence is
@@ -2945,11 +2934,11 @@ button {
 
 .booking-form .booking-notes {
   min-height: 84px;
-  border: 1px solid var(--c-border);
+  border: 1px solid var(--booking-border, var(--c-border));
   border-radius: 8px;
   padding: 10px;
-  background: var(--c-surface);
-  color: var(--c-text);
+  background: var(--booking-input, var(--c-surface));
+  color: var(--booking-text, var(--c-text));
   font: inherit;
   resize: vertical;
 }
