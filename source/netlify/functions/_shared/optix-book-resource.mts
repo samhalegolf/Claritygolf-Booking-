@@ -1,7 +1,6 @@
 import { getDatabase } from "@netlify/database";
 
 import {
-  readOptixReconcileConfig,
   type ClarityOptixAppointment,
   type OptixSyncRecord,
 } from "./optix-reconcile.mts";
@@ -10,13 +9,10 @@ import {
   reconcileOptixAppointmentWithAutoSelect,
 } from "./optix-auto-select.mts";
 import { cancelOptixBayForCalendarItem } from "./optix-cancel.mts";
+import { optixConfigForAccount } from "./optix-credentials.mts";
 import { notifyBookingEvent } from "../notification-engine.mts";
 
 const OVERALL_TIMEOUT_MS = 25_000;
-
-function env(name: string): string {
-  return (globalThis.Netlify?.env?.get(name) || process.env[name] || "").trim();
-}
 
 function db() {
   return getDatabase();
@@ -272,7 +268,7 @@ export async function bookOneResource(accountId: string, calendarItemId: string)
     return { ok: true, alreadyBooked: true, result: existing };
   }
 
-  const config = readOptixReconcileConfig(env);
+  const config = await optixConfigForAccount(accountId);
   const serviceId = String(appointment.serviceId || appointment.service_id || "");
   const bookingType = await readBookingTypeConfig(accountId, serviceId);
 
@@ -415,7 +411,7 @@ export async function rebookResourceAfterReschedule(
         const moved = await moveOptixBookingInPlace({
           appointment,
           existing,
-          config: readOptixReconcileConfig(env),
+          config: await optixConfigForAccount(accountId),
           bookingType: await readBookingTypeConfig(
             accountId,
             String(appointment.serviceId || (appointment as any).service_id || ""),

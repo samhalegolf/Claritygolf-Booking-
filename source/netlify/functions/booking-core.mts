@@ -6968,6 +6968,7 @@ async function deleteCalendarItemById(accountId: string, id, context = null, net
         duration: existingItem.duration,
         timezone: existingItem.location?.timezone || "",
         clientName: existingItem.client || existingItem.title || "",
+        accountId,
       });
     } catch (error) {
       const detail = cleanString(
@@ -9900,7 +9901,7 @@ async function readPlayerProfile(session) {
     new Map(serviceList.map((service) => [service.id, service.name])),
   );
 
-  const stripeStatus = stripeCredentialStatus(settingsMap[STRIPE_SECRET_SETTING]);
+  const stripeStatus = stripeCredentialStatus(settingsMap[STRIPE_SECRET_SETTING], accountId);
   const currency = playerShopCurrency(settingsMap);
   const flexibleValueCents = session.personId
     ? await readFlexibleValueForPerson(accountId, session.personId, currency)
@@ -10028,9 +10029,41 @@ const SANDBOX_IDENTITY = {
   venueShortName: "Demo Range",
 };
 
-// Bumped whenever what a fresh sandbox looks like changes. A sandbox whose
-// settings carry an older version is rebuilt from scratch on its next visit.
-const SANDBOX_SEED_VERSION = "2";
+// Bumped whenever what a fresh sandbox looks like changes. A sandbox seeded
+// before version 2 is rebuilt from scratch on its next visit; one at version 2
+// only has its public slug moved (see freshenSandboxIfStale), so a sandbox a
+// coach has already set up keeps everything they set up.
+const SANDBOX_SEED_VERSION = "3";
+
+/**
+ * The slug a sandbox's booking page is published under.
+ *
+ * Not its id. The id is derived from the live business's id, so it carries the
+ * live business's name ("sam-hale-golf-sandbox") into every link and embed the
+ * sandbox hands out. The slug is what the public sees; the id stays internal.
+ * A short hash keeps it unique per business and stable across rebuilds.
+ */
+function sandboxPublicSlugFor(sandboxId: string): string {
+  return `demo-golf-${createHash("sha256").update(`sandbox:${sandboxId}`).digest("hex").slice(0, 6)}`;
+}
+
+async function applySandboxPublicSlug(sandboxId: string) {
+  const slug = sandboxPublicSlugFor(sandboxId);
+  await db().sql`
+    UPDATE accounts SET slug = ${slug}, business_name = ${SANDBOX_IDENTITY.businessName}
+    WHERE id = ${sandboxId} AND kind = 'sandbox'
+  `;
+  const entries = parseSettingJson(await readSettingsMap(sandboxId), "workspaceAccountsJson", []);
+  await setSettingsBulk(sandboxId, {
+    accountCalendarSlug: slug,
+    workspaceAccountsJson: JSON.stringify(
+      (Array.isArray(entries) ? entries : []).map((entry) =>
+        entry?.id === sandboxId ? { ...entry, slug } : entry,
+      ),
+    ),
+    sandboxSeedVersion: SANDBOX_SEED_VERSION,
+  });
+}
 
 /**
  * Give a sandbox the settings of a brand-new business.
@@ -10065,27 +10098,25 @@ async function writeFreshSandboxSettings(sandboxId: string, parentId: string) {
       {
         id: sandboxId,
         name: SANDBOX_IDENTITY.businessName,
-        slug: sandboxId,
+        slug: sandboxPublicSlugFor(sandboxId),
         planKey: accountPlanCatalog[ownEntry?.planKey] ? ownEntry.planKey : livePlanKey,
         subscriptionStatus: "internal",
         billingProvider: "none",
         active: true,
       },
     ]),
-    sandboxSeedVersion: SANDBOX_SEED_VERSION,
   });
-  await db().sql`
-    UPDATE accounts SET business_name = ${SANDBOX_IDENTITY.businessName}
-    WHERE id = ${sandboxId} AND kind = 'sandbox'
-  `;
+  await applySandboxPublicSlug(sandboxId);
 }
 
 /** Rebuild a sandbox seeded before SANDBOX_SEED_VERSION. Cheap when current. */
 async function freshenSandboxIfStale(sandbox) {
   if (!sandbox?.id) return sandbox;
   const settings = await readSettingsMap(sandbox.id);
-  if (settingValue(settings, "sandboxSeedVersion") === SANDBOX_SEED_VERSION) return sandbox;
-  await writeFreshSandboxSettings(sandbox.id, sandbox.sandboxOfAccountId);
+  const version = settingValue(settings, "sandboxSeedVersion");
+  if (version === SANDBOX_SEED_VERSION) return sandbox;
+  if (version === "2") await applySandboxPublicSlug(sandbox.id);
+  else await writeFreshSandboxSettings(sandbox.id, sandbox.sandboxOfAccountId);
   return (await readSandboxForAccount(sandbox.sandboxOfAccountId)) || sandbox;
 }
 
@@ -10157,7 +10188,7 @@ async function setSandboxPlanKey(sandboxId: string, sandboxName: string, planKey
       {
         id: sandboxId,
         name: sandboxName,
-        slug: sandboxId,
+        slug: sandboxPublicSlugFor(sandboxId),
         planKey,
         subscriptionStatus: "internal",
         billingProvider: "none",
@@ -12715,7 +12746,7 @@ async function routeBookingApiRequest(
       const body = await parseBody(req);
       const state = await readPublicCatalogState(accountId);
       const settingsMap = await readSettingsMap(accountId);
-      const credential = resolveStripeCredential(settingsMap[STRIPE_SECRET_SETTING]);
+      const credential = resolveStripeCredential(settingsMap[STRIPE_SECRET_SETTING], accountId);
 
       // Priced from the catalogue on the server, never from the request. The
       // browser sends which thing, not what it costs.
@@ -12895,7 +12926,7 @@ async function routeBookingApiRequest(
       if (!sessionId) return json({ error: "invalid", message: "Which purchase?" }, 400);
 
       const settingsMap = await readSettingsMap(accountId);
-      const credential = resolveStripeCredential(settingsMap[STRIPE_SECRET_SETTING]);
+      const credential = resolveStripeCredential(settingsMap[STRIPE_SECRET_SETTING], accountId);
       const paid = await retrieveStripeCheckoutSession(credential, sessionId);
 
       // Whose purchase this was is Stripe's answer, not the caller's. Both
@@ -14457,7 +14488,7 @@ async function readPassInbox(accountId: string, services) {
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountFeature(requestContext.account, "invoicing");
       const settingsMap = await readSettingsMap(requestContext.accountId);
-      return json({ stripe: stripeCredentialStatus(settingsMap[STRIPE_SECRET_SETTING]) });
+      return json({ stripe: stripeCredentialStatus(settingsMap[STRIPE_SECRET_SETTING], requestContext.accountId) });
     }
 
     if (req.method === "PUT" && pathname === "/api/payments/stripe") {
@@ -14483,7 +14514,7 @@ async function readPassInbox(accountId: string, services) {
       await setSettingsBulk(accountId, { [STRIPE_SECRET_SETTING]: raw });
       const settingsMap = await readSettingsMap(accountId);
       return json({
-        stripe: stripeCredentialStatus(settingsMap[STRIPE_SECRET_SETTING]),
+        stripe: stripeCredentialStatus(settingsMap[STRIPE_SECRET_SETTING], accountId),
         cleared: !raw,
       });
     }

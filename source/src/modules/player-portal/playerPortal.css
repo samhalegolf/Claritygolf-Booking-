@@ -2222,10 +2222,10 @@
   justify-self: start;
   min-height: 40px;
   padding: 0 14px;
-  border: 1px solid var(--c-danger-border);
+  border: 1px solid var(--c-danger);
   border-radius: 9px;
   background: transparent;
-  color: var(--c-danger-text);
+  color: var(--c-danger);
   font: inherit;
   font-weight: 700;
   cursor: pointer;

@@ -43,6 +43,11 @@ function stubHosts(options: { onPatch?: (body: string) => void } = {}) {
         { status: 200 },
       );
     }
+    // The business's own Stripe key. Only the original workspace may fall back
+    // to the platform key, and "acct-1" is not it.
+    if (url.includes("/rest/v1/settings") && method === "GET") {
+      return new Response(JSON.stringify([{ value: "sk_test_stub" }]), { status: 200 });
+    }
     if (url.includes("/rest/v1/billing_invoices") && method === "PATCH") {
       options.onPatch?.(body);
       return new Response(null, { status: 204 });

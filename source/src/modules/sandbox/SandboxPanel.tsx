@@ -68,10 +68,10 @@ export default function SandboxPanel() {
   return (
     <>
       <p className="sandbox-panel__lede">
-        A complete second copy of this workspace with its own settings, calendar,
-        players, passes and invoices. Everything works the way it does here — the
-        only difference is that emails, card payments and outside integrations
-        stop at the edge of Clarity instead of leaving it.
+        Your tenant test space: a brand-new business on Clarity, walled off from
+        this one. It starts empty — no lesson types, no hours, no integrations —
+        and has its own booking page, so you can set it up and book into it the
+        way a new coach would. Nothing from this workspace shows up in it.
       </p>
 
       {status.sandbox ? (
@@ -131,9 +131,9 @@ export default function SandboxPanel() {
             </button>
           </div>
           <p className="sandbox-panel__note">
-            It starts with your country, timezone and currency, Clarity's default
-            lesson types and hours, and two demo players. Everything else you make
-            yourself, through the real screens.
+            It starts with your country, timezone and currency and two demo
+            players. Everything else you set up yourself, through the real
+            screens.
           </p>
         </>
       )}

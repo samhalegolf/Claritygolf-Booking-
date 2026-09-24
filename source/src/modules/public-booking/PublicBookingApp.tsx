@@ -2,7 +2,7 @@ import { Loading, loadingLabel } from "../shared/Loading";
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { ArrowLeft, ArrowRight, Check, Clock, X } from "lucide-react";
 import { apiFetch } from "../auth/apiFetch";
-import { appearsOnCurrentPublicBookingScreen } from "./bookingScreen";
+import { appearsOnCurrentPublicBookingScreen, publicApi } from "./bookingScreen";
 
 type Service = { id: string; name: string; duration: number; price: number; priceMode?: string; description?: string; lessonNote?: string; location?: string; lessonFormat?: string; reviewTurnaroundDays?: number; customGroup?: boolean; customGroupEnabled?: boolean; minParticipants?: number; bookingScreenIds?: string[] };
 type Slot = { week: number; day: number; start: number; remainingSpots?: number; locationId?: string; coachId?: string };
@@ -82,7 +82,7 @@ export default function PublicBookingApp({ customer, onBookingComplete }: Public
 
   useEffect(() => {
     let cancelled = false;
-    apiFetch("/api/public-booking-catalog")
+    apiFetch(publicApi("/api/public-booking-catalog"))
       .then(async (response) => { if (!response.ok) throw new Error("Booking is unavailable."); return response.json(); })
       .then((data) => { if (!cancelled) { setCatalogue({ services: Array.isArray(data.services) ? data.services : [], brand: data.brand ?? {}, account: data.account ?? {} }); setCatalogueState("ready"); } })
       .catch(() => { if (!cancelled) setCatalogueState("error"); });
@@ -102,7 +102,7 @@ export default function PublicBookingApp({ customer, onBookingComplete }: Public
     setSlotsState("loading");
     // Deliberately one request for the active week. The endpoint returns every
     // public service keyed by id; do not turn this back into an N+1 loop.
-    apiFetch(`/api/public-booking-slots?week=${week}`)
+    apiFetch(publicApi(`/api/public-booking-slots?week=${week}`))
       .then(async (response) => { if (!response.ok) throw new Error("Availability is unavailable."); return response.json(); })
       .then((data) => {
         if (cancelled) return;
@@ -135,7 +135,7 @@ export default function PublicBookingApp({ customer, onBookingComplete }: Public
     if (!videoReview && !slot) return;
     setSubmitState("saving"); setError("");
     try {
-      const response = await apiFetch("/api/public-booking", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serviceId: service.id, ...(videoReview || !slot ? {} : { week: slot.week, day: slot.day, start: slot.start, coachId: slot.coachId, locationId: slot.locationId }), duration: service.duration, ...form, handedness, notes: notes.trim() || undefined, attendees: customGroup ? attendees : undefined }) });
+      const response = await apiFetch(publicApi("/api/public-booking"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serviceId: service.id, ...(videoReview || !slot ? {} : { week: slot.week, day: slot.day, start: slot.start, coachId: slot.coachId, locationId: slot.locationId }), duration: service.duration, ...form, handedness, notes: notes.trim() || undefined, attendees: customGroup ? attendees : undefined }) });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.appointment?.id) throw new Error(data.message || "That time is no longer available.");
       setSubmitState("done"); onBookingComplete?.();

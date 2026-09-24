@@ -2,6 +2,7 @@ import { Loading } from "../shared/Loading";
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, ArrowRight, Check, Clock, X } from "lucide-react";
 import { apiFetch } from "../auth/apiFetch";
+import { publicApi } from "./bookingScreen";
 
 type Service = { id: string; name: string; duration: number; location?: string };
 type Match = { id: string; serviceId: string; serviceName: string; duration: number; week: number; day: number; start: number; client: string };
@@ -31,14 +32,14 @@ export default function PublicBookingManage() {
   const selected = matches.find((match) => match.id === selectedId) ?? null;
   const selectedService = services.find((service) => service.id === selected?.serviceId) ?? null;
 
-  useEffect(() => { apiFetch("/api/public-booking-catalog").then((response) => response.ok ? response.json() : null).then((data) => setServices(Array.isArray(data?.services) ? data.services : [])).catch(() => {}); }, []);
+  useEffect(() => { apiFetch(publicApi("/api/public-booking-catalog")).then((response) => response.ok ? response.json() : null).then((data) => setServices(Array.isArray(data?.services) ? data.services : [])).catch(() => {}); }, []);
   useEffect(() => { if (credentials.email && credentials.phone) void lookup(); }, []);
   useEffect(() => {
     if (!selected) return;
     let cancelled = false;
     setSlots([]); setSlot(null); setState("loading");
     const query = new URLSearchParams({ serviceId: selected.serviceId, week: String(week), ignoreId: selected.id });
-    apiFetch(`/api/public-booking-slots?${query}`)
+    apiFetch(publicApi(`/api/public-booking-slots?${query}`))
       .then(async (response) => { if (!response.ok) throw new Error("Available times could not be loaded."); return response.json(); })
       .then((data) => { if (!cancelled) { setSlots(Array.isArray(data.services?.[selected.serviceId]?.slots) ? data.services[selected.serviceId].slots : Array.isArray(data.slots) ? data.slots : []); setState("idle"); } })
       .catch(() => { if (!cancelled) { setMessage("Available times could not be loaded."); setState("error"); } });
@@ -49,7 +50,7 @@ export default function PublicBookingManage() {
     if (!credentials.email.trim() || !credentials.phone.trim()) { setMessage("Enter the email and phone number used on the booking."); return; }
     setState("loading"); setMessage(""); setMatches([]); setSelectedId("");
     try {
-      const response = await apiFetch("/api/public-reschedule-lookup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(credentials) });
+      const response = await apiFetch(publicApi("/api/public-reschedule-lookup"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(credentials) });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.message || "Could not find that booking.");
       const found = Array.isArray(data.matches) ? data.matches : [];
@@ -65,7 +66,7 @@ export default function PublicBookingManage() {
     if (!selected || !slot) return;
     setState("saving"); setMessage("");
     try {
-      const response = await apiFetch("/api/public-reschedule", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ appointmentId: selected.id, ...credentials, week: slot.week, day: slot.day, start: slot.start }) });
+      const response = await apiFetch(publicApi("/api/public-reschedule"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ appointmentId: selected.id, ...credentials, week: slot.week, day: slot.day, start: slot.start }) });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.message || "That time is no longer available.");
       setState("done");
@@ -75,7 +76,7 @@ export default function PublicBookingManage() {
     if (!selected || !window.confirm(`Cancel ${selected.serviceName} for ${selected.client}?`)) return;
     setState("saving"); setMessage("");
     try {
-      const response = await apiFetch("/api/public-cancel", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ appointmentId: selected.id, ...credentials }) });
+      const response = await apiFetch(publicApi("/api/public-cancel"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ appointmentId: selected.id, ...credentials }) });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.message || "Could not cancel that booking.");
       setState("done"); setMessage("Booking cancelled.");

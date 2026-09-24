@@ -151,6 +151,7 @@ import {
   playerBookingUrl,
   type BookingEntryMode,
 } from "./modules/shared/bookingHandoff";
+import { currentPublicBookingScreenId, publicApi, publicBookingPath } from "./modules/public-booking/bookingScreen";
 import type {
   VideoWorkspaceNavigationContext,
   VideoWorkspaceSaveResult,
@@ -2227,15 +2228,16 @@ type BookingScreenDefinition = {
   path: string;
 };
 const BOOKING_SCREENS = [
-  { id: "main", label: "Main booking screen", slugs: ["/", "/sam-hale-golf"] },
-  { id: "group-lessons", label: "Group Lessons", slugs: ["/group-lessons"] },
-  { id: "private-lessons", label: "Private Lessons", slugs: ["/private-lessons"] },
+  { id: "main", label: "Main booking screen" },
+  { id: "group-lessons", label: "Group Lessons" },
+  { id: "private-lessons", label: "Private Lessons" },
 ] as const;
-const BOOKING_SCREEN_PATHS: BookingScreenDefinition[] = [
-  { id: "main", label: "Main booking screen", path: "/sam-hale-golf" },
-  { id: "group-lessons", label: "Group Lessons", path: "/group-lessons" },
-  { id: "private-lessons", label: "Private Lessons", path: "/private-lessons" },
-];
+// A screen's public path is /<business>/<screen>, so it is worked out per
+// account -- see publicBookingPath. It used to be a constant, which is how the
+// original workspace's slug ended up in every tenant's embed code.
+function bookingScreenPathsFor(business: string): BookingScreenDefinition[] {
+  return BOOKING_SCREENS.map((screen) => ({ ...screen, path: publicBookingPath(business, screen.id) }));
+}
 const CADDY_APP_URL = "https://caddy.claritygolf.app";
 const THEME_STORAGE_KEY = "clarity-booking-theme";
 const BRAND_STORAGE_KEY = "clarity-booking-brand";
@@ -2765,8 +2767,8 @@ function getBookingScreenIframeCode(path: string, businessName: string, screenNa
   return `<iframe src="${bookingScreenUrl}" title="${businessName} ${screenName} booking" width="100%" height="760" style="border:0;max-width:100%;border-radius:18px;overflow:hidden;background:transparent;" loading="lazy"></iframe>`;
 }
 
-function getBookingWidgetUrl(showLogo: boolean) {
-  return getBookingScreenPublicUrl("/sam-hale-golf", showLogo);
+function getBookingWidgetUrl(business: string, showLogo: boolean) {
+  return getBookingScreenPublicUrl(publicBookingPath(business, "main"), showLogo);
 }
 
 function isBookingLogoHiddenByUrl() {
@@ -2790,11 +2792,7 @@ function normalizeBookingPath(pathname = "") {
 }
 
 function getBookingScreenId(pathname = "") {
-  const normalizedPath = normalizeBookingPath(pathname);
-  for (const screen of BOOKING_SCREENS) {
-    if (screen.slugs.includes(normalizedPath)) return screen.id;
-  }
-  return "main";
+  return currentPublicBookingScreenId(pathname);
 }
 
 /**
@@ -6102,10 +6100,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const [bookingSubmitError, setBookingSubmitError] = useState("");
   const [bookingConfirmation, setBookingConfirmation] = useState<BookingConfirmation | null>(null);
   const [copiedEmbed, setCopiedEmbed] = useState(false);
-  const [selectedBookingScreenId, setSelectedBookingScreenId] = useState(BOOKING_SCREEN_PATHS[0]?.id || "main");
+  const [selectedBookingScreenId, setSelectedBookingScreenId] = useState<string>(BOOKING_SCREENS[0]?.id || "main");
   const [bookingScreenNames, setBookingScreenNames] = useState<Record<string, string>>(
     () =>
-      BOOKING_SCREEN_PATHS.reduce<Record<string, string>>((acc, screen) => {
+      BOOKING_SCREENS.reduce<Record<string, string>>((acc, screen) => {
         acc[screen.id] = screen.label;
         return acc;
       }, {}),
@@ -7108,9 +7106,17 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const customGroupRemainingAttendees = isCustomGroupBooking
     ? Math.max(0, customGroupMaxParticipants(bookingTargetService) - customGroupParticipantCount)
     : 0;
+  // What the public sees in this business's links. The server resolves either
+  // the id or the accounts-table slug, so the id is the safe answer -- except
+  // for a sandbox, whose id is derived from the live business's
+  // ("<live-id>-sandbox", see sandboxAccountIdFor) and would put that name in
+  // every embed it hands out. A sandbox's workspace slug is written to match
+  // its accounts-table slug, so it uses that instead.
+  const publicBusinessSlug =
+    activeAccount.id.endsWith("-sandbox") && activeAccount.slug ? activeAccount.slug : activeAccount.id;
   const bookingScreenEmbeds = useMemo(
     () =>
-      BOOKING_SCREEN_PATHS.map((screen) => ({
+      bookingScreenPathsFor(publicBusinessSlug).map((screen) => ({
         ...screen,
         label: bookingScreenNames[screen.id] || screen.label,
         publicUrl: getBookingScreenPublicUrl(screen.path, brandSettings.showLogo),
@@ -7121,10 +7127,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           brandSettings.showLogo,
         ),
       })),
-    [bookingScreenNames, brandSettings.showLogo, coachAccount.businessName],
+    [publicBusinessSlug, bookingScreenNames, brandSettings.showLogo, coachAccount.businessName],
   );
   const selectedBookingScreen = bookingScreenEmbeds.find((bookingScreen) => bookingScreen.id === selectedBookingScreenId) ?? bookingScreenEmbeds[0];
-  const bookingWidgetUrl = useMemo(() => getBookingWidgetUrl(brandSettings.showLogo), [brandSettings.showLogo]);
+  const bookingWidgetUrl = useMemo(
+    () => getBookingWidgetUrl(publicBusinessSlug, brandSettings.showLogo),
+    [publicBusinessSlug, brandSettings.showLogo],
+  );
   const iframeCode = `<iframe src="${bookingWidgetUrl}" title="${coachAccount.businessName} booking" width="100%" height="760" style="border:0;max-width:100%;border-radius:18px;overflow:hidden;background:transparent;" loading="lazy"></iframe>`;
   const calendarFeedUrl = `${syncBaseUrl.trim().replace(/\/+$/, "") || "https://booking.yourdomain.co.nz"}/calendar/${coachAccount.calendarSlug}.ics?key=${calendarSyncKey}`;
   const caddyWorkspaceUrl = coachAccount.caddyWorkspaceUrl || CADDY_APP_URL;
@@ -7165,7 +7174,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     maxLocations: activeLocationList.length,
     maxUsers: userBelongsToAccount(currentAppUser, activeAccountId) ? 1 : 0,
     maxServices: accountServices.filter((service) => service.archived !== true).length,
-    maxBookingScreens: BOOKING_SCREEN_PATHS.length,
+    maxBookingScreens: BOOKING_SCREENS.length,
   };
   const enabledAccountFeatures = accountFeatureKeys.filter((feature) => activeAccountEntitlements.features[feature]);
   const bookingBrandName = (brandSettings.coachName || coachAccount.businessName).trim();
@@ -7681,7 +7690,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           email: bookingConfirmation.email,
           phone: bookingConfirmation.phone || "",
         });
-        const response = await fetch(`/api/public-notification-status?${params.toString()}`, {
+        const response = await fetch(publicApi(`/api/public-notification-status?${params.toString()}`), {
           headers: { Accept: "application/json" },
         });
         const data = (await response.json()) as { sent?: boolean; notification?: EmailSendResult | null };
@@ -9041,7 +9050,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       route: "GET /api/public-booking-catalog",
       functionName: "loadPublicBookingCatalog",
     });
-    const response = await fetch("/api/public-booking-catalog", {
+    const response = await fetch(publicApi("/api/public-booking-catalog"), {
       cache: "no-store",
       headers: { Accept: "application/json" },
     });
@@ -9124,7 +9133,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     try {
       const params = new URLSearchParams({ serviceId, week: String(week) });
       if (ignoreId) params.set("ignoreId", ignoreId);
-      const response = await fetch(`/api/public-booking-slots?${params.toString()}`, {
+      const response = await fetch(publicApi(`/api/public-booking-slots?${params.toString()}`), {
         cache: "no-store",
         headers: { Accept: "application/json" },
       });
@@ -13511,7 +13520,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     setSelectedRescheduleId("");
     setBookingStart(null);
     try {
-      const response = await fetch("/api/public-reschedule-lookup", {
+      const response = await fetch(publicApi("/api/public-reschedule-lookup"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: lookupCredentials.email, phone: lookupCredentials.phone }),
@@ -13555,7 +13564,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
     setRescheduleState("saving");
     try {
-      const response = await fetch("/api/public-reschedule", {
+      const response = await fetch(publicApi("/api/public-reschedule"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -13624,7 +13633,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
     setRescheduleState("saving");
     try {
-      const response = await fetch("/api/public-cancel", {
+      const response = await fetch(publicApi("/api/public-cancel"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -20120,7 +20129,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         const timeoutId = window.setTimeout(() => controller.abort(), 15000);
         const response = await (async () => {
           try {
-            return await fetch("/api/public-booking", {
+            return await fetch(publicApi("/api/public-booking"), {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               signal: controller.signal,

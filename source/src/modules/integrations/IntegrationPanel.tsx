@@ -37,6 +37,10 @@ type Field = {
   fingerprint: string;
   value: string;
   hasSurroundingWhitespace: boolean;
+  /** This business may type a value in (an owner or admin, on its own connection). */
+  editable?: boolean;
+  /** Where the current value came from: saved by this business, or the site's environment. */
+  source?: "saved" | "environment" | "";
 };
 
 type Connection = {
@@ -62,9 +66,13 @@ type SetupState = {
     /** Only a booking provider has these; the rest are outbound only. */
     capabilities: Capabilities | null;
     configured: boolean; missing: string[]; needsAuthorisation: boolean;
+    /** True when this business saves its own credentials for it here. */
+    editable?: boolean;
   };
   connections: Connection[];
 };
+
+type SaveCredentials = (values: Record<string, string | null>) => Promise<string | null>;
 
 type ResourceProfile = { id: string; name: string; handedness: "standard" | "left"; resourceIds: string[]; serviceIds: string[] };
 type PendingSummary = { count: number; oldest: string | null; newest: string | null };
@@ -170,10 +178,14 @@ function CopyField({ label, value, help }: { label: string; value: string; help?
  * a trailing newline is invisible behind a row of dots and rejects every
  * delivery. A length one longer than expected gives it away immediately.
  */
-function CredentialField({ credential }: { credential: Field }) {
+function CredentialField({ credential, onSave }: { credential: Field; onSave?: SaveCredentials }) {
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const editable = Boolean(credential.editable && onSave);
   const status = credential.set
     ? credential.type === "secret"
-      ? `Set · ${credential.length} chars · ${credential.fingerprint}`
+      ? `Set · ${credential.length} chars · ${credential.fingerprint}${credential.source === "environment" ? " · from the site's environment" : ""}`
       : credential.value
     : credential.required === true
       ? "Not set — required"
@@ -189,6 +201,58 @@ function CredentialField({ credential }: { credential: Field }) {
         <code>{credential.key}</code>
       </span>
       <input readOnly value={status} />
+      {editable ? (
+        <form
+          className="credential-edit"
+          onSubmit={async (event) => {
+            event.preventDefault();
+            if (!draft.trim()) return;
+            setSaving(true);
+            const failure = await onSave!({ [credential.key]: draft });
+            setSaving(false);
+            setError(failure || "");
+            if (!failure) setDraft("");
+          }}
+        >
+          {credential.type === "choice" && credential.choices.length ? (
+            <select value={draft} onChange={(event) => setDraft(event.target.value)} aria-label={credential.label}>
+              <option value="">Choose…</option>
+              {credential.choices.map((choice) => (
+                <option key={choice.value} value={choice.value}>{choice.label}</option>
+              ))}
+            </select>
+          ) : (
+            <input
+              aria-label={credential.label}
+              autoComplete="off"
+              onChange={(event) => setDraft(event.target.value)}
+              placeholder={credential.set ? "Paste a new value to replace it" : `Paste your ${credential.label.toLowerCase()}`}
+              spellCheck={false}
+              type={credential.type === "secret" ? "password" : "text"}
+              value={draft}
+            />
+          )}
+          <button className="credential-copy" disabled={saving || !draft.trim()} type="submit">
+            {saving ? "Saving…" : "Save"}
+          </button>
+          {credential.set && credential.source === "saved" ? (
+            <button
+              className="credential-copy"
+              disabled={saving}
+              onClick={async () => {
+                setSaving(true);
+                const failure = await onSave!({ [credential.key]: null });
+                setSaving(false);
+                setError(failure || "");
+              }}
+              type="button"
+            >
+              Clear
+            </button>
+          ) : null}
+        </form>
+      ) : null}
+      {error ? <strong className="credential-warning">{error}</strong> : null}
       {credential.hasSurroundingWhitespace ? (
         <strong className="credential-warning">
           This value has a space or newline around it. That is enough on its own to make every request fail — re-paste it.
@@ -197,6 +261,28 @@ function CredentialField({ credential }: { credential: Field }) {
       <small>{credential.help}</small>
       {!credential.set && credential.defaultValue ? <small>Default if left unset: <code>{credential.defaultValue}</code></small> : null}
     </label>
+  );
+}
+
+/** Where these values live, which differs for a coach's own connection and Clarity's. */
+function CredentialsNote({ editable }: { editable: boolean }) {
+  return editable ? (
+    <div className="integration-note">
+      <strong>Saved to this business</strong>
+      <span>
+        What you paste here belongs to this business alone and is stored encrypted. No other business
+        on Clarity can use it or see it, and a secret is never shown back — only its length and a
+        short fingerprint, so you can tell two apart.
+      </span>
+    </div>
+  ) : (
+    <div className="integration-note">
+      <strong>Part of Clarity itself</strong>
+      <span>
+        These are set where the site is deployed rather than here. This screen reports what is set
+        and what is missing; it deliberately never shows a secret back to you.
+      </span>
+    </div>
   );
 }
 
@@ -234,6 +320,24 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
       setSetupError("");
     } catch (error) {
       setSetupError(error instanceof Error ? error.message : "Connection details could not load.");
+    }
+  }, [integrationId]);
+
+  /** Save this business's own values; returns an error message, or null. */
+  const saveCredentials = useCallback<SaveCredentials>(async (values) => {
+    try {
+      const response = await fetch(`/api/integration-setup?id=${encodeURIComponent(integrationId)}`, {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ values }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) return payload?.message || payload?.error || "That could not be saved.";
+      setSetup(payload);
+      return null;
+    } catch {
+      return "That could not be saved. Check your connection and try again.";
     }
   }, [integrationId]);
 
@@ -561,7 +665,7 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
                 </section>
                 <section>
                   <h3>Paste these from {providerLabel}</h3>
-                  {inbound.fields.filter((field) => field.type !== "copy").map((field) => <CredentialField credential={field} key={field.key} />)}
+                  {inbound.fields.filter((field) => field.type !== "copy").map((field) => <CredentialField credential={field} key={field.key} onSave={saveCredentials} />)}
                   {inbound.signatureRecipe ? (
                     <label className="integration-credential">
                       <span className="credential-label">Signature recipe</span>
@@ -574,14 +678,7 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
                   ) : null}
                 </section>
               </div>
-              <div className="integration-note">
-                <strong>Credentials live in the environment</strong>
-                <span>
-                  Clarity reads these from environment variables, so they are set where the site is
-                  deployed rather than here. This screen reports what is set and what is missing;
-                  it deliberately never shows a secret back to you.
-                </span>
-              </div>
+              <CredentialsNote editable={Boolean(setup?.integration.editable)} />
             </>
           ) : <div className="integration-empty">{providerLabel} does not send Clarity anything.</div>
         ) : null}
@@ -603,7 +700,7 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
                     <CopyField help={field.help} key={field.key} label={field.label} value={field.value} />
                   ))}
                   {outbound.fields.filter((field) => field.type !== "copy" && field.type !== "oauth").map((field) => (
-                    <CredentialField credential={field} key={field.key} />
+                    <CredentialField credential={field} key={field.key} onSave={saveCredentials} />
                   ))}
                   {outbound.fields.filter((field) => field.type === "oauth").map((field) => (
                     <div className="integration-oauth" key={field.key}>

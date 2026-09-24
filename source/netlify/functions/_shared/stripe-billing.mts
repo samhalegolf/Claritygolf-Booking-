@@ -90,9 +90,11 @@ const MAX_PAGES = 50;
 /** Default invoice backfill window start: 2026-01-01T00:00:00Z. */
 export const DEFAULT_SINCE_EPOCH = 1767225600;
 
-async function stripe(path: string, params: Record<string, unknown> = {}) {
-  const secret = env("STRIPE_SECRET_KEY");
-  if (!secret) throw Object.assign(new Error("Stripe is not configured (missing STRIPE_SECRET_KEY)."), { status: 503 });
+// The business's own key. Only the original workspace may fall back to the
+// STRIPE_SECRET_KEY env var -- see resolveStripeCredential -- so one business's
+// sync can never read another business's Stripe account.
+async function stripe(accountId: string, path: string, params: Record<string, unknown> = {}) {
+  const { secret } = resolveStripeCredential(await readAccountStripeSecret(accountId), accountId);
   const url = new URL(`https://api.stripe.com${path}`);
   for (const [key, value] of Object.entries(params)) {
     if (value === undefined || value === null || value === "") continue;
@@ -110,11 +112,11 @@ async function stripe(path: string, params: Record<string, unknown> = {}) {
 
 type StripeList = { data?: Record<string, any>[]; has_more?: boolean };
 
-async function stripePageAll(path: string, params: Record<string, unknown>) {
+async function stripePageAll(accountId: string, path: string, params: Record<string, unknown>) {
   const all: Record<string, any>[] = [];
   let startingAfter = "";
   for (let page = 0; page < MAX_PAGES; page += 1) {
-    const body = (await stripe(path, {
+    const body = (await stripe(accountId, path, {
       ...params,
       limit: STRIPE_PAGE_LIMIT,
       ...(startingAfter ? { starting_after: startingAfter } : {}),
@@ -221,10 +223,10 @@ function mapLine(line: Record<string, any>, invoice: Record<string, any>, accoun
   };
 }
 
-async function fetchAllInvoiceLines(invoice: Record<string, any>) {
+async function fetchAllInvoiceLines(invoice: Record<string, any>, accountId: string) {
   const embedded = Array.isArray(invoice.lines?.data) ? invoice.lines.data : [];
   if (invoice.lines && !invoice.lines.has_more) return embedded;
-  const paged = await stripePageAll(`/v1/invoices/${invoice.id}/lines`, {});
+  const paged = await stripePageAll(accountId, `/v1/invoices/${invoice.id}/lines`, {});
   return paged.length ? paged : embedded;
 }
 
@@ -276,7 +278,7 @@ async function upsertInvoice(invoice: Record<string, any>, lines: Record<string,
 /** Sync a single Stripe invoice object (e.g. a webhook event payload). */
 export async function syncStripeInvoice(invoice: Record<string, any>, accountId: string) {
   if (!invoice?.id) return null;
-  const lines = await fetchAllInvoiceLines(invoice);
+  const lines = await fetchAllInvoiceLines(invoice, accountId);
   await upsertInvoice(invoice, lines, accountId);
   return { invoiceId: invoice.id as string, lineItems: lines.length };
 }
@@ -293,7 +295,7 @@ export async function deleteStripeInvoice(accountId: string, invoiceId: string) 
 
 /** Backfill all Stripe invoices created at/after sinceEpoch. */
 export async function syncInvoicesSince(sinceEpoch: number, accountId: string, untilEpoch?: number) {
-  const invoices = await stripePageAll("/v1/invoices", {
+  const invoices = await stripePageAll(accountId, "/v1/invoices", {
     "created[gte]": sinceEpoch,
     ...(untilEpoch ? { "created[lte]": untilEpoch } : {}),
   });
@@ -302,7 +304,7 @@ export async function syncInvoicesSince(sinceEpoch: number, accountId: string, u
   const failures: { invoiceId: string; number: string | null; error: string }[] = [];
   for (const invoice of invoices) {
     try {
-      const lines = await fetchAllInvoiceLines(invoice);
+      const lines = await fetchAllInvoiceLines(invoice, accountId);
       await upsertInvoice(invoice, lines, accountId);
       synced += 1;
       itemsSynced += lines.length;
@@ -324,6 +326,8 @@ export async function syncInvoicesSince(sinceEpoch: number, accountId: string, u
   };
 }
 
+import { readAccountStripeSecret } from "./integration-credentials.mts";
+import { resolveStripeCredential } from "./stripe.mts";
 import {
   chargeProductName,
   chargeWording,
@@ -456,8 +460,8 @@ export function shouldSyncCharge(charge: Record<string, any>) {
 }
 
 /** A Stripe GET in this module's credential, shaped for the shared scanner. */
-const stripeGet = (path: string, params: URLSearchParams) =>
-  stripe(`/v1/${path}`, Object.fromEntries(params.entries()));
+const stripeGetFor = (accountId: string) => (path: string, params: URLSearchParams) =>
+  stripe(accountId, `/v1/${path}`, Object.fromEntries(params.entries()));
 
 /**
  * What the basket said, for charges that said nothing themselves.
@@ -469,12 +473,12 @@ const stripeGet = (path: string, params: URLSearchParams) =>
  * once there are a hundred of these, and unbounded is how Stripe starts
  * rate limiting halfway through.
  */
-async function basketNames(charges: Record<string, any>[]) {
+async function basketNames(charges: Record<string, any>[], accountId: string) {
   const needing = charges.filter((charge) => !chargeWording(charge).length);
   const found = new Map<string, string>();
   if (!needing.length) return found;
   const wordings = await mapLimit(needing, 6, (charge) =>
-    checkoutLineItemWording(charge, stripeGet),
+    checkoutLineItemWording(charge, stripeGetFor(accountId)),
   );
   needing.forEach((charge, index) => {
     const text = wordings[index][0]?.text;
@@ -501,14 +505,14 @@ export async function syncStripeCharge(charge: Record<string, any>, accountId: s
   if (!shouldSyncCharge(charge)) return null;
   // A webhook payload carries an unexpanded intent and often no wording, so
   // the basket is the only name available on the live path too.
-  const names = await basketNames([charge]);
+  const names = await basketNames([charge], accountId);
   await upsertCharge(charge, accountId, names.get(String(charge.id)) || "");
   return { chargeId: charge.id as string, status: chargeStatus(charge) };
 }
 
 /** Backfill all succeeded, unlinked Stripe charges created at/after sinceEpoch. */
 export async function syncChargesSince(sinceEpoch: number, accountId: string, untilEpoch?: number) {
-  const charges = await stripePageAll("/v1/charges", {
+  const charges = await stripePageAll(accountId, "/v1/charges", {
     "created[gte]": sinceEpoch,
     ...(untilEpoch ? { "created[lte]": untilEpoch } : {}),
     // Expanded so mapChargeLine can reach the intent's description. Without it
@@ -522,7 +526,7 @@ export async function syncChargesSince(sinceEpoch: number, accountId: string, un
   const failures: { chargeId: string; error: string }[] = [];
   // Resolved for the whole window up front, so the basket look-ups run a few
   // at a time rather than one per charge inside a serial write loop.
-  const names = await basketNames(charges.filter(shouldSyncCharge));
+  const names = await basketNames(charges.filter(shouldSyncCharge), accountId);
   for (const charge of charges) {
     if (!shouldSyncCharge(charge)) {
       skipped += 1;

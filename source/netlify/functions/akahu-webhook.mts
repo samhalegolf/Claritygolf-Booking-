@@ -1,6 +1,6 @@
 import type { Config } from "@netlify/functions";
 import { createVerify } from "node:crypto";
-import { legacyOriginalWorkspaceId as defaultAccountId } from "./_shared/account.mts";
+import { resolveWebhookAccount } from "./_shared/integration-credentials.mts";
 import { autoReconcileCredits, syncAkahuTransactionsByIds } from "./_shared/akahu.mts";
 
 // Akahu webhook — keeps the bank feed live. On a TRANSACTION webhook Akahu sends
@@ -9,7 +9,8 @@ import { autoReconcileCredits, syncAkahuTransactionsByIds } from "./_shared/akah
 // payments. Everything is idempotent, so Akahu's at-least-once retries are safe.
 //
 // Setup: register a webhook in the Akahu dashboard pointing at
-// https://claritygolf.app/api/akahu-webhook (TRANSACTION events). No shared
+// https://claritygolf.app/api/akahu-webhook?account=<business> (TRANSACTION
+// events; the URL Integrations › Akahu shows is the one to use). No shared
 // secret — Akahu signs each delivery with a rotating key we fetch from
 // /v1/keys/{X-Akahu-Signing-Key} and verify (RSA-SHA256).
 
@@ -52,6 +53,15 @@ async function verifySignature(rawBody: string, signature: string, keyId: string
 export default async function handler(req: Request) {
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
 
+  // Which business's ledger this lands in. Each business registers its own
+  // URL (?account=<id>); a URL naming none is the original workspace's.
+  // Akahu signs with its own key rather than a per-business secret, so the
+  // signature proves Akahu sent it, and the business's own tokens are what
+  // fetch the transactions: ids from somebody else's bank connection resolve
+  // to nothing under this business's tokens.
+  const accountId = await resolveWebhookAccount(req);
+  if (!accountId) return json({ error: "unknown_business" }, 404);
+
   const rawBody = await req.text();
   const signature = req.headers.get("x-akahu-signature") || "";
   const keyId = req.headers.get("x-akahu-signing-key") || "";
@@ -66,19 +76,6 @@ export default async function handler(req: Request) {
     return json({ error: "invalid_json" }, 400);
   }
 
-  // KNOWN BOUNDARY GAP, deliberately left for the Billing pass.
-  //
-  // There is no session here to resolve a business from, and the Akahu/Stripe
-  // credentials in the environment belong to the original workspace, so this
-  // still writes into legacyOriginalWorkspaceId(). That is correct while the
-  // original workspace is the only one with a bank or Stripe connection, and it
-  // is wrong the moment a second business connects one: their transactions would
-  // land in the first business's ledger.
-  //
-  // The fix is to resolve the business from the inbound payload -- the Akahu
-  // connection or the Stripe customer/subscription -- rather than statically.
-  // Until then, do not connect banking or Stripe for a second business.
-  const accountId = defaultAccountId();
   try {
     if (event?.webhook_type === "TRANSACTION") {
       const ids = Array.isArray(event?.new_transaction_ids) ? event.new_transaction_ids : [];

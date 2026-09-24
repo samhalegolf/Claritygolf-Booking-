@@ -429,9 +429,10 @@ test("an unknown public slug resolves to nothing, never to the original business
     assert.equal(await resolvePublicAccount("no-such-business"), null);
     const read = issued.find((statement) => statement.text.includes("FROM accounts"));
     assert.ok(read, "the slug was checked against the accounts table");
-    // Slug, id, and the kind filter that keeps sandboxes off the public pages.
-    assert.deepEqual(read!.values, ["no-such-business", "no-such-business", "live"]);
-    assert.match(read!.text, /kind = \$3/, "the lookup is pinned to live accounts");
+    // Slug, id, and the kind filter. A sandbox resolves only when it is named:
+    // it is the coach's test tenant and needs a booking page of its own.
+    assert.deepEqual(read!.values, ["no-such-business", "no-such-business", "live", "sandbox"]);
+    assert.match(read!.text, /kind IN \(\$3, \$4\)/, "the lookup is pinned to live and sandbox accounts");
   } finally {
     restoreDatabase();
   }

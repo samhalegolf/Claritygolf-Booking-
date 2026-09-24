@@ -12,6 +12,7 @@
 // as stripe-billing.mts — it owns nothing outside bank_transactions (and, for
 // the Phase 2 expense fan-out, writes billing_expenses keyed by the Akahu id).
 
+import { integrationCredentials } from "./integration-credentials.mts";
 import { randomUUID } from "node:crypto";
 
 function env(name: string, fallback = "") {
@@ -87,19 +88,25 @@ const MAX_PAGES = 100;
 
 // Akahu authenticates server-to-server with two tokens: the app token in the
 // X-Akahu-Id header and the user's access token as a Bearer token.
-function akahuTokens() {
-  const appToken = env("AKAHU_APP_TOKEN");
-  const userToken = env("AKAHU_USER_TOKEN");
+//
+// Per business. The tokens are the business's own bank connection, read
+// through its credential reader: the original workspace falls back to the
+// AKAHU_* env vars it has always used, and no other business ever does -- they
+// are somebody else's bank feed.
+async function akahuTokens(accountId: string) {
+  const read = await integrationCredentials(accountId, "akahu");
+  const appToken = read("AKAHU_APP_TOKEN");
+  const userToken = read("AKAHU_USER_TOKEN");
   if (!appToken || !userToken) {
-    throw Object.assign(new Error("Akahu is not configured (missing AKAHU_APP_TOKEN / AKAHU_USER_TOKEN)."), {
+    throw Object.assign(new Error("Akahu is not connected for this business. Add its app and user tokens in Integrations › Akahu."), {
       status: 503,
     });
   }
   return { appToken, userToken };
 }
 
-async function akahu(path: string, params: Record<string, unknown> = {}) {
-  const { appToken, userToken } = akahuTokens();
+async function akahu(accountId: string, path: string, params: Record<string, unknown> = {}) {
+  const { appToken, userToken } = await akahuTokens(accountId);
   const url = new URL(`${AKAHU_BASE}${path}`);
   for (const [key, value] of Object.entries(params)) {
     if (value === undefined || value === null || value === "") continue;
@@ -148,11 +155,11 @@ type AkahuList = { success?: boolean; items?: Record<string, any>[]; cursor?: { 
 
 // Akahu list endpoints are cursor-paginated: the response carries cursor.next
 // until there are no more pages.
-async function akahuPageAll(path: string, params: Record<string, unknown>) {
+async function akahuPageAll(accountId: string, path: string, params: Record<string, unknown>) {
   const all: Record<string, any>[] = [];
   let cursor = "";
   for (let page = 0; page < MAX_PAGES; page += 1) {
-    const body = (await akahu(path, { ...params, ...(cursor ? { cursor } : {}) })) as AkahuList;
+    const body = (await akahu(accountId, path, { ...params, ...(cursor ? { cursor } : {}) })) as AkahuList;
     const items = Array.isArray(body?.items) ? body.items : [];
     all.push(...items);
     const next = body?.cursor?.next;
@@ -163,8 +170,8 @@ async function akahuPageAll(path: string, params: Record<string, unknown>) {
 }
 
 /** The connected bank accounts (for reference / account selection in the UI). */
-export async function listAkahuAccounts() {
-  const body = (await akahu("/accounts")) as AkahuList;
+export async function listAkahuAccounts(accountId: string) {
+  const body = (await akahu(accountId, "/accounts")) as AkahuList;
   return Array.isArray(body?.items) ? body.items : [];
 }
 
@@ -226,7 +233,7 @@ export async function syncAkahuTransactions(accountId: string, sinceIso?: string
   const params: Record<string, unknown> = {};
   if (sinceIso) params.start = sinceIso;
   if (untilIso) params.end = untilIso;
-  const transactions = await akahuPageAll("/transactions", params);
+  const transactions = await akahuPageAll(accountId, "/transactions", params);
   const rows = transactions.map((txn) => mapAkahuTransaction(txn, accountId)).filter((row) => row.id);
   await upsertTransactions(rows);
   const moneyIn = rows.filter((row) => row.direction === "in").length;
@@ -245,7 +252,7 @@ export async function syncAkahuTransactionsByIds(accountId: string, ids: string[
   const rows: Record<string, any>[] = [];
   for (const id of ids.filter(Boolean)) {
     try {
-      const body = await akahu(`/transactions/${encodeURIComponent(id)}`);
+      const body = await akahu(accountId, `/transactions/${encodeURIComponent(id)}`);
       const txn = body?.item || body;
       const row = mapAkahuTransaction(txn, accountId);
       if (row.id) rows.push(row);
@@ -261,8 +268,8 @@ export async function syncAkahuTransactionsByIds(accountId: string, ids: string[
 // --- Phase 2: expense fan-out (money-out → billing_expenses) -----------------
 
 /** _account id → account display info, so candidates can show which account. */
-export async function getAkahuAccountMap() {
-  const accounts = await listAkahuAccounts();
+export async function getAkahuAccountMap(accountId: string) {
+  const accounts = await listAkahuAccounts(accountId);
   const map: Record<string, { name: string | null; type: string | null; formatted: string | null }> = {};
   for (const a of accounts) {
     const id = cleanString(a?._id, "", 120);
@@ -290,7 +297,7 @@ export async function listBankExpenseCandidates(accountId: string, opts: { limit
   });
   let accMap: Record<string, { name: string | null }> = {};
   try {
-    accMap = await getAkahuAccountMap();
+    accMap = await getAkahuAccountMap(accountId);
   } catch {
     accMap = {};
   }
@@ -516,7 +523,7 @@ export async function listReconcileCandidates(accountId: string) {
   const { credits, invoices } = await fetchReconcileInputs(accountId);
   let accMap: Record<string, { name: string | null }> = {};
   try {
-    accMap = await getAkahuAccountMap();
+    accMap = await getAkahuAccountMap(accountId);
   } catch {
     accMap = {};
   }

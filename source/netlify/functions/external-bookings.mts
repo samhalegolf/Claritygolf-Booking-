@@ -179,7 +179,10 @@ export default async function handler(req: Request) {
       // at 'received' by the receipt-only period with no button at all.
       const rows = await integrationRequest(`optix_webhook_events?event_key=eq.${encodeURIComponent(eventKey)}&processing_status=in.(${UNPROCESSED_STATUSES})&select=event_key,payload_json&limit=1`);
       if (!rows?.[0]) return json({ error: "retryable_event_not_found" }, 404);
-      const result = await processStoredExternalEvent(PROVIDER, eventKey, rows[0].payload_json);
+      const result = await processStoredExternalEvent(PROVIDER, eventKey, rows[0].payload_json, {
+        // A coach replaying an event can only file it into their own business.
+        accountId,
+      });
       return json({ ok: true, result, state: await getState(accountId) });
     }
     // Replays every event still waiting, oldest first, from a cutoff date.
@@ -193,7 +196,7 @@ export default async function handler(req: Request) {
       const summary: Record<string, number> = {};
       for (const row of rows || []) {
         try {
-          const result: any = await processStoredExternalEvent(PROVIDER, row.event_key, row.payload_json);
+          const result: any = await processStoredExternalEvent(PROVIDER, row.event_key, row.payload_json, { accountId });
           const key = result?.status === "ignored" ? `ignored:${result?.reason || "unknown"}` : String(result?.status || "unknown");
           summary[key] = (summary[key] || 0) + 1;
         } catch (error: any) {

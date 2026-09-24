@@ -4,10 +4,7 @@ import { processStoredExternalEvent, storeOptixWebhookEvent, webhookEventKey } f
 import { integrationRequest } from "./_shared/integrations/db.mts";
 import { notifyBookingEvent, sendCoachPushForBooking } from "./notification-engine.mts";
 import { validateOptixWebhook } from "./_shared/integrations/providers/optix-webhook-auth.mts";
-
-function env(name: string) {
-  return (globalThis.Netlify?.env?.get(name) || process.env[name] || "").trim();
-}
+import { integrationCredentials, resolveWebhookAccount } from "./_shared/integration-credentials.mts";
 
 function json(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), {
@@ -19,12 +16,19 @@ function json(value: unknown, status = 200) {
 export default async function handler(req: Request) {
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
 
+  // Whose Optix app this delivery claims to come from. The URL names the
+  // business; that business's own client id and secret then have to verify
+  // the signature, so naming a business without its secret gets nowhere.
+  const accountId = await resolveWebhookAccount(req);
+  if (!accountId) return json({ ok: false, error: "unknown_business", message: "This webhook URL names no business." }, 404);
+  const credentials = await integrationCredentials(accountId, "optix");
+
   const rawBody = await req.text();
   const validation = validateOptixWebhook({
     rawBody,
     contentType: req.headers.get("content-type") || "",
-    expectedClientId: env("OPTIX_CLIENT_ID"),
-    appSecret: env("OPTIX_APP_SECRET"),
+    expectedClientId: credentials("OPTIX_CLIENT_ID"),
+    appSecret: credentials("OPTIX_APP_SECRET"),
   });
 
   if (validation.ok === false) {
@@ -67,7 +71,7 @@ export default async function handler(req: Request) {
     // duplicate, and replaying it would re-run the import.
     if (stored.inserted) {
       try {
-        const processed: any = await processStoredExternalEvent("optix", eventKey, payload);
+        const processed: any = await processStoredExternalEvent("optix", eventKey, payload, { accountId });
         if (processed?.status === "processed" && processed?.created) {
           // The coach's pop-up is not tied to the client's email behaviour —
           // a booking landing on the calendar is worth knowing about whether

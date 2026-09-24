@@ -1,3 +1,5 @@
+import { legacyOriginalWorkspaceId } from "./account.mts";
+
 /**
  * Stripe, and whose Stripe it is.
  *
@@ -45,7 +47,18 @@ export type StripeCredentialStatus = {
   testMode: boolean;
 };
 
-const platformSecret = () => String(process.env.STRIPE_SECRET_KEY || "").trim();
+/**
+ * The platform key, for the one business allowed to use it.
+ *
+ * It is the original workspace's own Stripe account, not a Clarity-wide one, so
+ * any other business falling back to it would be taking payment into somebody
+ * else's bank account -- a sandbox included. Every other business uses its own
+ * key or is simply not set up.
+ */
+const platformSecret = (accountId: string) =>
+  accountId && accountId === legacyOriginalWorkspaceId()
+    ? String(process.env.STRIPE_SECRET_KEY || "").trim()
+    : "";
 
 /**
  * Is this the shape of a Stripe secret key?
@@ -81,11 +94,11 @@ export function maskStripeSecret(value: unknown): string {
  * about to take money, and there is no useful way to half-do that. The 503 is
  * deliberate -- "not set up yet" is a service state, not a bad request.
  */
-export function resolveStripeCredential(accountSecret?: unknown): StripeCredential {
+export function resolveStripeCredential(accountSecret: unknown, accountId: string): StripeCredential {
   const own = String(accountSecret ?? "").trim();
   if (own) return { secret: own, mode: "account" };
 
-  const platform = platformSecret();
+  const platform = platformSecret(accountId);
   if (platform) return { secret: platform, mode: "platform" };
 
   throw Object.assign(
@@ -100,7 +113,7 @@ export function resolveStripeCredential(accountSecret?: unknown): StripeCredenti
  * Separate from resolveStripeCredential because this one must not throw: a
  * settings screen asking "am I set up?" wants an answer, not an exception.
  */
-export function stripeCredentialStatus(accountSecret?: unknown): StripeCredentialStatus {
+export function stripeCredentialStatus(accountSecret: unknown, accountId: string): StripeCredentialStatus {
   const own = String(accountSecret ?? "").trim();
   if (own) {
     return {
@@ -110,7 +123,7 @@ export function stripeCredentialStatus(accountSecret?: unknown): StripeCredentia
       testMode: isStripeTestKey(own),
     };
   }
-  const platform = platformSecret();
+  const platform = platformSecret(accountId);
   return {
     configured: Boolean(platform),
     mode: platform ? "platform" : "none",

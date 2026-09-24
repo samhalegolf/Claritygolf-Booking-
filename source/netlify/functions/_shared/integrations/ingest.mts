@@ -303,11 +303,22 @@ async function findOwnedCalendarItem(
   return rowsOf(rows)[0] as ExistingOptixCalendarItem | undefined || null;
 }
 
-async function findMapping(event: NormalizedBookingEvent, provider: ExternalProvider): Promise<IntegrationMapping | null> {
-  const query = `external_booking_mappings?provider=eq.${provider}&organisation_id=eq.${encodeURIComponent(event.organisationId)}&workspace_id=eq.${encodeURIComponent(event.workspaceId)}&limit=1`;
+/**
+ * `accountId`, when given, is the business whose credentials verified the
+ * delivery. Only that business's mappings may claim it: a signed event from
+ * one business's Optix app must not land in another business that happens to
+ * have mapped the same workspace id.
+ */
+async function findMapping(
+  event: NormalizedBookingEvent,
+  provider: ExternalProvider,
+  accountId = "",
+): Promise<IntegrationMapping | null> {
+  const owner = accountId ? `&account_id=eq.${encodeURIComponent(accountId)}` : "";
+  const query = `external_booking_mappings?provider=eq.${provider}&organisation_id=eq.${encodeURIComponent(event.organisationId)}&workspace_id=eq.${encodeURIComponent(event.workspaceId)}${owner}&limit=1`;
   let rows = await integrationRequest(query);
   if (!Array.isArray(rows) || !rows.length) {
-    rows = await integrationRequest(`external_booking_mappings?provider=eq.${provider}&workspace_id=eq.${encodeURIComponent(event.workspaceId)}&limit=1`);
+    rows = await integrationRequest(`external_booking_mappings?provider=eq.${provider}&workspace_id=eq.${encodeURIComponent(event.workspaceId)}${owner}&limit=1`);
   }
   const row = Array.isArray(rows) ? rows[0] : null;
   if (!row) return null;
@@ -421,6 +432,7 @@ export async function processStoredExternalEvent(
   provider: ExternalProvider,
   eventKey: string,
   payload: unknown,
+  options: { accountId?: string } = {},
 ) {
   const adapter = adapterFor(provider);
   if (!adapter) {
@@ -499,7 +511,7 @@ export async function processStoredExternalEvent(
   const receivedAt = text(attemptRows?.[0]?.received_at);
   await updateEvent(eventKey, { processing_status: "processing", attempt_count: attemptCount });
   try {
-    const mapping = await findMapping(event, provider);
+    const mapping = await findMapping(event, provider, options.accountId || "");
     // No service check: every inbound booking files under the reserved
     // External Booking lesson type, so only a location still needs choosing.
     if (!mapping || !mapping.enabled || !mapping.locationId) {

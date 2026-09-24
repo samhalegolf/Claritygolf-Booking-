@@ -109,7 +109,7 @@ export function SwingReviewFlow({
                 : ""}
             </p>
           </>
-        ) : review.canBuy ? (
+        ) : !__CLARITY_NATIVE__ && review.canBuy ? (
           <>
             <button
               className="player-portal-primary"

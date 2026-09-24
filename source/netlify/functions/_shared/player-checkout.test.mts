@@ -28,6 +28,8 @@ import {
 
 const PLATFORM = "sk_live_platformkey000000";
 const OWN = "sk_live_coachownkey11111";
+// The platform key is the original workspace's own Stripe account.
+const ORIGINAL = "sam-hale-golf";
 
 function withPlatformKey(value: string | undefined, run: () => void) {
   const before = process.env.STRIPE_SECRET_KEY;
@@ -45,17 +47,30 @@ test("a business with its own key is charged on its own key", () => {
   // The whole multi-tenant question in one assertion: the platform key exists
   // and must still lose to the account's own.
   withPlatformKey(PLATFORM, () => {
-    const credential = resolveStripeCredential(OWN);
+    const credential = resolveStripeCredential(OWN, ORIGINAL);
     assert.equal(credential.secret, OWN);
     assert.equal(credential.mode, "account");
   });
 });
 
-test("a business with no key of its own falls back to the platform", () => {
+test("the original workspace with no saved key falls back to the platform key", () => {
   withPlatformKey(PLATFORM, () => {
-    const credential = resolveStripeCredential("");
+    const credential = resolveStripeCredential("", ORIGINAL);
     assert.equal(credential.secret, PLATFORM);
     assert.equal(credential.mode, "platform");
+  });
+});
+
+test("no other business falls back to the original workspace's Stripe", () => {
+  // A sandbox or a second business with no key is not set up. Falling back
+  // would take its customers' money into another business's bank account.
+  withPlatformKey(PLATFORM, () => {
+    for (const accountId of ["acme-golf", "sam-hale-golf-sandbox", ""]) {
+      assert.throws(() => resolveStripeCredential("", accountId), (error: { code?: string }) => error.code === "STRIPE_NOT_CONFIGURED");
+      assert.equal(stripeCredentialStatus("", accountId).configured, false);
+      assert.equal(stripeCredentialStatus("", accountId).mode, "none");
+    }
+    assert.equal(resolveStripeCredential(OWN, "acme-golf").mode, "account");
   });
 });
 
@@ -63,33 +78,33 @@ test("whitespace is not a key", () => {
   // A pasted key with a trailing newline must not read as "configured" and
   // then silently take the platform's money instead.
   withPlatformKey(PLATFORM, () => {
-    assert.equal(resolveStripeCredential(" \n\t ").mode, "platform");
+    assert.equal(resolveStripeCredential(" \n\t ", ORIGINAL).mode, "platform");
   });
   withPlatformKey(undefined, () => {
-    assert.equal(stripeCredentialStatus("  ").configured, false);
+    assert.equal(stripeCredentialStatus("  ", ORIGINAL).configured, false);
   });
 });
 
 test("no key anywhere refuses rather than charging nobody", () => {
   withPlatformKey(undefined, () => {
-    assert.throws(() => resolveStripeCredential(""), (error: { status?: number; code?: string }) => {
+    assert.throws(() => resolveStripeCredential("", ORIGINAL), (error: { status?: number; code?: string }) => {
       assert.equal(error.status, 503);
       assert.equal(error.code, "STRIPE_NOT_CONFIGURED");
       return true;
     });
-    assert.equal(stripeCredentialStatus("").configured, false);
-    assert.equal(stripeCredentialStatus("").mode, "none");
+    assert.equal(stripeCredentialStatus("", ORIGINAL).configured, false);
+    assert.equal(stripeCredentialStatus("", ORIGINAL).mode, "none");
   });
 });
 
 test("the status a UI is given never carries the key", () => {
   withPlatformKey(PLATFORM, () => {
-    const own = stripeCredentialStatus(OWN);
+    const own = stripeCredentialStatus(OWN, ORIGINAL);
     assert.equal(JSON.stringify(own).includes(OWN), false);
     assert.equal(own.maskedTail, "••••1111");
 
     // The platform's key is not this coach's to see any part of.
-    const platform = stripeCredentialStatus("");
+    const platform = stripeCredentialStatus("", ORIGINAL);
     assert.equal(platform.maskedTail, "");
     assert.equal(JSON.stringify(platform).includes(PLATFORM), false);
   });
@@ -97,8 +112,8 @@ test("the status a UI is given never carries the key", () => {
 
 test("a test key is reported as one, because it takes no real money", () => {
   withPlatformKey(undefined, () => {
-    assert.equal(stripeCredentialStatus("sk_test_abcdefgh1234").testMode, true);
-    assert.equal(stripeCredentialStatus(OWN).testMode, false);
+    assert.equal(stripeCredentialStatus("sk_test_abcdefgh1234", ORIGINAL).testMode, true);
+    assert.equal(stripeCredentialStatus(OWN, ORIGINAL).testMode, false);
   });
   assert.equal(isStripeTestKey("rk_test_abcdefgh1234"), true);
 });

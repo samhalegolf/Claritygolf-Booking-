@@ -11,7 +11,7 @@
 
 import { getDatabase } from "@netlify/database";
 import { LEGACY_DEFAULT_ACCOUNT_ID } from "./account.mts";
-import { LIVE_KIND, readSandboxAccount } from "./sandbox.mts";
+import { LIVE_KIND, SANDBOX_KIND, readSandboxAccount } from "./sandbox.mts";
 import type { AccountRole, AppUserRole, SessionRole } from "./auth-contract.mts";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 
@@ -437,6 +437,12 @@ export async function switchActiveAccount(
  * Resolves a business by its public slug (from /book/<slug> or hostname).
  * Unknown slug returns null — caller should 404. Never falls back to the
  * original workspace.
+ *
+ * A sandbox resolves too, but only when it is named. It is the coach's test
+ * tenant, and a tenant whose booking page cannot be opened cannot be tested
+ * end to end. The unnamed fallback (resolvePublicAccountId's "the only live
+ * business") still counts live accounts only, so a sandbox can never be what
+ * a bare link lands on.
  */
 export async function resolvePublicAccount(slug: string): Promise<{
   id: string;
@@ -456,7 +462,7 @@ export async function resolvePublicAccount(slug: string): Promise<{
     FROM accounts
     WHERE (slug = ${clean} OR id = ${clean})
       AND status = 'active'
-      AND kind = ${LIVE_KIND}
+      AND kind IN (${LIVE_KIND}, ${SANDBOX_KIND})
     LIMIT 1
   `;
   const row = rows[0];

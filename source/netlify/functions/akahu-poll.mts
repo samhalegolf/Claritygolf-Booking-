@@ -1,36 +1,37 @@
 import type { Config } from "@netlify/functions";
-import { legacyOriginalWorkspaceId as defaultAccountId } from "./_shared/account.mts";
+import { legacyOriginalWorkspaceId } from "./_shared/account.mts";
 import { autoReconcileCredits, syncAkahuTransactions } from "./_shared/akahu.mts";
+import { accountsWithStoredCredentials } from "./_shared/integration-credentials.mts";
 
-// Nightly safety net for the Akahu bank feed. Re-syncs the last ~10 days of
+// Hourly safety net for the Akahu bank feed. Re-syncs the last ~10 days of
 // transactions (covering anything a missed webhook didn't deliver) and
 // auto-reconciles. Runs on Netlify's scheduler — it isn't a public endpoint, so
 // no auth is needed; nobody can trigger it over HTTP.
-
-// KNOWN BOUNDARY GAP, deliberately left for the Billing pass.
 //
-// There is no session here to resolve a business from, and the Akahu/Stripe
-// credentials in the environment belong to the original workspace, so this
-// still writes into legacyOriginalWorkspaceId(). That is correct while the
-// original workspace is the only one with a bank or Stripe connection, and it
-// is wrong the moment a second business connects one: their transactions would
-// land in the first business's ledger.
-//
-// The fix is to resolve the business from the inbound payload -- the Akahu
-// connection or the Stripe customer/subscription -- rather than statically.
-// Until then, do not connect banking or Stripe for a second business.
+// Once per business with a bank feed, each on its own tokens and into its own
+// ledger. That is every business that saved Akahu credentials, plus the
+// original workspace, whose feed still comes from the AKAHU_* env vars (it
+// simply reports "not connected" and is skipped when those are unset). One
+// business's failure is logged and does not stop the next one's sync.
 export default async function handler() {
-  const accountId = defaultAccountId();
   const since = new Date(Date.now() - 10 * 86400000).toISOString();
-  try {
-    const transactions = await syncAkahuTransactions(accountId, since);
-    const reconciled = await autoReconcileCredits(accountId);
-    console.log("akahu_poll:done", { synced: transactions.synced, autoApplied: reconciled.autoApplied });
-    return new Response("ok");
-  } catch (error) {
-    console.error("akahu_poll:failed", error instanceof Error ? error.message : error);
-    return new Response("error", { status: 500 });
+  const stored = await accountsWithStoredCredentials("akahu").catch(() => [] as string[]);
+  const accounts = Array.from(new Set([legacyOriginalWorkspaceId(), ...stored]));
+  let failed = 0;
+  for (const accountId of accounts) {
+    try {
+      const transactions = await syncAkahuTransactions(accountId, since);
+      const reconciled = await autoReconcileCredits(accountId);
+      console.log("akahu_poll:done", { accountId, synced: transactions.synced, autoApplied: reconciled.autoApplied });
+    } catch (error) {
+      const status = Number((error as { status?: unknown })?.status);
+      // 503 is "this business has no bank feed", which is not a failure.
+      if (status === 503) continue;
+      failed += 1;
+      console.error("akahu_poll:failed", accountId, error instanceof Error ? error.message : error);
+    }
   }
+  return new Response(failed ? "partial" : "ok", { status: failed ? 500 : 200 });
 }
 
 export const config: Config = {

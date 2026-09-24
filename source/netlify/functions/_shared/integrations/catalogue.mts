@@ -31,13 +31,14 @@ import type {
 const stripe: IntegrationDescriptor = {
   id: "stripe",
   label: "Stripe",
-  audience: "admin",
-  category: "billing",
-  caveat:
-    "One Stripe key does both jobs today: it takes your customers' payments AND bills this workspace. " +
-    "That works for one coach and is wrong for two — a second coach's takings would land in this account. " +
-    "Multi-coach needs Stripe Connect, at which point the payments half becomes each coach's own integration.",
-  summary: "Card payments at the counter, and the subscription that bills this workspace.",
+  // Each business's own Stripe account: its key takes its customers' payments,
+  // and its webhook mirrors its invoices and charges into its own billing.
+  // Saved per business (the key in Billing settings, the webhook secret in the
+  // credential store); no business falls back to another's.
+  audience: "integration",
+  category: "payments",
+  caveat: "Use a test key (sk_test_…) in a sandbox — it takes no real money.",
+  summary: "Card payments from your clients, and your Stripe invoices and charges in Billing.",
   docsUrl: "https://dashboard.stripe.com/apikeys",
   connections: [
     {
@@ -65,10 +66,21 @@ const stripe: IntegrationDescriptor = {
       title: "Webhooks",
       summary: "What Stripe sends us.",
       path: "/api/stripe-billing-webhook",
+      // What stripe-billing-webhook.mts actually handles. Nothing else is read.
       events: [
-        { id: "checkout.session.completed", label: "Checkout finished" },
-        { id: "customer.subscription.updated", label: "Plan changed" },
+        { id: "invoice.created", label: "Invoice created" },
+        { id: "invoice.updated", label: "Invoice updated" },
+        { id: "invoice.finalized", label: "Invoice finalised" },
+        { id: "invoice.sent", label: "Invoice sent" },
         { id: "invoice.paid", label: "Invoice paid" },
+        { id: "invoice.payment_failed", label: "Invoice payment failed" },
+        { id: "invoice.voided", label: "Invoice voided" },
+        { id: "invoice.marked_uncollectible", label: "Invoice uncollectible" },
+        { id: "invoice.deleted", label: "Invoice deleted" },
+        { id: "charge.succeeded", label: "Charge succeeded" },
+        { id: "charge.updated", label: "Charge updated" },
+        { id: "charge.captured", label: "Charge captured" },
+        { id: "charge.refunded", label: "Charge refunded" },
       ],
       fields: [
         {

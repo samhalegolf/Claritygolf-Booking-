@@ -38,7 +38,7 @@ export default async function handler(req: Request) {
     const action = String(body?.action || "sync");
 
     if (action === "accounts") {
-      return json({ accounts: await listAkahuAccounts() });
+      return json({ accounts: await listAkahuAccounts(accountId) });
     }
     if (action === "sync") {
       const since = typeof body?.since === "string" && body.since.trim() ? body.since.trim() : undefined;

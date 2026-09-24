@@ -47,6 +47,16 @@ export type OptixSyncRecord = {
 };
 
 type ReconcileConfig = {
+  /**
+   * The business's credential reader, carried so every Optix call made with
+   * this config uses the same business's token. See integration-credentials.
+   */
+  read: (name: string) => string;
+  /**
+   * True only for the original workspace. Gates the fallbacks that are that
+   * business's own Optix facts (its dual-handed bays) rather than defaults.
+   */
+  originalWorkspace: boolean;
   memberId: string;
   ownerUserId: string;
   defaultResourceId: string;
@@ -56,6 +66,7 @@ type ReconcileConfig = {
 
 export function readOptixReconcileConfig(
   readEnv: (name: string) => string,
+  options: { originalWorkspace?: boolean } = {},
 ): ReconcileConfig {
   const resourceMapRaw = readEnv("OPTIX_RESOURCE_MAP_JSON");
   let resourceMap: Record<string, string> = {};
@@ -78,6 +89,8 @@ export function readOptixReconcileConfig(
   }
 
   return {
+    read: readEnv,
+    originalWorkspace: options.originalWorkspace ?? true,
     memberId: readEnv("OPTIX_MEMBER_ID").trim(),
     ownerUserId: readEnv("OPTIX_OWNER_USER_ID").trim(),
     defaultResourceId: readEnv("OPTIX_RESOURCE_ID").trim(),
@@ -278,7 +291,7 @@ export function buildOptixAppointmentInput(
   if (!config.memberId || !config.ownerUserId) {
     throw new OptixSyncError(
       "not_configured",
-      "OPTIX_MEMBER_ID and OPTIX_OWNER_USER_ID are required.",
+      "Optix needs the member and user id bookings are made as. Add them in Integrations › Optix.",
     );
   }
   const resourceId = resolveOptixResourceId(appointment, config);
@@ -358,7 +371,7 @@ export async function reconcileOneOptixAppointment(input: {
   }
 
   try {
-    const result = await syncOptixBooking(request);
+    const result = await syncOptixBooking(request, input.config.read);
     return {
       calendarItemId: input.appointment.id,
       optixBookingId:

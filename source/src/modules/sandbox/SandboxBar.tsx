@@ -68,7 +68,7 @@ export default function SandboxBar({ liveAccountId = "", viewingAs }: SandboxBar
     <div className="sandbox-bar" role="status">
       <span className="sandbox-bar__mark">
         <FlaskConical size={14} aria-hidden="true" />
-        Sandbox
+        Test tenant
       </span>
       <span className="sandbox-bar__detail">
         {impersonating ? (
@@ -76,7 +76,7 @@ export default function SandboxBar({ liveAccountId = "", viewingAs }: SandboxBar
             Viewing as <strong>{viewingAs}</strong>
           </>
         ) : (
-          <>Nothing here is real. Emails, payments and integrations do not leave Clarity.</>
+          <>A fresh business, walled off from your live workspace. Emails and bookings made here are real.</>
         )}
       </span>
       <span className="sandbox-bar__actions">

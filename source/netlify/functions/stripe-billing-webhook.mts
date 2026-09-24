@@ -1,6 +1,6 @@
 import type { Config } from "@netlify/functions";
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { legacyOriginalWorkspaceId as defaultAccountId } from "./_shared/account.mts";
+import { integrationCredentials, resolveWebhookAccount } from "./_shared/integration-credentials.mts";
 import {
   deleteStripeInvoice,
   syncStripeCharge,
@@ -19,13 +19,15 @@ import {
 // events invoice.created, invoice.updated, invoice.finalized, invoice.sent,
 // invoice.paid, invoice.payment_failed, invoice.voided,
 // invoice.marked_uncollectible, invoice.deleted, charge.succeeded,
-// charge.updated, charge.captured, charge.refunded — and set
-// STRIPE_BILLING_WEBHOOK_SECRET (falls back to STRIPE_WEBHOOK_SECRET) to that
-// endpoint's signing secret.
-
-function env(name: string, fallback = "") {
-  return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
-}
+// charge.updated, charge.captured, charge.refunded — and save that endpoint's
+// signing secret in Integrations › Stripe.
+//
+// Per business: each registers its own URL (?account=<id>, as Integrations ›
+// Stripe shows it) and its own signing secret. The URL names the business and
+// only that business's secret verifies the delivery, so an event can land in
+// no ledger but the one whose Stripe account signed it. A URL naming no
+// business is the original workspace's, verified against the
+// STRIPE_BILLING_WEBHOOK_SECRET / STRIPE_WEBHOOK_SECRET env vars as before.
 
 function json(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), {
@@ -34,8 +36,9 @@ function json(value: unknown, status = 200) {
   });
 }
 
-function webhookSecret() {
-  return env("STRIPE_BILLING_WEBHOOK_SECRET") || env("STRIPE_WEBHOOK_SECRET");
+async function webhookSecret(accountId: string) {
+  const read = await integrationCredentials(accountId, "stripe");
+  return read("STRIPE_BILLING_WEBHOOK_SECRET") || read("STRIPE_WEBHOOK_SECRET");
 }
 
 function verifyStripeSignature(rawBody: string, signatureHeader: string, secret: string) {
@@ -62,30 +65,18 @@ function verifyStripeSignature(rawBody: string, signatureHeader: string, secret:
   return JSON.parse(rawBody);
 }
 
-// KNOWN BOUNDARY GAP, deliberately left for the Billing pass.
-//
-// There is no session here to resolve a business from, and the Akahu/Stripe
-// credentials in the environment belong to the original workspace, so this
-// still writes into legacyOriginalWorkspaceId(). That is correct while the
-// original workspace is the only one with a bank or Stripe connection, and it
-// is wrong the moment a second business connects one: their transactions would
-// land in the first business's ledger.
-//
-// The fix is to resolve the business from the inbound payload -- the Akahu
-// connection or the Stripe customer/subscription -- rather than statically.
-// Until then, do not connect banking or Stripe for a second business.
-function accountId() {
-  return defaultAccountId();
-}
-
 export default async function handler(req: Request) {
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
-  if (!webhookSecret()) return json({ error: "not_configured", message: "Webhook secret is not configured." }, 503);
+  const business = await resolveWebhookAccount(req);
+  if (!business) return json({ error: "unknown_business" }, 404);
+  const accountId = () => business;
+  const secret = await webhookSecret(business);
+  if (!secret) return json({ error: "not_configured", message: "Webhook secret is not configured." }, 503);
 
   const rawBody = await req.text();
   let event: Record<string, any>;
   try {
-    event = verifyStripeSignature(rawBody, req.headers.get("stripe-signature") || "", webhookSecret());
+    event = verifyStripeSignature(rawBody, req.headers.get("stripe-signature") || "", secret);
   } catch {
     return json({ error: "invalid_signature" }, 400);
   }

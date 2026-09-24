@@ -58,6 +58,12 @@ export function candidateOptixResourceIds(input: {
   legacyResourceId?: string;
   /** The player said they are left-handed on the booking page. */
   leftHandedPlayer?: boolean;
+  /**
+   * Bays a left-hander can use when the lesson type names none. The original
+   * workspace's own two bays by default; another business has no such bays
+   * and passes [] (see reconcileOptixAppointmentWithAutoSelect).
+   */
+  dualHandedFallback?: string[];
 }) {
   const type = input.bookingType || {};
   if (input.leftHandedPlayer) {
@@ -65,7 +71,7 @@ export function candidateOptixResourceIds(input: {
     // the legacy default: a right-handed bay is no use to them, so if both are
     // taken the booking fails visibly and the coach sorts it out.
     const leftBays = uniqueIds([type.leftHandedResourceIds || []]);
-    const allowed = leftBays.length ? leftBays : DUAL_HANDED_RESOURCE_IDS;
+    const allowed = leftBays.length ? leftBays : input.dualHandedFallback ?? DUAL_HANDED_RESOURCE_IDS;
     const existing = String(input.existing?.resourceId || "");
     return uniqueIds([allowed.includes(existing) ? existing : "", ...allowed]);
   }
@@ -106,7 +112,7 @@ export async function reconcileOptixAppointmentWithAutoSelect(input: {
     }
     const cancelRequest = { ...baseRequest, resourceIds: [input.existing.resourceId], isCanceled: true };
     try {
-      const result = await withOverallTimeout(() => syncOptixBooking(cancelRequest), "cancellation");
+      const result = await withOverallTimeout(() => syncOptixBooking(cancelRequest, input.config.read), "cancellation");
       return {
         ...input.existing,
         optixBookingId: result.bookingId || input.existing.optixBookingId,
@@ -139,6 +145,7 @@ export async function reconcileOptixAppointmentWithAutoSelect(input: {
     existing: input.existing,
     legacyResourceId: baseRequest.resourceIds[0],
     leftHandedPlayer: handednessFromNote(input.appointment.note) === "left",
+    dualHandedFallback: input.config.originalWorkspace ? DUAL_HANDED_RESOURCE_IDS : [],
   });
   if (!candidates.length) {
     throw new OptixSyncError("not_configured", `No Optix bays are configured for booking type ${input.appointment.serviceId || input.appointment.service_id || "unknown"}.`);
@@ -152,7 +159,7 @@ export async function reconcileOptixAppointmentWithAutoSelect(input: {
       return input.existing;
     }
     try {
-      const result = await withOverallTimeout(() => syncOptixBooking(request), `booking for resource ${resourceId}`);
+      const result = await withOverallTimeout(() => syncOptixBooking(request, input.config.read), `booking for resource ${resourceId}`);
       return {
         calendarItemId: input.appointment.id,
         optixBookingId: result.bookingId || input.existing?.optixBookingId || "",
@@ -277,7 +284,7 @@ export async function moveOptixBookingInPlace(input: {
 
   try {
     const result = await withOverallTimeout(
-      () => (input.sync || syncOptixBooking)(request),
+      () => (input.sync || syncOptixBooking)(request, input.config.read),
       `bay move for resource ${existing.resourceId}`,
     );
     return {

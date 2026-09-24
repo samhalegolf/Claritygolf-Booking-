@@ -89,18 +89,26 @@ function readEnv(name: string): string {
   return (globalThis.Netlify?.env?.get(name) || process.env[name] || "").trim();
 }
 
-export function getOptixClientConfig(): OptixClientConfig {
-  const endpoint = readEnv("OPTIX_GRAPHQL_ENDPOINT") || "https://api.optixapp.com/graphql";
-  const organizationToken = readEnv("OPTIX_ORGANIZATION_TOKEN");
-  const personalToken = readEnv("OPTIX_PERSONAL_TOKEN");
+/**
+ * Where Optix is and which token to call it with, for one business.
+ *
+ * `read` is that business's credential reader (see
+ * _shared/integration-credentials.mts). It defaults to the environment only so
+ * the original workspace's existing behaviour and tests hold; every request
+ * path passes the reader for the business it is acting for.
+ */
+export function getOptixClientConfig(read: (name: string) => string = readEnv): OptixClientConfig {
+  const endpoint = read("OPTIX_GRAPHQL_ENDPOINT").trim() || "https://api.optixapp.com/graphql";
+  const organizationToken = read("OPTIX_ORGANIZATION_TOKEN").trim();
+  const personalToken = read("OPTIX_PERSONAL_TOKEN").trim();
   const token = organizationToken || personalToken;
   const tokenKind = organizationToken ? "organization" : "personal";
 
   if (!token) {
     throw new OptixSyncError(
       "not_configured",
-      "Optix is not configured. Set exactly one of OPTIX_ORGANIZATION_TOKEN or OPTIX_PERSONAL_TOKEN, " +
-        "and OPTIX_OWNER_USER_ID for the user the bookings belong to.",
+      "Optix is not connected for this business. Add an organisation or personal token, " +
+        "and the Optix user the bookings belong to, in Integrations › Optix.",
     );
   }
 
@@ -348,26 +356,28 @@ function readBookingResult(payload: any): OptixBookingResult {
   };
 }
 
-export async function draftOptixBooking(input: OptixBookingInput): Promise<OptixBookingResult> {
-  const config = getOptixClientConfig();
+type CredentialRead = (name: string) => string;
+
+export async function draftOptixBooking(input: OptixBookingInput, read?: CredentialRead): Promise<OptixBookingResult> {
+  const config = getOptixClientConfig(read);
   const data = await optixGraphQL<any>(BOOKINGS_DRAFT, {
     input: buildBookingSetInput(input, config.tokenKind),
   }, config);
   return readBookingResult(data);
 }
 
-export async function commitOptixBooking(input: OptixBookingInput): Promise<OptixBookingResult> {
-  const config = getOptixClientConfig();
+export async function commitOptixBooking(input: OptixBookingInput, read?: CredentialRead): Promise<OptixBookingResult> {
+  const config = getOptixClientConfig(read);
   const data = await optixGraphQL<any>(BOOKINGS_COMMIT, {
     input: buildBookingSetInput(input, config.tokenKind),
   }, config);
   return readBookingResult(data);
 }
 
-export async function syncOptixBooking(input: OptixBookingInput): Promise<OptixBookingResult> {
-  const draft = await draftOptixBooking(input);
+export async function syncOptixBooking(input: OptixBookingInput, read?: CredentialRead): Promise<OptixBookingResult> {
+  const draft = await draftOptixBooking(input, read);
   return commitOptixBooking({
     ...input,
     bookingSessionId: draft.bookingSessionId || input.bookingSessionId,
-  });
+  }, read);
 }

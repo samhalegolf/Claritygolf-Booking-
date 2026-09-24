@@ -423,12 +423,12 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
       // server's answer rather than something the portal works out.
       // The App Store build is a companion to the coach's service. Existing
       // passes work here, but this binary never sells or links out to buy one.
-      setShop(NATIVE ? [] : Array.isArray(data.shop) ? data.shop : []);
+      setShop(__CLARITY_NATIVE__ ? [] : Array.isArray(data.shop) ? data.shop : []);
       // Null when the coach sells no video review, or sells more than one and
       // the catalogue cannot say which is "the" review.
       setReviewOffer(
         data.review
-          ? { ...data.review, canBuy: NATIVE ? false : Boolean(data.review.canBuy) }
+          ? { ...data.review, canBuy: __CLARITY_NATIVE__ ? false : Boolean(data.review.canBuy) }
           : null,
       );
       setBookingEmbed(isPlayerBookingEmbedConfigured(data.bookingEmbed) ? data.bookingEmbed : null);
@@ -668,7 +668,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   const buyShopItem = useCallback(async (serviceId: string) => {
     // The native App Store binary is a companion app. Existing entitlements
     // remain usable, but purchase and purchase links belong to the web client.
-    if (NATIVE) return;
+    if (__CLARITY_NATIVE__) return;
     setBuyingId(serviceId);
     setPurchaseNote("");
     try {
@@ -716,7 +716,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
    * The URL is cleaned either way: a session id left in the address bar is
    * something a player can bookmark, share, or re-trigger by reloading. */
   useEffect(() => {
-    if (NATIVE || isGuest) return;
+    if (__CLARITY_NATIVE__ || isGuest) return;
     const params = new URLSearchParams(window.location.search);
     const purchase = params.get("purchase");
     const reservation = params.get("reservation");
@@ -2181,9 +2181,9 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                           ? `${reviewOffer.passOptions[0].creditsAvailable} credit${
                               reviewOffer.passOptions[0].creditsAvailable === 1 ? "" : "s"
                             } ready to use`
-                          : reviewOffer.canBuy
+                          : !__CLARITY_NATIVE__ && reviewOffer.canBuy
                             ? `${reviewOffer.currency} ${reviewOffer.price.toFixed(2)} each`
-                            : "Ask your coach about credits"}
+                            : "No review credit available"}
                       </p>
                     </section>
                   )}
@@ -2465,7 +2465,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                       Absent entirely when the business has not set up card
                       payments: the server sends an empty shop, and a "Buy"
                       button that cannot take money is worse than no button. */}
-                  {!NATIVE && shop.length > 0 && (
+                  {!__CLARITY_NATIVE__ && shop.length > 0 && (
                     <section className="player-portal-section">
                       <h2>{passes.length ? "Buy more" : "Buy lessons or a review"}</h2>
                       <p className="player-portal-lead">

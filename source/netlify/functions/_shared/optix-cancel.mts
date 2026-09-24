@@ -4,16 +4,12 @@ import {
   buildOptixAppointmentInput,
   datePartsForSlot,
   optixAppointmentFingerprint,
-  readOptixReconcileConfig,
   wallClockToUnixSeconds,
   type ClarityOptixAppointment,
   type OptixSyncRecord,
 } from "./optix-reconcile.mts";
 import { OptixSyncError, syncOptixBooking } from "./optix-client.mts";
-
-function env(name: string): string {
-  return (globalThis.Netlify?.env?.get(name) || process.env[name] || "").trim();
-}
+import { optixConfigForAccount } from "./optix-credentials.mts";
 
 function db() {
   return getDatabase();
@@ -81,6 +77,8 @@ export type OptixCustomerCancellationInput = {
   duration: number;
   timezone?: string;
   clientName?: string;
+  /** The business the booking belongs to -- whose Optix token cancels it. */
+  accountId: string;
 };
 
 /**
@@ -103,7 +101,7 @@ export async function cancelOptixCustomerBooking(
   if (!bookingId) {
     throw new OptixSyncError("validation_failed", "An Optix booking ID is required to cancel the customer's booking.");
   }
-  const config = readOptixReconcileConfig(env);
+  const config = await optixConfigForAccount(input.accountId);
   const timeZone = String(input.timezone || "").trim() || config.defaultTimeZone;
   const date = datePartsForSlot(input.week, input.day);
   const startTimestamp = wallClockToUnixSeconds({ ...date, minutes: input.start, timeZone });
@@ -120,7 +118,7 @@ export async function cancelOptixCustomerBooking(
     title: input.clientName || "Clarity Booking",
     source: "Clarity Booking",
     isCanceled: true,
-  });
+  }, config.read);
   return { ok: true, optixBookingId: bookingId };
 }
 
@@ -152,7 +150,7 @@ export async function cancelOptixBayForCalendarItem(
   }
 
   const appointmentRows = await db().sql`
-    SELECT id, kind, week, day, start, duration, title, client, note,
+    SELECT id, account_id, kind, week, day, start, duration, title, client, note,
            service_id, location_id, location, email, phone, coach_id, person_id
     FROM calendar_items
     WHERE id = ${cleanId}
@@ -167,12 +165,13 @@ export async function cancelOptixBayForCalendarItem(
   }
 
   const appointment = rowToAppointment(appointmentRows[0]);
-  const config = readOptixReconcileConfig(env);
+  // The lesson's own business decides whose Optix token releases its bay.
+  const config = await optixConfigForAccount(String(appointmentRows[0].account_id || ""));
   const request = buildOptixAppointmentInput(appointment, existing, config);
   request.isCanceled = true;
 
   try {
-    const result = await syncOptixBooking(request);
+    const result = await syncOptixBooking(request, config.read);
     const fingerprint = optixAppointmentFingerprint(request);
     await db().sql`
       UPDATE optix_booking_sync

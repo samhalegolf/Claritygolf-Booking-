@@ -13616,6 +13616,43 @@ button {
   opacity: .72;
 }
 
+/* A business's own connection: the status line above, and under it a field
+   to paste a new value into. Scoped under .integration-credential (0-2-0) so
+   the .data-card element rules cannot outrank it, and form controls opt into
+   the page font because nothing sets it globally. */
+.integration-credential .credential-edit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.integration-credential .credential-edit input,
+.integration-credential .credential-edit select {
+  flex: 1 1 220px;
+  min-width: 0;
+  width: auto;
+  font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 7px 9px;
+  border: 1px solid var(--c-border);
+  border-radius: 7px;
+  background: var(--c-surface);
+  color: var(--c-text);
+}
+
+.integration-credential .credential-edit .credential-copy {
+  margin-left: 0;
+  font: inherit;
+  font-size: 11px;
+  padding: 5px 10px;
+}
+
+.integration-credential .credential-edit .credential-copy:disabled {
+  opacity: .5;
+  cursor: default;
+}
+
 .integration-credential .credential-warning {
   display: block;
   margin-top: 6px;

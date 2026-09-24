@@ -2712,7 +2712,7 @@ async function accountStripeSecret(accountId: string): Promise<string> {
 }
 
 async function stripeFor(accountId: string) {
-  return resolveStripeCredential(await accountStripeSecret(accountId));
+  return resolveStripeCredential(await accountStripeSecret(accountId), accountId);
 }
 
 async function stripeRequest(
@@ -3225,7 +3225,7 @@ async function listPaymentMethods(accountId: string) {
     // Asked per account rather than of the environment: a business with its own
     // Stripe key is configured even if the platform has none, and one relying
     // on the platform's is not configured if that key is missing.
-    clarityPayConfigured: stripeCredentialStatus(await accountStripeSecret(accountId)).configured,
+    clarityPayConfigured: stripeCredentialStatus(await accountStripeSecret(accountId), accountId).configured,
   };
 }
 
