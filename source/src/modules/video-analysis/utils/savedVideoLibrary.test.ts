@@ -700,6 +700,197 @@ describe("saved video library", () => {
     }
   });
 
+  /* A stand-in for the browser's image pipeline: decode the data URL and hand
+   * back a JPEG-typed blob, which is all uploadSnapshotImages needs of it. */
+  const installImagePipeline = () => {
+    class FakeImage {
+      naturalWidth = 1280;
+      naturalHeight = 720;
+      onload?: () => void;
+      onerror?: () => void;
+      set src(_value: string) {
+        queueMicrotask(() => this.onload?.());
+      }
+    }
+    Object.defineProperty(globalThis, "Image", { value: FakeImage, configurable: true });
+    Object.defineProperty(globalThis, "document", {
+      value: {
+        createElement: () => ({
+          width: 0,
+          height: 0,
+          getContext: () => ({ fillRect() {}, drawImage() {}, fillStyle: "" }),
+          toBlob: (done: (blob: Blob) => void, type: string) => done(new Blob(["jpeg-bytes"], { type })),
+        }),
+      },
+      configurable: true,
+    });
+  };
+
+  it("uploads each screenshot picture before finalize and names it in the analysis", async () => {
+    installBrowserGlobals();
+    installImagePipeline();
+    const { store, item } = await savedVideoWithLargeImages();
+    const originalFetch = globalThis.fetch;
+    const order: string[] = [];
+    let finalizeAnalysis: any = null;
+    const id = encodeURIComponent(item.savedVideoId);
+    globalThis.fetch = async (input, init) => {
+      const url = String(input);
+      if (url.endsWith(`/api/video-transfer/${id}/session`)) {
+        order.push("session");
+        return Response.json({
+          ok: true,
+          status: "verifying",
+          session: {
+            transferId: "transfer-1",
+            savedVideoId: item.savedVideoId,
+            status: "verifying",
+            expectedSizeBytes: sourceBlob().size,
+            acceptedOffsetBytes: sourceBlob().size,
+            chunkSizeBytes: 8,
+            driveAssetFolderId: "drive-folder-1",
+            driveVideoFileId: "drive-video-1",
+          },
+        });
+      }
+      if (url.endsWith(`/api/video-transfer/${id}/snapshots/focus-1`)) {
+        order.push("snapshot");
+        assert.equal(init?.method, "PUT");
+        assert.equal((init?.body as Blob).type, "image/jpeg");
+        return Response.json({ ok: true, snapshotId: "focus-1", imageFileId: "drive-image-1" });
+      }
+      if (url.endsWith(`/api/video-transfer/${id}/finalize`)) {
+        order.push("finalize");
+        finalizeAnalysis = JSON.parse(String(init?.body || "{}")).analysisJson;
+        return Response.json({
+          ok: true,
+          status: "ready",
+          assetFolderId: "drive-folder-1",
+          videoFileId: "drive-video-1",
+          manifestFileId: "manifest-1",
+          analysisFileId: "analysis-1",
+          uploadedAt: "2026-07-10T01:00:00.000Z",
+        });
+      }
+      return Response.json({ ok: false }, { status: 500 });
+    };
+    try {
+      const ready = await saveSavedVideoToCloud(item.savedVideoId, store);
+      assert.deepEqual(order, ["session", "snapshot", "finalize"]);
+      const [snapshot] = finalizeAnalysis.analysis.focusSnapshots;
+      assert.equal(snapshot.imageFileId, "drive-image-1");
+      assert.equal("imageDataUrl" in snapshot, false, "the picture itself never rides in the analysis");
+      // The local copy keeps its picture and learns the cloud id, so the next
+      // send does not upload it again.
+      const local = ready.analysisSnapshot.focusSnapshots[0];
+      assert.equal(local.imageFileId, "drive-image-1");
+      assert.ok(local.imageDataUrl.startsWith("data:"));
+      assert.equal(ready.cloud?.snapshotImagesPending, undefined);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("still sends the video when a picture will not upload, and says how many did not", async () => {
+    installBrowserGlobals();
+    installImagePipeline();
+    const { store, item } = await savedVideoWithLargeImages();
+    const originalFetch = globalThis.fetch;
+    const id = encodeURIComponent(item.savedVideoId);
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+      if (url.endsWith(`/api/video-transfer/${id}/session`)) {
+        return Response.json({
+          ok: true,
+          status: "verifying",
+          session: {
+            transferId: "transfer-1",
+            savedVideoId: item.savedVideoId,
+            status: "verifying",
+            expectedSizeBytes: sourceBlob().size,
+            acceptedOffsetBytes: sourceBlob().size,
+            chunkSizeBytes: 8,
+            driveAssetFolderId: "drive-folder-1",
+            driveVideoFileId: "drive-video-1",
+          },
+        });
+      }
+      if (url.includes("/snapshots/")) return Response.json({ ok: false }, { status: 502 });
+      if (url.endsWith(`/api/video-transfer/${id}/finalize`)) {
+        return Response.json({
+          ok: true,
+          status: "ready",
+          assetFolderId: "drive-folder-1",
+          videoFileId: "drive-video-1",
+          manifestFileId: "manifest-1",
+          analysisFileId: "analysis-1",
+          uploadedAt: "2026-07-10T01:00:00.000Z",
+        });
+      }
+      return Response.json({ ok: false }, { status: 500 });
+    };
+    try {
+      const ready = await saveSavedVideoToCloud(item.savedVideoId, store);
+      assert.equal(ready.cloud?.status, "ready");
+      assert.equal(ready.cloud?.snapshotImagesPending, 1);
+      assert.equal(ready.analysisSnapshot.focusSnapshots[0].imageFileId, undefined, "left for the next send to retry");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("re-sending an uploaded video refreshes its analysis instead of stopping at this device", async () => {
+    installBrowserGlobals();
+    installImagePipeline();
+    const { store, item } = await savedVideoWithLargeImages();
+    const originalFetch = globalThis.fetch;
+    const id = encodeURIComponent(item.savedVideoId);
+    let refreshed: any = null;
+    let finalized = false;
+    globalThis.fetch = async (input, init) => {
+      const url = String(input);
+      if (url.endsWith(`/api/video-transfer/${id}/session`)) {
+        return Response.json({
+          ok: true,
+          status: "ready",
+          session: {
+            transferId: "transfer-1",
+            savedVideoId: item.savedVideoId,
+            status: "ready",
+            expectedSizeBytes: sourceBlob().size,
+            acceptedOffsetBytes: sourceBlob().size,
+            chunkSizeBytes: 8,
+            driveAssetFolderId: "drive-folder-1",
+            driveManifestFileId: "manifest-1",
+          },
+        });
+      }
+      if (url.endsWith(`/api/video-transfer/${id}/snapshots/focus-1`)) {
+        return Response.json({ ok: true, snapshotId: "focus-1", imageFileId: "drive-image-1" });
+      }
+      if (url.endsWith(`/api/video-transfer/${id}/analysis`)) {
+        assert.equal(init?.method, "PUT");
+        refreshed = JSON.parse(String(init?.body || "{}")).analysisJson;
+        return Response.json({ ok: true, analysisFileId: "analysis-1" });
+      }
+      if (url.endsWith("/finalize")) finalized = true;
+      return Response.json({ ok: false }, { status: 500 });
+    };
+    try {
+      const ready = await saveSavedVideoToCloud(item.savedVideoId, store, {
+        returnToPlayer: true,
+        returnToPersonId: "player-1",
+      });
+      assert.equal(finalized, false, "the video bytes are not sent twice");
+      assert.equal(refreshed.analysis.focusSnapshots[0].imageFileId, "drive-image-1");
+      assert.equal(refreshed.analysis.focusSnapshots[0].note, "Keep the chest over the ball.");
+      assert.equal(ready.cloud?.status, "ready");
+      assert.equal(ready.cloud?.analysisRefreshPending, undefined);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("lists Clarity Cloud imports and imports only after local verification receipt", async () => {
     installBrowserGlobals();
     const store = createMemorySavedVideoLibraryStore();

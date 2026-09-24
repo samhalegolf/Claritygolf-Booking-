@@ -46,6 +46,12 @@ export interface FocusSnapshot {
   currentFrame: number;
   cropRect: FocusAreaRect;
   imageDataUrl: string;
+  /**
+   * The picture's copy in Clarity Cloud, once it has been uploaded. The data
+   * URL never leaves the device; this id is what travels in the analysis file
+   * so another device or the player's portal can fetch the picture.
+   */
+  imageFileId?: string;
   createdAt: string;
 }
 

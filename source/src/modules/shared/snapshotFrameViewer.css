@@ -1,0 +1,446 @@
+/* The screenshot frame viewer. A dark lightbox on every surface it opens from
+ * (coach app, player portal, emailed review page), so it carries its own
+ * palette rather than borrowing one surface's tokens. Colours are rgba() on
+ * purpose: uiRules.test.ts ratchets literal hex across src. */
+
+.frame-viewer-backdrop {
+  --fv-bg: rgba(14, 16, 18, 1);
+  --fv-panel: rgba(255, 255, 255, 0.06);
+  --fv-panel-strong: rgba(255, 255, 255, 0.12);
+  --fv-line: rgba(255, 255, 255, 0.14);
+  --fv-text: rgba(255, 255, 255, 0.94);
+  --fv-muted: rgba(255, 255, 255, 0.62);
+  --fv-accent: rgba(255, 204, 0, 1);
+  --fv-accent-soft: rgba(255, 204, 0, 0.18);
+
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.frame-viewer {
+  display: flex;
+  flex-direction: column;
+  width: min(1280px, 100%);
+  min-height: 0;
+  border-radius: 14px;
+  background: var(--fv-bg);
+  color: var(--fv-text);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  outline: none;
+}
+
+.frame-viewer button {
+  font: inherit;
+  color: inherit;
+}
+
+.frame-viewer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--fv-line);
+}
+
+.frame-viewer-header div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.frame-viewer-header strong {
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.frame-viewer-header span {
+  font-size: 13px;
+  color: var(--fv-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.frame-viewer-close {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--fv-panel);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.frame-viewer-close:hover {
+  background: var(--fv-panel-strong);
+}
+
+.frame-viewer-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  flex: 1;
+  min-height: 0;
+}
+
+.frame-viewer-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+/* Sized to the video's own shape, so a percentage inside it is a percentage
+ * of the picture and the box lands where the crop was taken. */
+.frame-viewer-picture {
+  position: relative;
+  width: 100%;
+  max-width: calc(var(--frame-aspect, 1.7778) * 64vh);
+  max-height: 64vh;
+  background: rgba(0, 0, 0, 1);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.frame-viewer-picture video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.frame-viewer-box {
+  position: absolute;
+  border: 2px solid var(--fv-accent);
+  border-radius: 4px;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.38);
+  pointer-events: none;
+  transition: opacity 160ms ease, box-shadow 160ms ease;
+}
+
+/* Off the screenshot's frame the box no longer describes the picture, so it
+ * stays as a faint guide and stops dimming the rest of the frame. */
+.frame-viewer-box.is-away {
+  opacity: 0.35;
+  box-shadow: none;
+  border-style: dashed;
+}
+
+.frame-viewer-whole {
+  position: absolute;
+  inset: 0;
+  border: 2px solid var(--fv-accent);
+  border-radius: 8px;
+  pointer-events: none;
+}
+
+.frame-viewer-whole span {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--fv-accent);
+  color: rgba(0, 0, 0, 0.88);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.frame-viewer-missing {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 16px;
+  text-align: center;
+  color: var(--fv-muted);
+}
+
+.frame-viewer-missing img {
+  max-width: 70%;
+  max-height: 70%;
+  border-radius: 6px;
+}
+
+.frame-viewer-missing p {
+  margin: 0;
+  font-size: 14px;
+}
+
+.frame-viewer-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  max-width: calc(var(--frame-aspect, 1.7778) * 64vh);
+}
+
+.frame-viewer-controls > button {
+  flex: none;
+  min-width: 36px;
+  height: 36px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--fv-panel);
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.frame-viewer-controls > button:hover {
+  background: var(--fv-panel-strong);
+}
+
+.frame-viewer-controls > .frame-viewer-return {
+  font-size: 13px;
+  font-weight: 600;
+  background: var(--fv-accent-soft);
+  color: var(--fv-accent);
+}
+
+/* Inset by half the active marker, so a screenshot at the very start or end
+ * of the clip still sits inside the row. */
+.frame-viewer-timeline {
+  position: relative;
+  flex: 1;
+  min-width: 80px;
+  height: 36px;
+  margin: 0 9px;
+  cursor: pointer;
+}
+
+.frame-viewer-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 4px;
+  margin-top: -2px;
+  border-radius: 2px;
+  background: var(--fv-panel-strong);
+}
+
+.frame-viewer-playhead {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--fv-text);
+  pointer-events: none;
+}
+
+.frame-viewer-marker {
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  padding: 0;
+  border: 2px solid var(--fv-bg);
+  border-radius: 50%;
+  background: var(--fv-muted);
+  cursor: pointer;
+}
+
+.frame-viewer-marker.is-active {
+  width: 18px;
+  height: 18px;
+  margin: -9px 0 0 -9px;
+  background: var(--fv-accent);
+}
+
+.frame-viewer-time {
+  flex: none;
+  min-width: 56px;
+  font-size: 13px;
+  color: var(--fv-muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.frame-viewer-note {
+  width: 100%;
+  max-width: calc(var(--frame-aspect, 1.7778) * 64vh);
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.frame-viewer-rail {
+  list-style: none;
+  margin: 0;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-left: 1px solid var(--fv-line);
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.frame-viewer-rail-video {
+  display: block;
+  margin: 6px 4px 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fv-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.frame-viewer-card {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 10px;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: var(--fv-panel);
+  text-align: left;
+  cursor: pointer;
+}
+
+.frame-viewer-card:hover {
+  background: var(--fv-panel-strong);
+}
+
+.frame-viewer-card.is-active {
+  border-color: var(--fv-accent);
+  background: var(--fv-accent-soft);
+}
+
+.frame-viewer-thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 66px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--fv-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.frame-viewer-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.frame-viewer-card-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.frame-viewer-card-text strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.frame-viewer-card-text small {
+  font-size: 12px;
+  color: var(--fv-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.frame-viewer-card-text em {
+  font-style: normal;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--fv-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.frame-viewer-hint {
+  padding: 8px 16px;
+  border-top: 1px solid var(--fv-line);
+  font-size: 12px;
+  color: var(--fv-muted);
+}
+
+/* Phone: the rail becomes a strip under the video you swipe along. */
+@media (max-width: 760px) {
+  .frame-viewer-backdrop {
+    padding: 0;
+  }
+
+  .frame-viewer {
+    border-radius: 0;
+  }
+
+  .frame-viewer-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  .frame-viewer-stage {
+    padding: 12px;
+  }
+
+  .frame-viewer-picture {
+    max-height: 52vh;
+    max-width: calc(var(--frame-aspect, 1.7778) * 52vh);
+  }
+
+  .frame-viewer-controls,
+  .frame-viewer-note {
+    max-width: none;
+  }
+
+  /* The timeline takes its own row, so the buttons never push it off-screen. */
+  .frame-viewer-controls {
+    flex-wrap: wrap;
+  }
+
+  .frame-viewer-timeline {
+    order: -1;
+    flex: 1 0 calc(100% - 18px);
+  }
+
+  .frame-viewer-time {
+    margin-left: auto;
+  }
+
+  .frame-viewer-rail {
+    flex-direction: row;
+    border-left: 0;
+    border-top: 1px solid var(--fv-line);
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 10px 12px;
+  }
+
+  .frame-viewer-rail li {
+    flex: none;
+    width: 220px;
+  }
+
+  .frame-viewer-hint {
+    display: none;
+  }
+}

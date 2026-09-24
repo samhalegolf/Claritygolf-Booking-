@@ -20,6 +20,8 @@
  * it is testable without a network.
  */
 
+import { publicSnapshots, type PublicSnapshot } from "./swing-review-snapshots.mts";
+
 const text = (value: unknown, max = 600) => String(value ?? "").trim().slice(0, max);
 
 /**
@@ -116,9 +118,10 @@ export type ReviewShareVideo = {
   createdAt: string;
   /** Timestamped notes the coach typed against this video. */
   notes: Array<{ id: string; text: string; time: number }>;
-  /** Screenshot captions. The pictures are stripped on upload, so these carry
-   *  their title, note and timestamp and the page renders the timestamp. */
-  screenshots: Array<{ id: string; title: string; note: string; currentTime: number }>;
+  /** Screenshots, with where in the frame and when in the swing each was
+   *  taken. The picture itself is fetched separately when `hasImage` is set;
+   *  reviews uploaded before pictures travelled have captions only. */
+  screenshots: PublicSnapshot[];
 };
 
 export type ReviewSharePayload = {
@@ -138,7 +141,7 @@ export type ReviewSharePayload = {
 type AnalysisFile = {
   analysis?: {
     notes?: Array<{ id?: unknown; text?: unknown; time?: unknown }>;
-    focusSnapshots?: Array<{ id?: unknown; title?: unknown; note?: unknown; currentTime?: unknown }>;
+    focusSnapshots?: unknown[];
   };
 };
 
@@ -167,9 +170,6 @@ export function reviewShareVideo(
   analysis: AnalysisFile | null,
 ): ReviewShareVideo {
   const notes = Array.isArray(analysis?.analysis?.notes) ? analysis!.analysis!.notes! : [];
-  const snapshots = Array.isArray(analysis?.analysis?.focusSnapshots)
-    ? analysis!.analysis!.focusSnapshots!
-    : [];
   return {
     savedVideoId: text(row.savedVideoId, 160),
     title: text(row.title, 180) || "Swing video",
@@ -187,14 +187,7 @@ export function reviewShareVideo(
       // In the order they happen in the swing, which is the order the coach
       // said them and the order the player will scrub through.
       .sort((left, right) => left.time - right.time),
-    screenshots: snapshots
-      .map((snapshot, index) => ({
-        id: text(snapshot?.id, 120) || `snapshot-${index}`,
-        title: text(snapshot?.title, 180) || "Screenshot",
-        note: text(snapshot?.note, 2000),
-        currentTime: seconds(snapshot?.currentTime),
-      }))
-      .sort((left, right) => left.currentTime - right.currentTime),
+    screenshots: publicSnapshots(analysis),
   };
 }
 

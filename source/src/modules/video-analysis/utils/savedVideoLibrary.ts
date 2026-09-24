@@ -126,6 +126,13 @@ export interface SavedVideoCloudState {
   providerFolderLink?: string;
   lastUploadErrorCode?: string;
   errorMessage?: string;
+  /**
+   * Set by the last send when the video went but some of it did not: pictures
+   * that failed to upload, or an analysis refresh that failed on a re-send.
+   * The next send retries both. Cleared by a send that gets everything up.
+   */
+  snapshotImagesPending?: number;
+  analysisRefreshPending?: boolean;
 }
 
 export interface SavedVideoAnalysisSummary {
@@ -1067,6 +1074,245 @@ const patchCloudState = async (
   return next;
 };
 
+/* --- Screenshot pictures in Clarity Cloud ----------------------------------
+ *
+ * A screenshot's picture lives in IndexedDB as a data URL on the device that
+ * took it. compactSavedVideoAnalysisJson strips it from the analysis file --
+ * a few PNGs would overrun the function's request limit -- so each picture now
+ * goes up on its own, as a downsized JPEG beside the video in Drive, and the
+ * analysis records the returned id. Another device, or the player's portal,
+ * reads the analysis and fetches the pictures it names.
+ * ------------------------------------------------------------------------- */
+
+/** Wide enough to read a hand position off a full frame on a laptop. */
+const SNAPSHOT_UPLOAD_MAX_EDGE = 1600;
+const SNAPSHOT_UPLOAD_QUALITY = 0.85;
+
+const loadImage = (src: string) =>
+  new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Screenshot image could not be decoded."));
+    image.src = src;
+  });
+
+const snapshotUploadBlob = async (dataUrl: string): Promise<Blob> => {
+  const image = await loadImage(dataUrl);
+  const scale = Math.min(1, SNAPSHOT_UPLOAD_MAX_EDGE / Math.max(image.naturalWidth || 1, image.naturalHeight || 1));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round((image.naturalWidth || 1) * scale));
+  canvas.height = Math.max(1, Math.round((image.naturalHeight || 1) * scale));
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Could not prepare the screenshot for upload.");
+  // JPEG has no alpha; a transparent corner would otherwise come out black.
+  context.fillStyle = "#fff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  const blob = await new Promise<Blob | null>((resolve) =>
+    canvas.toBlob(resolve, "image/jpeg", SNAPSHOT_UPLOAD_QUALITY)
+  );
+  if (!blob) throw new Error("Could not prepare the screenshot for upload.");
+  return blob;
+};
+
+const blobToDataUrl = (blob: Blob) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("Could not read the screenshot."));
+    reader.readAsDataURL(blob);
+  });
+
+/** Uploads every screenshot on this video that has a picture here and none in
+ *  the cloud yet, and records the ids on the local copy. Idempotent: the
+ *  server replaces by screenshot id, and one already uploaded is skipped. */
+/** Best-effort per picture: one that will not upload must not stop the video
+ *  reaching the player. It stays without an id, so the next send retries it,
+ *  and the count comes back so the coach is told. */
+const uploadSnapshotImages = async (
+  savedVideoId: string,
+  store: SavedVideoLibraryStore,
+  item: SavedVideoItem
+): Promise<{ item: SavedVideoItem; failed: number }> => {
+  const pending = item.analysisSnapshot.focusSnapshots.filter(
+    (snapshot) => !snapshot.imageFileId && typeof snapshot.imageDataUrl === "string" && snapshot.imageDataUrl.startsWith("data:")
+  );
+  if (!pending.length) return { item, failed: 0 };
+  const uploaded = new Map<string, string>();
+  let failed = 0;
+  for (const snapshot of pending) {
+    try {
+      const blob = await snapshotUploadBlob(snapshot.imageDataUrl);
+      const response = await apiFetch(transferUrl("coach", savedVideoId, "snapshots", snapshot.id), {
+        method: "PUT",
+        headers: { "Content-Type": blob.type || "image/jpeg", Accept: "application/json" },
+        body: blob,
+      });
+      const data = await safeJson<any>(response, "Screenshot upload did not return JSON.", "DRIVE_FINALIZE_FAILED");
+      if (!response.ok || data.ok === false || !data.imageFileId) {
+        throw apiFailure(data, response.status === 413 ? "DRIVE_UPLOAD_TOO_LARGE" : "DRIVE_FINALIZE_FAILED");
+      }
+      uploaded.set(snapshot.id, String(data.imageFileId));
+    } catch (error) {
+      failed += 1;
+      console.warn("Screenshot picture did not upload", snapshot.id, error);
+    }
+  }
+  if (!uploaded.size) return { item, failed };
+  const next: SavedVideoItem = {
+    ...item,
+    analysisSnapshot: {
+      ...item.analysisSnapshot,
+      focusSnapshots: item.analysisSnapshot.focusSnapshots.map((snapshot) =>
+        uploaded.has(snapshot.id) ? { ...snapshot, imageFileId: uploaded.get(snapshot.id) } : snapshot
+      ),
+    },
+  };
+  await store.putItem(next);
+  return { item: next, failed };
+};
+
+const refreshCloudAnalysis = async (savedVideoId: string, item: SavedVideoItem) => {
+  const response = await apiFetch(transferUrl("coach", savedVideoId, "analysis"), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ analysisJson: compactSavedVideoAnalysisJson(item) }),
+  });
+  const data = await safeJson<any>(response, "Analysis refresh did not return JSON.", "DRIVE_FINALIZE_FAILED");
+  if (!response.ok || data.ok === false) throw apiFailure(data, "DRIVE_FINALIZE_FAILED");
+};
+
+/** A screenshot as the cloud describes it. Mirrors PublicSnapshot in
+ *  netlify/functions/_shared/swing-review-snapshots.mts. */
+export type CloudSnapshot = {
+  id: string;
+  title: string;
+  note: string;
+  currentTime: number;
+  captureKind: "frame" | "area";
+  cropRect: { x: number; y: number; width: number; height: number } | null;
+  hasImage: boolean;
+};
+
+export const listCloudSnapshots = async (
+  savedVideoId: string,
+  scope: VideoTransferScope = "coach"
+): Promise<CloudSnapshot[]> => {
+  const response = await apiFetch(transferUrl(scope, savedVideoId, "snapshots"), {
+    headers: { Accept: "application/json" },
+  });
+  const data = await safeJson<{ snapshots?: CloudSnapshot[] }>(
+    response,
+    "Screenshot list did not return JSON.",
+    "CLARITY_CLOUD_IMPORT_FAILED"
+  );
+  if (!response.ok) throw apiFailure(data, "CLARITY_CLOUD_IMPORT_FAILED");
+  return Array.isArray(data.snapshots) ? data.snapshots : [];
+};
+
+export const fetchCloudSnapshotImage = async (
+  savedVideoId: string,
+  snapshotId: string,
+  scope: VideoTransferScope = "coach"
+): Promise<string> => {
+  const response = await apiFetch(transferUrl(scope, savedVideoId, "snapshots", snapshotId), {
+    headers: { Accept: "image/*" },
+  });
+  if (!response.ok) {
+    throw new SavedVideoCloudError(
+      "CLARITY_CLOUD_IMPORT_FAILED",
+      `Screenshot download failed with HTTP ${response.status}.`,
+      response.status
+    );
+  }
+  return blobToDataUrl(await response.blob());
+};
+
+/** One attempt per video per page load. A video with nothing to fill would
+ *  otherwise ask Drive again on every render that notices a blank frame. */
+const hydrateAttempts = new Map<string, Promise<SavedVideoItem | null>>();
+
+/**
+ * Fills in, on this device's copy, the screenshots the cloud has and this copy
+ * lacks: a picture for one that arrived as words only, and the whole entry for
+ * one taken on another device after this copy was made. Never removes or
+ * overwrites anything already here. Returns the updated item, or null when
+ * there was nothing to add.
+ */
+export const hydrateSnapshotImages = (
+  savedVideoId: string,
+  store: SavedVideoLibraryStore,
+  scope: VideoTransferScope = "coach"
+): Promise<SavedVideoItem | null> => {
+  const key = `${scope}:${savedVideoId}`;
+  const existing = hydrateAttempts.get(key);
+  if (existing) return existing;
+  const attempt = (async () => {
+    const item = await store.getItem(savedVideoId);
+    if (!item) {
+      hydrateAttempts.delete(key);
+      return null;
+    }
+    const remote = await listCloudSnapshots(savedVideoId, scope);
+    if (!remote.length) return null;
+    const local = new Map(item.analysisSnapshot.focusSnapshots.map((snapshot) => [snapshot.id, snapshot]));
+    let changed = false;
+    const additions: VideoAnalysis["focusSnapshots"] = [];
+    const filled = new Map<string, string>();
+    for (const cloud of remote) {
+      const mine = local.get(cloud.id);
+      const needsPicture = cloud.hasImage && !(mine?.imageDataUrl || "").startsWith("data:");
+      const picture = needsPicture
+        ? await fetchCloudSnapshotImage(savedVideoId, cloud.id, scope).catch(() => "")
+        : "";
+      if (mine) {
+        if (picture) {
+          filled.set(cloud.id, picture);
+          changed = true;
+        }
+        continue;
+      }
+      additions.push({
+        id: cloud.id,
+        playerId: item.playerId,
+        analysisId: item.analysisSnapshot.id,
+        title: cloud.title,
+        note: cloud.note,
+        captureKind: cloud.captureKind,
+        side: "left",
+        currentTime: cloud.currentTime,
+        currentFrame: 0,
+        cropRect: cloud.cropRect || { x: 0, y: 0, width: 1, height: 1 },
+        imageDataUrl: picture,
+        createdAt: item.updatedAt,
+      });
+      changed = true;
+    }
+    if (!changed) return null;
+    const next: SavedVideoItem = {
+      ...item,
+      analysisSnapshot: {
+        ...item.analysisSnapshot,
+        focusSnapshots: [
+          ...item.analysisSnapshot.focusSnapshots.map((snapshot) =>
+            filled.has(snapshot.id) ? { ...snapshot, imageDataUrl: filled.get(snapshot.id) || "" } : snapshot
+          ),
+          ...additions,
+        ],
+      },
+    };
+    await store.putItem(next);
+    return next;
+  })().catch((error) => {
+    // Not cached: a dropped connection is worth another try on the next look.
+    hydrateAttempts.delete(key);
+    console.warn("Could not fetch screenshots from Clarity Cloud", error);
+    return null;
+  });
+  hydrateAttempts.set(key, attempt);
+  return attempt;
+};
+
 export const saveSavedVideoToCloud = async (
   savedVideoId: string,
   store: SavedVideoLibraryStore,
@@ -1159,7 +1405,26 @@ export const saveSavedVideoToCloud = async (
     if (!sessionResponse.ok) throw apiFailure(sessionData, "DRIVE_UPLOAD_SESSION_FAILED");
     let session = sessionFromResponse(sessionData);
     if (session.status === "ready") {
+      // Already uploaded, so the video bytes are not sent again -- but the
+      // analysis is. A screenshot taken or a note typed since the first send
+      // used to stop at this device.
+      let snapshotImagesPending = 0;
+      let analysisRefreshPending = false;
+      if (scope === "coach") {
+        const pictures = await uploadSnapshotImages(savedVideoId, store, working);
+        working = pictures.item;
+        snapshotImagesPending = pictures.failed;
+        analysisRefreshPending = await refreshCloudAnalysis(savedVideoId, working).then(
+          () => false,
+          (error) => {
+            console.warn("Analysis refresh failed", savedVideoId, error);
+            return true;
+          }
+        );
+      }
       const ready = await patchCloudState(store, working, {
+        snapshotImagesPending: snapshotImagesPending || undefined,
+        analysisRefreshPending: analysisRefreshPending || undefined,
         status: "ready",
         catalogueStatus: session.catalogueStatus || "ready_to_import",
         provider: "google-drive",
@@ -1207,6 +1472,14 @@ export const saveSavedVideoToCloud = async (
       driveVideoFileId: session.driveVideoFileId,
       progress: 99,
     });
+    // The screenshots' pictures go up beside the video before the analysis
+    // file is written, so the analysis can name each one.
+    let snapshotImagesPending = 0;
+    if (scope === "coach") {
+      const pictures = await uploadSnapshotImages(savedVideoId, store, working);
+      working = pictures.item;
+      snapshotImagesPending = pictures.failed;
+    }
 
     const finalizeResponse = await apiFetch(transferUrl(scope, savedVideoId, "finalize"), {
       method: "POST",
@@ -1249,6 +1522,7 @@ export const saveSavedVideoToCloud = async (
       readyToImportAt: finalized.readyToImportAt || finalized.uploadedAt,
       providerFolderLink: finalized.session?.providerFolderLink,
       progress: 100,
+      snapshotImagesPending: snapshotImagesPending || undefined,
     });
     options.onProgress?.(100);
     return ready;
@@ -1538,14 +1812,14 @@ export const importSavedVideoFromClarityCloud = async (
     existing.source.sizeBytes === importPackage.video.sizeBytes
   ) {
     const verifiedExisting = await store.verifyItem(existing.savedVideoId);
-    return finishClarityCloudImport(
+    return withCloudSnapshots(savedVideoId, store, scope, await finishClarityCloudImport(
       savedVideoId,
       store,
       verifiedExisting,
       existing.source.checksumSha256,
       importPackage.transfer,
       options
-    );
+    ));
   }
 
   const downloadResponse = await apiFetch(transferUrl(scope, savedVideoId, "download"), {
@@ -1595,14 +1869,27 @@ export const importSavedVideoFromClarityCloud = async (
     workspaceSnapshot: workspace,
   });
   const verified = await store.verifyItem(item.savedVideoId);
-  return finishClarityCloudImport(
+  return withCloudSnapshots(savedVideoId, store, scope, await finishClarityCloudImport(
     savedVideoId,
     store,
     verified,
     checksumSha256,
     importPackage.transfer,
     options
-  );
+  ));
+};
+
+/** Pictures are a second fetch after the video. A failure there costs the
+ *  import its pictures, not the video. */
+const withCloudSnapshots = async (
+  savedVideoId: string,
+  store: SavedVideoLibraryStore,
+  scope: VideoTransferScope,
+  item: SavedVideoItem
+) => {
+  // A fresh import is a new copy; whatever an earlier look found no longer holds.
+  hydrateAttempts.delete(`${scope}:${savedVideoId}`);
+  return (await hydrateSnapshotImages(savedVideoId, store, scope)) || item;
 };
 
 export interface ManagedLocalVideoLibraryStatus {

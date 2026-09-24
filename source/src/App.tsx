@@ -70,6 +70,8 @@ import {
   FlaskConical,
 } from "lucide-react";
 import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { apiFetch } from "./modules/auth/apiFetch";
+import { SnapshotFrameViewer, type FrameViewerShot } from "./modules/shared/SnapshotFrameViewer";
 import type { Session } from "./modules/auth/session";
 import type { TillLesson } from "./modules/billing/tillLessons";
 import { WORKSPACE_ACCOUNTS_STORAGE_KEY } from "./modules/shared/workspaceStorage";
@@ -172,6 +174,7 @@ import {
   moveManagedLocalVideoLibrary,
   cancelSavedVideoCloudUpload,
   importSavedVideoFromClarityCloud,
+  hydrateSnapshotImages,
   listClarityCloudImportTransfers,
   markClarityCloudSubmissionSeen,
   pauseSavedVideoCloudUpload,
@@ -5648,6 +5651,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   /** The Practice tab lists blocks; this flips it to the module's own composer. */
   const [playerPracticeComposer, setPlayerPracticeComposer] = useState(false);
   const [openSwingReviewId, setOpenSwingReviewId] = useState<string | null>(null);
+  /** The screenshot being looked at in its video, and the review it belongs to. */
+  const [snapshotFrameView, setSnapshotFrameView] = useState<{ reviewId: string; key: string } | null>(null);
   // The review currently being sent, and the link the last send produced. The
   // link is kept in memory rather than re-read, because the raw token exists
   // only in the response that minted it -- the server stores its hash.
@@ -9877,6 +9882,44 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       .sort((left, right) => right.at.localeCompare(left.at));
   }, [notesWorkspaceLessonNotes, playerPracticeBlocks, playerToolCloudVideos, playerToolVideos]);
 
+  /* Opening a review fills in pictures this copy is missing: a video imported
+   * from the cloud before pictures travelled with it arrived with captions and
+   * blank frames, and one sent from another device since may hold screenshots
+   * this copy has never seen. One attempt per video per page load. */
+  useEffect(() => {
+    const store = savedVideoLibraryRef.current;
+    const review = playerSwingReviewGroups.find((group) => group.id === openSwingReviewId);
+    if (!store || !review) return;
+    const candidates = review.videos.filter(
+      (video) =>
+        Boolean(video.cloud?.transferId) &&
+        (video.analysisSnapshot.focusSnapshots.length === 0 ||
+          video.analysisSnapshot.focusSnapshots.some((snapshot) => !snapshot.imageDataUrl)),
+    );
+    if (!candidates.length) return;
+    let cancelled = false;
+    void Promise.all(candidates.map((video) => hydrateSnapshotImages(video.savedVideoId, store, "coach"))).then(
+      (results) => {
+        const updated = results.filter((item): item is SavedVideoItem => Boolean(item));
+        if (!cancelled && updated.length) {
+          setSavedVideoItems((current) => mergeSavedVideoItems(current, updated));
+        }
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [openSwingReviewId, playerSwingReviewGroups]);
+
+  const resolveReviewVideoUrl = useCallback(async (savedVideoId: string) => {
+    const blob = await savedVideoLibraryRef.current?.getBlob(savedVideoId).catch(() => null);
+    if (blob) return URL.createObjectURL(blob);
+    // Not on this device: stream it out of Clarity Cloud instead.
+    const response = await apiFetch(`/api/video-transfer/${encodeURIComponent(savedVideoId)}/download`);
+    if (!response.ok) return null;
+    return URL.createObjectURL(await response.blob());
+  }, []);
+
   const linkedLessonVideoIds = useMemo(() => {
     const ids = new Set<string>();
     const noteLessonIds = new Set(notesWorkspaceLessonNotes.map((note) => note.lessonId).filter(Boolean));
@@ -12792,9 +12835,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
     setSendingSwingReviewId(review.id);
     try {
+      let picturesPending = 0;
+      let analysisPending = false;
       for (const video of review.videos) {
         setToast({ message: `Sending ${review.videos.length > 1 ? "videos" : "video"}…` });
-        await saveSavedVideoToCloud(video.savedVideoId, store, {
+        const sent = await saveSavedVideoToCloud(video.savedVideoId, store, {
           onProgress: () => refreshSavedVideoLibrary(),
           returnToPlayer: true,
           returnToPersonId: client.id,
@@ -12803,9 +12848,21 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           // three-angle review would send the player four emails.
           deferNotification: true,
         });
+        picturesPending += sent.cloud?.snapshotImagesPending || 0;
+        analysisPending = analysisPending || Boolean(sent.cloud?.analysisRefreshPending);
       }
       refreshSavedVideoLibrary();
       await refreshClarityCloudImports();
+      // The videos went; say plainly if some of what goes with them did not.
+      const shortfall = [
+        picturesPending
+          ? `${picturesPending} screenshot picture${picturesPending === 1 ? "" : "s"} did not upload`
+          : "",
+        analysisPending ? "the latest notes did not update" : "",
+      ]
+        .filter(Boolean)
+        .join(" and ");
+      const shortfallNote = shortfall ? ` But ${shortfall} — send again to retry.` : "";
 
       const response = await fetch("/api/video-transfer/review/send", {
         method: "POST",
@@ -12824,9 +12881,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       }
       setSentSwingReviewLink(result.shareUrl ? { id: review.id, url: result.shareUrl } : null);
       setToast({
-        message: result.emailed
-          ? `Sent to ${result.recipient || client.name}. It is in their portal too.`
-          : "The review is in their portal, but the email could not be sent. Copy the link instead.",
+        message:
+          (result.emailed
+            ? `Sent to ${result.recipient || client.name}. It is in their portal too.`
+            : "The review is in their portal, but the email could not be sent. Copy the link instead.") +
+          shortfallNote,
       });
     } catch (error) {
       refreshSavedVideoLibrary();
@@ -24702,7 +24761,23 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                                 <div className="swing-review-screenshots">
                                                   {review.screenshots.map((snapshot) => (
                                                     <figure key={`${snapshot.savedVideoId}-${snapshot.id}`}>
-                                                      {snapshot.imageDataUrl ? <img src={snapshot.imageDataUrl} alt={snapshot.title} /> : <div className="swing-review-image-missing"><ImagePlus size={20} /></div>}
+                                                      <button
+                                                        type="button"
+                                                        className="swing-review-screenshot-open"
+                                                        onClick={() =>
+                                                          setSnapshotFrameView({
+                                                            reviewId: review.id,
+                                                            key: `${snapshot.savedVideoId}-${snapshot.id}`,
+                                                          })
+                                                        }
+                                                        aria-label={`Show ${snapshot.title} in the video`}
+                                                      >
+                                                        {snapshot.imageDataUrl ? <img src={snapshot.imageDataUrl} alt={snapshot.title} /> : <div className="swing-review-image-missing"><ImagePlus size={20} /></div>}
+                                                        <span className="swing-review-screenshot-jump">
+                                                          <Video size={13} />
+                                                          View in video · {snapshot.currentTime.toFixed(2)}s
+                                                        </span>
+                                                      </button>
                                                       <figcaption>
                                                         <strong>{snapshot.title}</strong>
                                                         <span>{snapshot.note || `Captured at ${snapshot.currentTime.toFixed(2)}s`}</span>
@@ -24710,6 +24785,24 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                                     </figure>
                                                   ))}
                                                 </div>
+                                              ) : null}
+                                              {snapshotFrameView?.reviewId === review.id ? (
+                                                <SnapshotFrameViewer
+                                                  shots={review.screenshots.map((snapshot): FrameViewerShot => ({
+                                                    key: `${snapshot.savedVideoId}-${snapshot.id}`,
+                                                    savedVideoId: snapshot.savedVideoId,
+                                                    videoTitle: snapshot.videoTitle,
+                                                    title: snapshot.title,
+                                                    note: snapshot.note,
+                                                    currentTime: snapshot.currentTime,
+                                                    captureKind: snapshot.captureKind,
+                                                    cropRect: snapshot.cropRect,
+                                                    imageUrl: snapshot.imageDataUrl || undefined,
+                                                  }))}
+                                                  initialKey={snapshotFrameView.key}
+                                                  resolveVideoUrl={resolveReviewVideoUrl}
+                                                  onClose={() => setSnapshotFrameView(null)}
+                                                />
                                               ) : null}
                                               {[...review.notes.map((note) => ({ id: note.id, text: note.body, label: note.title })), ...review.analysisNotes.map((note) => ({ id: note.id, text: note.text, label: note.videoTitle }))].map((note) => (
                                                 <div className="swing-review-note" key={note.id}>

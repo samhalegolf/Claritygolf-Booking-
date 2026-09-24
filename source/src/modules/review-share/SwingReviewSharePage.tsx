@@ -1,5 +1,6 @@
 import { Loading } from "../shared/Loading";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { SnapshotFrameViewer, type FrameViewerShot } from "../shared/SnapshotFrameViewer";
 
 import { reviewShareToken } from "../shared/bookingHandoff";
 
@@ -27,7 +28,16 @@ type ReviewVideo = {
   durationSeconds: number | null;
   createdAt: string;
   notes: Array<{ id: string; text: string; time: number }>;
-  screenshots: Array<{ id: string; title: string; note: string; currentTime: number }>;
+  screenshots: Array<{
+    id: string;
+    title: string;
+    note: string;
+    currentTime: number;
+    captureKind?: "frame" | "area";
+    cropRect?: { x: number; y: number; width: number; height: number } | null;
+    /** Reviews sent before pictures travelled have captions only. */
+    hasImage?: boolean;
+  }>;
 };
 
 type ReviewResponse = {
@@ -50,6 +60,9 @@ const reviewUrl = (token: string, path = "") =>
 
 const videoUrl = (token: string, savedVideoId: string) =>
   reviewUrl(token, `/video/${encodeURIComponent(savedVideoId)}`);
+
+const snapshotUrl = (token: string, savedVideoId: string, snapshotId: string) =>
+  reviewUrl(token, `/snapshot/${encodeURIComponent(savedVideoId)}/${encodeURIComponent(snapshotId)}`);
 
 function formatClock(seconds: number) {
   const total = Math.max(0, Math.round(seconds));
@@ -86,6 +99,34 @@ const noteStyle: React.CSSProperties = {
    button. */
 const linkButtonStyle: React.CSSProperties = { textDecoration: "none" };
 
+const shotButtonStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 8,
+  padding: 0,
+  border: 0,
+  background: "none",
+  font: "inherit",
+  color: "inherit",
+  textAlign: "left",
+  cursor: "pointer",
+};
+
+const shotImageStyle: React.CSSProperties = {
+  width: "100%",
+  maxHeight: 240,
+  objectFit: "contain",
+  borderRadius: 9,
+  background: "var(--c-surface-soft)",
+};
+
+const shotLinkStyle: React.CSSProperties = {
+  display: "block",
+  marginTop: 2,
+  fontSize: "0.85em",
+  fontWeight: 600,
+  textDecoration: "underline",
+};
+
 const stampStyle: React.CSSProperties = {
   fontVariantNumeric: "tabular-nums",
   opacity: 0.65,
@@ -96,6 +137,13 @@ export default function SwingReviewSharePage() {
   const [token] = useState(reviewShareToken);
   const [state, setState] = useState<"loading" | "ready" | "gone">("loading");
   const [review, setReview] = useState<ReviewResponse["review"] | null>(null);
+  const [frameViewKey, setFrameViewKey] = useState<string | null>(null);
+  // Streamed straight from the review route: the token is in the path, so the
+  // <video> element can carry it without a header.
+  const resolveVideoUrl = useCallback(
+    async (savedVideoId: string) => videoUrl(token, savedVideoId),
+    [token],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -139,6 +187,19 @@ export default function SwingReviewSharePage() {
   }
 
   const sentBy = review.coachName || review.businessName;
+  const shots: FrameViewerShot[] = review.videos.flatMap((video) =>
+    video.screenshots.map((snapshot) => ({
+      key: `${video.savedVideoId}-${snapshot.id}`,
+      savedVideoId: video.savedVideoId,
+      videoTitle: video.title,
+      title: snapshot.title,
+      note: snapshot.note,
+      currentTime: snapshot.currentTime,
+      captureKind: snapshot.captureKind,
+      cropRect: snapshot.cropRect,
+      imageUrl: snapshot.hasImage ? snapshotUrl(token, video.savedVideoId, snapshot.id) : undefined,
+    })),
+  );
 
   return (
     <main className="login-shell">
@@ -183,35 +244,58 @@ export default function SwingReviewSharePage() {
                * kinds of note. Merged and sorted, they read as the commentary
                * they are, and each stamp says where to scrub the video above.
                *
-               * Screenshots keep their title in bold: their picture is stripped
-               * on upload, so the title is all that is left of the frame. */
+               * A screenshot also carries its picture, when it has one, and
+               * opens the frame viewer: the video wound to that instant with a
+               * box where the coach cropped. */
               const moments = [
                 ...video.notes.map((note) => ({
                   key: `note-${note.id}`,
                   time: note.time,
                   title: "",
                   text: note.text,
+                  shotKey: "",
+                  image: "",
                 })),
                 ...video.screenshots.map((snapshot) => ({
                   key: `snapshot-${snapshot.id}`,
                   time: snapshot.currentTime,
                   title: snapshot.title,
                   text: snapshot.note,
+                  shotKey: `${video.savedVideoId}-${snapshot.id}`,
+                  image: snapshot.hasImage ? snapshotUrl(token, video.savedVideoId, snapshot.id) : "",
                 })),
               ].sort((left, right) => left.time - right.time);
               if (!moments.length) return null;
               return (
                 <div style={{ display: "grid", gap: 8 }}>
-                  {moments.map((moment) => (
-                    <div key={moment.key} style={noteStyle}>
-                      <span style={stampStyle}>{formatClock(moment.time)}</span>
-                      <span>
-                        {moment.title ? <strong>{moment.title}</strong> : null}
-                        {moment.title && moment.text ? " — " : ""}
-                        {moment.text}
-                      </span>
-                    </div>
-                  ))}
+                  {moments.map((moment) =>
+                    moment.shotKey ? (
+                      <button
+                        type="button"
+                        key={moment.key}
+                        onClick={() => setFrameViewKey(moment.shotKey)}
+                        style={shotButtonStyle}
+                        aria-label={`Show ${moment.title} in the video`}
+                      >
+                        {moment.image ? (
+                          <img src={moment.image} alt="" style={shotImageStyle} loading="lazy" />
+                        ) : null}
+                        <span style={noteStyle}>
+                          <span style={stampStyle}>{formatClock(moment.time)}</span>
+                          <span>
+                            <strong>{moment.title}</strong>
+                            {moment.text ? ` — ${moment.text}` : ""}
+                            <span style={shotLinkStyle}>View in video ›</span>
+                          </span>
+                        </span>
+                      </button>
+                    ) : (
+                      <div key={moment.key} style={noteStyle}>
+                        <span style={stampStyle}>{formatClock(moment.time)}</span>
+                        <span>{moment.text}</span>
+                      </div>
+                    ),
+                  )}
                 </div>
               );
             })()}
@@ -237,6 +321,15 @@ export default function SwingReviewSharePage() {
             ))}
           </section>
         )}
+
+        {frameViewKey ? (
+          <SnapshotFrameViewer
+            shots={shots}
+            initialKey={frameViewKey}
+            resolveVideoUrl={resolveVideoUrl}
+            onClose={() => setFrameViewKey(null)}
+          />
+        ) : null}
 
         <div>
           <a className="primary-button" href="/" style={linkButtonStyle}>

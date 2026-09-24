@@ -33,6 +33,16 @@ import {
   type ReviewSharePayload,
 } from "./_shared/swing-review-share.mts";
 import { canonicalPhoneKey, cleanPhoneCountry } from "./_shared/phone.mts";
+import {
+  MAX_SNAPSHOT_IMAGE_BYTES,
+  carryImageFileIds,
+  publicSnapshots,
+  safeSnapshotId,
+  snapshotHasImage,
+  snapshotImageAppProperties,
+  snapshotImageFileName,
+  snapshotUploadVerdict,
+} from "./_shared/swing-review-snapshots.mts";
 
 // Player portal sessions (see booking-core.mts). Player video routes are scoped
 // to the player's own player_id; the admin transfer surface is untouched.
@@ -1331,6 +1341,67 @@ async function uploadJsonFile(
   );
 }
 
+/** Swap the bytes of a file Clarity already wrote, keeping its id, name and
+ *  appProperties. Used for a screenshot re-sent after an edit and for an
+ *  analysis file refreshed on a later send. */
+async function replaceDriveFileContent(
+  accessToken: string,
+  fileId: string,
+  mimeType: string,
+  body: BodyInit,
+  errorCode: TransferErrorCode,
+  diagnostics: ProviderDiagnostics = {}
+) {
+  return googleJson<DriveFile>(
+    accessToken,
+    `https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(fileId)}?uploadType=media&fields=id,name,size,appProperties`,
+    { method: "PATCH", headers: { "Content-Type": mimeType }, body },
+    errorCode,
+    { ...diagnostics, endpointClass: "drive-upload-media" }
+  );
+}
+
+async function uploadBinaryFile(
+  accessToken: string,
+  folderId: string,
+  name: string,
+  mimeType: string,
+  props: Record<string, string>,
+  bytes: Uint8Array,
+  diagnostics: ProviderDiagnostics = {}
+) {
+  const boundary = `clarity_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const encoder = new TextEncoder();
+  const head = encoder.encode(
+    [
+      `--${boundary}`,
+      "Content-Type: application/json; charset=utf-8",
+      "",
+      JSON.stringify({ name, parents: [folderId], mimeType, appProperties: props }),
+      `--${boundary}`,
+      `Content-Type: ${mimeType}`,
+      "",
+      "",
+    ].join("\r\n")
+  );
+  const tail = encoder.encode(`\r\n--${boundary}--\r\n`);
+  const body = new Uint8Array(head.byteLength + bytes.byteLength + tail.byteLength);
+  body.set(head, 0);
+  body.set(bytes, head.byteLength);
+  body.set(tail, head.byteLength + bytes.byteLength);
+  return googleJson<DriveFile>(
+    accessToken,
+    "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,size,appProperties",
+    {
+      method: "POST",
+      headers: { "Content-Type": `multipart/related; boundary=${boundary}` },
+      body,
+    },
+    "DRIVE_FINALIZE_FAILED",
+    { ...diagnostics, endpointClass: "drive-upload-multipart" }
+  );
+}
+
 async function startResumableUpload(
   accessToken: string,
   accountId: string,
@@ -2365,6 +2436,150 @@ async function handleFinalize(
   });
 }
 
+/* --- Screenshot pictures ---------------------------------------------------
+ *
+ * One JPEG per screenshot, beside the video in its Drive asset folder. The
+ * upload is idempotent on the screenshot id, so a send that is retried, or a
+ * review re-sent after an edit, replaces the picture rather than piling up
+ * copies. Reading one back always goes through the analysis file first: a
+ * screenshot id the analysis does not list as having a picture is a 404 with
+ * no Drive lookup, and the Drive lookup itself is keyed on account, saved
+ * video and screenshot so it cannot land on another video's picture.
+ * ------------------------------------------------------------------------- */
+
+async function handleSnapshotUpload(
+  req: Request,
+  accessToken: string,
+  session: VideoTransferSession,
+  snapshotIdRaw: string,
+  diagnostics: ProviderDiagnostics = {}
+) {
+  if (!session.driveAssetFolderId) {
+    throw new TransferError("DRIVE_UPLOAD_SESSION_EXPIRED", "Start the video upload before sending its screenshots.", 409);
+  }
+  const declared = Number(req.headers.get("content-length") || 0);
+  if (declared > MAX_SNAPSHOT_IMAGE_BYTES) {
+    return errorJson("DRIVE_UPLOAD_TOO_LARGE", "That screenshot is too large to upload.", 413);
+  }
+  const bytes = new Uint8Array(await req.arrayBuffer());
+  const snapshotId = safeSnapshotId(snapshotIdRaw);
+  const verdict = snapshotUploadVerdict({
+    snapshotId,
+    contentType: req.headers.get("content-type"),
+    sizeBytes: bytes.byteLength,
+  });
+  if (verdict.ok === false) {
+    return json({ error: "invalid_snapshot", message: verdict.reason }, verdict.status);
+  }
+  const props = snapshotImageAppProperties({
+    accountId: session.accountId,
+    savedVideoId: session.savedVideoId,
+    snapshotId,
+    clarityVersion,
+  });
+  const existing = await findDriveFile(accessToken, props, session.driveAssetFolderId, diagnostics);
+  const file = existing?.id
+    ? await replaceDriveFileContent(accessToken, existing.id, verdict.mimeType, bytes, "DRIVE_FINALIZE_FAILED", diagnostics)
+    : await uploadBinaryFile(
+        accessToken,
+        session.driveAssetFolderId,
+        snapshotImageFileName(snapshotId, verdict.mimeType),
+        verdict.mimeType,
+        props,
+        bytes,
+        diagnostics
+      );
+  return json({ ok: true, snapshotId, imageFileId: file.id });
+}
+
+async function readSessionAnalysis(provider: ClarityCloudProviderAdapter, session: VideoTransferSession) {
+  if (!session.driveAnalysisFileId) return null;
+  return provider.readJsonFile({ fileId: session.driveAnalysisFileId }).catch(() => null);
+}
+
+async function handleSnapshotList(provider: ClarityCloudProviderAdapter, session: VideoTransferSession) {
+  const analysis = await readSessionAnalysis(provider, session);
+  return json({ ok: true, snapshots: publicSnapshots(analysis) });
+}
+
+async function snapshotImageResponse(
+  accessToken: string,
+  provider: ClarityCloudProviderAdapter,
+  session: VideoTransferSession,
+  snapshotIdRaw: string,
+  headers: Record<string, string>,
+  diagnostics: ProviderDiagnostics = {}
+) {
+  const snapshotId = safeSnapshotId(snapshotIdRaw);
+  const notFound = () =>
+    new Response(JSON.stringify({ error: "not_found", message: "Screenshot not found." }), {
+      status: 404,
+      headers: { "Content-Type": "application/json", ...headers },
+    });
+  if (!snapshotId || !session.driveAssetFolderId) return notFound();
+  const analysis = await readSessionAnalysis(provider, session);
+  if (!snapshotHasImage(analysis, snapshotId)) return notFound();
+  const file = await findDriveFile(
+    accessToken,
+    snapshotImageAppProperties({
+      accountId: session.accountId,
+      savedVideoId: session.savedVideoId,
+      snapshotId,
+      clarityVersion,
+    }),
+    session.driveAssetFolderId,
+    diagnostics
+  );
+  if (!file?.id) return notFound();
+  const result = await provider.readFileRange({ fileId: file.id });
+  const body =
+    result instanceof Response
+      ? await result.arrayBuffer()
+      : (result.buffer.slice(result.byteOffset, result.byteOffset + result.byteLength) as ArrayBuffer);
+  return new Response(body, {
+    status: 200,
+    headers: {
+      "Content-Type": file.mimeType || "image/jpeg",
+      ...headers,
+    },
+  });
+}
+
+/** A send after the first one used to leave analysis.json exactly as the first
+ *  upload wrote it, so a note typed or a screenshot taken afterwards never
+ *  reached the player. The coach's later send now rewrites it in place. */
+async function handleAnalysisRefresh(
+  req: Request,
+  accessToken: string,
+  provider: ClarityCloudProviderAdapter,
+  session: VideoTransferSession,
+  diagnostics: ProviderDiagnostics = {}
+) {
+  if (session.status !== "ready" || !session.driveAnalysisFileId) {
+    throw new TransferError("CLARITY_CLOUD_IMPORT_NOT_READY", "This video has not finished uploading yet.", 409);
+  }
+  const body = (await readJson(req)) as any;
+  const analysisJson = removeDataUrls(body?.analysisJson || {}) as Record<string, unknown>;
+  if (!analysisJson || typeof analysisJson !== "object" || !(analysisJson as any).analysis) {
+    return json({ error: "invalid_analysis", message: "The analysis to save was missing." }, 400);
+  }
+  // A device that never held a picture (a copy imported before pictures
+  // travelled, say) must not unlink one another device already uploaded.
+  const previous = await readSessionAnalysis(provider, session);
+  const merged = carryImageFileIds(previous, analysisJson);
+  await replaceDriveFileContent(
+    accessToken,
+    session.driveAnalysisFileId,
+    "application/json; charset=utf-8",
+    JSON.stringify({ ...merged, savedVideoId: session.savedVideoId }, null, 2),
+    "DRIVE_FINALIZE_FAILED",
+    diagnostics
+  );
+  return json({ ok: true, analysisFileId: session.driveAnalysisFileId });
+}
+
+const privateImageHeaders = { "Cache-Control": "private, max-age=3600" };
+
 async function handleStatus(accountId: string, accessToken: string, settings: Record<string, string>, savedVideoId: string, diagnostics: ProviderDiagnostics = {}) {
   const session = await readTransferSession(accountId, savedVideoId);
   if (session) return json({ ok: true, status: session.status, session: publicTransferSession(session), ...publicTransferSession(session) });
@@ -3247,6 +3462,16 @@ async function handlePlayerVideoRoute(
     const accessToken = await ensureDriveReady(accountId, diagnostics);
     return await handleImportDownload(req, accountId, googleDriveProviderAdapter(accessToken, settings, diagnostics), savedVideoId);
   }
+  // The screenshots on a video the player can already see. Read-only, so the
+  // coach-return rows their coach sent are as readable as their own uploads.
+  if (req.method === "GET" && sub[1] === "snapshots") {
+    const accessToken = await ensureDriveReady(accountId, diagnostics);
+    const provider = googleDriveProviderAdapter(accessToken, settings, diagnostics);
+    if (sub[2]) {
+      return await snapshotImageResponse(accessToken, provider, owned, sub[2], privateImageHeaders, diagnostics);
+    }
+    return await handleSnapshotList(provider, owned);
+  }
   if (req.method === "GET" && sub[1] === "import") {
     const accessToken = await ensureDriveReady(accountId, diagnostics);
     return await handleImportPackage(accountId, googleDriveProviderAdapter(accessToken, settings, diagnostics), savedVideoId);
@@ -3672,6 +3897,29 @@ async function handleReviewShareRoute(
     });
   }
 
+  // A screenshot's picture, under the same rule as the video: only one from a
+  // video inside this review.
+  if (sub[0] === "snapshot" && sub[1] && sub[2]) {
+    const savedVideoId = cleanString(sub[1], "", 160);
+    const sessions = await reviewReturnedSessions(share.accountId, share.playerId, share.lessonId);
+    const session = sessions.find((entry) => entry.savedVideoId === savedVideoId);
+    if (!session) {
+      return new Response(JSON.stringify({ error: "not_found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json", ...shareResponseHeaders },
+      });
+    }
+    const accessToken = await ensureDriveReady(share.accountId, diagnostics);
+    return await snapshotImageResponse(
+      accessToken,
+      googleDriveProviderAdapter(accessToken, settings, diagnostics),
+      session,
+      sub[2],
+      shareResponseHeaders,
+      diagnostics
+    );
+  }
+
   if (sub.length) {
     return new Response(JSON.stringify({ error: "not_found" }), {
       status: 404,
@@ -3941,6 +4189,23 @@ async function routeVideoTransferRequest(
     if (req.method === "GET" && parts[1] === "download") {
       const accessToken = await ensureDriveReady(accountId, diagnostics);
       return await handleImportDownload(req, accountId, googleDriveProviderAdapter(accessToken, settings, diagnostics), parts[0]);
+    }
+    if (parts[1] === "snapshots" || (req.method === "PUT" && parts[1] === "analysis")) {
+      const session = await readTransferSession(accountId, parts[0]);
+      if (!session) return json({ error: "not_found", message: "Transfer not found." }, 404);
+      const accessToken = await ensureDriveReady(accountId, diagnostics);
+      const provider = googleDriveProviderAdapter(accessToken, settings, diagnostics);
+      if (req.method === "PUT" && parts[1] === "analysis") {
+        return await handleAnalysisRefresh(req, accessToken, provider, session, diagnostics);
+      }
+      if (req.method === "PUT" && parts[2]) {
+        return await handleSnapshotUpload(req, accessToken, session, parts[2], diagnostics);
+      }
+      if (req.method === "GET" && parts[2]) {
+        return await snapshotImageResponse(accessToken, provider, session, parts[2], privateImageHeaders, diagnostics);
+      }
+      if (req.method === "GET") return await handleSnapshotList(provider, session);
+      return json({ error: "not_found", message: "Video transfer route not found." }, 404);
     }
     // Opening a submission clears its unseen dot in Player Profiles.
     if (req.method === "POST" && parts[1] === "seen") {

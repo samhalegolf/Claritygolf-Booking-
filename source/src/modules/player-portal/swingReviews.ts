@@ -13,11 +13,13 @@
  *
  *   - A video the coach never sent stays on the coach's phone, so the player's
  *     copy of the review simply has one fewer video in it.
- *   - Screenshot images are stripped on upload (compactSavedVideoAnalysisJson),
- *     so a screenshot that arrived over the cloud has its title, its note and
- *     its timestamp but no picture. `imageDataUrl` is optional here for that
- *     reason, and the portal renders the timestamp when it is missing rather
- *     than an empty frame.
+ *   - Screenshot pictures travel separately from the analysis (one JPEG each
+ *     in Drive), and reviews sent before that have none at all, so a
+ *     screenshot may arrive as its title, note and timestamp only.
+ *     `imageDataUrl` is optional for that reason, and the portal renders the
+ *     timestamp when it is missing rather than an empty frame.
+ *   - A video still in the cloud has no local analysis. Its screenshots come
+ *     from `cloudSnapshots`, which the portal fetches when a review is opened.
  *
  * Nothing here decides what a player may see. Every list handed in has already
  * been filtered to this player by the server or by their own device.
@@ -66,8 +68,23 @@ export type SwingReviewScreenshot = {
   /** Seconds into the video. The fallback when the picture did not travel. */
   currentTime: number;
   imageDataUrl?: string;
+  /** "frame" is the whole picture; an area crop also has `cropRect`. */
+  captureKind?: "frame" | "area";
+  /** The cropped part of the frame, normalised 0–1 to the video. */
+  cropRect?: { x: number; y: number; width: number; height: number } | null;
   savedVideoId: string;
   videoTitle: string;
+};
+
+/** A screenshot on a video that is still in the cloud, as the portal fetched it. */
+export type CloudReviewSnapshot = {
+  id: string;
+  title: string;
+  note?: string;
+  currentTime: number;
+  captureKind?: "frame" | "area";
+  cropRect?: { x: number; y: number; width: number; height: number } | null;
+  imageDataUrl?: string;
 };
 
 export type SwingReviewAnalysisNote = {
@@ -107,6 +124,8 @@ export type SwingReviewSources<
   cloudVideos: ClarityCloudImportTransfer[];
   notes: TNote[];
   practice: TPractice[];
+  /** Screenshots on cloud-only videos, keyed by saved video id. */
+  cloudSnapshots?: Record<string, CloudReviewSnapshot[]>;
 };
 
 /**
@@ -126,6 +145,7 @@ export function groupSwingReviews<
   cloudVideos,
   notes,
   practice,
+  cloudSnapshots = {},
 }: SwingReviewSources<TNote, TPractice>): SwingReview<TNote, TPractice>[] {
   const reviewVideos = savedVideos.filter((video) => isSwingReviewLessonId(video.lessonId));
 
@@ -177,17 +197,28 @@ export function groupSwingReviews<
           .sort()
           .at(-1) || swingReviewStartedAt(id);
 
-      const screenshots = videos.flatMap((video) =>
-        (video.analysisSnapshot?.focusSnapshots || []).map((snapshot) => ({
-          id: snapshot.id,
-          title: snapshot.title,
-          note: snapshot.note,
-          currentTime: snapshot.currentTime,
-          imageDataUrl: snapshot.imageDataUrl,
-          savedVideoId: video.savedVideoId,
-          videoTitle: video.title,
-        })),
-      );
+      const screenshots: SwingReviewScreenshot[] = [
+        ...videos.flatMap((video) =>
+          (video.analysisSnapshot?.focusSnapshots || []).map((snapshot) => ({
+            id: snapshot.id,
+            title: snapshot.title,
+            note: snapshot.note,
+            currentTime: snapshot.currentTime,
+            imageDataUrl: snapshot.imageDataUrl,
+            captureKind: snapshot.captureKind,
+            cropRect: snapshot.cropRect,
+            savedVideoId: video.savedVideoId,
+            videoTitle: video.title,
+          })),
+        ),
+        ...reviewCloud.flatMap((transfer) =>
+          (cloudSnapshots[transfer.savedVideoId] || []).map((snapshot) => ({
+            ...snapshot,
+            savedVideoId: transfer.savedVideoId,
+            videoTitle: transfer.savedVideo?.title || "Video",
+          })),
+        ),
+      ];
 
       const analysisNotes = videos.flatMap((video) =>
         (video.analysisSnapshot?.notes || []).map((note) => ({

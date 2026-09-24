@@ -1436,6 +1436,36 @@
   gap: 10px;
 }
 
+/* The whole row opens the frame viewer at the instant it was taken. */
+.player-portal-review-shot {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.player-portal-review-shot:focus-visible {
+  outline: 2px solid var(--pt-accent);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+.player-portal-review-shot-link {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--pt-text-body);
+  text-decoration: underline;
+}
+
 .player-portal-review-shots img {
   width: 76px;
   flex-shrink: 0;

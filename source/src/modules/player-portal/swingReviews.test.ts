@@ -245,3 +245,60 @@ test("a malformed review id does not throw, it just has no clock", () => {
   assert.equal(reviews.length, 1);
   assert.equal(reviews[0].at, "");
 });
+
+test("a video still in the cloud brings its screenshots once the portal has fetched them", () => {
+  // Before this, a player who had not downloaded the video saw a review with
+  // no screenshots at all -- the only copy of them was inside the video's
+  // analysis, which only a download brought down.
+  const cloud = transfer({
+    savedVideoId: "v-cloud",
+    direction: "coach-return",
+    savedVideo: { lessonId: REVIEW, title: "Driver" },
+  } as never);
+  const shot = {
+    id: "focus-1",
+    title: "Focus snapshot",
+    note: "Scapula connected",
+    currentTime: 0.8,
+    captureKind: "area" as const,
+    cropRect: { x: 0.2, y: 0.3, width: 0.25, height: 0.4 },
+    imageDataUrl: "data:image/jpeg;base64,AAA",
+  };
+  const [before] = groupSwingReviews({ ...empty, cloudVideos: [cloud] });
+  assert.equal(before.screenshots.length, 0);
+
+  const [after] = groupSwingReviews({
+    ...empty,
+    cloudVideos: [cloud],
+    cloudSnapshots: { "v-cloud": [shot] },
+  });
+  assert.deepEqual(after.screenshots, [{ ...shot, savedVideoId: "v-cloud", videoTitle: "Driver" }]);
+  assert.equal(after.itemCount, 2);
+});
+
+test("a screenshot on a downloaded video keeps where in the frame it was taken", () => {
+  const [review] = groupSwingReviews({
+    ...empty,
+    savedVideos: [
+      savedVideo({
+        savedVideoId: "v1",
+        lessonId: REVIEW,
+        analysisSnapshot: {
+          focusSnapshots: [
+            {
+              id: "s1",
+              title: "Focus snapshot",
+              currentTime: 1.2,
+              captureKind: "area",
+              cropRect: { x: 0.1, y: 0.1, width: 0.2, height: 0.2 },
+              imageDataUrl: "",
+            },
+          ],
+          notes: [],
+        },
+      } as never),
+    ],
+  });
+  assert.equal(review.screenshots[0].captureKind, "area");
+  assert.deepEqual(review.screenshots[0].cropRect, { x: 0.1, y: 0.1, width: 0.2, height: 0.2 });
+});

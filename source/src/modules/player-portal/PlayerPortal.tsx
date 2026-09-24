@@ -28,7 +28,8 @@ import {
   type PlayerBookingEmbedConfig,
 } from "./PlayerBookingEmbed";
 import { formatClock, formatDate } from "./format";
-import { groupSwingReviews } from "./swingReviews";
+import { groupSwingReviews, type CloudReviewSnapshot } from "./swingReviews";
+import { SnapshotFrameViewer, type FrameViewerShot } from "../shared/SnapshotFrameViewer";
 import { SwingReviewFlow, type ReviewOffer, type SwingReviewDraft } from "./SwingReviewFlow";
 import { stashReviewDraft, takeReviewDraft } from "./reviewDraftStore";
 import { recentActivityList } from "./recentActivity";
@@ -54,8 +55,11 @@ import {
 } from "../practice/practiceModel";
 import {
   createIndexedDbSavedVideoLibrary,
+  fetchCloudSnapshotImage,
   fetchGuestStatus,
+  hydrateSnapshotImages,
   importSavedVideoFromClarityCloud,
+  listCloudSnapshots,
   listClarityCloudImportTransfers,
   markClarityCloudReturnSeen,
   registerGuestSender,
@@ -323,6 +327,12 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   const [expandedPracticeId, setExpandedPracticeId] = useState<string | null>(null);
   /** Which swing review is open. Empty means the list, which is how it lands. */
   const [openReviewId, setOpenReviewId] = useState("");
+  /** The screenshot being looked at in its video. */
+  const [frameViewKey, setFrameViewKey] = useState("");
+  /** Screenshots on review videos that are still in the cloud, fetched when
+   *  their review is first opened. */
+  const [cloudReviewSnapshots, setCloudReviewSnapshots] = useState<Record<string, CloudReviewSnapshot[]>>({});
+  const cloudSnapshotRequests = useRef<Set<string>>(new Set());
   const [completingPracticeId, setCompletingPracticeId] = useState<string | null>(null);
   const [practiceVideos, setPracticeVideos] = useState<ClarityCloudImportTransfer[]>([]);
   // The business's outside booking widget, if it runs one. Null until the
@@ -1225,8 +1235,75 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
      notes, videos and practice the portal has anyway, so this is a regrouping
      of what is here rather than a new source of truth. See swingReviews.ts. */
   const swingReviews = useMemo(
-    () => (isGuest ? [] : groupSwingReviews({ savedVideos, cloudVideos, notes, practice })),
-    [cloudVideos, isGuest, notes, practice, savedVideos],
+    () =>
+      isGuest
+        ? []
+        : groupSwingReviews({ savedVideos, cloudVideos, notes, practice, cloudSnapshots: cloudReviewSnapshots }),
+    [cloudReviewSnapshots, cloudVideos, isGuest, notes, practice, savedVideos],
+  );
+
+  /* Opening a review fetches the screenshots its videos are missing: all of
+     them for a video still in the cloud, and the pictures for one downloaded
+     before pictures travelled with the video. */
+  const openReview = swingReviews.find((review) => review.id === openReviewId);
+  useEffect(() => {
+    if (!openReview || !savedVideoLibrary) return;
+    let cancelled = false;
+    for (const transfer of openReview.cloudVideos) {
+      const id = transfer.savedVideoId;
+      if (cloudSnapshotRequests.current.has(id)) continue;
+      cloudSnapshotRequests.current.add(id);
+      void (async () => {
+        const listed = await listCloudSnapshots(id, "player");
+        const withPictures = await Promise.all(
+          listed.map(async (snapshot): Promise<CloudReviewSnapshot> => ({
+            id: snapshot.id,
+            title: snapshot.title,
+            note: snapshot.note,
+            currentTime: snapshot.currentTime,
+            captureKind: snapshot.captureKind,
+            cropRect: snapshot.cropRect,
+            imageDataUrl: snapshot.hasImage
+              ? await fetchCloudSnapshotImage(id, snapshot.id, "player").catch(() => undefined)
+              : undefined,
+          })),
+        );
+        setCloudReviewSnapshots((current) => ({ ...current, [id]: withPictures }));
+      })().catch(() => {
+        cloudSnapshotRequests.current.delete(id);
+      });
+    }
+    const stale = openReview.videos.filter(
+      (video) =>
+        Boolean(video.cloud?.transferId) &&
+        (video.analysisSnapshot.focusSnapshots.length === 0 ||
+          video.analysisSnapshot.focusSnapshots.some((snapshot) => !snapshot.imageDataUrl)),
+    );
+    if (stale.length) {
+      void Promise.all(
+        stale.map((video) => hydrateSnapshotImages(video.savedVideoId, savedVideoLibrary, "player")),
+      ).then((results) => {
+        if (!cancelled && results.some(Boolean)) void refreshSavedVideos();
+      });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [openReview, refreshSavedVideos, savedVideoLibrary]);
+
+  const resolveReviewVideoUrl = useCallback(
+    async (savedVideoId: string) => {
+      const blob = await savedVideoLibrary?.getBlob(savedVideoId).catch(() => null);
+      if (blob) return URL.createObjectURL(blob);
+      // Still in the cloud: stream a copy for viewing without filing it on
+      // this phone. The Download button is still how a player keeps it.
+      const response = await apiFetch(
+        `/api/video-transfer/player/${encodeURIComponent(savedVideoId)}/download`,
+      );
+      if (!response.ok) return null;
+      return URL.createObjectURL(await response.blob());
+    },
+    [savedVideoLibrary],
   );
 
   /* A review holding a returned video the player has not opened. Counted off
@@ -2301,20 +2378,50 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                                   <ul className="player-portal-review-shots">
                                     {review.screenshots.map((shot) => (
                                       <li key={`${shot.savedVideoId}-${shot.id}`}>
-                                        {shot.imageDataUrl ? (
-                                          <img src={shot.imageDataUrl} alt={shot.title} />
-                                        ) : (
-                                          <span className="player-portal-review-shot-time">
-                                            {formatClock(shot.currentTime)}
-                                          </span>
-                                        )}
-                                        <div>
-                                          <strong>{shot.title}</strong>
-                                          {shot.note && <p>{shot.note}</p>}
-                                        </div>
+                                        <button
+                                          type="button"
+                                          className="player-portal-review-shot"
+                                          onClick={() => setFrameViewKey(`${shot.savedVideoId}-${shot.id}`)}
+                                          aria-label={`Show ${shot.title} in the video`}
+                                        >
+                                          {shot.imageDataUrl ? (
+                                            <img src={shot.imageDataUrl} alt="" />
+                                          ) : (
+                                            <span className="player-portal-review-shot-time">
+                                              {formatClock(shot.currentTime)}
+                                            </span>
+                                          )}
+                                          <div>
+                                            <strong>{shot.title}</strong>
+                                            {shot.note && <p>{shot.note}</p>}
+                                            <span className="player-portal-review-shot-link">
+                                              View in video ›
+                                            </span>
+                                          </div>
+                                        </button>
                                       </li>
                                     ))}
                                   </ul>
+                                )}
+                                {frameViewKey && (
+                                  <SnapshotFrameViewer
+                                    shots={review.screenshots.map(
+                                      (shot): FrameViewerShot => ({
+                                        key: `${shot.savedVideoId}-${shot.id}`,
+                                        savedVideoId: shot.savedVideoId,
+                                        videoTitle: shot.videoTitle,
+                                        title: shot.title,
+                                        note: shot.note,
+                                        currentTime: shot.currentTime,
+                                        captureKind: shot.captureKind,
+                                        cropRect: shot.cropRect,
+                                        imageUrl: shot.imageDataUrl || undefined,
+                                      }),
+                                    )}
+                                    initialKey={frameViewKey}
+                                    resolveVideoUrl={resolveReviewVideoUrl}
+                                    onClose={() => setFrameViewKey("")}
+                                  />
                                 )}
 
                                 {review.analysisNotes.map((note) => (
