@@ -948,14 +948,33 @@ function normalizeAvailability(availability) {
         // from the public slot calculation and the booking page shows no
         // times at all.
         const accountId = cleanSlug(window?.accountId, "");
+        // Where the coach is working in this window. Empty means "wherever the
+        // lesson type is" -- every window saved before locations existed.
+        const locationId = cleanSlug(window?.locationId, "");
         if (end <= start) return null;
-        return accountId ? { start, end, coachId, accountId } : { start, end, coachId };
+        return {
+          start,
+          end,
+          coachId,
+          ...(accountId ? { accountId } : {}),
+          ...(locationId ? { locationId } : {}),
+        };
       })
       .filter(Boolean)
-      .sort((a, b) => (a.coachId || "").localeCompare(b.coachId || "") || a.start - b.start)
+      .sort(
+        (a, b) =>
+          (a.coachId || "").localeCompare(b.coachId || "") ||
+          (a.locationId || "").localeCompare(b.locationId || "") ||
+          a.start - b.start,
+      )
       .reduce((merged, window) => {
         const previous = merged.at(-1);
-        if (previous && previous.coachId === window.coachId && window.start < previous.end) {
+        if (
+          previous &&
+          previous.coachId === window.coachId &&
+          (previous.locationId || "") === (window.locationId || "") &&
+          window.start < previous.end
+        ) {
           previous.end = Math.max(previous.end, window.end);
         } else {
           merged.push({ ...window });
@@ -10452,13 +10471,30 @@ function slotOverlaps(a, b) {
   );
 }
 
-function isInsideAvailability(availability, day, start, duration, coachId = defaultCoachProfileFromAccount().id) {
+/**
+ * A window with no location predates locations and covers every one. A window
+ * pinned to a location only opens the coach there: a coach at the Range on
+ * Monday is not bookable at the Club on Monday.
+ */
+function availabilityWindowCoversLocation(window, locationId = "") {
+  return !window?.locationId || !locationId || window.locationId === locationId;
+}
+
+function isInsideAvailability(
+  availability,
+  day,
+  start,
+  duration,
+  coachId = defaultCoachProfileFromAccount().id,
+  locationId = "",
+) {
   const end = start + duration;
   const fallbackCoachId = defaultCoachProfileFromAccount().id;
   return (
     availability[day]?.some(
       (window) =>
         (window.coachId || fallbackCoachId) === coachId &&
+        availabilityWindowCoversLocation(window, locationId) &&
         start >= window.start &&
         end <= window.end,
     ) ?? false
@@ -10789,6 +10825,7 @@ function publicSlotsForService(accountState, service, week, ignoreId = "") {
     for (const window of windows) {
       const windowCoachId = window.coachId || defaultCoachProfileFromAccount().id;
       if (windowCoachId !== serviceCoachId) continue;
+      if (!availabilityWindowCoversLocation(window, serviceLocationId)) continue;
       for (let start = window.start; start + service.duration <= window.end; start += PUBLIC_SLOT_STEP_MINUTES) {
         const candidate = {
           week,
@@ -10798,7 +10835,7 @@ function publicSlotsForService(accountState, service, week, ignoreId = "") {
         };
         if (
           !isSlotInPast(week, day, start, slotTimeZone) &&
-          isInsideAvailability(accountState.availability, day, start, service.duration, serviceCoachId) &&
+          isInsideAvailability(accountState.availability, day, start, service.duration, serviceCoachId, serviceLocationId) &&
           !hasCollision(items, candidate, service, accountState)
         ) {
           slots.push({
@@ -11039,7 +11076,9 @@ async function createPublicBooking(accountId: string, payload: Record<string, an
         conflictItem: conflictItemSummary(collision.item, accountState),
       });
     }
-  } else if (!isInsideAvailability(accountState.availability, day, start, service.duration, serviceCoachId)) {
+  } else if (
+    !isInsideAvailability(accountState.availability, day, start, service.duration, serviceCoachId, serviceLocationId)
+  ) {
     throw publicSlotUnavailableError({
       ...rejectionBase,
       reason: "outside_availability",
@@ -11561,6 +11600,9 @@ async function reschedulePublicBooking(accountId: string, payload: Record<string
   );
   const duration = service?.duration || appointment.duration;
   const serviceCoachId = appointment.coachId || service?.coachId || defaultCoachId(accountState.coaches || []);
+  const appointmentLocationId =
+    cleanSlug(appointment.locationId, "") ||
+    (service ? serviceLocation(service, accountState.locations || [], accountState.account)?.id || "" : "");
   const slot = { week, day, start, duration };
   const itemRead = await readPublicSlotItemsForWeek({ accountId: workspaceAccount.id, week });
   const accountItems = (itemRead.items || []).filter((item) => recordBelongsToAccount(item, workspaceAccount.id));
@@ -11602,6 +11644,7 @@ async function reschedulePublicBooking(accountId: string, payload: Record<string
           start,
           duration,
           serviceCoachId,
+          appointmentLocationId,
         ) ||
         !Number.isInteger(duration)) ||
     hasCollision(itemsWithoutOriginal, slot, service, accountState)

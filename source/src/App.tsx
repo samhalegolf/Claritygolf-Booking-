@@ -2056,6 +2056,8 @@ type ServiceEditor = Omit<Service, "id"> & {
 type AvailabilityWindow = {
   accountId?: string;
   coachId?: string;
+  /** Where the coach works in this window. Empty covers every location (pre-location data). */
+  locationId?: string;
   start: number;
   end: number;
 };
@@ -4911,13 +4913,24 @@ function cleanAvailability(availability?: AvailabilityWindow[][], fallbackCoachI
         const end = snap(clamp(rawEnd, start + SNAP_MINUTES, LAST_TIME_SLOT_MINUTES));
         const coachId = cleanSlug(window?.coachId, fallbackCoachId);
         const accountId = cleanSlug(window?.accountId, defaultWorkspaceAccountFromCoachAccount().id);
-        return end > start ? { start, end, coachId, accountId } : null;
+        const locationId = cleanSlug(window?.locationId, "");
+        return end > start ? { start, end, coachId, accountId, ...(locationId ? { locationId } : {}) } : null;
       })
       .filter((window): window is AvailabilityWindow => Boolean(window))
-      .sort((a, b) => (a.coachId || "").localeCompare(b.coachId || "") || a.start - b.start)
+      .sort(
+        (a, b) =>
+          (a.coachId || "").localeCompare(b.coachId || "") ||
+          (a.locationId || "").localeCompare(b.locationId || "") ||
+          a.start - b.start,
+      )
       .reduce<AvailabilityWindow[]>((merged, window) => {
         const previous = merged.at(-1);
-        if (previous && previous.coachId === window.coachId && window.start < previous.end) {
+        if (
+          previous &&
+          previous.coachId === window.coachId &&
+          (previous.locationId || "") === (window.locationId || "") &&
+          window.start < previous.end
+        ) {
           previous.end = Math.max(previous.end, window.end);
         } else {
           merged.push({ ...window });
@@ -4930,6 +4943,19 @@ function cleanAvailability(availability?: AvailabilityWindow[][], fallbackCoachI
 function emptyAvailability(): AvailabilityWindow[][] {
   return Array.from({ length: DAY_COUNT }, () => []);
 }
+
+/**
+ * A window pinned to a location only opens the coach there. A window with no
+ * location predates locations and still covers every one. Same rule as the
+ * server's availabilityWindowCoversLocation.
+ */
+function availabilityWindowCoversLocation(window: AvailabilityWindow, locationId = "") {
+  return !window.locationId || !locationId || window.locationId === locationId;
+}
+
+// Band tint per location, as a hue. hsl() rather than hex so it sits on top of
+// --available in either theme, and the hex ratchet stays where it is.
+const LOCATION_BAND_HUES = [150, 212, 32, 282, 352, 52, 188, 320];
 
 function availabilityForCoach(availability: AvailabilityWindow[][], coachId: string, fallbackCoachId: string) {
   return availability.map((dayWindows) =>
@@ -5576,6 +5602,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const [availability, setAvailability] = useState<AvailabilityWindow[][]>(() => (isEmbedMode ? emptyAvailability() : defaultAvailability));
   const [availabilitySaveState, setAvailabilitySaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [editingAvailabilityWindow, setEditingAvailabilityWindow] = useState("");
+  const [availabilityCoachChoice, setAvailabilityCoachChoice] = useState("");
   // The client list is owned by modules/clients/clientsStore. Reading it here
   // keeps every screen that needs people on one copy, and the old setter name
   // survives because the writes that answer with a fresh list all use it.
@@ -6928,6 +6955,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         .filter((coach) => (coach.assignedLocationIds ?? []).includes(selectedCalendarLocationId))
         .map((coach) => coach.id),
     );
+    // A coach rostered here in Availability works here, assigned or not.
+    availability.flat().forEach((window) => {
+      if (window.locationId === selectedCalendarLocationId && recordBelongsToAccount(window, activeAccountId)) {
+        coachIds.add(window.coachId || activeCoachId);
+      }
+    });
     visibleWeekItems.forEach((item) =>
       coachIds.add(
         resolvedCalendarItemCoachId(item, itemService(item, services), coachProfiles, coachAccount),
@@ -6936,7 +6969,18 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     return Array.from(coachIds)
       .map((coachId) => bookingCoachSnapshotFor(coachId, coachProfiles, coachAccount))
       .sort((a, b) => (a.displayName || a.name).localeCompare(b.displayName || b.name));
-  }, [activeCoachList, effectiveCalendarPerspective, selectedCalendarLocationId, coachAccount, coachProfiles, services, visibleWeekItems]);
+  }, [
+    activeAccountId,
+    activeCoachId,
+    activeCoachList,
+    availability,
+    effectiveCalendarPerspective,
+    selectedCalendarLocationId,
+    coachAccount,
+    coachProfiles,
+    services,
+    visibleWeekItems,
+  ]);
   const locationCalendarHasAppointments = visibleWeekItems.some((item) => item.kind === "appointment");
   const locationCalendarCoachItemCount = (coachId?: string) => {
     if (!coachId) return 0;
@@ -6951,12 +6995,84 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     () => availability.map((dayWindows) => dayWindows.filter((window) => recordBelongsToAccount(window, activeAccountId))),
     [activeAccountId, availability],
   );
+  // The location calendar only answers for the coaches working there, so a
+  // coach at another range must not light up this range's day.
+  const locationCalendarCoachIds = useMemo(
+    () => new Set(locationCalendarCoachGroups.map((coach) => coach.coachId).filter(Boolean)),
+    [locationCalendarCoachGroups],
+  );
   const calendarAvailability = useMemo(
     () =>
       effectiveCalendarPerspective === "coach"
         ? availabilityForCoach(accountAvailability, selectedCalendarCoachId, activeCoachId)
+        : effectiveCalendarPerspective === "location"
+        ? accountAvailability.map((dayWindows) =>
+            dayWindows.filter((window) =>
+              window.locationId
+                ? window.locationId === selectedCalendarLocationId
+                : locationCalendarCoachIds.has(window.coachId || activeCoachId),
+            ),
+          )
         : accountAvailability,
-    [accountAvailability, activeCoachId, effectiveCalendarPerspective, selectedCalendarCoachId],
+    [
+      accountAvailability,
+      activeCoachId,
+      effectiveCalendarPerspective,
+      locationCalendarCoachIds,
+      selectedCalendarCoachId,
+      selectedCalendarLocationId,
+    ],
+  );
+  // Locations the business runs, in their set order. With more than one, every
+  // availability band is tinted by where the coach is, so a coach's week shows
+  // at a glance which range they are at when.
+  const availabilityLocations = useMemo(
+    () =>
+      accountLocations
+        .filter((location) => location.active && !location.archived)
+        .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name)),
+    [accountLocations],
+  );
+  const hasMultipleAvailabilityLocations = availabilityLocations.length > 1;
+  const availabilityLocationHue = (locationId?: string) => {
+    const index = availabilityLocations.findIndex((location) => location.id === locationId);
+    return index < 0 ? null : LOCATION_BAND_HUES[index % LOCATION_BAND_HUES.length];
+  };
+  const availabilityLocationLabel = (locationId?: string) => {
+    const location = availabilityLocations.find((entry) => entry.id === locationId);
+    return location ? location.shortName || location.name : "Any location";
+  };
+  // Settings › Availability edits one coach at a time. An admin picks whose
+  // week; a coach only ever sees their own.
+  const availabilityEditorCoaches = useMemo(() => {
+    const own = activeCoachList.find((coach) => coach.id === activeCoachId);
+    if (!isAdminUser) return own ? [own] : [];
+    return [...activeCoachList].sort(
+      (a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || (a.displayName || a.name).localeCompare(b.displayName || b.name),
+    );
+  }, [activeCoachId, activeCoachList, isAdminUser]);
+  const availabilityEditorCoachId =
+    isAdminUser && availabilityEditorCoaches.some((coach) => coach.id === availabilityCoachChoice)
+      ? availabilityCoachChoice
+      : availabilityEditorCoaches.some((coach) => coach.id === activeCoachId)
+      ? activeCoachId
+      : availabilityEditorCoaches[0]?.id || activeCoachId;
+  const availabilityEditorCoach = availabilityEditorCoaches.find((coach) => coach.id === availabilityEditorCoachId);
+  // Where this coach can be rostered: their assigned locations, or every
+  // location when none are assigned.
+  const availabilityEditorLocations = useMemo(() => {
+    const assigned = availabilityEditorCoach?.assignedLocationIds ?? [];
+    const own = availabilityLocations.filter((location) => assigned.includes(location.id));
+    return own.length ? own : availabilityLocations;
+  }, [availabilityEditorCoach, availabilityLocations]);
+  const availabilityEditorDefaultLocationId = hasMultipleAvailabilityLocations
+    ? availabilityEditorLocations.find((location) => location.id === availabilityEditorCoach?.defaultLocationId)?.id ||
+      availabilityEditorLocations[0]?.id ||
+      ""
+    : "";
+  const availabilityEditorWeek = useMemo(
+    () => availabilityForCoach(accountAvailability, availabilityEditorCoachId, activeCoachId),
+    [accountAvailability, activeCoachId, availabilityEditorCoachId],
   );
   const calendarDisplayBounds = useMemo(() => {
     const points = [DEFAULT_CALENDAR_START_MINUTES, DEFAULT_CALENDAR_END_MINUTES];
@@ -10277,7 +10393,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     if (!bookingDaySelected) return [];
 
     const serviceAvailability = availabilityForCoach(accountAvailability, publicBookingServiceCoachId, publicBookingFallbackCoachId);
-    const windows = serviceAvailability[bookingDay] ?? [];
+    const serviceLocationId = serviceLocation(bookingTargetService, locations, coachAccount).id;
+    const windows = (serviceAvailability[bookingDay] ?? []).filter((window) =>
+      availabilityWindowCoversLocation(window, serviceLocationId),
+    );
     const slots: BookingSlot[] = [];
     windows.forEach((window) => {
       for (let start = window.start; start + bookingTargetService.duration <= window.end; start += 30) {
@@ -10305,6 +10424,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     bookingDaySelected,
     bookingMode,
     bookingTargetService,
+    coachAccount,
+    locations,
     publicBookingSlotKey,
     publicBookingSlots,
     isEmbedMode,
@@ -11026,6 +11147,35 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     setPointerSessionState(null);
     setMovedState(false);
     if (!options.preserveQuickCreate) setQuickCreate(null);
+  }
+
+  function renderAvailableBand(window: AvailabilityWindow, key: string) {
+    const visibleWindow = clipCalendarSegment(window.start, window.end - window.start);
+    if (!visibleWindow) return null;
+    const bandTop = calendarMinutesToTop(visibleWindow.start);
+    // The location view is one location already; everywhere else the band says
+    // where the coach is working.
+    const hue =
+      hasMultipleAvailabilityLocations && effectiveCalendarPerspective !== "location"
+        ? availabilityLocationHue(window.locationId)
+        : null;
+    return (
+      <div
+        className={`available-band ${hue !== null ? "has-location" : ""}`}
+        key={key}
+        style={{
+          top: bandTop,
+          height: calendarSegmentHeight(visibleWindow.start, visibleWindow.duration),
+          // The band draws its own hour ticks, and a window rarely opens on the
+          // hour. Hand it its distance from the top of the grid so the ticks
+          // count from the time gutter rather than from the band edge.
+          ["--band-offset" as string]: `${bandTop}px`,
+          ...(hue !== null ? { ["--location-hue" as string]: String(hue) } : {}),
+        } as CSSProperties}
+      >
+        {hue !== null ? <span className="available-band-location">{availabilityLocationLabel(window.locationId)}</span> : null}
+      </div>
+    );
   }
 
   function isInsideAvailability(day: number, start: number, duration: number) {
@@ -18433,66 +18583,95 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     deleteService(service);
   }
 
-  function updateAvailabilityWindow(day: number, index: number, field: keyof AvailabilityWindow, value: number) {
+  /**
+   * Every edit in the Availability panel is to one coach's week. The state
+   * holds the whole business's windows in one array, so each edit pulls out
+   * the chosen coach's windows for the day, changes those, and puts the other
+   * coaches' back untouched. Indices are into that coach's list, which is what
+   * the panel renders.
+   */
+  function isAvailabilityEditorWindow(window: AvailabilityWindow) {
+    return (
+      recordBelongsToAccount(window, activeAccountId) &&
+      (window.coachId || activeCoachId) === availabilityEditorCoachId
+    );
+  }
+
+  function editAvailabilityEditorDay(day: number, edit: (windows: AvailabilityWindow[]) => AvailabilityWindow[]) {
     setAvailabilitySaveState("idle");
     setAvailability((current) =>
       cleanAvailability(
-        current.map((windows, dayIndex) =>
-          dayIndex === day
-            ? windows.map((window, windowIndex) =>
-                windowIndex === index ? { ...window, [field]: value } : window,
-              )
-            : windows,
-        ),
+        current.map((windows, dayIndex) => {
+          if (dayIndex !== day) return windows;
+          const others = windows.filter((window) => !isAvailabilityEditorWindow(window));
+          const edited = edit(windows.filter(isAvailabilityEditorWindow)).map((window) => ({
+            ...window,
+            coachId: availabilityEditorCoachId,
+            accountId: window.accountId || activeAccountId,
+          }));
+          return [...others, ...edited];
+        }),
         activeCoachId,
       ),
+    );
+  }
+
+  function updateAvailabilityWindow(day: number, index: number, field: keyof AvailabilityWindow, value: number) {
+    editAvailabilityEditorDay(day, (windows) =>
+      windows.map((window, windowIndex) => (windowIndex === index ? { ...window, [field]: value } : window)),
     );
   }
 
   function removeAvailabilityWindow(day: number, index: number) {
-    setAvailabilitySaveState("idle");
     setEditingAvailabilityWindow((current) => (current === `${day}-${index}` ? "" : current));
-    setAvailability((current) =>
-      cleanAvailability(
-        current.map((windows, dayIndex) =>
-          dayIndex === day ? windows.filter((_, windowIndex) => windowIndex !== index) : windows,
-        ),
-        activeCoachId,
-      ),
-    );
+    editAvailabilityEditorDay(day, (windows) => windows.filter((_, windowIndex) => windowIndex !== index));
   }
 
   function addAvailabilityWindow(day: number) {
-    setAvailabilitySaveState("idle");
-    const existingWindows = availability[day] ?? [];
+    const existingWindows = availabilityEditorWeek[day] ?? [];
     const lastWindow = existingWindows.at(-1);
     const start = lastWindow
       ? Math.min(Math.max(lastWindow.end, timeToMinutes(9, 0)), LAST_TIME_SLOT_MINUTES - SNAP_MINUTES * 2)
       : timeToMinutes(9, 0);
     const end = Math.min(Math.max(start + SNAP_MINUTES * 2, start + SNAP_MINUTES), LAST_TIME_SLOT_MINUTES);
     setEditingAvailabilityWindow(`${day}-${existingWindows.length}`);
-    setAvailability((current) =>
-      cleanAvailability(
-        current.map((windows, dayIndex) => (dayIndex === day ? [...windows, { start, end, coachId: activeCoachId }] : windows)),
-        activeCoachId,
+    editAvailabilityEditorDay(day, (windows) => [
+      ...windows,
+      { start, end, locationId: lastWindow?.locationId || availabilityEditorDefaultLocationId || undefined },
+    ]);
+  }
+
+  function updateAvailabilityWindowLocation(day: number, index: number, locationId: string) {
+    setEditingAvailabilityWindow("");
+    editAvailabilityEditorDay(day, (windows) =>
+      windows.map((window, windowIndex) =>
+        windowIndex === index ? { ...window, locationId: locationId || undefined } : window,
       ),
     );
   }
 
   function toggleAvailabilityDay(day: number) {
-    setAvailabilitySaveState("idle");
     setEditingAvailabilityWindow("");
-    setAvailability((current) =>
-      cleanAvailability(
-        current.map((windows, dayIndex) =>
-          dayIndex === day
-            ? windows.length
-              ? []
-              : [{ start: timeToMinutes(9, 0), end: timeToMinutes(17, 0), coachId: activeCoachId }]
-            : windows,
-        ),
-        activeCoachId,
-      ),
+    editAvailabilityEditorDay(day, (windows) =>
+      windows.length
+        ? []
+        : [
+            {
+              start: timeToMinutes(9, 0),
+              end: timeToMinutes(17, 0),
+              locationId: availabilityEditorDefaultLocationId || undefined,
+            },
+          ],
+    );
+  }
+
+  /** Replace the chosen coach's whole week with another coach's pattern. */
+  function copyAvailabilityFromCoach(sourceCoachId: string) {
+    if (!sourceCoachId || sourceCoachId === availabilityEditorCoachId) return;
+    const sourceWeek = availabilityForCoach(accountAvailability, sourceCoachId, activeCoachId);
+    setEditingAvailabilityWindow("");
+    sourceWeek.forEach((sourceWindows, day) =>
+      editAvailabilityEditorDay(day, () => sourceWindows.map(({ start, end, locationId }) => ({ start, end, locationId }))),
     );
   }
 
@@ -21630,7 +21809,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         <div className="data-card wide">
           <div className="data-card-header">
             <div>
-              <h2>{coachAccount.venueName}</h2>
+              <h2>
+                {availabilityEditorCoaches.find((coach) => coach.id === availabilityEditorCoachId)?.displayName ||
+                  availabilityEditorCoaches.find((coach) => coach.id === availabilityEditorCoachId)?.name ||
+                  coachAccount.venueName}
+              </h2>
+              <p className="availability-coach-hint">
+                Weekly hours this coach can be booked, and where. Each block only opens bookings at its own location.
+              </p>
             </div>
             <button className="primary-button" onClick={saveAvailability}>
               {availabilitySaveState === "saving"
@@ -21640,6 +21826,50 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 : "Save Availability"}
             </button>
           </div>
+          {availabilityEditorCoaches.length > 1 ? (
+            <div className="availability-coach-picker">
+              <div className="availability-coach-tabs" role="tablist" aria-label="Coach">
+                {availabilityEditorCoaches.map((coach) => {
+                  const weekMinutes = availabilityForCoach(accountAvailability, coach.id, activeCoachId)
+                    .flat()
+                    .reduce((total, window) => total + (window.end - window.start), 0);
+                  const selected = coach.id === availabilityEditorCoachId;
+                  return (
+                    <button
+                      key={coach.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={selected}
+                      className={`availability-coach-tab ${selected ? "is-selected" : ""}`}
+                      onClick={() => {
+                        setEditingAvailabilityWindow("");
+                        setAvailabilityCoachChoice(coach.id);
+                      }}
+                    >
+                      <strong>{coach.displayName || coach.name}</strong>
+                      <small>{weekMinutes ? `${formatDurationLabel(weekMinutes)} / week` : "No hours set"}</small>
+                    </button>
+                  );
+                })}
+              </div>
+              <label className="availability-copy-from">
+                <span>Copy hours from</span>
+                <select
+                  value=""
+                  onChange={(event) => copyAvailabilityFromCoach(event.target.value)}
+                >
+                  <option value="">Choose coach</option>
+                  {availabilityEditorCoaches
+                    .filter((coach) => coach.id !== availabilityEditorCoachId)
+                    .map((coach) => (
+                      <option key={coach.id} value={coach.id}>
+                        {coach.displayName || coach.name}
+                      </option>
+                    ))}
+                </select>
+              </label>
+            </div>
+          ) : null}
           <div className="availability-editor">
             {fullDayNames.map((dayName, dayIndex) => (
               <details className="settings-subsection availability-edit-row" key={dayName}>
@@ -21648,19 +21878,26 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   <div>
                     <span>{dayName}</span>
                     <strong>
-                      {availability[dayIndex].length
-                        ? availability[dayIndex].map((window) => `${formatTime(window.start)} - ${formatTime(window.end)}`).join(", ")
+                      {availabilityEditorWeek[dayIndex].length
+                        ? availabilityEditorWeek[dayIndex]
+                            .map(
+                              (window) =>
+                                `${formatTime(window.start)} - ${formatTime(window.end)}${
+                                  hasMultipleAvailabilityLocations ? ` · ${availabilityLocationLabel(window.locationId)}` : ""
+                                }`,
+                            )
+                            .join(", ")
                         : "Closed"}
                     </strong>
                   </div>
                 </summary>
                 <div className="availability-day-controls">
                   <button className="outline-button compact-button" onClick={() => toggleAvailabilityDay(dayIndex)}>
-                    {availability[dayIndex].length ? "Closed" : "Open"}
+                    {availabilityEditorWeek[dayIndex].length ? "Closed" : "Open"}
                   </button>
                 </div>
                 <div className="availability-windows">
-                  {availability[dayIndex].map((window, windowIndex) => {
+                  {availabilityEditorWeek[dayIndex].map((window, windowIndex) => {
                     const windowKey = `${dayIndex}-${windowIndex}`;
                     const isEditingWindow = editingAvailabilityWindow === windowKey;
                     return (
@@ -21720,6 +21957,29 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             {formatTime(window.start)} - {formatTime(window.end)}
                           </button>
                         )}
+                        {hasMultipleAvailabilityLocations ? (
+                          <select
+                            className="availability-window-location"
+                            aria-label={`${dayName} window location`}
+                            value={window.locationId || ""}
+                            onChange={(event) => updateAvailabilityWindowLocation(dayIndex, windowIndex, event.target.value)}
+                            style={
+                              window.locationId
+                                ? ({ ["--location-hue" as string]: String(availabilityLocationHue(window.locationId)) } as CSSProperties)
+                                : undefined
+                            }
+                          >
+                            <option value="">Any location</option>
+                            {availabilityEditorLocations.map((location) => (
+                              <option key={location.id} value={location.id}>
+                                {location.shortName || location.name}
+                              </option>
+                            ))}
+                            {window.locationId && !availabilityEditorLocations.some((location) => location.id === window.locationId) ? (
+                              <option value={window.locationId}>{availabilityLocationLabel(window.locationId)}</option>
+                            ) : null}
+                          </select>
+                        ) : null}
                         <button
                           className="icon-button small"
                           aria-label={`Remove ${dayName} window`}
@@ -23677,6 +23937,18 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       ) : null}
                     </>
                   ) : null}
+                  {effectiveCalendarPerspective !== "location" && hasMultipleAvailabilityLocations ? (
+                    <div className="calendar-location-key" aria-label="Location colours">
+                      {availabilityLocations.map((location) => (
+                        <span
+                          key={location.id}
+                          style={{ ["--location-hue" as string]: String(availabilityLocationHue(location.id)) } as CSSProperties}
+                        >
+                          {location.shortName || location.name}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
               </div>
               <div className={`calendar-save-pill ${calendarSaveStatus}`}>
@@ -23836,26 +24108,28 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     hidden={calendarDayColumns[dayIndex].hidden}
                     style={{ left: calendarDayColumns[dayIndex].left, width: calendarDayColumns[dayIndex].width }}
                   >
-                    {calendarAvailability[dayIndex].map((window, index) => {
-                      const visibleWindow = clipCalendarSegment(window.start, window.end - window.start);
-                      if (!visibleWindow) return null;
-                      const bandTop = calendarMinutesToTop(visibleWindow.start);
-                      return (
-                        <div
-                          className="available-band"
-                          key={`${day.label}-${index}`}
-                          style={{
-                            top: bandTop,
-                            height: calendarSegmentHeight(visibleWindow.start, visibleWindow.duration),
-                            // The band draws its own hour ticks, and a window
-                            // rarely opens on the hour. Hand it its distance
-                            // from the top of the grid so the ticks count from
-                            // the time gutter rather than from the band edge.
-                            ["--band-offset" as string]: `${bandTop}px`,
-                          } as CSSProperties}
-                        />
-                      );
-                    })}
+                    {effectiveCalendarPerspective === "location" && locationCalendarCoachGroups.length > 1
+                      ? // One lane per coach, in the same order and width as the
+                        // columns their bookings land in, each carrying only
+                        // that coach's hours. An empty lane is a coach not
+                        // working that day.
+                        locationCalendarCoachGroups.map((coach, coachIndex) => (
+                          <div
+                            className="location-coach-lane"
+                            key={coach.coachId || coach.name}
+                            style={{
+                              left: `${(coachIndex * 100) / locationCalendarCoachGroups.length}%`,
+                              width: `${100 / locationCalendarCoachGroups.length}%`,
+                            }}
+                          >
+                            {calendarAvailability[dayIndex]
+                              .filter((window) => (window.coachId || activeCoachId) === coach.coachId)
+                              .map((window, index) => renderAvailableBand(window, `${day.label}-${coach.coachId}-${index}`))}
+                          </div>
+                        ))
+                      : calendarAvailability[dayIndex].map((window, index) =>
+                          renderAvailableBand(window, `${day.label}-${index}`),
+                        )}
                   </div>
                 ))}
 
