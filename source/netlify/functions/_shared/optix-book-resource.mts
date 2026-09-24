@@ -18,7 +18,7 @@ function db() {
   return getDatabase();
 }
 
-async function ensureOptixSyncTable() {
+export async function ensureOptixSyncTable() {
   await db().sql`
     CREATE TABLE IF NOT EXISTS optix_booking_sync (
       calendar_item_id TEXT PRIMARY KEY,
@@ -47,7 +47,11 @@ async function ensureOptixSyncTable() {
     ALTER TABLE optix_booking_sync
       ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0,
       ADD COLUMN IF NOT EXISTS account_id TEXT,
-      ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT 'optix'
+      ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT 'optix',
+      ADD COLUMN IF NOT EXISTS pending_action TEXT,
+      ADD COLUMN IF NOT EXISTS pending_since TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS pending_claimed_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS pending_attempts INTEGER NOT NULL DEFAULT 0
   `;
 }
 

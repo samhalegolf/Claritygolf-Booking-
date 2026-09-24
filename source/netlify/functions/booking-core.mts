@@ -18,9 +18,10 @@ import { cancelOptixCustomerBooking } from "./_shared/optix-cancel.mts";
 import {
   cancellationFreesResource,
   holdResourceIfAutomatic,
-  moveResource,
+  queueResourceAction,
   queueResourceHold,
   releaseResource,
+  runResourceAction,
 } from "./_shared/resource-handler.mts";
 import { bayBookingMatchesSlot, bayFollowsReschedule } from "./_shared/optix-reconcile.mts";
 import { calendarSlot, MINUTES_IN_DAY } from "./_shared/calendar-slot.mts";
@@ -6584,13 +6585,17 @@ function deferGoogleCalendarAvailabilitySync(accountId, netlifyContext = null) {
  * never throws and skips lessons without a synced bay, so callers pass every
  * slot-changed appointment id without checking the sync table first.
  */
-function deferOptixBayRebook(accountId: string, calendarItemIds, netlifyContext = null) {
+async function deferOptixBayRebook(accountId: string, calendarItemIds, netlifyContext = null) {
   const ids = (calendarItemIds || []).filter(Boolean);
   if (!ids.length) return;
-  console.info("optix_bay_rebook_scheduled", { accountId, calendarItemIds: ids });
+  // Written down before the response, so the sweep finishes the move if the
+  // attempt below is cut short. Only lessons that hold a bay get marked.
+  const queued = await queueResourceAction(accountId, ids, "move");
+  if (!queued.length) return;
+  console.info("optix_bay_rebook_scheduled", { accountId, calendarItemIds: queued });
   const task = (async () => {
-    for (const id of ids) {
-      await moveResource(accountId, id);
+    for (const id of queued) {
+      await runResourceAction(accountId, id, "move");
     }
   })().catch((error) => console.error("optix_bay_rebook_deferred_failed", error));
   if (netlifyContext && typeof netlifyContext.waitUntil === "function") {
@@ -6615,25 +6620,20 @@ function appointmentsWhoseResourceIsFreed(previousItemsById: Map<any, any>, item
 }
 
 /**
- * Release the resources of lessons that were just cancelled. Deferred like the
- * rebook so a save never waits on the other system. A refusal is logged and
- * left on the ledger row as failed, where the bay card shows it.
+ * Release the resources of lessons that were just cancelled. Queued before the
+ * response like the move, attempted after it, and finished by the sweep when
+ * the attempt is cut short or the other system refuses. A refusal is also left
+ * on the ledger row as failed, where the bay card shows it.
  */
-function deferResourceRelease(accountId: string, calendarItemIds, netlifyContext = null) {
+async function deferResourceRelease(accountId: string, calendarItemIds, netlifyContext = null) {
   const ids = (calendarItemIds || []).filter(Boolean);
   if (!ids.length) return;
-  console.info("resource_release_scheduled", { accountId, calendarItemIds: ids });
+  const queued = await queueResourceAction(accountId, ids, "release");
+  if (!queued.length) return;
+  console.info("resource_release_scheduled", { accountId, calendarItemIds: queued });
   const task = (async () => {
-    for (const id of ids) {
-      try {
-        const outcome = await releaseResource(accountId, id);
-        console.info("resource_release_after_cancel", { calendarItemId: id, ...outcome });
-      } catch (error) {
-        console.error("resource_release_after_cancel_failed", {
-          calendarItemId: id,
-          error: error instanceof Error ? error.message.slice(0, 300) : String(error || "").slice(0, 300),
-        });
-      }
+    for (const id of queued) {
+      await runResourceAction(accountId, id, "release");
     }
   })().catch((error) => console.error("resource_release_deferred_failed", error));
   if (netlifyContext && typeof netlifyContext.waitUntil === "function") {
@@ -6968,12 +6968,12 @@ async function writeCalendarState(accountId: string, nextState: Record<string, a
   );
   // Bay bookings follow their lessons: every still-live appointment whose slot
   // changed in this save gets its Optix bay moved in the background.
-  deferOptixBayRebook(
+  await deferOptixBayRebook(
     accountId,
     appointmentsWhoseBayFollows(previousItemsById, items).map((item) => item.id),
     netlifyContext,
   );
-  deferResourceRelease(accountId, appointmentsWhoseResourceIsFreed(previousItemsById, items), netlifyContext);
+  await deferResourceRelease(accountId, appointmentsWhoseResourceIsFreed(previousItemsById, items), netlifyContext);
   // Lessons the coach just created get the same Auto-book treatment a client
   // booking gets. The ask is recorded first (a pending sync row the scheduled
   // sweep will honour if the attempt below is cut short), then attempted.
@@ -7377,7 +7377,7 @@ function schedulePublicBookingSideEffects(accountId: string, context, appointmen
     // way — the client's confirmation screen must not wait on two Optix round
     // trips. Never throws, and skips lessons that had no bay to begin with.
     if (options.rebookResource === true) {
-      await moveResource(accountId, appointment.id);
+      await runResourceAction(accountId, appointment.id, "move");
     }
     // A client just booked. This path sends its confirmation through
     // sendBookingNotifications above rather than notifyBookingEvent, so the
@@ -7417,6 +7417,10 @@ async function writePublicBookingAppointment(accountId: string, currentState: Re
   // what the scheduled sweep honours when that happens.
   if (options.autoBookResource === true) {
     await queueResourceHold(accountId, savedAppointment.id, savedAppointment.serviceId);
+  }
+  // A client reschedule owes the bay a move. Same reason, same queue.
+  if (options.rebookResource === true) {
+    await queueResourceAction(accountId, [savedAppointment.id], "move");
   }
   schedulePublicBookingSideEffects(accountId, context, savedAppointment, options);
   return {
@@ -13576,12 +13580,16 @@ async function routeBookingApiRequest(
           // background (see deferOptixBayRebook). Only while the lesson is
           // still live: a completed or already-finished lesson keeps its record.
           const previousById = new Map(previousItem ? [[previousItem.id, previousItem]] : []);
-          deferOptixBayRebook(
+          await deferOptixBayRebook(
             requestContext.accountId,
             appointmentsWhoseBayFollows(previousById, [item]).map((entry) => entry.id),
             context,
           );
-          deferResourceRelease(requestContext.accountId, appointmentsWhoseResourceIsFreed(previousById, [item]), context);
+          await deferResourceRelease(
+            requestContext.accountId,
+            appointmentsWhoseResourceIsFreed(previousById, [item]),
+            context,
+          );
           // A lesson created through this route (no previous row) is as new as
           // one from a whole-calendar save, and gets the same Auto-book.
           if (!previousItem) {

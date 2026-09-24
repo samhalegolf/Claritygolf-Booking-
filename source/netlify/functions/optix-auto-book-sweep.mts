@@ -1,5 +1,5 @@
 import type { Config } from "@netlify/functions";
-import { sweepQueuedResourceHolds } from "./_shared/resource-handler.mts";
+import { sweepQueuedResourceActions, sweepQueuedResourceHolds } from "./_shared/resource-handler.mts";
 
 // Scheduled catch-up for Optix bay auto-booking.
 //
@@ -17,9 +17,16 @@ import { sweepQueuedResourceHolds } from "./_shared/resource-handler.mts";
 
 export default async function handler() {
   try {
-    for (const { provider, outcome } of await sweepQueuedResourceHolds({ budgetMs: 4_000 })) {
+    // One budget across both queues: a new attempt only starts in the first
+    // four seconds of the run, and each may take up to 25.
+    const nowMs = Date.now();
+    for (const { provider, outcome } of await sweepQueuedResourceHolds({ budgetMs: 4_000, nowMs })) {
       if (outcome.claimed) console.log("optix_auto_book_sweep:done", { provider, ...outcome });
     }
+    // Moves after a reschedule and releases after a cancellation, whose
+    // after-response attempt never finished.
+    const actions = await sweepQueuedResourceActions({ budgetMs: 4_000, nowMs });
+    if (actions.claimed) console.log("resource_action_sweep:done", actions);
     return new Response("ok");
   } catch (error) {
     console.error("optix_auto_book_sweep:failed", error instanceof Error ? error.message : error);
