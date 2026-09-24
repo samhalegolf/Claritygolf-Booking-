@@ -2769,6 +2769,7 @@ button {
 
 .service-picker button,
 .time-slots button,
+.booking-handedness button,
 .booking-days button {
   border: 1px solid #deded8;
   background: #fbfbf9;
@@ -2796,6 +2797,7 @@ button {
 
 .service-picker .selected-service,
 .time-slots .selected-time,
+.booking-handedness .selected-handedness,
 .booking-days .selected-day {
   border-color: #111;
   background: #111;
@@ -2868,6 +2870,88 @@ button {
   border: 1px solid #deded8;
   padding: 0 10px;
   font: inherit;
+}
+
+/* Handedness toggle and player notes on the public booking page. The option
+   buttons borrow every theme's day-picker look (their selectors sit beside
+   .booking-days above); this only lays them out and adds the explainer. */
+.booking-handedness {
+  display: grid;
+  gap: var(--c-space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.booking-handedness legend {
+  padding: 0;
+  font-size: var(--c-size-meta);
+  font-weight: 700;
+}
+
+.booking-handedness-options {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.booking-handedness button {
+  min-height: var(--c-h-control);
+  font: inherit;
+  font-weight: 700;
+  text-align: center;
+}
+
+/* The standalone booking page sits outside .app-shell, so --coach-primary is
+   unset there and the shared selected-state fill (a colour-mix of it) is
+   dropped, leaving only a border. A two-way toggle has to show which side is
+   on, so it paints from tokens that always exist. The themed .app-shell rules
+   are more specific and still win inside the player portal. */
+.booking-handedness button.selected-handedness,
+.booking-handedness button.selected-handedness:hover {
+  border-color: var(--c-accent);
+  background: var(--c-accent);
+  color: var(--c-accent-text);
+}
+
+/* The explainer. Shown on hover and on keyboard focus; the same sentence is
+   also the button's accessible description, so nothing depends on a pointer.
+   Anchored to the whole toggle row rather than its button, so on a phone the
+   right-hand option's tip cannot hang off the screen edge. */
+.booking-handedness-tip {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 5;
+  padding: var(--c-space-2) var(--c-space-3);
+  border-radius: var(--c-radius-control);
+  background: var(--c-text);
+  color: var(--c-surface);
+  font-size: var(--c-size-meta);
+  font-weight: 400;
+  line-height: 1.4;
+  text-align: left;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--c-t-fade);
+}
+
+.booking-handedness button:hover .booking-handedness-tip,
+.booking-handedness button:focus-visible .booking-handedness-tip {
+  opacity: 1;
+}
+
+.booking-form .booking-notes {
+  min-height: 84px;
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--c-surface);
+  color: var(--c-text);
+  font: inherit;
+  resize: vertical;
 }
 
 /* The asterisk is positioned against this wrapper, so the wrapper has to be
@@ -5071,6 +5155,7 @@ button {
 .client-match-prompt,
 .service-picker button,
 .time-slots button,
+.booking-handedness button,
 .booking-days button {
   border-color: var(--border);
   border-radius: 8px;
@@ -5095,6 +5180,7 @@ button {
 .client-match-prompt:hover,
 .service-picker button:hover,
 .time-slots button:hover,
+.booking-handedness button:hover,
 .booking-days button:hover {
   border-color: color-mix(in srgb, var(--coach-primary) 22%, var(--border));
   background: color-mix(in srgb, var(--coach-primary) 3%, var(--panel-soft));
@@ -5104,6 +5190,7 @@ button {
 .active-pill,
 .service-picker .selected-service,
 .time-slots .selected-time,
+.booking-handedness .selected-handedness,
 .booking-days .selected-day {
   border-color: color-mix(in srgb, var(--coach-primary) 24%, #050805);
   background:
@@ -6225,6 +6312,7 @@ button {
 
 .app-shell .public-booking .service-picker button,
 .app-shell .public-booking .time-slots button,
+.app-shell .public-booking .booking-handedness button,
 .app-shell .public-booking .booking-days button {
   border-color: color-mix(in srgb, var(--card-outline) 28%, var(--booking-border));
   background:
@@ -6235,6 +6323,7 @@ button {
 
 .app-shell .public-booking .service-picker button:hover,
 .app-shell .public-booking .time-slots button:hover,
+.app-shell .public-booking .booking-handedness button:hover,
 .app-shell .public-booking .booking-days button:hover {
   border-color: color-mix(in srgb, var(--card-outline) 58%, var(--booking-border));
   background: var(--booking-control-hover);
@@ -6242,6 +6331,7 @@ button {
 
 .app-shell .public-booking .service-picker .selected-service,
 .app-shell .public-booking .time-slots .selected-time,
+.app-shell .public-booking .booking-handedness .selected-handedness,
 .app-shell .public-booking .booking-days .selected-day {
   border-color: color-mix(in srgb, var(--card-outline) 88%, var(--booking-border));
   background:
@@ -6376,6 +6466,7 @@ button {
 
 .app-shell .public-booking.booking-theme-light .service-picker button,
 .app-shell .public-booking.booking-theme-light .time-slots button,
+.app-shell .public-booking.booking-theme-light .booking-handedness button,
 .app-shell .public-booking.booking-theme-light .booking-days button {
   border-color: #deded8;
   background: #fbfbf9;
@@ -6390,6 +6481,7 @@ button {
 
 .app-shell .public-booking.booking-theme-light .service-picker button:hover,
 .app-shell .public-booking.booking-theme-light .time-slots button:hover,
+.app-shell .public-booking.booking-theme-light .booking-handedness button:hover,
 .app-shell .public-booking.booking-theme-light .booking-days button:hover {
   border-color: #cfcfc8;
   background: #f7f7f3;
@@ -6414,6 +6506,7 @@ button {
 
 .app-shell .public-booking.booking-theme-light .service-picker .selected-service,
 .app-shell .public-booking.booking-theme-light .time-slots .selected-time,
+.app-shell .public-booking.booking-theme-light .booking-handedness .selected-handedness,
 .app-shell .public-booking.booking-theme-light .booking-days .selected-day,
 .app-shell .public-booking.booking-theme-light .confirm-booking {
   border-color: #111;
@@ -6456,6 +6549,7 @@ button {
 .app-shell .public-booking.booking-theme-light .booking-card:first-child .service-picker button,
 .app-shell .public-booking.booking-theme-light .service-picker button,
 .app-shell .public-booking.booking-theme-light .time-slots button,
+.app-shell .public-booking.booking-theme-light .booking-handedness button,
 .app-shell .public-booking.booking-theme-light .booking-days button {
   border-color: #deded8;
   background: #fbfbf9;
@@ -6466,6 +6560,7 @@ button {
 .app-shell .public-booking.booking-theme-light .booking-card:first-child .service-picker button:hover,
 .app-shell .public-booking.booking-theme-light .service-picker button:hover,
 .app-shell .public-booking.booking-theme-light .time-slots button:hover,
+.app-shell .public-booking.booking-theme-light .booking-handedness button:hover,
 .app-shell .public-booking.booking-theme-light .booking-days button:hover {
   border-color: #cfcfc8;
   background: #f7f7f3;
@@ -6474,6 +6569,7 @@ button {
 .app-shell .public-booking.booking-theme-light .booking-card:first-child .service-picker .selected-service,
 .app-shell .public-booking.booking-theme-light .service-picker .selected-service,
 .app-shell .public-booking.booking-theme-light .time-slots .selected-time,
+.app-shell .public-booking.booking-theme-light .booking-handedness .selected-handedness,
 .app-shell .public-booking.booking-theme-light .booking-days .selected-day {
   border-color: #cfcfc8;
   background: #f7f7f3;
@@ -6502,10 +6598,12 @@ button {
 .app-shell .public-booking.booking-theme-light .booking-card:first-child .service-picker button:hover,
 .app-shell .public-booking.booking-theme-light .service-picker button:hover,
 .app-shell .public-booking.booking-theme-light .time-slots button:hover,
+.app-shell .public-booking.booking-theme-light .booking-handedness button:hover,
 .app-shell .public-booking.booking-theme-light .booking-days button:hover,
 .app-shell .public-booking.booking-theme-light .booking-card:first-child .service-picker .selected-service,
 .app-shell .public-booking.booking-theme-light .service-picker .selected-service,
 .app-shell .public-booking.booking-theme-light .time-slots .selected-time,
+.app-shell .public-booking.booking-theme-light .booking-handedness .selected-handedness,
 .app-shell .public-booking.booking-theme-light .booking-days .selected-day {
   border-color: #111;
   background:

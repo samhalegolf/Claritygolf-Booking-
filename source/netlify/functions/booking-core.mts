@@ -22,6 +22,7 @@ import {
 } from "./_shared/optix-book-resource.mts";
 import { bayBookingMatchesSlot, bayFollowsReschedule } from "./_shared/optix-reconcile.mts";
 import { calendarSlot, MINUTES_IN_DAY } from "./_shared/calendar-slot.mts";
+import { cleanHandedness, handednessNoteLine } from "./_shared/handedness.mts";
 import { planExternalReschedule, sameSlot } from "./_shared/external-reschedule.mts";
 import { legacyOriginalWorkspaceId, defaultCalendarSlug } from "./_shared/account.mts";
 import {
@@ -10841,6 +10842,8 @@ async function createPublicBooking(accountId: string, payload: Record<string, an
   const lastName = cleanString(payload.lastName, "", 80);
   const email = cleanString(payload.email, "", 180);
   const phone = cleanString(payload.phone, "", 80);
+  const handedness = cleanHandedness(payload.handedness);
+  const playerNotes = cleanString(payload.notes, "", 800);
 
   if (!firstName || !lastName || !email) {
     throw Object.assign(
@@ -10993,9 +10996,15 @@ async function createPublicBooking(accountId: string, payload: Record<string, an
     title: client,
     phone,
     email,
-    note: reviewDue
-      ? `Video review booked from public booking page. Due back ${formatBookingDate(reviewDue.week, reviewDue.day)}.`
-      : "Booked from public booking page.",
+    // Handedness leads the note: the Optix bay picker reads it from there (see
+    // _shared/handedness.mts) and it is the first thing the coach sees.
+    note: [
+      handednessNoteLine(handedness),
+      reviewDue
+        ? `Video review booked from public booking page. Due back ${formatBookingDate(reviewDue.week, reviewDue.day)}.`
+        : "Booked from public booking page.",
+      playerNotes ? `Player notes: ${playerNotes}` : "",
+    ].filter(Boolean).join("\n"),
     location,
     ...(customGroup || {}),
   };

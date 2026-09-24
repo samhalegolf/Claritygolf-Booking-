@@ -5,6 +5,7 @@ import {
   type ClarityOptixAppointment,
   type OptixSyncRecord,
 } from "./optix-reconcile.mts";
+import { handednessFromNote } from "./handedness.mts";
 
 type BookingTypeConfig = {
   enabled?: boolean;
@@ -16,6 +17,14 @@ type BookingTypeConfig = {
 type ReconcileConfig = Parameters<typeof buildOptixAppointmentInput>[2];
 
 const OPTIX_OVERALL_TIMEOUT_MS = 25_000;
+
+/**
+ * The bays set up for both right- and left-handed players: Bay #1 (600009) and
+ * Bay #7 (600010), both "RH/LH Sim Bay" in Optix. Every other bay is
+ * right-handed only. Used for a left-handed player when the lesson type has no
+ * left-handed profile of its own in the Integrations panel.
+ */
+export const DUAL_HANDED_RESOURCE_IDS = ["600009", "600010"];
 
 function uniqueIds(values: unknown[]): string[] {
   return Array.from(new Set(values.flatMap((value) => Array.isArray(value) ? value : [value])
@@ -47,8 +56,19 @@ export function candidateOptixResourceIds(input: {
   bookingType?: BookingTypeConfig | null;
   existing?: OptixSyncRecord | null;
   legacyResourceId?: string;
+  /** The player said they are left-handed on the booking page. */
+  leftHandedPlayer?: boolean;
 }) {
   const type = input.bookingType || {};
+  if (input.leftHandedPlayer) {
+    // Only bays a left-hander can hit in. No fallback to the preferred list or
+    // the legacy default: a right-handed bay is no use to them, so if both are
+    // taken the booking fails visibly and the coach sorts it out.
+    const leftBays = uniqueIds([type.leftHandedResourceIds || []]);
+    const allowed = leftBays.length ? leftBays : DUAL_HANDED_RESOURCE_IDS;
+    const existing = String(input.existing?.resourceId || "");
+    return uniqueIds([allowed.includes(existing) ? existing : "", ...allowed]);
+  }
   const preferred = type.leftHanded
     ? [type.leftHandedResourceIds, type.preferredResourceIds]
     : [type.preferredResourceIds];
@@ -118,6 +138,7 @@ export async function reconcileOptixAppointmentWithAutoSelect(input: {
     bookingType,
     existing: input.existing,
     legacyResourceId: baseRequest.resourceIds[0],
+    leftHandedPlayer: handednessFromNote(input.appointment.note) === "left",
   });
   if (!candidates.length) {
     throw new OptixSyncError("not_configured", `No Optix bays are configured for booking type ${input.appointment.serviceId || input.appointment.service_id || "unknown"}.`);

@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { OptixSyncError } from "./optix-client.mts";
-import { moveOptixBookingInPlace } from "./optix-auto-select.mts";
+import { candidateOptixResourceIds, DUAL_HANDED_RESOURCE_IDS, moveOptixBookingInPlace } from "./optix-auto-select.mts";
+import { cleanHandedness, handednessFromNote, handednessNoteLine } from "./handedness.mts";
 import {
   buildOptixAppointmentInput,
   optixAppointmentFingerprint,
@@ -196,4 +197,48 @@ test("an unusable Optix configuration is reported, not thrown", async () => {
   });
   assert.equal(outcome.moved, false);
   assert.equal(outcome.moved === false && outcome.code, "not_configured");
+});
+
+const standardBays = { enabled: true, preferredResourceIds: ["600007", "600006", "600010", "600009"], leftHandedResourceIds: [] };
+
+test("handedness round-trips through the appointment note", () => {
+  const note = [handednessNoteLine("left"), "Booked from public booking page.", "Player notes: bad back"].join("\n");
+  assert.equal(handednessFromNote(note), "left");
+  assert.equal(handednessFromNote(handednessNoteLine("right")), "right");
+  assert.equal(handednessFromNote("Booked from public booking page."), null);
+  // Only a line that starts with the marker counts, so a player writing
+  // "handedness: left" mid-sentence in their notes does not move their bay.
+  assert.equal(handednessFromNote("Handedness: Right\nPlayer notes: my friend said Handedness: left"), "right");
+  assert.equal(cleanHandedness("LEFT"), "left");
+  assert.equal(cleanHandedness("anything else"), "right");
+  assert.equal(cleanHandedness(undefined), "right");
+});
+
+test("a right-handed player keeps the lesson type's preferred bay order", () => {
+  assert.deepEqual(candidateOptixResourceIds({ bookingType: standardBays }), ["600007", "600006", "600010", "600009"]);
+});
+
+test("a left-handed player is only offered the dual-handed bays", () => {
+  assert.deepEqual(
+    candidateOptixResourceIds({ bookingType: standardBays, leftHandedPlayer: true, legacyResourceId: "600004" }),
+    DUAL_HANDED_RESOURCE_IDS,
+  );
+});
+
+test("a left-handed profile on the lesson type overrides the built-in dual-handed bays", () => {
+  assert.deepEqual(
+    candidateOptixResourceIds({ bookingType: { ...standardBays, leftHandedResourceIds: ["600010"] }, leftHandedPlayer: true }),
+    ["600010"],
+  );
+});
+
+test("a left-handed player keeps an existing dual-handed bay but never a right-handed one", () => {
+  assert.deepEqual(
+    candidateOptixResourceIds({ bookingType: standardBays, leftHandedPlayer: true, existing: syncRecord({ resourceId: "600010" }) }),
+    ["600010", "600009"],
+  );
+  assert.deepEqual(
+    candidateOptixResourceIds({ bookingType: standardBays, leftHandedPlayer: true, existing: syncRecord({ resourceId: "600007" }) }),
+    DUAL_HANDED_RESOURCE_IDS,
+  );
 });
