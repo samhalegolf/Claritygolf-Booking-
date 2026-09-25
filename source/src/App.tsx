@@ -2276,7 +2276,7 @@ const PAST_ADMIN_LESSON_WARNING =
 // rewrite it. One completed lesson was nudged a row and back in September 2026
 // and Optix received two booking changes for a bay used a week earlier.
 const COMPLETED_LESSON_MOVE_WARNING =
-  "This lesson is already marked completed. Move it anyway? Its Optix bay booking will stay where it was.";
+  "This lesson is already marked completed. Move it anyway? Its bay booking will stay where it was.";
 
 const baseWeekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const fullDayNames = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -10691,12 +10691,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     for (let attempt = 0; attempt < 9; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 5000));
       try {
-        const response = await fetch("/api/optix-booking-status", { credentials: "same-origin", cache: "no-store" });
+        // One lesson's row, not the account's latest hundred.
+        const response = await fetch(`/api/resource-status?calendarItemId=${encodeURIComponent(itemId)}`, {
+          credentials: "same-origin",
+          cache: "no-store",
+        });
         if (!response.ok) continue;
         const data = await response.json().catch(() => ({}));
-        const record = (Array.isArray(data?.records) ? data.records : []).find(
-          (entry: { calendarItemId?: string }) => entry?.calendarItemId === itemId,
-        );
+        const record = data?.record && data.record.calendarItemId === itemId ? data.record : null;
         if (!record) continue;
         const rowUpdatedAtMs = Date.parse(String(record.updatedAt || "")) || 0;
         if (rowUpdatedAtMs < movedAtMs - 15000) continue; // pre-move state; rebook still running
@@ -10713,8 +10715,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         if (record.syncStatus === "failed" || record.syncStatus === "token_expired") {
           setToast({
             message: record.errorMessage
-              ? `The lesson was moved, but its Optix bay booking was not: ${record.errorMessage}`
-              : "The lesson was moved, but its Optix bay booking was not. Use Book resource on the booking card.",
+              ? `The lesson was moved, but its bay was not: ${record.errorMessage}`
+              : "The lesson was moved, but its bay was not. Use Book bay on the booking card.",
           });
           return;
         }
@@ -29029,9 +29031,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     <CreditCard size={24} />
                   </div>
                   <p className="field-help">
-                    These totals are counter takings plus Optix sales only — invoice rows in the list below belong to
-                    invoicing (Revenue and Reports), so they stay out of the tiles to avoid double counting. Optix
-                    records are read-only — that money was taken in Optix.
+                    These totals are counter takings plus sales from connected systems only — invoice rows in the list
+                    below belong to invoicing (Revenue and Reports), so they stay out of the tiles to avoid double
+                    counting. Sales from a connected system are read-only — that money was taken there.
                   </p>
                   <div className="settings-field-row pos-range-row">
                     <div className="settings-field">

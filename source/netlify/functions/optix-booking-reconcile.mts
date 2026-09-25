@@ -60,7 +60,7 @@ export default async function handler(req: Request) {
       {
         ok: false,
         error: "manual_booking_required",
-        message: "Optix resource bookings can only be created from the Book resource button on a Clarity booking card.",
+        message: "Bays can only be booked from the Book bay button on a booking card.",
       },
       400,
     );
@@ -70,16 +70,18 @@ export default async function handler(req: Request) {
     const result = await holdResource(accountId, calendarItemId);
     return json(result, result.ok ? 200 : 207);
   } catch (error: any) {
-    const code = String(error?.code || "optix_reconcile_failed");
+    const code = String(error?.code || "resource_hold_failed");
     return json(
       {
         ok: false,
         error: code,
-        message: error instanceof Error ? error.message : "Optix resource booking failed.",
+        message: error instanceof Error ? error.message : "Bay booking failed.",
       },
       code === "not_configured" ? 503 : 500,
     );
   }
 }
 
-export const config: Config = { path: "/api/optix-booking-reconcile" };
+// /api/resource-hold is the name the app uses; the old one stays for any open
+// tab still running the previous bundle.
+export const config: Config = { path: ["/api/resource-hold", "/api/optix-booking-reconcile"] };

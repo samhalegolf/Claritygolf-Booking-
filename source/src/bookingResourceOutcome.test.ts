@@ -6,6 +6,8 @@ import {
   buildDetails,
   describeBookAttempt,
   describeStatusRecord,
+  resourceSystemFor,
+  WEBHOOK_SYSTEM,
   type ResourceStatusRecord,
 } from "./bookingResourceOutcome.ts";
 
@@ -92,8 +94,8 @@ test("every failure code has a title, and an unknown one still says something", 
 });
 
 test("only a timeout asks the coach to check Optix before booking again", () => {
-  assert.equal(describeStatusRecord(record({ errorCode: "timeout" }), NOW).needsOptixCheckFirst, true);
-  assert.equal(describeStatusRecord(record({ errorCode: "resource_conflict" }), NOW).needsOptixCheckFirst, false);
+  assert.equal(describeStatusRecord(record({ errorCode: "timeout" }), NOW).needsSystemCheckFirst, true);
+  assert.equal(describeStatusRecord(record({ errorCode: "resource_conflict" }), NOW).needsSystemCheckFirst, false);
 });
 
 test("an unreachable server is not silence", () => {
@@ -184,6 +186,36 @@ test("a queued auto-book reads as in progress, and the button still books it now
   assert.equal(outcome.tone, "idle");
   assert.equal(outcome.title, "Bay booking queued");
   assert.equal(outcome.canRetry, true, "the coach must be able to book it immediately");
-  assert.equal(outcome.needsOptixCheckFirst, false);
+  assert.equal(outcome.needsSystemCheckFirst, false);
   assert.equal(outcome.staleAttemptAt, null);
+});
+
+test("a business on its own booking system never reads the word Optix", () => {
+  const texts: string[] = [];
+  const collect = (outcome: { title: string; line: string; details: string }) =>
+    texts.push(outcome.title, outcome.line, outcome.details);
+  for (const errorCode of [
+    "resource_unavailable", "timeout", "network_error", "invalid_reply", "not_configured",
+    "http_500", "remote_error", "something_new", "",
+  ]) {
+    collect(describeStatusRecord({ hasSyncRow: true, syncStatus: "failed", errorCode, errorMessage: "x", provider: "webhook" }, NOW));
+    collect(describeBookAttempt({ kind: "response", status: 207, payload: { ok: false, error: errorCode } }, WEBHOOK_SYSTEM));
+  }
+  collect(describeStatusRecord({ hasSyncRow: true, syncStatus: "synced", bayName: "Bay 7", provider: "webhook" }, NOW));
+  collect(describeStatusRecord({ hasSyncRow: true, syncStatus: "cancelled", errorCode: "optix_disabled", provider: "webhook" }, NOW));
+  for (const status of [200, 400, 503]) {
+    collect(describeBookAttempt({ kind: "response", status, payload: { ok: status === 200 } }, WEBHOOK_SYSTEM));
+  }
+  const leaks = texts.filter((text) => /optix/i.test(text));
+  assert.deepEqual(leaks, []);
+});
+
+test("a held webhook bay is named, and a refusal reads as no bay free", () => {
+  const held = describeStatusRecord({ hasSyncRow: true, syncStatus: "synced", bayName: "Bay 7", provider: "webhook" }, NOW);
+  assert.equal(held.line, "Bay 7 is held in your booking system for this lesson.");
+  const none = describeStatusRecord({ hasSyncRow: true, syncStatus: "failed", errorCode: "resource_unavailable", provider: "webhook" }, NOW);
+  assert.equal(none.title, "No bay free");
+  assert.equal(resourceSystemFor("optix").name, "Optix");
+  assert.equal(resourceSystemFor("webhook").name, "your booking system");
+  assert.equal(resourceSystemFor(undefined).name, "your booking system");
 });

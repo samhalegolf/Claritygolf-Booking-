@@ -12,6 +12,7 @@ import {
 } from "./_shared/integration-credentials.mts";
 import { isStripeSecretShaped, STRIPE_SECRET_SETTING } from "./_shared/stripe.mts";
 
+import { businessUsesOptix } from "./_shared/resource-handler.mts";
 import { allIntegrations, integrationById, integrationsFor } from "./_shared/integrations/catalogue.mts";
 import { integrationRequest } from "./_shared/integrations/db.mts";
 import { providerCapabilities } from "./_shared/integrations/registry.mts";
@@ -430,7 +431,11 @@ export default async function handler(req: Request) {
     // which is what anything asking "is everything set up" wants.
     if (!id) {
       if (req.method !== "GET") return json({ error: "method_not_allowed" }, 405);
-      const list = audience === "admin" || audience === "integration" ? integrationsFor(audience) : allIntegrations();
+      const everything = audience === "admin" || audience === "integration" ? integrationsFor(audience) : allIntegrations();
+      // Optix is listed only to a business that uses it. Everyone else connects
+      // their bay system through Settings › Booking › Bay & room system.
+      const showOptix = await businessUsesOptix(actor.accountId);
+      const list = everything.filter((descriptor) => descriptor.id !== "optix" || showOptix);
       const original = isOriginalWorkspace(actor.accountId);
       const oauth = await oauthState(actor.accountId);
       const integrations = await Promise.all(

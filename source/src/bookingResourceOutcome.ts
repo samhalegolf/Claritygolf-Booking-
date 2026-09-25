@@ -18,6 +18,24 @@
 
 export type ResourceTone = "ok" | "idle" | "warn" | "error";
 
+/**
+ * The system that keeps this business's bays, as the card names it. Optix is
+ * named only for a business that uses Optix; anyone else's is "your booking
+ * system", because Clarity does not know what their software is called.
+ */
+export type ResourceSystem = { provider: "optix" | "webhook"; name: string };
+
+export const OPTIX_SYSTEM: ResourceSystem = { provider: "optix", name: "Optix" };
+export const WEBHOOK_SYSTEM: ResourceSystem = { provider: "webhook", name: "your booking system" };
+
+export function resourceSystemFor(provider: string | null | undefined): ResourceSystem {
+  return provider === "optix" ? OPTIX_SYSTEM : WEBHOOK_SYSTEM;
+}
+
+function cap(text: string) {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 export type ResourceOutcome = {
   tone: ResourceTone;
   /** Short. This is the red line when tone is "error". */
@@ -33,7 +51,7 @@ export type ResourceOutcome = {
    * plain retry can hold a second bay. The panel turns this into a deliberate
    * second press rather than a normal Book bay.
    */
-  needsOptixCheckFirst: boolean;
+  needsSystemCheckFirst: boolean;
   /**
    * Set when the failure being described is old news rather than the current
    * state. The panel prefixes the date and drops the red: opening a lesson
@@ -43,7 +61,7 @@ export type ResourceOutcome = {
   staleAttemptAt: string | null;
 };
 
-/** A row of optix_booking_sync as /api/optix-booking-status returns it. */
+/** A ledger row as /api/resource-status returns it. */
 export type ResourceStatusRecord = {
   calendarItemId?: string;
   resourceId?: string;
@@ -54,6 +72,8 @@ export type ResourceStatusRecord = {
   errorMessage?: string;
   optixBookingId?: string;
   optixBookingSessionId?: string;
+  /** Which system made this hold, when there is one. */
+  provider?: string;
   lastAttemptedAt?: string | null;
   lastSyncedAt?: string | null;
   updatedAt?: string | null;
@@ -72,44 +92,64 @@ const STALE_FAILURE_MS = 60 * 60 * 1000;
  * carries its raw code in the details -- an unknown code is a reason to say
  * less, never a reason to say nothing.
  */
-const FAILURES: Record<string, { title: string; line: string }> = {
-  resource_conflict: {
-    title: "No bay free",
-    line: "Every bay set for this lesson type is already booked at this time.",
-  },
-  token_expired: {
-    title: "Optix login expired",
-    line: "Clarity's Optix access token is no longer valid. The details name which one to replace.",
-  },
-  unauthorized: {
-    title: "Optix refused access",
-    line: "The Optix account Clarity books with is not allowed to make this booking.",
-  },
-  validation_failed: {
-    title: "Optix rejected the details",
-    line: "Optix would not accept this booking's times or fields.",
-  },
-  timeout: {
-    title: "Optix did not answer",
-    line: "The result is unknown — Optix may still have taken the bay. Check Optix before booking again.",
-  },
-  not_configured: {
-    title: "No bays for this lesson type",
-    line: "Give this lesson type a resource profile in Integrations, then book the bay.",
-  },
-  remote_error: {
-    title: "Optix returned an error",
-    line: "Optix refused the request. Its own words are in the details.",
-  },
-};
+function failures(system: ResourceSystem): Record<string, { title: string; line: string }> {
+  const name = system.name;
+  const Name = cap(name);
+  const setUp =
+    system.provider === "optix"
+      ? "Give this lesson type a resource profile in Integrations, then book the bay."
+      : "Connect it in Settings › Booking › Bay & room system, then book the bay.";
+  return {
+    resource_conflict: {
+      title: "No bay free",
+      line: "Every bay set for this lesson type is already booked at this time.",
+    },
+    resource_unavailable: {
+      title: "No bay free",
+      line: `${Name} has no bay free at this time.`,
+    },
+    token_expired: {
+      title: `${Name} login expired`,
+      line: `Clarity's ${name} access token is no longer valid. The details name which one to replace.`,
+    },
+    unauthorized: {
+      title: `${Name} refused access`,
+      line: `The ${name} account Clarity books with is not allowed to make this booking.`,
+    },
+    validation_failed: {
+      title: `${Name} rejected the details`,
+      line: `${Name} would not accept this booking's times or fields.`,
+    },
+    timeout: {
+      title: `${Name} did not answer`,
+      line: `The result is unknown — ${name} may still have taken the bay. Check ${name} before booking again.`,
+    },
+    network_error: {
+      title: `Could not reach ${name}`,
+      line: `Clarity could not connect to ${name}. Check the address in Settings, then try again.`,
+    },
+    invalid_reply: {
+      title: `${Name} answered oddly`,
+      line: `${Name} replied, but not in the shape Clarity expects. The details say what was wrong.`,
+    },
+    not_configured: {
+      title: system.provider === "optix" ? "No bays for this lesson type" : `${Name} isn't connected`,
+      line: setUp,
+    },
+    remote_error: {
+      title: `${Name} returned an error`,
+      line: `${Name} refused the request. Its own words are in the details.`,
+    },
+  };
+}
 
 export function bayLabel(record: ResourceStatusRecord | null | undefined): string {
   if (!record) return "";
   const name = String(record.bayName || "").trim();
   if (name) return name;
   const id = String(record.resourceId || "").trim();
-  // Naming the id beats "Resource booked": it is what you type into Optix to
-  // find the thing Clarity is talking about.
+  // Naming the id beats "Resource booked": it is what you type into the other
+  // system to find the thing Clarity is talking about.
   return id ? `Resource ${id}` : "";
 }
 
@@ -118,11 +158,14 @@ export function bayLabel(record: ResourceStatusRecord | null | undefined): strin
  * Returns "" when there is nothing, which is what stops the panel rendering a
  * Details disclosure that opens onto an empty box.
  */
-export function buildDetails(record: ResourceStatusRecord | null | undefined): string {
+export function buildDetails(
+  record: ResourceStatusRecord | null | undefined,
+  system: ResourceSystem = OPTIX_SYSTEM,
+): string {
   if (!record) return "";
   const rows: Array<[string, string]> = [
     ["Error code", String(record.errorCode || "")],
-    ["Optix said", String(record.errorMessage || "")],
+    [`${cap(system.name)} said`, String(record.errorMessage || "")],
     ["Booking ID", String(record.optixBookingId || "")],
     ["Session ID", String(record.optixBookingSessionId || "")],
     ["Bay tried", String(record.resourceId || "")],
@@ -136,16 +179,18 @@ export function buildDetails(record: ResourceStatusRecord | null | undefined): s
 function failure(
   code: string,
   record: ResourceStatusRecord | null,
+  system: ResourceSystem,
   overrides: Partial<ResourceOutcome> = {},
 ): ResourceOutcome {
-  const known = FAILURES[code];
+  // An HTTP status from a webhook system arrives as http_<status>.
+  const known = failures(system)[code.startsWith("http_") ? "remote_error" : code];
   return {
     tone: "error",
-    title: known?.title || "Optix booking failed",
-    line: known?.line || "The attempt did not complete. The details carry what Optix returned.",
-    details: buildDetails(record),
+    title: known?.title || (system.provider === "optix" ? "Optix booking failed" : "Bay booking failed"),
+    line: known?.line || `The attempt did not complete. The details carry what ${system.name} returned.`,
+    details: buildDetails(record, system),
     canRetry: true,
-    needsOptixCheckFirst: code === "timeout",
+    needsSystemCheckFirst: code === "timeout",
     staleAttemptAt: null,
     ...overrides,
   };
@@ -160,6 +205,7 @@ function failure(
 export function describeStatusRecord(
   record: ResourceStatusRecord | null | undefined,
   nowMs: number = Date.now(),
+  system: ResourceSystem = resourceSystemFor(record?.provider || "optix"),
 ): ResourceOutcome {
   const base: ResourceOutcome = {
     tone: "idle",
@@ -167,7 +213,7 @@ export function describeStatusRecord(
     line: "No bay has been held for this lesson yet.",
     details: "",
     canRetry: true,
-    needsOptixCheckFirst: false,
+    needsSystemCheckFirst: false,
     staleAttemptAt: null,
   };
 
@@ -184,7 +230,9 @@ export function describeStatusRecord(
       ...base,
       tone: "ok",
       title: label || "Bay held",
-      line: label ? `${label} is held in Optix for this lesson.` : "A bay is held in Optix for this lesson.",
+      line: label
+        ? `${label} is held in ${system.name} for this lesson.`
+        : `A bay is held in ${system.name} for this lesson.`,
       canRetry: false,
     };
   }
@@ -209,7 +257,10 @@ export function describeStatusRecord(
       return {
         ...base,
         title: "Bays are off for this lesson type",
-        line: "Turn them on in Integrations → resource profiles if this lesson should hold a bay.",
+        line:
+          system.provider === "optix"
+            ? "Turn them on in Integrations → resource profiles if this lesson should hold a bay."
+            : "Tick “Holds one of the location's resources” on the lesson type if it should hold a bay.",
         canRetry: false,
       };
     }
@@ -224,7 +275,7 @@ export function describeStatusRecord(
     const attemptedAt = record.lastAttemptedAt || record.updatedAt || null;
     const attemptAge = attemptedAt ? nowMs - Date.parse(String(attemptedAt)) : Number.NaN;
     const stale = Number.isFinite(attemptAge) && attemptAge > STALE_FAILURE_MS;
-    return failure(code, record, stale ? { tone: "warn", staleAttemptAt: attemptedAt } : {});
+    return failure(code, record, system, stale ? { tone: "warn", staleAttemptAt: attemptedAt } : {});
   }
 
   return base;
@@ -237,7 +288,7 @@ export function describeStatusRecord(
  * sync row reached 'synced'. A 207 means the attempt genuinely ran and Optix
  * said no, which is a real answer and gets a real message rather than silence.
  */
-export function describeBookAttempt(attempt: BookAttempt): ResourceOutcome {
+export function describeBookAttempt(attempt: BookAttempt, system: ResourceSystem = OPTIX_SYSTEM): ResourceOutcome {
   if (attempt.kind === "unreachable") {
     return {
       tone: "error",
@@ -245,7 +296,7 @@ export function describeBookAttempt(attempt: BookAttempt): ResourceOutcome {
       line: "The request never got an answer. Check your connection, then press Book bay again.",
       details: attempt.error instanceof Error ? attempt.error.message : "",
       canRetry: true,
-      needsOptixCheckFirst: false,
+      needsSystemCheckFirst: false,
       staleAttemptAt: null,
     };
   }
@@ -261,7 +312,7 @@ export function describeBookAttempt(attempt: BookAttempt): ResourceOutcome {
       line: "Your admin session expired. Sign in again, then book the bay.",
       details: "",
       canRetry: false,
-      needsOptixCheckFirst: false,
+      needsSystemCheckFirst: false,
       staleAttemptAt: null,
     };
   }
@@ -273,7 +324,7 @@ export function describeBookAttempt(attempt: BookAttempt): ResourceOutcome {
       line: "This login cannot book bays for this business.",
       details: serverMessage,
       canRetry: false,
-      needsOptixCheckFirst: false,
+      needsSystemCheckFirst: false,
       staleAttemptAt: null,
     };
   }
@@ -282,25 +333,25 @@ export function describeBookAttempt(attempt: BookAttempt): ResourceOutcome {
     return {
       tone: "error",
       title: "Clarity sent a bad request",
-      line: "Optix was never asked. This is a Clarity bug rather than an Optix one.",
+      line: `${cap(system.name)} was never asked. This is a Clarity bug, not a problem with ${system.name}.`,
       details: serverMessage || String(payload?.error || ""),
       canRetry: false,
-      needsOptixCheckFirst: false,
+      needsSystemCheckFirst: false,
       staleAttemptAt: null,
     };
   }
 
   // The env-level "not configured" and the lesson-type-level one share a code
-  // but not a fix, and the status separates them: 503 is Clarity's Optix
-  // credentials missing, 207 is this lesson type having no bays.
+  // but not a fix, and the status separates them: 503 is the system's
+  // connection missing, 207 is this lesson type having no bays.
   if (status === 503) {
     return {
       tone: "error",
-      title: "Optix isn't set up",
-      line: serverMessage || "Clarity has no Optix credentials configured.",
+      title: `${cap(system.name)} isn't set up`,
+      line: serverMessage || `Clarity has no connection to ${system.name} yet.`,
       details: "",
       canRetry: false,
-      needsOptixCheckFirst: false,
+      needsSystemCheckFirst: false,
       staleAttemptAt: null,
     };
   }
@@ -314,17 +365,17 @@ export function describeBookAttempt(attempt: BookAttempt): ResourceOutcome {
         line: label ? `This lesson already holds ${label}.` : "This lesson already holds a bay.",
         details: "",
         canRetry: false,
-        needsOptixCheckFirst: false,
+        needsSystemCheckFirst: false,
         staleAttemptAt: null,
       };
     }
     return {
       tone: "ok",
       title: label || "Bay held",
-      line: label ? `${label} is now held in Optix.` : "The bay is now held in Optix.",
+      line: label ? `${label} is now held in ${system.name}.` : `The bay is now held in ${system.name}.`,
       details: "",
       canRetry: false,
-      needsOptixCheckFirst: false,
+      needsSystemCheckFirst: false,
       staleAttemptAt: null,
     };
   }
@@ -333,7 +384,7 @@ export function describeBookAttempt(attempt: BookAttempt): ResourceOutcome {
     const code = String(record?.errorCode || payload?.error || "");
     // 207 not_configured is the lesson type having no bays, which is the
     // wording FAILURES already carries. Nothing to override.
-    return failure(code, record);
+    return failure(code, record, system);
   }
 
   if (status === 404 || String(payload?.error || "") === "appointment_not_found") {
@@ -343,12 +394,12 @@ export function describeBookAttempt(attempt: BookAttempt): ResourceOutcome {
       line: "Clarity could not find this lesson to book a bay against. Reload the calendar.",
       details: serverMessage,
       canRetry: false,
-      needsOptixCheckFirst: false,
+      needsSystemCheckFirst: false,
       staleAttemptAt: null,
     };
   }
 
-  return failure(String(payload?.error || record?.errorCode || ""), record, {
-    details: [buildDetails(record), serverMessage].filter(Boolean).join("\n"),
+  return failure(String(payload?.error || record?.errorCode || ""), record, system, {
+    details: [buildDetails(record, system), serverMessage].filter(Boolean).join("\n"),
   });
 }
