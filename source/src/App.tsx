@@ -111,6 +111,7 @@ import {
   phoneCountryOptions,
 } from "../netlify/functions/_shared/phone.mts";
 import { ResourceSystemPanel } from "./modules/integrations/ResourceSystemPanel";
+import { availabilityConflicts, type AvailabilityConflict } from "./availabilityConflicts";
 import {
   cleanLocationKind,
   cleanLocationResources,
@@ -5635,6 +5636,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const [availabilitySaveState, setAvailabilitySaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [editingAvailabilityWindow, setEditingAvailabilityWindow] = useState("");
   const [availabilityCoachChoice, setAvailabilityCoachChoice] = useState("");
+  const [availabilityLocationChoice, setAvailabilityLocationChoice] = useState<string | null>(null);
+  // Set when Save found a coach booked at two places at once; the panel shows
+  // the clashes and lets the coach save anyway.
+  const [availabilityConflictList, setAvailabilityConflictList] = useState<AvailabilityConflict[]>([]);
   // The client list is owned by modules/clients/clientsStore. Reading it here
   // keeps every screen that needs people on one copy, and the old setter name
   // survives because the writes that answer with a fresh list all use it.
@@ -7102,9 +7107,35 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       availabilityEditorLocations[0]?.id ||
       ""
     : "";
+  // One week per location. The tabs are the coach's locations, plus any other
+  // location the coach already has hours at, plus "Any location" while old
+  // unpinned hours remain. With one location there are no tabs at all.
+  const availabilityEditorLocationTabs = useMemo(() => {
+    if (!hasMultipleAvailabilityLocations) return [] as Array<{ id: string; label: string }>;
+    const coachWindows = availabilityForCoach(accountAvailability, availabilityEditorCoachId, activeCoachId).flat();
+    const ids = [
+      ...availabilityEditorLocations.map((location) => location.id),
+      ...coachWindows.map((window) => window.locationId || "").filter(Boolean),
+    ];
+    const tabs = [...new Set(ids)].map((id) => ({ id, label: availabilityLocationLabel(id) }));
+    if (coachWindows.some((window) => !window.locationId)) tabs.push({ id: "", label: "Any location" });
+    return tabs;
+  }, [accountAvailability, activeCoachId, availabilityEditorCoachId, availabilityEditorLocations, hasMultipleAvailabilityLocations]);
+  // null means "every window the coach has": the single-location case.
+  const availabilityEditorLocationId: string | null = !availabilityEditorLocationTabs.length
+    ? null
+    : availabilityEditorLocationTabs.some((tab) => tab.id === availabilityLocationChoice)
+      ? (availabilityLocationChoice as string)
+      : availabilityEditorLocationTabs.find((tab) => tab.id === availabilityEditorDefaultLocationId)?.id ??
+        availabilityEditorLocationTabs[0].id;
   const availabilityEditorWeek = useMemo(
-    () => availabilityForCoach(accountAvailability, availabilityEditorCoachId, activeCoachId),
-    [accountAvailability, activeCoachId, availabilityEditorCoachId],
+    () =>
+      availabilityForCoach(accountAvailability, availabilityEditorCoachId, activeCoachId).map((dayWindows) =>
+        availabilityEditorLocationId === null
+          ? dayWindows
+          : dayWindows.filter((window) => (window.locationId || "") === availabilityEditorLocationId),
+      ),
+    [accountAvailability, activeCoachId, availabilityEditorCoachId, availabilityEditorLocationId],
   );
   const calendarDisplayBounds = useMemo(() => {
     const points = [DEFAULT_CALENDAR_START_MINUTES, DEFAULT_CALENDAR_END_MINUTES];
@@ -18685,7 +18716,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   function isAvailabilityEditorWindow(window: AvailabilityWindow) {
     return (
       recordBelongsToAccount(window, activeAccountId) &&
-      (window.coachId || activeCoachId) === availabilityEditorCoachId
+      (window.coachId || activeCoachId) === availabilityEditorCoachId &&
+      (availabilityEditorLocationId === null || (window.locationId || "") === availabilityEditorLocationId)
     );
   }
 
@@ -18699,6 +18731,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           const edited = edit(windows.filter(isAvailabilityEditorWindow)).map((window) => ({
             ...window,
             coachId: availabilityEditorCoachId,
+            // Everything in a location's week is at that location.
+            ...(availabilityEditorLocationId !== null ? { locationId: availabilityEditorLocationId || undefined } : {}),
             accountId: window.accountId || activeAccountId,
           }));
           return [...others, ...edited];
@@ -18727,19 +18761,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       : timeToMinutes(9, 0);
     const end = Math.min(Math.max(start + SNAP_MINUTES * 2, start + SNAP_MINUTES), LAST_TIME_SLOT_MINUTES);
     setEditingAvailabilityWindow(`${day}-${existingWindows.length}`);
-    editAvailabilityEditorDay(day, (windows) => [
-      ...windows,
-      { start, end, locationId: lastWindow?.locationId || availabilityEditorDefaultLocationId || undefined },
-    ]);
-  }
-
-  function updateAvailabilityWindowLocation(day: number, index: number, locationId: string) {
-    setEditingAvailabilityWindow("");
-    editAvailabilityEditorDay(day, (windows) =>
-      windows.map((window, windowIndex) =>
-        windowIndex === index ? { ...window, locationId: locationId || undefined } : window,
-      ),
-    );
+    editAvailabilityEditorDay(day, (windows) => [...windows, { start, end }]);
   }
 
   function toggleAvailabilityDay(day: number) {
@@ -18747,30 +18769,38 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     editAvailabilityEditorDay(day, (windows) =>
       windows.length
         ? []
-        : [
-            {
-              start: timeToMinutes(9, 0),
-              end: timeToMinutes(17, 0),
-              locationId: availabilityEditorDefaultLocationId || undefined,
-            },
-          ],
+        : [{ start: timeToMinutes(9, 0), end: timeToMinutes(17, 0) }],
     );
   }
 
-  /** Replace the chosen coach's whole week with another coach's pattern. */
+  /** Replace this coach's week at this location with another coach's week there. */
   function copyAvailabilityFromCoach(sourceCoachId: string) {
     if (!sourceCoachId || sourceCoachId === availabilityEditorCoachId) return;
-    const sourceWeek = availabilityForCoach(accountAvailability, sourceCoachId, activeCoachId);
+    const sourceWeek = availabilityForCoach(accountAvailability, sourceCoachId, activeCoachId).map((dayWindows) =>
+      availabilityEditorLocationId === null
+        ? dayWindows
+        : dayWindows.filter((window) => (window.locationId || "") === availabilityEditorLocationId),
+    );
     setEditingAvailabilityWindow("");
     sourceWeek.forEach((sourceWindows, day) =>
       editAvailabilityEditorDay(day, () => sourceWindows.map(({ start, end, locationId }) => ({ start, end, locationId }))),
     );
   }
 
-  async function saveAvailability() {
+  async function saveAvailability(options: { ignoreConflicts?: boolean } = {}) {
     const clean = cleanAvailability(availability, activeCoachId);
     setEditingAvailabilityWindow("");
     setAvailability(clean);
+    // A coach down at two places at once is allowed, but never by accident.
+    const conflicts = availabilityConflicts(
+      clean.map((dayWindows) => dayWindows.filter((window) => recordBelongsToAccount(window, activeAccountId))),
+      activeCoachId,
+    );
+    if (conflicts.length && !options.ignoreConflicts) {
+      setAvailabilityConflictList(conflicts);
+      return;
+    }
+    setAvailabilityConflictList([]);
     setAvailabilitySaveState("saving");
     try {
       const response = await fetch("/api/availability", {
@@ -22083,10 +22113,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   coachAccount.venueName}
               </h2>
               <p className="availability-coach-hint">
-                Weekly hours this coach can be booked, and where. Each block only opens bookings at its own location.
+                Weekly hours this coach can be booked{availabilityEditorLocationTabs.length ? ", one week per location" : ""}.
+                Each location's hours only open bookings there.
               </p>
             </div>
-            <button className="primary-button" onClick={saveAvailability}>
+            <button className="primary-button" onClick={() => void saveAvailability()}>
               {availabilitySaveState === "saving"
                 ? "Saving"
                 : availabilitySaveState === "saved"
@@ -22138,6 +22169,64 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               </label>
             </div>
           ) : null}
+          {availabilityEditorLocationTabs.length ? (
+            <div className="availability-location-tabs" role="tablist" aria-label="Location">
+              {availabilityEditorLocationTabs.map((tab) => {
+                const selected = tab.id === availabilityEditorLocationId;
+                const minutes = availabilityForCoach(accountAvailability, availabilityEditorCoachId, activeCoachId)
+                  .flat()
+                  .filter((window) => (window.locationId || "") === tab.id)
+                  .reduce((total, window) => total + (window.end - window.start), 0);
+                const hue = tab.id ? availabilityLocationHue(tab.id) : null;
+                return (
+                  <button
+                    key={tab.id || "any"}
+                    type="button"
+                    role="tab"
+                    aria-selected={selected}
+                    className={`availability-location-tab ${selected ? "is-selected" : ""}`}
+                    style={hue !== null ? ({ ["--location-hue" as string]: String(hue) } as CSSProperties) : undefined}
+                    onClick={() => {
+                      setEditingAvailabilityWindow("");
+                      setAvailabilityLocationChoice(tab.id);
+                    }}
+                  >
+                    <strong>{tab.label}</strong>
+                    <small>{minutes ? `${formatDurationLabel(minutes)} / week` : "No hours"}</small>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+          {availabilityConflictList.length ? (
+            <div className="availability-conflicts" role="alert">
+              <strong>
+                {availabilityConflictList.length === 1 ? "One clash" : `${availabilityConflictList.length} clashes`}: a coach
+                is down at two locations at once
+              </strong>
+              <ul>
+                {availabilityConflictList.slice(0, 8).map((conflict, index) => {
+                  const coach = availabilityEditorCoaches.find((entry) => entry.id === conflict.coachId);
+                  return (
+                    <li key={index}>
+                      {coach?.displayName || coach?.name || "Coach"} · {fullDayNames[conflict.day]}{" "}
+                      {formatTime(conflict.start)} – {formatTime(conflict.end)} ·{" "}
+                      {availabilityLocationLabel(conflict.locationIds[0])} and {availabilityLocationLabel(conflict.locationIds[1])}
+                    </li>
+                  );
+                })}
+              </ul>
+              <p>Clients could book them at both places for the same time. Save anyway if that's intended.</p>
+              <div className="availability-conflict-actions">
+                <button className="primary-button" onClick={() => void saveAvailability({ ignoreConflicts: true })} type="button">
+                  Save anyway
+                </button>
+                <button className="outline-button" onClick={() => setAvailabilityConflictList([])} type="button">
+                  Keep editing
+                </button>
+              </div>
+            </div>
+          ) : null}
           <div className="availability-editor">
             {fullDayNames.map((dayName, dayIndex) => (
               <details className="settings-subsection availability-edit-row" key={dayName}>
@@ -22148,12 +22237,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     <strong>
                       {availabilityEditorWeek[dayIndex].length
                         ? availabilityEditorWeek[dayIndex]
-                            .map(
-                              (window) =>
-                                `${formatTime(window.start)} - ${formatTime(window.end)}${
-                                  hasMultipleAvailabilityLocations ? ` · ${availabilityLocationLabel(window.locationId)}` : ""
-                                }`,
-                            )
+                            .map((window) => `${formatTime(window.start)} - ${formatTime(window.end)}`)
                             .join(", ")
                         : "Closed"}
                     </strong>
@@ -22225,29 +22309,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             {formatTime(window.start)} - {formatTime(window.end)}
                           </button>
                         )}
-                        {hasMultipleAvailabilityLocations ? (
-                          <select
-                            className="availability-window-location"
-                            aria-label={`${dayName} window location`}
-                            value={window.locationId || ""}
-                            onChange={(event) => updateAvailabilityWindowLocation(dayIndex, windowIndex, event.target.value)}
-                            style={
-                              window.locationId
-                                ? ({ ["--location-hue" as string]: String(availabilityLocationHue(window.locationId)) } as CSSProperties)
-                                : undefined
-                            }
-                          >
-                            <option value="">Any location</option>
-                            {availabilityEditorLocations.map((location) => (
-                              <option key={location.id} value={location.id}>
-                                {location.shortName || location.name}
-                              </option>
-                            ))}
-                            {window.locationId && !availabilityEditorLocations.some((location) => location.id === window.locationId) ? (
-                              <option value={window.locationId}>{availabilityLocationLabel(window.locationId)}</option>
-                            ) : null}
-                          </select>
-                        ) : null}
                         <button
                           className="icon-button small"
                           aria-label={`Remove ${dayName} window`}

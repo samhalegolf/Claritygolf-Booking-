@@ -16478,20 +16478,71 @@ button {
   content: "";
 }
 
-.availability-layout .availability-window-location {
-  min-height: 34px;
-  padding: 0 8px;
+/* Settings › Availability: one week per location, picked by tab. The coloured
+   edge is the location's band colour on the calendar. */
+.availability-layout .availability-location-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.availability-layout .availability-location-tab {
+  display: grid;
+  gap: 2px;
+  min-height: var(--c-h-control);
+  padding: 8px 14px 8px 16px;
   border: 1px solid var(--c-border);
   border-radius: var(--c-radius-control);
   background: var(--c-surface);
+  box-shadow: inset 4px 0 0 hsl(var(--location-hue, 0) 60% 45% / var(--location-mark, 1));
   color: var(--c-text);
   font: inherit;
-  font-size: var(--c-size-meta);
-  box-shadow: inset 3px 0 0 hsl(var(--location-hue, 0) 60% 45% / var(--location-mark, 1));
+  text-align: left;
+  cursor: pointer;
 }
 
-.availability-layout .availability-window-location:not([style]) {
+.availability-layout .availability-location-tab:not([style]) {
   --location-mark: 0;
+}
+
+.availability-layout .availability-location-tab.is-selected {
+  border-color: var(--c-text);
+  background: var(--c-active);
+}
+
+.availability-layout .availability-location-tab small {
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+}
+
+.availability-layout .availability-conflicts {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--c-danger) 45%, transparent);
+  border-radius: var(--c-radius-card);
+  background: var(--c-danger-wash);
+  color: var(--c-text);
+}
+
+.availability-layout .availability-conflicts ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: var(--c-size-secondary);
+}
+
+.availability-layout .availability-conflicts p {
+  margin: 0;
+  color: var(--c-text-body);
+  font-size: var(--c-size-secondary);
+}
+
+.availability-layout .availability-conflict-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 /* Locations › facility: physical or online, and the bays or rooms it has. */
