@@ -62,7 +62,7 @@ const reviewShare = isReviewShareMode();
 // Public verification/legal pages deliberately bypass authentication. Google,
 // a player, or anyone deciding whether to use Clarity must be able to read
 // these without possessing a Clarity session.
-const publicPath = window.location.pathname.replace(/\\/+$/, "") || "/";
+const publicPath = window.location.pathname.replace(/\/+$/, "") || "/";
 const authLinkAtRoot =
   publicPath === "/" &&
   (new URLSearchParams(window.location.search).has("portalInvite") ||
