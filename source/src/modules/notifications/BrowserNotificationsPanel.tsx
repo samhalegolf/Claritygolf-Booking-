@@ -56,7 +56,7 @@ export default function BrowserNotificationsPanel() {
 
       <p className="field-help">
         Pop-ups next to your browser when a client books, moves or cancels a lesson, and when a booking arrives from
-        Optix. They work with the browser closed. Turn them on separately on each device you want alerted.
+        a system you've connected. They work with the browser closed. Turn them on separately on each device you want alerted.
       </p>
 
       {status === null ? (

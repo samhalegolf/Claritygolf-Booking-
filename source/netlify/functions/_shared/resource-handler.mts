@@ -44,6 +44,7 @@ import {
 } from "./optix-book-resource.mts";
 import { cancelOptixBayForCalendarItem, type OptixBayCancellationResult } from "./optix-cancel.mts";
 import { bayFollowsReschedule } from "./optix-reconcile.mts";
+import { isOriginalWorkspace, readStoredCredentials } from "./integration-credentials.mts";
 
 import {
   webhookHold,
@@ -175,6 +176,22 @@ export async function chosenResourceProviderId(accountId: string): Promise<Exter
     // Unreadable settings fall through to the default.
   }
   return "webhook";
+}
+
+/**
+ * Whether Optix is something this business uses, and so may be shown to it.
+ *
+ * A fresh business never sees the word: Optix is not a sign-in integration,
+ * only a connection one business set up. It is offered as a ready-made choice
+ * to the business that already has it -- the original workspace, anyone with
+ * Optix credentials saved, Optix lesson types switched on, or Optix chosen.
+ */
+export async function businessUsesOptix(accountId: string): Promise<boolean> {
+  if (!accountId) return false;
+  if (isOriginalWorkspace(accountId)) return true;
+  if ((await chosenResourceProviderId(accountId)) === "optix") return true;
+  const optix = await readStoredCredentials(accountId, "optix");
+  return Object.values(optix).some(Boolean);
 }
 
 /** The business's chosen provider. For new holds. */

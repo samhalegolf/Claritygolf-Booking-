@@ -224,7 +224,7 @@ export function ClientsPanel<T extends ClientRow>({
         ) : listTab === "external" ? (
           <div className="empty-panel compact">
             <h2>No external booking clients</h2>
-            <p>People created by an inbound Optix booking appear here until you merge or move them into your clients.</p>
+            <p>People created by a booking from a connected system appear here until you merge or move them into your clients.</p>
           </div>
         ) : term ? (
           <div className="empty-panel compact">

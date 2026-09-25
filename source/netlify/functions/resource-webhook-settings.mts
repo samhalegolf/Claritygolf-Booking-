@@ -8,6 +8,7 @@ import {
   webhookUrlForAccount,
 } from "./_shared/integration-credentials.mts";
 import {
+  businessUsesOptix,
   chosenResourceProviderId,
   EXTERNAL_RESOURCE_PROVIDER_IDS,
   RESOURCE_PROVIDER_SETTING,
@@ -56,20 +57,8 @@ async function writeSetting(accountId: string, key: string, value: string) {
   `;
 }
 
-/** True when this business has Optix set up, so the guide can offer it as the ready-made choice. */
-async function optixConnected(accountId: string) {
-  const rows = await db().sql`
-    SELECT value FROM settings WHERE account_id = ${accountId} AND key = 'optixBookingTypeConfigJson' LIMIT 1
-  `;
-  try {
-    const types = JSON.parse(rows[0]?.value || "{}");
-    if (types && Object.values(types).some((entry: any) => entry?.enabled === true)) return true;
-  } catch {
-    // fall through
-  }
-  const optix = await readStoredCredentials(accountId, "optix");
-  return Object.values(optix).some(Boolean);
-}
+/** True when this business uses Optix, so the guide can offer it as the ready-made choice. */
+const optixConnected = businessUsesOptix;
 
 async function state(req: Request, accountId: string) {
   const [settings, secrets, provider, optix] = await Promise.all([

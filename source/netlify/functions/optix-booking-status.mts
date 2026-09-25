@@ -1,6 +1,8 @@
 import { getDatabase } from "@netlify/database";
 import type { Config } from "@netlify/functions";
 import { requireCoachActor } from "./_shared/coach-auth.mts";
+import { chosenResourceProviderId } from "./_shared/resource-handler.mts";
+import { readResourceWebhookSettings } from "./_shared/resource-webhook-provider.mts";
 
 /**
  * Bay names come from Optix itself.
@@ -60,6 +62,11 @@ async function ensureTable() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `;
+  await db().sql`
+    ALTER TABLE optix_booking_sync
+      ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT 'optix',
+      ADD COLUMN IF NOT EXISTS resource_name TEXT
+  `;
 }
 
 /**
@@ -115,7 +122,10 @@ function toRecord(row: any, bayNames: Map<string, string>) {
     optixBookingId: String(row.optix_booking_id || ""),
     optixBookingSessionId: String(row.optix_booking_session_id || ""),
     resourceId,
-    bayName: bayNames.get(resourceId) || "",
+    // A webhook system names its own bay on the hold; Optix bays are named
+    // from its webhook log.
+    bayName: String(row.resource_name || "").trim() || bayNames.get(resourceId) || "",
+    provider: row.sync_status ? String(row.provider || "optix") : "",
     hasSyncRow: Boolean(row.sync_status),
     syncStatus: row.sync_status ? String(row.sync_status) : "none",
     errorCode: String(row.error_code || ""),
@@ -124,6 +134,18 @@ function toRecord(row: any, bayNames: Map<string, string>) {
     lastSyncedAt: row.last_synced_at || null,
     updatedAt: row.updated_at || null,
   };
+}
+
+/**
+ * Which system this business's bays are in, and whether it is connected. The
+ * card hides itself when nothing is, and names the system when something is --
+ * Optix only for a business that uses Optix.
+ */
+async function systemFor(accountId: string) {
+  const provider = await chosenResourceProviderId(accountId);
+  if (provider === "optix") return { provider, connected: true };
+  const settings = await readResourceWebhookSettings(accountId);
+  return { provider, connected: settings.enabled && Boolean(settings.url) };
 }
 
 export default async function handler(req: Request) {
@@ -154,7 +176,7 @@ export default async function handler(req: Request) {
     const rows = await db().sql`
       SELECT
         c.id, c.client, c.title, c.service_id, c.week, c.day, c.start, c.duration,
-        s.optix_booking_id, s.optix_booking_session_id, s.resource_id, s.sync_status,
+        s.optix_booking_id, s.optix_booking_session_id, s.resource_id, s.resource_name, s.provider, s.sync_status,
         s.error_code, s.error_message, s.last_attempted_at, s.last_synced_at, s.updated_at
       FROM calendar_items c
       LEFT JOIN optix_booking_sync s ON s.calendar_item_id = c.id
@@ -166,9 +188,9 @@ export default async function handler(req: Request) {
     // found:false is "not an appointment on your account", which is a different
     // thing from "an appointment with no bay yet" -- the caller must be able to
     // tell them apart, because only one of them is worth a Book bay button.
-    if (!rows[0]) return json({ found: false, record: null });
+    if (!rows[0]) return json({ found: false, record: null, system: await systemFor(accountId) });
     const bayNames = await bayNamesFor([String(rows[0].resource_id || "")]);
-    return json({ found: true, record: toRecord(rows[0], bayNames) });
+    return json({ found: true, record: toRecord(rows[0], bayNames), system: await systemFor(accountId) });
   }
 
   const rows = await db().sql`
@@ -188,4 +210,6 @@ export default async function handler(req: Request) {
   return json({ records: rows.map((row: any) => toRecord(row, bayNames)) });
 }
 
-export const config: Config = { path: "/api/optix-booking-status" };
+// /api/resource-status is the name the app uses; the old one stays for any
+// open tab still running the previous bundle.
+export const config: Config = { path: ["/api/resource-status", "/api/optix-booking-status"] };

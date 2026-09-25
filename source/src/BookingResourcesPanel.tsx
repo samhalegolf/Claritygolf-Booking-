@@ -5,12 +5,18 @@ import {
   bayLabel,
   describeBookAttempt,
   describeStatusRecord,
+  resourceSystemFor,
   type ResourceOutcome,
   type ResourceStatusRecord,
+  type ResourceSystem,
 } from "./bookingResourceOutcome";
 
 /**
- * Resources — the bay this lesson holds in Optix, and the button that books it.
+ * Resources — the bay this lesson holds in the business's booking system, and
+ * the button that books it. The system is named only when it is Optix and the
+ * business uses Optix; otherwise it is "your booking system". The card does
+ * not appear at all for a business with no system connected, unless the lesson
+ * already holds something.
  *
  * Replaces the panel that optix-booking-feedback.ts injected into this modal
  * from outside React. That one drove itself from a MutationObserver on the
@@ -29,9 +35,11 @@ type Props = {
   onBooked: (resourceId: string) => void;
 };
 
+type SystemState = { provider: string; connected: boolean };
+
 type LoadState =
   | { kind: "loading" }
-  | { kind: "ready"; record: ResourceStatusRecord | null }
+  | { kind: "ready"; record: ResourceStatusRecord | null; system: SystemState | null }
   | { kind: "signedOut" }
   | { kind: "unreadable"; detail: string };
 
@@ -53,7 +61,7 @@ function summaryLabel(outcome: ResourceOutcome, busy: boolean) {
   return outcome.title;
 }
 
-function loadOutcome(load: LoadState): ResourceOutcome {
+function loadOutcome(load: LoadState, system: ResourceSystem): ResourceOutcome {
   if (load.kind === "loading") {
     return {
       tone: "idle",
@@ -61,7 +69,7 @@ function loadOutcome(load: LoadState): ResourceOutcome {
       line: "Reading this lesson's bay booking.",
       details: "",
       canRetry: false,
-      needsOptixCheckFirst: false,
+      needsSystemCheckFirst: false,
       staleAttemptAt: null,
     };
   }
@@ -72,7 +80,7 @@ function loadOutcome(load: LoadState): ResourceOutcome {
       line: "Your admin session expired. Sign in again to see this lesson's bay.",
       details: "",
       canRetry: false,
-      needsOptixCheckFirst: false,
+      needsSystemCheckFirst: false,
       staleAttemptAt: null,
     };
   }
@@ -86,11 +94,21 @@ function loadOutcome(load: LoadState): ResourceOutcome {
       line: "Clarity could not load this lesson's bay booking. Reload status to try again.",
       details: load.detail,
       canRetry: false,
-      needsOptixCheckFirst: false,
+      needsSystemCheckFirst: false,
       staleAttemptAt: null,
     };
   }
-  return describeStatusRecord(load.record);
+  return describeStatusRecord(load.record, Date.now(), system);
+}
+
+/**
+ * The business's system, remembered across lessons so opening the next one
+ * does not flash a card that is about to hide itself. Refreshed by every read.
+ */
+let rememberedSystem: SystemState | null = null;
+
+function holdsSomething(record: ResourceStatusRecord | null) {
+  return Boolean(record && record.hasSyncRow && record.syncStatus && record.syncStatus !== "none");
 }
 
 export default function BookingResourcesPanel({ calendarItemId, onBooked }: Props) {
@@ -106,7 +124,7 @@ export default function BookingResourcesPanel({ calendarItemId, onBooked }: Prop
   const readStatus = useCallback(async (id: string) => {
     try {
       const response = await fetch(
-        `/api/optix-booking-status?calendarItemId=${encodeURIComponent(id)}`,
+        `/api/resource-status?calendarItemId=${encodeURIComponent(id)}`,
         { credentials: "same-origin", cache: "no-store" },
       );
       if (shownId.current !== id) return;
@@ -120,7 +138,9 @@ export default function BookingResourcesPanel({ calendarItemId, onBooked }: Prop
       if (payload.found === false) {
         return setLoad({ kind: "unreadable", detail: "Clarity has no appointment with this id on your account." });
       }
-      setLoad({ kind: "ready", record: (payload.record || null) as ResourceStatusRecord | null });
+      const system = payload.system && typeof payload.system === "object" ? (payload.system as SystemState) : null;
+      if (system) rememberedSystem = system;
+      setLoad({ kind: "ready", record: (payload.record || null) as ResourceStatusRecord | null, system });
     } catch (error) {
       if (shownId.current !== id) return;
       setLoad({
@@ -140,7 +160,11 @@ export default function BookingResourcesPanel({ calendarItemId, onBooked }: Prop
     void readStatus(calendarItemId);
   }, [calendarItemId, readStatus]);
 
-  const outcome = attempt || loadOutcome(load);
+  const record = load.kind === "ready" ? load.record : null;
+  const knownSystem = (load.kind === "ready" ? load.system : null) || rememberedSystem;
+  // Whoever made this lesson's hold, else whoever the business uses now.
+  const system = resourceSystemFor(record?.provider || knownSystem?.provider);
+  const outcome = attempt || loadOutcome(load, system);
 
   // The 25 second ceiling is real (OVERALL_TIMEOUT_MS in optix-book-resource),
   // so a long wait is not a hung request. Say that rather than inventing
@@ -159,7 +183,7 @@ export default function BookingResourcesPanel({ calendarItemId, onBooked }: Prop
     setAttempt(null);
     let result: ResourceOutcome;
     try {
-      const response = await fetch("/api/optix-booking-reconcile", {
+      const response = await fetch("/api/resource-hold", {
         method: "POST",
         credentials: "same-origin",
         cache: "no-store",
@@ -167,12 +191,12 @@ export default function BookingResourcesPanel({ calendarItemId, onBooked }: Prop
         body: JSON.stringify({ forceRetry: true, calendarItemId: id, source: "manual-book-resource" }),
       });
       const payload = await response.json().catch(() => ({}));
-      result = describeBookAttempt({ kind: "response", status: response.status, payload });
+      result = describeBookAttempt({ kind: "response", status: response.status, payload }, system);
       if (payload?.ok === true && shownId.current === id) {
         onBooked(String(payload?.result?.resourceId || ""));
       }
     } catch (error) {
-      result = describeBookAttempt({ kind: "unreachable", error });
+      result = describeBookAttempt({ kind: "unreachable", error }, system);
     }
     if (shownId.current !== id) return;
     setBusy(false);
@@ -184,12 +208,14 @@ export default function BookingResourcesPanel({ calendarItemId, onBooked }: Prop
     void readStatus(id);
   }
 
-  const record = load.kind === "ready" ? load.record : null;
   const metaLabel = record?.syncStatus === "synced" ? "Last confirmed" : record?.hasSyncRow ? "Last attempt" : "";
   const metaTime = formatTime(
     record?.syncStatus === "synced" ? record?.lastSyncedAt || record?.updatedAt : record?.lastAttemptedAt || record?.updatedAt,
   );
-  const bookLabel = outcome.needsOptixCheckFirst ? "I've checked Optix — book anyway" : "Book bay";
+  const bookLabel = outcome.needsSystemCheckFirst ? `I've checked ${system.name} — book anyway` : "Book bay";
+
+  // Nothing connected and nothing held: there is no bay to talk about.
+  if (knownSystem && !knownSystem.connected && !holdsSomething(record) && !busy && !attempt) return null;
 
   return (
     /* Arrives closed, like every other section. The state that would justify
@@ -208,8 +234,8 @@ export default function BookingResourcesPanel({ calendarItemId, onBooked }: Prop
             <p className="resource-state-line">
               <span className="resource-spinner" aria-hidden="true" />
               {slow
-                ? "Still waiting on Optix. Clarity gives it 25 seconds before it gives up."
-                : "Asking Optix to hold a bay for this lesson."}
+                ? `Still waiting on ${system.name}. Clarity gives it 25 seconds before it gives up.`
+                : `Asking ${system.name} to hold a bay for this lesson.`}
             </p>
           ) : (
             <p className="resource-state-line">
