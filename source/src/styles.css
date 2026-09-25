@@ -16342,3 +16342,492 @@ button {
   border-color: transparent;
   font-size: 13px;
 }
+
+/* Location calendar: each coach gets a lane inside the day, in the same order
+   and width as the columns their bookings land in. The band inside keeps the
+   usual inset, so a lane reads as that coach's own card. */
+.location-coach-lane {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+
+.location-coach-lane + .location-coach-lane {
+  border-left: 1px dashed color-mix(in srgb, var(--c-border) 70%, transparent);
+}
+
+/* Settings › Availability: pick whose week is being edited. */
+.availability-layout .availability-coach-hint {
+  margin: 4px 0 0;
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+}
+
+.availability-coach-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-top: 14px;
+}
+
+.availability-coach-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.availability-layout .availability-coach-tab {
+  display: grid;
+  gap: 2px;
+  min-height: var(--c-h-control);
+  padding: 8px 14px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  color: var(--c-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.availability-layout .availability-coach-tab:hover {
+  background: var(--c-hover);
+}
+
+.availability-layout .availability-coach-tab.is-selected {
+  border-color: var(--c-text);
+  box-shadow: inset 0 0 0 1px var(--c-text);
+  background: var(--c-active);
+}
+
+.availability-layout .availability-coach-tab small {
+  color: inherit;
+  font-size: var(--c-size-meta);
+  opacity: 0.75;
+}
+
+.availability-layout .availability-copy-from {
+  display: grid;
+  gap: 4px;
+}
+
+.availability-layout .availability-copy-from span {
+  margin: 0;
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+}
+
+.availability-layout .availability-copy-from select {
+  min-height: var(--c-h-control);
+  font: inherit;
+}
+
+/* A band tinted by the location the coach is working at. The hue is set per
+   band; the tint mixes into --available so it holds in both themes. */
+.available-band.has-location {
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0 calc(var(--hour-height) - 1px),
+      color-mix(in srgb, var(--grid-line) 45%, transparent) calc(var(--hour-height) - 1px) var(--hour-height)
+    ),
+    color-mix(in srgb, hsl(var(--location-hue) 65% 50%) 16%, var(--available));
+  background-position: 0 calc(var(--band-offset, 0px) * -1), 0 0;
+  border-color: color-mix(in srgb, hsl(var(--location-hue) 60% 45%) 45%, transparent);
+  box-shadow: inset 3px 0 0 hsl(var(--location-hue) 60% 45%);
+}
+
+.available-band-location {
+  position: absolute;
+  top: 4px;
+  left: 8px;
+  right: 6px;
+  overflow: hidden;
+  color: color-mix(in srgb, hsl(var(--location-hue) 60% 45%) 65%, var(--c-text));
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.calendar-location-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.calendar-location-key span {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+  font-weight: 600;
+}
+
+.calendar-location-key span::before {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: hsl(var(--location-hue) 60% 50%);
+  content: "";
+}
+
+.availability-layout .availability-window-location {
+  min-height: 34px;
+  padding: 0 8px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  color: var(--c-text);
+  font: inherit;
+  font-size: var(--c-size-meta);
+  box-shadow: inset 3px 0 0 hsl(var(--location-hue, 0) 60% 45% / var(--location-mark, 1));
+}
+
+.availability-layout .availability-window-location:not([style]) {
+  --location-mark: 0;
+}
+
+/* Locations › facility: physical or online, and the bays or rooms it has. */
+.location-facility {
+  display: grid;
+  gap: 14px;
+  margin: 14px 0;
+}
+
+.location-facility .location-facility-kind {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 8px;
+}
+
+.location-facility .location-kind-option {
+  display: grid;
+  gap: 3px;
+  padding: 10px 14px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  color: var(--c-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.location-facility .location-kind-option:hover {
+  background: var(--c-hover);
+}
+
+.location-facility .location-kind-option.is-selected {
+  border-color: var(--c-text);
+  box-shadow: inset 0 0 0 1px var(--c-text);
+  background: var(--c-active);
+}
+
+.location-facility .location-kind-option small,
+.location-facility .location-resources-header small {
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+}
+
+.location-facility .location-resources {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--c-border-soft);
+  border-radius: var(--c-radius-card);
+  background: var(--c-surface-soft);
+}
+
+.location-facility .location-resources-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  justify-content: space-between;
+}
+
+.location-facility .location-resources-header > div {
+  display: grid;
+  gap: 3px;
+  max-width: 46ch;
+}
+
+.location-facility .location-resources-header strong {
+  color: var(--c-text);
+}
+
+.location-facility .location-resource-source select {
+  min-height: var(--c-h-control);
+  font: inherit;
+}
+
+.location-facility .location-resource-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 12rem) auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.location-facility .location-resource-row input:not([type="checkbox"]),
+.location-facility .location-resource-row select {
+  min-width: 0;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  color: var(--c-text);
+  font: inherit;
+}
+
+.location-facility .location-resource-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+@media (max-width: 640px) {
+  .location-facility .location-resource-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .location-facility .location-resource-row select {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
+/* Lesson types › Resource. */
+.service-resource-field {
+  display: grid;
+  align-content: center;
+  gap: 4px;
+}
+
+.service-resource-field .service-resource-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-top: 6px;
+}
+
+.service-resource-field small {
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+}
+
+.service-resource-field .service-resource-chip {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-pill);
+  background: var(--c-surface);
+  color: var(--c-text);
+  font: inherit;
+  font-size: var(--c-size-meta);
+  cursor: pointer;
+}
+
+.service-resource-field .service-resource-chip.is-selected {
+  border-color: var(--c-text);
+  background: var(--c-active);
+  font-weight: 700;
+}
+
+/* Settings › Booking › Bay & room system. Scoped under .resource-system so the
+   .data-card descendant rules (0-1-1) cannot outrank these. */
+.resource-system {
+  display: grid;
+  gap: 16px;
+}
+
+.resource-system .resource-system-status {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 10px;
+  row-gap: 2px;
+  align-items: center;
+}
+
+.resource-system .resource-system-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--c-text-disabled);
+}
+
+.resource-system .resource-system-dot.is-on {
+  background: var(--c-success-text);
+}
+
+.resource-system .resource-system-status small {
+  grid-column: 2;
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+}
+
+.resource-system .resource-system-choice {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.resource-system .resource-system-option {
+  display: grid;
+  gap: 3px;
+  padding: 10px 14px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  color: var(--c-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.resource-system .resource-system-option.is-selected {
+  border-color: var(--c-text);
+  box-shadow: inset 0 0 0 1px var(--c-text);
+  background: var(--c-active);
+}
+
+.resource-system .resource-system-option small {
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+}
+
+.resource-system .resource-system-steps {
+  display: grid;
+  gap: 18px;
+  margin: 0;
+  padding-left: 22px;
+}
+
+/* A list item, not a grid: a grid item loses its step number. */
+.resource-system .resource-system-steps > li {
+  display: list-item;
+  color: var(--c-text);
+}
+
+.resource-system .resource-system-steps > li > * + * {
+  margin-top: 6px;
+}
+
+.resource-system .resource-system-steps > li::marker {
+  font-weight: 700;
+}
+
+.resource-system .resource-system-steps > li > p {
+  margin-bottom: 0;
+  color: var(--c-text-body);
+  font-size: var(--c-size-secondary);
+  max-width: var(--c-w-prose);
+}
+
+.resource-system code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--c-surface-soft);
+  color: var(--c-text);
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+}
+
+.resource-system .resource-system-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.resource-system .resource-system-row input:not([type="checkbox"]) {
+  flex: 1 1 280px;
+  min-width: 0;
+  min-height: var(--c-h-control);
+  padding: 0 10px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  color: var(--c-text);
+  font: inherit;
+}
+
+.resource-system .resource-system-secret {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.resource-system .resource-system-secret small {
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+}
+
+.resource-system .resource-system-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.resource-system .resource-system-tabs button {
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-pill);
+  background: var(--c-surface);
+  color: var(--c-text);
+  font: inherit;
+  font-size: var(--c-size-meta);
+  cursor: pointer;
+}
+
+.resource-system .resource-system-tabs button.is-selected {
+  border-color: var(--c-text);
+  background: var(--c-active);
+  font-weight: 700;
+}
+
+.resource-system .resource-system-code {
+  max-height: 320px;
+  margin: 0;
+  padding: 12px 14px;
+  overflow: auto;
+  border: 1px solid var(--c-border-soft);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface-soft);
+  color: var(--c-text);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.resource-system .resource-system-url {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+
+.resource-system .resource-system-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.resource-system .resource-system-test {
+  font-size: var(--c-size-secondary);
+}
+
+.resource-system .resource-system-test.is-ok {
+  color: var(--c-success-text);
+}
+
+.resource-system .resource-system-test.is-failed {
+  color: var(--c-error-text);
+}

@@ -1,7 +1,7 @@
 import { getDatabase } from "@netlify/database";
 import type { Config } from "@netlify/functions";
 
-import { bookOneResource } from "./_shared/optix-book-resource.mts";
+import { holdResource } from "./_shared/resource-handler.mts";
 import { requireCoachActor } from "./_shared/coach-auth.mts";
 
 
@@ -67,7 +67,7 @@ export default async function handler(req: Request) {
   }
 
   try {
-    const result = await bookOneResource(accountId, calendarItemId);
+    const result = await holdResource(accountId, calendarItemId);
     return json(result, result.ok ? 200 : 207);
   } catch (error: any) {
     const code = String(error?.code || "optix_reconcile_failed");

@@ -110,6 +110,9 @@ const SET_FROM_JS: Array<{ name: string; setBy: string }> = [
   { name: "--coach-secondary", setBy: "App.tsx" },
   { name: "--coach-accent", setBy: "App.tsx" },
   { name: "--coach-neutral", setBy: "App.tsx" },
+  // The hue of the location an availability band, key chip or window picker
+  // stands for, set inline per element from LOCATION_BAND_HUES.
+  { name: "--location-hue", setBy: "App.tsx" },
   // The video workspace's tokens, applied by its theme module. The chrome
   // aliases onto --c-*; the signal colours are its own -- see the module.
   { name: "--va-bg", setBy: "videoAnalysisTheme.ts" },

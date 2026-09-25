@@ -2,7 +2,7 @@ import type { Config, Context } from "@netlify/functions";
 
 import { syncGoogleCalendarChangesIfEnabled } from "./google-calendar-sync.mts";
 import { notifyBookingEvent } from "./notification-engine.mts";
-import { cancelOptixBayForCalendarItem } from "./_shared/optix-cancel.mts";
+import { releaseResource } from "./_shared/resource-handler.mts";
 import { defaultCalendarSlug } from "./_shared/account.mts";
 import { resolvePublicAccount } from "./_shared/coach-auth.mts";
 import {
@@ -264,9 +264,9 @@ async function cancelPublicBooking(req: Request, payload: any) {
 
   const appointment = rowToItem(row);
 
-  // Release any linked Optix bay before removing the Clarity lesson. A failed
-  // Optix cancellation deliberately leaves the lesson in place for a safe retry.
-  await cancelOptixBayForCalendarItem(appointmentId);
+  // Release any linked bay before removing the Clarity lesson. A refused
+  // release deliberately leaves the lesson in place for a safe retry.
+  await releaseResource(account.id, appointmentId);
 
   // The booking deletion is authoritative after linked resources are released.
   // Settings, Google Calendar and notification updates remain secondary.

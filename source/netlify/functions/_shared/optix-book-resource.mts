@@ -18,7 +18,7 @@ function db() {
   return getDatabase();
 }
 
-async function ensureOptixSyncTable() {
+export async function ensureOptixSyncTable() {
   await db().sql`
     CREATE TABLE IF NOT EXISTS optix_booking_sync (
       calendar_item_id TEXT PRIMARY KEY,
@@ -40,9 +40,19 @@ async function ensureOptixSyncTable() {
   // How many times the background sweep has picked this row up. Added by the
   // 20260924000100 migration; repeated here so an environment whose migrations
   // have not run still has the column the sweep relies on.
+  // account_id and provider (the owning business, the holding system) came
+  // with the 20260925000200 migration. One statement for all three, because
+  // every round trip here is paid on every bay booking.
   await db().sql`
     ALTER TABLE optix_booking_sync
-      ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0
+      ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS account_id TEXT,
+      ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT 'optix',
+      ADD COLUMN IF NOT EXISTS pending_action TEXT,
+      ADD COLUMN IF NOT EXISTS pending_since TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS pending_claimed_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS pending_attempts INTEGER NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS resource_name TEXT
   `;
 }
 
@@ -163,11 +173,14 @@ async function readAppointment(accountId: string, calendarItemId: string) {
   return rows[0] ? rowToAppointment(rows[0]) : null;
 }
 
-async function readSyncRecord(calendarItemId: string) {
+// Scoped to the business too. A row written before account_id existed has
+// none until the migration backfills it, and is still found by its lesson id.
+async function readSyncRecord(accountId: string, calendarItemId: string) {
   const rows = await db().sql`
     SELECT *
     FROM optix_booking_sync
     WHERE calendar_item_id = ${calendarItemId}
+      AND (account_id = ${accountId} OR account_id IS NULL)
     LIMIT 1
   `;
   return rows[0] ? rowToSyncRecord(rows[0]) : null;
@@ -198,24 +211,25 @@ export async function readBookingTypeConfig(
   }
 }
 
-async function saveSyncRecord(record: OptixSyncRecord) {
+async function saveSyncRecord(accountId: string, record: OptixSyncRecord) {
   const lastSyncedAt = ["synced", "cancelled"].includes(record.syncStatus)
     ? new Date().toISOString()
     : null;
   await db().sql`
     INSERT INTO optix_booking_sync (
-      calendar_item_id, optix_booking_id, optix_booking_session_id,
+      calendar_item_id, account_id, provider, optix_booking_id, optix_booking_session_id,
       resource_id, start_timestamp, end_timestamp, fingerprint,
       sync_status, error_code, error_message, last_attempted_at,
       last_synced_at, created_at, updated_at
     ) VALUES (
-      ${record.calendarItemId}, ${record.optixBookingId},
+      ${record.calendarItemId}, ${accountId || null}, 'optix', ${record.optixBookingId},
       ${record.optixBookingSessionId}, ${record.resourceId},
       ${record.startTimestamp}, ${record.endTimestamp}, ${record.fingerprint},
       ${record.syncStatus}, ${record.errorCode}, ${record.errorMessage},
       NOW(), ${lastSyncedAt}, NOW(), NOW()
     )
     ON CONFLICT (calendar_item_id) DO UPDATE SET
+      account_id = COALESCE(optix_booking_sync.account_id, EXCLUDED.account_id),
       optix_booking_id = EXCLUDED.optix_booking_id,
       optix_booking_session_id = EXCLUDED.optix_booking_session_id,
       resource_id = EXCLUDED.resource_id,
@@ -263,7 +277,7 @@ export async function bookOneResource(accountId: string, calendarItemId: string)
     return { ok: false, error: "appointment_not_found", message: "Clarity appointment not found." };
   }
 
-  const existing = await readSyncRecord(calendarItemId);
+  const existing = await readSyncRecord(accountId, calendarItemId);
   if (existing?.syncStatus === "synced" && existing.optixBookingId) {
     return { ok: true, alreadyBooked: true, result: existing };
   }
@@ -296,7 +310,7 @@ export async function bookOneResource(accountId: string, calendarItemId: string)
     };
   }
 
-  await saveSyncRecord(result);
+  await saveSyncRecord(accountId, result);
   if (result.syncStatus === "synced") {
     await db().sql`
       UPDATE calendar_items
@@ -382,7 +396,7 @@ export async function rebookResourceAfterReschedule(
   const cleanId = String(calendarItemId || "").trim();
   try {
     await ensureOptixSyncTable();
-    const existing = cleanId ? await readSyncRecord(cleanId) : null;
+    const existing = cleanId ? await readSyncRecord(accountId, cleanId) : null;
     if (!existing?.optixBookingId || existing.syncStatus !== "synced") {
       console.warn("optix_bay_rebook_after_reschedule_skipped", {
         calendarItemId: cleanId,
@@ -421,7 +435,7 @@ export async function rebookResourceAfterReschedule(
           // `unchanged` means the lesson's slot produced the same Optix
           // request it already holds -- a save that touched something other
           // than the time. Nothing to write, nothing to tell Optix.
-          if (!moved.unchanged) await saveSyncRecord(moved.record);
+          if (!moved.unchanged) await saveSyncRecord(accountId, moved.record);
           console.info("optix_bay_moved_in_place", {
             calendarItemId: cleanId,
             optixBookingId: moved.record.optixBookingId,
@@ -576,11 +590,11 @@ export async function queueAutoBookResource(
     // see -- is left exactly as it is.
     const rows = await db().sql`
       INSERT INTO optix_booking_sync (
-        calendar_item_id, optix_booking_id, optix_booking_session_id, resource_id,
+        calendar_item_id, account_id, provider, optix_booking_id, optix_booking_session_id, resource_id,
         start_timestamp, end_timestamp, fingerprint, sync_status, error_code,
         error_message, last_attempted_at, last_synced_at, created_at, updated_at
       )
-      SELECT ${cleanId}, '', '', '', 0, 0, '', 'pending', 'queued',
+      SELECT ${cleanId}, ${accountId}, 'optix', '', '', '', 0, 0, '', 'pending', 'queued',
              'Waiting for Clarity to book a bay in the background.',
              NULL, NULL, NOW(), NOW()
       WHERE EXISTS (
@@ -682,6 +696,7 @@ export async function sweepQueuedAutoBooks(
         SELECT calendar_item_id
         FROM optix_booking_sync
         WHERE sync_status = 'pending'
+          AND COALESCE(provider, 'optix') = 'optix'
           AND created_at < NOW() - (${SWEEP_GRACE_SECONDS}::int * INTERVAL '1 second')
           AND (last_attempted_at IS NULL
                OR last_attempted_at < NOW() - (${SWEEP_CLAIM_SECONDS}::int * INTERVAL '1 second'))
