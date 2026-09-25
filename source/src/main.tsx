@@ -82,7 +82,7 @@ const publicPage: PublicPage | null =
 // their workspace starts downloading now, alongside the session check, rather
 // than after it. The lazy import above reuses the same promise. A player or a
 // stranger never trips this: the hint is removed on logout.
-if (!publicBookingOnly && !videoShare && !reviewShare && lastVisitorWasCoach()) {
+if (!publicPage && !publicBookingOnly && !videoShare && !reviewShare && lastVisitorWasCoach()) {
   void loadApp();
   // The client list too. It is the first thing Clients and Player Profiles
   // need, it is served by its own function, and nothing about the request
