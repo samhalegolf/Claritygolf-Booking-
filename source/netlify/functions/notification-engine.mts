@@ -206,6 +206,10 @@ async function readSettings(accountId: string) {
     venueName: s.accountVenueName || env("CLARITY_VENUE_NAME", ""),
     timezone: s.accountTimezone || env("CLARITY_TIMEZONE", "Pacific/Auckland"),
     bookingUrl: cleanUrl(s.accountBookingUrl || env("CLARITY_BOOKING_URL", "https://book.claritygolf.app"), "https://book.claritygolf.app/"),
+    // Public booking APIs resolve the tenant from the first path segment. Older
+    // accounts can still have a host-root bookingUrl, so keep the account slug
+    // alongside the URL and let client links repair that legacy shape.
+    calendarSlug: cleanText(s.accountCalendarSlug, accountId, 120) || accountId,
     siteUrl,
     contactEmail: cleanEmail(s.accountContactEmail, env("CLARITY_CONTACT_EMAIL", "")),
     coachProfiles: parseCoachProfiles(s.coachProfilesJson),
@@ -392,6 +396,17 @@ function rescheduleUrlFor(appt: any, settings: any) {
   if (!appt?.id) return "";
   try {
     const url = new URL(settings.bookingUrl || "https://book.claritygolf.app");
+    // The public reschedule endpoints are tenant-scoped by the booking page's
+    // first path segment. Legacy accountBookingUrl values often point at the
+    // host root, which rendered the manager but made its API calls unscoped.
+    // Repair only that legacy/root shape; an explicitly configured path wins.
+    const calendarSlug = cleanText(settings.calendarSlug, "", 120)
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    if ((url.pathname === "/" || !url.pathname) && calendarSlug) {
+      url.pathname = `/${calendarSlug}`;
+    }
     url.searchParams.set("embed", "booking");
     url.searchParams.set("mode", "reschedule");
     url.searchParams.set("booking", appt.id);
