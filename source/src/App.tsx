@@ -6905,9 +6905,22 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     isAdminUser && (calendarPerspective !== "location" || canUseFeature(activeAccount, "locationCalendar"))
       ? calendarPerspective
       : "coach";
-  const selectedCalendarCoachId = calendarCoachFilterId || (isAdminUser ? defaultCoachId(accountCoachProfiles) : activeCoachId);
+  // The coach calendar opens on the signed-in person's own calendar when they
+  // coach, whatever their role.
+  const selectedCalendarCoachId = calendarCoachFilterId || activeCoachId;
   const selectedCalendarLocationId = calendarLocationFilterId || defaultLocationId(accountLocations);
   const selectedCalendarCoach = bookingCoachSnapshotFor(selectedCalendarCoachId, accountCoachProfiles, coachAccount);
+  // A business owner who coaches opens on their own calendar, where bookings
+  // are theirs without asking. "All calendars" is still one pick away, and
+  // once they pick a view it stays theirs.
+  const calendarPerspectiveChosenRef = useRef(false);
+  const ownCalendarCoachId = activeCoachList.some((coach) => coach.id === currentAppUser.coachId)
+    ? currentAppUser.coachId || ""
+    : "";
+  useEffect(() => {
+    if (calendarPerspectiveChosenRef.current || !isAdminUser || !ownCalendarCoachId) return;
+    setCalendarPerspective("coach");
+  }, [isAdminUser, ownCalendarCoachId]);
   const visibleWeekItems = useMemo(
     () =>
       weekItems.filter((item) => {
@@ -7305,6 +7318,23 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     const pickedLocations = locationIds.length ? locationIds : [serviceLocation(service, accountLocations, coachAccount).id];
     return pickedCoaches.flatMap((coachId) => pickedLocations.map((locationId) => ({ coachId, locationId })));
   }
+  // Who and where a lesson booked from the calendar is with. A coach's
+  // calendar books with that coach. Anything the lesson type has more than one
+  // of, and the calendar being viewed does not settle, is the booker's choice:
+  // nothing falls to a "default" coach.
+  function calendarBookingChoices(service: Service) {
+    const options = serviceBookingOptions(service);
+    const coachIds = [...new Set(options.map((option) => option.coachId))];
+    const locationIds = [...new Set(options.map((option) => option.locationId))];
+    const fixedCoachId =
+      effectiveCalendarPerspective === "coach" && coachIds.includes(selectedCalendarCoachId)
+        ? selectedCalendarCoachId
+        : coachIds.length === 1
+          ? coachIds[0]
+          : "";
+    const fixedLocationId = locationIds.length === 1 ? locationIds[0] : "";
+    return { coachIds, locationIds, fixedCoachId, fixedLocationId };
+  }
   // The coach a lesson booked from the calendar goes to: the one being viewed
   // when they teach it, otherwise the first the lesson type lists.
   function serviceCoachFor(service: Service | undefined, preferredCoachId = "") {
@@ -7334,7 +7364,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     (service.bookingScreenIds ?? ["main"]).includes(currentBookingScreenId),
   );
   const currentScreenPublicServiceIds = currentScreenPublicServices.map((service) => service.id).join("|");
-  const quickCreateServices = effectiveCalendarPerspective === "location" ? [] : appointmentServices;
+  // A coach's calendar offers only the lesson types that coach teaches.
+  const quickCreateServices =
+    effectiveCalendarPerspective === "location"
+      ? []
+      : effectiveCalendarPerspective === "coach"
+        ? appointmentServices.filter((service) =>
+            serviceBookingOptions(service).some((option) => option.coachId === selectedCalendarCoachId),
+          )
+        : appointmentServices;
   // Resolve the quick-create service from all account services, not just the
   // appointment-style pick list: "Add person" on a scheduled group session sets
   // serviceId to the group service, which the pick list deliberately excludes.
@@ -10341,12 +10379,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     };
     setQuickMatchField("name");
     setQuickClientSearch("");
+    // A scheduled group is one session, with the first coach at the first place.
+    const [{ coachId, locationId }] = serviceBookingOptions(service);
     setQuickCreate({
       week: candidate.week,
       day: candidate.day,
       start: candidate.start,
       x: anchor.x,
       y: anchor.y,
+      coachId,
+      locationId,
       serviceId: service.id,
       phone: "",
       email: "",
@@ -10354,7 +10396,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       attendees: [],
       attendeeName: "",
       attendeeEmail: "",
-      error: quickCreateAvailabilityError(candidate, service),
+      error: quickCreateAvailabilityError(candidate, service, { coachId, locationId }),
     });
   }
 
@@ -11475,10 +11517,21 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     return sameServiceCount >= service.capacity;
   }
 
-  function quickCreateAvailabilityError(candidate: SlotCandidate, service?: Service) {
+  function quickCreateAvailabilityError(
+    candidate: SlotCandidate,
+    service?: Service,
+    choice: { coachId?: string; locationId?: string } = {},
+  ) {
     if (!service) return "That service is no longer available.";
     if (isGroupSlotFull(candidate, service)) return "Group is full.";
-    if (!isValidAppointmentSlot(candidate, undefined, service)) return "That time is already occupied.";
+    const { coachIds, locationIds } = calendarBookingChoices(service);
+    // Before the coach or place is chosen, the time only has to suit one of them.
+    const free = (choice.coachId ? [choice.coachId] : coachIds).some((coachId) =>
+      (choice.locationId ? [choice.locationId] : locationIds).some((locationId) =>
+        isValidAppointmentSlot(candidate, undefined, service, { candidateCoachId: coachId, candidateLocationId: locationId }),
+      ),
+    );
+    if (!free) return choice.coachId || coachIds.length === 1 ? "That time is already occupied." : "No coach is free then.";
     return "";
   }
 
@@ -11512,9 +11565,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     });
   }
 
-  function isValidAppointmentSlot(candidate: SlotCandidate, ignoreId?: string, service?: Service) {
+  function isValidAppointmentSlot(
+    candidate: SlotCandidate,
+    ignoreId?: string,
+    service?: Service,
+    options: { candidateCoachId?: string; candidateLocationId?: string } = {},
+  ) {
     if (candidate.start < DAY_START_MINUTES || candidate.start + candidate.duration > DAY_END_MINUTES) return false;
-    if (service) return !hasCollision(candidate, ignoreId, service);
+    if (service) return !hasCollision(candidate, ignoreId, service, options);
     if (hasAppointmentCollision(candidate, ignoreId)) return false;
     return true;
   }
@@ -12277,19 +12335,37 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       start: quickCreate.start,
       duration: service.duration,
     };
+    const { fixedCoachId, fixedLocationId } = calendarBookingChoices(service);
+    const choice = { coachId: fixedCoachId, locationId: fixedLocationId };
     setQuickCreate((current) =>
       current
         ? {
             ...current,
             serviceId,
+            ...choice,
             attendees: [],
             attendeeName: "",
             attendeeEmail: "",
-            error: quickCreateAvailabilityError(candidate, service),
+            error: quickCreateAvailabilityError(candidate, service, choice),
           }
         : current,
     );
     setQuickMatchField("name");
+  }
+
+  function chooseQuickCreateScope(field: "coachId" | "locationId", value: string) {
+    setQuickCreate((current) => {
+      if (!current || !quickCreateService) return current;
+      const next = { ...current, [field]: value };
+      const candidate = { week: next.week, day: next.day, start: next.start, duration: quickCreateService.duration };
+      return {
+        ...next,
+        error: quickCreateAvailabilityError(candidate, quickCreateService, {
+          coachId: next.coachId,
+          locationId: next.locationId,
+        }),
+      };
+    });
   }
 
   function backToQuickServiceChoice() {
@@ -12299,7 +12375,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       // to the normal lesson pick list makes no sense there, so just close.
       const service = activeServices.find((candidate) => candidate.id === current.serviceId);
       if (isScheduledGroupService(service)) return null;
-      return { ...current, serviceId: "", phone: "", email: "", note: "", error: "" };
+      return { ...current, serviceId: "", coachId: undefined, locationId: undefined, phone: "", email: "", note: "", error: "" };
     });
   }
 
@@ -12317,21 +12393,34 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setQuickCreate((current) => (current ? { ...current, error: "Add at least one other person." } : current));
       return;
     }
+    const coachId = quickCreate.coachId || "";
+    const locationId = quickCreate.locationId || "";
+    if (!coachId || !locationId) {
+      setQuickCreate((current) =>
+        current ? { ...current, error: coachId ? "Choose a location." : "Choose a coach." } : current,
+      );
+      return;
+    }
     const candidate = {
       week: quickCreate.week,
       day: quickCreate.day,
       start: quickCreate.start,
       duration: quickCreateService.duration,
     };
-    if (!isValidAppointmentSlot(candidate, undefined, quickCreateService)) {
+    const choice = { candidateCoachId: coachId, candidateLocationId: locationId };
+    if (!isValidAppointmentSlot(candidate, undefined, quickCreateService, choice)) {
       setQuickCreate((current) =>
-        current ? { ...current, error: quickCreateAvailabilityError(candidate, quickCreateService) } : current,
+        current
+          ? { ...current, error: quickCreateAvailabilityError(candidate, quickCreateService, { coachId, locationId }) }
+          : current,
       );
       return;
     }
     if (!confirmPastAdminLesson(candidate)) return;
-    const coachId = serviceCoachFor(quickCreateService, selectedCalendarCoachId || activeCoachId);
-    const location = bookingLocationSnapshotFor(quickCreateService, locations, coachAccount);
+    const chosenLocation = locationById(locations, locationId);
+    const location = chosenLocation
+      ? locationSnapshot(chosenLocation)
+      : bookingLocationSnapshotFor(quickCreateService, locations, coachAccount);
     const item: CalendarItem = {
       id: newCalendarItemId("appt"),
       kind: "appointment",
@@ -12411,19 +12500,54 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     });
   }
 
+  /**
+   * The first coach and place, among those the lesson type is offered with,
+   * who are free for this slot. The preferred ones (the block's own coach, the
+   * coach calendar being viewed) go first; otherwise the lesson type's order.
+   */
+  function firstFreeCalendarOption(
+    candidate: SlotCandidate,
+    service: Service,
+    preferred: { coachId?: string; locationId?: string } = {},
+    ignoreId?: string,
+  ) {
+    const rank = (option: { coachId: string; locationId: string }) =>
+      (option.coachId === preferred.coachId ? 0 : 2) + (option.locationId === preferred.locationId ? 0 : 1);
+    return (
+      serviceBookingOptions(service)
+        .map((option, index) => ({ option, index }))
+        .sort((a, b) => rank(a.option) - rank(b.option) || a.index - b.index)
+        .map(({ option }) => option)
+        .find((option) =>
+          isValidAppointmentSlot(candidate, ignoreId, service, {
+            candidateCoachId: option.coachId,
+            candidateLocationId: option.locationId,
+          }),
+        ) ?? null
+    );
+  }
+
   function createAppointmentInsideSelectedBlock(serviceId: string) {
     if (!selected || selected.kind !== "block") return;
     const service = appointmentServices.find((candidate) => candidate.id === serviceId);
     if (!service) return;
     const candidate = { week: itemWeek(selected), day: selected.day, start: selected.start, duration: service.duration };
-    if (!isValidAppointmentSlot(candidate, undefined, service)) {
+    // Booked with the blocked coach and place when the lesson type has them.
+    const option = firstFreeCalendarOption(candidate, service, {
+      coachId: selected.coachId || (effectiveCalendarPerspective === "coach" ? selectedCalendarCoachId : undefined),
+      locationId: selected.locationId,
+    });
+    if (!option) {
       setToast({ message: "That lesson would overlap another appointment." });
       return;
     }
     if (!confirmPastAdminLesson(candidate)) return;
     const previous = items;
-    const coachId = serviceCoachFor(service, selectedCalendarCoachId || activeCoachId);
-    const location = bookingLocationSnapshotFor(service, locations, coachAccount);
+    const coachId = option.coachId;
+    const chosenLocation = locationById(locations, option.locationId);
+    const location = chosenLocation
+      ? locationSnapshot(chosenLocation)
+      : bookingLocationSnapshotFor(service, locations, coachAccount);
     const item: CalendarItem = {
       id: newCalendarItemId("appt"),
       kind: "appointment",
@@ -12521,7 +12645,23 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     // back exactly where it came from, the whole point of the grace window, the
     // one move the calendar refused. New bookings have no source and are
     // unaffected.
-    if (!isValidAppointmentSlot(candidate, booking.sourceItemId || undefined, service)) {
+    // A lesson that came off the calendar keeps its own coach and place. A new
+    // one goes to the coach calendar being viewed when that coach teaches it,
+    // otherwise the first coach and place the lesson type lists who are free.
+    const shelvedSource = booking.sourceItemId
+      ? items.find((item) => item.id === booking.sourceItemId)
+      : null;
+    const option = shelvedSource
+      ? isValidAppointmentSlot(candidate, shelvedSource.id, service, {
+          candidateCoachId: resolvedCalendarItemCoachId(shelvedSource, service, coachProfiles, coachAccount),
+          candidateLocationId: resolvedCalendarItemLocationId(shelvedSource, service, locations, coachAccount),
+        })
+        ? { coachId: "", locationId: "" }
+        : null
+      : firstFreeCalendarOption(candidate, service, {
+          coachId: effectiveCalendarPerspective === "coach" ? selectedCalendarCoachId : undefined,
+        });
+    if (!option) {
       setToast({ message: "That spot is not available. The lesson is still on the shelf." });
       return false;
     }
@@ -12532,9 +12672,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     // already set, and the backend sees one reschedule -- so returning it to its
     // original slot inside the grace window is a no-op rather than a cancel
     // followed by a new booking.
-    const shelvedSource = booking.sourceItemId
-      ? items.find((item) => item.id === booking.sourceItemId)
-      : null;
     if (shelvedSource) {
       const movedItem: CalendarItem = {
         ...shelvedSource,
@@ -12572,8 +12709,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       return true;
     }
 
-    const coachId = serviceCoachFor(service);
-    const location = bookingLocationSnapshotFor(service, locations, coachAccount);
+    const coachId = option.coachId;
+    const chosenLocation = locationById(locations, option.locationId);
+    const location = chosenLocation
+      ? locationSnapshot(chosenLocation)
+      : bookingLocationSnapshotFor(service, locations, coachAccount);
     const item: CalendarItem = {
       id: newCalendarItemId("appt"),
       kind: "appointment",
@@ -23311,6 +23451,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   );
 
   const quickCreateIsCustomGroup = Boolean(quickCreate && quickCreateService && isCustomGroupService(quickCreateService));
+  // The coach and place choices the quick-create form asks for, if any.
+  const quickCreateChoices =
+    quickCreate && quickCreateService && !isScheduledGroupService(quickCreateService)
+      ? calendarBookingChoices(quickCreateService)
+      : null;
+  const quickCreateCandidate =
+    quickCreate && quickCreateService
+      ? { week: quickCreate.week, day: quickCreate.day, start: quickCreate.start, duration: quickCreateService.duration }
+      : null;
   const quickCreateCustomGroupParticipantCount = quickCreateIsCustomGroup && quickCreate ? 1 + quickCreate.attendees.length : 1;
   const quickCreateCustomGroupPrice =
     quickCreateIsCustomGroup && quickCreateService
@@ -24615,7 +24764,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 <div className="calendar-scope-controls" aria-label="Calendar scope">
                   <select
                     value={effectiveCalendarPerspective}
-                    onChange={(event) => setCalendarPerspective(event.target.value as CalendarPerspective)}
+                    onChange={(event) => {
+                      calendarPerspectiveChosenRef.current = true;
+                      setCalendarPerspective(event.target.value as CalendarPerspective);
+                    }}
                     disabled={!isAdminUser}
                   >
                     {isAdminUser ? <option value="all">All calendars</option> : null}
@@ -25191,6 +25343,58 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       </span>
                       <ArrowLeft size={14} />
                     </button>
+                    {quickCreateChoices && !quickCreateChoices.fixedCoachId ? (
+                      <label>
+                        <span>Coach</span>
+                        <select
+                          value={quickCreate.coachId ?? ""}
+                          onChange={(event) => chooseQuickCreateScope("coachId", event.target.value)}
+                        >
+                          <option value="" disabled>
+                            Choose a coach
+                          </option>
+                          {quickCreateChoices.coachIds.map((coachId) => {
+                            const coach = bookingCoachSnapshotFor(coachId, coachProfiles, coachAccount);
+                            const free = !quickCreateAvailabilityError(quickCreateCandidate!, quickCreateService, {
+                              coachId,
+                              locationId: quickCreate.locationId,
+                            });
+                            return (
+                              <option key={coachId} value={coachId}>
+                                {coach.displayName || coach.name}
+                                {free ? "" : " (busy)"}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </label>
+                    ) : null}
+                    {quickCreateChoices && !quickCreateChoices.fixedLocationId ? (
+                      <label>
+                        <span>Location</span>
+                        <select
+                          value={quickCreate.locationId ?? ""}
+                          onChange={(event) => chooseQuickCreateScope("locationId", event.target.value)}
+                        >
+                          <option value="" disabled>
+                            Choose a location
+                          </option>
+                          {quickCreateChoices.locationIds.map((locationId) => {
+                            const location = locationById(locations, locationId);
+                            const free = !quickCreateAvailabilityError(quickCreateCandidate!, quickCreateService, {
+                              coachId: quickCreate.coachId,
+                              locationId,
+                            });
+                            return (
+                              <option key={locationId} value={locationId}>
+                                {location?.shortName || location?.name || locationId}
+                                {free ? "" : " (busy)"}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </label>
+                    ) : null}
                     <label>
                       <span>Name</span>
                       <div className="quick-match-anchor">

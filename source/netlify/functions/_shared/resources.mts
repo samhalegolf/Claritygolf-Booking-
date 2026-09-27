@@ -186,9 +186,10 @@ export function clarityResourcesApply(
 }
 
 /**
- * The resources this booking may take, best first. Lefties-only resources go
- * last for anyone who is not a left-hander, so they stay free for those who
- * need them; for a left-hander they go first.
+ * The resources this booking may take, in the order the location lists them:
+ * that order is the business's own choice of which to fill first. Handedness
+ * only rules resources out -- a left-hander never gets a righties-only one and
+ * a right-hander never a lefties-only one -- it never reorders them.
  */
 export function eligibleResources(
   location: ResourceLocation,
@@ -207,18 +208,15 @@ export function eligibleResources(
     types.has(resourceTypeKey(resource.type)) ||
     ids.has(resourceSelectionId(location.id || "", resource.id)) ||
     ids.has(resource.id);
-  const candidates = (location.resources || []).filter((resource) => resource.active !== false && chosen(resource));
-  const rank = (resource: LocationResource) => {
+  const fitsHand = (resource: LocationResource) => {
     const hand = cleanResourceHandedness(resource.handedness);
-    if (handedness === "left") return hand === "left" ? 0 : hand === "any" ? 1 : 9;
-    if (handedness === "right") return hand === "right" ? 0 : hand === "any" ? 1 : 9;
-    return hand === "left" ? 2 : hand === "right" ? 0 : 1;
+    if (handedness === "left") return hand !== "right";
+    if (handedness === "right") return hand !== "left";
+    return true;
   };
-  return candidates
-    .map((resource, index) => ({ resource, index, rank: rank(resource) }))
-    .filter((entry) => entry.rank < 9)
-    .sort((a, b) => a.rank - b.rank || a.index - b.index)
-    .map((entry) => entry.resource);
+  return (location.resources || []).filter(
+    (resource) => resource.active !== false && chosen(resource) && fitsHand(resource),
+  );
 }
 
 function overlaps(a: ResourceSlot, b: ResourceSlot) {
