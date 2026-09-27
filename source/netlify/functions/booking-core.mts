@@ -9073,28 +9073,59 @@ async function resetAdminPassword(token, password) {
   return { user: { id: row.user_id, email: row.email, password_hash: passwordHash, password_salt: salt } };
 }
 
-async function changeAdminPassword(session, currentPassword, nextPassword) {
-  if (!session?.email) return { error: "unauthorized" };
+/**
+ * Change the signed-in coach's password.
+ *
+ * Coach credentials live in Supabase Auth; admin_users is the transitional
+ * store for the original workspace's login. Login tries Supabase first and
+ * falls back to admin_users, so a change has to land in both: updating only
+ * admin_users left the old Supabase password still signing in, and a coach
+ * with no admin_users row could not change their password at all.
+ *
+ * The current password is proved against whichever store holds it. Every
+ * other session for this person is ended; the route mints a fresh one for the
+ * device that made the change.
+ */
+async function changeAdminPassword(session, authUserId, currentPassword, nextPassword) {
+  if (!session) return { error: "unauthorized" };
   if (typeof nextPassword !== "string" || nextPassword.length < 8)
     return { error: "weak_password" };
-  const user = await verifyAdminPassword(session.email, currentPassword || "");
-  if (!user) return { error: "invalid_current_password" };
+
+  const email = session.email || (await supabaseAuthEmail(authUserId));
+  if (!email) return { error: "unauthorized" };
+
+  const supabaseUserId = await verifySupabaseAuthPassword(email, currentPassword || "");
+  const provedBySupabase = Boolean(authUserId) && supabaseUserId === authUserId;
+  const legacyUser = await verifyAdminPassword(email, currentPassword || "");
+  if (!provedBySupabase && !legacyUser) return { error: "invalid_current_password" };
+
+  // The legacy row is kept in step whenever one exists for this email, even if
+  // the current password was proved against Supabase -- otherwise the old
+  // password would still get in through the login fallback.
+  const legacyRows = await db().sql`SELECT id FROM admin_users WHERE email = ${cleanString(email, "", 180)}`;
+  const legacyUserId = cleanString(legacyRows[0]?.id, "", 80);
 
   const { passwordHash, salt } = hashPassword(nextPassword);
   const client = await db().pool.connect();
   try {
     await client.query("BEGIN");
+    if (legacyUserId) {
+      await client.query(
+        `UPDATE admin_users
+         SET password_hash = $1,
+             password_salt = $2,
+             updated_at = NOW()
+         WHERE id = $3`,
+        [passwordHash, salt, legacyUserId],
+      );
+    }
     await client.query(
-      `UPDATE admin_users
-       SET password_hash = $1,
-           password_salt = $2,
-           updated_at = NOW()
-       WHERE id = $3`,
-      [passwordHash, salt, user.id],
+      "DELETE FROM admin_sessions WHERE user_id = $1 OR ($2 <> '' AND auth_user_id::text = $2)",
+      [legacyUserId || authUserId, authUserId || ""],
     );
-    await client.query("DELETE FROM admin_sessions WHERE user_id = $1", [
-      user.id,
-    ]);
+    // Last, so a Supabase refusal (a password its policy rejects, say) rolls
+    // the legacy change back and the two stores never disagree.
+    if (authUserId) await setSupabaseAuthPassword(authUserId, nextPassword);
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");
@@ -9103,7 +9134,14 @@ async function changeAdminPassword(session, currentPassword, nextPassword) {
     client.release();
   }
 
-  return { user: { id: user.id, email: user.email, password_hash: passwordHash, password_salt: salt } };
+  return { user: { id: legacyUserId || authUserId, email } };
+}
+
+/** The email Supabase Auth holds for a user id, or "". */
+async function supabaseAuthEmail(authUserId) {
+  if (!authUserId) return "";
+  const rows = await db().sql`SELECT email FROM auth.users WHERE id = ${authUserId}::uuid LIMIT 1`;
+  return cleanEmail(rows[0]?.email, "");
 }
 
 /**
@@ -12888,11 +12926,9 @@ async function routeBookingApiRequest(
 
     if (req.method === "POST" && pathname === "/api/auth/change-password") {
       // The boundary check first (401 without a session, 403 without a
-      // membership), then the legacy session row for the email this route
-      // needs. Coaches whose credential lives only in Supabase Auth have no
-      // admin_users row, so this route reports invalid_current_password for
-      // them -- they change their password through Supabase, not here.
-      await requireAdmin(req);
+      // membership), then the session row. changeAdminPassword works out
+      // which credential store(s) this coach has and updates all of them.
+      const changeActor = await requireAdmin(req);
       const currentSession = await readAdminSession(sessionTokenFromRequest(req));
       if (!currentSession)
         return json(
@@ -12900,11 +12936,28 @@ async function routeBookingApiRequest(
           401,
         );
       const body = await parseBody(req);
-      const result = await changeAdminPassword(
-        currentSession,
-        body.currentPassword || "",
-        body.newPassword || "",
-      );
+      let result;
+      try {
+        result = await changeAdminPassword(
+          currentSession,
+          changeActor.authUserId,
+          body.currentPassword || "",
+          body.newPassword || "",
+        );
+      } catch (error) {
+        // Supabase refusing the new password (its own strength policy) is the
+        // coach's to fix, so say what it said rather than a bare 500. Anything
+        // else is ours and goes to the normal error path.
+        const status = Number((error as { status?: number })?.status);
+        if (!(status >= 400 && status < 500)) throw error;
+        return json(
+          {
+            error: "change_password_failed",
+            message: error instanceof Error && error.message ? error.message : "Could not change password.",
+          },
+          400,
+        );
+      }
       if (result.error === "weak_password") {
         return json(
           { error: "weak_password", message: "Use at least 8 characters." },
@@ -12931,9 +12984,7 @@ async function routeBookingApiRequest(
       }
       // The new session must carry the same Supabase identity the old one did,
       // or the coach is signed out in all but name: requireCoachActor would
-      // find no auth_user_id and refuse every request. requireAdmin above
-      // already resolved this actor, so it is cached.
-      const changeActor = await currentActor(req);
+      // find no auth_user_id and refuse every request.
       const session = await createAdminSession(result.user, changeActor.authUserId);
       return json(
         authSessionResponse({
