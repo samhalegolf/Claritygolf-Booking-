@@ -1436,7 +1436,6 @@ function defaultCoachProfileFromAccount(account = defaultCoachAccount()) {
     email: clean.contactEmail,
     active: true,
     archived: false,
-    isDefault: true,
     bookable: true,
     assignedLocationIds: ["default-location"],
     defaultLocationId: "default-location",
@@ -1482,7 +1481,6 @@ function cleanCoachProfile(raw = {}, fallback = defaultCoachProfileFromAccount()
     photoUrl: cleanUrl(raw?.photoUrl, "", 300) || undefined,
     active: raw?.active !== false,
     archived: raw?.archived === true,
-    isDefault: raw?.isDefault === true || fallback.isDefault === true,
     bookable: raw?.bookable !== false,
     assignedLocationIds: Array.isArray(raw?.assignedLocationIds)
       ? raw.assignedLocationIds.map((id) => cleanSlug(id, "")).filter(Boolean)
@@ -1510,15 +1508,21 @@ function normalizeCoachProfiles(rawProfiles, account = defaultCoachAccount()) {
   if (!cleaned.some((coach) => coach.active && !coach.archived && coach.bookable)) {
     cleaned[0] = { ...cleaned[0], active: true, archived: false, bookable: true };
   }
-  const defaultIndex = cleaned.findIndex((coach) => coach.isDefault && coach.active && !coach.archived);
-  const fallbackDefaultIndex = defaultIndex >= 0 ? defaultIndex : cleaned.findIndex((coach) => coach.active && !coach.archived);
-  return cleaned
-    .map((coach, index) => ({ ...coach, isDefault: index === fallbackDefaultIndex }))
-    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.displayName.localeCompare(b.displayName));
+  return cleaned.sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.displayName.localeCompare(b.displayName));
 }
 
-function defaultCoachId(coaches) {
-  return coaches.find((coach) => coach.isDefault && coach.active && !coach.archived)?.id || coaches[0]?.id || defaultCoachProfileFromAccount().id;
+/**
+ * The coach a record that names none belongs to: the first active coach in
+ * the business's list. There is no "default coach" setting -- lesson types,
+ * bookings and availability all name their coach -- so this only decides
+ * where rows saved before that are shown.
+ */
+function firstCoachId(coaches) {
+  return (
+    coaches.find((coach) => coach.active && !coach.archived)?.id ||
+    coaches[0]?.id ||
+    defaultCoachProfileFromAccount().id
+  );
 }
 
 function coachById(coaches, id) {
@@ -1539,7 +1543,7 @@ function coachSnapshot(coach) {
 function bookingCoachSnapshotFor(coachId, coaches, account) {
   const profile =
     coachById(coaches, coachId) ||
-    coachById(coaches, defaultCoachId(coaches)) ||
+    coachById(coaches, firstCoachId(coaches)) ||
     defaultCoachProfileFromAccount(account);
   return coachSnapshot(profile);
 }
@@ -1681,7 +1685,7 @@ function calendarItemCoach(item, coaches, account) {
 }
 
 function resolvedCalendarItemCoachId(item, service, coaches, account) {
-  return item?.coachId || item?.coach?.coachId || primaryServiceCoachId(service) || calendarItemCoach(item, coaches, account).coachId || defaultCoachId(coaches);
+  return item?.coachId || item?.coach?.coachId || primaryServiceCoachId(service) || calendarItemCoach(item, coaches, account).coachId || firstCoachId(coaches);
 }
 
 function resolvedCalendarItemLocationId(item, service, locations, account) {
@@ -1748,10 +1752,10 @@ export function filterCalendarStateForContext(state, context) {
     items: filteredItems,
     services: context.isAdmin
       ? (state.services || []).filter((service) => recordBelongsToAccount(service, context.accountId))
-      : (state.services || []).filter((service) => recordBelongsToAccount(service, context.accountId) && serviceIncludesCoach(service, context.coachId, defaultCoachId(state.coaches))),
+      : (state.services || []).filter((service) => recordBelongsToAccount(service, context.accountId) && serviceIncludesCoach(service, context.coachId, firstCoachId(state.coaches))),
     availability: context.isAdmin
       ? (state.availability || []).map((day) => day.filter((window) => recordBelongsToAccount(window, context.accountId)))
-      : (state.availability || []).map((day) => day.filter((window) => recordBelongsToAccount(window, context.accountId) && (window.coachId || defaultCoachId(state.coaches)) === context.coachId)),
+      : (state.availability || []).map((day) => day.filter((window) => recordBelongsToAccount(window, context.accountId) && (window.coachId || firstCoachId(state.coaches)) === context.coachId)),
     notifications: context.isAdmin
       ? state.notifications
       : (state.notifications || []).filter((notification) => visibleItemIds.has(notification.calendarItemId)),
@@ -1764,7 +1768,7 @@ export function filterCalendarStateForContext(state, context) {
 function serviceBelongsToContext(service, context, coaches = []) {
   if (!recordBelongsToAccount(service, context.accountId)) return false;
   if (context.isAdmin) return true;
-  return serviceIncludesCoach(service, context.coachId, defaultCoachId(coaches));
+  return serviceIncludesCoach(service, context.coachId, firstCoachId(coaches));
 }
 
 function assertCanWriteService(context, service, previousService, coaches = []) {
@@ -6027,8 +6031,7 @@ async function readWorkspaceBootstrap(membership: CoachActor): Promise<Workspace
     const { settings: settingsMap } = await readStateSettingsSnapshot(membership.accountId);
     const account = coachAccountFromSettings(settingsMap, membership.accountId);
     const coaches = coachProfilesFromSettings(settingsMap, account);
-    const defaultCoachId =
-      coaches.find((coach) => coach.isDefault && coach.active && !coach.archived)?.id || coaches[0]?.id || "";
+    const fallbackCoachId = coaches.find((coach) => coach.active && !coach.archived)?.id || coaches[0]?.id || "";
     const coachName = settingValue(settingsMap, "accountCoachName") || account.coachName;
     return {
       accountId: membership.accountId,
@@ -6042,7 +6045,7 @@ async function readWorkspaceBootstrap(membership: CoachActor): Promise<Workspace
         accountId: membership.accountId,
         name: coachName,
         role: appUserRoleForMembership(membership.role),
-        coachId: membership.coachId || defaultCoachId,
+        coachId: membership.coachId || fallbackCoachId,
         permissions: membership.isAdmin
           ? { bookings: "all", services: "all", availability: "all", locations: "all", clients: "all", settings: "all" }
           : { bookings: "own", services: "own", availability: "own", locations: "none", clients: "own", settings: "none" },
@@ -8456,7 +8459,7 @@ function modernClientEmailFooter(value) {
 // account-wide setting as a last resort.
 function resolveAppointmentCoach(appointment, coaches = [], account = defaultCoachAccount(), settings = {}) {
   const snapshot = appointment?.coach || null;
-  const coachId = cleanSlug(appointment?.coachId || snapshot?.coachId || "", "") || defaultCoachId(coaches);
+  const coachId = cleanSlug(appointment?.coachId || snapshot?.coachId || "", "") || firstCoachId(coaches);
   const profile = coachById(coaches, coachId);
   const email =
     cleanEmail(profile?.email, "") ||
@@ -11035,7 +11038,7 @@ function findCollision(items, candidate, service, state = {}) {
   const account = state.account || defaultCoachAccount();
   // The coach and location this booking would be with. A lesson type offered
   // by several says which one on the candidate; otherwise it is the first.
-  const candidateCoachId = candidate.coachId || primaryServiceCoachId(service, defaultCoachId(coaches));
+  const candidateCoachId = candidate.coachId || primaryServiceCoachId(service, firstCoachId(coaches));
   const candidateLocationId = candidate.locationId || serviceLocation(service, locations, account).id;
   const candidateItem = {
     kind: "appointment",
@@ -11178,7 +11181,7 @@ function serviceBookingOptions(service, state = {}) {
   const coachIds = serviceCoachIds(service).filter(liveCoach);
   const locationIds = serviceLocationIds(service).filter(liveLocation);
   const fallbackLocation = serviceLocation(service, locations, account);
-  const pickedCoaches = coachIds.length ? coachIds : [primaryServiceCoachId(service, defaultCoachId(coaches))];
+  const pickedCoaches = coachIds.length ? coachIds : [primaryServiceCoachId(service, firstCoachId(coaches))];
   const pickedLocations = locationIds.length ? locationIds.map((id) => locationById(locations, id)) : [fallbackLocation];
   return pickedCoaches.flatMap((coachId) =>
     pickedLocations.map((location) => ({ coachId, locationId: location.id, location })),
@@ -11553,7 +11556,7 @@ async function createPublicBooking(accountId: string, payload: Record<string, an
   }
 
   // A review has no time or place: it goes to the lesson type's first coach.
-  const reviewCoachId = primaryServiceCoachId(service, defaultCoachId(accountState.coaches || []));
+  const reviewCoachId = primaryServiceCoachId(service, firstCoachId(accountState.coaches || []));
   const reviewDue = isReview
     ? videoReviewDueSlot(
         service,
@@ -14407,7 +14410,7 @@ async function routeBookingApiRequest(
     if (req.method === "GET" && pathname === "/api/availability") {
       const state = await readSettingsState(await currentAccountId(req));
       const requestContext = await resolveBackendRequestContext(req, state);
-      const fallbackCoachId = defaultCoachId(state.coaches);
+      const fallbackCoachId = firstCoachId(state.coaches);
       return json({
         availability: state.availability.map((dayWindows) =>
           dayWindows.filter((window) => availabilityWindowBelongsToContext(window, requestContext, fallbackCoachId)),
@@ -14423,7 +14426,7 @@ async function routeBookingApiRequest(
         body.availability || [],
         state.availability,
         requestContext,
-        defaultCoachId(state.coaches),
+        firstCoachId(state.coaches),
       );
       const savedAvailability = await writeAvailability(requestContext.accountId, nextAvailability, requestContext);
       // Unavailable blocks in Google are derived from availability, so a change
@@ -14431,7 +14434,7 @@ async function routeBookingApiRequest(
       // cannot express it — it works from calendar item diffs — so this takes
       // the full rebuild, deferred like every other save's sync.
       deferGoogleCalendarAvailabilitySync(requestContext.accountId, context);
-      const fallbackCoachId = defaultCoachId(state.coaches);
+      const fallbackCoachId = firstCoachId(state.coaches);
       return json({
         availability: savedAvailability.map((dayWindows) =>
           dayWindows.filter((window) => availabilityWindowBelongsToContext(window, requestContext, fallbackCoachId)),

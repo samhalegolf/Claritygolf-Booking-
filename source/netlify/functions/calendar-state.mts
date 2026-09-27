@@ -241,7 +241,6 @@ function defaultCoachProfileFromAccount(account = defaultCoachAccount()) {
     email: clean.contactEmail,
     active: true,
     archived: false,
-    isDefault: true,
     bookable: true,
     assignedLocationIds: ["default-location"],
     defaultLocationId: "default-location",
@@ -451,7 +450,6 @@ function normalizeCoachProfiles(rawProfiles: unknown, account = defaultCoachAcco
       photoUrl: cleanUrl(item.photoUrl, "", 300) || undefined,
       active: item.active !== false,
       archived: item.archived === true,
-      isDefault: item.isDefault === true || index === 0,
       bookable: item.bookable !== false,
       assignedLocationIds: Array.isArray(item.assignedLocationIds) ? item.assignedLocationIds.map((id) => cleanSlug(id, "")).filter(Boolean) : fallback.assignedLocationIds,
       defaultLocationId: cleanSlug(item.defaultLocationId, "") || fallback.defaultLocationId,
@@ -639,19 +637,19 @@ function isAdminUser(user: Record<string, unknown> | null | undefined) {
 
 function filterCalendarStateForContext(state: Record<string, any>, context: { accountId: string; isAdmin: boolean; coachId?: string }) {
   const coaches = state.coaches || [];
-  const defaultCoachId = coaches.find((coach: Record<string, unknown>) => coach.isDefault && coach.active && !coach.archived)?.id || coaches[0]?.id || "";
+  const fallbackCoachId = coaches.find((coach: Record<string, unknown>) => coach.active && !coach.archived)?.id || coaches[0]?.id || "";
   const filteredItems = context.isAdmin
     ? (state.items || []).filter((item: Record<string, unknown>) => recordBelongsToAccount(item, context.accountId))
-    : (state.items || []).filter((item: Record<string, unknown>) => recordBelongsToAccount(item, context.accountId) && (item.coachId || defaultCoachId) === context.coachId);
+    : (state.items || []).filter((item: Record<string, unknown>) => recordBelongsToAccount(item, context.accountId) && (item.coachId || fallbackCoachId) === context.coachId);
   return {
     ...state,
     items: filteredItems,
     services: context.isAdmin
       ? (state.services || []).filter((service: Record<string, unknown>) => recordBelongsToAccount(service, context.accountId))
-      : (state.services || []).filter((service: Record<string, unknown>) => recordBelongsToAccount(service, context.accountId) && serviceIncludesCoach(service, context.coachId || "", defaultCoachId)),
+      : (state.services || []).filter((service: Record<string, unknown>) => recordBelongsToAccount(service, context.accountId) && serviceIncludesCoach(service, context.coachId || "", fallbackCoachId)),
     availability: context.isAdmin
       ? (state.availability || []).map((day: Array<Record<string, unknown>>) => day.filter((window) => recordBelongsToAccount(window, context.accountId)))
-      : (state.availability || []).map((day: Array<Record<string, unknown>>) => day.filter((window) => recordBelongsToAccount(window, context.accountId) && (window.coachId || defaultCoachId) === context.coachId)),
+      : (state.availability || []).map((day: Array<Record<string, unknown>>) => day.filter((window) => recordBelongsToAccount(window, context.accountId) && (window.coachId || fallbackCoachId) === context.coachId)),
     people: state.people || [],
     notifications: state.notifications || [],
   };
@@ -734,7 +732,7 @@ async function readTinyCalendarShell(req: Request, requestStartedAt: number) {
   const original = isOriginalWorkspace(actor.accountId);
   const accountId = actor.accountId;
   const coaches = normalizeCoachProfiles(parseSettingJson(settingsMap, "coachProfilesJson", []), account);
-  const defaultCoachId = coaches.find((coach) => coach.isDefault && coach.active && !coach.archived)?.id || coaches[0]?.id || "";
+  const fallbackCoachId = coaches.find((coach) => coach.active && !coach.archived)?.id || coaches[0]?.id || "";
   const coachName = settingValue(settingsMap, "accountCoachName") || account.coachName;
   const currentUser = {
     id: actor.authUserId,
@@ -743,7 +741,7 @@ async function readTinyCalendarShell(req: Request, requestStartedAt: number) {
     // The app-user vocabulary the calendar reads permissions from, not the
     // membership vocabulary -- "owner" is not a role this app knows.
     role: appUserRoleForMembership(actor.role),
-    coachId: actor.coachId || defaultCoachId,
+    coachId: actor.coachId || fallbackCoachId,
     permissions: actor.isAdmin
       ? {
           bookings: "all",

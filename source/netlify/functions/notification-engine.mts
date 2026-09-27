@@ -265,7 +265,6 @@ function resolveAppointmentCoach(appt: any, settings: any) {
   const coachId = cleanText(appt?.coachId || snapshot?.coachId, "", 120);
   const profile =
     coaches.find((coach) => coach?.id && coach.id === coachId) ||
-    coaches.find((coach) => coach?.isDefault && coach?.active !== false && coach?.archived !== true) ||
     null;
   return {
     email:
