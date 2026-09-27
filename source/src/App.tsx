@@ -14115,6 +14115,17 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     setLocationEditor((current) => ({ ...current, resources: edit(current.resources ?? []) }));
   }
 
+  /** Moves a resource one place up or down the order bookings fill them in. */
+  function moveLocationResource(index: number, step: -1 | 1) {
+    updateLocationResources((resources) => {
+      const target = index + step;
+      if (target < 0 || target >= resources.length) return resources;
+      const next = [...resources];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  }
+
   /** Adds resources named on from the last one, e.g. Bay 5, Bay 6 after Bay 4. */
   function addLocationResources(count: number) {
     updateLocationResources((resources) => {
@@ -22052,7 +22063,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       <strong>Resources</strong>
                       <small>
                         Hitting bays, rooms or nets. Give each a type so a lesson type can take every one of that
-                        type. Leave empty if this place has no limit.
+                        type. A booking takes the first free one in this order, so put the ones you want filled first
+                        at the top. Leave empty if this place has no limit.
                       </small>
                     </div>
                     <label className="settings-field location-resource-source">
@@ -22129,16 +22141,36 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         />
                         <span>In use</span>
                       </label>
-                      <button
-                        className="icon-button small"
-                        aria-label={`Remove ${resource.name || "resource"}`}
-                        onClick={() =>
-                          updateLocationResources((resources) => resources.filter((_, entryIndex) => entryIndex !== index))
-                        }
-                        type="button"
-                      >
-                        <X size={15} />
-                      </button>
+                      <div className="location-resource-row-actions">
+                        <button
+                          className="icon-button small"
+                          aria-label={`Book ${resource.name || "resource"} earlier`}
+                          disabled={index === 0}
+                          onClick={() => moveLocationResource(index, -1)}
+                          type="button"
+                        >
+                          <ChevronUp size={15} />
+                        </button>
+                        <button
+                          className="icon-button small"
+                          aria-label={`Book ${resource.name || "resource"} later`}
+                          disabled={index === (locationEditor.resources ?? []).length - 1}
+                          onClick={() => moveLocationResource(index, 1)}
+                          type="button"
+                        >
+                          <ChevronDown size={15} />
+                        </button>
+                        <button
+                          className="icon-button small"
+                          aria-label={`Remove ${resource.name || "resource"}`}
+                          onClick={() =>
+                            updateLocationResources((resources) => resources.filter((_, entryIndex) => entryIndex !== index))
+                          }
+                          type="button"
+                        >
+                          <X size={15} />
+                        </button>
+                      </div>
                     </div>
                   ))}
                   <datalist id="location-resource-types">

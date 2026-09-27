@@ -116,3 +116,18 @@ test("resource selections are qualified by location, and old unqualified ones by
   assert.deepEqual(cleanServiceResourceIds(["bay-1"]), ["bay-1"]);
   assert.deepEqual(cleanServiceResourceTypes([" Hitting  bay ", "hitting bay", ""]), ["Hitting bay"]);
 });
+
+test("bookings take resources in the order the location lists them", () => {
+  const club: ResourceLocation = {
+    id: "club",
+    kind: "physical",
+    resourceSource: "clarity",
+    resources: cleanLocationResources([
+      { id: "bay-3", name: "Bay 3" },
+      { id: "bay-1", name: "Bay 1" },
+      { id: "bay-2", name: "Bay 2" },
+    ]),
+  };
+  assert.deepEqual(eligibleResources(club, lesson).map((r) => r.id), ["bay-3", "bay-1", "bay-2"]);
+  assert.equal(pickFreeResource({ location: club, service: lesson, slot, holders: [{ id: "a", ...slot, resourceId: "bay-3" }] })?.id, "bay-1");
+});
