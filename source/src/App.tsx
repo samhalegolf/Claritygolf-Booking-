@@ -3534,6 +3534,45 @@ const accountFeatureKeys: AccountFeatureKey[] = [
   "advancedPermissions",
 ];
 
+// What the Account screen calls each part of a plan. Staff and service words
+// follow the business's own terminology, so a physio clinic never reads "Coach".
+function accountFeatureLabel(feature: AccountFeatureKey, terms: BusinessTerminology) {
+  const labels: Record<AccountFeatureKey, string> = {
+    publicBooking: "Online booking page",
+    coachCalendar: `${terms.staffSingular} calendar`,
+    locationCalendar: "Location calendar",
+    multiCoach: `Multiple ${terms.staffPlural.toLowerCase()}`,
+    multiLocation: "Multiple locations",
+    services: `${terms.serviceSingular} types`,
+    groupLessons: `Group ${terms.servicePlural.toLowerCase()}`,
+    packages: "Packages",
+    clients: `${terms.customerSingular} records`,
+    notifications: "Email and SMS notifications",
+    googleCalendarSync: "Google Calendar sync",
+    invoicing: "Invoicing",
+    checkout: "Online checkout",
+    customBranding: "Custom branding",
+    customDomains: "Custom domains",
+    staffUsers: "Team logins",
+    advancedPermissions: "Advanced permissions",
+  };
+  return labels[feature];
+}
+
+const SUBSCRIPTION_STATUS_LABEL: Record<SubscriptionStatus, string> = {
+  trialing: "Trial",
+  active: "Active",
+  past_due: "Payment overdue",
+  paused: "Paused",
+  cancelled: "Cancelled",
+  comped: "Complimentary",
+  internal: "Internal",
+};
+
+// Plans at or above this are sold as unlimited; the catalogue stores 999
+// because a limit has to be a number.
+const UNLIMITED_ACCOUNT_LIMIT = 999;
+
 function accountFeatures(enabled: AccountFeatureKey[]): Record<AccountFeatureKey, boolean> {
   return accountFeatureKeys.reduce(
     (features, feature) => ({ ...features, [feature]: enabled.includes(feature) }),
@@ -5668,7 +5707,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   // overwrites all of it when it answers.
   const [bootstrap] = useState(() => workspaceBootstrapFromSession(entrySession));
   const [coachAccount, setCoachAccount] = useState<CoachAccount>(() => bootstrap?.account ?? getStoredCoachAccount());
-<<<<<<< HEAD
   const terms = useMemo(() => terminologyFor(coachAccount), [coachAccount.terminology]);
   const settingsSections = useMemo(
     () =>
@@ -5679,9 +5717,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       ),
     [terms.serviceSingular],
   );
-=======
   setBusinessTimeZone(coachAccount.timezone);
->>>>>>> 3825cf8cd4acdb91df610bf5e88365fd5b6594cc
   // Contact matching and phone formatting resolve bare national numbers against
   // the workspace's country. The server does the same, from the same setting —
   // if these two ever disagree, the client and server disagree about whether
@@ -5734,6 +5770,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     confirmPassword: "",
   });
   const [passwordChangeState, setPasswordChangeState] = useState<"idle" | "saving" | "saved">("idle");
+  const [showPasswordFields, setShowPasswordFields] = useState(false);
   const [passwordChangeMessage, setPasswordChangeMessage] = useState("");
   const [items, setItems] = useState<CalendarItem[]>(initialItems);
   // Empty until the server says otherwise. Seeding this with defaultServices
@@ -6442,12 +6479,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const editableBlocks = useMemo(
     () => [
       { id: "region", title: "Country & region", editor: regionEditor },
-<<<<<<< HEAD
-      { id: "coach-account", title: `${terms.staffSingular} Account`, editor: coachAccountEditor },
-      { id: "terminology", title: "Terminology", editor: terminologyEditor },
-=======
       { id: "business-name", title: "Business name", editor: businessNameEditor },
->>>>>>> 3825cf8cd4acdb91df610bf5e88365fd5b6594cc
+      { id: "terminology", title: "Terminology", editor: terminologyEditor },
       { id: "billing-settings", title: "Billing Settings", editor: billingSettingsEditor },
       { id: "email-notifications", title: "Email", editor: emailNotificationsEditor },
       { id: "text-machine", title: "SMS", editor: textMachineEditor },
@@ -6458,12 +6491,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     ],
     [
       regionEditor,
-<<<<<<< HEAD
-      coachAccountEditor,
-      terminologyEditor,
-=======
       businessNameEditor,
->>>>>>> 3825cf8cd4acdb91df610bf5e88365fd5b6594cc
+      terminologyEditor,
       billingSettingsEditor,
       emailNotificationsEditor,
       textMachineEditor,
@@ -6471,7 +6500,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       bookingNoticeEditor,
       bookingScreenNameEditor,
       playerBookingEmbedEditor,
-      terms.staffSingular,
     ],
   );
   // Which Settings section the coach profile asked to have open on arrival.
@@ -6527,15 +6555,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     setSettingsTab(nextTab);
   }
 
-<<<<<<< HEAD
-  const coachAccountDraft = coachAccountEditor.draftValue;
-  const coachAccountIsLocked = coachAccountEditor.status !== "editing" && coachAccountEditor.status !== "error";
   const terminologyDraft = terminologyEditor.draftValue;
   const terminologyIsLocked = terminologyEditor.status !== "editing" && terminologyEditor.status !== "error";
-=======
   const businessNameDraft = businessNameEditor.draftValue;
   const businessNameIsLocked = businessNameEditor.status !== "editing" && businessNameEditor.status !== "error";
->>>>>>> 3825cf8cd4acdb91df610bf5e88365fd5b6594cc
   const regionDraft = regionEditor.draftValue;
   const regionIsLocked = regionEditor.status !== "editing" && regionEditor.status !== "error";
   const billingAccountDraft = billingSettingsEditor.draftValue;
@@ -19357,6 +19380,20 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     setPasswordChangeForm((current) => ({ ...current, [field]: value }));
   }
 
+  // Shown live under the form and used to enable the button, so the rules are
+  // visible before submitting instead of arriving as an error afterwards.
+  const passwordRequirements = [
+    { label: "At least 8 characters", met: passwordChangeForm.newPassword.length >= 8 },
+    {
+      label: "Different from your current password",
+      met: passwordChangeForm.newPassword.length > 0 && passwordChangeForm.newPassword !== passwordChangeForm.currentPassword,
+    },
+    {
+      label: "Both new passwords match",
+      met: passwordChangeForm.confirmPassword.length > 0 && passwordChangeForm.newPassword === passwordChangeForm.confirmPassword,
+    },
+  ];
+
   async function handleChangePassword(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setPasswordChangeMessage("");
@@ -19366,6 +19403,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     }
     if (passwordChangeForm.newPassword !== passwordChangeForm.confirmPassword) {
       setPasswordChangeMessage("Those passwords do not match.");
+      return;
+    }
+    if (passwordChangeForm.newPassword === passwordChangeForm.currentPassword) {
+      setPasswordChangeMessage("Choose a password different from your current one.");
       return;
     }
 
@@ -19391,6 +19432,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       }
       if (data.email) setAdminEmail(data.email);
       setPasswordChangeForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      setShowPasswordFields(false);
       setPasswordChangeState("saved");
       setPasswordChangeMessage("Password changed.");
     } catch (error) {
@@ -24409,15 +24451,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       {
         id: "coach-branding",
         category: "Customer experience",
-<<<<<<< HEAD
-        label: `${terms.staffSingular} branding`,
-        summary: "Your logo and colours, everywhere a client looks.",
-        path: `Settings › Business › ${terms.staffSingular} branding`,
-=======
         label: "Business branding",
         summary: "Your logo and colours, everywhere a client looks.",
         path: "Settings › Business › Business branding",
->>>>>>> 3825cf8cd4acdb91df610bf5e88365fd5b6594cc
         target: { kind: "settings", tab: "business", group: "coach-branding" },
         facts: [
           ["Logo", brandSettings.logoName || (brandSettings.logoPreview ? "Set" : "Not set")],
@@ -31260,27 +31296,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           <section className="profile-page">
             <CoachProfilePanel
               identity={{
-<<<<<<< HEAD
-                coachName: coachAccount.coachName || currentAppUser.name,
-                businessName: coachAccount.businessName,
-                venueName: coachAccount.venueShortName || coachAccount.venueName,
-                roleLabel: isPlatformAdmin ? "Platform admin" : isAdminUser ? `${terms.staffSingular} · Admin` : terms.staffSingular,
-                email: coachAccount.contactEmail || currentAppUser.email,
-                phone: coachProfiles[0]?.phone || "",
-                timezone: coachAccount.timezone,
-                currency: invoiceSettings.currency,
-=======
                 coachName: ownCoachProfile?.displayName || ownCoachProfile?.name || currentAppUser.name,
                 roleLabel: isPlatformAdmin
                   ? "Platform admin"
                   : isAdminUser
                     ? ownCoachProfile
-                      ? "Coach · Admin"
+                      ? `${terms.staffSingular} · Admin`
                       : "Admin"
-                    : "Coach",
+                    : terms.staffSingular,
                 email: ownCoachProfile?.email || currentAppUser.email,
                 phone: ownCoachProfile?.phone || "",
->>>>>>> 3825cf8cd4acdb91df610bf5e88365fd5b6594cc
               }}
               internalJobs={profileInternalJobs}
               onOpen={(target, label) => openProfileTarget(target, label)}
@@ -31414,174 +31439,73 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 </EditableSettingsBlock>
               </SettingsGroup>
 
-<<<<<<< HEAD
-              <SettingsGroup id="coach-account" section="account" title={`${terms.staffSingular} account`} className="notification-card account-card">
-=======
               <SettingsGroup id="coach-account" section="account" title="Account" className="notification-card account-card">
->>>>>>> 3825cf8cd4acdb91df610bf5e88365fd5b6594cc
                 <details className="settings-subsection">
                   <summary className="settings-subsection-title">
-                    <KeyRound size={18} />
+                    <CreditCard size={18} />
                     <div>
-                      <span>Workspace subscription</span>
-                      <strong>{activeAccount.planKey} · {activeAccount.subscriptionStatus}</strong>
+                      <span>Plan</span>
+                      <strong className="account-plan-heading">
+                        {activeAccount.planKey.charAt(0).toUpperCase() + activeAccount.planKey.slice(1)}
+                        <em className={`account-status-pill ${isAccountActive(activeAccount) ? "is-ok" : "is-bad"}`}>
+                          {SUBSCRIPTION_STATUS_LABEL[activeAccount.subscriptionStatus]}
+                        </em>
+                      </strong>
                     </div>
                   </summary>
-                  <div className="service-form-row">
-                    <label className="settings-field">
-                      <span>Workspace</span>
-                      <input value={activeAccount.name} readOnly />
-                    </label>
-                    <label className="settings-field">
-                      <span>Slug</span>
-                      <input value={activeAccount.slug} readOnly />
-                    </label>
+                  <dl className="account-plan-details">
+                    <div>
+                      <dt>Workspace</dt>
+                      <dd>{activeAccount.name}</dd>
+                    </div>
+                    <div>
+                      <dt>Workspace ID</dt>
+                      <dd>{activeAccount.slug}</dd>
+                    </div>
+                  </dl>
+                  <div className="account-usage-grid">
+                    {(
+                      [
+                        ["maxCoaches", terms.staffPlural],
+                        ["maxLocations", "Locations"],
+                        ["maxUsers", "Team logins"],
+                        ["maxServices", `${terms.serviceSingular} types`],
+                        ["maxBookingScreens", "Booking screens"],
+                      ] as Array<[keyof AccountLimits, string]>
+                    ).map(([limitName, label]) => {
+                      const used = accountUsage[limitName];
+                      const limit = activeAccountEntitlements.limits[limitName];
+                      const unlimited = limit >= UNLIMITED_ACCOUNT_LIMIT;
+                      const share = unlimited || limit <= 0 ? 0 : Math.min(used / limit, 1);
+                      return (
+                        <div key={limitName} className="account-usage-tile">
+                          <span>{label}</span>
+                          <strong>
+                            {used}
+                            <small>{unlimited ? " · unlimited" : ` of ${limit}`}</small>
+                          </strong>
+                          {!unlimited && (
+                            <div className={`account-usage-meter${share >= 1 ? " is-full" : ""}`} aria-hidden="true">
+                              <i style={{ width: `${share * 100}%` }} />
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
-                  <div className="service-form-row">
-                    <label className="settings-field">
-                      <span>Billing provider</span>
-                      <input value={activeAccount.billingProvider || "none"} readOnly />
-                    </label>
-                    <label className="settings-field">
-                      <span>Subscription</span>
-                      <input value={isAccountActive(activeAccount) ? "Active" : "Restricted"} readOnly />
-                    </label>
+                  <div className="account-feature-block">
+                    <span className="account-feature-heading">Included in your plan</span>
+                    <ul className="account-feature-list">
+                      {enabledAccountFeatures.map((feature) => (
+                        <li key={feature}>
+                          <Check size={14} aria-hidden="true" />
+                          {accountFeatureLabel(feature, terms)}
+                        </li>
+                      ))}
+                    </ul>
                   </div>
-                  <div className="location-usage-grid">
-                    {(Object.keys(accountUsage) as Array<keyof AccountLimits>).map((limitName) => (
-                      <span key={limitName}>
-                        <strong>{limitName.replace(/^max/, "")}</strong>
-                        {accountUsage[limitName]} / {activeAccountEntitlements.limits[limitName]}
-                      </span>
-                    ))}
-                  </div>
-                  <div className="service-card-meta">
-                    {enabledAccountFeatures.slice(0, 10).map((feature) => (
-                      <span key={feature}>{feature}</span>
-                    ))}
-                    {enabledAccountFeatures.length > 10 ? <span>+{enabledAccountFeatures.length - 10} more</span> : null}
-                  </div>
-                  <p className="field-help">This is the account wrapper for subscription entitlements. Billing automation and platform admin tools are not implemented here.</p>
                 </details>
                 <div className="account-settings-groups">
-<<<<<<< HEAD
-                  <EditableSettingsBlock
-                    id="coach-account-block"
-                    title={`${terms.staffSingular} Account`}
-                    status={coachAccountEditor.status}
-                    dirty={coachAccountEditor.dirty}
-                    errorMessage={coachAccountEditor.errorMessage}
-                    onEdit={() => startEditableBlock("coach-account")}
-                    onCancel={() => cancelEditableBlock("coach-account")}
-                    onSave={() => void saveEditableBlock("coach-account")}
-                  >
-                  <details className="settings-subsection">
-                    <summary className="settings-subsection-title">
-                      <User size={18} />
-                      <div>
-                        <span>{terms.staffSingular}</span>
-                        <strong>Profile</strong>
-                      </div>
-                    </summary>
-                    <div className="service-form-row">
-                      <label className="settings-field">
-                      <span>{terms.staffSingular} name</span>
-                        <input
-                          value={coachAccountDraft.coachName}
-                          readOnly={coachAccountIsLocked}
-                          onChange={(event) => updateCoachAccountBlockDraft("coachName", event.target.value)}
-                        />
-                      </label>
-                      <label className="settings-field">
-                        <span>Business name</span>
-                        <input
-                          value={coachAccountDraft.businessName}
-                          readOnly={coachAccountIsLocked}
-                          onChange={(event) => updateCoachAccountBlockDraft("businessName", event.target.value)}
-                        />
-                      </label>
-                    </div>
-                    <label className="settings-field">
-                      <span>Contact email</span>
-                      <input
-                        value={coachAccountDraft.contactEmail}
-                        readOnly={coachAccountIsLocked}
-                        onChange={(event) => updateCoachAccountBlockDraft("contactEmail", event.target.value)}
-                        type="email"
-                      />
-                    </label>
-                  </details>
-
-                  <details className="settings-subsection">
-                    <summary className="settings-subsection-title">
-                      <MapPin size={18} />
-                      <div>
-                        <span>Venue</span>
-                        <strong>{coachAccount.venueShortName}</strong>
-                      </div>
-                    </summary>
-                    <label className="settings-field">
-                      <span>Venue name</span>
-                      <input
-                        value={coachAccountDraft.venueName}
-                        readOnly={coachAccountIsLocked}
-                        onChange={(event) => updateCoachAccountBlockDraft("venueName", event.target.value)}
-                      />
-                    </label>
-                    <div className="service-form-row">
-                      <label className="settings-field">
-                        <span>Short label</span>
-                        <input
-                          value={coachAccountDraft.venueShortName}
-                          readOnly={coachAccountIsLocked}
-                          onChange={(event) => updateCoachAccountBlockDraft("venueShortName", event.target.value)}
-                        />
-                      </label>
-                    </div>
-                  </details>
-
-	                  <details className="settings-subsection">
-	                    <summary className="settings-subsection-title">
-	                      <Link2 size={18} />
-                      <div>
-                        <span>Connected apps</span>
-                        <strong>Booking and Caddy</strong>
-                      </div>
-                    </summary>
-                    <label className="settings-field">
-                      <span>Booking app URL</span>
-                      <input
-                        value={coachAccountDraft.bookingUrl}
-                        readOnly={coachAccountIsLocked}
-                        onChange={(event) => {
-                          updateCoachAccountBlockDraft("bookingUrl", event.target.value);
-                          setSyncBaseUrl(event.target.value);
-                        }}
-                      />
-                    </label>
-                    <div className="service-form-row">
-                      <label className="settings-field">
-                        <span>Calendar slug</span>
-                        <input
-                          value={coachAccountDraft.calendarSlug}
-                          readOnly={coachAccountIsLocked}
-                          onChange={(event) => updateCoachAccountBlockDraft("calendarSlug", event.target.value)}
-                        />
-                      </label>
-                      <label className="settings-field">
-                        <span>Caddy workspace</span>
-                        <input
-                          value={coachAccountDraft.caddyWorkspaceUrl}
-                          readOnly={coachAccountIsLocked}
-                          onChange={(event) => updateCoachAccountBlockDraft("caddyWorkspaceUrl", event.target.value)}
-                        />
-                      </label>
-	                    </div>
-	                  </details>
-                  </EditableSettingsBlock>
-
-=======
->>>>>>> 3825cf8cd4acdb91df610bf5e88365fd5b6594cc
                   <details className="settings-subsection">
                     <summary className="settings-subsection-title">
                       <KeyRound size={18} />
@@ -31591,43 +31515,70 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       </div>
                     </summary>
                     <form className="security-settings-form" onSubmit={handleChangePassword}>
+                      <p className="field-help">
+                        Enter your current password, then choose a new one. You'll stay signed in on this device.
+                      </p>
                       <label className="settings-field">
                         <span>Current password</span>
                         <input
                           value={passwordChangeForm.currentPassword}
                           onChange={(event) => updatePasswordChangeForm("currentPassword", event.target.value)}
-                          type="password"
+                          type={showPasswordFields ? "text" : "password"}
                           autoComplete="current-password"
+                          required
                         />
                       </label>
-                      <div className="service-form-row">
-                        <label className="settings-field">
-                          <span>New password</span>
-                          <input
-                            value={passwordChangeForm.newPassword}
-                            onChange={(event) => updatePasswordChangeForm("newPassword", event.target.value)}
-                            type="password"
-                            autoComplete="new-password"
-                          />
-                        </label>
-                        <label className="settings-field">
-                          <span>Confirm new password</span>
-                          <input
-                            value={passwordChangeForm.confirmPassword}
-                            onChange={(event) => updatePasswordChangeForm("confirmPassword", event.target.value)}
-                            type="password"
-                            autoComplete="new-password"
-                          />
-                        </label>
-                      </div>
+                      <label className="settings-field">
+                        <span>New password</span>
+                        <input
+                          value={passwordChangeForm.newPassword}
+                          onChange={(event) => updatePasswordChangeForm("newPassword", event.target.value)}
+                          type={showPasswordFields ? "text" : "password"}
+                          autoComplete="new-password"
+                          aria-describedby="password-requirements"
+                          required
+                        />
+                      </label>
+                      <label className="settings-field">
+                        <span>Confirm new password</span>
+                        <input
+                          value={passwordChangeForm.confirmPassword}
+                          onChange={(event) => updatePasswordChangeForm("confirmPassword", event.target.value)}
+                          type={showPasswordFields ? "text" : "password"}
+                          autoComplete="new-password"
+                          required
+                        />
+                      </label>
+                      <label className="show-password-toggle">
+                        <input
+                          checked={showPasswordFields}
+                          onChange={(event) => setShowPasswordFields(event.target.checked)}
+                          type="checkbox"
+                        />
+                        <span>Show passwords</span>
+                      </label>
+                      <ul id="password-requirements" className="password-requirements">
+                        {passwordRequirements.map((requirement) => (
+                          <li key={requirement.label} className={requirement.met ? "is-met" : undefined}>
+                            {requirement.met ? <Check size={14} aria-hidden="true" /> : <span aria-hidden="true" className="password-requirement-dot" />}
+                            {requirement.label}
+                          </li>
+                        ))}
+                      </ul>
                       {passwordChangeMessage && (
-                        <div className={passwordChangeState === "saved" ? "auth-success" : "auth-error"}>
+                        <div className={passwordChangeState === "saved" ? "auth-success" : "auth-error"} role="status">
                           {passwordChangeMessage}
                         </div>
                       )}
-                      <button className="outline-button" disabled={passwordChangeState === "saving"} type="submit">
-                        {passwordChangeState === "saving" ? "Changing" : "Change Password"}
-                      </button>
+                      <div className="security-settings-actions">
+                        <button
+                          className="primary-button"
+                          disabled={passwordChangeState === "saving" || !passwordRequirements.every((requirement) => requirement.met)}
+                          type="submit"
+                        >
+                          {passwordChangeState === "saving" ? "Updating…" : "Update password"}
+                        </button>
+                      </div>
                     </form>
                   </details>
 
@@ -33488,11 +33439,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 </details>
               </SettingsGroup>
 
-<<<<<<< HEAD
-              <SettingsGroup id="coach-branding" section="business" title={`${terms.staffSingular} branding`} className="brand-vein-card">
-=======
               <SettingsGroup id="coach-branding" section="business" title="Business branding" className="brand-vein-card">
->>>>>>> 3825cf8cd4acdb91df610bf5e88365fd5b6594cc
 
                 <div className="brand-vein-preview">
                   <div className="brand-vein-logo">

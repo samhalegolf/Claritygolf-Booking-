@@ -8737,6 +8737,188 @@ button {
   gap: 12px;
 }
 
+/* Settings > Account > Plan. Everything here is read-only, so per Rule 01 it is
+   text, not boxes: the workspace name and ID are a plain definition list, the
+   status is a pill (tint plus word, like .cp-chip), and usage sits on soft
+   unbordered tiles like .integration-stat-grid so it does not break the nesting
+   law inside the accordion's own box. */
+.settings-subsection-title strong.account-plan-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.account-status-pill {
+  padding: 2px 8px;
+  border-radius: var(--c-radius-pill);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.account-status-pill.is-ok {
+  background: var(--c-success-wash);
+  color: var(--c-success-text);
+}
+
+.account-status-pill.is-bad {
+  background: var(--c-danger-wash);
+  color: var(--c-danger);
+}
+
+.account-plan-details {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  gap: 12px 24px;
+  margin: 14px 0 0;
+}
+
+.account-plan-details dt,
+.account-usage-tile > span,
+.account-feature-heading {
+  color: var(--c-muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.account-plan-details dd {
+  margin: 4px 0 0;
+  color: var(--c-text);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.account-usage-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr));
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.account-usage-tile {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border-radius: var(--c-radius-control);
+  background: var(--c-hover);
+}
+
+.account-usage-tile > strong {
+  color: var(--c-text);
+  font-size: 22px;
+  line-height: 1.1;
+}
+
+.account-usage-tile > strong small {
+  color: var(--c-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.account-usage-meter {
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--c-radius-pill);
+  background: var(--c-border-soft);
+}
+
+.account-usage-meter i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--c-accent);
+}
+
+/* At the limit the next add will be refused, so the bar says so first. */
+.account-usage-meter.is-full i {
+  background: var(--c-danger);
+}
+
+.account-feature-block {
+  display: grid;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.account-feature-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(210px, 100%), 1fr));
+  gap: 8px 18px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.account-feature-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--c-text-body);
+  font-size: 14px;
+}
+
+.account-feature-list svg {
+  flex: none;
+  color: var(--c-success-text);
+}
+
+/* Settings > Account > Password. One column at a readable width, the rules
+   listed up front and ticked off as they are met, and the button only live
+   once they all are. */
+.security-settings-form {
+  max-width: 420px;
+}
+
+.security-settings-form .field-help {
+  margin: 0;
+}
+
+.password-requirements {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.password-requirements li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--c-muted);
+  font-size: 13px;
+}
+
+.password-requirements li.is-met {
+  color: var(--c-success-text);
+}
+
+.password-requirement-dot {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  display: grid;
+  place-items: center;
+}
+
+.password-requirement-dot::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.security-settings-actions {
+  display: flex;
+  justify-content: flex-start;
+  padding-top: 4px;
+}
+
 /* The nesting law: a list of hairline-separated editor rows inside a settings
    accordion body, which already draws the box. Was a second bordered, filled
    container inside it. */
