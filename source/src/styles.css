@@ -16654,6 +16654,11 @@ button {
   font: inherit;
 }
 
+.location-facility .location-resource-row-actions {
+  display: flex;
+  gap: 2px;
+}
+
 .location-facility .location-resource-actions {
   display: flex;
   flex-wrap: wrap;

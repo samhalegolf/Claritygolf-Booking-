@@ -33,10 +33,10 @@ test("resources only apply to a physical, Clarity-held location and a lesson tha
   assert.equal(clarityResourcesApply({ ...range, resources: [] }, lesson), false);
 });
 
-test("lefties-only resources go last for everyone but a left-hander", () => {
-  assert.deepEqual(eligibleResources(range, lesson).map((r) => r.id), ["bay-3", "bay-2", "bay-1"]);
+test("handedness rules resources out but never reorders them", () => {
+  assert.deepEqual(eligibleResources(range, lesson).map((r) => r.id), ["bay-1", "bay-2", "bay-3"]);
   assert.deepEqual(eligibleResources(range, lesson, "left").map((r) => r.id), ["bay-1", "bay-2"]);
-  assert.deepEqual(eligibleResources(range, lesson, "right").map((r) => r.id), ["bay-3", "bay-2"]);
+  assert.deepEqual(eligibleResources(range, lesson, "right").map((r) => r.id), ["bay-2", "bay-3"]);
 });
 
 test("a lesson type can narrow itself to some resources", () => {
@@ -115,4 +115,19 @@ test("resource selections are qualified by location, and old unqualified ones by
   assert.deepEqual(cleanServiceResourceIds(["Bay-1", "club/Studio", "bad/"], "range"), ["range/bay-1", "club/studio"]);
   assert.deepEqual(cleanServiceResourceIds(["bay-1"]), ["bay-1"]);
   assert.deepEqual(cleanServiceResourceTypes([" Hitting  bay ", "hitting bay", ""]), ["Hitting bay"]);
+});
+
+test("bookings take resources in the order the location lists them", () => {
+  const club: ResourceLocation = {
+    id: "club",
+    kind: "physical",
+    resourceSource: "clarity",
+    resources: cleanLocationResources([
+      { id: "bay-3", name: "Bay 3" },
+      { id: "bay-1", name: "Bay 1" },
+      { id: "bay-2", name: "Bay 2" },
+    ]),
+  };
+  assert.deepEqual(eligibleResources(club, lesson).map((r) => r.id), ["bay-3", "bay-1", "bay-2"]);
+  assert.equal(pickFreeResource({ location: club, service: lesson, slot, holders: [{ id: "a", ...slot, resourceId: "bay-3" }] })?.id, "bay-1");
 });
