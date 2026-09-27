@@ -2,8 +2,6 @@ import type { Config, Context } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
 import { createHash, randomUUID } from "node:crypto";
 import { legacyOriginalWorkspaceId, defaultCalendarSlug } from "./_shared/account.mts";
-import { currencyForCountry } from "./_shared/locale.mts";
-import { FALLBACK_PHONE_COUNTRY } from "./_shared/phone.mts";
 import { bayBookingMatchesSlot } from "./_shared/optix-reconcile.mts";
 import { cleanLocationKind, cleanLocationResources, cleanResourceSource } from "./_shared/resources.mts";
 import { serviceIncludesCoach } from "./_shared/service-scope.mts";
@@ -21,27 +19,6 @@ const sessionCookieName = "clarity_session";
 const CANCELLED_GROUP_SESSION_TITLE = "Cancelled group session";
 const CANCELLED_GROUP_SESSION_NOTE = "__cancelled_group_session__";
 
-const defaultInvoiceSettings = {
-  enabled: true,
-  showBillingWorkspace: true,
-  prefix: "INV",
-  nextNumber: 1001,
-  // The last-resort currency for a business whose country is unreadable. This
-  // read activeCurrency() before, which -- evaluated at module load, before any
-  // account had been read -- was always this same fallback anyway.
-  currency: currencyForCountry(FALLBACK_PHONE_COUNTRY),
-  taxName: "GST",
-  taxNumber: "",
-  taxRate: 15,
-  bankAccount: "",
-  paymentTermsDays: 7,
-  businessAddress: "",
-  headerText: "",
-  footerText: "Thank you for training with Sam Hale Golf.",
-  defaultCustomerNote: "Thanks for your work on the lesson programme. Invoice attached below.",
-  paymentInstructions: "Please pay by bank transfer and use the invoice number as reference.",
-  customFields: [],
-};
 
 const defaultServices = [
   { id: "lesson-30", name: "30min Lesson", duration: 30, price: 100, description: "Price Includes Bay Hire", visibility: "public", active: true, capacity: 1, minParticipants: 1, lessonFormat: "private", priceMode: "session", lessonNote: "Bay hire included", location: "Bay hire included" },
@@ -217,12 +194,7 @@ function defaultCoachAccount() {
     bookingUrl: env("CLARITY_BOOKING_URL", "https://book.claritygolf.app"),
     calendarSlug: defaultCalendarSlug(),
     caddyWorkspaceUrl: env("CLARITY_CADDY_WORKSPACE_URL", "https://caddy.claritygolf.app"),
-    invoiceSettings: defaultInvoiceSettings,
   };
-}
-
-function cleanInvoiceSettings(settings: Record<string, unknown> = {}) {
-  return { ...defaultInvoiceSettings, ...(settings || {}) };
 }
 
 function cleanCoachAccount(account: Record<string, unknown> = {}) {
@@ -240,7 +212,6 @@ function cleanCoachAccount(account: Record<string, unknown> = {}) {
     bookingUrl: cleanUrl(account.bookingUrl, defaults.bookingUrl),
     calendarSlug: cleanSlug(account.calendarSlug, cleanSlug(businessName, defaults.calendarSlug)),
     caddyWorkspaceUrl: cleanUrl(account.caddyWorkspaceUrl, defaults.caddyWorkspaceUrl),
-    invoiceSettings: cleanInvoiceSettings(account.invoiceSettings as Record<string, unknown>),
   };
 }
 
@@ -346,10 +317,6 @@ function neutralCoachAccount(accountId: string) {
     venueShortName: "",
     contactEmail: "",
     calendarSlug: cleanSlug(accountId, ""),
-    // Spreading defaultCoachAccount() brought its invoice settings along, whose
-    // footer reads "Thank you for training with Sam Hale Golf." -- on a second
-    // business's invoices.
-    invoiceSettings: { ...defaultInvoiceSettings, footerText: "", defaultCustomerNote: "" },
   };
 }
 
@@ -370,7 +337,6 @@ function coachAccountFromSettings(settings: Record<string, string>, accountId = 
     bookingUrl: settingValue(settings, "accountBookingUrl") || defaults.bookingUrl,
     calendarSlug: settingValue(settings, "accountCalendarSlug") || defaults.calendarSlug,
     caddyWorkspaceUrl: settingValue(settings, "accountCaddyWorkspaceUrl") || defaults.caddyWorkspaceUrl,
-    invoiceSettings: parseSettingJson(settings, "accountInvoiceSettingsJson", defaults.invoiceSettings),
   });
 }
 

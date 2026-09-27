@@ -26,15 +26,21 @@ import {
   type CountryCode,
 } from "../../netlify/functions/_shared/phone.mts";
 import {
-  currencyForCountry,
+  currencyForAccountSettings,
   localeForCountry,
 } from "../../netlify/functions/_shared/locale.mts";
 
 let activeCountry: CountryCode = FALLBACK_PHONE_COUNTRY;
+let activeCurrencyCode = "";
 
-/** Called once when the account loads, and again if the coach changes country. */
-export function setActiveCountry(value: unknown): CountryCode {
-  activeCountry = cleanPhoneCountry(value);
+/**
+ * Called when the account loads, and again whenever the coach changes country
+ * or currency in Settings > Account > Country & region. The currency is the
+ * one the business chose; without one, its country's.
+ */
+export function setActiveRegion(country: unknown, currency?: unknown): CountryCode {
+  activeCountry = cleanPhoneCountry(country);
+  activeCurrencyCode = currencyForAccountSettings(currency, activeCountry);
   return activeCountry;
 }
 
@@ -49,7 +55,7 @@ export function activeLocale(): string {
 
 /** This workspace's currency. */
 export function activeCurrency(): string {
-  return currencyForCountry(activeCountry);
+  return activeCurrencyCode || currencyForAccountSettings("", activeCountry);
 }
 
 export function canonicalPhoneKey(value: unknown, country: CountryCode = activeCountry): string {

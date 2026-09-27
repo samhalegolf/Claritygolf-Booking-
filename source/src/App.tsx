@@ -106,10 +106,7 @@ import {
   resetLessonNotes,
   useLessonNotesState,
 } from "./modules/player-profiles/lessonNotesStore";
-import {
-  cleanPhoneCountry,
-  phoneCountryOptions,
-} from "../netlify/functions/_shared/phone.mts";
+import { cleanPhoneCountry } from "../netlify/functions/_shared/phone.mts";
 import { ResourceSystemPanel } from "./modules/integrations/ResourceSystemPanel";
 import { availabilityConflicts, type AvailabilityConflict } from "./availabilityConflicts";
 import {
@@ -146,9 +143,10 @@ import {
   formatPhoneForDisplay,
   getActiveCountry,
   isValidPhone,
-  setActiveCountry,
+  setActiveRegion,
 } from "./lib/activeCountry";
 import { CoachProfilePanel } from "./modules/profile/CoachProfilePanel";
+import { RegionSettings, TimeZoneSelect, type RegionValues } from "./modules/settings/RegionSettings";
 import type { ProfileInternalJob, ProfileTarget } from "./modules/profile/CoachProfilePanel";
 import {
   cleanNotificationTemplates,
@@ -3454,7 +3452,10 @@ function cleanCoachAccount(account?: Partial<CoachAccount>): CoachAccount {
     bookingUrl: cleanUrl(account?.bookingUrl, defaultCoachAccount.bookingUrl),
     calendarSlug: cleanSlug(account?.calendarSlug, cleanSlug(businessName, defaultCoachAccount.calendarSlug)),
     caddyWorkspaceUrl: cleanUrl(account?.caddyWorkspaceUrl, defaultCoachAccount.caddyWorkspaceUrl),
-    invoiceSettings: cleanInvoiceSettings(account?.invoiceSettings),
+    invoiceSettings: cleanInvoiceSettings(
+      account?.invoiceSettings,
+      cleanPhoneCountry(account?.country, defaultCoachAccount.country),
+    ),
   };
 }
 
@@ -4434,9 +4435,9 @@ function mergeCalendarItemsAfterConflict(
 function servicePriceLabel(service?: (Pick<Service, "price" | "priceMode"> & Partial<Service>) | null) {
   if (!service) return "No charge";
   if (isCustomGroupService(service)) {
-    return `NZ$${customGroupBasePrice(service)}.00 up to ${customGroupBaseParticipants(service)}`;
+    return `${formatMoney(customGroupBasePrice(service))} up to ${customGroupBaseParticipants(service)}`;
   }
-  return `NZ$${service.price}.00${service.priceMode === "per-person" ? " pp" : ""}`;
+  return `${formatMoney(service.price)}${service.priceMode === "per-person" ? " pp" : ""}`;
 }
 
 function serviceCapacityLabel(service: Pick<Service, "capacity" | "lessonFormat" | "minParticipants">) {
@@ -5604,9 +5605,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   // if these two ever disagree, the client and server disagree about whether
   // two numbers belong to the same person, which is what produced duplicate
   // contacts and the failed saves.
+  // Money is shown in the currency the business chose, which is its country's
+  // unless it picked another in Country & region.
   useEffect(() => {
-    setActiveCountry(coachAccount.country);
-  }, [coachAccount.country]);
+    setActiveRegion(coachAccount.country, coachAccount.invoiceSettings.currency);
+  }, [coachAccount.country, coachAccount.invoiceSettings.currency]);
   const [workspaceAccounts, setWorkspaceAccounts] = useState<WorkspaceAccount[]>(() =>
     bootstrap?.accounts ?? cleanWorkspaceAccounts(getStoredWorkspaceAccounts(), getStoredCoachAccount()),
   );
@@ -6321,6 +6324,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     value: coachAccount,
     onSave: saveCoachAccount,
   });
+  const regionEditor = useEditableBlock<CoachAccount>({
+    value: coachAccount,
+    onSave: saveCoachAccount,
+  });
   const emailNotificationsEditor = useEditableBlock<NotificationSettings>({
     value: notificationSettings,
     onSave: (draft) => saveNotificationSettings(draft, NOTIFICATION_BLOCK_KEYS.emailSender),
@@ -6351,6 +6358,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   });
   const editableBlocks = useMemo(
     () => [
+      { id: "region", title: "Country & region", editor: regionEditor },
       { id: "coach-account", title: "Coach Account", editor: coachAccountEditor },
       { id: "billing-settings", title: "Billing Settings", editor: billingSettingsEditor },
       { id: "email-notifications", title: "Email", editor: emailNotificationsEditor },
@@ -6361,6 +6369,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       { id: "player-booking-embed", title: "Player portal booking widget", editor: playerBookingEmbedEditor },
     ],
     [
+      regionEditor,
       coachAccountEditor,
       billingSettingsEditor,
       emailNotificationsEditor,
@@ -6426,6 +6435,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
   const coachAccountDraft = coachAccountEditor.draftValue;
   const coachAccountIsLocked = coachAccountEditor.status !== "editing" && coachAccountEditor.status !== "error";
+  const regionDraft = regionEditor.draftValue;
+  const regionIsLocked = regionEditor.status !== "editing" && regionEditor.status !== "error";
   const billingAccountDraft = billingSettingsEditor.draftValue;
   const invoiceSettingsDraft = billingAccountDraft.invoiceSettings;
   const billingSettingsIsLocked = billingSettingsEditor.status !== "editing" && billingSettingsEditor.status !== "error";
@@ -6446,6 +6457,18 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
   function updateCoachAccountBlockDraft<K extends keyof CoachAccount>(field: K, value: CoachAccount[K]) {
     coachAccountEditor.setDraftValue((current) => cleanCoachAccount({ ...current, [field]: value }));
+  }
+
+  function updateRegionDraft(next: Partial<RegionValues>) {
+    regionEditor.setDraftValue((current) => {
+      const { country, timezone, ...invoice } = next;
+      return cleanCoachAccount({
+        ...current,
+        country: country ?? current.country,
+        timezone: timezone ?? current.timezone,
+        invoiceSettings: { ...current.invoiceSettings, ...invoice },
+      });
+    });
   }
 
   function updateBillingAccountDraft<K extends keyof InvoiceSettings>(field: K, value: InvoiceSettings[K]) {
@@ -7825,9 +7848,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     };
   }, [ownsPage]);
 
+  // The booking widget only ever holds the public view of the account (see
+  // public-account.mts). Storing it would overwrite a coach's own saved copy
+  // in the same browser with a thinner one.
   useEffect(() => {
+    if (isEmbedMode) return;
     window.localStorage.setItem(COACH_ACCOUNT_STORAGE_KEY, JSON.stringify(coachAccount));
-  }, [coachAccount]);
+  }, [coachAccount, isEmbedMode]);
 
   useEffect(() => {
     window.localStorage.setItem(WORKSPACE_ACCOUNTS_STORAGE_KEY, JSON.stringify(workspaceAccounts));
@@ -17640,7 +17667,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     const parsed = new Date(value);
     return Number.isNaN(parsed.valueOf())
       ? "-"
-      : parsed.toLocaleDateString("en-NZ", { day: "numeric", month: "short", year: "numeric" });
+      : parsed.toLocaleDateString(activeLocale(), { day: "numeric", month: "short", year: "numeric" });
   };
 
   // Reconcile type filter: the distinct transaction-type labels present, and the
@@ -22162,8 +22189,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 </>
               ) : null}
               <label className="settings-field">
-                <span>Timezone</span>
-                <input value={locationEditor.timezone} onChange={(event) => updateLocationEditor("timezone", event.target.value)} />
+                <span>Time zone</span>
+                <TimeZoneSelect
+                  country={coachAccount.country}
+                  value={locationEditor.timezone}
+                  onChange={(timezone) => updateLocationEditor("timezone", timezone)}
+                />
               </label>
               <label className="settings-field">
                 <span>Sort order</span>
@@ -25310,7 +25341,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         <Plus size={16} />
                         <span>
                           <strong>{service.name}</strong>
-                          <em>{`${service.duration} min · NZ$${service.price.toFixed(2)}`}</em>
+                          <em>{`${service.duration} min · ${formatMoney(service.price)}`}</em>
                         </span>
                       </button>
                     ))}
@@ -25339,7 +25370,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     <button className="quick-service-summary" onClick={backToQuickServiceChoice} type="button">
                       <span>
                         <strong>{quickCreateService.name}</strong>
-                        <em>{`${quickCreateService.duration} min · NZ$${quickCreateService.price.toFixed(2)}`}</em>
+                        <em>{`${quickCreateService.duration} min · ${formatMoney(quickCreateService.price)}`}</em>
                       </span>
                       <ArrowLeft size={14} />
                     </button>
@@ -30034,20 +30065,20 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     onCancel={() => cancelEditableBlock("billing-settings")}
                     onSave={() => void saveEditableBlock("billing-settings")}
                   >
-                  <div className="service-form-row">
-                    <label className="settings-field">
-                      <span>Currency</span>
-                      <input
-                        value={invoiceSettingsDraft.currency}
-                        readOnly={billingSettingsIsLocked}
-                        onChange={(event) => updateBillingAccountDraft("currency", event.target.value)}
-                      />
-                    </label>
-                    <label className="settings-field">
-                      <span>Time zone</span>
-                      <input value={billingAccountDraft.timezone} readOnly={billingSettingsIsLocked} onChange={(event) => billingSettingsEditor.setDraftValue((current) => cleanCoachAccount({ ...current, timezone: event.target.value }))} />
-                    </label>
-                  </div>
+                  {/* Currency, time zone and tax belong to the business's
+                      country, and are set in one place: Settings > Account >
+                      Country & region. */}
+                  <p className="field-help">
+                    {invoiceSettings.currency} · {invoiceSettings.taxName} {invoiceSettings.taxRate}%{" "}
+                    {invoiceSettings.taxInclusive ? "included in prices" : "added on top"} · {coachAccount.timezone}.{" "}
+                    <button
+                      className="link-button"
+                      onClick={() => openProfileTarget({ kind: "settings", tab: "account", group: "region" }, "Country & region")}
+                      type="button"
+                    >
+                      Change in Country &amp; region
+                    </button>
+                  </p>
                   <div className="service-form-row">
                     <label className="settings-field">
                       <span>Invoice prefix</span>
@@ -30077,42 +30108,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   </div>
                   <div className="service-form-row">
                     <label className="settings-field">
-                      <span>GST / tax name</span>
-                      <input
-                        value={invoiceSettingsDraft.taxName}
-                        readOnly={billingSettingsIsLocked}
-                        onChange={(event) => updateBillingAccountDraft("taxName", event.target.value)}
-                      />
-                    </label>
-                    <label className="settings-field">
-                      <span>Tax number</span>
+                      <span>{invoiceSettingsDraft.taxName} number</span>
                       <input
                         value={invoiceSettingsDraft.taxNumber}
                         readOnly={billingSettingsIsLocked}
                         onChange={(event) => updateBillingAccountDraft("taxNumber", event.target.value)}
-                        placeholder="GST / tax number"
+                        placeholder={`${invoiceSettingsDraft.taxName} number`}
                       />
-                    </label>
-                    <label className="settings-field">
-                      <span>Tax rate</span>
-                      <input
-                        value={invoiceSettingsDraft.taxRate}
-                        inputMode="decimal"
-                        readOnly={billingSettingsIsLocked}
-                        onChange={(event) => updateBillingAccountDraft("taxRate", parseMoneyInput(event.target.value))}
-                        type="text"
-                      />
-                    </label>
-                    <label className="settings-field">
-                      <span>Prices and {invoiceSettingsDraft.taxName}</span>
-                      <select
-                        value={invoiceSettingsDraft.taxInclusive ? "inclusive" : "exclusive"}
-                        disabled={billingSettingsIsLocked}
-                        onChange={(event) => updateBillingAccountDraft("taxInclusive", event.target.value === "inclusive")}
-                      >
-                        <option value="inclusive">Prices include {invoiceSettingsDraft.taxName}</option>
-                        <option value="exclusive">Add {invoiceSettingsDraft.taxName} on top</option>
-                      </select>
                     </label>
                   </div>
                   <label className="settings-field">
@@ -31183,6 +31185,35 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               ) : null}
               {bookingSettingsPanel}
               {isAdminUser ? playerBookingEmbedPanel : null}
+              {/* Where the business is. Not the coach's: every coach in the
+                  workspace shares its time zone, currency and tax. */}
+              <SettingsGroup id="region" section="account" title="Country & region" className="notification-card account-card">
+                <EditableSettingsBlock
+                  id="region-block"
+                  title="Country & region"
+                  status={regionEditor.status}
+                  dirty={regionEditor.dirty}
+                  errorMessage={regionEditor.errorMessage}
+                  onEdit={() => startEditableBlock("region")}
+                  onCancel={() => cancelEditableBlock("region")}
+                  onSave={() => void saveEditableBlock("region")}
+                >
+                  <RegionSettings
+                    values={{
+                      country: cleanPhoneCountry(regionDraft.country),
+                      timezone: regionDraft.timezone,
+                      currency: regionDraft.invoiceSettings.currency,
+                      taxName: regionDraft.invoiceSettings.taxName,
+                      taxRate: regionDraft.invoiceSettings.taxRate,
+                      taxInclusive: regionDraft.invoiceSettings.taxInclusive,
+                    }}
+                    locked={regionIsLocked}
+                    onChange={updateRegionDraft}
+                    parseRate={parseMoneyInput}
+                  />
+                </EditableSettingsBlock>
+              </SettingsGroup>
+
               <SettingsGroup id="coach-account" section="account" title="Coach account" className="notification-card account-card">
                 <details className="settings-subsection">
                   <summary className="settings-subsection-title">
@@ -31300,32 +31331,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           readOnly={coachAccountIsLocked}
                           onChange={(event) => updateCoachAccountBlockDraft("venueShortName", event.target.value)}
                         />
-                      </label>
-                      <label className="settings-field">
-                        <span>Timezone</span>
-                        <input
-                          value={coachAccountDraft.timezone}
-                          readOnly={coachAccountIsLocked}
-                          onChange={(event) => updateCoachAccountBlockDraft("timezone", event.target.value)}
-                        />
-                      </label>
-                      <label className="settings-field">
-                        <span>Country</span>
-                        <select
-                          value={cleanPhoneCountry(coachAccountDraft.country)}
-                          disabled={coachAccountIsLocked}
-                          onChange={(event) => updateCoachAccountBlockDraft("country", event.target.value)}
-                        >
-                          {phoneCountryOptions().map((option) => (
-                            <option key={option.code} value={option.code}>
-                              {option.name} ({option.dialCode})
-                            </option>
-                          ))}
-                        </select>
-                        <small className="settings-field-hint">
-                          Sets the dialling code for new phone numbers, and how a number typed
-                          without a country code is understood.
-                        </small>
                       </label>
                     </div>
                   </details>
@@ -31478,53 +31483,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           type="text"
                         />
                       </label>
-                      <label className="settings-field">
-                        <span>Currency</span>
-                        <input
-                          value={invoiceSettingsDraft.currency}
-                        readOnly={billingSettingsIsLocked}
-                        onChange={(event) => updateBillingAccountDraft("currency", event.target.value)}
-                        />
-                      </label>
                     </div>
                     <div className="service-form-row">
                       <label className="settings-field">
-                        <span>Tax label</span>
-                        <input
-                          value={invoiceSettingsDraft.taxName}
-                        readOnly={billingSettingsIsLocked}
-                        onChange={(event) => updateBillingAccountDraft("taxName", event.target.value)}
-                        />
-                      </label>
-                      <label className="settings-field">
-                        <span>Tax number</span>
+                        <span>{invoiceSettingsDraft.taxName} number</span>
                         <input
                           value={invoiceSettingsDraft.taxNumber}
                         readOnly={billingSettingsIsLocked}
                         onChange={(event) => updateBillingAccountDraft("taxNumber", event.target.value)}
-                          placeholder="GST / tax number"
+                          placeholder={`${invoiceSettingsDraft.taxName} number`}
                         />
-                      </label>
-                      <label className="settings-field">
-                        <span>Tax rate</span>
-                        <input
-                          value={invoiceSettingsDraft.taxRate}
-                          inputMode="decimal"
-                          readOnly={billingSettingsIsLocked}
-                        onChange={(event) => updateBillingAccountDraft("taxRate", parseMoneyInput(event.target.value))}
-                          type="text"
-                        />
-                      </label>
-                      <label className="settings-field">
-                        <span>Prices and {invoiceSettingsDraft.taxName}</span>
-                        <select
-                          value={invoiceSettingsDraft.taxInclusive ? "inclusive" : "exclusive"}
-                          disabled={billingSettingsIsLocked}
-                          onChange={(event) => updateBillingAccountDraft("taxInclusive", event.target.value === "inclusive")}
-                        >
-                          <option value="inclusive">Prices include {invoiceSettingsDraft.taxName}</option>
-                          <option value="exclusive">Add {invoiceSettingsDraft.taxName} on top</option>
-                        </select>
                       </label>
                     </div>
                     <div className="service-form-row">

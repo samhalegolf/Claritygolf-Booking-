@@ -72,7 +72,7 @@ export function BillingReportsPanel({
   onClearCategories,
   formatMoney,
 }: BillingReportsPanelProps) {
-  const currency = summary?.currency ?? "NZD";
+  const currency = summary?.currency ?? "";
   const money = (amount: number) => formatMoney(amount, currency);
   const chartMax = Math.max(1, ...(summary?.months.flatMap((month) => [month.income, month.expenses]) ?? [0]));
   const hasActivity =
