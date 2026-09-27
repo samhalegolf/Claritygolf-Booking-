@@ -51,13 +51,9 @@ export type ProfileInternalJob = {
 
 export type CoachProfileIdentity = {
   coachName: string;
-  businessName: string;
-  venueName: string;
   roleLabel: string;
   email: string;
   phone: string;
-  timezone: string;
-  currency: string;
 };
 
 /**
@@ -225,16 +221,11 @@ export function CoachProfilePanel({ identity, internalJobs, onOpen }: CoachProfi
             <strong>{identity.coachName || "Your name"}</strong>
             <span className="cp-role">{identity.roleLabel}</span>
           </div>
-          <p className="cp-identity-where">
-            {[identity.businessName, identity.venueName].filter(Boolean).join(" · ") || "Set your business in Settings › Business"}
-          </p>
           <div className="cp-identity-facts">
             {(
               [
                 ["Email", identity.email],
                 ["Phone", identity.phone],
-                ["Timezone", identity.timezone],
-                ["Currency", identity.currency],
               ] as Array<[string, string]>
             ).map(([key, value]) => (
               <div key={key}>

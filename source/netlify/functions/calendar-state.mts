@@ -237,7 +237,7 @@ function defaultCoachProfileFromAccount(account = defaultCoachAccount()) {
     accountId: workspaceAccount.id,
     name: clean.coachName,
     displayName: clean.coachName || clean.businessName,
-    shortName: "Sam",
+    shortName: clean.coachName.split(/\s+/)[0] || "",
     email: clean.contactEmail,
     active: true,
     archived: false,
@@ -423,9 +423,13 @@ function normalizeWorkspaceAccounts(rawAccounts: unknown, account = defaultCoach
   });
 }
 
+// Mirrors normalizeCoachProfiles in booking-core: only a never-saved list is
+// seeded with the owner's coach; a saved empty list stays empty.
 function normalizeCoachProfiles(rawProfiles: unknown, account = defaultCoachAccount()) {
-  const fallback = defaultCoachProfileFromAccount(account);
-  const source = Array.isArray(rawProfiles) && rawProfiles.length ? rawProfiles : [fallback];
+  const seeded = !Array.isArray(rawProfiles);
+  const seed = defaultCoachProfileFromAccount(account);
+  const fallback = seeded ? seed : { ...seed, name: "", email: "" };
+  const source = seeded ? [seed] : rawProfiles;
   const seen = new Set<string>();
   return source.map((raw, index) => {
     const item = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
@@ -731,8 +735,12 @@ async function readTinyCalendarShell(req: Request, requestStartedAt: number) {
   // starts empty rather than inheriting them.
   const original = isOriginalWorkspace(actor.accountId);
   const accountId = actor.accountId;
-  const coaches = normalizeCoachProfiles(parseSettingJson(settingsMap, "coachProfilesJson", []), account);
-  const fallbackCoachId = coaches.find((coach) => coach.active && !coach.archived)?.id || coaches[0]?.id || "";
+  const coaches = normalizeCoachProfiles(parseSettingJson(settingsMap, "coachProfilesJson", null), account);
+  // The signed-in person's own coach; mirrors ownCoachIdFor in booking-core.
+  const liveCoachId = (id?: string) => (id && coaches.some((coach) => coach.id === id) ? id : "");
+  const ownCoachId =
+    liveCoachId(actor.coachId) ||
+    (actor.isOwner ? liveCoachId(cleanSlug(accountId, "")) : coaches.find((coach) => coach.active && !coach.archived)?.id || coaches[0]?.id || "");
   const coachName = settingValue(settingsMap, "accountCoachName") || account.coachName;
   const currentUser = {
     id: actor.authUserId,
@@ -741,7 +749,7 @@ async function readTinyCalendarShell(req: Request, requestStartedAt: number) {
     // The app-user vocabulary the calendar reads permissions from, not the
     // membership vocabulary -- "owner" is not a role this app knows.
     role: appUserRoleForMembership(actor.role),
-    coachId: actor.coachId || fallbackCoachId,
+    coachId: ownCoachId || undefined,
     permissions: actor.isAdmin
       ? {
           bookings: "all",

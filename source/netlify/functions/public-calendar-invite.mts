@@ -137,7 +137,6 @@ async function readSettings(req: Request) {
     account,
     services,
     businessName: orDefault(settings.accountBusinessName, "CLARITY_BUSINESS_NAME", "Sam Hale Golf"),
-    coachName: orDefault(settings.accountCoachName, "CLARITY_COACH_NAME", "Sam Hale"),
     venueName: orDefault(settings.accountVenueName, "CLARITY_VENUE_NAME", "The Range 24/7 - Three Kings"),
     // Timezone is a formatting concern, not an identity one: a business with no
     // timezone set still needs the invite to render, so the platform default
@@ -275,7 +274,7 @@ function generateInvite(appointment: any, settings: any) {
     `DTSTAMP:${formatUtcStamp()}`,
     `DTSTART:${formatUtcStamp(zonedSlotToUtc(appointment.week, appointment.day, appointment.start, settings.timezone))}`,
     `DTEND:${formatUtcStamp(zonedSlotToUtc(appointment.week, appointment.day, Number(appointment.start || 0) + Number(appointment.duration || 0), settings.timezone))}`,
-    `SUMMARY:${escapeIcs(`${serviceName} with ${settings.coachName || settings.businessName}`)}`,
+    `SUMMARY:${escapeIcs(`${serviceName} with ${appointment.coach?.displayName || appointment.coach?.name || settings.businessName}`)}`,
     `DESCRIPTION:${escapeIcs(description)}`,
     `LOCATION:${escapeIcs(bookingLocationDisplay(location))}`,
     settings.contactEmail ? `ORGANIZER;CN=${escapeIcs(settings.businessName)}:MAILTO:${escapeIcs(settings.contactEmail)}` : "",
