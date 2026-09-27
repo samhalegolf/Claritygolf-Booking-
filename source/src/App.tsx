@@ -116,12 +116,26 @@ import {
   cleanLocationKind,
   cleanLocationResources,
   cleanResourceSource,
+  cleanResourceType,
   cleanServiceResourceIds,
+  cleanServiceResourceTypes,
+  resourceSelectionId,
+  resourceTypeKey,
+  serviceResourceMode,
   type LocationKind,
   type LocationResource,
   type ResourceHandedness,
+  type ResourceMode,
   type ResourceSource,
 } from "../netlify/functions/_shared/resources.mts";
+import {
+  cleanScopeIds,
+  primaryServiceCoachId,
+  primaryServiceLocationId,
+  serviceCoachIds,
+  serviceIncludesCoach,
+  serviceLocationIds,
+} from "../netlify/functions/_shared/service-scope.mts";
 // The country itself is held per page here, not in the shared module -- see
 // that file for why the server cannot have one.
 import {
@@ -630,7 +644,8 @@ type ServiceEditorFormat = "private" | "group" | "custom-group" | "package" | "v
 type Service = {
   id: string;
   accountId?: string;
-  coachId?: string;
+  /** Every coach who teaches it, in the order a booking tries them. */
+  coachIds: string[];
   name: string;
   duration: number;
   price: number;
@@ -643,10 +658,13 @@ type Service = {
   priceMode: PriceMode;
   /** Fill for this lesson type's cards on the calendar. Hex, from settings. */
   color?: string;
-  locationId?: string;
-  /** A booking holds one of the location's resources (a bay, a room). */
-  needsResource?: boolean;
-  /** The resources it may take; empty means any at the location. */
+  /** Every place it runs, in the order a booking tries them. */
+  locationIds: string[];
+  /** Whether a booking must hold one of the location's resources, or takes one only when free. */
+  resourceMode?: ResourceMode;
+  /** Whole resource types it may take, by name. With resourceIds empty too, any resource. */
+  resourceTypes?: string[];
+  /** Single resources it may take, as "locationId/resourceId". */
   resourceIds?: string[];
   lessonNote?: string;
   location: string;
@@ -2289,6 +2307,8 @@ const baseWeekStart = BASE_WEEK_START;
 const defaultServices: Service[] = [
   {
     id: "lesson-30",
+    coachIds: [],
+    locationIds: [],
     name: "30min Lesson",
     duration: 30,
     price: 100,
@@ -2304,6 +2324,8 @@ const defaultServices: Service[] = [
   },
   {
     id: "lesson-60",
+    coachIds: [],
+    locationIds: [],
     name: "1 Hour Golf Lesson",
     duration: 60,
     price: 180,
@@ -2319,6 +2341,8 @@ const defaultServices: Service[] = [
   },
   {
     id: "lesson-pair",
+    coachIds: [],
+    locationIds: [],
     name: "2 Person Golf Lesson",
     duration: 60,
     price: 200,
@@ -2334,6 +2358,8 @@ const defaultServices: Service[] = [
   },
   {
     id: "group-clinic",
+    coachIds: [],
+    locationIds: [],
     name: "Group Golf Clinic",
     duration: 90,
     price: 55,
@@ -2355,6 +2381,8 @@ const defaultServices: Service[] = [
   },
   {
     id: "member-30",
+    coachIds: [],
+    locationIds: [],
     name: "30min Golf Lesson (Range 24/7 Member)",
     duration: 30,
     price: 90,
@@ -2370,6 +2398,8 @@ const defaultServices: Service[] = [
   },
   {
     id: "member-60",
+    coachIds: [],
+    locationIds: [],
     name: "1 Hour Golf Lesson (Range 24/7 Member)",
     duration: 60,
     price: 160,
@@ -2385,6 +2415,8 @@ const defaultServices: Service[] = [
   },
   {
     id: "package-60",
+    coachIds: [],
+    locationIds: [],
     name: "1 hour Lesson - 5 Lesson Package",
     duration: 60,
     price: 650,
@@ -3871,7 +3903,7 @@ function resolvedCalendarItemCoachId(
   coaches: CoachProfile[],
   account: Partial<CoachAccount>,
 ) {
-  return item?.coachId || item?.coach?.coachId || service?.coachId || calendarItemCoach(item, coaches, account).coachId || defaultCoachId(coaches);
+  return item?.coachId || item?.coach?.coachId || primaryServiceCoachId(service) || calendarItemCoach(item, coaches, account).coachId || defaultCoachId(coaches);
 }
 
 function calendarItemBelongsToCoach(
@@ -3987,7 +4019,7 @@ function locationSnapshot(location: Location): BookingLocationSnapshot {
 function serviceLocation(service: Partial<Service> | undefined, locations: Location[], account: Partial<CoachAccount>) {
   const cleanAccount = cleanCoachAccount(account);
   return (
-    locationById(locations, service?.locationId) ??
+    locationById(locations, primaryServiceLocationId(service)) ??
     locationById(locations, defaultLocationId(locations)) ??
     defaultLocationFromCoachAccount(cleanAccount)
   );
@@ -4046,7 +4078,7 @@ function resolvedCalendarItemLocationId(
   locations: Location[],
   account: Partial<CoachAccount>,
 ) {
-  return item?.locationId || item?.location?.locationId || service?.locationId || calendarItemLocation(item, service, locations, account).locationId || defaultLocationId(locations);
+  return item?.locationId || item?.location?.locationId || primaryServiceLocationId(service) || calendarItemLocation(item, service, locations, account).locationId || defaultLocationId(locations);
 }
 
 function calendarItemBelongsToLocation(
@@ -4177,6 +4209,19 @@ const neutralServiceFallback: Service = {
   price: 0,
 };
 
+// Whether a booking takes one of the location's resources, and which types or
+// single resources it may take. A review is not at a location at all.
+function cleanServiceResourceUse(service: Partial<Service> | undefined, canUseResources: boolean) {
+  const resourceMode = canUseResources ? serviceResourceMode(service) : "none";
+  if (resourceMode === "none") return {};
+  return {
+    resourceMode,
+    resourceTypes: cleanServiceResourceTypes(service?.resourceTypes),
+    // Unqualified ids are from when a lesson type had one location.
+    resourceIds: cleanServiceResourceIds(service?.resourceIds, primaryServiceLocationId(service)),
+  };
+}
+
 function cleanService(service?: Partial<Service>, index = 0): Service {
   const fallback = neutralServiceFallback;
   const descriptionFallback = service ? "" : fallback.description;
@@ -4234,7 +4279,7 @@ function cleanService(service?: Partial<Service>, index = 0): Service {
   return {
     id: cleanSlug(service?.id, cleanSlug(name, `service-${Date.now()}-${index}`)),
     accountId: cleanSlug(service?.accountId, fallback.accountId || defaultWorkspaceAccountFromCoachAccount().id),
-    coachId: cleanSlug(service?.coachId, defaultCoachProfileFromAccount().id),
+    coachIds: cleanScopeIds(serviceCoachIds(service)),
     name,
     duration: clamp(Math.round(duration), 15, 240),
     price: Math.max(0, Math.round(price)),
@@ -4246,12 +4291,8 @@ function cleanService(service?: Partial<Service>, index = 0): Service {
     lessonFormat,
     priceMode,
     color: cleanHexColor(service?.color, defaultServiceColor(index)),
-    locationId: typeof service?.locationId === "string" ? cleanSlug(service.locationId, "") || undefined : undefined,
-    needsResource: !videoReview && lessonFormat !== "package" && service?.needsResource === true ? true : undefined,
-    resourceIds:
-      !videoReview && lessonFormat !== "package" && service?.needsResource === true
-        ? cleanServiceResourceIds(service?.resourceIds)
-        : undefined,
+    locationIds: cleanScopeIds(serviceLocationIds(service)),
+    ...cleanServiceResourceUse(service, !videoReview && lessonFormat !== "package"),
     lessonNote: cleanEditableServiceText(service?.lessonNote, lessonNoteFallback, 180),
     location: cleanEditableServiceText(service?.location, locationFallback, 160),
     packageAllowance: lessonFormat === "package" ? packageAllowance : undefined,
@@ -4920,7 +4961,8 @@ function emptyServiceEditor(): ServiceEditor {
     lessonFormat: "private",
     priceMode: "session",
     color: defaultServiceColor(0),
-    locationId: "",
+    coachIds: [],
+    locationIds: [],
     lessonNote: "",
     location: "",
     groupSchedule: defaultGroupSchedule(),
@@ -5625,6 +5667,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const [coachSaveState, setCoachSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [coachEditorError, setCoachEditorError] = useState("");
   const [serviceEditor, setServiceEditor] = useState<ServiceEditor>(emptyServiceEditor);
+  // Resource types opened in the lesson type editor to choose single resources.
+  const [openResourceTypes, setOpenResourceTypes] = useState<string[]>([]);
   const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
   const [showServiceEditor, setShowServiceEditor] = useState(false);
   const [serviceListTab, setServiceListTab] = useState<ServiceListTab>("active");
@@ -7244,8 +7288,30 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     isAdminUser || resolvedCalendarItemCoachId(item, itemService(item, services), coachProfiles, coachAccount) === serviceScopeCoachId;
   const serviceVisibleToCurrentUser = (service: Service) =>
     serviceBelongsToAccount(service, activeAccountId) &&
-    (isAdminUser || (service.coachId || defaultCoachId(accountCoachProfiles)) === serviceScopeCoachId);
+    (isAdminUser || serviceIncludesCoach(service, serviceScopeCoachId, defaultCoachId(accountCoachProfiles)));
   const accountServices = services.filter((service) => serviceBelongsToAccount(service, activeAccountId));
+  // Every coach-and-place pair a booking of this lesson type could be with, in
+  // the order they are tried. Mirrors serviceBookingOptions in booking-core.
+  function serviceBookingOptions(service: Service) {
+    const coachIds = service.coachIds.filter((id) => {
+      const coach = coachById(accountCoachProfiles, id);
+      return !coach || (coach.active && !coach.archived);
+    });
+    const locationIds = service.locationIds.filter((id) => {
+      const location = locationById(accountLocations, id);
+      return Boolean(location && location.active && !location.archived);
+    });
+    const pickedCoaches = coachIds.length ? coachIds : [publicBookingFallbackCoachId];
+    const pickedLocations = locationIds.length ? locationIds : [serviceLocation(service, accountLocations, coachAccount).id];
+    return pickedCoaches.flatMap((coachId) => pickedLocations.map((locationId) => ({ coachId, locationId })));
+  }
+  // The coach a lesson booked from the calendar goes to: the one being viewed
+  // when they teach it, otherwise the first the lesson type lists.
+  function serviceCoachFor(service: Service | undefined, preferredCoachId = "") {
+    const ids = service?.coachIds ?? [];
+    if (preferredCoachId && ids.includes(preferredCoachId)) return preferredCoachId;
+    return ids[0] || preferredCoachId || defaultCoachId(accountCoachProfiles);
+  }
   const activeServices = accountServices.filter((service) => service.archived !== true && serviceVisibleToCurrentUser(service));
   const archivedServices = accountServices.filter((service) => service.archived === true && serviceVisibleToCurrentUser(service));
   const sortedLocations = [...accountLocations].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name));
@@ -7253,7 +7319,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const archivedLocationList = sortedLocations.filter((location) => location.archived || !location.active);
   const defaultLocation = locationById(accountLocations, defaultLocationId(accountLocations)) ?? defaultLocationFromCoachAccount(coachAccount);
   const locationUsageCount = (locationId: string) =>
-    accountServices.filter((service) => (service.locationId || defaultLocation.id) === locationId && service.archived !== true).length;
+    accountServices.filter(
+      (service) =>
+        (service.locationIds.length ? service.locationIds : [defaultLocation.id]).includes(locationId) &&
+        service.archived !== true,
+    ).length;
   const packageServices = activeServices.filter((service) => service.active && service.lessonFormat === "package");
   const bookableServices = activeServices.filter((service) => service.active && service.lessonFormat !== "package");
   const appointmentServices = activeServices.filter((service) => service.active && isAppointmentStyleService(service));
@@ -10317,7 +10387,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       return;
     }
     const previous = items;
-    const coachId = selectedGroupSessionService?.coachId || defaultCoachId(coachProfiles);
+    const coachId = serviceCoachFor(selectedGroupSessionService ?? undefined);
     const location = bookingLocationSnapshotFor(selectedGroupSessionService, locations, coachAccount);
     const cancellationRecord: CalendarItem = {
       id: `group-session-cancel-${selectedGroupSession.serviceId}-${selectedGroupSession.week}-${selectedGroupSession.day}-${selectedGroupSession.start}`,
@@ -10449,7 +10519,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     }
 
     const ignoreId = bookingMode === "reschedule" ? selectedRescheduleMatch?.id : undefined;
-    const publicBookingServiceCoachId = bookingTargetService.coachId || publicBookingFallbackCoachId;
+    const bookingOptions = serviceBookingOptions(bookingTargetService);
 
     if (bookingMode === "book" && isScheduledGroupService(bookingTargetService)) {
       const schedule = bookingTargetService.groupSchedule;
@@ -10460,8 +10530,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         start: schedule.startMinutes,
         duration: bookingTargetService.duration,
       };
+      // A scheduled group is one session, with the first coach at the first place.
+      const [{ coachId, locationId }] = bookingOptions;
       if (!isGroupServiceSlotMatch(bookingTargetService, activeWeek, schedule.dayOfWeek, schedule.startMinutes)) return [];
-      if (hasCollision(candidate, ignoreId, bookingTargetService, { candidateCoachId: publicBookingServiceCoachId })) return [];
+      if (hasCollision(candidate, ignoreId, bookingTargetService, { candidateCoachId: coachId, candidateLocationId: locationId })) return [];
       const remainingSpots = getGroupSlotRemainingSpots(candidate, bookingTargetService);
       if (!remainingSpots) return [];
       return [
@@ -10470,39 +10542,51 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           day: candidate.day,
           start: candidate.start,
           remainingSpots,
+          coachId,
+          locationId,
         },
       ];
     }
 
     if (!bookingDaySelected) return [];
 
-    const serviceAvailability = availabilityForCoach(accountAvailability, publicBookingServiceCoachId, publicBookingFallbackCoachId);
-    const serviceLocationId = serviceLocation(bookingTargetService, locations, coachAccount).id;
-    const windows = (serviceAvailability[bookingDay] ?? []).filter((window) =>
-      availabilityWindowCoversLocation(window, serviceLocationId),
-    );
+    // Each time once, with the first coach and place (in the lesson type's
+    // order) who are free for it -- the same rule the booking server uses.
     const slots: BookingSlot[] = [];
-    windows.forEach((window) => {
-      for (let start = window.start; start + bookingTargetService.duration <= window.end; start += 30) {
-        const candidate = {
-          week: activeWeek,
-          day: bookingDay,
-          start,
-          duration: bookingTargetService.duration,
-        };
-        if (!hasCollision(candidate, ignoreId, bookingTargetService, { candidateCoachId: publicBookingServiceCoachId })) {
-          slots.push({
-            week: candidate.week,
-            day: candidate.day,
-            start: candidate.start,
-            remainingSpots: 0,
-          });
+    const offered = new Set<number>();
+    bookingOptions.forEach(({ coachId, locationId }) => {
+      const coachAvailability = availabilityForCoach(accountAvailability, coachId, publicBookingFallbackCoachId);
+      const windows = (coachAvailability[bookingDay] ?? []).filter((window) =>
+        availabilityWindowCoversLocation(window, locationId),
+      );
+      windows.forEach((window) => {
+        for (let start = window.start; start + bookingTargetService.duration <= window.end; start += 30) {
+          if (offered.has(start)) continue;
+          const candidate = {
+            week: activeWeek,
+            day: bookingDay,
+            start,
+            duration: bookingTargetService.duration,
+          };
+          if (!hasCollision(candidate, ignoreId, bookingTargetService, { candidateCoachId: coachId, candidateLocationId: locationId })) {
+            offered.add(start);
+            slots.push({
+              week: candidate.week,
+              day: candidate.day,
+              start: candidate.start,
+              remainingSpots: 0,
+              coachId,
+              locationId,
+            });
+          }
         }
-      }
+      });
     });
-    return slots;
+    return slots.sort((a, b) => a.start - b.start);
   }, [
     accountAvailability,
+    accountCoachProfiles,
+    accountLocations,
     activeWeek,
     bookingDay,
     bookingDaySelected,
@@ -11304,7 +11388,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             status: "booked" as BookingStatus,
             accountId: activeAccountId,
             serviceId: groupService.id,
-            coachId: groupService.coachId,
+            coachId: serviceCoachFor(groupService),
             locationId: serviceLocation(groupService, locations, coachAccount).id,
             title: `${groupService.name} (group session)`,
             syntheticGroupSlot: true,
@@ -11320,7 +11404,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     service?: Service,
     options: { candidateCoachId?: string; candidateLocationId?: string } = {},
   ) {
-    const candidateCoachId = options.candidateCoachId || service?.coachId || selectedCalendarCoachId || activeCoachId;
+    const candidateCoachId = options.candidateCoachId || serviceCoachFor(service, selectedCalendarCoachId || activeCoachId);
     const candidateLocationId = options.candidateLocationId || serviceLocation(service, locations, coachAccount).id;
     const candidateItem: Partial<CalendarItem> = {
       kind: "appointment",
@@ -12246,7 +12330,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       return;
     }
     if (!confirmPastAdminLesson(candidate)) return;
-    const coachId = quickCreateService.coachId || selectedCalendarCoachId || activeCoachId || defaultCoachId(coachProfiles);
+    const coachId = serviceCoachFor(quickCreateService, selectedCalendarCoachId || activeCoachId);
     const location = bookingLocationSnapshotFor(quickCreateService, locations, coachAccount);
     const item: CalendarItem = {
       id: newCalendarItemId("appt"),
@@ -12338,7 +12422,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     }
     if (!confirmPastAdminLesson(candidate)) return;
     const previous = items;
-    const coachId = service.coachId || selectedCalendarCoachId || activeCoachId || defaultCoachId(coachProfiles);
+    const coachId = serviceCoachFor(service, selectedCalendarCoachId || activeCoachId);
     const location = bookingLocationSnapshotFor(service, locations, coachAccount);
     const item: CalendarItem = {
       id: newCalendarItemId("appt"),
@@ -12488,7 +12572,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       return true;
     }
 
-    const coachId = service.coachId || defaultCoachId(coachProfiles);
+    const coachId = serviceCoachFor(service);
     const location = bookingLocationSnapshotFor(service, locations, coachAccount);
     const item: CalendarItem = {
       id: newCalendarItemId("appt"),
@@ -14038,9 +14122,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       const match = /^(.*?)(\d+)\s*$/.exec(last);
       const prefix = match ? match[1] : last ? `${last} ` : "Bay ";
       const startAt = match ? Number(match[2]) + 1 : last ? 2 : 1;
+      // New ones are the same kind as the one above them; a first batch of
+      // bays is hitting bays.
+      const type = resources.length ? resources.at(-1)?.type ?? "" : "Hitting bay";
       const added = Array.from({ length: Math.max(1, Math.min(20, count)) }, (_, index) => ({
         id: "",
         name: `${prefix}${startAt + index}`,
+        ...(type ? { type } : {}),
         handedness: "any" as ResourceHandedness,
         active: true,
       }));
@@ -14682,14 +14770,103 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     );
   }
 
-  // The lesson type's location, when it is a physical place with resources
-  // set up -- the only time "needs a resource" means anything.
-  const serviceEditorResourceLocation = (() => {
-    const location = locationById(locations, serviceEditor.locationId || defaultLocationId(locations));
-    if (!location || location.kind === "online") return null;
-    return (location.resources ?? []).some((resource) => resource.active) ? location : null;
+  // The lesson type's physical places that have resources set up -- the only
+  // ones where using a resource means anything. Clarity keeps track of the
+  // "clarity" ones; the others are held by another booking system.
+  const serviceEditorResourceLocations = serviceEditor.locationIds
+    .map((id) => locationById(accountLocations, id))
+    .filter(
+      (location): location is Location =>
+        Boolean(location) &&
+        location!.kind !== "online" &&
+        (location!.resources ?? []).some((resource) => resource.active),
+    );
+  const serviceEditorClarityResourceLocations = serviceEditorResourceLocations.filter(
+    (location) => location.resourceSource !== "external",
+  );
+  // The resources those places have, grouped by type (first spelling wins),
+  // then the ones with no type.
+  const serviceEditorResourceGroups = (() => {
+    const groups: Array<{ key: string; type: string; resources: Array<{ location: Location; resource: LocationResource }> }> = [];
+    serviceEditorClarityResourceLocations.forEach((location) =>
+      (location.resources ?? [])
+        .filter((resource) => resource.active)
+        .forEach((resource) => {
+          const key = resourceTypeKey(resource.type);
+          let group = groups.find((entry) => entry.key === key);
+          if (!group) {
+            group = { key, type: cleanResourceType(resource.type), resources: [] };
+            groups.push(group);
+          }
+          group.resources.push({ location, resource });
+        }),
+    );
+    return [...groups.filter((group) => group.key), ...groups.filter((group) => !group.key)];
   })();
-  const serviceEditorResources = (serviceEditorResourceLocation?.resources ?? []).filter((resource) => resource.active);
+  const serviceEditorTypeChosen = (key: string) =>
+    Boolean(key) && (serviceEditor.resourceTypes ?? []).some((type) => resourceTypeKey(type) === key);
+  const serviceEditorResourceChosen = (location: Location, resource: LocationResource) =>
+    serviceEditorTypeChosen(resourceTypeKey(resource.type)) ||
+    (serviceEditor.resourceIds ?? []).includes(resourceSelectionId(location.id, resource.id));
+
+  // Keeps a chosen list in the order it is shown, so the order a booking tries
+  // coaches and places in is the order they are listed.
+  function toggleServiceEditorScope(field: "coachIds" | "locationIds", id: string, order: string[]) {
+    const current = serviceEditor[field];
+    const next = current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id];
+    updateServiceEditor(
+      field,
+      [...next].sort((a, b) => order.indexOf(a) - order.indexOf(b)),
+    );
+  }
+
+  function setServiceEditorResourceMode(mode: ResourceMode) {
+    updateServiceEditor("resourceMode", serviceEditor.resourceMode === mode ? "none" : mode);
+  }
+
+  // A whole type covers every resource of that type, now and later.
+  function toggleServiceEditorResourceType(group: (typeof serviceEditorResourceGroups)[number]) {
+    const inGroup = new Set(group.resources.map(({ location, resource }) => resourceSelectionId(location.id, resource.id)));
+    const ids = (serviceEditor.resourceIds ?? []).filter((id) => !inGroup.has(id));
+    if (!group.key) {
+      // Resources with no type have nothing to choose as a whole, so this
+      // chooses (or clears) each of them.
+      const allChosen = group.resources.every(({ location, resource }) => serviceEditorResourceChosen(location, resource));
+      updateServiceEditor("resourceIds", allChosen ? ids : [...ids, ...inGroup]);
+      return;
+    }
+    const types = (serviceEditor.resourceTypes ?? []).filter((type) => resourceTypeKey(type) !== group.key);
+    setServiceSaveState("idle");
+    setServiceEditor((current) => ({
+      ...current,
+      resourceIds: ids,
+      resourceTypes: serviceEditorTypeChosen(group.key) ? types : [...types, group.type],
+    }));
+  }
+
+  // A single resource ties the lesson type to that one. Unticking one while
+  // its whole type is chosen keeps the rest of the type as single resources.
+  function toggleServiceEditorResource(
+    group: (typeof serviceEditorResourceGroups)[number],
+    location: Location,
+    resource: LocationResource,
+  ) {
+    const id = resourceSelectionId(location.id, resource.id);
+    const ids = serviceEditor.resourceIds ?? [];
+    if (group.key && serviceEditorTypeChosen(group.key)) {
+      const rest = group.resources
+        .map((entry) => resourceSelectionId(entry.location.id, entry.resource.id))
+        .filter((entry) => entry !== id && !ids.includes(entry));
+      setServiceSaveState("idle");
+      setServiceEditor((current) => ({
+        ...current,
+        resourceTypes: (current.resourceTypes ?? []).filter((type) => resourceTypeKey(type) !== group.key),
+        resourceIds: [...ids, ...rest],
+      }));
+      return;
+    }
+    updateServiceEditor("resourceIds", ids.includes(id) ? ids.filter((entry) => entry !== id) : [...ids, id]);
+  }
 
   function updateServiceEditor<K extends keyof ServiceEditor>(field: K, value: ServiceEditor[K]) {
     setServiceSaveState("idle");
@@ -15026,12 +15203,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       customGroup: isCustomGroupService(service),
       customGroupEnabled: isCustomGroupService(service),
       description: service.description ?? "",
-      coachId: service.coachId || serviceScopeCoachId || defaultCoachId(coachProfiles),
-      locationId: service.locationId || defaultLocationId(locations),
+      // Older lesson types that named no coach or place went to the defaults,
+      // so they open showing those.
+      coachIds: service.coachIds.length ? service.coachIds : [serviceScopeCoachId || defaultCoachId(coachProfiles)],
+      locationIds: service.locationIds.length ? service.locationIds : [defaultLocationId(accountLocations)],
       lessonNote: service.lessonNote || service.location || "",
       location: service.location ?? "",
       bookingScreenIds: service.bookingScreenIds ?? ["main"],
     });
+    setOpenResourceTypes([]);
     setShowServiceEditor(true);
     setServiceSaveState("idle");
   }
@@ -15045,11 +15225,18 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       // arrive the same shade and have to be told apart by hand.
       color: defaultServiceColor(services.length),
       id: generateServiceDraftId(),
-      coachId: serviceScopeCoachId || defaultCoachId(coachProfiles),
-      locationId: defaultLocationId(locations),
+      // Nothing is picked for the admin to untick, unless there is only one
+      // to choose. A coach's own lesson type is theirs.
+      coachIds: !isAdminUser
+        ? [serviceScopeCoachId]
+        : activeCoachList.length === 1
+          ? [activeCoachList[0].id]
+          : [],
+      locationIds: activeLocationList.length === 1 ? [activeLocationList[0].id] : [],
       lessonNote: "",
       location: "",
     });
+    setOpenResourceTypes([]);
     setShowServiceEditor(true);
     setServiceSaveState("idle");
   }
@@ -15170,9 +15357,19 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       ...targetItem,
       serviceId: nextServiceId,
       duration: nextService.duration,
-      coachId: nextService.coachId || targetItem.coachId,
-      location: bookingLocationSnapshotFor(nextService, locations, coachAccount),
-      locationId: nextService.locationId || targetItem.locationId,
+      // Stays with its coach and place when the new lesson type has them.
+      coachId: serviceCoachFor(nextService, resolvedCalendarItemCoachId(targetItem, itemService(targetItem, services), coachProfiles, coachAccount)),
+      ...(() => {
+        const currentLocationId = resolvedCalendarItemLocationId(targetItem, itemService(targetItem, services), locations, coachAccount);
+        const keepLocation = nextService.locationIds.includes(currentLocationId);
+        const location = keepLocation ? locationById(locations, currentLocationId) : undefined;
+        return location
+          ? { location: locationSnapshot(location), locationId: location.id }
+          : {
+              location: bookingLocationSnapshotFor(nextService, locations, coachAccount),
+              locationId: serviceLocation(nextService, locations, coachAccount).id,
+            };
+      })(),
       updatedAt: new Date().toISOString(),
     };
     const optimisticItems = items.map((item) => (item.id === targetItem.id ? nextItem : item));
@@ -18553,14 +18750,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       ...normalizedEditor,
       accountId: normalizedEditor.accountId || activeAccountId,
       description: typeof normalizedEditor.description === "string" ? normalizedEditor.description : "",
-      coachId:
-        typeof normalizedEditor.coachId === "string" && normalizedEditor.coachId
-          ? normalizedEditor.coachId
-          : serviceScopeCoachId || defaultCoachId(coachProfiles),
-      locationId:
-        typeof normalizedEditor.locationId === "string" && normalizedEditor.locationId
-          ? normalizedEditor.locationId
-          : defaultLocationId(locations),
       lessonNote:
         typeof normalizedEditor.lessonNote === "string"
           ? normalizedEditor.lessonNote
@@ -18574,6 +18763,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             ? normalizedEditor.location
             : "",
     };
+    if (!editableEditor.coachIds.length) {
+      setToast({ message: "Choose at least one coach for this lesson type." });
+      return;
+    }
+    const needsLocation =
+      editableEditor.lessonFormat !== "package" && editableEditor.lessonFormat !== "video-review";
+    if (needsLocation && activeLocationList.length && !editableEditor.locationIds.length) {
+      setToast({ message: "Choose at least one location for this lesson type." });
+      return;
+    }
     const hasPublicScreen = (editableEditor.bookingScreenIds ?? []).length > 0;
     if (editableEditor.visibility === "public" && !hasPublicScreen) {
       setToast({ message: "Public lesson types must be assigned to at least one booking screen." });
@@ -20418,14 +20617,20 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       return;
     }
 
+    // The coach and place the chosen time was offered with.
+    const chosenSlot = bookingSlots.find((slot) => slot.day === bookingDay && slot.start === bookingStart);
+    const [firstOption] = serviceBookingOptions(bookingTargetService);
+    const chosenLocation = locationById(locations, chosenSlot?.locationId || firstOption.locationId);
     const selectedBooking = {
       service: bookingTargetService,
       week: activeWeek,
       day: bookingDay,
       start: bookingStart,
       duration: bookingTargetService.duration,
-      location: bookingLocationSnapshotFor(bookingTargetService, locations, coachAccount),
-      coachId: bookingTargetService.coachId || publicBookingFallbackCoachId,
+      location: chosenLocation
+        ? locationSnapshot(chosenLocation)
+        : bookingLocationSnapshotFor(bookingTargetService, locations, coachAccount),
+      coachId: chosenSlot?.coachId || firstOption.coachId,
     };
     const selectedBookingCoach = bookingCoachSnapshotFor(selectedBooking.coachId, coachProfiles, coachAccount);
     const fallbackAppointmentId = `fallback-appt-${Date.now()}`;
@@ -20460,7 +20665,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       start: selectedBooking.start,
       duration: selectedBooking.duration,
     };
-    if (hasCollision(candidate, undefined, bookingTargetService, { candidateCoachId: selectedBooking.coachId })) {
+    if (
+      hasCollision(candidate, undefined, bookingTargetService, {
+        candidateCoachId: selectedBooking.coachId,
+        candidateLocationId: selectedBooking.location.locationId,
+      })
+    ) {
       const message = "That time has just been taken. Pick another slot.";
       setBookingSubmitError(message);
       setOpenPublicBookingSection("information");
@@ -21289,77 +21499,181 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   </label>
                 )}
                 {(isAdminUser || activeCoachList.length > 1) && (
-                  <label className="settings-field">
-                    <span>Coach</span>
-                    <select
-                      value={serviceEditor.coachId || serviceScopeCoachId || defaultCoachId(coachProfiles)}
-                      onChange={(event) => updateServiceEditor("coachId", event.target.value)}
-                      disabled={!isAdminUser}
-                    >
-                      {activeCoachList.map((coach) => (
-                        <option key={coach.id} value={coach.id}>
-                          {coach.displayName || coach.name}{coach.isDefault ? " (default)" : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  <div className="service-scope-field">
+                    <span>Coaches</span>
+                    <small>
+                      {isAdminUser
+                        ? "Who teaches it. Customers see every time any of them is free."
+                        : "Who teaches it. An admin can change this."}
+                    </small>
+                    <div className="service-resource-choices" aria-label="Coaches who teach this lesson type">
+                      {activeCoachList.map((coach) => {
+                        const chosen = serviceEditor.coachIds.includes(coach.id);
+                        return (
+                          <button
+                            key={coach.id}
+                            type="button"
+                            aria-pressed={chosen}
+                            disabled={!isAdminUser}
+                            className={`service-resource-chip ${chosen ? "is-selected" : ""}`}
+                            onClick={() =>
+                              toggleServiceEditorScope(
+                                "coachIds",
+                                coach.id,
+                                activeCoachList.map((entry) => entry.id),
+                              )
+                            }
+                          >
+                            {coach.displayName || coach.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                 )}
-                <label className="settings-field">
-                  <span>Booking location</span>
-                  <select
-                    value={serviceEditor.locationId || defaultLocationId(locations)}
-                    onChange={(event) => updateServiceEditor("locationId", event.target.value)}
-                  >
-                    {activeLocationList.map((location) => (
-                      <option key={location.id} value={location.id}>
-                        {location.name}{location.isDefault ? " (default)" : ""}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                {serviceEditorResourceLocation ? (
+                {serviceEditor.lessonFormat !== "package" && serviceEditor.lessonFormat !== "video-review" && (
+                  <div className="service-scope-field">
+                    <span>Locations</span>
+                    <small>Where it runs. Customers see every time it is free at any of them.</small>
+                    <div className="service-resource-choices" aria-label="Locations this lesson type runs at">
+                      {activeLocationList.map((location) => {
+                        const chosen = serviceEditor.locationIds.includes(location.id);
+                        return (
+                          <button
+                            key={location.id}
+                            type="button"
+                            aria-pressed={chosen}
+                            className={`service-resource-chip ${chosen ? "is-selected" : ""}`}
+                            onClick={() =>
+                              toggleServiceEditorScope(
+                                "locationIds",
+                                location.id,
+                                activeLocationList.map((entry) => entry.id),
+                              )
+                            }
+                          >
+                            {location.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                {serviceEditorResourceLocations.length > 0 &&
+                serviceEditor.lessonFormat !== "package" &&
+                serviceEditor.lessonFormat !== "video-review" ? (
                   <div className="service-resource-field">
+                    <span>Resources</span>
                     <label className="settings-toggle">
                       <input
-                        checked={serviceEditor.needsResource === true}
-                        onChange={(event) => updateServiceEditor("needsResource", event.target.checked)}
+                        checked={serviceEditor.resourceMode === "usable"}
+                        onChange={() => setServiceEditorResourceMode("usable")}
                         type="checkbox"
                       />
                       <span>
-                        Holds one of {serviceEditorResourceLocation.shortName || serviceEditorResourceLocation.name}'s
-                        resources
+                        Resource usable
+                        <small>Takes a free one when there is one. Still bookable when they are all in use.</small>
                       </span>
                     </label>
-                    {serviceEditor.needsResource && serviceEditorResourceLocation.resourceSource === "external" ? (
-                      <small>Tracked by another booking system, so Clarity won't limit these bookings.</small>
-                    ) : null}
-                    {serviceEditor.needsResource &&
-                    serviceEditorResourceLocation.resourceSource !== "external" &&
-                    serviceEditorResources.length > 1 ? (
-                      <div className="service-resource-choices" aria-label="Resources this lesson type can use">
-                        <small>Can use {serviceEditor.resourceIds?.length ? "only these" : "any of them"}:</small>
-                        {serviceEditorResources.map((resource) => {
-                          const chosen = (serviceEditor.resourceIds ?? []).includes(resource.id);
-                          return (
-                            <button
-                              key={resource.id}
-                              type="button"
-                              aria-pressed={chosen}
-                              className={`service-resource-chip ${chosen ? "is-selected" : ""}`}
-                              onClick={() =>
-                                updateServiceEditor(
-                                  "resourceIds",
-                                  chosen
-                                    ? (serviceEditor.resourceIds ?? []).filter((id) => id !== resource.id)
-                                    : [...(serviceEditor.resourceIds ?? []), resource.id],
-                                )
-                              }
-                            >
-                              {resource.name}
-                            </button>
-                          );
-                        })}
-                      </div>
+                    <label className="settings-toggle">
+                      <input
+                        checked={serviceEditor.resourceMode === "required"}
+                        onChange={() => setServiceEditorResourceMode("required")}
+                        type="checkbox"
+                      />
+                      <span>
+                        Resource required
+                        <small>Only bookable while one is free.</small>
+                      </span>
+                    </label>
+                    {serviceEditor.resourceMode && serviceEditor.resourceMode !== "none" ? (
+                      <>
+                        {serviceEditorResourceLocations.length > serviceEditorClarityResourceLocations.length ? (
+                          <small>
+                            {serviceEditorResourceLocations
+                              .filter((location) => location.resourceSource === "external")
+                              .map((location) => location.shortName || location.name)
+                              .join(", ")}{" "}
+                            is tracked by another booking system, so Clarity won't limit bookings there.
+                          </small>
+                        ) : null}
+                        {serviceEditorResourceGroups.length > 0 ? (
+                          <div className="service-resource-types" aria-label="Resources this lesson type can use">
+                            <small>
+                              {(serviceEditor.resourceTypes ?? []).length || (serviceEditor.resourceIds ?? []).length
+                                ? "Can use only the ones chosen. Choose a type for all of them, or open it to choose single ones."
+                                : "Nothing chosen, so it can use any of them. Choose a type for all of them, or open it to choose single ones."}
+                            </small>
+                            {serviceEditorResourceGroups.map((group) => {
+                              const groupKey = group.key || "(no type)";
+                              const open = openResourceTypes.includes(groupKey);
+                              const chosenCount = group.resources.filter(({ location, resource }) =>
+                                serviceEditorResourceChosen(location, resource),
+                              ).length;
+                              const wholeType = group.key
+                                ? serviceEditorTypeChosen(group.key)
+                                : chosenCount === group.resources.length;
+                              return (
+                                <div className="service-resource-type" key={groupKey}>
+                                  <div className="service-resource-type-row">
+                                    <label className="settings-toggle">
+                                      <input
+                                        checked={wholeType}
+                                        onChange={() => toggleServiceEditorResourceType(group)}
+                                        type="checkbox"
+                                      />
+                                      <span>
+                                        {group.type || "No type"}
+                                        <small>
+                                          {wholeType
+                                            ? `All ${group.resources.length}`
+                                            : chosenCount
+                                              ? `${chosenCount} of ${group.resources.length}`
+                                              : `${group.resources.length} ${group.resources.length === 1 ? "resource" : "resources"}`}
+                                        </small>
+                                      </span>
+                                    </label>
+                                    <button
+                                      className="icon-button small"
+                                      type="button"
+                                      aria-expanded={open}
+                                      aria-label={`${open ? "Hide" : "Show"} ${group.type || "untyped"} resources`}
+                                      onClick={() =>
+                                        setOpenResourceTypes((current) =>
+                                          open ? current.filter((key) => key !== groupKey) : [...current, groupKey],
+                                        )
+                                      }
+                                    >
+                                      {open ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+                                    </button>
+                                  </div>
+                                  {open ? (
+                                    <div className="service-resource-choices">
+                                      {group.resources.map(({ location, resource }) => {
+                                        const chosen = serviceEditorResourceChosen(location, resource);
+                                        return (
+                                          <button
+                                            key={resourceSelectionId(location.id, resource.id)}
+                                            type="button"
+                                            aria-pressed={chosen}
+                                            className={`service-resource-chip ${chosen ? "is-selected" : ""}`}
+                                            onClick={() => toggleServiceEditorResource(group, location, resource)}
+                                          >
+                                            {resource.name}
+                                            {serviceEditorClarityResourceLocations.length > 1
+                                              ? ` · ${location.shortName || location.name}`
+                                              : ""}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  ) : null}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : null}
+                      </>
                     ) : null}
                   </div>
                 ) : null}
@@ -21526,9 +21840,26 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   <strong>{service.name}</strong>
                   {service.description && <em>{service.description}</em>}
                   {(isAdminUser || activeCoachList.length > 1) && (
-                    <em>Coach: {bookingCoachSnapshotFor(service.coachId, coachProfiles, coachAccount).displayName || bookingCoachSnapshotFor(service.coachId, coachProfiles, coachAccount).name}</em>
+                    <em>
+                      {service.coachIds.length > 1 ? "Coaches" : "Coach"}:{" "}
+                      {(service.coachIds.length ? service.coachIds : [defaultCoachId(coachProfiles)])
+                        .map((id) => {
+                          const coach = bookingCoachSnapshotFor(id, coachProfiles, coachAccount);
+                          return coach.displayName || coach.name;
+                        })
+                        .join(", ")}
+                    </em>
                   )}
-                  <em>Booking location: {bookingLocationShortDisplay(bookingLocationSnapshotFor(service, locations, coachAccount))}</em>
+                  <em>
+                    {service.locationIds.length > 1 ? "Booking locations" : "Booking location"}:{" "}
+                    {service.locationIds.length > 1
+                      ? service.locationIds
+                          .map((id) => locationById(locations, id))
+                          .filter((location): location is Location => Boolean(location))
+                          .map((location) => location.shortName || location.name)
+                          .join(", ")
+                      : bookingLocationShortDisplay(bookingLocationSnapshotFor(service, locations, coachAccount))}
+                  </em>
                   {(service.lessonNote || service.location) && <em>Lesson note: {service.lessonNote || service.location}</em>}
                   {service.lessonFormat === "package" && (
                     <em>
@@ -21720,8 +22051,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     <div>
                       <strong>Resources</strong>
                       <small>
-                        Hitting bays, rooms or nets. Lesson types that need one can only be booked while one is free.
-                        Leave empty if this place has no limit.
+                        Hitting bays, rooms or nets. Give each a type so a lesson type can take every one of that
+                        type. Leave empty if this place has no limit.
                       </small>
                     </div>
                     <label className="settings-field location-resource-source">
@@ -21750,6 +22081,19 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           updateLocationResources((resources) =>
                             resources.map((entry, entryIndex) =>
                               entryIndex === index ? { ...entry, name: event.target.value } : entry,
+                            ),
+                          )
+                        }
+                      />
+                      <input
+                        aria-label={`${resource.name || "Resource"} type`}
+                        list="location-resource-types"
+                        placeholder="Type, e.g. Hitting bay"
+                        value={resource.type ?? ""}
+                        onChange={(event) =>
+                          updateLocationResources((resources) =>
+                            resources.map((entry, entryIndex) =>
+                              entryIndex === index ? { ...entry, type: event.target.value } : entry,
                             ),
                           )
                         }
@@ -21797,6 +22141,18 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       </button>
                     </div>
                   ))}
+                  <datalist id="location-resource-types">
+                    {[
+                      ...new Map(
+                        [...accountLocations.flatMap((location) => location.resources ?? []), ...(locationEditor.resources ?? [])]
+                          .map((resource) => cleanResourceType(resource.type))
+                          .filter(Boolean)
+                          .map((type) => [type.toLowerCase(), type] as const),
+                      ).values(),
+                    ].map((type) => (
+                      <option key={type} value={type} />
+                    ))}
+                  </datalist>
                   <div className="location-resource-actions">
                     <button className="outline-button compact-button" onClick={() => addLocationResources(1)} type="button">
                       <Plus size={15} />

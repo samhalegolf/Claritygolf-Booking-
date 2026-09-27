@@ -31,9 +31,20 @@ import {
   cleanLocationKind,
   cleanLocationResources,
   cleanResourceSource,
+  cleanResourceMode,
   cleanServiceResourceIds,
+  cleanServiceResourceTypes,
   pickFreeResource,
+  serviceResourceMode,
 } from "./_shared/resources.mts";
+import {
+  cleanScopeIds,
+  primaryServiceCoachId,
+  primaryServiceLocationId,
+  serviceCoachIds,
+  serviceIncludesCoach,
+  serviceLocationIds,
+} from "./_shared/service-scope.mts";
 import { planExternalReschedule, sameSlot } from "./_shared/external-reschedule.mts";
 import { legacyOriginalWorkspaceId, defaultCalendarSlug } from "./_shared/account.mts";
 import {
@@ -785,6 +796,17 @@ const neutralServiceFallback = {
   price: 0,
 };
 
+function cleanServiceResourceUse(service, canUseResources) {
+  const resourceMode = canUseResources ? serviceResourceMode(service) : "none";
+  if (resourceMode === "none") return {};
+  return {
+    resourceMode: cleanResourceMode(resourceMode),
+    resourceTypes: cleanServiceResourceTypes(service?.resourceTypes),
+    // Unqualified ids are from when a lesson type had one location.
+    resourceIds: cleanServiceResourceIds(service?.resourceIds, primaryServiceLocationId(service)),
+  };
+}
+
 function cleanService(service, index = 0, accountId = "") {
   const fallback = neutralServiceFallback;
   const descriptionFallback = service ? "" : fallback.description;
@@ -848,7 +870,9 @@ function cleanService(service, index = 0, accountId = "") {
     // it visible to that business and nobody else -- fail-open in the same
     // shape the calendar rows had.
     accountId: cleanSlug(service?.accountId, accountId),
-    coachId: cleanSlug(service?.coachId, ""),
+    // Every coach who teaches it and every place it runs, in the order a
+    // booking tries them. Older rows held one of each; see service-scope.mts.
+    coachIds: cleanScopeIds(serviceCoachIds(service)),
     name,
     duration: Math.max(15, Math.min(240, Math.round(duration))),
     price: Math.max(0, Math.round(price)),
@@ -863,14 +887,11 @@ function cleanService(service, index = 0, accountId = "") {
     lessonFormat,
     priceMode,
     color: cleanHexColor(service?.color, defaultServiceColor(index)),
-    locationId: cleanSlug(service?.locationId, "") || undefined,
-    // Whether a booking holds one of the location's resources, and which ones
-    // it may take (none listed = any). A review is not at a location at all.
-    needsResource: !videoReview && lessonFormat !== "package" && service?.needsResource === true ? true : undefined,
-    resourceIds:
-      !videoReview && lessonFormat !== "package" && service?.needsResource === true
-        ? cleanServiceResourceIds(service?.resourceIds)
-        : undefined,
+    locationIds: cleanScopeIds(serviceLocationIds(service)),
+    // Whether a booking must hold, or only takes when free, one of the
+    // location's resources, and which types or single resources it may take
+    // (none chosen = any). A review is not at a location at all.
+    ...cleanServiceResourceUse(service, !videoReview && lessonFormat !== "package"),
     lessonNote: cleanEditableServiceText(service?.lessonNote, lessonNoteFallback, 180),
     location: cleanEditableServiceText(service?.location, locationFallback, 160),
     packageAllowance: lessonFormat === "package" ? packageAllowance : undefined,
@@ -1614,7 +1635,7 @@ function locationSnapshot(location) {
 
 function serviceLocation(service, locations, account) {
   return (
-    locationById(locations, service?.locationId) ||
+    locationById(locations, primaryServiceLocationId(service)) ||
     locationById(locations, defaultLocationId(locations)) ||
     defaultLocationFromCoachAccount(account)
   );
@@ -1659,11 +1680,11 @@ function calendarItemCoach(item, coaches, account) {
 }
 
 function resolvedCalendarItemCoachId(item, service, coaches, account) {
-  return item?.coachId || item?.coach?.coachId || service?.coachId || calendarItemCoach(item, coaches, account).coachId || defaultCoachId(coaches);
+  return item?.coachId || item?.coach?.coachId || primaryServiceCoachId(service) || calendarItemCoach(item, coaches, account).coachId || defaultCoachId(coaches);
 }
 
 function resolvedCalendarItemLocationId(item, service, locations, account) {
-  return item?.locationId || item?.location?.locationId || service?.locationId || calendarItemLocation(item, service, locations, account).locationId || defaultLocationId(locations);
+  return item?.locationId || item?.location?.locationId || primaryServiceLocationId(service) || calendarItemLocation(item, service, locations, account).locationId || defaultLocationId(locations);
 }
 
 function serviceForCalendarItem(item, services = []) {
@@ -1726,7 +1747,7 @@ export function filterCalendarStateForContext(state, context) {
     items: filteredItems,
     services: context.isAdmin
       ? (state.services || []).filter((service) => recordBelongsToAccount(service, context.accountId))
-      : (state.services || []).filter((service) => recordBelongsToAccount(service, context.accountId) && (service.coachId || defaultCoachId(state.coaches)) === context.coachId),
+      : (state.services || []).filter((service) => recordBelongsToAccount(service, context.accountId) && serviceIncludesCoach(service, context.coachId, defaultCoachId(state.coaches))),
     availability: context.isAdmin
       ? (state.availability || []).map((day) => day.filter((window) => recordBelongsToAccount(window, context.accountId)))
       : (state.availability || []).map((day) => day.filter((window) => recordBelongsToAccount(window, context.accountId) && (window.coachId || defaultCoachId(state.coaches)) === context.coachId)),
@@ -1742,7 +1763,7 @@ export function filterCalendarStateForContext(state, context) {
 function serviceBelongsToContext(service, context, coaches = []) {
   if (!recordBelongsToAccount(service, context.accountId)) return false;
   if (context.isAdmin) return true;
-  return (service?.coachId || defaultCoachId(coaches)) === context.coachId;
+  return serviceIncludesCoach(service, context.coachId, defaultCoachId(coaches));
 }
 
 function assertCanWriteService(context, service, previousService, coaches = []) {
@@ -1764,11 +1785,17 @@ function assertCanWriteService(context, service, previousService, coaches = []) 
 function mergeServicesForContext(incomingServices, currentServices, context, coaches = []) {
   if (context.isAdmin) return incomingServices.map((service) => ({ ...service, accountId: context.accountId }));
   const previousById = new Map((currentServices || []).map((service) => [service.id, service]));
-  const ownedIncoming = incomingServices.map((service) => ({
-    ...service,
-    accountId: context.accountId,
-    coachId: service.coachId || context.coachId,
-  }));
+  // Which coaches teach a lesson type is the admin's call. A coach keeps the
+  // list an existing lesson type already has, and a new one is theirs alone.
+  const ownedIncoming = incomingServices.map((service) => {
+    const previous = previousById.get(service.id);
+    const { coachId: _legacyCoachId, ...rest } = service;
+    return {
+      ...rest,
+      accountId: context.accountId,
+      coachIds: previous ? serviceCoachIds(previous) : [context.coachId],
+    };
+  });
   ownedIncoming.forEach((service) => assertCanWriteService(context, service, previousById.get(service.id), coaches));
   const ownedIds = new Set(ownedIncoming.map((service) => service.id));
   const preserved = (currentServices || []).filter(
@@ -10940,7 +10967,9 @@ function conflictItemSummary(item, state = {}) {
 
 /**
  * The lessons at a location that hold, or are owed, one of its Clarity
- * resources, in the shape pickFreeResource wants.
+ * resources, in the shape pickFreeResource wants. A lesson type that only
+ * uses a resource when one is free is owed nothing, so its lessons count
+ * only while they actually hold one.
  */
 function clarityResourceHolders(items, locationId, state = {}) {
   const services = state.services || defaultServices;
@@ -10950,7 +10979,8 @@ function clarityResourceHolders(items, locationId, state = {}) {
     .filter((item) => {
       if (item.kind !== "appointment" || isInactiveForConflict(item)) return false;
       const itemService = services.find((candidateService) => candidateService.id === item.serviceId);
-      if (itemService?.needsResource !== true) return false;
+      const mode = serviceResourceMode(itemService);
+      if (mode === "none" || (mode === "usable" && !item.resourceId)) return false;
       return resolvedCalendarItemLocationId(item, itemService, locations, account) === locationId;
     })
     .map((item) => ({
@@ -10966,14 +10996,15 @@ function clarityResourceHolders(items, locationId, state = {}) {
 /**
  * Which of the location's resources this booking would hold. `applies` is
  * false when the location or lesson type does not use Clarity resources, so
- * the caller can tell "no resource needed" from "none free".
+ * the caller can tell "no resource needed" from "none free". `required` says
+ * whether "none free" means the booking cannot go ahead.
  */
 function clarityResourceFor(items, candidate, service, state = {}, { ignoreId = "", preferResourceId = "" } = {}) {
   const location = candidate.locationId
     ? (state.locations || []).find((entry) => entry.id === candidate.locationId)
     : serviceLocation(service, state.locations || [], state.account || defaultCoachAccount());
   if (!clarityResourcesApply(location, service) || isScheduledGroupService(service)) {
-    return { applies: false, resource: null };
+    return { applies: false, required: false, resource: null };
   }
   const handedness =
     candidate.handedness === "left" || candidate.handedness === "right"
@@ -10993,7 +11024,7 @@ function clarityResourceFor(items, candidate, service, state = {}, { ignoreId = 
     ignoreId: ignoreId || candidate.id || "",
     preferResourceId,
   });
-  return { applies: true, resource };
+  return { applies: true, required: serviceResourceMode(service) === "required", resource };
 }
 
 function findCollision(items, candidate, service, state = {}) {
@@ -11001,8 +11032,10 @@ function findCollision(items, candidate, service, state = {}) {
   const coaches = state.coaches || [];
   const locations = state.locations || [];
   const account = state.account || defaultCoachAccount();
-  const candidateCoachId = service?.coachId || defaultCoachId(coaches);
-  const candidateLocationId = serviceLocation(service, locations, account).id;
+  // The coach and location this booking would be with. A lesson type offered
+  // by several says which one on the candidate; otherwise it is the first.
+  const candidateCoachId = candidate.coachId || primaryServiceCoachId(service, defaultCoachId(coaches));
+  const candidateLocationId = candidate.locationId || serviceLocation(service, locations, account).id;
   const candidateItem = {
     kind: "appointment",
     coachId: candidateCoachId,
@@ -11040,9 +11073,9 @@ function findCollision(items, candidate, service, state = {}) {
   if (!isScheduledGroupService(service)) {
     const item = overlapping.find(isAppointmentConflict);
     if (item) return { reason: "blocking_item", item, candidateCoachId, candidateLocationId };
-    // Every bay or room this lesson could take is held for some of the time.
+    // Every bay or room this lesson must have is held for some of the time.
     const held = clarityResourceFor(conflictItems, { ...candidate, locationId: candidateLocationId }, service, state);
-    if (held.applies && !held.resource) {
+    if (held.required && !held.resource) {
       return { reason: "resource_full", item: null, candidateCoachId, candidateLocationId };
     }
     return null;
@@ -11122,14 +11155,77 @@ function publicSlotRequestedWeekItems(items = [], week) {
   return items.filter((item) => itemWeek(item) === week && !isInactiveForConflict(item));
 }
 
+/**
+ * Every coach-and-location pair a booking of this lesson type could be with,
+ * in the order they are tried: each listed coach at each listed location. A
+ * coach or place that has since been archived is skipped. A lesson type with
+ * none listed (or none left) falls back to the business's default coach and
+ * the lesson type's first location, as before the lists existed.
+ */
+function serviceBookingOptions(service, state = {}) {
+  const coaches = state.coaches || [];
+  const locations = state.locations || [];
+  const account = state.account || defaultCoachAccount();
+  const liveCoach = (id) => {
+    const coach = coaches.find((entry) => entry?.id === id);
+    return !coach || (coach.active !== false && coach.archived !== true);
+  };
+  const liveLocation = (id) => {
+    const location = locationById(locations, id);
+    return Boolean(location) && location.active !== false && location.archived !== true;
+  };
+  const coachIds = serviceCoachIds(service).filter(liveCoach);
+  const locationIds = serviceLocationIds(service).filter(liveLocation);
+  const fallbackLocation = serviceLocation(service, locations, account);
+  const pickedCoaches = coachIds.length ? coachIds : [primaryServiceCoachId(service, defaultCoachId(coaches))];
+  const pickedLocations = locationIds.length ? locationIds.map((id) => locationById(locations, id)) : [fallbackLocation];
+  return pickedCoaches.flatMap((coachId) =>
+    pickedLocations.map((location) => ({ coachId, locationId: location.id, location })),
+  );
+}
+
+/**
+ * The first coach and location, among those this lesson type is offered with,
+ * who are free for this slot -- or null when none are. The one the page
+ * offered goes first, so a booking lands where it was shown when it still can.
+ */
+function freeBookingOption(accountState, service, slot, preferred = {}) {
+  const options = serviceBookingOptions(service, accountState);
+  const preferredIndex = options.findIndex(
+    (option) => option.coachId === preferred.coachId && option.locationId === preferred.locationId,
+  );
+  const ordered = preferredIndex > 0
+    ? [options[preferredIndex], ...options.filter((_, index) => index !== preferredIndex)]
+    : options;
+  let firstRejection = null;
+  for (const option of ordered) {
+    const candidate = { ...slot, coachId: option.coachId, locationId: option.locationId };
+    if (
+      !isScheduledGroupService(service) &&
+      !isInsideAvailability(accountState.availability, slot.day, slot.start, slot.duration, option.coachId, option.locationId)
+    ) {
+      firstRejection ||= { reason: "outside_availability", option };
+      continue;
+    }
+    const collision = findCollision(accountState.items, candidate, service, accountState);
+    if (collision) {
+      firstRejection ||= { reason: collision.reason, collision, option };
+      continue;
+    }
+    return { option, rejection: null };
+  }
+  return { option: null, rejection: firstRejection || { reason: "outside_availability", option: options[0] } };
+}
+
 function publicSlotItemMayAffectService(item, service, state = {}) {
   const services = state.services || defaultServices;
   const coaches = state.coaches || [];
   const locations = state.locations || [];
   const account = state.account || defaultCoachAccount();
   const itemService = serviceForCalendarItem(item, services);
-  const serviceCoachId = service?.coachId || defaultCoachId(coaches);
-  const serviceLocationId = serviceLocation(service, locations, account).id;
+  const options = serviceBookingOptions(service, state);
+  const serviceCoachIds_ = new Set(options.map((option) => option.coachId).filter(Boolean));
+  const serviceLocationIds_ = new Set(options.map((option) => option.locationId).filter(Boolean));
   const itemCoachId = isLocationOnlyBlock(item)
     ? ""
     : resolvedCalendarItemCoachId(item, itemService, coaches, account);
@@ -11138,35 +11234,30 @@ function publicSlotItemMayAffectService(item, service, state = {}) {
   if (item.serviceId && item.serviceId === service?.id) return true;
 
   if (isLocationOnlyBlock(item)) {
-    if (!itemLocationId || !serviceLocationId) return true;
-    return itemLocationId === serviceLocationId;
+    if (!itemLocationId || !serviceLocationIds_.size) return true;
+    return serviceLocationIds_.has(itemLocationId);
   }
 
-  if (isCoachOnlyBlock(item)) {
-    if (!itemCoachId || !serviceCoachId) return true;
-    return itemCoachId === serviceCoachId;
-  }
-
-  if (isCoachLocationBlock(item)) {
-    if (!itemCoachId || !serviceCoachId) return true;
-    return itemCoachId === serviceCoachId;
+  if (isCoachOnlyBlock(item) || isCoachLocationBlock(item)) {
+    if (!itemCoachId || !serviceCoachIds_.size) return true;
+    return serviceCoachIds_.has(itemCoachId);
   }
 
   if (item.kind === "appointment") {
-    if (!itemCoachId || !serviceCoachId) return true;
-    if (itemCoachId === serviceCoachId) return true;
-    // Another coach's lesson still matters when both hold the same location's
+    if (!itemCoachId || !serviceCoachIds_.size) return true;
+    if (serviceCoachIds_.has(itemCoachId)) return true;
+    // Another coach's lesson still matters when both take the same location's
     // resources: it may have the last free bay.
-    const location = (locations || []).find((entry) => entry.id === serviceLocationId);
+    const location = (locations || []).find((entry) => entry.id === itemLocationId);
     return (
-      itemLocationId === serviceLocationId &&
+      serviceLocationIds_.has(itemLocationId) &&
       clarityResourcesApply(location, service) &&
-      itemService?.needsResource === true
+      serviceResourceMode(itemService) !== "none"
     );
   }
 
-  if (!itemCoachId || !itemLocationId || !serviceCoachId || !serviceLocationId) return true;
-  return itemCoachId === serviceCoachId || itemLocationId === serviceLocationId;
+  if (!itemCoachId || !itemLocationId || !serviceCoachIds_.size || !serviceLocationIds_.size) return true;
+  return serviceCoachIds_.has(itemCoachId) || serviceLocationIds_.has(itemLocationId);
 }
 
 function publicSlotRelevantResourceItems(items = [], service, state = {}) {
@@ -11176,18 +11267,19 @@ function publicSlotRelevantResourceItems(items = [], service, state = {}) {
 function publicSlotsForService(accountState, service, week, ignoreId = "", handedness = null) {
   const ignoredItemId = cleanString(ignoreId, "", 160);
   const items = ignoredItemId ? accountState.items.filter((item) => item.id !== ignoredItemId) : accountState.items;
-  const serviceCoachId = service.coachId || defaultCoachId(accountState.coaches || []);
-  const serviceLocation_ = serviceLocation(service, accountState.locations || [], accountState.account);
-  const serviceLocationId = serviceLocation_.id;
+  const options = serviceBookingOptions(service, accountState);
   // Past times must never be offered to the public. Use the location's timezone
   // when it has one, otherwise the workspace timezone — the same precedence the
   // calendar invite (ctz) uses — so "now" is computed where the lesson happens.
-  const slotTimeZone =
-    cleanString(serviceLocation_?.timezone, "", 80) ||
+  const slotTimeZone = (location) =>
+    cleanString(location?.timezone, "", 80) ||
     cleanString(accountState.account?.timezone, "", 80) ||
     defaultTimeZone();
 
   if (isScheduledGroupService(service)) {
+    // A scheduled group is one session, run by the first coach at the first
+    // location it lists.
+    const { coachId, locationId, location } = options[0];
     const schedule = service.groupSchedule;
     if (!schedule?.active) return [];
     const candidate = {
@@ -11195,9 +11287,11 @@ function publicSlotsForService(accountState, service, week, ignoreId = "", hande
       day: schedule.dayOfWeek,
       start: schedule.startMinutes,
       duration: service.duration,
+      coachId,
+      locationId,
     };
     if (!isGroupServiceSlotMatch(service, candidate)) return [];
-    if (isSlotInPast(candidate.week, candidate.day, candidate.start, slotTimeZone)) return [];
+    if (isSlotInPast(candidate.week, candidate.day, candidate.start, slotTimeZone(location))) return [];
     if (hasCollision(items, candidate, service, accountState)) return [];
     const remainingSpots = groupSlotRemainingSpots(items, candidate, service);
     if (!remainingSpots) return [];
@@ -11207,46 +11301,57 @@ function publicSlotsForService(accountState, service, week, ignoreId = "", hande
         day: candidate.day,
         start: candidate.start,
         remainingSpots,
-        coachId: serviceCoachId,
-        locationId: serviceLocationId,
+        coachId,
+        locationId,
       },
     ];
   }
 
+  // Each time is offered once, with the first coach and location (in the
+  // order the lesson type lists them) who are free for it.
   const slots = [];
-  for (let day = 0; day < 7; day += 1) {
-    const windows = accountState.availability[day] || [];
-    for (const window of windows) {
-      const windowCoachId = window.coachId || defaultCoachProfileFromAccount().id;
-      if (windowCoachId !== serviceCoachId) continue;
-      if (!availabilityWindowCoversLocation(window, serviceLocationId)) continue;
-      for (let start = window.start; start + service.duration <= window.end; start += PUBLIC_SLOT_STEP_MINUTES) {
-        const candidate = {
-          week,
-          day,
-          start,
-          duration: service.duration,
-          // Narrows which bays count as free. Unknown offers any of them.
-          handedness,
-        };
-        if (
-          !isSlotInPast(week, day, start, slotTimeZone) &&
-          isInsideAvailability(accountState.availability, day, start, service.duration, serviceCoachId, serviceLocationId) &&
-          !hasCollision(items, candidate, service, accountState)
-        ) {
-          slots.push({
-            week: candidate.week,
-            day: candidate.day,
-            start: candidate.start,
-            remainingSpots: 0,
-            coachId: serviceCoachId,
-            locationId: serviceLocationId,
-          });
+  const offered = new Set();
+  const fallbackCoachId = defaultCoachProfileFromAccount().id;
+  for (const { coachId, locationId, location } of options) {
+    const timeZone = slotTimeZone(location);
+    for (let day = 0; day < 7; day += 1) {
+      const windows = accountState.availability[day] || [];
+      for (const window of windows) {
+        if ((window.coachId || fallbackCoachId) !== coachId) continue;
+        if (!availabilityWindowCoversLocation(window, locationId)) continue;
+        for (let start = window.start; start + service.duration <= window.end; start += PUBLIC_SLOT_STEP_MINUTES) {
+          const key = `${day}:${start}`;
+          if (offered.has(key)) continue;
+          const candidate = {
+            week,
+            day,
+            start,
+            duration: service.duration,
+            coachId,
+            locationId,
+            // Narrows which bays count as free. Unknown offers any of them.
+            handedness,
+          };
+          if (
+            !isSlotInPast(week, day, start, timeZone) &&
+            isInsideAvailability(accountState.availability, day, start, service.duration, coachId, locationId) &&
+            !hasCollision(items, candidate, service, accountState)
+          ) {
+            offered.add(key);
+            slots.push({
+              week: candidate.week,
+              day: candidate.day,
+              start: candidate.start,
+              remainingSpots: 0,
+              coachId,
+              locationId,
+            });
+          }
         }
       }
     }
   }
-  return slots;
+  return slots.sort((a, b) => a.day - b.day || a.start - b.start);
 }
 
 export function publicBookingSlots(state, options = {}) {
@@ -11446,13 +11551,13 @@ async function createPublicBooking(accountId: string, payload: Record<string, an
     });
   }
 
-  const serviceCoachId = service.coachId || defaultCoachId(accountState.coaches || []);
-  const serviceLocationId = serviceLocation(service, accountState.locations || [], accountState.account).id;
+  // A review has no time or place: it goes to the lesson type's first coach.
+  const reviewCoachId = primaryServiceCoachId(service, defaultCoachId(accountState.coaches || []));
   const reviewDue = isReview
     ? videoReviewDueSlot(
         service,
         accountState,
-        serviceCoachId,
+        reviewCoachId,
         // Same precedence publicSlotsForService uses: the business's own
         // timezone from the state already in hand, never a global.
         cleanString(accountState.account?.timezone, "", 80) || defaultTimeZone(),
@@ -11461,57 +11566,52 @@ async function createPublicBooking(accountId: string, payload: Record<string, an
   const slot = reviewDue
     ? { week: reviewDue.week, day: reviewDue.day, start: reviewDue.start, duration: reviewDue.duration }
     : { week, day, start, duration: service.duration };
-  const rejectionBase = {
-    serviceId: service.id,
-    serviceName: service.name,
-    slot,
-    coachId: serviceCoachId,
-    locationId: serviceLocationId,
-    itemCount: accountState.items.length,
-  };
+  let chosen = serviceBookingOptions(service, accountState)[0];
   if (isReview) {
     // Nothing to check. A review does not hold a slot against anyone: two due
     // the same afternoon is a workload, not a double booking, and refusing the
     // second would be refusing work the coach has capacity to do.
-  } else if (isScheduledGroupService(service)) {
-    if (!isGroupServiceSlotMatch(service, slot)) {
-      throw publicSlotUnavailableError({ ...rejectionBase, reason: "group_schedule_mismatch" });
-    }
-    const collision = findCollision(accountState.items, slot, service, accountState);
-    if (collision) {
-      throw publicSlotUnavailableError({
-        ...rejectionBase,
-        reason: collision.reason,
-        candidateCoachId: collision.candidateCoachId,
-        candidateLocationId: collision.candidateLocationId,
-        conflictItem: conflictItemSummary(collision.item, accountState),
-      });
-    }
-  } else if (
-    !isInsideAvailability(accountState.availability, day, start, service.duration, serviceCoachId, serviceLocationId)
-  ) {
-    throw publicSlotUnavailableError({
-      ...rejectionBase,
-      reason: "outside_availability",
-      availability: accountState.availability[day] || [],
-    });
+    chosen = { ...chosen, coachId: reviewCoachId };
   } else {
-    // The player's handedness narrows which bays count as free.
-    const collision = findCollision(
-      accountState.items,
-      { ...slot, handedness: payload?.handedness ? handedness : null },
-      service,
-      accountState,
-    );
-    if (collision) {
+    if (isScheduledGroupService(service) && !isGroupServiceSlotMatch(service, slot)) {
       throw publicSlotUnavailableError({
-        ...rejectionBase,
-        reason: collision.reason,
-        candidateCoachId: collision.candidateCoachId,
-        candidateLocationId: collision.candidateLocationId,
-        conflictItem: conflictItemSummary(collision.item, accountState),
+        serviceId: service.id,
+        serviceName: service.name,
+        slot,
+        coachId: chosen.coachId,
+        locationId: chosen.locationId,
+        itemCount: accountState.items.length,
+        reason: "group_schedule_mismatch",
       });
     }
+    // The coach and place the page showed go first; if they have since been
+    // taken, any other the lesson type is offered with who is free will do.
+    // The player's handedness narrows which bays count as free.
+    const { option, rejection } = freeBookingOption(
+      accountState,
+      service,
+      { ...slot, handedness: payload?.handedness ? handedness : null },
+      { coachId: cleanSlug(payload?.coachId, ""), locationId: cleanSlug(payload?.locationId, "") },
+    );
+    if (!option) {
+      throw publicSlotUnavailableError({
+        serviceId: service.id,
+        serviceName: service.name,
+        slot,
+        coachId: rejection.option?.coachId,
+        locationId: rejection.option?.locationId,
+        itemCount: accountState.items.length,
+        reason: rejection.reason,
+        ...(rejection.collision
+          ? {
+              candidateCoachId: rejection.collision.candidateCoachId,
+              candidateLocationId: rejection.collision.candidateLocationId,
+              conflictItem: conflictItemSummary(rejection.collision.item, accountState),
+            }
+          : { availability: accountState.availability[day] || [] }),
+      });
+    }
+    chosen = option;
   }
 
   const client = `${firstName} ${lastName}`;
@@ -11562,10 +11662,8 @@ async function createPublicBooking(accountId: string, payload: Record<string, an
       calculatedPrice: calculateCustomGroupPrice(service, participantCount),
     };
   }
-  const coachId = serviceCoachId;
-  const location = cleanBookingLocationSnapshot(
-    bookingLocationSnapshotFor(service, accountState.locations || [], accountState.account),
-  );
+  const coachId = chosen.coachId;
+  const location = cleanBookingLocationSnapshot(locationSnapshot(chosen.location));
   const coach = cleanBookingCoachSnapshot(
     bookingCoachSnapshotFor(coachId, accountState.coaches || [], accountState.account),
   );
@@ -11575,7 +11673,7 @@ async function createPublicBooking(accountId: string, payload: Record<string, an
     kind: "appointment",
     ...slot,
     coachId,
-    locationId: cleanSlug(location?.locationId || service.locationId, ""),
+    locationId: cleanSlug(location?.locationId || chosen.locationId, ""),
     coach,
     serviceId: service.id,
     client,
@@ -12016,10 +12114,6 @@ async function reschedulePublicBooking(accountId: string, payload: Record<string
     (candidate) => candidate.id === appointment.serviceId,
   );
   const duration = service?.duration || appointment.duration;
-  const serviceCoachId = appointment.coachId || service?.coachId || defaultCoachId(accountState.coaches || []);
-  const appointmentLocationId =
-    cleanSlug(appointment.locationId, "") ||
-    (service ? serviceLocation(service, accountState.locations || [], accountState.account)?.id || "" : "");
   const slot = { week, day, start, duration };
   const itemRead = await readPublicSlotItemsForWeek({ accountId: workspaceAccount.id, week });
   const accountItems = (itemRead.items || []).filter((item) => recordBelongsToAccount(item, workspaceAccount.id));
@@ -12049,34 +12143,43 @@ async function reschedulePublicBooking(accountId: string, payload: Record<string
       { status: 409 },
     );
   }
-  if (
-    !service ||
-    !service.active ||
-    service.lessonFormat === "package" ||
-    (isScheduledGroupService(service)
-      ? !isGroupServiceSlotMatch(service, slot)
-      : !isInsideAvailability(
-          accountState.availability || defaultAvailability,
-          day,
-          start,
-          duration,
-          serviceCoachId,
-          appointmentLocationId,
-        ) ||
-        !Number.isInteger(duration)) ||
-    hasCollision(itemsWithoutOriginal, slot, service, accountState)
-  ) {
+  // The lesson stays with its coach and place when they are free at the new
+  // time; otherwise it goes to whichever the lesson type is offered with who
+  // is, the same way a new booking is placed.
+  const moved =
+    service &&
+    service.active &&
+    service.lessonFormat !== "package" &&
+    Number.isInteger(duration) &&
+    !(isScheduledGroupService(service) && !isGroupServiceSlotMatch(service, slot))
+      ? freeBookingOption({ ...accountState, items: itemsWithoutOriginal }, service, slot, {
+          coachId: resolvedCalendarItemCoachId(appointment, service, accountState.coaches || [], accountState.account),
+          locationId: resolvedCalendarItemLocationId(appointment, service, accountState.locations || [], accountState.account),
+        }).option
+      : null;
+  if (!moved) {
     throw Object.assign(new Error("That time is no longer available."), {
       status: 409,
     });
   }
 
+  const changedCoach = moved.coachId !== resolvedCalendarItemCoachId(appointment, service, accountState.coaches || [], accountState.account);
+  const changedLocation = moved.locationId !== resolvedCalendarItemLocationId(appointment, service, accountState.locations || [], accountState.account);
   const updatedAppointment = {
     ...appointment,
     week,
     day,
     start,
     duration,
+    ...(changedCoach
+      ? {
+          coachId: moved.coachId,
+          coach: cleanBookingCoachSnapshot(bookingCoachSnapshotFor(moved.coachId, accountState.coaches || [], accountState.account)),
+        }
+      : {}),
+    ...(changedLocation
+      ? { locationId: moved.locationId, location: cleanBookingLocationSnapshot(locationSnapshot(moved.location)) }
+      : {}),
     note: appointment.note || "Rescheduled from public booking page.",
   };
   await writePublicBookingAppointment(

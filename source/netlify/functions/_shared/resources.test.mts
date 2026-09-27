@@ -4,8 +4,11 @@ import test from "node:test";
 import {
   clarityResourcesApply,
   cleanLocationResources,
+  cleanServiceResourceIds,
+  cleanServiceResourceTypes,
   eligibleResources,
   pickFreeResource,
+  serviceResourceMode,
   type ResourceLocation,
 } from "./resources.mts";
 
@@ -80,4 +83,36 @@ test("different days and non-overlapping times never collide", () => {
   assert.ok(pickFreeResource({ location: range, service: lesson, slot, holders }));
   const later = ["bay-1", "bay-2", "bay-3"].map((resourceId, i) => ({ id: `l${i}`, ...slot, start: 660, resourceId }));
   assert.ok(pickFreeResource({ location: range, service: lesson, slot, holders: later }));
+});
+
+test("a lesson type uses resources when usable or required, and reads the old flag as required", () => {
+  assert.equal(serviceResourceMode({ needsResource: true }), "required");
+  assert.equal(serviceResourceMode({ resourceMode: "usable" }), "usable");
+  assert.equal(serviceResourceMode({ resourceMode: "none", needsResource: true }), "none");
+  assert.equal(clarityResourcesApply(range, { resourceMode: "usable" }), true);
+  assert.equal(clarityResourcesApply(range, { resourceMode: "none" }), false);
+});
+
+test("a whole type covers every resource of that type; single resources cover only themselves", () => {
+  const club: ResourceLocation = {
+    id: "club",
+    kind: "physical",
+    resourceSource: "clarity",
+    resources: cleanLocationResources([
+      { id: "bay-1", name: "Bay 1", type: "Hitting bay" },
+      { id: "bay-2", name: "Bay 2", type: "hitting  BAY" },
+      { id: "studio", name: "Studio", type: "Putting room" },
+    ]),
+  };
+  const byType = { resourceMode: "required" as const, resourceTypes: ["Hitting Bay"] };
+  assert.deepEqual(eligibleResources(club, byType).map((r) => r.id), ["bay-1", "bay-2"]);
+  const single = { resourceMode: "required" as const, resourceIds: ["club/studio", "range/bay-1"] };
+  assert.deepEqual(eligibleResources(club, single).map((r) => r.id), ["studio"]);
+  assert.deepEqual(eligibleResources(range, single).map((r) => r.id), ["bay-1"]);
+});
+
+test("resource selections are qualified by location, and old unqualified ones by the old location", () => {
+  assert.deepEqual(cleanServiceResourceIds(["Bay-1", "club/Studio", "bad/"], "range"), ["range/bay-1", "club/studio"]);
+  assert.deepEqual(cleanServiceResourceIds(["bay-1"]), ["bay-1"]);
+  assert.deepEqual(cleanServiceResourceTypes([" Hitting  bay ", "hitting bay", ""]), ["Hitting bay"]);
 });

@@ -16637,7 +16637,7 @@ button {
 
 .location-facility .location-resource-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 12rem) auto auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 11rem) minmax(0, 12rem) auto auto;
   gap: 8px;
   align-items: center;
 }
@@ -16665,17 +16665,61 @@ button {
     grid-template-columns: minmax(0, 1fr) auto;
   }
 
-  .location-facility .location-resource-row select {
+  .location-facility .location-resource-row input[list] {
     grid-column: 1 / -1;
     grid-row: 2;
   }
+
+  .location-facility .location-resource-row select {
+    grid-column: 1 / -1;
+    grid-row: 3;
+  }
 }
 
-/* Lesson types › Resource. */
+/* Lesson types › Coaches, Locations, Resources. */
+.service-scope-field,
 .service-resource-field {
   display: grid;
-  align-content: center;
+  align-content: start;
   gap: 4px;
+}
+
+.service-scope-field > span,
+.service-resource-field > span {
+  font-weight: 700;
+}
+
+.service-scope-field small,
+.service-resource-field .settings-toggle small {
+  display: block;
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+}
+
+.service-resource-field .service-resource-types {
+  display: grid;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.service-resource-field .service-resource-type {
+  display: grid;
+  gap: 4px;
+  padding: 4px 10px 8px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+}
+
+.service-resource-field .service-resource-type-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.service-resource-field .service-resource-type .service-resource-choices {
+  margin-top: 0;
 }
 
 .service-resource-field .service-resource-choices {
@@ -16691,6 +16735,15 @@ button {
   font-size: var(--c-size-meta);
 }
 
+.service-scope-field .service-resource-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-top: 6px;
+}
+
+.service-scope-field .service-resource-chip,
 .service-resource-field .service-resource-chip {
   min-height: 30px;
   padding: 0 10px;
@@ -16703,6 +16756,12 @@ button {
   cursor: pointer;
 }
 
+.service-scope-field .service-resource-chip:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.service-scope-field .service-resource-chip.is-selected,
 .service-resource-field .service-resource-chip.is-selected {
   border-color: var(--c-text);
   background: var(--c-active);
