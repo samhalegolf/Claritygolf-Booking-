@@ -1,6 +1,7 @@
 import { StrictMode, Suspense, lazy, useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import LoginScreen from "./modules/auth/LoginScreen";
+import PublicSite, { type PublicPage } from "./modules/public-site/PublicSite";
 import { Loading } from "./modules/shared/Loading";
 import { fetchSession, guestSession, type Session } from "./modules/auth/session";
 import { isBookingEmbedMode, isPlayerBookingMode, isReviewShareMode, isVideoShareMode } from "./modules/shared/bookingHandoff";
@@ -58,11 +59,30 @@ const videoShare = isVideoShareMode();
 // must not be stopped at a login screen on the way to their own review.
 const reviewShare = isReviewShareMode();
 
+// Public verification/legal pages deliberately bypass authentication. Google,
+// a player, or anyone deciding whether to use Clarity must be able to read
+// these without possessing a Clarity session.
+const publicPath = window.location.pathname.replace(/\/+$/, "") || "/";
+const authLinkAtRoot =
+  publicPath === "/" &&
+  (new URLSearchParams(window.location.search).has("portalInvite") ||
+    new URLSearchParams(window.location.search).has("reset"));
+const publicPage: PublicPage | null =
+  publicPath === "/privacy"
+    ? "privacy"
+    : publicPath === "/terms"
+      ? "terms"
+      : publicPath === "/support"
+        ? "support"
+        : publicPath === "/" && !authLinkAtRoot
+          ? "home"
+          : null;
+
 // A coach who was here last time and did not sign out is a coach again, so
 // their workspace starts downloading now, alongside the session check, rather
 // than after it. The lazy import above reuses the same promise. A player or a
 // stranger never trips this: the hint is removed on logout.
-if (!publicBookingOnly && !videoShare && !reviewShare && lastVisitorWasCoach()) {
+if (!publicPage && !publicBookingOnly && !videoShare && !reviewShare && lastVisitorWasCoach()) {
   void loadApp();
   // The client list too. It is the first thing Clients and Player Profiles
   // need, it is served by its own function, and nothing about the request
@@ -96,7 +116,7 @@ function Root() {
   useEffect(() => {
     // The share page never asks who is looking -- that is the whole point of
     // it -- so it must not make a session call either.
-    if (publicBookingOnly || videoShare || reviewShare) return;
+    if (publicPage || publicBookingOnly || videoShare || reviewShare) return;
     let cancelled = false;
     void fetchSession().then((next) => {
       if (!cancelled) setSession(next);
@@ -125,6 +145,10 @@ function Root() {
   // revoked cookie), which drops straight back to the login screen instead of
   // leaving a workspace on screen that can no longer save anything.
   const handleSessionLost = useCallback(() => setSession(guestSession), []);
+
+  if (publicPage) {
+    return <PublicSite page={publicPage} />;
+  }
 
   if (videoShare) {
     return (

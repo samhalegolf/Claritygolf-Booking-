@@ -453,6 +453,13 @@ export default function LoginScreen({ onSignedIn, onCancel }: LoginScreenProps) 
             Continue without signing in
           </button>
         )}
+
+        <nav className="login-legal" aria-label="Legal and support">
+          <a href="/">About</a>
+          <a href="/privacy">Privacy</a>
+          <a href="/terms">Terms</a>
+          <a href="/support">Support</a>
+        </nav>
       </form>
     </main>
   );
