@@ -48,3 +48,19 @@ test("printing drops the rows the coach has not filled in and trims the rest", (
     { id: "c", label: "Custom field", value: "Value only", placement: "footer" },
   ]);
 });
+
+test("currency and tax the business has not set come from its country", () => {
+  const settings = cleanInvoiceSettings({}, "GB");
+  assert.equal(settings.currency, "GBP");
+  assert.equal(settings.taxName, "VAT");
+  assert.equal(settings.taxRate, 20);
+  assert.equal(settings.taxInclusive, true);
+});
+
+test("tax the business has set is kept whatever its country", () => {
+  const settings = cleanInvoiceSettings({ currency: "NZD", taxName: "GST", taxRate: 15, taxInclusive: false }, "GB");
+  assert.equal(settings.currency, "NZD");
+  assert.equal(settings.taxName, "GST");
+  assert.equal(settings.taxRate, 15);
+  assert.equal(settings.taxInclusive, false);
+});

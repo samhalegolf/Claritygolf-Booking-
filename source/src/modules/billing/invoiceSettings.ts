@@ -4,6 +4,9 @@
 // verbatim from App.tsx; behaviour unchanged.
 
 import { clamp } from "../../lib/number";
+import { currencyForAccountSettings } from "../../../netlify/functions/_shared/locale.mts";
+import { FALLBACK_PHONE_COUNTRY } from "../../../netlify/functions/_shared/phone.mts";
+import { taxDefaultsForCountry } from "../../../netlify/functions/_shared/region.mts";
 import type {
   InvoiceCustomField,
   InvoiceCustomFieldPlacement,
@@ -11,18 +14,17 @@ import type {
   InvoiceSettings,
 } from "./types";
 
-export const DEFAULT_TAX_RATE = 15;
-
+// Seed values for the first render, before the account has loaded. Currency and
+// tax are the fallback country's; cleanInvoiceSettings fills them from the
+// business's own country, and the server does the same.
 export const defaultInvoiceSettings: InvoiceSettings = {
   enabled: true,
   showBillingWorkspace: true,
   prefix: "INV",
   nextNumber: 1001,
-  currency: "NZD", // seed value; readCoachAccount derives the real one from country
-  taxName: "GST",
+  currency: currencyForAccountSettings("", FALLBACK_PHONE_COUNTRY),
+  ...taxDefaultsForCountry(FALLBACK_PHONE_COUNTRY),
   taxNumber: "",
-  taxRate: DEFAULT_TAX_RATE,
-  taxInclusive: false,
   bankAccount: "",
   paymentTermsDays: 7,
   businessAddress: "",
@@ -103,8 +105,14 @@ export function cleanInvoiceLineTag(tag?: Partial<InvoiceLineTag>, index = 0): I
   };
 }
 
-export function cleanInvoiceSettings(settings?: Partial<InvoiceSettings>): InvoiceSettings {
-  const taxRate = Number(settings?.taxRate ?? defaultInvoiceSettings.taxRate);
+/**
+ * `country` supplies whatever the business has not set: its currency, and its
+ * tax's name, rate and whether prices include it. Mirrors cleanInvoiceSettings
+ * in booking-core.mts.
+ */
+export function cleanInvoiceSettings(settings?: Partial<InvoiceSettings>, country: unknown = FALLBACK_PHONE_COUNTRY): InvoiceSettings {
+  const tax = taxDefaultsForCountry(country);
+  const taxRate = Number(settings?.taxRate ?? tax.taxRate);
   const paymentTermsDays = Number(settings?.paymentTermsDays ?? defaultInvoiceSettings.paymentTermsDays);
   const nextNumber = Number(settings?.nextNumber ?? defaultInvoiceSettings.nextNumber);
   const customFields = Array.isArray(settings?.customFields)
@@ -136,17 +144,14 @@ export function cleanInvoiceSettings(settings?: Partial<InvoiceSettings>): Invoi
     // Any starting number is allowed (min 0 so the field can be cleared while
     // typing; up to 9 digits so year-based schemes like 20260001 work).
     nextNumber: Number.isFinite(nextNumber) ? clamp(Math.round(nextNumber), 0, 999999999) : defaultInvoiceSettings.nextNumber,
-    currency:
-      typeof settings?.currency === "string" && settings.currency.trim()
-        ? settings.currency.trim().toUpperCase().slice(0, 8)
-        : defaultInvoiceSettings.currency,
+    currency: currencyForAccountSettings(settings?.currency, country),
     taxName:
       typeof settings?.taxName === "string" && settings.taxName.trim()
         ? settings.taxName.trim().slice(0, 24)
-        : defaultInvoiceSettings.taxName,
+        : tax.taxName,
     taxNumber: typeof settings?.taxNumber === "string" ? settings.taxNumber.trim().slice(0, 80) : "",
-    taxRate: Number.isFinite(taxRate) ? clamp(taxRate, 0, 30) : defaultInvoiceSettings.taxRate,
-    taxInclusive: settings?.taxInclusive === true,
+    taxRate: Number.isFinite(taxRate) ? clamp(taxRate, 0, 30) : tax.taxRate,
+    taxInclusive: typeof settings?.taxInclusive === "boolean" ? settings.taxInclusive : tax.taxInclusive,
     bankAccount: typeof settings?.bankAccount === "string" ? settings.bankAccount.trim().slice(0, 120) : "",
     paymentTermsDays: Number.isFinite(paymentTermsDays)
       ? clamp(Math.round(paymentTermsDays), 0, 120)

@@ -115,7 +115,8 @@ import {
 } from "./_shared/sandbox.mts";
 import type { CoachActor } from "./_shared/coach-auth.mts";
 import { authSessionResponse, type WorkspaceBootstrap } from "./_shared/auth-contract.mts";
-import { currencyForAccountSettings, currencyForCountry, localeForCountry } from "./_shared/locale.mts";
+import { currencyForAccountSettings, localeForCountry } from "./_shared/locale.mts";
+import { taxDefaultsForCountry } from "./_shared/region.mts";
 import {
   caddyAppUrl,
   caddyConfigured,
@@ -186,16 +187,11 @@ const defaultInvoiceSettings = {
   showBillingWorkspace: true,
   prefix: "INV",
   nextNumber: 1001,
-  // The last-resort currency, for a business whose country is unreadable. This
-  // read activeCurrency() before, which -- being evaluated at module load,
-  // before any account had been read -- had always been this same fallback
-  // anyway. The per-account answer comes from currencyForAccountSettings()
-  // in cleanInvoiceSettings below.
-  currency: currencyForCountry(FALLBACK_PHONE_COUNTRY),
-  taxName: "GST",
+  // No currency or tax here on purpose. Both come from the business's country
+  // in cleanInvoiceSettings below; a value here would be read as a choice the
+  // business had made, and every new workspace would start in New Zealand
+  // dollars with GST.
   taxNumber: "",
-  taxRate: 15,
-  taxInclusive: false,
   bankAccount: "",
   paymentTermsDays: 7,
   businessAddress: "",
@@ -1126,7 +1122,10 @@ function cleanInvoiceSettings(settings = {}, country = FALLBACK_PHONE_COUNTRY) {
   const nextNumber = Number(
     settings?.nextNumber ?? defaultInvoiceSettings.nextNumber,
   );
-  const taxRate = Number(settings?.taxRate ?? defaultInvoiceSettings.taxRate);
+  // Tax a business has not set yet starts from its country, not from New
+  // Zealand's GST -- see taxDefaultsForCountry.
+  const tax = taxDefaultsForCountry(country);
+  const taxRate = Number(settings?.taxRate ?? tax.taxRate);
   const paymentTermsDays = Number(
     settings?.paymentTermsDays ?? defaultInvoiceSettings.paymentTermsDays,
   );
@@ -1167,12 +1166,13 @@ function cleanInvoiceSettings(settings = {}, country = FALLBACK_PHONE_COUNTRY) {
     // one its country uses, rather than New Zealand's. This is the same helper
     // billing-api already invoices with, so the two cannot disagree.
     currency: currencyForAccountSettings(settings?.currency, country),
-    taxName: cleanString(settings?.taxName, defaultInvoiceSettings.taxName, 24),
+    taxName: cleanString(settings?.taxName, tax.taxName, 24),
     taxNumber: cleanString(settings?.taxNumber, "", 80),
     taxRate: Number.isFinite(taxRate)
       ? Math.max(0, Math.min(30, taxRate))
-      : defaultInvoiceSettings.taxRate,
-    taxInclusive: settings?.taxInclusive === true,
+      : tax.taxRate,
+    taxInclusive:
+      typeof settings?.taxInclusive === "boolean" ? settings.taxInclusive : tax.taxInclusive,
     bankAccount: cleanString(settings?.bankAccount, "", 120),
     paymentTermsDays: Number.isFinite(paymentTermsDays)
       ? Math.max(0, Math.min(120, Math.round(paymentTermsDays)))

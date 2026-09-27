@@ -32,6 +32,7 @@ import type { ReservedPassPayment } from "./_shared/passes.mts";
 import type { PassSource, PassTemplate } from "./_shared/passes.mts";
 import { deliverEmail } from "./_shared/email-delivery.mts";
 import { currencyForAccountSettings } from "./_shared/locale.mts";
+import { taxDefaultsForCountry } from "./_shared/region.mts";
 import {
   createStripeCheckoutSession as createStripeCheckoutSessionWith,
   resolveStripeCredential,
@@ -1492,7 +1493,7 @@ async function createInvoice(accountId: string, body: Record<string, unknown>) {
     customer_phone: cleanString(body?.customerPhone, "", 80) || null,
     issue_date: cleanString(body?.issueDate, new Date().toISOString().slice(0, 10), 20),
     due_date: cleanString(body?.dueDate, "", 20) || null,
-    currency: cleanString(body?.currency, "NZD", 10),
+    currency: cleanString(body?.currency, "", 10) || await resolveDefaultCurrency(accountId),
     subtotal,
     tax_total: taxTotal,
     tax_inclusive: taxInclusive,
@@ -1594,7 +1595,7 @@ async function updateInvoiceDraft(accountId: string, id: string, body: Record<st
     customer_phone: cleanString(body?.customerPhone, "", 80) || null,
     issue_date: cleanString(body?.issueDate, new Date().toISOString().slice(0, 10), 20),
     due_date: cleanString(body?.dueDate, "", 20) || null,
-    currency: cleanString(body?.currency, "NZD", 10),
+    currency: cleanString(body?.currency, "", 10) || await resolveDefaultCurrency(accountId),
     subtotal,
     tax_total: taxTotal,
     tax_inclusive: taxInclusive,
@@ -1944,21 +1945,29 @@ const AGING_STATUSES = ["sent", "overdue"];
 async function resolveReportTaxConfig(accountId: string) {
   const rows = await supabase("settings", {
     query: settingsSelectQuery(accountId, {
-      select: "value",
-      filters: [`key=eq.${encodeFilter("accountInvoiceSettingsJson")}`, "limit=1"],
+      select: "key,value",
+      filters: [
+        `key=in.(${encodeFilter("accountInvoiceSettingsJson")},${encodeFilter("accountCountry")})`,
+      ],
     }),
   });
+  const settings = Object.fromEntries(rows.map((row: { key: string; value: string }) => [row.key, row.value]));
+  // Whatever the business has not set comes from its country, not from New
+  // Zealand's GST at 15%.
+  const country = settings.accountCountry;
+  const fallback = taxDefaultsForCountry(country);
+  let parsed: Record<string, unknown> = {};
   try {
-    const parsed = rows[0]?.value ? JSON.parse(rows[0].value) : {};
-    const rate = Number(parsed?.taxRate);
-    return {
-      currency: cleanString(parsed?.currency, "NZD", 10),
-      taxRate: Number.isFinite(rate) ? Math.max(0, Math.min(100, rate)) : 15,
-      taxName: cleanString(parsed?.taxName, "GST", 40),
-    };
+    parsed = settings.accountInvoiceSettingsJson ? JSON.parse(settings.accountInvoiceSettingsJson) : {};
   } catch {
-    return { currency: "NZD", taxRate: 15, taxName: "GST" };
+    parsed = {};
   }
+  const rate = Number(parsed?.taxRate ?? fallback.taxRate);
+  return {
+    currency: currencyForAccountSettings(parsed?.currency, country),
+    taxRate: Number.isFinite(rate) ? Math.max(0, Math.min(100, rate)) : fallback.taxRate,
+    taxName: cleanString(parsed?.taxName, fallback.taxName, 40),
+  };
 }
 
 // Whole calendar months overlapping [start, end], for the income/expense
@@ -2190,6 +2199,7 @@ async function resolveInvoiceBranding(accountId: string): Promise<InvoiceBrandin
       "coachName",
       "accountContactEmail",
       "accountInvoiceSettingsJson",
+      "accountCountry",
       "notificationFromName",
       "brandLogoPreview",
       "brandPrimary",
@@ -2213,8 +2223,8 @@ async function resolveInvoiceBranding(accountId: string): Promise<InvoiceBrandin
     coachName,
     contactEmail: cleanString(map.accountContactEmail, "", 180),
     fromName: cleanString(map.notificationFromName, "", 140) || coachName || businessName,
-    currency: cleanString(invoice.currency, "NZD", 10),
-    taxName: cleanString(invoice.taxName, "GST", 40),
+    currency: currencyForAccountSettings(invoice.currency, map.accountCountry),
+    taxName: cleanString(invoice.taxName, taxDefaultsForCountry(map.accountCountry).taxName, 40),
     taxNumber: cleanString(invoice.taxNumber, "", 60),
     bankAccount: cleanString(invoice.bankAccount, "", 120),
     businessAddress: cleanString(invoice.businessAddress, "", 300),
