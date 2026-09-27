@@ -1315,7 +1315,7 @@ function bankCandidateSortText(value: string | null | undefined) {
  * is left once each panel is filed once.
  *
  * Missing on purpose: Payments. Invoicing defaults, tax and payment terms all
- * live inside the Coach Account panel today, and pulling them out is a job
+ * live inside the Account panel today, and pulling them out is a job
  * about that panel rather than about the filing.
  */
 /**
@@ -2627,6 +2627,50 @@ function cleanGroupSchedule(
   };
 }
 
+/**
+ * The business's clock. Stored lessons are wall-clock times in the business's
+ * time zone (the server reads them that way), so "today", the now line and
+ * what counts as past have to come from that zone too, not from whichever
+ * zone the browser happens to be in. Set from the account on every render.
+ */
+let businessTimeZone = "";
+
+function setBusinessTimeZone(timeZone: string | undefined) {
+  businessTimeZone = timeZone || "";
+}
+
+/** Today (as a local-midnight Date, like the grid's) and the minute of the day, in the business's zone. */
+function businessNow(): { date: Date; minutes: number } {
+  const now = new Date();
+  if (businessTimeZone) {
+    try {
+      const parts = Object.fromEntries(
+        new Intl.DateTimeFormat("en-GB", {
+          timeZone: businessTimeZone,
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          hourCycle: "h23",
+        })
+          .formatToParts(now)
+          .map((part) => [part.type, part.value]),
+      );
+      return {
+        date: new Date(Number(parts.year), Number(parts.month) - 1, Number(parts.day)),
+        minutes: Number(parts.hour) * 60 + Number(parts.minute),
+      };
+    } catch {
+      // An unknown zone falls back to the browser's clock below.
+    }
+  }
+  return {
+    date: new Date(now.getFullYear(), now.getMonth(), now.getDate()),
+    minutes: now.getHours() * 60 + now.getMinutes(),
+  };
+}
+
 function startOfCalendarWeek(value = new Date()) {
   const date = new Date(value);
   date.setHours(0, 0, 0, 0);
@@ -2650,12 +2694,12 @@ function isSameCalendarDay(a: Date, b: Date) {
 
 function getCurrentWeekOffset() {
   const weekMs = 7 * 24 * 60 * 60 * 1000;
-  const currentWeekStart = startOfCalendarWeek(new Date());
+  const currentWeekStart = startOfCalendarWeek(businessNow().date);
   return Math.round((calendarDateUtcTime(currentWeekStart) - calendarDateUtcTime(baseWeekStart)) / weekMs);
 }
 
 function buildWeekDays(week: number): WeekDay[] {
-  const today = new Date();
+  const today = businessNow().date;
   return baseWeekDays.map((short, index) => {
     const date = new Date(baseWeekStart);
     date.setDate(baseWeekStart.getDate() + week * 7 + index);
@@ -2676,9 +2720,10 @@ function dateForSlot(week: number, day: number) {
 }
 
 function isSlotInPast(slot: Pick<SlotCandidate, "week" | "day" | "start">) {
-  const slotDate = dateForSlot(slot.week, slot.day);
-  slotDate.setHours(Math.floor(slot.start / 60), slot.start % 60, 0, 0);
-  return slotDate.getTime() < Date.now();
+  const now = businessNow();
+  const slotDay = calendarDateUtcTime(dateForSlot(slot.week, slot.day));
+  const today = calendarDateUtcTime(now.date);
+  return slotDay < today || (slotDay === today && slot.start < now.minutes);
 }
 
 function compactDateTime(date: Date, minutes: number) {
@@ -3715,11 +3760,11 @@ function defaultCoachProfileFromAccount(account: Partial<CoachAccount> = default
   const cleanAccount = cleanCoachAccount(account);
   const workspaceAccount = defaultWorkspaceAccountFromCoachAccount(cleanAccount);
   return {
-    id: cleanAccount.id || "sam-hale",
+    id: cleanAccount.id,
     accountId: workspaceAccount.id,
     name: cleanAccount.coachName,
     displayName: cleanAccount.coachName || cleanAccount.businessName,
-    shortName: "Sam",
+    shortName: cleanAccount.coachName.split(/\s+/)[0] || "",
     email: cleanAccount.contactEmail,
     active: true,
     archived: false,
@@ -3777,8 +3822,25 @@ function cleanAppUser(raw?: Partial<AppUser>, fallback = defaultAppUserFromCoach
   };
 }
 
+function blankCoachProfile(accountId = ""): CoachProfile {
+  return {
+    id: "",
+    accountId,
+    name: "",
+    displayName: "",
+    shortName: "",
+    email: "",
+    active: true,
+    archived: false,
+    bookable: true,
+    assignedLocationIds: ["default-location"],
+    defaultLocationId: "default-location",
+    sortOrder: 0,
+  };
+}
+
 function cleanCoachProfile(raw?: Partial<CoachProfile>, fallback?: CoachProfile, index = 0): CoachProfile {
-  const base = fallback ?? defaultCoachProfileFromAccount();
+  const base = fallback ?? blankCoachProfile(defaultWorkspaceAccountFromCoachAccount().id);
   const name =
     typeof raw?.name === "string" && raw.name.trim()
       ? raw.name.trim().slice(0, 120)
@@ -3810,12 +3872,18 @@ function cleanCoachProfile(raw?: Partial<CoachProfile>, fallback?: CoachProfile,
   };
 }
 
+/**
+ * Mirrors normalizeCoachProfiles in booking-core: only a list that was never
+ * saved is seeded with the owner's coach. An empty list is a business whose
+ * owner doesn't coach, and stays empty.
+ */
 function cleanCoachProfiles(rawProfiles?: Partial<CoachProfile>[], account?: Partial<CoachAccount>): CoachProfile[] {
-  const fallback = defaultCoachProfileFromAccount(account ?? defaultCoachAccount);
-  const source = Array.isArray(rawProfiles) && rawProfiles.length ? rawProfiles : [fallback];
+  const seeded = !Array.isArray(rawProfiles);
+  const seed = defaultCoachProfileFromAccount(account ?? defaultCoachAccount);
+  const source = seeded ? [seed] : rawProfiles;
   const seen = new Set<string>();
   const cleaned = source.map((raw, index) => {
-    const profile = cleanCoachProfile(raw, index === 0 ? fallback : undefined, index);
+    const profile = cleanCoachProfile(raw, seeded ? seed : blankCoachProfile(seed.accountId), index);
     let id = profile.id;
     let suffix = 2;
     while (seen.has(id)) {
@@ -3825,9 +3893,6 @@ function cleanCoachProfiles(rawProfiles?: Partial<CoachProfile>[], account?: Par
     seen.add(id);
     return { ...profile, id };
   });
-  if (!cleaned.some((coach) => coach.active && !coach.archived && coach.bookable)) {
-    cleaned[0] = { ...cleaned[0], active: true, archived: false, bookable: true };
-  }
   return cleaned.sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.displayName.localeCompare(b.displayName));
 }
 
@@ -3856,16 +3921,9 @@ function coachSnapshot(profile: CoachProfile): BookingCoachSnapshot {
   };
 }
 
-function bookingCoachSnapshotFor(
-  coachId: string | undefined,
-  coaches: CoachProfile[],
-  account: Partial<CoachAccount>,
-): BookingCoachSnapshot {
-  const profile =
-    coachById(coaches, coachId) ??
-    coachById(coaches, firstCoachId(coaches)) ??
-    defaultCoachProfileFromAccount(account);
-  return coachSnapshot(profile);
+function bookingCoachSnapshotFor(coachId: string | undefined, coaches: CoachProfile[]): BookingCoachSnapshot | undefined {
+  const profile = coachById(coaches, coachId) ?? coachById(coaches, firstCoachId(coaches));
+  return profile ? coachSnapshot(profile) : undefined;
 }
 
 function cleanBookingCoachSnapshot(
@@ -3890,10 +3948,10 @@ function calendarItemCoach(
   item: Partial<CalendarItem> | undefined,
   coaches: CoachProfile[],
   account: Partial<CoachAccount>,
-): BookingCoachSnapshot {
+): BookingCoachSnapshot | undefined {
   return (
     cleanBookingCoachSnapshot(item?.coach) ??
-    bookingCoachSnapshotFor(item?.coachId, coaches, account)
+    bookingCoachSnapshotFor(item?.coachId, coaches)
   );
 }
 
@@ -3903,7 +3961,7 @@ function resolvedCalendarItemCoachId(
   coaches: CoachProfile[],
   account: Partial<CoachAccount>,
 ) {
-  return item?.coachId || item?.coach?.coachId || primaryServiceCoachId(service) || calendarItemCoach(item, coaches, account).coachId || firstCoachId(coaches);
+  return item?.coachId || item?.coach?.coachId || primaryServiceCoachId(service) || calendarItemCoach(item, coaches, account)?.coachId || firstCoachId(coaches);
 }
 
 function calendarItemBelongsToCoach(
@@ -5599,6 +5657,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   // overwrites all of it when it answers.
   const [bootstrap] = useState(() => workspaceBootstrapFromSession(entrySession));
   const [coachAccount, setCoachAccount] = useState<CoachAccount>(() => bootstrap?.account ?? getStoredCoachAccount());
+  setBusinessTimeZone(coachAccount.timezone);
   // Contact matching and phone formatting resolve bare national numbers against
   // the workspace's country. The server does the same, from the same setting —
   // if these two ever disagree, the client and server disagree about whether
@@ -6260,16 +6319,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const [calendarDayFocus, setCalendarDayFocus] = useState<number | null>(null);
   // Minute of the day the now line is drawn at. Ticks on its own so the line
   // creeps down the column without anything else having to re-render it.
-  const [calendarNowMinutes, setCalendarNowMinutes] = useState(() => {
-    const now = new Date();
-    return now.getHours() * 60 + now.getMinutes();
-  });
+  const [calendarNowMinutes, setCalendarNowMinutes] = useState(() => businessNow().minutes);
   // Which calendar day it currently is. buildWeekDays reads new Date() when it
   // runs and is memoised on the week, so a calendar left open overnight kept
   // yesterday labelled Today and drew the now line down yesterday's column
   // until the week was changed. Ticked by the same interval as the minute
   // above; a string date so re-renders happen once a day, not once a minute.
-  const [todayStamp, setTodayStamp] = useState(() => new Date().toDateString());
+  const [todayStamp, setTodayStamp] = useState(() => businessNow().date.toDateString());
   const [calendarPerspective, setCalendarPerspective] = useState<CalendarPerspective>("all");
   const [calendarCoachFilterId, setCalendarCoachFilterId] = useState("");
   const [calendarLocationFilterId, setCalendarLocationFilterId] = useState("");
@@ -6315,7 +6371,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const isAdminUser = currentAppUser.role === "admin" || currentAppUser.role === "account_admin" || currentAppUser.role === "platform_admin";
   // Running Clarity, as distinct from running a business on it.
   const isPlatformAdmin = currentAppUser.role === "platform_admin";
-  const coachAccountEditor = useEditableBlock<CoachAccount>({
+  const businessNameEditor = useEditableBlock<CoachAccount>({
     value: coachAccount,
     onSave: saveCoachAccount,
   });
@@ -6358,7 +6414,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const editableBlocks = useMemo(
     () => [
       { id: "region", title: "Country & region", editor: regionEditor },
-      { id: "coach-account", title: "Coach Account", editor: coachAccountEditor },
+      { id: "business-name", title: "Business name", editor: businessNameEditor },
       { id: "billing-settings", title: "Billing Settings", editor: billingSettingsEditor },
       { id: "email-notifications", title: "Email", editor: emailNotificationsEditor },
       { id: "text-machine", title: "SMS", editor: textMachineEditor },
@@ -6369,7 +6425,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     ],
     [
       regionEditor,
-      coachAccountEditor,
+      businessNameEditor,
       billingSettingsEditor,
       emailNotificationsEditor,
       textMachineEditor,
@@ -6432,8 +6488,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     setSettingsTab(nextTab);
   }
 
-  const coachAccountDraft = coachAccountEditor.draftValue;
-  const coachAccountIsLocked = coachAccountEditor.status !== "editing" && coachAccountEditor.status !== "error";
+  const businessNameDraft = businessNameEditor.draftValue;
+  const businessNameIsLocked = businessNameEditor.status !== "editing" && businessNameEditor.status !== "error";
   const regionDraft = regionEditor.draftValue;
   const regionIsLocked = regionEditor.status !== "editing" && regionEditor.status !== "error";
   const billingAccountDraft = billingSettingsEditor.draftValue;
@@ -6454,9 +6510,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const playerBookingEmbedIsLocked =
     playerBookingEmbedEditor.status !== "editing" && playerBookingEmbedEditor.status !== "error";
 
-  function updateCoachAccountBlockDraft<K extends keyof CoachAccount>(field: K, value: CoachAccount[K]) {
-    coachAccountEditor.setDraftValue((current) => cleanCoachAccount({ ...current, [field]: value }));
-  }
 
   function updateRegionDraft(next: Partial<RegionValues>) {
     regionEditor.setDraftValue((current) => {
@@ -6908,7 +6961,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       })
     : "";
   // todayStamp is a dependency, not decoration: isToday is baked in here.
-  const weekDays = useMemo(() => buildWeekDays(activeWeek), [activeWeek, todayStamp]);
+  const weekDays = useMemo(() => buildWeekDays(activeWeek), [activeWeek, todayStamp, coachAccount.timezone]);
   const weekTitle = useMemo(() => formatWeekTitle(activeWeek), [activeWeek]);
   const accountItems = useMemo(
     () =>
@@ -6922,6 +6975,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const weekItems = useMemo(() => accountItems.filter((item) => itemWeek(item) === activeWeek), [activeWeek, accountItems]);
   const activeCoachId = currentAppUser.coachId || firstCoachId(accountCoachProfiles);
   const fallbackCoachId = firstCoachId(accountCoachProfiles);
+  // The signed-in person's own coach profile, if they coach: what the profile
+  // page shows. An owner who only runs the business has none.
+  const ownCoachProfile = currentAppUser.coachId
+    ? accountCoachProfiles.find((coach) => coach.id === currentAppUser.coachId)
+    : undefined;
   const activeCoachList = accountCoachProfiles.filter((coach) => coach.active && !coach.archived && coach.bookable);
   const effectiveCalendarPerspective: CalendarPerspective =
     isAdminUser && (calendarPerspective !== "location" || canUseFeature(activeAccount, "locationCalendar"))
@@ -6931,7 +6989,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   // coach, whatever their role.
   const selectedCalendarCoachId = calendarCoachFilterId || activeCoachId;
   const selectedCalendarLocationId = calendarLocationFilterId || defaultLocationId(accountLocations);
-  const selectedCalendarCoach = bookingCoachSnapshotFor(selectedCalendarCoachId, accountCoachProfiles, coachAccount);
+  const selectedCalendarCoach = bookingCoachSnapshotFor(selectedCalendarCoachId, accountCoachProfiles);
   // A business owner who coaches opens on their own calendar, where bookings
   // are theirs without asking. "All calendars" is still one pick away, and
   // once they pick a view it stays theirs.
@@ -7085,7 +7143,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       ),
     );
     return Array.from(coachIds)
-      .map((coachId) => bookingCoachSnapshotFor(coachId, coachProfiles, coachAccount))
+      .map((coachId) => bookingCoachSnapshotFor(coachId, coachProfiles))
+      .filter((coach): coach is BookingCoachSnapshot => Boolean(coach))
       .sort((a, b) => (a.displayName || a.name).localeCompare(b.displayName || b.name));
   }, [
     activeAccountId,
@@ -7507,7 +7566,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         locationById(locations, selectedCalendarLocationId)?.name ||
         defaultLocation.shortName ||
         defaultLocation.name
-      : selectedCalendarCoach.displayName || selectedCalendarCoach.name;
+      : selectedCalendarCoach?.displayName || selectedCalendarCoach?.name || "No coach";
   const isEmailLinkReschedule = Boolean(
     bookingMode === "reschedule" &&
       initialRescheduleLoginRef.current?.appointmentId &&
@@ -9710,15 +9769,18 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   }, [activeView, adminWorkspaceLoadStatus, isEmbedMode]);
 
   useEffect(() => {
-    const tick = window.setInterval(() => {
-      const now = new Date();
-      setCalendarNowMinutes(now.getHours() * 60 + now.getMinutes());
+    const update = () => {
+      const now = businessNow();
+      setCalendarNowMinutes(now.minutes);
       // Unchanged on 1439 of every 1440 ticks, and React drops a set to the
       // same string, so this costs nothing until the date actually rolls over.
-      setTodayStamp(now.toDateString());
-    }, 60_000);
+      setTodayStamp(now.date.toDateString());
+    };
+    // Straight away as well, so a time zone change moves the now line at once.
+    update();
+    const tick = window.setInterval(update, 60_000);
     return () => window.clearInterval(tick);
-  }, []);
+  }, [coachAccount.timezone]);
 
   // Removed: a window CustomEvent listener that existed only so the injected
   // Optix panel could tell React a bay had been booked. BookingResourcesPanel
@@ -10468,7 +10530,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       serviceId: selectedGroupSession.serviceId,
       coachId,
       locationId: location.locationId,
-      coach: bookingCoachSnapshotFor(coachId, coachProfiles, coachAccount),
+      coach: bookingCoachSnapshotFor(coachId, coachProfiles),
       location,
       title: CANCELLED_GROUP_SESSION_TITLE,
       note: CANCELLED_GROUP_SESSION_NOTE,
@@ -11124,8 +11186,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   function scrollCalendarToNow() {
     const scroller = calendarScrollRef.current;
     if (!scroller) return;
-    const now = new Date();
-    const minutes = now.getHours() * 60 + now.getMinutes();
+    const minutes = businessNow().minutes;
     // Before the calendar's first hour or after its last there is no "now" on
     // the grid to aim at, and the top of the day is the honest answer.
     if (minutes < calendarStartMinutes || minutes > calendarEndMinutes) {
@@ -12174,7 +12235,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         duration: activeDraft.duration,
         coachId: blockCoachId,
         locationId: blockLocationId,
-        coach: blockCoachId ? bookingCoachSnapshotFor(blockCoachId, coachProfiles, coachAccount) : undefined,
+        coach: blockCoachId ? bookingCoachSnapshotFor(blockCoachId, coachProfiles) : undefined,
         location: cleanBookingLocationSnapshot(
           locationSnapshot(locationById(locations, blockLocationId) ?? defaultLocationFromCoachAccount(coachAccount)),
         ),
@@ -12456,7 +12517,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       serviceId: quickCreateService.id,
       coachId,
       locationId: location.locationId,
-      coach: bookingCoachSnapshotFor(coachId, coachProfiles, coachAccount),
+      coach: bookingCoachSnapshotFor(coachId, coachProfiles),
       ...candidate,
       phone: quickCreate.phone.trim(),
       email: quickCreate.email.trim(),
@@ -12509,7 +12570,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       title: locationOnly ? "Location unavailable" : "Coach unavailable",
       coachId: blockCoachId,
       locationId: blockLocationId,
-      coach: blockCoachId ? bookingCoachSnapshotFor(blockCoachId, coachProfiles, coachAccount) : undefined,
+      coach: blockCoachId ? bookingCoachSnapshotFor(blockCoachId, coachProfiles) : undefined,
       location: cleanBookingLocationSnapshot(locationSnapshot(locationById(locations, blockLocationId) ?? defaultLocationFromCoachAccount(coachAccount))),
       ...candidate,
       note: locationOnly ? "Location-wide quick block" : "Coach-location quick block",
@@ -12583,7 +12644,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       serviceId,
       coachId,
       locationId: location.locationId,
-      coach: bookingCoachSnapshotFor(coachId, coachProfiles, coachAccount),
+      coach: bookingCoachSnapshotFor(coachId, coachProfiles),
       ...candidate,
       phone: "",
       email: "",
@@ -12753,7 +12814,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       serviceId: booking.serviceId,
       coachId,
       locationId: location.locationId,
-      coach: bookingCoachSnapshotFor(coachId, coachProfiles, coachAccount),
+      coach: bookingCoachSnapshotFor(coachId, coachProfiles),
       phone: booking.phone,
       email: booking.email,
       note: booking.note ?? "Placed from dock.",
@@ -14600,11 +14661,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setToast({ message: limitReachedMessage("maxCoaches", accountLimit(activeAccount, "maxCoaches")) });
       return;
     }
-    const fallback = defaultCoachProfileFromAccount(coachAccount);
     const assignedLocationId = defaultLocationId(locations);
     setEditingCoachId(null);
     setCoachEditor({
-      ...fallback,
+      ...blankCoachProfile(activeAccountId),
       id: `coach-${Date.now()}`,
       accountId: activeAccountId,
       name: "",
@@ -14834,7 +14894,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           : [defaultAssignedLocationId].filter((id): id is string => Boolean(id)),
         defaultLocationId: defaultAssignedLocationId,
       },
-      defaultCoachProfileFromAccount(coachAccount),
+      blankCoachProfile(activeAccountId),
       coachProfiles.length,
     );
     const exists = coachProfiles.some((coach) => coach.id === (editingCoachId || clean.id));
@@ -14853,16 +14913,24 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     if (saved) setShowCoachEditor(false);
   }
 
+  // A business can run with no active coach -- an owner who only manages
+  // others -- and its booking page then simply shows no availability.
   function archiveCoach(coach: CoachProfile) {
-    const activeCount = coachProfiles.filter((candidate) => candidate.active && !candidate.archived && candidate.bookable).length;
-    if (activeCount <= 1) {
-      setToast({ message: "At least one active coach is required." });
-      return;
-    }
     const next = coachProfiles.map((candidate) =>
       candidate.id === coach.id ? { ...candidate, active: false, archived: true } : candidate,
     );
     void persistCoaches(next, `${coach.displayName || coach.name} archived.`);
+  }
+
+  // Past bookings keep their own copy of the coach's name and contact, so an
+  // archived coach can be removed for good.
+  function deleteCoach(coach: CoachProfile) {
+    const name = coach.displayName || coach.name || "this coach";
+    if (!window.confirm(`Delete ${name}? Their past bookings keep their name, but this can't be undone.`)) return;
+    void persistCoaches(
+      coachProfiles.filter((candidate) => candidate.id !== coach.id),
+      `${name} deleted.`,
+    );
   }
 
   function restoreCoach(coach: CoachProfile) {
@@ -20795,7 +20863,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         : bookingLocationSnapshotFor(bookingTargetService, locations, coachAccount),
       coachId: chosenSlot?.coachId || firstOption.coachId,
     };
-    const selectedBookingCoach = bookingCoachSnapshotFor(selectedBooking.coachId, coachProfiles, coachAccount);
+    const selectedBookingCoach = bookingCoachSnapshotFor(selectedBooking.coachId, coachProfiles);
     const fallbackAppointmentId = `fallback-appt-${Date.now()}`;
     const localFallbackConfirmation = (): BookingConfirmation => ({
       kind: "booking",
@@ -22007,10 +22075,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       {service.coachIds.length > 1 ? "Coaches" : "Coach"}:{" "}
                       {(service.coachIds.length ? service.coachIds : [firstCoachId(coachProfiles)])
                         .map((id) => {
-                          const coach = bookingCoachSnapshotFor(id, coachProfiles, coachAccount);
-                          return coach.displayName || coach.name;
+                          const coach = bookingCoachSnapshotFor(id, coachProfiles);
+                          return coach?.displayName || coach?.name || "";
                         })
-                        .join(", ")}
+                        .filter(Boolean)
+                        .join(", ") || "None"}
                     </em>
                   )}
                   <em>
@@ -22615,10 +22684,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               </div>
               <div className="service-row-actions">
                 {coach.archived || !coach.active ? (
-                  <button className="outline-button service-action-button" onClick={() => restoreCoach(coach)} type="button">
-                    <RefreshCw size={15} />
-                    <span>Restore</span>
-                  </button>
+                  <>
+                    <button className="outline-button service-action-button" onClick={() => restoreCoach(coach)} type="button">
+                      <RefreshCw size={15} />
+                      <span>Restore</span>
+                    </button>
+                    <button className="outline-button service-action-button" onClick={() => deleteCoach(coach)} type="button">
+                      <Trash2 size={15} />
+                      <span>Delete</span>
+                    </button>
+                  </>
                 ) : (
                   <button className="outline-button service-action-button" onClick={() => archiveCoach(coach)} type="button">
                     <Archive size={15} />
@@ -24220,9 +24295,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       {
         id: "coach-branding",
         category: "Customer experience",
-        label: "Coach branding",
+        label: "Business branding",
         summary: "Your logo and colours, everywhere a client looks.",
-        path: "Settings › Business › Coach branding",
+        path: "Settings › Business › Business branding",
         target: { kind: "settings", tab: "business", group: "coach-branding" },
         facts: [
           ["Logo", brandSettings.logoName || (brandSettings.logoPreview ? "Set" : "Not set")],
@@ -25374,14 +25449,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             Choose a coach
                           </option>
                           {quickCreateChoices.coachIds.map((coachId) => {
-                            const coach = bookingCoachSnapshotFor(coachId, coachProfiles, coachAccount);
+                            const coach = bookingCoachSnapshotFor(coachId, coachProfiles);
                             const free = !quickCreateAvailabilityError(quickCreateCandidate!, quickCreateService, {
                               coachId,
                               locationId: quickCreate.locationId,
                             });
                             return (
                               <option key={coachId} value={coachId}>
-                                {coach.displayName || coach.name}
+                                {coach?.displayName || coach?.name || coachId}
                                 {free ? "" : " (busy)"}
                               </option>
                             );
@@ -30042,7 +30117,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     <Settings size={24} />
                   </div>
                   <p className="field-help">
-                    These defaults are used when creating a new invoice and are saved on the Coach Account record.
+                    These defaults are used when creating a new invoice and are saved on your account record.
                     Current next number: {invoiceNumber}
                   </p>
                   <EditableSettingsBlock
@@ -31064,14 +31139,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           <section className="profile-page">
             <CoachProfilePanel
               identity={{
-                coachName: coachAccount.coachName || currentAppUser.name,
-                businessName: coachAccount.businessName,
-                venueName: coachAccount.venueShortName || coachAccount.venueName,
-                roleLabel: isPlatformAdmin ? "Platform admin" : isAdminUser ? "Coach · Admin" : "Coach",
-                email: coachAccount.contactEmail || currentAppUser.email,
-                phone: coachProfiles[0]?.phone || "",
-                timezone: coachAccount.timezone,
-                currency: invoiceSettings.currency,
+                coachName: ownCoachProfile?.displayName || ownCoachProfile?.name || currentAppUser.name,
+                roleLabel: isPlatformAdmin
+                  ? "Platform admin"
+                  : isAdminUser
+                    ? ownCoachProfile
+                      ? "Coach · Admin"
+                      : "Admin"
+                    : "Coach",
+                email: ownCoachProfile?.email || currentAppUser.email,
+                phone: ownCoachProfile?.phone || "",
               }}
               internalJobs={profileInternalJobs}
               onOpen={(target, label) => openProfileTarget(target, label)}
@@ -31204,7 +31281,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 </EditableSettingsBlock>
               </SettingsGroup>
 
-              <SettingsGroup id="coach-account" section="account" title="Coach account" className="notification-card account-card">
+              <SettingsGroup id="coach-account" section="account" title="Account" className="notification-card account-card">
                 <details className="settings-subsection">
                   <summary className="settings-subsection-title">
                     <KeyRound size={18} />
@@ -31250,121 +31327,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   <p className="field-help">This is the account wrapper for subscription entitlements. Billing automation and platform admin tools are not implemented here.</p>
                 </details>
                 <div className="account-settings-groups">
-                  <EditableSettingsBlock
-                    id="coach-account-block"
-                    title="Coach Account"
-                    status={coachAccountEditor.status}
-                    dirty={coachAccountEditor.dirty}
-                    errorMessage={coachAccountEditor.errorMessage}
-                    onEdit={() => startEditableBlock("coach-account")}
-                    onCancel={() => cancelEditableBlock("coach-account")}
-                    onSave={() => void saveEditableBlock("coach-account")}
-                  >
-                  <details className="settings-subsection">
-                    <summary className="settings-subsection-title">
-                      <User size={18} />
-                      <div>
-                        <span>Coach</span>
-                        <strong>Profile</strong>
-                      </div>
-                    </summary>
-                    <div className="service-form-row">
-                      <label className="settings-field">
-                        <span>Coach name</span>
-                        <input
-                          value={coachAccountDraft.coachName}
-                          readOnly={coachAccountIsLocked}
-                          onChange={(event) => updateCoachAccountBlockDraft("coachName", event.target.value)}
-                        />
-                      </label>
-                      <label className="settings-field">
-                        <span>Business name</span>
-                        <input
-                          value={coachAccountDraft.businessName}
-                          readOnly={coachAccountIsLocked}
-                          onChange={(event) => updateCoachAccountBlockDraft("businessName", event.target.value)}
-                        />
-                      </label>
-                    </div>
-                    <label className="settings-field">
-                      <span>Contact email</span>
-                      <input
-                        value={coachAccountDraft.contactEmail}
-                        readOnly={coachAccountIsLocked}
-                        onChange={(event) => updateCoachAccountBlockDraft("contactEmail", event.target.value)}
-                        type="email"
-                      />
-                    </label>
-                  </details>
-
-                  <details className="settings-subsection">
-                    <summary className="settings-subsection-title">
-                      <MapPin size={18} />
-                      <div>
-                        <span>Venue</span>
-                        <strong>{coachAccount.venueShortName}</strong>
-                      </div>
-                    </summary>
-                    <label className="settings-field">
-                      <span>Venue name</span>
-                      <input
-                        value={coachAccountDraft.venueName}
-                        readOnly={coachAccountIsLocked}
-                        onChange={(event) => updateCoachAccountBlockDraft("venueName", event.target.value)}
-                      />
-                    </label>
-                    <div className="service-form-row">
-                      <label className="settings-field">
-                        <span>Short label</span>
-                        <input
-                          value={coachAccountDraft.venueShortName}
-                          readOnly={coachAccountIsLocked}
-                          onChange={(event) => updateCoachAccountBlockDraft("venueShortName", event.target.value)}
-                        />
-                      </label>
-                    </div>
-                  </details>
-
-	                  <details className="settings-subsection">
-	                    <summary className="settings-subsection-title">
-	                      <Link2 size={18} />
-                      <div>
-                        <span>Connected apps</span>
-                        <strong>Booking and Caddy</strong>
-                      </div>
-                    </summary>
-                    <label className="settings-field">
-                      <span>Booking app URL</span>
-                      <input
-                        value={coachAccountDraft.bookingUrl}
-                        readOnly={coachAccountIsLocked}
-                        onChange={(event) => {
-                          updateCoachAccountBlockDraft("bookingUrl", event.target.value);
-                          setSyncBaseUrl(event.target.value);
-                        }}
-                      />
-                    </label>
-                    <div className="service-form-row">
-                      <label className="settings-field">
-                        <span>Calendar slug</span>
-                        <input
-                          value={coachAccountDraft.calendarSlug}
-                          readOnly={coachAccountIsLocked}
-                          onChange={(event) => updateCoachAccountBlockDraft("calendarSlug", event.target.value)}
-                        />
-                      </label>
-                      <label className="settings-field">
-                        <span>Caddy workspace</span>
-                        <input
-                          value={coachAccountDraft.caddyWorkspaceUrl}
-                          readOnly={coachAccountIsLocked}
-                          onChange={(event) => updateCoachAccountBlockDraft("caddyWorkspaceUrl", event.target.value)}
-                        />
-                      </label>
-	                    </div>
-	                  </details>
-                  </EditableSettingsBlock>
-
                   <details className="settings-subsection">
                     <summary className="settings-subsection-title">
                       <KeyRound size={18} />
@@ -33271,7 +33233,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 </details>
               </SettingsGroup>
 
-              <SettingsGroup id="coach-branding" section="business" title="Coach branding" className="brand-vein-card">
+              <SettingsGroup id="coach-branding" section="business" title="Business branding" className="brand-vein-card">
 
                 <div className="brand-vein-preview">
                   <div className="brand-vein-logo">
@@ -33282,11 +33244,36 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     )}
                   </div>
                   <div>
-                    <span>Current coach brand</span>
+                    <span>Current business brand</span>
                     <strong>{brandSettings.coachName}</strong>
                     <em>{brandSettings.logoName || "No logo uploaded yet"}</em>
                   </div>
                 </div>
+
+                <EditableSettingsBlock
+                  id="business-name-block"
+                  title="Business name"
+                  status={businessNameEditor.status}
+                  dirty={businessNameEditor.dirty}
+                  errorMessage={businessNameEditor.errorMessage}
+                  onEdit={() => startEditableBlock("business-name")}
+                  onCancel={() => cancelEditableBlock("business-name")}
+                  onSave={() => void saveEditableBlock("business-name")}
+                >
+                  <label className="settings-field">
+                    <span>Business name</span>
+                    <input
+                      value={businessNameDraft.businessName}
+                      readOnly={businessNameIsLocked}
+                      onChange={(event) =>
+                        businessNameEditor.setDraftValue((current) =>
+                          cleanCoachAccount({ ...current, businessName: event.target.value }),
+                        )
+                      }
+                    />
+                  </label>
+                  <p className="field-help">Shown on your booking page, invoices and emails.</p>
+                </EditableSettingsBlock>
 
                 <details className="settings-subsection">
                   <summary className="settings-subsection-title">
@@ -33297,7 +33284,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     </div>
                   </summary>
                   <label className="settings-field">
-                    <span>Coach brand name</span>
+                    <span>Brand name</span>
                     <input
                       value={brandSettings.coachName}
                       onChange={(event) => updateBrandSetting("coachName", event.target.value)}

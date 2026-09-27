@@ -15293,17 +15293,11 @@ button {
   letter-spacing: 0.06em;
 }
 
-.coach-profile .cp-identity-where {
-  margin: var(--c-space-2) 0 var(--c-space-5);
-  color: var(--c-text-soft);
-  font-size: var(--c-size-secondary);
-  line-height: 1.5;
-}
-
 .cp-identity-facts {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
   gap: var(--c-space-5);
+  margin-top: var(--c-space-5);
 }
 
 .coach-profile .cp-identity-facts span {
