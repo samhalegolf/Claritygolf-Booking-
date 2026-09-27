@@ -2160,7 +2160,6 @@ type CoachProfile = {
   photoUrl?: string;
   active: boolean;
   archived?: boolean;
-  isDefault?: boolean;
   bookable: boolean;
   assignedLocationIds?: string[];
   defaultLocationId?: string;
@@ -3723,7 +3722,6 @@ function defaultCoachProfileFromAccount(account: Partial<CoachAccount> = default
     email: cleanAccount.contactEmail,
     active: true,
     archived: false,
-    isDefault: true,
     bookable: true,
     assignedLocationIds: ["default-location"],
     defaultLocationId: "default-location",
@@ -3802,7 +3800,6 @@ function cleanCoachProfile(raw?: Partial<CoachProfile>, fallback?: CoachProfile,
     photoUrl: cleanUrl(raw?.photoUrl, "") || undefined,
     active: raw?.active !== false,
     archived: raw?.archived === true,
-    isDefault: raw?.isDefault === true || base.isDefault === true,
     bookable: raw?.bookable !== false,
     assignedLocationIds: Array.isArray(raw?.assignedLocationIds)
       ? raw.assignedLocationIds.map((id) => cleanSlug(id, "")).filter(Boolean)
@@ -3830,15 +3827,17 @@ function cleanCoachProfiles(rawProfiles?: Partial<CoachProfile>[], account?: Par
   if (!cleaned.some((coach) => coach.active && !coach.archived && coach.bookable)) {
     cleaned[0] = { ...cleaned[0], active: true, archived: false, bookable: true };
   }
-  const defaultIndex = cleaned.findIndex((coach) => coach.isDefault && coach.active && !coach.archived);
-  const nextDefaultIndex = defaultIndex >= 0 ? defaultIndex : cleaned.findIndex((coach) => coach.active && !coach.archived);
-  return cleaned
-    .map((coach, index) => ({ ...coach, isDefault: index === nextDefaultIndex }))
-    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.displayName.localeCompare(b.displayName));
+  return cleaned.sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.displayName.localeCompare(b.displayName));
 }
 
-function defaultCoachId(coaches: CoachProfile[]) {
-  return coaches.find((coach) => coach.isDefault && coach.active && !coach.archived)?.id || coaches[0]?.id || "";
+/**
+ * The coach a record that names none belongs to: the first active coach in
+ * the business's list. There is no "default coach" setting -- lesson types,
+ * bookings and availability all name their coach -- so this only decides
+ * where rows saved before that are shown. Mirrors firstCoachId in booking-core.
+ */
+function firstCoachId(coaches: CoachProfile[]) {
+  return coaches.find((coach) => coach.active && !coach.archived)?.id || coaches[0]?.id || "";
 }
 
 function coachById(coaches: CoachProfile[], id?: string) {
@@ -3863,7 +3862,7 @@ function bookingCoachSnapshotFor(
 ): BookingCoachSnapshot {
   const profile =
     coachById(coaches, coachId) ??
-    coachById(coaches, defaultCoachId(coaches)) ??
+    coachById(coaches, firstCoachId(coaches)) ??
     defaultCoachProfileFromAccount(account);
   return coachSnapshot(profile);
 }
@@ -3903,7 +3902,7 @@ function resolvedCalendarItemCoachId(
   coaches: CoachProfile[],
   account: Partial<CoachAccount>,
 ) {
-  return item?.coachId || item?.coach?.coachId || primaryServiceCoachId(service) || calendarItemCoach(item, coaches, account).coachId || defaultCoachId(coaches);
+  return item?.coachId || item?.coach?.coachId || primaryServiceCoachId(service) || calendarItemCoach(item, coaches, account).coachId || firstCoachId(coaches);
 }
 
 function calendarItemBelongsToCoach(
@@ -6898,8 +6897,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const accountCoachProfiles = useMemo(() => filterRecordsForAccount(coachProfiles, activeAccountId), [activeAccountId, coachProfiles]);
   const accountLocations = useMemo(() => filterRecordsForAccount(locations, activeAccountId), [activeAccountId, locations]);
   const weekItems = useMemo(() => accountItems.filter((item) => itemWeek(item) === activeWeek), [activeWeek, accountItems]);
-  const activeCoachId = currentAppUser.coachId || defaultCoachId(accountCoachProfiles);
-  const publicBookingFallbackCoachId = defaultCoachId(accountCoachProfiles);
+  const activeCoachId = currentAppUser.coachId || firstCoachId(accountCoachProfiles);
+  const fallbackCoachId = firstCoachId(accountCoachProfiles);
   const activeCoachList = accountCoachProfiles.filter((coach) => coach.active && !coach.archived && coach.bookable);
   const effectiveCalendarPerspective: CalendarPerspective =
     isAdminUser && (calendarPerspective !== "location" || canUseFeature(activeAccount, "locationCalendar"))
@@ -7301,7 +7300,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     isAdminUser || resolvedCalendarItemCoachId(item, itemService(item, services), coachProfiles, coachAccount) === serviceScopeCoachId;
   const serviceVisibleToCurrentUser = (service: Service) =>
     serviceBelongsToAccount(service, activeAccountId) &&
-    (isAdminUser || serviceIncludesCoach(service, serviceScopeCoachId, defaultCoachId(accountCoachProfiles)));
+    (isAdminUser || serviceIncludesCoach(service, serviceScopeCoachId, firstCoachId(accountCoachProfiles)));
   const accountServices = services.filter((service) => serviceBelongsToAccount(service, activeAccountId));
   // Every coach-and-place pair a booking of this lesson type could be with, in
   // the order they are tried. Mirrors serviceBookingOptions in booking-core.
@@ -7314,7 +7313,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       const location = locationById(accountLocations, id);
       return Boolean(location && location.active && !location.archived);
     });
-    const pickedCoaches = coachIds.length ? coachIds : [publicBookingFallbackCoachId];
+    const pickedCoaches = coachIds.length ? coachIds : [fallbackCoachId];
     const pickedLocations = locationIds.length ? locationIds : [serviceLocation(service, accountLocations, coachAccount).id];
     return pickedCoaches.flatMap((coachId) => pickedLocations.map((locationId) => ({ coachId, locationId })));
   }
@@ -7340,7 +7339,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   function serviceCoachFor(service: Service | undefined, preferredCoachId = "") {
     const ids = service?.coachIds ?? [];
     if (preferredCoachId && ids.includes(preferredCoachId)) return preferredCoachId;
-    return ids[0] || preferredCoachId || defaultCoachId(accountCoachProfiles);
+    return ids[0] || preferredCoachId || firstCoachId(accountCoachProfiles);
   }
   const activeServices = accountServices.filter((service) => service.archived !== true && serviceVisibleToCurrentUser(service));
   const archivedServices = accountServices.filter((service) => service.archived === true && serviceVisibleToCurrentUser(service));
@@ -10597,7 +10596,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     const slots: BookingSlot[] = [];
     const offered = new Set<number>();
     bookingOptions.forEach(({ coachId, locationId }) => {
-      const coachAvailability = availabilityForCoach(accountAvailability, coachId, publicBookingFallbackCoachId);
+      const coachAvailability = availabilityForCoach(accountAvailability, coachId, fallbackCoachId);
       const windows = (coachAvailability[bookingDay] ?? []).filter((window) =>
         availabilityWindowCoversLocation(window, locationId),
       );
@@ -10640,7 +10639,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     publicBookingSlots,
     isEmbedMode,
     items,
-    publicBookingFallbackCoachId,
+    fallbackCoachId,
     publicBookingStateStatus,
     selectedRescheduleMatch,
   ]);
@@ -12136,7 +12135,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       }
       const previous = items;
       const blockLocationOnly = effectiveCalendarPerspective === "location";
-      const blockCoachId = blockLocationOnly ? undefined : selectedCalendarCoachId || currentAppUser.coachId || defaultCoachId(coachProfiles);
+      const blockCoachId = blockLocationOnly ? undefined : selectedCalendarCoachId || currentAppUser.coachId || firstCoachId(coachProfiles);
       const blockLocationId = blockLocationOnly ? selectedCalendarLocationId : defaultLocationId(locations);
       const newBlock: CalendarItem = {
         id: newCalendarItemId("block"),
@@ -12468,7 +12467,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     const blockCoachId =
       locationOnly
         ? undefined
-        : quickCreate.coachId || selectedCalendarCoachId || currentAppUser.coachId || defaultCoachId(coachProfiles);
+        : quickCreate.coachId || selectedCalendarCoachId || currentAppUser.coachId || firstCoachId(coachProfiles);
     const blockLocationId = quickCreate.locationId || selectedCalendarLocationId || defaultLocationId(locations);
     const candidate = { week: activeWeek, day: quickCreate.day, start: quickCreate.start, duration: 30 };
     if (!isValidBlockSlot(candidate, undefined, { coachId: blockCoachId, locationId: blockLocationId, locationOnly })) {
@@ -14590,7 +14589,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       photoUrl: "",
       active: true,
       archived: false,
-      isDefault: activeCoachList.length === 0,
       bookable: true,
       assignedLocationIds: assignedLocationId ? [assignedLocationId] : [],
       defaultLocationId: assignedLocationId,
@@ -14834,15 +14832,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setToast({ message: "At least one active coach is required." });
       return;
     }
-    const nextDefault = coach.isDefault
-      ? coachProfiles.find((candidate) => candidate.id !== coach.id && candidate.active && !candidate.archived && candidate.bookable)?.id
-      : "";
     const next = coachProfiles.map((candidate) =>
-      candidate.id === coach.id
-        ? { ...candidate, active: false, archived: true, isDefault: false }
-        : nextDefault && candidate.id === nextDefault
-          ? { ...candidate, isDefault: true }
-          : candidate,
+      candidate.id === coach.id ? { ...candidate, active: false, archived: true } : candidate,
     );
     void persistCoaches(next, `${coach.displayName || coach.name} archived.`);
   }
@@ -14852,12 +14843,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       candidate.id === coach.id ? { ...candidate, active: true, archived: false, bookable: true } : candidate,
     );
     void persistCoaches(next, `${coach.displayName || coach.name} restored.`);
-  }
-
-  function makeDefaultCoach(coach: CoachProfile) {
-    if (!coach.active || coach.archived) return;
-    const next = coachProfiles.map((candidate) => ({ ...candidate, isDefault: candidate.id === coach.id }));
-    void persistCoaches(next, `${coach.displayName || coach.name} set as default coach.`);
   }
 
   function updateInvoiceSettings<K extends keyof InvoiceSettings>(field: K, value: InvoiceSettings[K]) {
@@ -15356,7 +15341,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       description: service.description ?? "",
       // Older lesson types that named no coach or place went to the defaults,
       // so they open showing those.
-      coachIds: service.coachIds.length ? service.coachIds : [serviceScopeCoachId || defaultCoachId(coachProfiles)],
+      coachIds: service.coachIds.length ? service.coachIds : [serviceScopeCoachId || firstCoachId(coachProfiles)],
       locationIds: service.locationIds.length ? service.locationIds : [defaultLocationId(accountLocations)],
       lessonNote: service.lessonNote || service.location || "",
       location: service.location ?? "",
@@ -21993,7 +21978,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   {(isAdminUser || activeCoachList.length > 1) && (
                     <em>
                       {service.coachIds.length > 1 ? "Coaches" : "Coach"}:{" "}
-                      {(service.coachIds.length ? service.coachIds : [defaultCoachId(coachProfiles)])
+                      {(service.coachIds.length ? service.coachIds : [firstCoachId(coachProfiles)])
                         .map((id) => {
                           const coach = bookingCoachSnapshotFor(id, coachProfiles, coachAccount);
                           return coach.displayName || coach.name;
@@ -22541,14 +22526,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 />
                 <span>Active</span>
               </label>
-              <label className="settings-toggle">
-                <input
-                  checked={coachEditor.isDefault === true}
-                  onChange={(event) => updateCoachEditor("isDefault", event.target.checked)}
-                  type="checkbox"
-                />
-                <span>Default coach</span>
-              </label>
             </div>
             <div className="settings-field">
               <span>Assigned locations</span>
@@ -22594,7 +22571,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           {coachProfiles.map((coach) => (
             <article className={`service-row ${coach.active && !coach.archived ? "" : "is-archived"}`} key={coach.id}>
               <button className="service-row-main" onClick={() => editCoach(coach)} type="button">
-                <span>{coach.isDefault ? "Default · " : ""}{coach.active && !coach.archived ? "Active" : "Archived"}</span>
+                <span>{coach.active && !coach.archived ? "Active" : "Archived"}</span>
                 <strong>{coach.displayName || coach.name}</strong>
                 {coach.email && <em>{coach.email}</em>}
                 <em>
@@ -22606,12 +22583,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 <span>{coach.phone || "No phone"}</span>
               </div>
               <div className="service-row-actions">
-                {!coach.isDefault && coach.active && !coach.archived ? (
-                  <button className="outline-button service-action-button" onClick={() => makeDefaultCoach(coach)} type="button">
-                    <Check size={15} />
-                    <span>Default</span>
-                  </button>
-                ) : null}
                 {coach.archived || !coach.active ? (
                   <button className="outline-button service-action-button" onClick={() => restoreCoach(coach)} type="button">
                     <RefreshCw size={15} />

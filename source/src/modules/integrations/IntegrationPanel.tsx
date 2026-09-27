@@ -765,9 +765,9 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
                 </select>
               </label>
               <label>
-                Default coach
+                Coach for these lessons
                 <select disabled={!integration} value={mappingDraft.defaultCoachId} onChange={(event) => void commitMapping({ defaultCoachId: event.target.value })}>
-                  <option value="">No default coach</option>
+                  <option value="">Choose a coach</option>
                   {(integration?.catalog?.coaches || []).map((coach) => <option key={coach.id} value={coach.id}>{coach.displayName || coach.name || coach.id}</option>)}
                 </select>
               </label>
