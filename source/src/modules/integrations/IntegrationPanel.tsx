@@ -172,6 +172,43 @@ function CopyField({ label, value, help }: { label: string; value: string; help?
 }
 
 /**
+ * Sends the coach to Google's sign-in.
+ *
+ * The connect endpoint hands back the Google URL rather than redirecting, so a
+ * plain link would land on a page of JSON.
+ */
+function OAuthConnect({ label, help }: { label: string; help: string }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function connect() {
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch("/api/google-calendar/connect", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+      });
+      const data = (await response.json().catch(() => ({}))) as { authUrl?: string; message?: string };
+      if (!response.ok || !data.authUrl) throw new Error(data.message || "Google sign-in is not available right now.");
+      window.location.assign(data.authUrl);
+    } catch (err) {
+      setBusy(false);
+      setError(err instanceof Error ? err.message : "Could not start Google sign-in.");
+    }
+  }
+  return (
+    <div className="integration-oauth">
+      <span className="credential-label">{label}</span>
+      <button className="primary-button small" disabled={busy} onClick={() => void connect()} type="button">
+        {busy ? "Opening Google…" : "Connect"}
+      </button>
+      {error ? <strong className="credential-warning">{error}</strong> : <small>{help}</small>}
+    </div>
+  );
+}
+
+/**
  * One credential's state, never its value when it is a secret.
  *
  * Length and fingerprint are shown for a specific reason: a secret pasted with
@@ -703,11 +740,7 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
                     <CredentialField credential={field} key={field.key} onSave={saveCredentials} />
                   ))}
                   {outbound.fields.filter((field) => field.type === "oauth").map((field) => (
-                    <div className="integration-oauth" key={field.key}>
-                      <span className="credential-label">{field.label}</span>
-                      <a className="primary-button small" href="/api/google-calendar/connect">Connect</a>
-                      <small>{field.help}</small>
-                    </div>
+                    <OAuthConnect help={field.help} key={field.key} label={field.label} />
                   ))}
                 </section>
               </div>

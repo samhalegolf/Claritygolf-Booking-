@@ -101,7 +101,7 @@ export default async function handler(req: Request) {
     const accountId = (await requireCoachActor(req)).accountId;
 
     if (req.method === "GET" && action === "status") return json(await getGoogleCalendarSyncStatus(accountId, req));
-    if ((req.method === "GET" || req.method === "POST") && action === "connect") return json(await createGoogleCalendarAuthUrl(accountId, req));
+    if (req.method === "POST" && action === "connect") return json(await createGoogleCalendarAuthUrl(accountId, req));
     if (req.method === "POST" && action === "migrate-provider-token") return json(await migrateLegacyGoogleCalendarConnection(accountId, req));
     if (req.method === "POST" && action === "sync") return json(await syncGoogleCalendarNow(accountId, "manual_sync_now"));
     if (req.method === "POST" && action === "disconnect") return json(await disconnectGoogleCalendar(accountId, req));
