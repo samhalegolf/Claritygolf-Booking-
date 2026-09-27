@@ -18,7 +18,8 @@ import { handednessFromNote } from "./handedness.mts";
 import { ensureOptixSyncTable } from "./optix-book-resource.mts";
 import { datePartsForSlot, wallClockToUnixSeconds } from "./optix-reconcile.mts";
 import { readStoredCredentials } from "./integration-credentials.mts";
-import { cleanLocationKind, cleanResourceSource } from "./resources.mts";
+import { cleanLocationKind, cleanResourceSource, serviceResourceMode } from "./resources.mts";
+import { primaryServiceLocationId } from "./service-scope.mts";
 import {
   cleanResourceWebhookUrl,
   sendResourceWebhook,
@@ -154,7 +155,7 @@ async function readBusiness(accountId: string): Promise<Business> {
 }
 
 function lessonLocation(lesson: Lesson, service: any, business: Business) {
-  const id = lesson.locationId || service?.locationId || "";
+  const id = lesson.locationId || primaryServiceLocationId(service);
   return (
     business.locations.find((location) => location?.id === id) ||
     business.locations.find((location) => location?.isDefault) ||
@@ -163,10 +164,10 @@ function lessonLocation(lesson: Lesson, service: any, business: Business) {
   );
 }
 
-/** A lesson this provider holds for: needs a resource, at a place whose resources another system keeps. */
+/** A lesson this provider holds for: uses a resource, at a place whose resources another system keeps. */
 function appliesTo(lesson: Lesson, business: Business) {
   const service = business.services.find((entry) => entry?.id === lesson.serviceId);
-  if (service?.needsResource !== true) return false;
+  if (serviceResourceMode(service) === "none") return false;
   const location = lessonLocation(lesson, service, business);
   return (
     Boolean(location) &&

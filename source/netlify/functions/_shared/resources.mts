@@ -9,10 +9,13 @@
  * free resource, so a location with no resources, or held elsewhere, books
  * exactly as it did before resources existed.
  *
- * A lesson type opts in with needsResource, and may narrow itself to some of
- * the location's resources (a fitting that only runs in Room A). Handedness
- * narrows it again: a left-hander needs a resource set up for lefties or for
- * both; a right-hander must not take a lefties-only one.
+ * A lesson type opts in one of two ways. "Required": it can only be booked
+ * while a resource is free. "Usable": it takes a free one when there is one,
+ * and is still booked when there is not. Either way it may narrow itself to
+ * whole types of resource (every "Hitting bay") or to single resources (a
+ * fitting that only runs in Room A). Handedness narrows it again: a
+ * left-hander needs a resource set up for lefties or for both; a right-hander
+ * must not take a lefties-only one.
  *
  * Pure: no database, no provider. Callers pass in the lessons already holding
  * resources at that location, and write back whatever this picks.
@@ -21,10 +24,13 @@
 export type LocationKind = "physical" | "online";
 export type ResourceSource = "clarity" | "external";
 export type ResourceHandedness = "any" | "left" | "right";
+export type ResourceMode = "none" | "usable" | "required";
 
 export type LocationResource = {
   id: string;
   name: string;
+  /** What kind of resource it is ("Hitting bay"). Lesson types can take a whole type. */
+  type?: string;
   handedness: ResourceHandedness;
   active: boolean;
 };
@@ -38,7 +44,12 @@ export type ResourceLocation = {
 
 export type ResourceService = {
   id?: string;
+  resourceMode?: ResourceMode;
+  /** Before resourceMode: true meant "required". Read, never written. */
   needsResource?: boolean;
+  /** Whole types it may take, by name. */
+  resourceTypes?: string[];
+  /** Single resources it may take, as "locationId/resourceId". */
   resourceIds?: string[];
 };
 
@@ -71,6 +82,30 @@ export function cleanResourceHandedness(value: unknown): ResourceHandedness {
   return value === "left" || value === "right" ? value : "any";
 }
 
+export function cleanResourceMode(value: unknown): ResourceMode {
+  return value === "usable" || value === "required" ? value : "none";
+}
+
+/** How a lesson type uses resources, reading the older needsResource flag too. */
+export function serviceResourceMode(service: ResourceService | null | undefined): ResourceMode {
+  if (service?.resourceMode) return cleanResourceMode(service.resourceMode);
+  return service?.needsResource === true ? "required" : "none";
+}
+
+export function cleanResourceType(value: unknown): string {
+  return String(value ?? "").replace(/\s+/g, " ").trim().slice(0, 40);
+}
+
+/** Types match whatever their case, so "hitting bay" and "Hitting Bay" are one type. */
+export function resourceTypeKey(value: unknown): string {
+  return cleanResourceType(value).toLowerCase();
+}
+
+/** How a lesson type names one resource at one location. */
+export function resourceSelectionId(locationId: string, resourceId: string) {
+  return `${locationId}/${resourceId}`;
+}
+
 export function cleanLocationResources(raw: unknown): LocationResource[] {
   if (!Array.isArray(raw)) return [];
   const seen = new Set<string>();
@@ -85,9 +120,11 @@ export function cleanLocationResources(raw: unknown): LocationResource[] {
       suffix += 1;
     }
     seen.add(id);
+    const type = cleanResourceType(entry?.type);
     resources.push({
       id,
       name,
+      ...(type ? { type } : {}),
       handedness: cleanResourceHandedness(entry?.handedness),
       active: entry?.active !== false,
     });
@@ -95,20 +132,54 @@ export function cleanLocationResources(raw: unknown): LocationResource[] {
   return resources;
 }
 
-export function cleanServiceResourceIds(raw: unknown): string[] {
+/**
+ * "locationId/resourceId" entries. An entry with no location is from before a
+ * lesson type could run at more than one place; it is qualified with the
+ * location it ran at when that is known.
+ */
+export function cleanServiceResourceIds(raw: unknown, legacyLocationId = ""): string[] {
   if (!Array.isArray(raw)) return [];
-  return [...new Set(raw.map((id) => slug(id, "")).filter(Boolean))].slice(0, MAX_RESOURCES);
+  const legacyLocation = slug(legacyLocationId, "");
+  const ids = raw
+    .map((entry) => {
+      const [first, second] = String(entry ?? "").split("/");
+      if (second !== undefined) {
+        const locationId = slug(first, "");
+        const resourceId = slug(second, "");
+        return locationId && resourceId ? resourceSelectionId(locationId, resourceId) : "";
+      }
+      const resourceId = slug(first, "");
+      if (!resourceId) return "";
+      return legacyLocation ? resourceSelectionId(legacyLocation, resourceId) : resourceId;
+    })
+    .filter(Boolean);
+  return [...new Set(ids)].slice(0, MAX_RESOURCES);
+}
+
+export function cleanServiceResourceTypes(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const types: string[] = [];
+  for (const entry of raw) {
+    const type = cleanResourceType(entry);
+    const key = type.toLowerCase();
+    if (!type || seen.has(key)) continue;
+    seen.add(key);
+    types.push(type);
+  }
+  return types.slice(0, MAX_RESOURCES);
 }
 
 /**
- * True when a booking of this service at this location must hold one of
- * Clarity's own resources. Everything else books without one.
+ * True when a booking of this service at this location takes one of
+ * Clarity's own resources, whether it must have one or only uses one when
+ * free. Everything else books without one.
  */
 export function clarityResourcesApply(
   location: ResourceLocation | null | undefined,
   service: ResourceService | null | undefined,
 ) {
-  if (!location || !service?.needsResource) return false;
+  if (!location || serviceResourceMode(service) === "none") return false;
   if (cleanLocationKind(location.kind) === "online") return false;
   if (cleanResourceSource(location.resourceSource) !== "clarity") return false;
   return (location.resources || []).some((resource) => resource.active !== false);
@@ -124,10 +195,19 @@ export function eligibleResources(
   service: ResourceService,
   handedness: "left" | "right" | null = null,
 ): LocationResource[] {
-  const allowed = new Set(service.resourceIds || []);
-  const candidates = (location.resources || []).filter(
-    (resource) => resource.active !== false && (!allowed.size || allowed.has(resource.id)),
-  );
+  // Nothing chosen means any of them. A chosen type covers every resource of
+  // that type, including ones added later; a chosen resource covers only
+  // itself. An entry with no location (see cleanServiceResourceIds) matches
+  // that resource id wherever it is.
+  const types = new Set((service.resourceTypes || []).map(resourceTypeKey).filter(Boolean));
+  const ids = new Set(service.resourceIds || []);
+  const anything = !types.size && !ids.size;
+  const chosen = (resource: LocationResource) =>
+    anything ||
+    types.has(resourceTypeKey(resource.type)) ||
+    ids.has(resourceSelectionId(location.id || "", resource.id)) ||
+    ids.has(resource.id);
+  const candidates = (location.resources || []).filter((resource) => resource.active !== false && chosen(resource));
   const rank = (resource: LocationResource) => {
     const hand = cleanResourceHandedness(resource.handedness);
     if (handedness === "left") return hand === "left" ? 0 : hand === "any" ? 1 : 9;

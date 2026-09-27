@@ -13,6 +13,7 @@ import {
   saveGoogleAuthorization,
 } from "./_shared/google-provider.mts";
 import { unavailableSpans } from "./_shared/availability-blocks.mts";
+import { primaryServiceLocationId } from "./_shared/service-scope.mts";
 import { legacyOriginalWorkspaceId, slugify as cleanSlug } from "./_shared/account.mts";
 import { requireCoachActor } from "./_shared/coach-auth.mts";
 import {
@@ -774,7 +775,7 @@ function resolveLocation(item: any, service: any, locations: any[], account: Ret
     ? locations.filter((location) => location?.active !== false && location?.archived !== true)
     : [];
   const byItem = activeLocations.find((location) => location.id && location.id === item?.locationId);
-  const byService = activeLocations.find((location) => location.id && location.id === service?.locationId);
+  const byService = activeLocations.find((location) => location.id && location.id === primaryServiceLocationId(service));
   const fallback = activeLocations.find((location) => location.isDefault) || activeLocations[0] || defaultLocationFromAccount(account);
   return cleanBookingLocationSnapshot(item.location, byItem || byService || fallback);
 }

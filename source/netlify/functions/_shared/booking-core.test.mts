@@ -1142,3 +1142,78 @@ test("a coach or business name cannot carry markup into the email", () => {
   assert.doesNotMatch(nasty.html, /<img /);
   assert.doesNotMatch(nasty.html, /<b>Jordan/);
 });
+
+test("a lesson type with several coaches offers a time when any of them is free, taking them in order", () => {
+  const shared = service({ coachIds: [coachId, otherCoachId], coachId: undefined });
+  const days = availability();
+  days[day].push({ accountId, coachId: otherCoachId, start: firstSlot, end: minutes(10, 30) });
+  const state = (items: any[]) =>
+    calendarState({
+      services: [shared],
+      availability: days,
+      items,
+    });
+  const free = publicBookingSlots(state([]), { serviceId, week: testWeek });
+  assert.deepEqual(slotStarts(free), [firstSlot, secondSlot, thirdSlot]);
+  assert.ok(free.slots.every((slot: any) => slot.coachId === coachId));
+
+  const coachABusy = publicBookingSlots(state([item({ id: "a-busy", serviceId: otherServiceId })]), { serviceId, week: testWeek });
+  assert.deepEqual(slotStarts(coachABusy), [firstSlot, secondSlot, thirdSlot]);
+  assert.equal(coachABusy.slots.find((slot: any) => slot.start === firstSlot).coachId, otherCoachId);
+
+  const bothBusy = publicBookingSlots(
+    state([
+      item({ id: "a-busy", serviceId: otherServiceId }),
+      item({ id: "b-busy", serviceId: otherServiceId, coachId: otherCoachId, locationId: otherLocationId }),
+    ]),
+    { serviceId, week: testWeek },
+  );
+  assert.deepEqual(slotStarts(bothBusy), [secondSlot, thirdSlot]);
+});
+
+test("a lesson type that only uses a resource is still offered when every one is held", () => {
+  const withBay = (overrides = {}) =>
+    calendarState({
+      locations: [
+        {
+          id: locationId,
+          accountId,
+          name: "Bay A",
+          shortName: "Bay A",
+          active: true,
+          archived: false,
+          isDefault: true,
+          kind: "physical",
+          resourceSource: "clarity",
+          resources: [{ id: "bay-1", name: "Bay 1", type: "Hitting bay", handedness: "any", active: true }],
+        },
+      ],
+      services: [
+        service({ resourceMode: "required", resourceTypes: ["Hitting bay"] }),
+        service({ id: otherServiceId, coachId: otherCoachId, resourceMode: "required" }),
+      ],
+      items: [item({ id: "bay-holder", serviceId: otherServiceId, coachId: otherCoachId, resourceId: "bay-1" })],
+      ...overrides,
+    });
+  const required = publicBookingSlots(withBay(), { serviceId, week: testWeek });
+  assert.deepEqual(slotStarts(required), [secondSlot, thirdSlot]);
+
+  const usableState = withBay();
+  usableState.services[0] = service({ resourceMode: "usable", resourceTypes: ["Hitting bay"] });
+  const usable = publicBookingSlots(usableState, { serviceId, week: testWeek });
+  assert.deepEqual(slotStarts(usable), [firstSlot, secondSlot, thirdSlot]);
+});
+
+test("stored lesson types are read with coach and location lists and a resource mode", () => {
+  const [clean] = normalizeServices(
+    [service({ needsResource: true, resourceIds: ["bay-2"] })],
+    accountId,
+  );
+  assert.deepEqual(clean.coachIds, [coachId]);
+  assert.deepEqual(clean.locationIds, [locationId]);
+  assert.equal(clean.resourceMode, "required");
+  assert.deepEqual(clean.resourceIds, [`${locationId}/bay-2`]);
+  assert.equal("coachId" in clean, false);
+  assert.equal("locationId" in clean, false);
+  assert.equal("needsResource" in clean, false);
+});

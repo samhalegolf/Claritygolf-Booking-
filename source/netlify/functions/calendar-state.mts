@@ -6,6 +6,7 @@ import { currencyForCountry } from "./_shared/locale.mts";
 import { FALLBACK_PHONE_COUNTRY } from "./_shared/phone.mts";
 import { bayBookingMatchesSlot } from "./_shared/optix-reconcile.mts";
 import { cleanLocationKind, cleanLocationResources, cleanResourceSource } from "./_shared/resources.mts";
+import { serviceIncludesCoach } from "./_shared/service-scope.mts";
 import {
   requireCoachActor,
   recordBelongsToAccountStrict,
@@ -681,7 +682,7 @@ function filterCalendarStateForContext(state: Record<string, any>, context: { ac
     items: filteredItems,
     services: context.isAdmin
       ? (state.services || []).filter((service: Record<string, unknown>) => recordBelongsToAccount(service, context.accountId))
-      : (state.services || []).filter((service: Record<string, unknown>) => recordBelongsToAccount(service, context.accountId) && (service.coachId || defaultCoachId) === context.coachId),
+      : (state.services || []).filter((service: Record<string, unknown>) => recordBelongsToAccount(service, context.accountId) && serviceIncludesCoach(service, context.coachId || "", defaultCoachId)),
     availability: context.isAdmin
       ? (state.availability || []).map((day: Array<Record<string, unknown>>) => day.filter((window) => recordBelongsToAccount(window, context.accountId)))
       : (state.availability || []).map((day: Array<Record<string, unknown>>) => day.filter((window) => recordBelongsToAccount(window, context.accountId) && (window.coachId || defaultCoachId) === context.coachId)),
