@@ -118,6 +118,7 @@ import { authSessionResponse, type WorkspaceBootstrap } from "./_shared/auth-con
 import { currencyForAccountSettings, localeForCountry } from "./_shared/locale.mts";
 import { taxDefaultsForCountry } from "./_shared/region.mts";
 import { publicCoachAccount } from "./_shared/public-account.mts";
+import { terminologyFor } from "./_shared/business-terminology.mts";
 import {
   caddyAppUrl,
   caddyConfigured,
@@ -1057,6 +1058,7 @@ function neutralCoachAccount(accountId) {
     bookingUrl: env("CLARITY_BOOKING_URL", "https://book.claritygolf.app"),
     calendarSlug: cleanSlug(accountId, ""),
     caddyWorkspaceUrl: env("CLARITY_CADDY_WORKSPACE_URL", "https://caddy.claritygolf.app"),
+    terminology: terminologyFor(),
     invoiceSettings: neutralInvoiceSettings(),
   };
 }
@@ -1078,6 +1080,7 @@ function defaultCoachAccount() {
     bookingUrl: env("CLARITY_BOOKING_URL", "https://book.claritygolf.app"),
     calendarSlug: defaultCalendarSlug(),
     caddyWorkspaceUrl: env("CLARITY_CADDY_WORKSPACE_URL", "https://caddy.claritygolf.app"),
+    terminology: terminologyFor(),
     invoiceSettings: defaultInvoiceSettings,
 	  };
 	}
@@ -1233,6 +1236,7 @@ function cleanCoachAccount(account) {
       account?.caddyWorkspaceUrl,
       defaults.caddyWorkspaceUrl,
     ),
+    terminology: terminologyFor(account?.terminology),
     invoiceSettings: cleanInvoiceSettings(
       account?.invoiceSettings,
       cleanPhoneCountry(account?.country, defaults.country),
@@ -5611,6 +5615,7 @@ export function coachAccountFromSettings(settings, accountId = "") {
     caddyWorkspaceUrl:
       settingValue(settings, "accountCaddyWorkspaceUrl") ||
       defaults.caddyWorkspaceUrl,
+    terminology: parseSettingJson(settings, "accountTerminologyJson", defaults.terminology),
     invoiceSettings: parseSettingJson(
       settings,
       "accountInvoiceSettingsJson",
@@ -5983,6 +5988,7 @@ async function writeCoachAccount(accountId: string, account) {
     accountBookingUrl: clean.bookingUrl,
     accountCalendarSlug: clean.calendarSlug,
     accountCaddyWorkspaceUrl: clean.caddyWorkspaceUrl,
+    accountTerminologyJson: JSON.stringify(clean.terminology),
     accountInvoiceSettingsJson: JSON.stringify(clean.invoiceSettings),
     coachName: clean.businessName,
     updatedAt: nowIso(),
@@ -10336,6 +10342,7 @@ async function readPlayerProfile(session) {
     shop,
     review,
     bookingEmbed,
+    terminology: terminologyFor(safeJsonParse(settingsMap.accountTerminologyJson, {})),
   };
 }
 

@@ -34,6 +34,7 @@ test("the booking page gets what a price needs and nothing private", () => {
   assert.deepEqual(shown.invoiceSettings, { currency: "GBP", taxName: "VAT", taxRate: 20, taxInclusive: true });
   assert.equal(shown.businessName, "Acme Golf");
   assert.equal(shown.country, "GB");
+  assert.equal(shown.terminology.staffSingular, "Coach");
   const text = JSON.stringify(shown);
   for (const secret of ["owner@example.com", "GB123456789", "12345678", "1 High Street", "Pay by transfer", "Sort code"]) {
     assert.ok(!text.includes(secret), `${secret} reached the public account`);

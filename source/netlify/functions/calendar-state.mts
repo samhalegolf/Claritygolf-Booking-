@@ -2,6 +2,7 @@ import type { Config, Context } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
 import { createHash, randomUUID } from "node:crypto";
 import { legacyOriginalWorkspaceId, defaultCalendarSlug } from "./_shared/account.mts";
+import { terminologyFor } from "./_shared/business-terminology.mts";
 import { bayBookingMatchesSlot } from "./_shared/optix-reconcile.mts";
 import { cleanLocationKind, cleanLocationResources, cleanResourceSource } from "./_shared/resources.mts";
 import { serviceIncludesCoach } from "./_shared/service-scope.mts";
@@ -194,6 +195,7 @@ function defaultCoachAccount() {
     bookingUrl: env("CLARITY_BOOKING_URL", "https://book.claritygolf.app"),
     calendarSlug: defaultCalendarSlug(),
     caddyWorkspaceUrl: env("CLARITY_CADDY_WORKSPACE_URL", "https://caddy.claritygolf.app"),
+    terminology: terminologyFor(),
   };
 }
 
@@ -212,6 +214,7 @@ function cleanCoachAccount(account: Record<string, unknown> = {}) {
     bookingUrl: cleanUrl(account.bookingUrl, defaults.bookingUrl),
     calendarSlug: cleanSlug(account.calendarSlug, cleanSlug(businessName, defaults.calendarSlug)),
     caddyWorkspaceUrl: cleanUrl(account.caddyWorkspaceUrl, defaults.caddyWorkspaceUrl),
+    terminology: terminologyFor(account.terminology),
   };
 }
 
@@ -336,6 +339,13 @@ function coachAccountFromSettings(settings: Record<string, string>, accountId = 
     bookingUrl: settingValue(settings, "accountBookingUrl") || defaults.bookingUrl,
     calendarSlug: settingValue(settings, "accountCalendarSlug") || defaults.calendarSlug,
     caddyWorkspaceUrl: settingValue(settings, "accountCaddyWorkspaceUrl") || defaults.caddyWorkspaceUrl,
+    terminology: (() => {
+      try {
+        return JSON.parse(settingValue(settings, "accountTerminologyJson") || "{}");
+      } catch {
+        return defaults.terminology;
+      }
+    })(),
   });
 }
 

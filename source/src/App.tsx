@@ -107,6 +107,14 @@ import {
   useLessonNotesState,
 } from "./modules/player-profiles/lessonNotesStore";
 import { cleanPhoneCountry } from "../netlify/functions/_shared/phone.mts";
+import {
+  BUSINESS_TERMINOLOGY_PRESETS,
+  matchingTerminologyPreset,
+  terminologyFor,
+  terminologyPreset,
+  type BusinessTerminology,
+  type BusinessTerminologyPreset,
+} from "../netlify/functions/_shared/business-terminology.mts";
 import { ResourceSystemPanel } from "./modules/integrations/ResourceSystemPanel";
 import { availabilityConflicts, type AvailabilityConflict } from "./availabilityConflicts";
 import {
@@ -2143,6 +2151,7 @@ type CoachAccount = {
   bookingUrl: string;
   calendarSlug: string;
   caddyWorkspaceUrl: string;
+  terminology: BusinessTerminology;
   invoiceSettings: InvoiceSettings;
 };
 
@@ -2701,10 +2710,10 @@ function formatWeekTitle(week: number) {
   return `Week of ${month} ${date.getDate()}, ${date.getFullYear()}`;
 }
 
-function sectionTitle(view: View) {
+function sectionTitle(view: View, terms: BusinessTerminology = terminologyFor()) {
   switch (view) {
     case "clients":
-      return "Clients";
+      return terms.customerPlural;
     case "booking":
       return "Booking Page";
     case "sell":
@@ -2716,9 +2725,9 @@ function sectionTitle(view: View) {
     case "video":
       return "Video Analysis";
     case "players":
-      return "Player Profiles";
+      return `${terms.customerSingular} Profiles`;
     case "profile":
-      return "Coach profile";
+      return `${terms.staffSingular} profile`;
     default:
       return "Calendar";
   }
@@ -3360,6 +3369,7 @@ const defaultCoachAccount: CoachAccount = {
   bookingUrl: "https://book.claritygolf.app",
   calendarSlug: "",
   caddyWorkspaceUrl: CADDY_APP_URL,
+  terminology: terminologyFor(),
   invoiceSettings: defaultInvoiceSettings,
 };
 
@@ -3451,6 +3461,7 @@ function cleanCoachAccount(account?: Partial<CoachAccount>): CoachAccount {
     bookingUrl: cleanUrl(account?.bookingUrl, defaultCoachAccount.bookingUrl),
     calendarSlug: cleanSlug(account?.calendarSlug, cleanSlug(businessName, defaultCoachAccount.calendarSlug)),
     caddyWorkspaceUrl: cleanUrl(account?.caddyWorkspaceUrl, defaultCoachAccount.caddyWorkspaceUrl),
+    terminology: terminologyFor(account?.terminology),
     invoiceSettings: cleanInvoiceSettings(
       account?.invoiceSettings,
       cleanPhoneCountry(account?.country, defaultCoachAccount.country),
@@ -5599,6 +5610,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   // overwrites all of it when it answers.
   const [bootstrap] = useState(() => workspaceBootstrapFromSession(entrySession));
   const [coachAccount, setCoachAccount] = useState<CoachAccount>(() => bootstrap?.account ?? getStoredCoachAccount());
+  const terms = useMemo(() => terminologyFor(coachAccount), [coachAccount.terminology]);
+  const settingsSections = useMemo(
+    () =>
+      SETTINGS_SECTIONS.map((section) =>
+        section.key === "services"
+          ? { ...section, label: `${terms.serviceSingular} types` }
+          : section,
+      ),
+    [terms.serviceSingular],
+  );
   // Contact matching and phone formatting resolve bare national numbers against
   // the workspace's country. The server does the same, from the same setting —
   // if these two ever disagree, the client and server disagree about whether
@@ -6319,6 +6340,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     value: coachAccount,
     onSave: saveCoachAccount,
   });
+  const terminologyEditor = useEditableBlock<CoachAccount>({
+    value: coachAccount,
+    onSave: saveCoachAccount,
+  });
   const billingSettingsEditor = useEditableBlock<CoachAccount>({
     value: coachAccount,
     onSave: saveCoachAccount,
@@ -6358,7 +6383,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const editableBlocks = useMemo(
     () => [
       { id: "region", title: "Country & region", editor: regionEditor },
-      { id: "coach-account", title: "Coach Account", editor: coachAccountEditor },
+      { id: "coach-account", title: `${terms.staffSingular} Account`, editor: coachAccountEditor },
+      { id: "terminology", title: "Terminology", editor: terminologyEditor },
       { id: "billing-settings", title: "Billing Settings", editor: billingSettingsEditor },
       { id: "email-notifications", title: "Email", editor: emailNotificationsEditor },
       { id: "text-machine", title: "SMS", editor: textMachineEditor },
@@ -6370,6 +6396,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     [
       regionEditor,
       coachAccountEditor,
+      terminologyEditor,
       billingSettingsEditor,
       emailNotificationsEditor,
       textMachineEditor,
@@ -6377,6 +6404,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       bookingNoticeEditor,
       bookingScreenNameEditor,
       playerBookingEmbedEditor,
+      terms.staffSingular,
     ],
   );
   // Which Settings section the coach profile asked to have open on arrival.
@@ -6434,6 +6462,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
   const coachAccountDraft = coachAccountEditor.draftValue;
   const coachAccountIsLocked = coachAccountEditor.status !== "editing" && coachAccountEditor.status !== "error";
+  const terminologyDraft = terminologyEditor.draftValue;
+  const terminologyIsLocked = terminologyEditor.status !== "editing" && terminologyEditor.status !== "error";
   const regionDraft = regionEditor.draftValue;
   const regionIsLocked = regionEditor.status !== "editing" && regionEditor.status !== "error";
   const billingAccountDraft = billingSettingsEditor.draftValue;
@@ -6456,6 +6486,21 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
   function updateCoachAccountBlockDraft<K extends keyof CoachAccount>(field: K, value: CoachAccount[K]) {
     coachAccountEditor.setDraftValue((current) => cleanCoachAccount({ ...current, [field]: value }));
+  }
+
+  function updateTerminologyDraft(field: keyof BusinessTerminology, value: string) {
+    terminologyEditor.setDraftValue((current) => ({
+      ...current,
+      terminology: { ...current.terminology, [field]: value },
+    }));
+  }
+
+  function applyTerminologyPreset(preset: BusinessTerminologyPreset) {
+    if (preset === "custom") return;
+    terminologyEditor.setDraftValue((current) => ({
+      ...current,
+      terminology: terminologyPreset(preset),
+    }));
   }
 
   function updateRegionDraft(next: Partial<RegionValues>) {
@@ -12879,7 +12924,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     // against the real lists here. A card naming a destination that no longer
     // exists does nothing, rather than leaving the app on an impossible tab.
     if (target.kind === "settings") {
-      const section = SETTINGS_SECTIONS.find((candidate) => candidate.key === target.tab);
+      const section = settingsSections.find((candidate) => candidate.key === target.tab);
       if (!section) return;
       // Opened over the profile, not navigated to: the coach stays where they
       // were, and closing puts them back on the card they clicked.
@@ -14634,7 +14679,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     setCoachEditorError("");
   }
 
-  async function persistCoaches(nextCoaches: CoachProfile[], message = "Coaches saved."): Promise<boolean> {
+  async function persistCoaches(nextCoaches: CoachProfile[], message = `${terms.staffPlural} saved.`): Promise<boolean> {
     const saveVersion = ++coachSaveVersionRef.current;
     beginAdminSave("coaches");
     const isCurrentSave = () => coachSaveVersionRef.current === saveVersion;
@@ -18776,7 +18821,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
   async function persistServices(
     nextServices: Service[],
-    message = "Lesson types saved.",
+    message = `${terms.serviceSingular} types saved.`,
     requiredServiceId?: string | null,
   ) {
     const payloadServices = nextServices.map((service) => ({ ...service }));
@@ -21375,8 +21420,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       <div className="service-layout">
         <div className="services-topline">
           <div>
-            <span>Lesson options</span>
-            <h2>Lesson types</h2>
+            <span>{terms.serviceSingular} options</span>
+            <h2>{terms.serviceSingular} types</h2>
           </div>
           <button className="outline-button" onClick={startNewService}>
             <Plus size={16} />
@@ -21388,8 +21433,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           <article className="data-card service-editor">
             <div className="data-card-header">
               <div>
-                <span>{editingServiceId ? "Edit Lesson Type" : "New Lesson Type"}</span>
-                <h2>{editingServiceId ? serviceEditor.name || "Lesson details" : "Add service"}</h2>
+                <span>{editingServiceId ? `Edit ${terms.serviceSingular} Type` : `New ${terms.serviceSingular} Type`}</span>
+                <h2>{editingServiceId ? serviceEditor.name || `${terms.serviceSingular} details` : `Add ${terms.serviceSingular.toLowerCase()}`}</h2>
               </div>
               <button
                 className="outline-button"
@@ -21456,7 +21501,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 <input
                   value={serviceEditor.name}
                   onChange={(event) => updateServiceEditor("name", event.target.value)}
-                  placeholder="Lesson name"
+                  placeholder={`${terms.serviceSingular} name`}
                 />
               </label>
               {/* The colour lives on the lesson type because that is the thing
@@ -21663,13 +21708,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 )}
                 {(isAdminUser || activeCoachList.length > 1) && (
                   <div className="service-scope-field">
-                    <span>Coaches</span>
+                    <span>{terms.staffPlural}</span>
                     <small>
                       {isAdminUser
                         ? "Who teaches it. Customers see every time any of them is free."
                         : "Who teaches it. An admin can change this."}
                     </small>
-                    <div className="service-resource-choices" aria-label="Coaches who teach this lesson type">
+                    <div className="service-resource-choices" aria-label={`${terms.staffPlural} who provide this ${terms.serviceSingular.toLowerCase()} type`}>
                       {activeCoachList.map((coach) => {
                         const chosen = serviceEditor.coachIds.includes(coach.id);
                         return (
@@ -21962,7 +22007,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   ? "Saved"
                   : serviceSaveState === "error"
                     ? "Not saved"
-                    : "Save Lesson Type"}
+                    : `Save ${terms.serviceSingular} Type`}
             </button>
           </article>
         )}
@@ -21971,11 +22016,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           <summary className="settings-subsection-title">
             <ScissorsLineDashed size={18} />
             <div>
-              <span>Lesson types</span>
+              <span>{terms.serviceSingular} types</span>
               <strong>{activeServices.length} active</strong>
             </div>
           </summary>
-          <div className="service-list-tabs" role="tablist" aria-label="Lesson type status">
+          <div className="service-list-tabs" role="tablist" aria-label={`${terms.serviceSingular} type status`}>
             <button
               className={`pill ${serviceListTab === "active" ? "active-pill" : ""}`}
               onClick={() => setServiceListTab("active")}
@@ -21991,7 +22036,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               Archived
             </button>
           </div>
-          <div className="service-list" aria-label="Lesson types">
+          <div className="service-list" aria-label={`${terms.serviceSingular} types`}>
             {(serviceListTab === "active" ? activeServices : archivedServices).map((service) => (
               <article className={`service-row ${service.active ? "" : "is-archived"}`} key={service.id}>
                 <button className="service-row-main" onClick={() => editService(service)} type="button">
@@ -22004,7 +22049,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   {service.description && <em>{service.description}</em>}
                   {(isAdminUser || activeCoachList.length > 1) && (
                     <em>
-                      {service.coachIds.length > 1 ? "Coaches" : "Coach"}:{" "}
+                      {service.coachIds.length > 1 ? terms.staffPlural : terms.staffSingular}:{" "}
                       {(service.coachIds.length ? service.coachIds : [firstCoachId(coachProfiles)])
                         .map((id) => {
                           const coach = bookingCoachSnapshotFor(id, coachProfiles, coachAccount);
@@ -22023,7 +22068,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           .join(", ")
                       : bookingLocationShortDisplay(bookingLocationSnapshotFor(service, locations, coachAccount))}
                   </em>
-                  {(service.lessonNote || service.location) && <em>Lesson note: {service.lessonNote || service.location}</em>}
+                  {(service.lessonNote || service.location) && <em>{terms.serviceSingular} note: {service.lessonNote || service.location}</em>}
                   {service.lessonFormat === "package" && (
                     <em>
                       {service.packageAllowance ?? 5} slots ·{" "}
@@ -22460,28 +22505,81 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     </SettingsGroup>
   );
 
+  const terminologySettingsPanel = (
+    <SettingsGroup id="terminology" section="business" title="Terminology">
+      <EditableSettingsBlock
+        id="terminology-block"
+        title="Terminology"
+        status={terminologyEditor.status}
+        dirty={terminologyEditor.dirty}
+        errorMessage={terminologyEditor.errorMessage}
+        onEdit={() => startEditableBlock("terminology")}
+        onCancel={() => cancelEditableBlock("terminology")}
+        onSave={() => void saveEditableBlock("terminology")}
+      >
+        <div className="data-card wide">
+          <p className="field-help">
+            Choose the words customers see. This does not change booking data, permissions, integrations, or how the calendar works.
+          </p>
+          <label className="settings-field">
+            <span>Preset</span>
+            <select
+              value={matchingTerminologyPreset(terminologyDraft)}
+              disabled={terminologyIsLocked}
+              onChange={(event) => applyTerminologyPreset(event.target.value as BusinessTerminologyPreset)}
+            >
+              {BUSINESS_TERMINOLOGY_PRESETS.map((preset) => (
+                <option key={preset.id} value={preset.id}>{preset.label}</option>
+              ))}
+            </select>
+          </label>
+          <div className="service-form-grid">
+            {([
+              ["staffSingular", "Staff — singular"],
+              ["staffPlural", "Staff — plural"],
+              ["customerSingular", "Customer — singular"],
+              ["customerPlural", "Customer — plural"],
+              ["serviceSingular", "Service — singular"],
+              ["servicePlural", "Service — plural"],
+            ] as Array<[keyof BusinessTerminology, string]>).map(([field, label]) => (
+              <label className="settings-field" key={field}>
+                <span>{label}</span>
+                <input
+                  value={terminologyDraft.terminology[field]}
+                  readOnly={terminologyIsLocked}
+                  maxLength={40}
+                  onChange={(event) => updateTerminologyDraft(field, event.target.value)}
+                />
+              </label>
+            ))}
+          </div>
+        </div>
+      </EditableSettingsBlock>
+    </SettingsGroup>
+  );
+
   const coachesSettingsPanel = (
-    <SettingsGroup id="coaches" section="business" title="Coaches">
+    <SettingsGroup id="coaches" section="business" title={terms.staffPlural}>
       <div className="data-card wide">
         <div className="data-card-header">
           <div>
-            <h2>{activeCoachList.length} active coach{activeCoachList.length === 1 ? "" : "es"}</h2>
+              <h2>{activeCoachList.length} active {activeCoachList.length === 1 ? terms.staffSingular.toLowerCase() : terms.staffPlural.toLowerCase()}</h2>
           </div>
           <button className="primary-button" onClick={startNewCoach} type="button">
             <Plus size={16} />
-            <span>Add coach</span>
+            <span>Add {terms.staffSingular.toLowerCase()}</span>
           </button>
         </div>
         <p className="field-help">
-          Coach profiles are bookable operator identities. Admin users are a permission layer, not the owner of bookings.
+          {terms.staffSingular} profiles are bookable operator identities. Admin users are a permission layer, not the owner of bookings.
         </p>
 
         {showCoachEditor && (
           <article className="service-editor-card">
             <div className="data-card-header compact">
               <div>
-                <span>{editingCoachId ? "Edit coach" : "New coach"}</span>
-                <h3>{coachEditor.displayName || coachEditor.name || "Coach details"}</h3>
+                <span>{editingCoachId ? `Edit ${terms.staffSingular.toLowerCase()}` : `New ${terms.staffSingular.toLowerCase()}`}</span>
+                <h3>{coachEditor.displayName || coachEditor.name || `${terms.staffSingular} details`}</h3>
               </div>
               <button
                 className="icon-button"
@@ -22593,12 +22691,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   ? "Saved"
                   : coachSaveState === "error"
                     ? "Not saved"
-                    : "Save Coach"}
+                    : `Save ${terms.staffSingular}`}
             </button>
           </article>
         )}
 
-        <div className="service-list" aria-label="Coaches">
+        <div className="service-list" aria-label={terms.staffPlural}>
           {coachProfiles.map((coach) => (
             <article className={`service-row ${coach.active && !coach.archived ? "" : "is-archived"}`} key={coach.id}>
               <button className="service-row-main" onClick={() => editCoach(coach)} type="button">
@@ -24183,9 +24281,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       {
         id: "lesson-types",
         category: "Calendar",
-        label: "Lesson types",
+        label: `${terms.serviceSingular} types`,
         summary: "What a client can book, and what it costs.",
-        path: "Settings › Lesson types",
+        path: `Settings › ${terms.serviceSingular} types`,
         target: { kind: "settings", tab: "services" },
         facts: firstFew(live, (service) => [
           service.name,
@@ -24220,9 +24318,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       {
         id: "coach-branding",
         category: "Customer experience",
-        label: "Coach branding",
+        label: `${terms.staffSingular} branding`,
         summary: "Your logo and colours, everywhere a client looks.",
-        path: "Settings › Business › Coach branding",
+        path: `Settings › Business › ${terms.staffSingular} branding`,
         target: { kind: "settings", tab: "business", group: "coach-branding" },
         facts: [
           ["Logo", brandSettings.logoName || (brandSettings.logoPreview ? "Set" : "Not set")],
@@ -24321,7 +24419,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       },
       {
         id: "clients",
-        category: "Player portal",
+        category: `${terms.customerSingular} portal`,
         label: "Client list",
         summary: "Everyone who has booked with you.",
         path: "Clients",
@@ -24331,25 +24429,25 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       },
       {
         id: "players",
-        category: "Player portal",
-        label: "Player profiles",
-        summary: "Notes, videos, practice and passes per player.",
-        path: "Player Profiles",
+        category: `${terms.customerSingular} portal`,
+        label: `${terms.customerSingular} profiles`,
+        summary: `Notes, videos, practice and passes per ${terms.customerSingular.toLowerCase()}.`,
+        path: `${terms.customerSingular} Profiles`,
         target: { kind: "view", view: "players" },
         facts: [],
       },
       {
         id: "video",
-        category: "Player portal",
+        category: `${terms.customerSingular} portal`,
         label: "Video",
-        summary: "Saved analysis, and what a player can watch.",
+        summary: `Saved analysis, and what a ${terms.customerSingular.toLowerCase()} can watch.`,
         path: "Video",
         target: { kind: "view", view: "video" },
         facts: [],
       },
       {
         id: "practice",
-        category: "Player portal",
+        category: `${terms.customerSingular} portal`,
         label: "Practice",
         summary: "The kinds of block, and the favourites rail.",
         path: "Settings › Practice",
@@ -24368,6 +24466,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     notificationSettings,
     invoiceSettings,
     catalogItems,
+    terms,
   ]);
 
   const pageHeading: { title: string; subtitle?: string } =
@@ -24386,14 +24485,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         : activeView === "settings"
           ? {
               title: "Settings",
-              subtitle: SETTINGS_SECTIONS.find((section) => section.key === settingsTab)?.label,
+              subtitle: settingsSections.find((section) => section.key === settingsTab)?.label,
             }
           : activeView === "profile"
             ? {
-                title: "Coach profile",
+                title: `${terms.staffSingular} profile`,
                 subtitle: "Who you are, and everything Clarity is plugged into on your behalf",
               }
-            : { title: sectionTitle(activeView) };
+            : { title: sectionTitle(activeView, terms) };
   const failedDiagnosticEvents = diagnosticEvents.filter((event) => event.status === "failed");
   const latestDiagnosticEvent = diagnosticEvents[0];
   const latestDiagnosticError = failedDiagnosticEvents[0];
@@ -24463,7 +24562,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             onClick={() => switchView("profile")}
           >
             <Home size={18} />
-            Coach profile
+            {terms.staffSingular} profile
           </button>
           <button className={activeView === "calendar" ? "active" : ""} onClick={() => switchView("calendar")}>
             <CalendarDays size={18} />
@@ -24471,11 +24570,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           </button>
           <button className={activeView === "clients" ? "active" : ""} onClick={() => switchView("clients")}>
             <User size={18} />
-            Clients
+            {terms.customerPlural}
           </button>
           <button className={activeView === "players" ? "active" : ""} onClick={() => switchView("players")}>
             <Users size={18} />
-            Player Profiles
+            {terms.customerSingular} Profiles
           </button>
           {billingWorkspaceEnabled && (
             <button className={activeView === "sell" ? "active" : ""} onClick={() => switchView("sell")}>
@@ -25298,7 +25397,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         <div className="item-content">
                           <strong>{pointerSession.booking.client}</strong>
                           <span>
-                            {services.find((service) => service.id === pointerSession.booking.serviceId)?.name ?? "Lesson"}
+                            {services.find((service) => service.id === pointerSession.booking.serviceId)?.name ?? terms.serviceSingular}
                           </span>
                           <em>{formatRange(draft.start, draft.duration)}</em>
                         </div>
@@ -25666,15 +25765,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           <section className="module-page player-profiles-page">
             <div className="player-profiles-toolbar">
               <div className="player-profiles-heading">
-                <p>Clients with lesson notes or video, plus anyone you add.</p>
+                <p>{terms.customerPlural} with {terms.serviceSingular.toLowerCase()} notes or video, plus anyone you add.</p>
               </div>
               <div className="player-profiles-actions">
                 <button
                   type="button"
                   className="icon-button"
                   onClick={openPlayerAddDialog}
-                  title="Add player"
-                  aria-label="Add player"
+                  title={`Add ${terms.customerSingular.toLowerCase()}`}
+                  aria-label={`Add ${terms.customerSingular.toLowerCase()}`}
                 >
                   <Plus size={18} />
                 </button>
@@ -25694,8 +25793,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               <div className="player-profiles-list">
                 {playerProfiles.length === 0 && playerProfilesDataReady ? (
                   <div className="player-profiles-empty">
-                    <h2>No player profiles yet</h2>
-                    <p>Add a lesson note or video to a client, or use + to add one.</p>
+                    <h2>No {terms.customerSingular.toLowerCase()} profiles yet</h2>
+                    <p>Add a {terms.serviceSingular.toLowerCase()} note or video to a {terms.customerSingular.toLowerCase()}, or use + to add one.</p>
                   </div>
                 ) : (
                   playerProfiles.map((player) => {
@@ -29547,7 +29646,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   onAdjustStock={adjustProductStock}
                   onLoadMovements={fetchStockMovements}
                   onEditLessonTypes={() =>
-                    openProfileTarget({ kind: "settings", tab: "services" }, "Lesson types")
+                    openProfileTarget({ kind: "settings", tab: "services" }, `${terms.serviceSingular} types`)
                   }
                 />
               </Suspense>
@@ -31067,7 +31166,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 coachName: coachAccount.coachName || currentAppUser.name,
                 businessName: coachAccount.businessName,
                 venueName: coachAccount.venueShortName || coachAccount.venueName,
-                roleLabel: isPlatformAdmin ? "Platform admin" : isAdminUser ? "Coach · Admin" : "Coach",
+                roleLabel: isPlatformAdmin ? "Platform admin" : isAdminUser ? `${terms.staffSingular} · Admin` : terms.staffSingular,
                 email: coachAccount.contactEmail || currentAppUser.email,
                 phone: coachProfiles[0]?.phone || "",
                 timezone: coachAccount.timezone,
@@ -31096,7 +31195,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 offering a journey nobody started. */}
             {workspaceOverlay?.kind !== "settings" && (
             <nav className="settings-subnav" aria-label="Settings sections">
-              {SETTINGS_SECTIONS.filter(
+              {settingsSections.filter(
                 (section) =>
                   (section.platformOnly ? isPlatformAdmin : true) &&
                   (isAdminUser || !section.adminOnly),
@@ -31163,6 +31262,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 </Suspense>
               ) : null}
               {servicesSettingsPanel}
+              {isAdminUser ? terminologySettingsPanel : null}
               {isAdminUser ? coachesSettingsPanel : null}
               {isAdminUser ? locationsSettingsPanel : null}
               {availabilitySettingsPanel}
@@ -31204,7 +31304,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 </EditableSettingsBlock>
               </SettingsGroup>
 
-              <SettingsGroup id="coach-account" section="account" title="Coach account" className="notification-card account-card">
+              <SettingsGroup id="coach-account" section="account" title={`${terms.staffSingular} account`} className="notification-card account-card">
                 <details className="settings-subsection">
                   <summary className="settings-subsection-title">
                     <KeyRound size={18} />
@@ -31252,7 +31352,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 <div className="account-settings-groups">
                   <EditableSettingsBlock
                     id="coach-account-block"
-                    title="Coach Account"
+                    title={`${terms.staffSingular} Account`}
                     status={coachAccountEditor.status}
                     dirty={coachAccountEditor.dirty}
                     errorMessage={coachAccountEditor.errorMessage}
@@ -31264,13 +31364,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     <summary className="settings-subsection-title">
                       <User size={18} />
                       <div>
-                        <span>Coach</span>
+                        <span>{terms.staffSingular}</span>
                         <strong>Profile</strong>
                       </div>
                     </summary>
                     <div className="service-form-row">
                       <label className="settings-field">
-                        <span>Coach name</span>
+                      <span>{terms.staffSingular} name</span>
                         <input
                           value={coachAccountDraft.coachName}
                           readOnly={coachAccountIsLocked}
@@ -33271,7 +33371,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 </details>
               </SettingsGroup>
 
-              <SettingsGroup id="coach-branding" section="business" title="Coach branding" className="brand-vein-card">
+              <SettingsGroup id="coach-branding" section="business" title={`${terms.staffSingular} branding`} className="brand-vein-card">
 
                 <div className="brand-vein-preview">
                   <div className="brand-vein-logo">

@@ -913,6 +913,28 @@ test("saving an account keeps the coach's invoice line tags", () => {
   ]);
 });
 
+test("a business reads its saved terminology without changing internal account fields", () => {
+  const account = coachAccountFromSettings(
+    {
+      accountId: "wellness-room",
+      accountBusinessName: "Wellness Room",
+      accountTerminologyJson: JSON.stringify({
+        staffSingular: "Therapist",
+        staffPlural: "Therapists",
+        customerSingular: "Client",
+        customerPlural: "Clients",
+        serviceSingular: "Treatment",
+        servicePlural: "Treatments",
+      }),
+    },
+    "wellness-room",
+  );
+
+  assert.equal(account.id, "wellness-room");
+  assert.equal(account.terminology.staffSingular, "Therapist");
+  assert.equal(account.terminology.servicePlural, "Treatments");
+});
+
 test("saving an account keeps the coach's unpaid-invoice loudness", () => {
   const settingsJson = (unpaidLoudness: unknown) => ({
     accountId,

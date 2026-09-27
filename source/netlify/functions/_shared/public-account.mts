@@ -8,6 +8,8 @@
 // This is an allow-list on purpose. A field added to the account later stays
 // private until someone decides the booking page needs it.
 
+import { terminologyFor } from "./business-terminology.mts";
+
 type AccountLike = {
   id?: unknown;
   coachName?: unknown;
@@ -19,6 +21,7 @@ type AccountLike = {
   bookingUrl?: unknown;
   calendarSlug?: unknown;
   caddyWorkspaceUrl?: unknown;
+  terminology?: unknown;
   invoiceSettings?: {
     currency?: unknown;
     taxName?: unknown;
@@ -40,6 +43,7 @@ export function publicCoachAccount(account: AccountLike | null | undefined) {
     bookingUrl: account?.bookingUrl,
     calendarSlug: account?.calendarSlug,
     caddyWorkspaceUrl: account?.caddyWorkspaceUrl,
+    terminology: terminologyFor(account),
     // Only what a price needs: its currency, and the tax to name beside it.
     invoiceSettings: {
       currency: invoice.currency,

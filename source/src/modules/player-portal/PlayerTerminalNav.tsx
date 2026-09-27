@@ -9,6 +9,8 @@
 // Clarity Caddy is deliberately absent. It is a different product, and its one
 // way in is the card on the home route -- a permanent link in the bar would put
 // "leave here" next to every screen in the terminal.
+import { terminologyFor, type BusinessTerminology } from "../../../netlify/functions/_shared/business-terminology.mts";
+
 export type PlayerTerminalDestination =
   | "home"
   | "lessons"
@@ -82,6 +84,7 @@ export type PlayerTerminalNavProps = {
    *  guest, who holds none and has no coach to hold them with. */
   balance?: { credits: number } | null;
   onOpenBalance?: () => void;
+  terminology?: BusinessTerminology;
 };
 
 export function PlayerTerminalNav({
@@ -97,8 +100,13 @@ export function PlayerTerminalNav({
   onToggleTheme,
   balance,
   onOpenBalance,
+  terminology,
 }: PlayerTerminalNavProps) {
-  const baseLinks = guest ? NAV_LINKS.filter((link) => !GUEST_HIDDEN.has(link.id)) : NAV_LINKS;
+  const terms = terminologyFor(terminology);
+  const namedLinks = NAV_LINKS.map((link) =>
+    link.id === "lessons" ? { ...link, label: terms.servicePlural } : link,
+  );
+  const baseLinks = guest ? namedLinks.filter((link) => !GUEST_HIDDEN.has(link.id)) : namedLinks;
 
   // Last in the bar, and only when there is one. A guest never gets it either:
   // the config arrives with the player profile, and a guest has no account to

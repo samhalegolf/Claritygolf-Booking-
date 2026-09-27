@@ -76,6 +76,7 @@ import type {
   VideoWorkspaceSaveResult,
 } from "../video-analysis/VideoWorkspace";
 import { deleteGuestNote, listGuestNotes, saveGuestNote, type GuestNote } from "./guestNotesStore";
+import { terminologyFor, type BusinessTerminology } from "../../../netlify/functions/_shared/business-terminology.mts";
 
 // The player's own app. It is chosen by the entry point from the session role,
 // not by hostname any more, and it never renders a login form of its own --
@@ -339,6 +340,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   // profile lands, and null forever for a business that has not set one up --
   // which is what keeps the tab out of the nav.
   const [bookingEmbed, setBookingEmbed] = useState<PlayerBookingEmbedConfig | null>(null);
+  const [terms, setTerms] = useState<BusinessTerminology>(() => terminologyFor());
 
   // Videos live on this device first. Nothing leaves it until the player
   // presses Send to coach.
@@ -417,6 +419,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
         shop?: ShopItem[];
         review?: ReviewOffer | null;
         bookingEmbed?: PlayerBookingEmbedConfig;
+        terminology?: BusinessTerminology;
       };
       if (!res.ok) throw new Error(data?.message || "We couldn't load your profile.");
       setBookings(Array.isArray(data.bookings) ? data.bookings : []);
@@ -442,6 +445,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
           : null,
       );
       setBookingEmbed(isPlayerBookingEmbedConfigured(data.bookingEmbed) ? data.bookingEmbed : null);
+      setTerms(terminologyFor(data.terminology));
       if (data.player?.email) setPlayerEmail(data.player.email);
       if (data.player?.name) setPlayerName(data.player.name);
       if (data.player?.phone) setPlayerPhone(data.player.phone);
@@ -1443,6 +1447,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
       onToggleTheme={toggleTheme}
       balance={isGuest || !spendableCredits ? null : { credits: spendableCredits }}
       onOpenBalance={() => navigateTerminal("passes")}
+      terminology={terms}
     />
   );
 
@@ -1650,7 +1655,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                           <span>
                             {nextLesson
                               ? formatBookingWhen(nextLesson)
-                              : "Book a lesson or a swing review"}
+                              : `Book a ${terms.serviceSingular.toLowerCase()} or a swing review`}
                           </span>
                           {nextLesson?.location?.name && <em>{nextLesson.location.name}</em>}
                         </span>
@@ -1677,7 +1682,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                               />
                             ) : (
                               <p className="player-portal-empty">
-                                Your coach adds these after a lesson.
+                                Your {terms.staffSingular.toLowerCase()} adds these after a {terms.serviceSingular.toLowerCase()}.
                               </p>
                             )}
                             <button
@@ -1826,13 +1831,13 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                           className="player-portal-home-card"
                           onClick={() => navigateTerminal("lessons")}
                         >
-                          <span className="player-portal-home-card-title">Next lesson</span>
+                          <span className="player-portal-home-card-title">Next {terms.serviceSingular.toLowerCase()}</span>
                           <span className="player-portal-home-card-sub">
                             {profileLoading && !bookings.length
                               ? "Loading…"
                               : nextLesson
                                 ? formatBookingWhen(nextLesson)
-                                : "No upcoming lessons"}
+                                : `No upcoming ${terms.servicePlural.toLowerCase()}`}
                           </span>
                         </button>
                         {/* Only for a player who actually holds one. A card
@@ -1893,8 +1898,8 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                           <span className="player-portal-home-card-title">Notes</span>
                           <span className="player-portal-home-card-sub">
                             {sortedNotes.length
-                              ? `${sortedNotes.length} lesson note${sortedNotes.length === 1 ? "" : "s"}`
-                              : "Lesson notes"}
+                              ? `${sortedNotes.length} ${terms.serviceSingular.toLowerCase()} note${sortedNotes.length === 1 ? "" : "s"}`
+                              : `${terms.serviceSingular} notes`}
                           </span>
                         </button>
                         <button
@@ -1933,9 +1938,9 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                       it gets its own place above the list rather than being the
                       first row of it. */}
                   <section className="player-portal-section">
-                    <h2>Next lesson</h2>
+                    <h2>Next {terms.serviceSingular.toLowerCase()}</h2>
                     {profileLoading && !bookings.length ? (
-                      <Loading what="your lessons" className="player-portal-empty" />
+                      <Loading what={`your ${terms.servicePlural.toLowerCase()}`} className="player-portal-empty" />
                     ) : nextLesson ? (
                       <div className="player-portal-next">
                         <strong>{nextLesson.serviceName || "Lesson"}</strong>
@@ -1943,7 +1948,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                         {nextLesson.location?.name && <em>{nextLesson.location.name}</em>}
                       </div>
                     ) : (
-                      <p className="player-portal-empty">No upcoming lessons booked.</p>
+                      <p className="player-portal-empty">No upcoming {terms.servicePlural.toLowerCase()} booked.</p>
                     )}
                   </section>
 
@@ -1966,7 +1971,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                     </section>
                   )}
 
-                  <div className="player-portal-pill-toggle" role="tablist" aria-label="Lessons view">
+                  <div className="player-portal-pill-toggle" role="tablist" aria-label={`${terms.servicePlural} view`}>
                     <button
                       type="button"
                       role="tab"
@@ -2500,8 +2505,8 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                       {spendableCredits > 0 && (
                         <p className="player-portal-lead">
                           {spendableCredits === 1
-                            ? "1 lesson paid for and ready to book."
-                            : `${spendableCredits} lessons paid for and ready to book.`}
+                            ? `1 ${terms.serviceSingular.toLowerCase()} paid for and ready to book.`
+                            : `${spendableCredits} ${terms.servicePlural.toLowerCase()} paid for and ready to book.`}
                           {nextPassExpiry && formatDate(nextPassExpiry)
                             ? ` Use them by ${formatDate(nextPassExpiry)}.`
                             : ""}
@@ -2574,7 +2579,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                       button that cannot take money is worse than no button. */}
                   {!__CLARITY_NATIVE__ && shop.length > 0 && (
                     <section className="player-portal-section">
-                      <h2>{passes.length ? "Buy more" : "Buy lessons or a review"}</h2>
+                      <h2>{passes.length ? "Buy more" : `Buy ${terms.servicePlural.toLowerCase()} or a review`}</h2>
                       <p className="player-portal-lead">
                         Paid for here, straight onto your account. Book it whenever you like.
                       </p>
@@ -2722,9 +2727,9 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
 
               {tab === "notes" && !isGuest && (
                 <section className="player-portal-section">
-                  <h2>Lesson notes</h2>
+                  <h2>{terms.serviceSingular} notes</h2>
                   {profileLoading && !notes.length ? (
-                    <Loading what="your lesson notes" className="player-portal-empty" />
+                    <Loading what={`your ${terms.serviceSingular.toLowerCase()} notes`} className="player-portal-empty" />
                   ) : sortedNotes.length ? (
                     <ul className="player-portal-list">
                       {sortedNotes.map((note) => (
@@ -2740,7 +2745,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                       ))}
                     </ul>
                   ) : (
-                    <p className="player-portal-empty">No lesson notes yet.</p>
+                    <p className="player-portal-empty">No {terms.serviceSingular.toLowerCase()} notes yet.</p>
                   )}
                 </section>
               )}
