@@ -13,7 +13,7 @@ Six integrations ship today. Nobody planned them as a set, and yet:
 | Integration | What it does | Credentials |
 |---|---|---|
 | **Optix** | inbound bookings + outbound bay booking | `OPTIX_CLIENT_ID`, `OPTIX_APP_SECRET`, `OPTIX_GRAPHQL_ENDPOINT`, `OPTIX_ORGANIZATION_TOKEN` / `OPTIX_PERSONAL_TOKEN`, `OPTIX_MEMBER_ID`, `OPTIX_OWNER_USER_ID` |
-| **Google** | Calendar sync, Drive video storage | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (+ a second Calendar-specific pair), OAuth tokens in `google_provider_connections` |
+| **Google** | Calendar sync, Drive video storage | Sign-in only — the OAuth client (`GOOGLE_CLIENT_ID`/`_SECRET`) is Clarity's own, set in Netlify; tokens in `google_provider_connections` |
 | **Stripe** | Clarity Pay, billing sync | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_BILLING_WEBHOOK_SECRET` |
 | **Akahu** | bank feed for expense reconciliation | `AKAHU_APP_TOKEN`, `AKAHU_USER_TOKEN` |
 | **Resend** | transactional email | `RESEND_API_KEY`, `RESEND_FROM_EMAIL` |
@@ -88,7 +88,7 @@ type FieldSpec = {
   defaultValue?: string;
   choices?: Array<{ value: string; label: string }>;
   /** For `copy`: how to build the value from this deployment. */
-  compute?: "webhook-url" | "redirect-uri" | "event-list" | "signature-recipe";
+  compute?: "webhook-url" | "event-list" | "signature-recipe";
 };
 ```
 

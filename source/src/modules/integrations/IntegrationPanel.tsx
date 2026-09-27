@@ -695,7 +695,7 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
               </div>
               <div className="integration-directions single">
                 <section>
-                  <h3>Paste these from {providerLabel}</h3>
+                  <h3>{outbound.kind === "oauth2" ? `Sign in to ${providerLabel}` : `Paste these from ${providerLabel}`}</h3>
                   {outbound.fields.filter((field) => field.type === "copy").map((field) => (
                     <CopyField help={field.help} key={field.key} label={field.label} value={field.value} />
                   ))}
@@ -705,9 +705,6 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
                   {outbound.fields.filter((field) => field.type === "oauth").map((field) => (
                     <div className="integration-oauth" key={field.key}>
                       <span className="credential-label">{field.label}</span>
-                      {/* Signing in is the connection. The fields above only say
-                          which app is asking, so a filled-in client id is not
-                          the same as access and must not read as one. */}
                       <a className="primary-button small" href="/api/google-calendar/connect">Connect</a>
                       <small>{field.help}</small>
                     </div>

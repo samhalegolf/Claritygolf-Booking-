@@ -279,55 +279,15 @@ const googleConnection: ConnectionSpec = {
   kind: "oauth2",
   title: "Google account",
   summary: "One sign-in. Calendar and Drive are separate permissions on it.",
+  // Signing in is the whole setup. The OAuth client ID and secret are
+  // Clarity's own app, set once in Netlify for every business (see
+  // clarity-cloud-google-config.mts) — nothing a coach has or should paste.
   fields: [
-    {
-      key: "__redirect_uri",
-      type: "copy",
-      compute: "redirect-uri",
-      label: "Redirect URI",
-      help: "Google Cloud › Credentials › your OAuth client › Authorised redirect URIs. Must match exactly, including the scheme.",
-      required: true,
-    },
-    // Two accepted names per field, because clarity-cloud-google-config.mts
-    // resolves either. Naming only the bare pair reported an integration that
-    // has been connected since July as "2 fields to set".
-    {
-      key: "GOOGLE_CLIENT_ID",
-      type: "text",
-      label: "Client ID",
-      help: "Google Cloud › Credentials › OAuth 2.0 Client IDs. Ends in .apps.googleusercontent.com.",
-      required: "one-of",
-      group: "google-client-id",
-    },
-    {
-      key: "GOOGLE_CALENDAR_CLIENT_ID",
-      type: "text",
-      label: "Client ID (Calendar-specific)",
-      help: "An alternative to the one above, for a separate Calendar OAuth client. Either satisfies this.",
-      required: "one-of",
-      group: "google-client-id",
-    },
-    {
-      key: "GOOGLE_CLIENT_SECRET",
-      type: "secret",
-      label: "Client secret",
-      help: "Issued beside the client ID. Identifies the app, not the account — connecting is still a separate step.",
-      required: "one-of",
-      group: "google-client-secret",
-    },
-    {
-      key: "GOOGLE_CALENDAR_CLIENT_SECRET",
-      type: "secret",
-      label: "Client secret (Calendar-specific)",
-      help: "The partner of the Calendar-specific client ID. Either pair works.",
-      required: "one-of",
-      group: "google-client-secret",
-    },
     {
       key: "__connect",
       type: "oauth",
       label: "Connection",
-      help: "Signing in is what actually grants access. The fields above only say which app is asking.",
+      help: "Sign in with the Google account whose calendar your lessons should go in.",
       required: false,
     },
   ],
@@ -339,7 +299,6 @@ const googleCalendar: IntegrationDescriptor = {
   audience: "integration",
   category: "calendar",
   summary: "Puts your lessons in your own diary, and keeps them in step.",
-  docsUrl: "https://console.cloud.google.com/apis/credentials",
   connections: [googleConnection],
 };
 
@@ -349,7 +308,6 @@ const googleDrive: IntegrationDescriptor = {
   audience: "admin",
   category: "storage",
   summary: "Where lesson video is kept once it leaves the browser.",
-  docsUrl: "https://console.cloud.google.com/apis/credentials",
   sharesGrantWith: "google-calendar",
   connections: [googleConnection],
 };
