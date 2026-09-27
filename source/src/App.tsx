@@ -7848,9 +7848,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     };
   }, [ownsPage]);
 
+  // The booking widget only ever holds the public view of the account (see
+  // public-account.mts). Storing it would overwrite a coach's own saved copy
+  // in the same browser with a thinner one.
   useEffect(() => {
+    if (isEmbedMode) return;
     window.localStorage.setItem(COACH_ACCOUNT_STORAGE_KEY, JSON.stringify(coachAccount));
-  }, [coachAccount]);
+  }, [coachAccount, isEmbedMode]);
 
   useEffect(() => {
     window.localStorage.setItem(WORKSPACE_ACCOUNTS_STORAGE_KEY, JSON.stringify(workspaceAccounts));

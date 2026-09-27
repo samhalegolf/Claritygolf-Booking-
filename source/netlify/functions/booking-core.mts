@@ -117,6 +117,7 @@ import type { CoachActor } from "./_shared/coach-auth.mts";
 import { authSessionResponse, type WorkspaceBootstrap } from "./_shared/auth-contract.mts";
 import { currencyForAccountSettings, localeForCountry } from "./_shared/locale.mts";
 import { taxDefaultsForCountry } from "./_shared/region.mts";
+import { publicCoachAccount } from "./_shared/public-account.mts";
 import {
   caddyAppUrl,
   caddyConfigured,
@@ -7543,7 +7544,7 @@ export function publicBookingState(state) {
     locations: (state.locations || []).filter((location) => recordBelongsToAccount(location, workspaceAccount.id)),
     availability: (state.availability || []).map((day) => day.filter((window) => recordBelongsToAccount(window, workspaceAccount.id))),
     brand: state.brand,
-    account: state.account,
+    account: publicCoachAccount(state.account),
     items: accountItems.map((item) => ({
       id: item.id,
       kind: item.kind,
@@ -7577,7 +7578,7 @@ export function publicBookingCatalog(state) {
     coaches: (state.coaches || []).filter((coach) => recordBelongsToAccount(coach, workspaceAccount.id)),
     locations: (state.locations || []).filter((location) => recordBelongsToAccount(location, workspaceAccount.id)),
     brand: state.brand,
-    account: state.account,
+    account: publicCoachAccount(state.account),
   };
 }
 
