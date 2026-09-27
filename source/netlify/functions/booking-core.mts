@@ -48,6 +48,15 @@ import {
 import { planExternalReschedule, sameSlot } from "./_shared/external-reschedule.mts";
 import { legacyOriginalWorkspaceId, defaultCalendarSlug } from "./_shared/account.mts";
 import {
+  cleanCoachAccount,
+  coachAccountFromSettings,
+  defaultCoachAccount,
+  defaultTimeZone,
+  FALLBACK_TIME_ZONE,
+  isOriginalWorkspace,
+  neutralCoachAccount,
+} from "./_shared/coach-account.mts";
+import {
   findReviewService,
   newSwingReviewLessonId,
   reviewDraftVerdict,
@@ -183,47 +192,6 @@ const defaultEmailTemplates = {
   adminEmailSubject: "New booking: {{client}}",
   adminEmailIntro: "{{client}} booked {{service}} for {{date}} at {{time}}.",
 };
-
-const defaultInvoiceSettings = {
-  enabled: true,
-  showBillingWorkspace: true,
-  prefix: "INV",
-  nextNumber: 1001,
-  // No currency or tax here on purpose. Both come from the business's country
-  // in cleanInvoiceSettings below; a value here would be read as a choice the
-  // business had made, and every new workspace would start in New Zealand
-  // dollars with GST.
-  taxNumber: "",
-  bankAccount: "",
-  paymentTermsDays: 7,
-  businessAddress: "",
-  headerText: "",
-  footerText: "Thank you for training with Sam Hale Golf.",
-  defaultCustomerNote: "Thanks for your work on the lesson programme. Invoice attached below.",
-  paymentInstructions:
-    "Please pay by bank transfer and use the invoice number as reference.",
-  customFields: [],
-  // The coach's own labels for invoice lines, and how loudly the workspace
-  // flags unpaid invoices. Both are set in Billing Settings - see
-  // src/modules/billing/invoiceSettings.ts, which this mirrors.
-  lineTags: [],
-  unpaidLoudness: 2,
-};
-
-/**
- * Invoice defaults for a business that has not been set up yet.
- *
- * Same shape as defaultInvoiceSettings, minus everything that names the
- * original business -- the footer said "Thank you for training with Sam Hale
- * Golf" on every invoice a second business would have sent.
- */
-function neutralInvoiceSettings() {
-  return {
-    ...defaultInvoiceSettings,
-    footerText: "",
-    defaultCustomerNote: "",
-  };
-}
 
 const defaultServices = [
   {
@@ -1040,224 +1008,6 @@ function normalizeAvailability(availability) {
       }, []);
   });
 }
-
-// Original-workspace bootstrapping only — never used as auth fallback or account resolution.
-// New workspaces get their own values from DB settings per-account.
-/** True only for the business this deployment started life as. */
-function isOriginalWorkspace(accountId) {
-  return cleanSlug(accountId, "") === legacyOriginalWorkspaceId();
-}
-
-/**
- * Product defaults for a business that has not been set up yet.
- *
- * A new workspace must not open on somebody else's details. Before this, an
- * account with no settings rows fell through to defaultCoachAccount(), so the
- * second business's first login showed "Sam Hale", "Sam Hale Golf" and "The
- * Range 24/7 - Three Kings" -- and its invoices carried "Thank you for training
- * with Sam Hale Golf". Everything identifying starts empty and is filled in
- * during setup; only genuinely product-level things (Clarity's own booking and
- * Caddy URLs, the platform's timezone guess) carry over.
- */
-function neutralCoachAccount(accountId) {
-  return {
-    id: cleanSlug(accountId, ""),
-    coachName: "",
-    businessName: "",
-    venueName: "",
-    venueShortName: "",
-    timezone: defaultTimeZone(),
-    country: cleanPhoneCountry(env("CLARITY_COUNTRY", FALLBACK_PHONE_COUNTRY)),
-    contactEmail: "",
-    bookingUrl: env("CLARITY_BOOKING_URL", "https://book.claritygolf.app"),
-    calendarSlug: cleanSlug(accountId, ""),
-    caddyWorkspaceUrl: env("CLARITY_CADDY_WORKSPACE_URL", "https://caddy.claritygolf.app"),
-    terminology: terminologyFor(),
-    invoiceSettings: neutralInvoiceSettings(),
-  };
-}
-
-function defaultCoachAccount() {
-  return {
-    id: legacyOriginalWorkspaceId(),
-    coachName: env("CLARITY_COACH_NAME", "Sam Hale"),
-    businessName: env("CLARITY_BUSINESS_NAME", "Sam Hale Golf"),
-    venueName: env("CLARITY_VENUE_NAME", "The Range 24/7 - Three Kings"),
-    venueShortName: env("CLARITY_VENUE_SHORT_NAME", "The Range 24/7"),
-    timezone: defaultTimeZone(),
-    // ISO 3166-1 alpha-2. The workspace's home country: what a phone number
-    // with no + is assumed to be, and the default selection in the country
-    // dropdown. Everything else that is currently hardcoded to New Zealand
-    // (date formatting, currency) should eventually derive from this too.
-    country: cleanPhoneCountry(env("CLARITY_COUNTRY", FALLBACK_PHONE_COUNTRY)),
-    contactEmail: env("CLARITY_CONTACT_EMAIL", ""),
-    bookingUrl: env("CLARITY_BOOKING_URL", "https://book.claritygolf.app"),
-    calendarSlug: defaultCalendarSlug(),
-    caddyWorkspaceUrl: env("CLARITY_CADDY_WORKSPACE_URL", "https://caddy.claritygolf.app"),
-    terminology: terminologyFor(),
-    invoiceSettings: defaultInvoiceSettings,
-	  };
-	}
-
-/**
- * Normalises one of the coach's invoice custom fields. Like cleanInvoiceLineTag
- * below, this keeps a blank row and does not trim, so the settings editor gets
- * its draft back unchanged when it saves: an added-but-not-filled-in row stays
- * on screen, and a label still being typed keeps its trailing space. The blank
- * rows are dropped and the labels trimmed where the fields are printed - see
- * printableInvoiceCustomFields in src/modules/billing/invoiceSettings.ts, which
- * this mirrors.
- */
-function cleanInvoiceCustomField(field, index = 0) {
-  if (!field || typeof field !== "object") return null;
-  const placement = ["bill-to", "payment", "footer"].includes(field?.placement)
-    ? field.placement
-    : "header";
-  return {
-    id: cleanString(field?.id, `field-${index + 1}`, 80),
-    label: typeof field?.label === "string" ? field.label.slice(0, 80) : "",
-    value: typeof field?.value === "string" ? field.value.slice(0, 180) : "",
-    placement,
-  };
-}
-
-/**
- * Normalises one of the coach's invoice-line tags. Deliberately keeps a blank
- * label and does not trim, so this is the same shape the browser's
- * cleanInvoiceLineTag returns: the settings editor round-trips its draft
- * through here on save, and a row the coach has added but not named yet has to
- * come back the way it went in rather than disappearing under the cursor.
- */
-function cleanInvoiceLineTag(tag, index = 0) {
-  if (!tag || typeof tag !== "object") return null;
-  return {
-    id: cleanString(tag?.id, `tag-${index + 1}`, 80),
-    label: typeof tag?.label === "string" ? tag.label.slice(0, 60) : "",
-  };
-}
-
-function cleanInvoiceSettings(settings = {}, country = FALLBACK_PHONE_COUNTRY) {
-  const nextNumber = Number(
-    settings?.nextNumber ?? defaultInvoiceSettings.nextNumber,
-  );
-  // Tax a business has not set yet starts from its country, not from New
-  // Zealand's GST -- see taxDefaultsForCountry.
-  const tax = taxDefaultsForCountry(country);
-  const taxRate = Number(settings?.taxRate ?? tax.taxRate);
-  const paymentTermsDays = Number(
-    settings?.paymentTermsDays ?? defaultInvoiceSettings.paymentTermsDays,
-  );
-  const customFields = Array.isArray(settings?.customFields)
-    ? settings.customFields
-        .map(cleanInvoiceCustomField)
-        .filter(Boolean)
-        .slice(0, 12)
-    : [];
-  // Duplicate ids would make the picker ambiguous and split one tag's lines into
-  // two buckets, so the first entry to claim an id keeps it.
-  const seenTagIds = new Set();
-  const lineTags = [];
-  if (Array.isArray(settings?.lineTags)) {
-    for (const [index, raw] of settings.lineTags.entries()) {
-      if (lineTags.length >= 40) break;
-      const tag = cleanInvoiceLineTag(raw, index);
-      if (!tag || seenTagIds.has(tag.id)) continue;
-      seenTagIds.add(tag.id);
-      lineTags.push(tag);
-    }
-  }
-  return {
-    enabled: settings?.enabled !== false,
-    showBillingWorkspace: settings?.showBillingWorkspace !== false,
-    prefix:
-      cleanString(settings?.prefix, defaultInvoiceSettings.prefix, 12)
-        .toUpperCase()
-        .replace(/[^A-Z0-9-]/g, "") || defaultInvoiceSettings.prefix,
-    // Same range the browser allows (see cleanInvoiceSettings in
-    // src/modules/billing/invoiceSettings.ts): min 0 so the field can be cleared
-    // while typing, and up to 9 digits so a year-based scheme like 20260001
-    // survives the save rather than being rewritten to 999999.
-    nextNumber: Number.isFinite(nextNumber)
-      ? Math.max(0, Math.min(999999999, Math.round(nextNumber)))
-      : defaultInvoiceSettings.nextNumber,
-    // A business that has chosen a currency keeps it; one that has not gets the
-    // one its country uses, rather than New Zealand's. This is the same helper
-    // billing-api already invoices with, so the two cannot disagree.
-    currency: currencyForAccountSettings(settings?.currency, country),
-    taxName: cleanString(settings?.taxName, tax.taxName, 24),
-    taxNumber: cleanString(settings?.taxNumber, "", 80),
-    taxRate: Number.isFinite(taxRate)
-      ? Math.max(0, Math.min(30, taxRate))
-      : tax.taxRate,
-    taxInclusive:
-      typeof settings?.taxInclusive === "boolean" ? settings.taxInclusive : tax.taxInclusive,
-    bankAccount: cleanString(settings?.bankAccount, "", 120),
-    paymentTermsDays: Number.isFinite(paymentTermsDays)
-      ? Math.max(0, Math.min(120, Math.round(paymentTermsDays)))
-      : defaultInvoiceSettings.paymentTermsDays,
-    businessAddress: cleanString(settings?.businessAddress, "", 400),
-    headerText: cleanString(settings?.headerText, "", 280),
-    footerText: cleanString(
-      settings?.footerText,
-      defaultInvoiceSettings.footerText,
-      400,
-    ),
-    defaultCustomerNote: cleanString(
-      settings?.defaultCustomerNote,
-      defaultInvoiceSettings.defaultCustomerNote,
-      400,
-    ),
-    paymentInstructions: cleanString(
-      settings?.paymentInstructions,
-      defaultInvoiceSettings.paymentInstructions,
-      400,
-    ),
-    customFields,
-    lineTags,
-    unpaidLoudness: [1, 2, 3].includes(Number(settings?.unpaidLoudness))
-      ? Number(settings?.unpaidLoudness)
-      : defaultInvoiceSettings.unpaidLoudness,
-  };
-}
-
-function cleanCoachAccount(account) {
-  const defaults = defaultCoachAccount();
-  const businessName = cleanString(
-    account?.businessName,
-    defaults.businessName,
-    100,
-  );
-  const venueName = cleanString(account?.venueName, defaults.venueName, 140);
-  return {
-    id: cleanSlug(account?.id, defaults.id),
-    coachName: cleanString(account?.coachName, defaults.coachName, 100),
-    businessName,
-    venueName,
-    venueShortName: cleanString(
-      account?.venueShortName,
-      defaults.venueShortName || venueName,
-      80,
-    ),
-    timezone: cleanString(account?.timezone, defaults.timezone, 80),
-    country: cleanPhoneCountry(account?.country, defaults.country),
-    contactEmail: cleanEmail(account?.contactEmail, defaults.contactEmail),
-    bookingUrl: cleanUrl(account?.bookingUrl, defaults.bookingUrl),
-    calendarSlug: cleanSlug(
-      account?.calendarSlug,
-      cleanSlug(businessName, defaults.calendarSlug),
-    ),
-    caddyWorkspaceUrl: cleanUrl(
-      account?.caddyWorkspaceUrl,
-      defaults.caddyWorkspaceUrl,
-    ),
-    terminology: terminologyFor(account?.terminology),
-    invoiceSettings: cleanInvoiceSettings(
-      account?.invoiceSettings,
-      cleanPhoneCountry(account?.country, defaults.country),
-    ),
-	  };
-	}
-
 const accountFeatureKeys = [
   "publicBooking",
   "coachCalendar",
@@ -3510,29 +3260,6 @@ function defaultPhoneCountry() {
   return cleanPhoneCountry(env("CLARITY_PHONE_COUNTRY", FALLBACK_PHONE_COUNTRY));
 }
 
-// UTC, not Auckland. When we genuinely do not know where the coach is, being
-// obviously wrong everywhere beats being silently right in one country.
-const FALLBACK_TIME_ZONE = "UTC";
-
-// There used to be a module-level `activeTimeZone` here, set from whichever
-// account was read last and reached through accountTimeZone() in a dozen
-// places. It was written to stop a call site forgetting an argument, and it did
-// -- by answering with a value that belonged to a different business.
-//
-// That matters more than the country did. Five of those call sites are slot
-// maths (isSlotInPast, slotWallTimeToUtcMillis, appointmentMinutesSinceEnd,
-// isAppointmentInPast, nowInTimeZoneParts). A stale timezone there does not
-// format a date oddly; it decides whether a lesson has already happened, which
-// is the difference between a reminder sending and not, and between a slot
-// being offered to the public and not.
-//
-// The timezone is an argument now, and the functions that need one take it with
-// no default -- so forgetting is a tsc error rather than a silently wrong hour.
-// The deployment default below is a constant, never a previous request's value.
-function defaultTimeZone() {
-  return cleanString(env("CLARITY_TIMEZONE", ""), "", 80) || FALLBACK_TIME_ZONE;
-}
-
 /**
  * The timezone a business's wall-clock times are in.
  *
@@ -5614,49 +5341,6 @@ async function readStateSettingsSnapshot(accountId: string) {
     settings.updatedAt = updatedAt;
   }
   return { settings, syncKey, updatedAt };
-}
-
-/**
- * The coach account for one business, from that business's own settings.
- *
- * The defaults differ by business on purpose. The original workspace keeps the
- * env-backed values it has always had, so nothing about it changes. Any other
- * business falls back to neutral product defaults rather than inheriting the
- * original coach's name, venue and invoice footer.
- */
-export function coachAccountFromSettings(settings, accountId = "") {
-  const scopedAccountId = cleanSlug(settingValue(settings, "accountId") || accountId, "");
-  const defaults =
-    !scopedAccountId || isOriginalWorkspace(scopedAccountId)
-      ? defaultCoachAccount()
-      : neutralCoachAccount(scopedAccountId);
-  return cleanCoachAccount({
-    id: settingValue(settings, "accountId") || defaults.id,
-    coachName: settingValue(settings, "accountCoachName") || defaults.coachName,
-    businessName:
-      settingValue(settings, "accountBusinessName") ||
-      settingValue(settings, "coachName") ||
-      defaults.businessName,
-    venueName: settingValue(settings, "accountVenueName") || defaults.venueName,
-    venueShortName:
-      settingValue(settings, "accountVenueShortName") || defaults.venueShortName,
-    timezone: settingValue(settings, "accountTimezone") || defaults.timezone,
-    country: settingValue(settings, "accountCountry") || defaults.country,
-    contactEmail:
-      settingValue(settings, "accountContactEmail") || defaults.contactEmail,
-    bookingUrl: settingValue(settings, "accountBookingUrl") || defaults.bookingUrl,
-    calendarSlug:
-      settingValue(settings, "accountCalendarSlug") || defaults.calendarSlug,
-    caddyWorkspaceUrl:
-      settingValue(settings, "accountCaddyWorkspaceUrl") ||
-      defaults.caddyWorkspaceUrl,
-    terminology: parseSettingJson(settings, "accountTerminologyJson", defaults.terminology),
-    invoiceSettings: parseSettingJson(
-      settings,
-      "accountInvoiceSettingsJson",
-      defaults.invoiceSettings,
-    ),
-  });
 }
 
 // Reminder lead time: 1 hour to 14 days before the lesson, default 24 hours.
@@ -10524,10 +10208,11 @@ async function applySandboxPublicSlug(sandboxId: string) {
  * Give a sandbox the settings of a brand-new business.
  *
  * Overwrites rather than seeds (seedSettings is DO NOTHING, so it cannot undo a
- * row that is already there). Only country, timezone and currency come from the
- * live business: they are facts about where the coach works, not their data,
- * and a sandbox pricing in the wrong currency tests nothing. The plan is left
- * alone so a plan the coach picked survives the rebuild.
+ * row that is already there). Only country and timezone come from the live
+ * business: they are facts about where the coach works, not their data. The
+ * fresh invoice settings carry no currency, so the sandbox prices in its
+ * country's currency -- a sandbox pricing in the wrong currency tests nothing.
+ * The plan is left alone so a plan the coach picked survives the rebuild.
  */
 async function writeFreshSandboxSettings(sandboxId: string, parentId: string) {
   const parentSettings = await readSettingsMap(parentId);
@@ -10544,7 +10229,6 @@ async function writeFreshSandboxSettings(sandboxId: string, parentId: string) {
     ...fresh,
     accountCountry: settingValue(parentSettings, "accountCountry"),
     accountTimezone: settingValue(parentSettings, "accountTimezone") || fresh.accountTimezone,
-    accountCurrency: settingValue(parentSettings, "accountCurrency"),
     // The plan is a copy of the live one, so entitlement checks run for real
     // rather than being bypassed. subscriptionStatus 'internal' is an existing
     // status isAccountActive() accepts, so the sandbox is entitled without

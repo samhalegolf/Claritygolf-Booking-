@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  coachAccountFromSettings,
   compatiblePersonMatch,
   handlePublicBookingSlotsRequest,
   publicAppointmentContactQuery,
@@ -15,6 +14,7 @@ import {
   readPublicSlotContext,
   readPublicSlotItemsForWeek,
 } from "../booking-core.mts";
+import { coachAccountFromSettings } from "./coach-account.mts";
 
 const accountId = "test-account";
 const serviceId = "lesson-a";

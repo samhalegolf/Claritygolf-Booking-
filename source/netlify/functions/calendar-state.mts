@@ -1,8 +1,13 @@
 import type { Config, Context } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
 import { createHash, randomUUID } from "node:crypto";
-import { legacyOriginalWorkspaceId, defaultCalendarSlug } from "./_shared/account.mts";
-import { terminologyFor } from "./_shared/business-terminology.mts";
+import { legacyOriginalWorkspaceId } from "./_shared/account.mts";
+import {
+  cleanCoachAccount,
+  coachAccountFromSettings,
+  defaultCoachAccount,
+  isOriginalWorkspace,
+} from "./_shared/coach-account.mts";
 import { bayBookingMatchesSlot } from "./_shared/optix-reconcile.mts";
 import { cleanLocationKind, cleanLocationResources, cleanResourceSource } from "./_shared/resources.mts";
 import { serviceIncludesCoach } from "./_shared/service-scope.mts";
@@ -181,43 +186,6 @@ async function readAdminSession(req: Request) {
   return { id: row.id, email: row.email, expiresAt: row.expires_at };
 }
 
-function defaultCoachAccount() {
-  // Original-workspace bootstrapping only — never used as auth fallback or
-  // account resolution. New workspaces get their own values from DB settings.
-  return {
-    id: legacyOriginalWorkspaceId(),
-    coachName: env("CLARITY_COACH_NAME", "Sam Hale"),
-    businessName: env("CLARITY_BUSINESS_NAME", "Sam Hale Golf"),
-    venueName: env("CLARITY_VENUE_NAME", "The Range 24/7 - Three Kings"),
-    venueShortName: env("CLARITY_VENUE_SHORT_NAME", "The Range 24/7"),
-    timezone: env("CLARITY_TIMEZONE", "Pacific/Auckland"),
-    contactEmail: env("CLARITY_CONTACT_EMAIL", ""),
-    bookingUrl: env("CLARITY_BOOKING_URL", "https://book.claritygolf.app"),
-    calendarSlug: defaultCalendarSlug(),
-    caddyWorkspaceUrl: env("CLARITY_CADDY_WORKSPACE_URL", "https://caddy.claritygolf.app"),
-    terminology: terminologyFor(),
-  };
-}
-
-function cleanCoachAccount(account: Record<string, unknown> = {}) {
-  const defaults = defaultCoachAccount();
-  const businessName = cleanString(account.businessName, defaults.businessName, 100);
-  const venueName = cleanString(account.venueName, defaults.venueName, 140);
-  return {
-    id: cleanSlug(account.id, defaults.id),
-    coachName: cleanString(account.coachName, defaults.coachName, 100),
-    businessName,
-    venueName,
-    venueShortName: cleanString(account.venueShortName, defaults.venueShortName || venueName, 80),
-    timezone: cleanString(account.timezone, defaults.timezone, 80),
-    contactEmail: cleanEmail(account.contactEmail, defaults.contactEmail),
-    bookingUrl: cleanUrl(account.bookingUrl, defaults.bookingUrl),
-    calendarSlug: cleanSlug(account.calendarSlug, cleanSlug(businessName, defaults.calendarSlug)),
-    caddyWorkspaceUrl: cleanUrl(account.caddyWorkspaceUrl, defaults.caddyWorkspaceUrl),
-    terminology: terminologyFor(account.terminology),
-  };
-}
-
 function defaultWorkspaceAccountFromCoachAccount(account = defaultCoachAccount()) {
   const clean = cleanCoachAccount(account);
   const slug = cleanSlug(clean.calendarSlug || clean.businessName, legacyOriginalWorkspaceId());
@@ -295,58 +263,6 @@ function settingValue(settings: Record<string, string>, key: string) {
 
 function parseSettingJson<T>(settings: Record<string, string>, key: string, fallback: T): T {
   return safeJsonParse(settingValue(settings, key), fallback);
-}
-
-/** True only for the business this deployment started life as. */
-function isOriginalWorkspace(accountId: string) {
-  return cleanSlug(accountId, "") === legacyOriginalWorkspaceId();
-}
-
-/**
- * Product defaults for a business that has not been set up yet.
- *
- * The fast shell renders before anything else, so it is where the original
- * coach's name and venue would show up first on a new business's very first
- * login. Mirrors neutralCoachAccount() in booking-core.mts.
- */
-function neutralCoachAccount(accountId: string) {
-  return {
-    ...defaultCoachAccount(),
-    id: cleanSlug(accountId, ""),
-    coachName: "",
-    businessName: "",
-    venueName: "",
-    venueShortName: "",
-    contactEmail: "",
-    calendarSlug: cleanSlug(accountId, ""),
-  };
-}
-
-function coachAccountFromSettings(settings: Record<string, string>, accountId = "") {
-  const scopedAccountId = cleanSlug(settingValue(settings, "accountId") || accountId, "");
-  const defaults =
-    !scopedAccountId || isOriginalWorkspace(scopedAccountId)
-      ? defaultCoachAccount()
-      : neutralCoachAccount(scopedAccountId);
-  return cleanCoachAccount({
-    id: settingValue(settings, "accountId") || defaults.id,
-    coachName: settingValue(settings, "accountCoachName") || defaults.coachName,
-    businessName: settingValue(settings, "accountBusinessName") || settingValue(settings, "coachName") || defaults.businessName,
-    venueName: settingValue(settings, "accountVenueName") || defaults.venueName,
-    venueShortName: settingValue(settings, "accountVenueShortName") || defaults.venueShortName,
-    timezone: settingValue(settings, "accountTimezone") || defaults.timezone,
-    contactEmail: settingValue(settings, "accountContactEmail") || defaults.contactEmail,
-    bookingUrl: settingValue(settings, "accountBookingUrl") || defaults.bookingUrl,
-    calendarSlug: settingValue(settings, "accountCalendarSlug") || defaults.calendarSlug,
-    caddyWorkspaceUrl: settingValue(settings, "accountCaddyWorkspaceUrl") || defaults.caddyWorkspaceUrl,
-    terminology: (() => {
-      try {
-        return JSON.parse(settingValue(settings, "accountTerminologyJson") || "{}");
-      } catch {
-        return defaults.terminology;
-      }
-    })(),
-  });
 }
 
 function adminSettingsFromSettings(settings: Record<string, string>) {
