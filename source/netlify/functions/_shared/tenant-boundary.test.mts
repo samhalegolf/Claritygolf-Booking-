@@ -47,7 +47,6 @@ import {
   availabilityFromSettings,
   calendarItemBelongsToAccount,
   calendarItemParams,
-  coachAccountFromSettings,
   filterCalendarStateForContext,
   getSetting,
   publicAppointmentContactQuery,
@@ -62,6 +61,7 @@ import {
   writeItems,
   handleBookingApiRoute,
 } from "../booking-core.mts";
+import { coachAccountFromSettings } from "./coach-account.mts";
 
 const BUSINESS_A = "sam-hale-golf";
 const BUSINESS_B = "boundary-test-business";
