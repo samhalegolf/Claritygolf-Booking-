@@ -68,11 +68,10 @@ import {
 } from "./_shared/player-shop.mts";
 import {
   createStripeCheckoutSession,
-  isStripeSecretShaped,
   resolveStripeCredential,
   retrieveStripeCheckoutSession,
   stripeCredentialStatus,
-  STRIPE_SECRET_SETTING,
+  STRIPE_CONNECTION_SETTING,
 } from "./_shared/stripe.mts";
 import {
   assignPass,
@@ -10039,7 +10038,7 @@ async function readPlayerProfile(session) {
     new Map(serviceList.map((service) => [service.id, service.name])),
   );
 
-  const stripeStatus = stripeCredentialStatus(settingsMap[STRIPE_SECRET_SETTING], accountId);
+  const stripeStatus = stripeCredentialStatus(settingsMap[STRIPE_CONNECTION_SETTING]);
   const currency = playerShopCurrency(settingsMap);
   const flexibleValueCents = session.personId
     ? await readFlexibleValueForPerson(accountId, session.personId, currency)
@@ -13093,7 +13092,7 @@ async function routeBookingApiRequest(
       const body = await parseBody(req);
       const state = await readPublicCatalogState(accountId);
       const settingsMap = await readSettingsMap(accountId);
-      const credential = resolveStripeCredential(settingsMap[STRIPE_SECRET_SETTING], accountId);
+      const credential = resolveStripeCredential(settingsMap[STRIPE_CONNECTION_SETTING]);
 
       // Priced from the catalogue on the server, never from the request. The
       // browser sends which thing, not what it costs.
@@ -13273,7 +13272,7 @@ async function routeBookingApiRequest(
       if (!sessionId) return json({ error: "invalid", message: "Which purchase?" }, 400);
 
       const settingsMap = await readSettingsMap(accountId);
-      const credential = resolveStripeCredential(settingsMap[STRIPE_SECRET_SETTING], accountId);
+      const credential = resolveStripeCredential(settingsMap[STRIPE_CONNECTION_SETTING]);
       const paid = await retrieveStripeCheckoutSession(credential, sessionId);
 
       // Whose purchase this was is Stripe's answer, not the caller's. Both
@@ -14846,51 +14845,15 @@ async function readPassInbox(accountId: string, services) {
 
     /* --- Card payments: whose Stripe account this business uses -----------
      *
-     * Its own route rather than a field on the settings payload, for two
-     * reasons. A secret key must never travel in the same body as a pile of
-     * notification toggles -- a block that PUTs a stale whole-object draft
-     * would wipe it. And the read has to be asymmetric: this answers with a
-     * status and a masked tail, never with the key, so there is no shape of
-     * response that could leak it into a browser.
-     *
-     * Leaving the field empty is how a business goes back to being billed
-     * through the platform's account. That is a real choice, not a failure to
-     * configure, so clearing is allowed and says so.
+     * Read-only. Connecting and disconnecting are a Stripe sign-in, handled by
+     * stripe-connect.mts; this only reports the result.
      */
     if (req.method === "GET" && pathname === "/api/payments/stripe") {
       const state = await readSettingsState(await currentAccountId(req));
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountFeature(requestContext.account, "invoicing");
       const settingsMap = await readSettingsMap(requestContext.accountId);
-      return json({ stripe: stripeCredentialStatus(settingsMap[STRIPE_SECRET_SETTING], requestContext.accountId) });
-    }
-
-    if (req.method === "PUT" && pathname === "/api/payments/stripe") {
-      const body = await parseBody(req);
-      const state = await readSettingsState(await currentAccountId(req));
-      const requestContext = await resolveBackendRequestContext(req, state);
-      assertAccountFeature(requestContext.account, "invoicing");
-      const accountId = requestContext.accountId;
-
-      const raw = cleanString(body?.secretKey, "", 200);
-      if (raw && !isStripeSecretShaped(raw)) {
-        return json(
-          {
-            error: "invalid_key",
-            message:
-              "That does not look like a Stripe secret key. It starts sk_ or rk_ — " +
-              "a key starting pk_ is the publishable one and cannot take payments.",
-          },
-          400,
-        );
-      }
-
-      await setSettingsBulk(accountId, { [STRIPE_SECRET_SETTING]: raw });
-      const settingsMap = await readSettingsMap(accountId);
-      return json({
-        stripe: stripeCredentialStatus(settingsMap[STRIPE_SECRET_SETTING], accountId),
-        cleared: !raw,
-      });
+      return json({ stripe: stripeCredentialStatus(settingsMap[STRIPE_CONNECTION_SETTING]) });
     }
 
     // Billing's Passes tab: everything issued, whoever holds it. The inbox

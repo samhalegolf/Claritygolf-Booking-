@@ -2,11 +2,12 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:
 
 import { legacyOriginalWorkspaceId } from "./account.mts";
 import { getDatabase } from "./database.mts";
+import { parseStripeConnection, STRIPE_CONNECTION_SETTING } from "./stripe.mts";
 
 /**
  * Per-business credentials for the integrations a coach connects themselves.
  *
- * Before this, Optix, Akahu and Stripe's webhook secret existed only as
+ * Before this, Optix and Akahu existed only as
  * deployment env vars -- the original workspace's own tokens. So exactly one
  * business could ever connect them, and every other business either borrowed
  * that business's connection or had nothing. This is the store that lets each
@@ -33,7 +34,7 @@ import { getDatabase } from "./database.mts";
 export type CredentialReader = (name: string) => string;
 
 /** Integrations a business connects itself, and so may store credentials for. */
-export const TENANT_INTEGRATION_IDS = ["optix", "akahu", "stripe", "resource-webhook"] as const;
+export const TENANT_INTEGRATION_IDS = ["optix", "akahu", "resource-webhook"] as const;
 export type TenantIntegrationId = (typeof TENANT_INTEGRATION_IDS)[number];
 
 export function isTenantIntegration(id: string): id is TenantIntegrationId {
@@ -344,21 +345,43 @@ export function webhookUrlForAccount(origin: string, path: string, accountId: st
 }
 
 /**
- * A business's own Stripe secret key.
+ * A business's Stripe connection, as stored in `settings`.
  *
- * It lives in `settings` (accountStripeSecretKey), where the Billing screen
- * has always saved it, rather than in this table: one key, one place. Read
- * here so code with no settings reader of its own -- the webhook and the
+ * Read here so code with no settings reader of its own -- the webhook and the
  * billing sync -- can pass it to resolveStripeCredential.
  */
-export async function readAccountStripeSecret(accountId: string): Promise<string> {
+export async function readAccountStripeConnection(accountId: string): Promise<string> {
   if (!accountId) return "";
   const rows = (await db()
     .sql`
       SELECT value FROM settings
-      WHERE account_id = ${accountId} AND key = 'accountStripeSecretKey'
+      WHERE account_id = ${accountId} AND key = ${STRIPE_CONNECTION_SETTING}
       LIMIT 1
     `
     .catch(() => [])) as Array<{ value: string }>;
   return String(rows[0]?.value || "").trim();
+}
+
+/**
+ * The businesses connected to one Stripe account in one mode.
+ *
+ * A Connect webhook names the Stripe account an event came from, not the
+ * business. Mode is part of the match because a sandbox and its live business
+ * may connect the same Stripe account -- one in test mode, one in live.
+ */
+export async function accountsForStripeAccount(stripeAccount: string, livemode: boolean): Promise<string[]> {
+  if (!/^acct_[A-Za-z0-9]+$/.test(stripeAccount)) return [];
+  const rows = (await db()
+    .sql`
+      SELECT account_id, value FROM settings
+      WHERE key = ${STRIPE_CONNECTION_SETTING}
+        AND value LIKE ${`%"${stripeAccount}"%`}
+    `
+    .catch(() => [])) as Array<{ account_id: string; value: string }>;
+  return rows
+    .filter((row) => {
+      const connection = parseStripeConnection(row.value);
+      return connection?.account === stripeAccount && connection.livemode === livemode;
+    })
+    .map((row) => row.account_id);
 }

@@ -34,9 +34,9 @@ No existing files were modified. Type-checked with the repo's `typecheck:functio
 
 ## Setup after deploy
 
-1. Push; Netlify auto-deploys. `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `STRIPE_SECRET_KEY` are already in this site's env (Clarity Pay uses them).
-2. In the Stripe Dashboard (Developers → Webhooks) add an endpoint pointing at `https://YOUR-BOOKING-SITE/api/stripe-billing-webhook` with these events: `invoice.created`, `invoice.updated`, `invoice.finalized`, `invoice.sent`, `invoice.paid`, `invoice.payment_failed`, `invoice.payment_action_required`, `invoice.voided`, `invoice.marked_uncollectible`, `invoice.deleted`, `product.created`, `product.updated`, `product.deleted`.
-3. Set `STRIPE_BILLING_WEBHOOK_SECRET` in the Netlify site env to that endpoint's signing secret (falls back to `STRIPE_WEBHOOK_SECRET` if you prefer one var).
+1. Each business connects its own Stripe from Settings › Billing › Card payments (Stripe Connect sign-in). Requests use Clarity's platform key on that connected account.
+2. Once, on Clarity's platform Stripe account (Connect › Webhooks, "events on connected accounts"), add an endpoint at `https://YOUR-BOOKING-SITE/api/stripe-billing-webhook` with: `invoice.created`, `invoice.updated`, `invoice.finalized`, `invoice.sent`, `invoice.paid`, `invoice.payment_failed`, `invoice.payment_action_required`, `invoice.voided`, `invoice.marked_uncollectible`, `invoice.deleted`, `charge.succeeded`, `charge.updated`, `charge.captured`, `charge.refunded`, `account.application.deauthorized`. Do the same in test mode.
+3. Set `STRIPE_CONNECT_WEBHOOK_SECRET` (and `STRIPE_CONNECT_TEST_WEBHOOK_SECRET`) in Netlify to those endpoints' signing secrets.
 4. Run the backfill while logged in as admin — from the browser console on the admin app:
 
 ```js

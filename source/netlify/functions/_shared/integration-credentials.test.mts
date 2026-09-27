@@ -100,7 +100,8 @@ test("a business's saved value is what it reads, and deployment settings still p
 test("only integrations a business connects itself can hold stored credentials", () => {
   assert.equal(isTenantIntegration("optix"), true);
   assert.equal(isTenantIntegration("akahu"), true);
-  assert.equal(isTenantIntegration("stripe"), true);
+  // Stripe is a sign-in (stripe-connect.mts), not a stored credential.
+  assert.equal(isTenantIntegration("stripe"), false);
   assert.equal(isTenantIntegration("resend"), false);
   assert.equal(isTenantIntegration("caddy"), false);
 });

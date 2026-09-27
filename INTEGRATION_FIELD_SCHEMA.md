@@ -14,7 +14,7 @@ Six integrations ship today. Nobody planned them as a set, and yet:
 |---|---|---|
 | **Optix** | inbound bookings + outbound bay booking | `OPTIX_CLIENT_ID`, `OPTIX_APP_SECRET`, `OPTIX_GRAPHQL_ENDPOINT`, `OPTIX_ORGANIZATION_TOKEN` / `OPTIX_PERSONAL_TOKEN`, `OPTIX_MEMBER_ID`, `OPTIX_OWNER_USER_ID` |
 | **Google** | Calendar sync, Drive video storage | Sign-in only — the OAuth client (`GOOGLE_CLIENT_ID`/`_SECRET`) is Clarity's own, set in Netlify; tokens in `google_provider_connections` |
-| **Stripe** | Clarity Pay, billing sync | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_BILLING_WEBHOOK_SECRET` |
+| **Stripe** | Clarity Pay, billing sync | Sign-in only (Stripe Connect). Platform: `STRIPE_CONNECT_CLIENT_ID`, `STRIPE_PLATFORM_SECRET_KEY`, `STRIPE_CONNECT_WEBHOOK_SECRET` (+ `_TEST_` versions for sandboxes); connected account in `settings.accountStripeConnection` |
 | **Akahu** | bank feed for expense reconciliation | `AKAHU_APP_TOKEN`, `AKAHU_USER_TOKEN` |
 | **Resend** | transactional email | `RESEND_API_KEY`, `RESEND_FROM_EMAIL` |
 | **Clarity Caddy** | the sibling app | `CLARITY_SERVICE_SECRET`, `CLARITY_CADDY_URL`, `CLARITY_CADDY_COACH_ACCOUNT_ID`, `CLARITY_CADDY_COACH_EMAIL` |

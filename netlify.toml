@@ -83,6 +83,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/stripe-connect/*"
+  to = "/.netlify/functions/stripe-connect/:splat"
+  status = 200
+
+[[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200

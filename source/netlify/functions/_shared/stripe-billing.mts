@@ -90,17 +90,16 @@ const MAX_PAGES = 50;
 /** Default invoice backfill window start: 2026-01-01T00:00:00Z. */
 export const DEFAULT_SINCE_EPOCH = 1767225600;
 
-// The business's own key. Only the original workspace may fall back to the
-// STRIPE_SECRET_KEY env var -- see resolveStripeCredential -- so one business's
-// sync can never read another business's Stripe account.
+// The business's own connected account, so one business's sync can never read
+// another business's Stripe.
 async function stripe(accountId: string, path: string, params: Record<string, unknown> = {}) {
-  const { secret } = resolveStripeCredential(await readAccountStripeSecret(accountId), accountId);
+  const credential = resolveStripeCredential(await readAccountStripeConnection(accountId));
   const url = new URL(`https://api.stripe.com${path}`);
   for (const [key, value] of Object.entries(params)) {
     if (value === undefined || value === null || value === "") continue;
     url.searchParams.append(key, String(value));
   }
-  const response = await fetch(url.toString(), { headers: { Authorization: `Bearer ${secret}` } });
+  const response = await fetch(url.toString(), { headers: stripeHeaders(credential) });
   const text = await response.text();
   if (!response.ok) {
     throw Object.assign(new Error(`Stripe GET ${path} failed ${response.status}: ${text.slice(0, 500)}`), {
@@ -326,8 +325,8 @@ export async function syncInvoicesSince(sinceEpoch: number, accountId: string, u
   };
 }
 
-import { readAccountStripeSecret } from "./integration-credentials.mts";
-import { resolveStripeCredential } from "./stripe.mts";
+import { readAccountStripeConnection } from "./integration-credentials.mts";
+import { resolveStripeCredential, stripeHeaders } from "./stripe.mts";
 import {
   chargeProductName,
   chargeWording,

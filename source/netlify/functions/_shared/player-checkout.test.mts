@@ -5,7 +5,7 @@
  *
  *   1. Which Stripe account the money lands in. Getting this wrong for the
  *      second business to sign up means their customers' payments arrive in
- *      the first one's bank account, and nothing in the app would look broken.
+ *      someone else's account, and nothing in the app would look broken.
  *   2. What is on the shelf. The shop is priced from the catalogue on the
  *      server, so anything wrongly on it is something a player can be charged
  *      for -- and anything wrongly priced at zero is a card form that charges
@@ -17,121 +17,87 @@ import test from "node:test";
 
 import { checkoutSourceRef, findPlayerShopItem, playerShopItems } from "./player-shop.mts";
 import {
-  isStripeSecretShaped,
-  isStripeTestKey,
-  maskStripeSecret,
+  parseStripeConnection,
   resolveStripeCredential,
   stripeCredentialStatus,
+  stripeHeaders,
 } from "./stripe.mts";
 
 /* --- Whose Stripe ------------------------------------------------------- */
 
-const PLATFORM = "sk_live_platformkey000000";
-const OWN = "sk_live_coachownkey11111";
-// The platform key is the original workspace's own Stripe account.
-const ORIGINAL = "sam-hale-golf";
+const LIVE_PLATFORM = "sk_live_platformkey000000";
+const TEST_PLATFORM = "sk_test_platformkey000000";
+const LIVE = JSON.stringify({ account: "acct_coachlive1", livemode: true });
+const TEST = JSON.stringify({ account: "acct_coachtest1", livemode: false });
 
-function withPlatformKey(value: string | undefined, run: () => void) {
-  const before = process.env.STRIPE_SECRET_KEY;
-  if (value === undefined) delete process.env.STRIPE_SECRET_KEY;
-  else process.env.STRIPE_SECRET_KEY = value;
+function withPlatformKeys(keys: { live?: string; test?: string }, run: () => void) {
+  const before = {
+    live: process.env.STRIPE_PLATFORM_SECRET_KEY,
+    test: process.env.STRIPE_PLATFORM_TEST_SECRET_KEY,
+  };
+  const set = (name: string, value: string | undefined) => {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  };
+  set("STRIPE_PLATFORM_SECRET_KEY", keys.live);
+  set("STRIPE_PLATFORM_TEST_SECRET_KEY", keys.test);
   try {
     run();
   } finally {
-    if (before === undefined) delete process.env.STRIPE_SECRET_KEY;
-    else process.env.STRIPE_SECRET_KEY = before;
+    set("STRIPE_PLATFORM_SECRET_KEY", before.live);
+    set("STRIPE_PLATFORM_TEST_SECRET_KEY", before.test);
   }
 }
 
-test("a business with its own key is charged on its own key", () => {
-  // The whole multi-tenant question in one assertion: the platform key exists
-  // and must still lose to the account's own.
-  withPlatformKey(PLATFORM, () => {
-    const credential = resolveStripeCredential(OWN, ORIGINAL);
-    assert.equal(credential.secret, OWN);
-    assert.equal(credential.mode, "account");
-  });
-});
-
-test("the original workspace with no saved key falls back to the platform key", () => {
-  withPlatformKey(PLATFORM, () => {
-    const credential = resolveStripeCredential("", ORIGINAL);
-    assert.equal(credential.secret, PLATFORM);
-    assert.equal(credential.mode, "platform");
-  });
-});
-
-test("no other business falls back to the original workspace's Stripe", () => {
-  // A sandbox or a second business with no key is not set up. Falling back
-  // would take its customers' money into another business's bank account.
-  withPlatformKey(PLATFORM, () => {
-    for (const accountId of ["acme-golf", "sam-hale-golf-sandbox", ""]) {
-      assert.throws(() => resolveStripeCredential("", accountId), (error: { code?: string }) => error.code === "STRIPE_NOT_CONFIGURED");
-      assert.equal(stripeCredentialStatus("", accountId).configured, false);
-      assert.equal(stripeCredentialStatus("", accountId).mode, "none");
-    }
-    assert.equal(resolveStripeCredential(OWN, "acme-golf").mode, "account");
-  });
-});
-
-test("whitespace is not a key", () => {
-  // A pasted key with a trailing newline must not read as "configured" and
-  // then silently take the platform's money instead.
-  withPlatformKey(PLATFORM, () => {
-    assert.equal(resolveStripeCredential(" \n\t ", ORIGINAL).mode, "platform");
-  });
-  withPlatformKey(undefined, () => {
-    assert.equal(stripeCredentialStatus("  ", ORIGINAL).configured, false);
-  });
-});
-
-test("no key anywhere refuses rather than charging nobody", () => {
-  withPlatformKey(undefined, () => {
-    assert.throws(() => resolveStripeCredential("", ORIGINAL), (error: { status?: number; code?: string }) => {
-      assert.equal(error.status, 503);
-      assert.equal(error.code, "STRIPE_NOT_CONFIGURED");
-      return true;
+test("a connected business is charged on its own Stripe account", () => {
+  // The whole multi-tenant question: every request names the business's
+  // account, so the money lands there and nowhere else.
+  withPlatformKeys({ live: LIVE_PLATFORM, test: TEST_PLATFORM }, () => {
+    const credential = resolveStripeCredential(LIVE);
+    assert.equal(credential.account, "acct_coachlive1");
+    assert.equal(credential.secret, LIVE_PLATFORM);
+    assert.deepEqual(stripeHeaders(credential), {
+      Authorization: `Bearer ${LIVE_PLATFORM}`,
+      "Stripe-Account": "acct_coachlive1",
     });
-    assert.equal(stripeCredentialStatus("", ORIGINAL).configured, false);
-    assert.equal(stripeCredentialStatus("", ORIGINAL).mode, "none");
   });
 });
 
-test("the status a UI is given never carries the key", () => {
-  withPlatformKey(PLATFORM, () => {
-    const own = stripeCredentialStatus(OWN, ORIGINAL);
-    assert.equal(JSON.stringify(own).includes(OWN), false);
-    assert.equal(own.maskedTail, "••••1111");
-
-    // The platform's key is not this coach's to see any part of.
-    const platform = stripeCredentialStatus("", ORIGINAL);
-    assert.equal(platform.maskedTail, "");
-    assert.equal(JSON.stringify(platform).includes(PLATFORM), false);
+test("a test-mode connection is served by the test key and takes no real money", () => {
+  withPlatformKeys({ live: LIVE_PLATFORM, test: TEST_PLATFORM }, () => {
+    assert.equal(resolveStripeCredential(TEST).secret, TEST_PLATFORM);
+    assert.equal(stripeCredentialStatus(TEST).testMode, true);
+    assert.equal(stripeCredentialStatus(LIVE).testMode, false);
   });
 });
 
-test("a test key is reported as one, because it takes no real money", () => {
-  withPlatformKey(undefined, () => {
-    assert.equal(stripeCredentialStatus("sk_test_abcdefgh1234", ORIGINAL).testMode, true);
-    assert.equal(stripeCredentialStatus(OWN, ORIGINAL).testMode, false);
+test("a business that has not connected cannot take a payment", () => {
+  withPlatformKeys({ live: LIVE_PLATFORM }, () => {
+    for (const value of ["", " \n\t ", "sk_live_pastedkey1234", "{}", '{"account":"not-an-account"}']) {
+      assert.throws(() => resolveStripeCredential(value), (error: { status?: number; code?: string }) => {
+        assert.equal(error.status, 503);
+        assert.equal(error.code, "STRIPE_NOT_CONFIGURED");
+        return true;
+      });
+      assert.deepEqual(stripeCredentialStatus(value), { configured: false, account: "", testMode: false });
+    }
   });
-  assert.equal(isStripeTestKey("rk_test_abcdefgh1234"), true);
 });
 
-test("a publishable key is refused before it is ever stored", () => {
-  // The mistake worth catching: pk_ is the key on the coach's own screen, and
-  // it is the one they will paste first.
-  assert.equal(isStripeSecretShaped("pk_live_abcdefgh1234"), false);
-  assert.equal(isStripeSecretShaped("sk_live_abcdefgh1234"), true);
-  assert.equal(isStripeSecretShaped("rk_live_abcdefgh1234"), true, "restricted keys are the safer choice");
-  assert.equal(isStripeSecretShaped("sk_live_"), false);
-  assert.equal(isStripeSecretShaped(""), false);
-  assert.equal(isStripeSecretShaped(undefined), false);
+test("a connection is not usable until Clarity's platform key for its mode is set", () => {
+  withPlatformKeys({ live: LIVE_PLATFORM }, () => {
+    assert.throws(() => resolveStripeCredential(TEST), (error: { code?: string }) => error.code === "STRIPE_PLATFORM_NOT_CONFIGURED");
+    const status = stripeCredentialStatus(TEST);
+    assert.equal(status.configured, false);
+    assert.equal(status.account, "acct_coachtest1", "still shown, so the screen can say what is connected");
+  });
 });
 
-test("masking keeps four characters and no more", () => {
-  assert.equal(maskStripeSecret("sk_live_abcd1234"), "••••1234");
-  assert.equal(maskStripeSecret("abc"), "");
+test("only a real connected account id is accepted", () => {
+  assert.deepEqual(parseStripeConnection(LIVE), { account: "acct_coachlive1", livemode: true });
+  assert.deepEqual(parseStripeConnection({ account: "acct_x1", livemode: "yes" }), { account: "acct_x1", livemode: false });
+  assert.equal(parseStripeConnection("not json"), null);
+  assert.equal(parseStripeConnection({ account: "acct_; DROP" }), null);
 });
 
 /* --- What is on the shelf ----------------------------------------------- */

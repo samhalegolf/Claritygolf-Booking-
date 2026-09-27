@@ -239,10 +239,10 @@ export type FieldSpec = {
  * All five were already in the codebase before they had names — this is a
  * description of what is there, not a framework laid over it.
  *
- *   webhook-in     they push to us          Optix, Stripe
+ *   webhook-in     they push to us          Optix
  *   api-token      we call with a token     Optix, Resend, Caddy
- *   api-key-pair   two keys, two jobs       Akahu, Stripe
- *   oauth2         they hand us a token     Google
+ *   api-key-pair   two keys, two jobs       Akahu
+ *   oauth2         they hand us a token     Google, Stripe
  *   service-link   shared secret with a peer Caddy
  *
  * A new kind earns its name when a SECOND integration needs it. service-link
@@ -263,6 +263,8 @@ export type ConnectionSpec = {
   events?: Array<{ id: string; label: string; note?: string }>;
   /** webhook-in: how a delivery is signed, in plain arithmetic. */
   signatureRecipe?: string;
+  /** oauth2: where the Connect button starts the sign-in. */
+  connectPath?: string;
   /** api-*: what Clarity asks the other system to do. */
   operations?: Array<{ id: string; label: string }>;
   transport?: "graphql" | "rest";

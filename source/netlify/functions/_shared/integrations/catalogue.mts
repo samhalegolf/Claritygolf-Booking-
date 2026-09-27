@@ -22,98 +22,37 @@ import type {
  */
 
 /**
- * Stripe: Clarity Pay at the counter, and the billing subscription sync.
+ * Stripe: Clarity Pay at the counter, and invoices and charges in Billing.
  *
- * Two webhook secrets because Stripe is wired up twice — the billing one falls
- * back to the general one (see stripe-billing-webhook.mts), which is what
- * `required: "one-of"` is describing rather than prescribing.
+ * Each business signs in to its own Stripe (Connect) and the money lands
+ * there. Clarity's platform key and its one Connect webhook are set once in
+ * Netlify, never per business -- see _shared/stripe.mts.
  */
 const stripe: IntegrationDescriptor = {
   id: "stripe",
   label: "Stripe",
-  // Each business's own Stripe account: its key takes its customers' payments,
-  // and its webhook mirrors its invoices and charges into its own billing.
-  // Saved per business (the key in Billing settings, the webhook secret in the
-  // credential store); no business falls back to another's.
   audience: "integration",
   category: "payments",
-  caveat: "Use a test key (sk_test_…) in a sandbox — it takes no real money.",
+  caveat: "A sandbox connects in Stripe's test mode, so it takes no real money.",
   summary: "Card payments from your clients, and your Stripe invoices and charges in Billing.",
-  docsUrl: "https://dashboard.stripe.com/apikeys",
   connections: [
     {
-      kind: "api-key-pair",
-      title: "API keys",
-      summary: "What we send Stripe.",
-      transport: "rest",
+      kind: "oauth2",
+      title: "Stripe account",
+      summary: "One sign-in. Payments go straight to your own Stripe account.",
+      connectPath: "/api/stripe-connect/connect",
       operations: [
         { id: "checkout.session", label: "Open a hosted checkout" },
-        { id: "payment_intent", label: "Take a payment" },
-        { id: "subscription", label: "Read this workspace's plan" },
+        { id: "payment_link", label: "Add a payment link to an invoice" },
+        { id: "invoices.read", label: "Read your invoices and charges into Billing" },
       ],
       fields: [
         {
-          key: "STRIPE_SECRET_KEY",
-          type: "secret",
-          label: "Secret key",
-          help: "Stripe › Developers › API keys › Secret key. Starts sk_live_ or sk_test_ — check which, because a test key takes payments that never arrive.",
-          required: true,
-        },
-      ],
-    },
-    {
-      kind: "webhook-in",
-      title: "Webhooks",
-      summary: "What Stripe sends us.",
-      path: "/api/stripe-billing-webhook",
-      // What stripe-billing-webhook.mts actually handles. Nothing else is read.
-      events: [
-        { id: "invoice.created", label: "Invoice created" },
-        { id: "invoice.updated", label: "Invoice updated" },
-        { id: "invoice.finalized", label: "Invoice finalised" },
-        { id: "invoice.sent", label: "Invoice sent" },
-        { id: "invoice.paid", label: "Invoice paid" },
-        { id: "invoice.payment_failed", label: "Invoice payment failed" },
-        { id: "invoice.voided", label: "Invoice voided" },
-        { id: "invoice.marked_uncollectible", label: "Invoice uncollectible" },
-        { id: "invoice.deleted", label: "Invoice deleted" },
-        { id: "charge.succeeded", label: "Charge succeeded" },
-        { id: "charge.updated", label: "Charge updated" },
-        { id: "charge.captured", label: "Charge captured" },
-        { id: "charge.refunded", label: "Charge refunded" },
-      ],
-      fields: [
-        {
-          key: "__webhook_url",
-          type: "copy",
-          compute: "webhook-url",
-          label: "Webhook URL",
-          help: "Stripe › Developers › Webhooks › Add endpoint.",
-          required: true,
-        },
-        {
-          key: "__events",
-          type: "copy",
-          compute: "event-list",
-          label: "Events to send",
-          help: "Nothing else is read.",
-          required: true,
-        },
-        {
-          key: "STRIPE_BILLING_WEBHOOK_SECRET",
-          type: "secret",
-          label: "Billing webhook secret",
-          help: "The signing secret for the endpoint above. Falls back to the general webhook secret when unset, so either one satisfies this.",
-          required: "one-of",
-          group: "webhook-secret",
-        },
-        {
-          key: "STRIPE_WEBHOOK_SECRET",
-          type: "secret",
-          label: "Webhook secret",
-          help: "The general signing secret, used when no billing-specific one is set.",
-          required: "one-of",
-          group: "webhook-secret",
+          key: "__connect",
+          type: "oauth",
+          label: "Connection",
+          help: "Sign in to the Stripe account your clients' payments should go to.",
+          required: false,
         },
       ],
     },
@@ -279,6 +218,7 @@ const googleConnection: ConnectionSpec = {
   kind: "oauth2",
   title: "Google account",
   summary: "One sign-in. Calendar and Drive are separate permissions on it.",
+  connectPath: "/api/google-calendar/connect",
   // Signing in is the whole setup. The OAuth client ID and secret are
   // Clarity's own app, set once in Netlify for every business (see
   // clarity-cloud-google-config.mts) — nothing a coach has or should paste.
