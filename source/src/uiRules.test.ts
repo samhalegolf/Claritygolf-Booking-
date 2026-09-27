@@ -388,9 +388,13 @@ test("every file Netlify deploys as a function has a legal name", () => {
  */
 test("every connection archetype has two integrations, or a stated reason", () => {
   const SOLO: Record<string, string> = {
-    // A handshake rather than a set of fields. Nothing else about it resembles
-    // pasting a token, so sharing a kind with one would help nobody.
-    oauth2: "Google — the only OAuth integration, and a different mechanism rather than a variation",
+    // The only thing that arrives rather than being called. Stripe's events
+    // now come through one Clarity-wide Connect webhook, set up once in
+    // Netlify, so it no longer shows here per business.
+    "webhook-in": "Optix — the only inbound feed a business sets up itself; a different direction, not a variation",
+    // Two tokens with two jobs (the app, and the connected bank account).
+    // Collapse into api-token if Akahu ever moves to a single token.
+    "api-key-pair": "Akahu — two tokens with separate jobs; collapse into api-token if that ever changes",
     // On probation. The secret is shared rather than issued, which is a
     // different failure mode from a revocable token — but if nothing else ever
     // links to a peer service this should collapse into api-token.

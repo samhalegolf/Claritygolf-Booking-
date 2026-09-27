@@ -1,16 +1,15 @@
 import type { Config } from "@netlify/functions";
 import { requireCoachActor, type CoachActor } from "./_shared/coach-auth.mts";
-import { getDatabase } from "./_shared/database.mts";
 import {
   credentialFingerprint,
   isOriginalWorkspace,
   isTenantIntegration,
-  readAccountStripeSecret,
+  readAccountStripeConnection,
   readStoredCredentials,
   saveIntegrationCredentials,
   webhookUrlForAccount,
 } from "./_shared/integration-credentials.mts";
-import { isStripeSecretShaped, STRIPE_SECRET_SETTING } from "./_shared/stripe.mts";
+import { stripeCredentialStatus } from "./_shared/stripe.mts";
 
 import { businessUsesOptix } from "./_shared/resource-handler.mts";
 import { allIntegrations, integrationById, integrationsFor } from "./_shared/integrations/catalogue.mts";
@@ -65,11 +64,6 @@ async function valuesFor(descriptor: IntegrationDescriptor, accountId: string): 
   const stored = isTenantIntegration(descriptor.id)
     ? await readStoredCredentials(accountId, descriptor.id)
     : {};
-  // Stripe's secret key lives where Billing settings has always saved it.
-  if (descriptor.id === "stripe") {
-    const key = await readAccountStripeSecret(accountId);
-    if (key) stored.STRIPE_SECRET_KEY = key;
-  }
   return (key: string) => {
     if (stored[key]) return { raw: stored[key], source: "saved" };
     // The env vars are the original workspace's own tokens and Clarity's own
@@ -198,13 +192,22 @@ function integrationStatus(descriptor: IntegrationDescriptor, value: ValueLookup
 /**
  * Whether an OAuth integration is actually connected.
  *
- * Not a question the environment can answer. A client id and secret being set
- * says the app EXISTS; it says nothing about whether anyone has signed in, and
- * the two are days or months apart. The truth is a stored refresh token, which
- * is what the Google Calendar panel has always read — this makes the card agree
- * with it instead of contradicting it one screen higher.
+ * Not a question the environment can answer: Clarity's app existing says
+ * nothing about whether this business has signed in. Google's truth is a
+ * stored refresh token; Stripe's is the connected account saved by
+ * stripe-connect.mts.
  */
-async function oauthState(accountId: string) {
+async function oauthState(descriptor: IntegrationDescriptor, accountId: string) {
+  if (descriptor.id === "stripe") {
+    const status = stripeCredentialStatus(await readAccountStripeConnection(accountId));
+    return {
+      connected: status.configured,
+      account: status.account ? `${status.account}${status.testMode ? " (test mode)" : ""}` : "",
+      scopes: [] as string[],
+      lastUsed: "",
+      error: "",
+    };
+  }
   const rows = await integrationRequest(
     "google_provider_connections?select=provider_email,connection_status,granted_scopes_json," +
       "last_error_code,last_successful_use_at,revoked_at" +
@@ -225,22 +228,15 @@ async function oauthState(accountId: string) {
 
 type OAuthState = Awaited<ReturnType<typeof oauthState>>;
 
-/**
- * An OAuth integration reports what the token store says, not what the field
- * scan guessed. For the original workspace, connected also wins over "fields
- * missing": you cannot have signed in without an app to sign into. For any
- * other business the app's client id is Clarity's, not theirs, so only their
- * own sign-in counts.
- */
+/** An OAuth integration is configured when this business has signed in. */
 function withOAuth<T extends { configured: boolean; needsAuthorisation: boolean }>(
   entry: T,
   oauth: OAuthState | null,
-  original: boolean,
 ) {
   if (!entry.needsAuthorisation || !oauth) return entry;
   return {
     ...entry,
-    configured: original ? oauth.connected || entry.configured : oauth.connected,
+    configured: oauth.connected,
     connectedAs: oauth.connected ? oauth.account : "",
     connectionError: oauth.error,
   };
@@ -273,13 +269,12 @@ function canEdit(actor: CoachActor, descriptor: IntegrationDescriptor) {
 
 async function detail(descriptor: IntegrationDescriptor, actor: CoachActor, origin: string) {
   const accountId = actor.accountId;
-  const original = isOriginalWorkspace(accountId);
   const value = await valuesFor(descriptor, accountId);
   const editable = canEdit(actor, descriptor);
   const oauth = descriptor.connections.some((connection) => connection.kind === "oauth2")
-    ? await oauthState(accountId)
+    ? await oauthState(descriptor, accountId)
     : null;
-  const status = withOAuth(integrationStatus(descriptor, value), oauth, original);
+  const status = withOAuth(integrationStatus(descriptor, value), oauth);
 
   return {
     oauth,
@@ -306,6 +301,7 @@ async function detail(descriptor: IntegrationDescriptor, actor: CoachActor, orig
       events: connection.events || [],
       operations: connection.operations || [],
       signatureRecipe: connection.signatureRecipe || "",
+      connectPath: connection.connectPath || "",
       fields: connection.fields.map((field) =>
         resolveField(field, connection, { origin, accountId, value, editable }),
       ),
@@ -364,27 +360,6 @@ async function save(req: Request, descriptor: IntegrationDescriptor, actor: Coac
     clean[key] = value || null;
   }
 
-  // Stripe's secret key is the one Billing settings has always saved. Kept in
-  // that one place, and held to the same shape check.
-  if (descriptor.id === "stripe" && "STRIPE_SECRET_KEY" in clean) {
-    const key = clean.STRIPE_SECRET_KEY;
-    delete clean.STRIPE_SECRET_KEY;
-    if (key && !isStripeSecretShaped(key)) {
-      return json(
-        {
-          error: "invalid_stripe_key",
-          message: "That is not a Stripe secret key. It starts sk_live_, sk_test_, rk_live_ or rk_test_ — not pk_.",
-        },
-        400,
-      );
-    }
-    await getDatabase().sql`
-      INSERT INTO settings (account_id, key, value, updated_at)
-      VALUES (${actor.accountId}, ${STRIPE_SECRET_SETTING}, ${key || ""}, NOW())
-      ON CONFLICT (account_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
-    `;
-  }
-
   if (Object.keys(clean).length) {
     await saveIntegrationCredentials({
       accountId: actor.accountId,
@@ -434,14 +409,13 @@ export default async function handler(req: Request) {
       // their bay system through Settings › Booking › Bay & room system.
       const showOptix = await businessUsesOptix(actor.accountId);
       const list = everything.filter((descriptor) => descriptor.id !== "optix" || showOptix);
-      const original = isOriginalWorkspace(actor.accountId);
-      const oauth = await oauthState(actor.accountId);
       const integrations = await Promise.all(
         list.map(async (descriptor) =>
           withOAuth(
             card(descriptor, await valuesFor(descriptor, actor.accountId), canEdit(actor, descriptor)),
-            oauth,
-            original,
+            descriptor.connections.some((connection) => connection.kind === "oauth2")
+              ? await oauthState(descriptor, actor.accountId)
+              : null,
           ),
         ),
       );

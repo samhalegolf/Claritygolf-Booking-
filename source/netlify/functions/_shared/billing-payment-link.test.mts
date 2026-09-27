@@ -26,7 +26,7 @@ function stubHosts(options: { onPatch?: (body: string) => void } = {}) {
   const original = globalThis.fetch;
   process.env.SUPABASE_URL = "https://stub.supabase.co";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "stub-key";
-  process.env.STRIPE_SECRET_KEY = "sk_test_stub";
+  process.env.STRIPE_PLATFORM_SECRET_KEY = "sk_live_platform_stub";
 
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -43,10 +43,9 @@ function stubHosts(options: { onPatch?: (body: string) => void } = {}) {
         { status: 200 },
       );
     }
-    // The business's own Stripe key. Only the original workspace may fall back
-    // to the platform key, and "acct-1" is not it.
+    // The business's connected Stripe account.
     if (url.includes("/rest/v1/settings") && method === "GET") {
-      return new Response(JSON.stringify([{ value: "sk_test_stub" }]), { status: 200 });
+      return new Response(JSON.stringify([{ value: JSON.stringify({ account: "acct_stub", livemode: true }) }]), { status: 200 });
     }
     if (url.includes("/rest/v1/billing_invoices") && method === "PATCH") {
       options.onPatch?.(body);

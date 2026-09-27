@@ -1,135 +1,141 @@
-import { legacyOriginalWorkspaceId } from "./account.mts";
-
 /**
  * Stripe, and whose Stripe it is.
  *
  * Every charge this app takes runs through here, and the only question this
  * module exists to answer is which Stripe account the money lands in.
  *
- * Today there is one business, and its charges go to the platform's own Stripe
- * key in the environment. That is the right answer for one coach and the wrong
- * answer for two: the second business to sign up must not have its customers'
- * money arriving in the first one's account. So the credential is resolved per
- * account, from one function, with the platform key as the fallback rather
- * than as the rule:
+ * Each business signs in to its own Stripe with Stripe Connect (see
+ * stripe-connect.mts) and Clarity keeps only the connected account's id.
+ * Every request is then made with Clarity's platform key plus a
+ * Stripe-Account header naming that account, so the money lands with the
+ * business and Clarity never holds a business's key.
  *
- *   account   the business pasted its own Stripe secret key into Settings.
- *             Money goes to them. Clarity never touches it.
- *   platform  no key of their own, so the platform's key is used and the money
- *             arrives in Clarity's Stripe account to be passed on.
+ * Mode follows the business, not the deployment: a sandbox connects in test
+ * mode and is served by the platform's test key, so it can never take real
+ * money; a live business connects in live mode. The connection records which,
+ * and the platform key is chosen from that.
  *
- * Nothing above this module knows which of the two happened, which is the
- * point: adding Stripe Connect later (an OAuth handshake and a Stripe-Account
- * header instead of a pasted key) is a change to resolveStripeCredential and
- * stripeRequest, and to nothing else in the app.
+ * Platform settings (Netlify env, set once for Clarity, never per business):
  *
- * THE KEY IS A SECRET. It is write-only from the browser's point of view:
- * stripeCredentialStatus() is the only thing any UI is ever given, and it
- * carries a masked tail and never the key itself.
+ *   live   STRIPE_CONNECT_CLIENT_ID, STRIPE_PLATFORM_SECRET_KEY,
+ *          STRIPE_CONNECT_WEBHOOK_SECRET
+ *   test   STRIPE_CONNECT_TEST_CLIENT_ID, STRIPE_PLATFORM_TEST_SECRET_KEY,
+ *          STRIPE_CONNECT_TEST_WEBHOOK_SECRET
  */
 
-/** Where a business's own key lives. One name, so nothing has to guess it. */
-export const STRIPE_SECRET_SETTING = "accountStripeSecretKey";
+/** Where a business's connection lives in `settings`. */
+export const STRIPE_CONNECTION_SETTING = "accountStripeConnection";
+
+export type StripeConnection = {
+  /** The connected account, acct_… */
+  account: string;
+  livemode: boolean;
+};
 
 export type StripeCredential = {
+  /** Clarity's platform key for the connection's mode. */
   secret: string;
-  /** Whose account the money lands in. */
-  mode: "account" | "platform";
+  /** Sent as Stripe-Account, so the request acts on the business's account. */
+  account: string;
+  livemode: boolean;
 };
 
 export type StripeCredentialStatus = {
-  /** Can this business take a payment at all? */
+  /** Can this business take a payment right now? */
   configured: boolean;
-  mode: "account" | "platform" | "none";
-  /** The last four characters, for "is that the right key" -- never the key. */
-  maskedTail: string;
-  /** True when the key is a Stripe test key, which takes no real money. */
+  /** The connected account id, acct_… Not a secret. Empty when not connected. */
+  account: string;
+  /** True for a test-mode connection, which takes no real money. */
   testMode: boolean;
 };
 
-/**
- * The platform key, for the one business allowed to use it.
- *
- * It is the original workspace's own Stripe account, not a Clarity-wide one, so
- * any other business falling back to it would be taking payment into somebody
- * else's bank account -- a sandbox included. Every other business uses its own
- * key or is simply not set up.
- */
-const platformSecret = (accountId: string) =>
-  accountId && accountId === legacyOriginalWorkspaceId()
-    ? String(process.env.STRIPE_SECRET_KEY || "").trim()
-    : "";
+export type StripePlatform = {
+  clientId: string;
+  secret: string;
+  webhookSecret: string;
+};
 
-/**
- * Is this the shape of a Stripe secret key?
- *
- * Deliberately not a call to Stripe: this runs when a coach pastes a key, and
- * the failure worth catching is the obvious one -- a publishable key, which
- * starts pk_ and would be accepted by nothing, or a whole line copied out of a
- * dashboard. A key that is well-formed but wrong still fails on first use, and
- * fails with Stripe's own message, which is more useful than ours.
- *
- * Restricted keys (rk_) are allowed and are the better choice: a coach only
- * needs Checkout write and read, and a restricted key limits what a leak costs.
- */
-export function isStripeSecretShaped(value: unknown): boolean {
-  const text = String(value ?? "").trim();
-  return /^(sk|rk)_(test|live)_[A-Za-z0-9]{8,}$/.test(text);
+function env(name: string) {
+  return String(globalThis.Netlify?.env?.get(name) || process.env[name] || "").trim();
 }
 
-export function isStripeTestKey(value: unknown): boolean {
-  return /^(sk|rk)_test_/.test(String(value ?? "").trim());
+/** Clarity's own Connect app for one mode. Empty strings when not set up. */
+export function stripePlatform(livemode: boolean): StripePlatform {
+  return livemode
+    ? {
+        clientId: env("STRIPE_CONNECT_CLIENT_ID"),
+        secret: env("STRIPE_PLATFORM_SECRET_KEY"),
+        webhookSecret: env("STRIPE_CONNECT_WEBHOOK_SECRET"),
+      }
+    : {
+        clientId: env("STRIPE_CONNECT_TEST_CLIENT_ID"),
+        secret: env("STRIPE_PLATFORM_TEST_SECRET_KEY"),
+        webhookSecret: env("STRIPE_CONNECT_TEST_WEBHOOK_SECRET"),
+      };
 }
 
-/** The last four, behind dots. Enough to recognise a key, useless if leaked. */
-export function maskStripeSecret(value: unknown): string {
-  const text = String(value ?? "").trim();
-  return text.length < 4 ? "" : `••••${text.slice(-4)}`;
+/** A stored connection, or null for anything that is not one. */
+export function parseStripeConnection(value: unknown): StripeConnection | null {
+  let parsed: unknown = value;
+  if (typeof value === "string") {
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  const record = (parsed || {}) as Record<string, unknown>;
+  const account = typeof record.account === "string" ? record.account.trim() : "";
+  if (!/^acct_[A-Za-z0-9]+$/.test(account)) return null;
+  return { account, livemode: record.livemode === true };
 }
 
 /**
- * Which Stripe account this business's money goes to.
+ * Which Stripe account this business's money goes to, and the key to reach it.
  *
  * Throws rather than returning an unconfigured credential: every caller is
  * about to take money, and there is no useful way to half-do that. The 503 is
  * deliberate -- "not set up yet" is a service state, not a bad request.
  */
-export function resolveStripeCredential(accountSecret: unknown, accountId: string): StripeCredential {
-  const own = String(accountSecret ?? "").trim();
-  if (own) return { secret: own, mode: "account" };
-
-  const platform = platformSecret(accountId);
-  if (platform) return { secret: platform, mode: "platform" };
-
-  throw Object.assign(
-    new Error("Card payments are not set up yet. Add a Stripe key in Settings."),
-    { status: 503, code: "STRIPE_NOT_CONFIGURED" },
-  );
+export function resolveStripeCredential(connectionValue: unknown): StripeCredential {
+  const connection = parseStripeConnection(connectionValue);
+  if (!connection) {
+    throw Object.assign(
+      new Error("Card payments are not set up yet. Connect Stripe in Settings."),
+      { status: 503, code: "STRIPE_NOT_CONFIGURED" },
+    );
+  }
+  const { secret } = stripePlatform(connection.livemode);
+  if (!secret) {
+    throw Object.assign(
+      new Error("Card payments are unavailable right now. Clarity's Stripe platform is not set up."),
+      { status: 503, code: "STRIPE_PLATFORM_NOT_CONFIGURED" },
+    );
+  }
+  return { secret, account: connection.account, livemode: connection.livemode };
 }
 
 /**
- * What a UI may know about the credential. Never the key.
+ * What a UI may know about the connection.
  *
  * Separate from resolveStripeCredential because this one must not throw: a
  * settings screen asking "am I set up?" wants an answer, not an exception.
  */
-export function stripeCredentialStatus(accountSecret: unknown, accountId: string): StripeCredentialStatus {
-  const own = String(accountSecret ?? "").trim();
-  if (own) {
-    return {
-      configured: true,
-      mode: "account",
-      maskedTail: maskStripeSecret(own),
-      testMode: isStripeTestKey(own),
-    };
-  }
-  const platform = platformSecret(accountId);
+export function stripeCredentialStatus(connectionValue: unknown): StripeCredentialStatus {
+  const connection = parseStripeConnection(connectionValue);
+  if (!connection) return { configured: false, account: "", testMode: false };
   return {
-    configured: Boolean(platform),
-    mode: platform ? "platform" : "none",
-    // The platform's key is not this coach's to see any part of.
-    maskedTail: "",
-    testMode: platform ? isStripeTestKey(platform) : false,
+    configured: Boolean(stripePlatform(connection.livemode).secret),
+    account: connection.account,
+    testMode: !connection.livemode,
+  };
+}
+
+/** The headers every request on a business's behalf carries. */
+export function stripeHeaders(credential: StripeCredential): Record<string, string> {
+  return {
+    Authorization: `Bearer ${credential.secret}`,
+    "Stripe-Account": credential.account,
   };
 }
 
@@ -143,7 +149,7 @@ export async function stripeRequest(
   const response = await fetch(`https://api.stripe.com/v1/${path}${query}`, {
     method,
     headers: {
-      Authorization: `Bearer ${credential.secret}`,
+      ...stripeHeaders(credential),
       ...(method === "GET" ? {} : { "Content-Type": "application/x-www-form-urlencoded" }),
     },
     ...(method === "GET" ? {} : { body: (options.params || new URLSearchParams()).toString() }),

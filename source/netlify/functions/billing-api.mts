@@ -39,7 +39,7 @@ import {
   retrieveStripeCheckoutSession as retrieveStripeCheckoutSessionWith,
   stripeCredentialStatus,
   stripeRequest as stripeRequestWith,
-  STRIPE_SECRET_SETTING,
+  STRIPE_CONNECTION_SETTING,
 } from "./_shared/stripe.mts";
 import type { StripeCheckoutInput } from "./_shared/stripe.mts";
 
@@ -2701,28 +2701,22 @@ async function sendInvoice(accountId: string, id: string, body: Record<string, u
 // only collects the money, so the shape of the request is identical apart from
 // the description and the metadata that lets us reconcile it afterwards.
 // Uses the Stripe REST API directly (form-encoded) so no SDK is required.
-// Requires STRIPE_SECRET_KEY in the environment.
+// Requests go through Clarity's platform key on the business's connected
+// account; see _shared/stripe.mts.
 
-/**
- * This account's Stripe key, if it has one of its own.
- *
- * Read through billing's own settings helper rather than booking-core's, per
- * the protected rule at the top of this file. Missing is the normal case
- * today and is not an error -- resolveStripeCredential falls back to the
- * platform key and says which it used.
- */
-async function accountStripeSecret(accountId: string): Promise<string> {
+/** This account's Stripe connection, as stored. Empty when not connected. */
+async function accountStripeConnection(accountId: string): Promise<string> {
   const rows = await supabase("settings", {
     query: settingsSelectQuery(accountId, {
       select: "value",
-      filters: [`key=eq.${encodeFilter(STRIPE_SECRET_SETTING)}`, "limit=1"],
+      filters: [`key=eq.${encodeFilter(STRIPE_CONNECTION_SETTING)}`, "limit=1"],
     }),
   }).catch(() => [] as Array<Record<string, unknown>>);
   return String(rows[0]?.value || "").trim();
 }
 
 async function stripeFor(accountId: string) {
-  return resolveStripeCredential(await accountStripeSecret(accountId), accountId);
+  return resolveStripeCredential(await accountStripeConnection(accountId));
 }
 
 async function stripeRequest(
@@ -3231,11 +3225,7 @@ async function listPaymentMethods(accountId: string) {
     // The Clarity Pay row is seeded for every account whether or not Stripe is
     // wired up, so its presence proves nothing. This is the real answer, and it
     // is what decides whether "Include payment link" arrives ticked.
-    //
-    // Asked per account rather than of the environment: a business with its own
-    // Stripe key is configured even if the platform has none, and one relying
-    // on the platform's is not configured if that key is missing.
-    clarityPayConfigured: stripeCredentialStatus(await accountStripeSecret(accountId), accountId).configured,
+    clarityPayConfigured: stripeCredentialStatus(await accountStripeConnection(accountId)).configured,
   };
 }
 

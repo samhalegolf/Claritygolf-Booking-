@@ -1,6 +1,8 @@
 import type { Config } from "@netlify/functions";
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { integrationCredentials, resolveWebhookAccount } from "./_shared/integration-credentials.mts";
+import { accountsForStripeAccount } from "./_shared/integration-credentials.mts";
+import { stripePlatform, STRIPE_CONNECTION_SETTING } from "./_shared/stripe.mts";
+import { getDatabase } from "./_shared/database.mts";
 import {
   deleteStripeInvoice,
   syncStripeCharge,
@@ -15,19 +17,18 @@ import {
 // Products are deliberately not mirrored - see the note in
 // _shared/stripe-billing.mts. product.* events are acknowledged and ignored.
 //
-// Setup: point a Stripe webhook endpoint at /api/stripe-billing-webhook with
-// events invoice.created, invoice.updated, invoice.finalized, invoice.sent,
+// One endpoint for every business. It is registered once, on Clarity's
+// platform Stripe account under Connect ("events on connected accounts"), with
+// the events below. Each event names the connected account it came from
+// (event.account) and whether it is live; that pair finds the business. The
+// signing secret is the platform's (STRIPE_CONNECT_WEBHOOK_SECRET, or the
+// _TEST_ one for the test-mode endpoint), never a business's.
+//
+// Events: invoice.created, invoice.updated, invoice.finalized, invoice.sent,
 // invoice.paid, invoice.payment_failed, invoice.voided,
 // invoice.marked_uncollectible, invoice.deleted, charge.succeeded,
-// charge.updated, charge.captured, charge.refunded — and save that endpoint's
-// signing secret in Integrations › Stripe.
-//
-// Per business: each registers its own URL (?account=<id>, as Integrations ›
-// Stripe shows it) and its own signing secret. The URL names the business and
-// only that business's secret verifies the delivery, so an event can land in
-// no ledger but the one whose Stripe account signed it. A URL naming no
-// business is the original workspace's, verified against the
-// STRIPE_BILLING_WEBHOOK_SECRET / STRIPE_WEBHOOK_SECRET env vars as before.
+// charge.updated, charge.captured, charge.refunded,
+// account.application.deauthorized.
 
 function json(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), {
@@ -36,9 +37,9 @@ function json(value: unknown, status = 200) {
   });
 }
 
-async function webhookSecret(accountId: string) {
-  const read = await integrationCredentials(accountId, "stripe");
-  return read("STRIPE_BILLING_WEBHOOK_SECRET") || read("STRIPE_WEBHOOK_SECRET");
+/** Both modes' secrets: the live and test endpoints are signed separately. */
+function webhookSecrets() {
+  return [stripePlatform(true).webhookSecret, stripePlatform(false).webhookSecret].filter(Boolean);
 }
 
 function verifyStripeSignature(rawBody: string, signatureHeader: string, secret: string) {
@@ -67,51 +68,76 @@ function verifyStripeSignature(rawBody: string, signatureHeader: string, secret:
 
 export default async function handler(req: Request) {
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
-  const business = await resolveWebhookAccount(req);
-  if (!business) return json({ error: "unknown_business" }, 404);
-  const accountId = () => business;
-  const secret = await webhookSecret(business);
-  if (!secret) return json({ error: "not_configured", message: "Webhook secret is not configured." }, 503);
+  const secrets = webhookSecrets();
+  if (!secrets.length) return json({ error: "not_configured", message: "Webhook secret is not configured." }, 503);
 
   const rawBody = await req.text();
-  let event: Record<string, any>;
-  try {
-    event = verifyStripeSignature(rawBody, req.headers.get("stripe-signature") || "", secret);
-  } catch {
-    return json({ error: "invalid_signature" }, 400);
+  const signature = req.headers.get("stripe-signature") || "";
+  let event: Record<string, any> | null = null;
+  for (const secret of secrets) {
+    try {
+      event = verifyStripeSignature(rawBody, signature, secret);
+      break;
+    } catch {
+      // Try the other mode's secret.
+    }
+  }
+  if (!event) return json({ error: "invalid_signature" }, 400);
+
+  const stripeAccount = String(event.account || "");
+  const businesses = await accountsForStripeAccount(stripeAccount, event.livemode === true);
+  // Acknowledged, not failed: a business that has disconnected is not coming
+  // back for these, and a 4xx/5xx would only make Stripe retry for days.
+  if (!businesses.length) return json({ received: true, ignored: "no_connected_business" });
+
+  if (event.type === "account.application.deauthorized") {
+    // Disconnected from Stripe's side. Forget the connection so the screens
+    // stop saying "connected" to an account Clarity can no longer reach.
+    for (const business of businesses) {
+      await getDatabase().sql`
+        DELETE FROM settings WHERE account_id = ${business} AND key = ${STRIPE_CONNECTION_SETTING}
+      `;
+    }
+    return json({ received: true, disconnected: businesses.length });
   }
 
   const object = event?.data?.object || {};
 
   try {
-    switch (event?.type) {
-      case "invoice.created":
-      case "invoice.updated":
-      case "invoice.finalized":
-      case "invoice.sent":
-      case "invoice.paid":
-      case "invoice.payment_failed":
-      case "invoice.payment_action_required":
-      case "invoice.voided":
-      case "invoice.marked_uncollectible":
-        return json({ received: true, result: await syncStripeInvoice(object, accountId()) });
-      case "invoice.deleted":
-        return json({ received: true, result: await deleteStripeInvoice(accountId(), String(object?.id || "")) });
-      case "charge.succeeded":
-      case "charge.updated":
-      case "charge.captured":
-      case "charge.refunded":
-        return json({ received: true, result: await syncStripeCharge(object, accountId()) });
-      default:
-        // Unhandled event types are acknowledged so Stripe doesn't retry them.
-        return json({ received: true, ignored: event?.type || "unknown" });
-    }
+    const results = [];
+    for (const business of businesses) results.push(await handleEvent(event, object, business));
+    return json({ received: true, results });
   } catch (error) {
     console.error("stripe_billing_webhook:failed", event?.type, error);
     return json(
       { error: "webhook_processing_failed", message: error instanceof Error ? error.message : "Processing failed." },
       500,
     );
+  }
+}
+
+async function handleEvent(event: Record<string, any>, object: Record<string, any>, accountId: string) {
+  switch (event?.type) {
+    case "invoice.created":
+    case "invoice.updated":
+    case "invoice.finalized":
+    case "invoice.sent":
+    case "invoice.paid":
+    case "invoice.payment_failed":
+    case "invoice.payment_action_required":
+    case "invoice.voided":
+    case "invoice.marked_uncollectible":
+      return syncStripeInvoice(object, accountId);
+    case "invoice.deleted":
+      return deleteStripeInvoice(accountId, String(object?.id || ""));
+    case "charge.succeeded":
+    case "charge.updated":
+    case "charge.captured":
+    case "charge.refunded":
+      return syncStripeCharge(object, accountId);
+    default:
+      // Unhandled event types are acknowledged so Stripe doesn't retry them.
+      return { ignored: event?.type || "unknown" };
   }
 }
 

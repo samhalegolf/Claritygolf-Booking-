@@ -138,12 +138,10 @@ export function chargeProductName(
 /**
  * A GET against Stripe, supplied by the caller.
  *
- * Injected rather than imported because the two callers hold different keys.
- * The billing sync runs on the deployment's STRIPE_SECRET_KEY; billing-api
- * resolves the business's own key through stripeFor(accountId), which is the
- * whole point of that function -- a second business's charges must never be
- * read with the first one's credential. A module that reached for one of them
- * would quietly be wrong for the other.
+ * Injected rather than imported so the caller decides whose Stripe is read:
+ * billing-api resolves the business's connected account through
+ * stripeFor(accountId), and a second business's charges must never be read
+ * with the first one's credential.
  */
 export type StripeGet = (path: string, params: URLSearchParams) => Promise<any>;
 
