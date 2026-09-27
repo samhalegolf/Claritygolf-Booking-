@@ -86,8 +86,6 @@ function computed(field: FieldSpec, connection: ConnectionSpec, origin: string, 
       // Each business registers its own URL; the webhook reads the business
       // from it and verifies with that business's secret.
       return connection.path ? webhookUrlForAccount(origin, connection.path, accountId) : "";
-    case "redirect-uri":
-      return `${origin}/api/google-calendar/callback`;
     case "event-list":
       return (connection.events || []).map((event) => event.id).join("\n");
     case "signature-recipe":

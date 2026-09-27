@@ -193,7 +193,7 @@ export type IntegrationCategory =
  * The six field types every integration is built from.
  *
  * `copy` is the one worth pausing on: it travels the other way. It is a fact
- * about Clarity that the other system needs — a webhook URL, a redirect URI,
+ * about Clarity that the other system needs — a webhook URL or
  * the list of events to subscribe to. Direction is a property of the field
  * rather than of the screen it lands on, which is what lets one renderer draw
  * both columns of a setup pane without being told which side it is drawing.
@@ -204,7 +204,7 @@ export type FieldType = "copy" | "text" | "secret" | "url" | "choice" | "oauth";
  * How a `copy` field's value is worked out. These cannot be literals: the
  * webhook URL depends on which deployment is asking.
  */
-export type FieldCompute = "webhook-url" | "redirect-uri" | "event-list" | "signature-recipe";
+export type FieldCompute = "webhook-url" | "event-list" | "signature-recipe";
 
 export type FieldSpec = {
   /** The environment variable holding it today. */
