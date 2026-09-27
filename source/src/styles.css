@@ -180,6 +180,22 @@ button {
   text-underline-offset: 3px;
 }
 
+.login-legal {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 14px;
+  padding-top: 16px;
+  border-top: 1px solid #e2e0d8;
+}
+
+.login-legal a {
+  color: #66635d;
+  font-size: 12px;
+  font-weight: 700;
+  text-underline-offset: 3px;
+}
+
 .app-shell {
   min-height: 100vh;
   display: grid;
