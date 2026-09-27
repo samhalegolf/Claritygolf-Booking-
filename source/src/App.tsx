@@ -6919,6 +6919,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const weekItems = useMemo(() => accountItems.filter((item) => itemWeek(item) === activeWeek), [activeWeek, accountItems]);
   const activeCoachId = currentAppUser.coachId || firstCoachId(accountCoachProfiles);
   const fallbackCoachId = firstCoachId(accountCoachProfiles);
+  // The signed-in person's own coach profile: what the profile page shows.
+  const ownCoachProfile = accountCoachProfiles.find((coach) => coach.id === activeCoachId);
   const activeCoachList = accountCoachProfiles.filter((coach) => coach.active && !coach.archived && coach.bookable);
   const effectiveCalendarPerspective: CalendarPerspective =
     isAdminUser && (calendarPerspective !== "location" || canUseFeature(activeAccount, "locationCalendar"))
@@ -31061,12 +31063,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           <section className="profile-page">
             <CoachProfilePanel
               identity={{
-                coachName: coachAccount.coachName || currentAppUser.name,
+                coachName: ownCoachProfile?.displayName || ownCoachProfile?.name || currentAppUser.name,
                 businessName: coachAccount.businessName,
                 venueName: coachAccount.venueShortName || coachAccount.venueName,
                 roleLabel: isPlatformAdmin ? "Platform admin" : isAdminUser ? "Coach · Admin" : "Coach",
-                email: coachAccount.contactEmail || currentAppUser.email,
-                phone: coachProfiles[0]?.phone || "",
+                email: ownCoachProfile?.email || currentAppUser.email,
+                phone: ownCoachProfile?.phone || "",
                 timezone: coachAccount.timezone,
                 currency: invoiceSettings.currency,
               }}
