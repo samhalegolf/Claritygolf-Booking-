@@ -1315,7 +1315,7 @@ function bankCandidateSortText(value: string | null | undefined) {
  * is left once each panel is filed once.
  *
  * Missing on purpose: Payments. Invoicing defaults, tax and payment terms all
- * live inside the Coach Account panel today, and pulling them out is a job
+ * live inside the Account panel today, and pulling them out is a job
  * about that panel rather than about the filing.
  */
 /**
@@ -6315,7 +6315,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const isAdminUser = currentAppUser.role === "admin" || currentAppUser.role === "account_admin" || currentAppUser.role === "platform_admin";
   // Running Clarity, as distinct from running a business on it.
   const isPlatformAdmin = currentAppUser.role === "platform_admin";
-  const coachAccountEditor = useEditableBlock<CoachAccount>({
+  const businessNameEditor = useEditableBlock<CoachAccount>({
     value: coachAccount,
     onSave: saveCoachAccount,
   });
@@ -6358,7 +6358,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const editableBlocks = useMemo(
     () => [
       { id: "region", title: "Country & region", editor: regionEditor },
-      { id: "coach-account", title: "Coach Account", editor: coachAccountEditor },
+      { id: "business-name", title: "Business name", editor: businessNameEditor },
       { id: "billing-settings", title: "Billing Settings", editor: billingSettingsEditor },
       { id: "email-notifications", title: "Email", editor: emailNotificationsEditor },
       { id: "text-machine", title: "SMS", editor: textMachineEditor },
@@ -6369,7 +6369,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     ],
     [
       regionEditor,
-      coachAccountEditor,
+      businessNameEditor,
       billingSettingsEditor,
       emailNotificationsEditor,
       textMachineEditor,
@@ -6432,8 +6432,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     setSettingsTab(nextTab);
   }
 
-  const coachAccountDraft = coachAccountEditor.draftValue;
-  const coachAccountIsLocked = coachAccountEditor.status !== "editing" && coachAccountEditor.status !== "error";
+  const businessNameDraft = businessNameEditor.draftValue;
+  const businessNameIsLocked = businessNameEditor.status !== "editing" && businessNameEditor.status !== "error";
   const regionDraft = regionEditor.draftValue;
   const regionIsLocked = regionEditor.status !== "editing" && regionEditor.status !== "error";
   const billingAccountDraft = billingSettingsEditor.draftValue;
@@ -6454,9 +6454,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const playerBookingEmbedIsLocked =
     playerBookingEmbedEditor.status !== "editing" && playerBookingEmbedEditor.status !== "error";
 
-  function updateCoachAccountBlockDraft<K extends keyof CoachAccount>(field: K, value: CoachAccount[K]) {
-    coachAccountEditor.setDraftValue((current) => cleanCoachAccount({ ...current, [field]: value }));
-  }
 
   function updateRegionDraft(next: Partial<RegionValues>) {
     regionEditor.setDraftValue((current) => {
@@ -24220,9 +24217,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       {
         id: "coach-branding",
         category: "Customer experience",
-        label: "Coach branding",
+        label: "Business branding",
         summary: "Your logo and colours, everywhere a client looks.",
-        path: "Settings › Business › Coach branding",
+        path: "Settings › Business › Business branding",
         target: { kind: "settings", tab: "business", group: "coach-branding" },
         facts: [
           ["Logo", brandSettings.logoName || (brandSettings.logoPreview ? "Set" : "Not set")],
@@ -30042,7 +30039,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     <Settings size={24} />
                   </div>
                   <p className="field-help">
-                    These defaults are used when creating a new invoice and are saved on the Coach Account record.
+                    These defaults are used when creating a new invoice and are saved on your account record.
                     Current next number: {invoiceNumber}
                   </p>
                   <EditableSettingsBlock
@@ -31204,7 +31201,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 </EditableSettingsBlock>
               </SettingsGroup>
 
-              <SettingsGroup id="coach-account" section="account" title="Coach account" className="notification-card account-card">
+              <SettingsGroup id="coach-account" section="account" title="Account" className="notification-card account-card">
                 <details className="settings-subsection">
                   <summary className="settings-subsection-title">
                     <KeyRound size={18} />
@@ -31250,121 +31247,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   <p className="field-help">This is the account wrapper for subscription entitlements. Billing automation and platform admin tools are not implemented here.</p>
                 </details>
                 <div className="account-settings-groups">
-                  <EditableSettingsBlock
-                    id="coach-account-block"
-                    title="Coach Account"
-                    status={coachAccountEditor.status}
-                    dirty={coachAccountEditor.dirty}
-                    errorMessage={coachAccountEditor.errorMessage}
-                    onEdit={() => startEditableBlock("coach-account")}
-                    onCancel={() => cancelEditableBlock("coach-account")}
-                    onSave={() => void saveEditableBlock("coach-account")}
-                  >
-                  <details className="settings-subsection">
-                    <summary className="settings-subsection-title">
-                      <User size={18} />
-                      <div>
-                        <span>Coach</span>
-                        <strong>Profile</strong>
-                      </div>
-                    </summary>
-                    <div className="service-form-row">
-                      <label className="settings-field">
-                        <span>Coach name</span>
-                        <input
-                          value={coachAccountDraft.coachName}
-                          readOnly={coachAccountIsLocked}
-                          onChange={(event) => updateCoachAccountBlockDraft("coachName", event.target.value)}
-                        />
-                      </label>
-                      <label className="settings-field">
-                        <span>Business name</span>
-                        <input
-                          value={coachAccountDraft.businessName}
-                          readOnly={coachAccountIsLocked}
-                          onChange={(event) => updateCoachAccountBlockDraft("businessName", event.target.value)}
-                        />
-                      </label>
-                    </div>
-                    <label className="settings-field">
-                      <span>Contact email</span>
-                      <input
-                        value={coachAccountDraft.contactEmail}
-                        readOnly={coachAccountIsLocked}
-                        onChange={(event) => updateCoachAccountBlockDraft("contactEmail", event.target.value)}
-                        type="email"
-                      />
-                    </label>
-                  </details>
-
-                  <details className="settings-subsection">
-                    <summary className="settings-subsection-title">
-                      <MapPin size={18} />
-                      <div>
-                        <span>Venue</span>
-                        <strong>{coachAccount.venueShortName}</strong>
-                      </div>
-                    </summary>
-                    <label className="settings-field">
-                      <span>Venue name</span>
-                      <input
-                        value={coachAccountDraft.venueName}
-                        readOnly={coachAccountIsLocked}
-                        onChange={(event) => updateCoachAccountBlockDraft("venueName", event.target.value)}
-                      />
-                    </label>
-                    <div className="service-form-row">
-                      <label className="settings-field">
-                        <span>Short label</span>
-                        <input
-                          value={coachAccountDraft.venueShortName}
-                          readOnly={coachAccountIsLocked}
-                          onChange={(event) => updateCoachAccountBlockDraft("venueShortName", event.target.value)}
-                        />
-                      </label>
-                    </div>
-                  </details>
-
-	                  <details className="settings-subsection">
-	                    <summary className="settings-subsection-title">
-	                      <Link2 size={18} />
-                      <div>
-                        <span>Connected apps</span>
-                        <strong>Booking and Caddy</strong>
-                      </div>
-                    </summary>
-                    <label className="settings-field">
-                      <span>Booking app URL</span>
-                      <input
-                        value={coachAccountDraft.bookingUrl}
-                        readOnly={coachAccountIsLocked}
-                        onChange={(event) => {
-                          updateCoachAccountBlockDraft("bookingUrl", event.target.value);
-                          setSyncBaseUrl(event.target.value);
-                        }}
-                      />
-                    </label>
-                    <div className="service-form-row">
-                      <label className="settings-field">
-                        <span>Calendar slug</span>
-                        <input
-                          value={coachAccountDraft.calendarSlug}
-                          readOnly={coachAccountIsLocked}
-                          onChange={(event) => updateCoachAccountBlockDraft("calendarSlug", event.target.value)}
-                        />
-                      </label>
-                      <label className="settings-field">
-                        <span>Caddy workspace</span>
-                        <input
-                          value={coachAccountDraft.caddyWorkspaceUrl}
-                          readOnly={coachAccountIsLocked}
-                          onChange={(event) => updateCoachAccountBlockDraft("caddyWorkspaceUrl", event.target.value)}
-                        />
-                      </label>
-	                    </div>
-	                  </details>
-                  </EditableSettingsBlock>
-
                   <details className="settings-subsection">
                     <summary className="settings-subsection-title">
                       <KeyRound size={18} />
@@ -33271,7 +33153,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 </details>
               </SettingsGroup>
 
-              <SettingsGroup id="coach-branding" section="business" title="Coach branding" className="brand-vein-card">
+              <SettingsGroup id="coach-branding" section="business" title="Business branding" className="brand-vein-card">
 
                 <div className="brand-vein-preview">
                   <div className="brand-vein-logo">
@@ -33282,11 +33164,36 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     )}
                   </div>
                   <div>
-                    <span>Current coach brand</span>
+                    <span>Current business brand</span>
                     <strong>{brandSettings.coachName}</strong>
                     <em>{brandSettings.logoName || "No logo uploaded yet"}</em>
                   </div>
                 </div>
+
+                <EditableSettingsBlock
+                  id="business-name-block"
+                  title="Business name"
+                  status={businessNameEditor.status}
+                  dirty={businessNameEditor.dirty}
+                  errorMessage={businessNameEditor.errorMessage}
+                  onEdit={() => startEditableBlock("business-name")}
+                  onCancel={() => cancelEditableBlock("business-name")}
+                  onSave={() => void saveEditableBlock("business-name")}
+                >
+                  <label className="settings-field">
+                    <span>Business name</span>
+                    <input
+                      value={businessNameDraft.businessName}
+                      readOnly={businessNameIsLocked}
+                      onChange={(event) =>
+                        businessNameEditor.setDraftValue((current) =>
+                          cleanCoachAccount({ ...current, businessName: event.target.value }),
+                        )
+                      }
+                    />
+                  </label>
+                  <p className="field-help">Shown on your booking page, invoices and emails.</p>
+                </EditableSettingsBlock>
 
                 <details className="settings-subsection">
                   <summary className="settings-subsection-title">
@@ -33297,7 +33204,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     </div>
                   </summary>
                   <label className="settings-field">
-                    <span>Coach brand name</span>
+                    <span>Brand name</span>
                     <input
                       value={brandSettings.coachName}
                       onChange={(event) => updateBrandSetting("coachName", event.target.value)}

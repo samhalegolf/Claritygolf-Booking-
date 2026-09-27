@@ -246,8 +246,8 @@ export function CoachProfilePanel({ identity, internalJobs, onOpen }: CoachProfi
         </div>
         <button
           className="cp-gear"
-          onClick={() => onOpen({ kind: "settings", tab: "account", group: "coach-account" }, "Coach account")}
-          title="Settings › Account"
+          onClick={() => onOpen({ kind: "settings", tab: "business", group: "coaches" }, "Coaches")}
+          title="Settings › Business › Coaches"
           type="button"
         >
           <SettingsIcon size={16} />
