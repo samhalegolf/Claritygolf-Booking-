@@ -919,6 +919,20 @@ function cleanService(service, index = 0, accountId = "") {
 // type. The id must match EXTERNAL_BOOKING_SERVICE_ID in _shared/integrations/ingest.mts.
 export const EXTERNAL_BOOKING_SERVICE_ID = "external-booking";
 
+export function isReservedExternalBookingService(service) {
+  return cleanSlug(service?.id, "") === EXTERNAL_BOOKING_SERVICE_ID;
+}
+
+export function countManagedActiveServices(services) {
+  return Array.isArray(services)
+    ? services.filter((service) => service?.archived !== true && !isReservedExternalBookingService(service)).length
+    : 0;
+}
+
+export function managedServicesForStorage(services) {
+  return Array.isArray(services) ? services.filter((service) => !isReservedExternalBookingService(service)) : [];
+}
+
 const externalBookingServiceTemplate = {
   id: EXTERNAL_BOOKING_SERVICE_ID,
   name: "External Booking",
@@ -951,10 +965,10 @@ export function normalizeServices(serviceList, accountId = "") {
     seen.add(id);
     return { ...clean, id };
   });
-  // The reserved External Booking type always exists, so an inbound external
-  // booking can never reference a lesson type that isn't in the catalogue. A
-  // stored copy wins (the coach may recolour or rename it); deleting it just
-  // brings the default back on the next read.
+  // The reserved External Booking type always exists in memory, so an inbound
+  // external booking can never reference a missing lesson type. Legacy stored
+  // copies are accepted, but new saves omit it because it is not part of the
+  // business's lesson-type catalogue.
   if (!seen.has(EXTERNAL_BOOKING_SERVICE_ID)) {
     services.push(cleanService(externalBookingServiceTemplate, services.length, accountId));
   }
@@ -5862,9 +5876,16 @@ async function writeServices(accountId: string, services, context = null) {
   }));
   const account = context?.account || (await readDefaultWorkspaceAccount(accountId));
   assertAccountFeature(account, "services");
-  const activeServices = clean.filter((service) => service.accountId === account.id && service.archived !== true).length;
+  // The external-booking row is an integration filing bucket, not a lesson
+  // type the business created or can sell. It must not consume a plan slot.
+  const activeServices = countManagedActiveServices(
+    clean.filter((service) => service.accountId === account.id),
+  );
   assertAccountLimit(account, activeServices, "maxServices");
-  await setSettingsBulk(accountId, { servicesJson: JSON.stringify(clean), updatedAt: nowIso() });
+  await setSettingsBulk(accountId, {
+    servicesJson: JSON.stringify(managedServicesForStorage(clean)),
+    updatedAt: nowIso(),
+  });
   return clean;
 }
 

@@ -78,6 +78,7 @@ import { WORKSPACE_ACCOUNTS_STORAGE_KEY } from "./modules/shared/workspaceStorag
 import { useBackNavigation } from "./modules/shared/backNavigation";
 import { Loading, loadingLabel } from "./modules/shared/Loading";
 import { cleanPeople as cleanPeopleWith, type PeopleImportDiagnostic, type Person } from "./modules/clients/clientsModel";
+import { isManagedService } from "./serviceCatalog";
 import { isUnauthorizedClientsError, loadClients, replaceClients, resetClients, useClientsState } from "./modules/clients/clientsStore";
 import type { ClientsPanel as ClientsPanelComponent } from "./modules/clients/ClientsPanel";
 import type {
@@ -7445,6 +7446,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     serviceBelongsToAccount(service, activeAccountId) &&
     (isAdminUser || serviceIncludesCoach(service, serviceScopeCoachId, firstCoachId(accountCoachProfiles)));
   const accountServices = services.filter((service) => serviceBelongsToAccount(service, activeAccountId));
+  const managedAccountServices = accountServices.filter(isManagedService);
   // Every coach-and-place pair a booking of this lesson type could be with, in
   // the order they are tried. Mirrors serviceBookingOptions in booking-core.
   function serviceBookingOptions(service: Service) {
@@ -7484,14 +7486,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     if (preferredCoachId && ids.includes(preferredCoachId)) return preferredCoachId;
     return ids[0] || preferredCoachId || firstCoachId(accountCoachProfiles);
   }
-  const activeServices = accountServices.filter((service) => service.archived !== true && serviceVisibleToCurrentUser(service));
-  const archivedServices = accountServices.filter((service) => service.archived === true && serviceVisibleToCurrentUser(service));
+  const activeServices = managedAccountServices.filter((service) => service.archived !== true && serviceVisibleToCurrentUser(service));
+  const archivedServices = managedAccountServices.filter((service) => service.archived === true && serviceVisibleToCurrentUser(service));
   const sortedLocations = [...accountLocations].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name));
   const activeLocationList = sortedLocations.filter((location) => location.active && !location.archived);
   const archivedLocationList = sortedLocations.filter((location) => location.archived || !location.active);
   const defaultLocation = locationById(accountLocations, defaultLocationId(accountLocations)) ?? defaultLocationFromCoachAccount(coachAccount);
   const locationUsageCount = (locationId: string) =>
-    accountServices.filter(
+    managedAccountServices.filter(
       (service) =>
         (service.locationIds.length ? service.locationIds : [defaultLocation.id]).includes(locationId) &&
         service.archived !== true,
@@ -7609,7 +7611,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     maxCoaches: activeCoachList.length,
     maxLocations: activeLocationList.length,
     maxUsers: userBelongsToAccount(currentAppUser, activeAccountId) ? 1 : 0,
-    maxServices: accountServices.filter((service) => service.archived !== true).length,
+    maxServices: managedAccountServices.filter((service) => service.archived !== true).length,
     maxBookingScreens: BOOKING_SCREENS.length,
   };
   const enabledAccountFeatures = accountFeatureKeys.filter((feature) => activeAccountEntitlements.features[feature]);
@@ -19086,7 +19088,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       services.length,
     );
     const exists = services.some((service) => service.id === clean.id);
-    if (!exists && !canCreateWithinLimit(activeAccount, accountServices.filter((service) => service.archived !== true).length, "maxServices")) {
+    if (!exists && !canCreateWithinLimit(activeAccount, managedAccountServices.filter((service) => service.archived !== true).length, "maxServices")) {
       setToast({ message: limitReachedMessage("maxServices", accountLimit(activeAccount, "maxServices")) });
       return;
     }

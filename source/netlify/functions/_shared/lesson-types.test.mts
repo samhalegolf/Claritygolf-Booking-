@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { normalizeServices, publicBookableServices } from "../booking-core.mts";
+import {
+  countManagedActiveServices,
+  isReservedExternalBookingService,
+  managedServicesForStorage,
+  normalizeServices,
+  publicBookableServices,
+} from "../booking-core.mts";
 
 function lessonType(overrides = {}) {
   return {
@@ -48,14 +54,31 @@ test("an explicitly empty lesson type list is not repopulated with the demo defa
   assert.deepEqual(normalizeServices([]).map((service) => service.id), ["external-booking"]);
 });
 
-test("the reserved External Booking type always exists and stays private", () => {
+test("the reserved External Booking type always exists in memory and stays private", () => {
   const services = normalizeServices([lessonType({ id: "lesson-a" })]);
   const external = services.find((service) => service.id === "external-booking");
   assert.ok(external, "external-booking must be appended when missing");
   assert.equal(external?.visibility, "private");
-  // A stored copy wins, so the coach can rename or recolour it.
+  // A legacy stored copy still normalizes safely.
   const [stored] = normalizeServices([lessonType({ id: "external-booking", name: "Optix bookings", visibility: "private" })]);
   assert.equal(stored.name, "Optix bookings");
+});
+
+test("the reserved External Booking type is internal and does not consume a lesson-type plan slot", () => {
+  const services = normalizeServices([
+    lessonType({ id: "lesson-a" }),
+    lessonType({ id: "lesson-archived", archived: true }),
+  ]);
+
+  assert.equal(isReservedExternalBookingService(services.find((service) => service.id === "external-booking")), true);
+  assert.equal(isReservedExternalBookingService(services.find((service) => service.id === "lesson-a")), false);
+  assert.equal(countManagedActiveServices(services), 1);
+});
+
+test("the virtual External Booking bucket is never saved as a business lesson type", () => {
+  const normalized = normalizeServices([lessonType({ id: "lesson-a" })]);
+
+  assert.deepEqual(managedServicesForStorage(normalized).map((service) => service.id), ["lesson-a"]);
 });
 
 test("missing lesson type data still seeds the demo defaults", () => {
