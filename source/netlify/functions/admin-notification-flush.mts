@@ -1,25 +1,10 @@
 import type { Config } from "@netlify/functions";
 import { flushAdminNotificationQueue } from "./booking-core.mts";
 
-// Server-side safety net for the admin notification debounce queue.
-//
-// Admin booking changes (drag reschedules, edits, new bookings entered by the
-// coach) are debounced for 30 seconds before their emails send. Until this
-// function existed, the only things that flushed that queue were the *next*
-// calendar save or a setTimeout in the admin's open browser tab — so closing
-// the laptop within ~30 seconds of a reschedule meant the client's email sat
-// unsent until the coach next opened the app, and was often dropped entirely
-// by the staleness checks when it finally flushed. Live notification_history
-// showed 2 reschedule emails ever sent against ~100 bookings/cancellations.
-//
-// Runs every 5 minutes on Netlify's scheduler; not a public endpoint, no auth
-// surface. Exits cheaply (one settings read) when the queue is empty.
-//
-// Was "* * * * *", but production showed the every-minute schedule never
-// invoking at all (no per-minute DB activity, while lesson-reminders' */5
-// pattern ran reliably) — a Josh Bowe booking confirmation queued at 7:11pm
-// sat unsent until a browser flush at 8:27am. */5 matches the schedule that
-// demonstrably fires; worst case an email waits 5 minutes instead of 1.
+// Authoritative durable-notification worker. Calendar writes only settle a
+// booking-scoped outbox job; this schedule atomically claims due jobs, records
+// attempts, and retries failures. Browser flushes call the same worker only as
+// an optional latency optimisation.
 
 export default async function handler() {
   try {
@@ -38,5 +23,6 @@ export default async function handler() {
 }
 
 export const config: Config = {
-  schedule: "*/5 * * * *",
+  // The existing two-minute Optix sweep is proven to run in this deployment.
+  schedule: "*/2 * * * *",
 };

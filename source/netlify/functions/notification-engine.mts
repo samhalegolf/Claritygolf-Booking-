@@ -28,6 +28,8 @@ type NotifyInput = {
   previousAppointment?: any;
   source?: string;
   testRecipient?: string;
+  /** Stable durable-job identity used for provider and history idempotency. */
+  notificationJobId?: string;
   /**
    * Also pop a browser notification on the coach's devices.
    *
@@ -50,6 +52,31 @@ function cleanText(value: unknown, fallback = "", max = 800) {
 function cleanEmail(value: unknown, fallback = "") {
   const email = cleanText(value, "", 180).toLowerCase();
   return email.includes("@") ? email : fallback;
+}
+
+export function sameNotificationRecipient(left: unknown, right: unknown) {
+  const a = cleanEmail(left, "");
+  const b = cleanEmail(right, "");
+  return Boolean(a && b && a === b);
+}
+
+export function internalNotificationDeliveryPlan(input: {
+  coachRecipient: unknown;
+  adminRecipient: unknown;
+  coachEnabled: boolean;
+  adminEnabled: boolean;
+}) {
+  const plan: Array<{ channel: "coach" | "admin"; recipient: string }> = [];
+  const coachRecipient = cleanEmail(input.coachRecipient, "");
+  const adminRecipient = cleanEmail(input.adminRecipient, "");
+  if (input.coachEnabled) plan.push({ channel: "coach", recipient: coachRecipient });
+  if (
+    input.adminEnabled &&
+    !(input.coachEnabled && sameNotificationRecipient(coachRecipient, adminRecipient))
+  ) {
+    plan.push({ channel: "admin", recipient: adminRecipient });
+  }
+  return plan;
 }
 
 function cleanUrl(value: unknown, fallback: string) {
@@ -461,6 +488,7 @@ async function recordNotification(row: any) {
           provider: cleanText(row.provider, "", 80),
           provider_id: cleanText(row.providerId, "", 180),
           error: cleanText(row.error, "", 1000),
+          notification_job_id: cleanText(row.notificationJobId, "", 180) || null,
           created_at: new Date().toISOString(),
         },
       ],
@@ -851,7 +879,7 @@ export async function notifyBookingEvent(input: NotifyInput) {
   const variant = notificationVariantFor(action, service?.lessonFormat);
   const subjects = templateSubjects(action, variant, settings, variables);
   const personKey = appt.email ? `email:${appt.email}` : appt.phone ? `phone:${appt.phone}` : `name:${appt.client.toLowerCase()}`;
-  const signature = hash({ action, appt, previous, source: input.source }).slice(0, 24);
+  const signature = cleanText(input.notificationJobId, "", 180) || hash({ action, appt, previous, source: input.source }).slice(0, 24);
   const results: any[] = [];
 
   // Awaited on purpose: these calls already run inside a waitUntil task, and a
@@ -871,7 +899,7 @@ export async function notifyBookingEvent(input: NotifyInput) {
     if (!recipient) {
       const skipped = { channel, recipient, subject, kind, status: "skipped", sent: false, reason: "missing_recipient" };
       results.push(skipped);
-      await recordNotification({ accountId, personKey, calendarItemId: appt.id, recipient, subject, kind, status: "skipped", provider: "settings", error: "missing_recipient" });
+      await recordNotification({ accountId, personKey, calendarItemId: appt.id, recipient, subject, kind, status: "skipped", provider: "settings", error: "missing_recipient", notificationJobId: input.notificationJobId });
       return;
     }
     const body = bodyFor(action, variant, appt, previous, serviceName, settings, variables, channel);
@@ -889,7 +917,7 @@ export async function notifyBookingEvent(input: NotifyInput) {
     results.push(output);
     // Record the provider's actual response body alongside the reason code —
     // "resend_failed" alone made the 429 rate-limit failures undiagnosable.
-    await recordNotification({ accountId, personKey, calendarItemId: appt.id, recipient, subject, kind, status, provider: "resend", providerId: result.id || "", error: [result.reason, result.error].filter(Boolean).join(": ") });
+    await recordNotification({ accountId, personKey, calendarItemId: appt.id, recipient, subject, kind, status, provider: "resend", providerId: result.id || "", error: [result.reason, result.error].filter(Boolean).join(": "), notificationJobId: input.notificationJobId });
     console.log(
       "notification_engine:result",
       JSON.stringify({ action, channel, recipient, status, reason: result.reason || "", providerId: result.id || "" }),
@@ -905,7 +933,7 @@ export async function notifyBookingEvent(input: NotifyInput) {
     if (!settings.sendClientEmail) {
       const skipped = { channel: "custom_group_invite", recipient, subject: invite.subject, kind, status: "skipped", sent: false, reason: "disabled_client_email" };
       results.push(skipped);
-      await recordNotification({ accountId, personKey, calendarItemId: appt.id, recipient, subject: invite.subject, kind, status: "skipped", provider: "settings", error: "disabled_client_email" });
+      await recordNotification({ accountId, personKey, calendarItemId: appt.id, recipient, subject: invite.subject, kind, status: "skipped", provider: "settings", error: "disabled_client_email", notificationJobId: input.notificationJobId });
       return;
     }
     const result = await deliverEmail({
@@ -919,7 +947,7 @@ export async function notifyBookingEvent(input: NotifyInput) {
     });
     const status = result.sent ? "sent" : "failed";
     results.push({ channel: "custom_group_invite", recipient, subject: invite.subject, kind, status, ...result });
-    await recordNotification({ accountId, personKey, calendarItemId: appt.id, recipient, subject: invite.subject, kind, status, provider: "resend", providerId: result.id || "", error: [result.reason, result.error].filter(Boolean).join(": ") });
+    await recordNotification({ accountId, personKey, calendarItemId: appt.id, recipient, subject: invite.subject, kind, status, provider: "resend", providerId: result.id || "", error: [result.reason, result.error].filter(Boolean).join(": "), notificationJobId: input.notificationJobId });
   }
 
   if (action === "test") {
@@ -965,6 +993,7 @@ export async function notifyBookingEvent(input: NotifyInput) {
         status: "skipped",
         provider: "settings",
         error: "disabled_lesson_type_change_email",
+        notificationJobId: input.notificationJobId,
       });
     }
     return results;
@@ -973,20 +1002,33 @@ export async function notifyBookingEvent(input: NotifyInput) {
   if (settings.sendClientEmail || action === "cancelled" || action === "rescheduled") {
     await sendAndRecord("client", appt.email, subjects.client);
   } else {
-    await recordNotification({ accountId, personKey, calendarItemId: appt.id, recipient: appt.email, subject: subjects.client, kind: `${action}_client_email`, status: "skipped", provider: "settings", error: "disabled_client_email" });
+    await recordNotification({ accountId, personKey, calendarItemId: appt.id, recipient: appt.email, subject: subjects.client, kind: `${action}_client_email`, status: "skipped", provider: "settings", error: "disabled_client_email", notificationJobId: input.notificationJobId });
   }
 
   const bookingCoach = resolveAppointmentCoach(appt, settings);
-  if (settings.sendCoachEmail || action === "cancelled" || action === "rescheduled") {
+  const coachShouldSend = settings.sendCoachEmail || action === "cancelled" || action === "rescheduled";
+  const adminRecipient = settings.notificationEmail || settings.contactEmail;
+  const adminShouldSend = settings.sendAdminEmail || action === "cancelled" || action === "rescheduled";
+  const internalPlan = internalNotificationDeliveryPlan({
+    coachRecipient: bookingCoach.email,
+    adminRecipient,
+    coachEnabled: coachShouldSend,
+    adminEnabled: adminShouldSend,
+  });
+  if (coachShouldSend) {
     await sendAndRecord("coach", bookingCoach.email, subjects.admin);
   } else {
-    await recordNotification({ accountId, personKey, calendarItemId: appt.id, recipient: bookingCoach.email, subject: subjects.admin, kind: `${action}_coach_email`, status: "skipped", provider: "settings", error: "disabled_coach_email" });
+    await recordNotification({ accountId, personKey, calendarItemId: appt.id, recipient: bookingCoach.email, subject: subjects.admin, kind: `${action}_coach_email`, status: "skipped", provider: "settings", error: "disabled_coach_email", notificationJobId: input.notificationJobId });
   }
 
-  if (settings.sendAdminEmail || action === "cancelled" || action === "rescheduled") {
-    await sendAndRecord("admin", settings.notificationEmail || settings.contactEmail, subjects.admin);
+  if (adminShouldSend && !internalPlan.some((entry) => entry.channel === "admin")) {
+    const duplicate = { channel: "admin", recipient: adminRecipient, subject: subjects.admin, kind: `${action}_admin_email`, status: "skipped", sent: false, reason: "duplicate_internal_recipient" };
+    results.push(duplicate);
+    await recordNotification({ accountId, personKey, calendarItemId: appt.id, recipient: adminRecipient, subject: subjects.admin, kind: duplicate.kind, status: "skipped", provider: "settings", error: duplicate.reason, notificationJobId: input.notificationJobId });
+  } else if (adminShouldSend) {
+    await sendAndRecord("admin", adminRecipient, subjects.admin);
   } else {
-    await recordNotification({ accountId, personKey, calendarItemId: appt.id, recipient: settings.notificationEmail || settings.contactEmail, subject: subjects.admin, kind: `${action}_admin_email`, status: "skipped", provider: "settings", error: "disabled_admin_email" });
+    await recordNotification({ accountId, personKey, calendarItemId: appt.id, recipient: adminRecipient, subject: subjects.admin, kind: `${action}_admin_email`, status: "skipped", provider: "settings", error: "disabled_admin_email", notificationJobId: input.notificationJobId });
   }
 
   if ((action === "booking" || action === "updated") && appt.customGroup) {
@@ -1031,7 +1073,7 @@ export async function notifyBookingEvent(input: NotifyInput) {
       });
       const status = result.sent ? "sent" : "failed";
       results.push({ channel: "custom_group_invite", recipient, subject: subjects.client, kind, status, ...result });
-      await recordNotification({ accountId, personKey, calendarItemId: appt.id, recipient, subject: subjects.client, kind, status, provider: "resend", providerId: result.id || "", error: [result.reason, result.error].filter(Boolean).join(": ") });
+      await recordNotification({ accountId, personKey, calendarItemId: appt.id, recipient, subject: subjects.client, kind, status, provider: "resend", providerId: result.id || "", error: [result.reason, result.error].filter(Boolean).join(": "), notificationJobId: input.notificationJobId });
     }
   }
 

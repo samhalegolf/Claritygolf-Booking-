@@ -1016,6 +1016,7 @@ function cleanNotificationRecord(notification: Partial<NotificationRecord> & { i
     status: safeText(notification.status),
     provider: safeText(notification.provider),
     providerId: safeText(notification.providerId),
+    notificationJobId: safeText(notification.notificationJobId),
     error: safeText(notification.error),
     createdAt: safeText(notification.createdAt),
   };
@@ -1562,6 +1563,7 @@ type NotificationRecord = {
   status: string;
   provider: string;
   providerId: string;
+  notificationJobId: string;
   error: string;
   createdAt: string;
 };

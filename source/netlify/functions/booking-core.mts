@@ -133,6 +133,12 @@ import {
   FALLBACK_PHONE_COUNTRY,
 } from "./_shared/phone.mts";
 import { deliverEmail } from "./_shared/email-delivery.mts";
+import {
+  notificationRetryDelayMs,
+  planBookingNotificationIntent,
+  runNotificationOutboxWorker,
+  type NotificationOutboxJob,
+} from "./_shared/notification-outbox.mts";
 
 const sessionCookieName = "clarity_session";
 const sessionDays = 7;
@@ -2599,6 +2605,49 @@ async function ensureNotificationHistoryTable() {
     ON notification_history (provider_id)
     WHERE provider_id IS NOT NULL AND provider_id <> ''
   `;
+  ddl.sql`ALTER TABLE notification_history ADD COLUMN IF NOT EXISTS notification_job_id TEXT`;
+  ddl.sql`
+    CREATE INDEX IF NOT EXISTS idx_notification_history_job
+    ON notification_history (notification_job_id, created_at ASC)
+    WHERE notification_job_id IS NOT NULL AND notification_job_id <> ''
+  `;
+  ddl.sql`
+    CREATE TABLE IF NOT EXISTS notification_outbox (
+      id TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL,
+      calendar_item_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'queued',
+      source TEXT NOT NULL DEFAULT 'calendar-state',
+      appointment JSONB NOT NULL,
+      previous_appointment JSONB,
+      original_position_signature TEXT,
+      target_signature TEXT,
+      queued_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      due_at TIMESTAMPTZ NOT NULL,
+      first_attempted_at TIMESTAMPTZ,
+      attempted_at TIMESTAMPTZ,
+      sent_at TIMESTAMPTZ,
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      next_attempt_at TIMESTAMPTZ,
+      claim_token TEXT,
+      claim_expires_at TIMESTAMPTZ,
+      provider_result JSONB,
+      last_error TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `;
+  ddl.sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS notification_outbox_one_active_booking
+    ON notification_outbox (account_id, calendar_item_id)
+    WHERE status IN ('queued', 'processing', 'retry')
+  `;
+  ddl.sql`
+    CREATE INDEX IF NOT EXISTS notification_outbox_due
+    ON notification_outbox (COALESCE(next_attempt_at, due_at), queued_at)
+    WHERE status IN ('queued', 'retry')
+  `;
   ddl.sql`
     CREATE TABLE IF NOT EXISTS notification_webhook_events (
       id TEXT PRIMARY KEY,
@@ -3848,6 +3897,7 @@ function rowToNotification(row) {
     status: row.status || "",
     provider: row.provider || "",
     providerId: row.provider_id || "",
+    notificationJobId: row.notification_job_id || "",
     error: row.error || "",
     createdAt: row.created_at,
   };
@@ -7273,18 +7323,10 @@ async function deleteCalendarItemById(accountId: string, id, context = null, net
   };
 }
 
-function scheduleAdminDeleteSideEffects(accountId, context, previousItems, nextItems, timeZone) {
-  const task = (async () => {
-    try {
-      await processAdminNotificationDebounce(accountId, previousItems, nextItems, { timeZone });
-    } catch (error) {
-      console.error("calendar_state:notification_failed", error);
-    }
-  })().catch((error) => console.error("calendar_state:delete_side_effects_failed", error));
-
-  if (context && typeof context.waitUntil === "function") {
-    context.waitUntil(task);
-  }
+async function enqueueAdminDeleteNotification(accountId, previousItems, nextItems, timeZone) {
+  // The cancellation intent must be durable before the request completes.
+  // Provider delivery remains deferred to the outbox worker.
+  return processAdminNotificationDebounce(accountId, previousItems, nextItems, { timeZone });
 }
 
 async function writePublicBookingState(accountId: string, currentState: Record<string, any>, items) {
@@ -7750,214 +7792,320 @@ async function writePendingAdminNotifications(accountId, queue) {
   await setSetting(accountId, ADMIN_NOTIFICATION_DEBOUNCE_QUEUE_KEY, JSON.stringify(queue));
 }
 
+function rowToNotificationOutboxJob(row): NotificationOutboxJob {
+  return {
+    id: cleanString(row?.id, "", 180),
+    accountId: cleanSlug(row?.account_id, ""),
+    calendarItemId: cleanString(row?.calendar_item_id, "", 180),
+    action: row?.action,
+    status: row?.status,
+    source: cleanString(row?.source, "calendar-state", 120),
+    appointment: row?.appointment || {},
+    previousAppointment: row?.previous_appointment || null,
+    originalPositionSignature: cleanString(row?.original_position_signature, "", 800),
+    targetSignature: cleanString(row?.target_signature, "", 1600),
+    queuedAt: cleanString(row?.queued_at instanceof Date ? row.queued_at.toISOString() : row?.queued_at, "", 80),
+    dueAt: cleanString(row?.due_at instanceof Date ? row.due_at.toISOString() : row?.due_at, "", 80),
+    firstAttemptedAt: cleanString(row?.first_attempted_at instanceof Date ? row.first_attempted_at.toISOString() : row?.first_attempted_at, "", 80),
+    attemptedAt: cleanString(row?.attempted_at instanceof Date ? row.attempted_at.toISOString() : row?.attempted_at, "", 80),
+    sentAt: cleanString(row?.sent_at instanceof Date ? row.sent_at.toISOString() : row?.sent_at, "", 80),
+    attemptCount: Math.max(0, Number(row?.attempt_count) || 0),
+    nextAttemptAt: cleanString(row?.next_attempt_at instanceof Date ? row.next_attempt_at.toISOString() : row?.next_attempt_at, "", 80),
+    claimToken: cleanString(row?.claim_token, "", 180),
+    claimExpiresAt: cleanString(row?.claim_expires_at instanceof Date ? row.claim_expires_at.toISOString() : row?.claim_expires_at, "", 80),
+    providerResult: row?.provider_result || null,
+    lastError: cleanString(row?.last_error, "", 2000),
+  };
+}
+
+async function queueAdminNotificationIntent(
+  accountId: string,
+  action: "booking" | "rescheduled" | "updated" | "cancelled",
+  previous,
+  next,
+  options: { queuedAt?: string; dueAt?: string; source?: string; skipIfExisting?: boolean } = {},
+) {
+  const queuedAt = cleanString(options.queuedAt, nowIso(), 80);
+  const dueAt = cleanString(options.dueAt, new Date(Date.parse(queuedAt) + ADMIN_NOTIFICATION_DEBOUNCE_MS).toISOString(), 80);
+  const calendarItemId = cleanString(next?.id || previous?.id, "", 180);
+  if (!accountId || !calendarItemId) return null;
+
+  const client = await db().pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`notification-outbox:${accountId}:${calendarItemId}`]);
+    const existingResult = await client.query(
+      `SELECT * FROM notification_outbox
+       WHERE account_id = $1 AND calendar_item_id = $2
+         AND status IN ('queued', 'processing', 'retry')
+       ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
+      [accountId, calendarItemId],
+    );
+    const existing = existingResult.rows[0] ? rowToNotificationOutboxJob(existingResult.rows[0]) : null;
+    if (options.skipIfExisting && existing) {
+      await client.query("COMMIT");
+      return existing;
+    }
+
+    const plan = planBookingNotificationIntent({
+      existing,
+      action,
+      previous,
+      next,
+      queuedAt,
+      dueAt,
+      positionSignature: appointmentPositionSignature,
+    });
+    if (plan.operation === "none") {
+      await client.query("COMMIT");
+      return null;
+    }
+    if (plan.operation === "cancel") {
+      if (existing) {
+        await client.query(
+          `UPDATE notification_outbox
+           SET status = 'cancelled', last_error = $2, claim_token = NULL,
+               claim_expires_at = NULL, updated_at = NOW()
+           WHERE id = $1`,
+          [existing.id, plan.reason],
+        );
+      }
+      await client.query("COMMIT");
+      return { id: existing?.id || "", status: "cancelled", reason: plan.reason };
+    }
+
+    const mustReplaceExisting = Boolean(existing && (plan.cancelExisting || existing.status !== "queued" || existing.attemptCount > 0));
+    if (mustReplaceExisting) {
+      await client.query(
+        `UPDATE notification_outbox
+         SET status = 'cancelled', last_error = 'superseded_by_new_booking_change',
+             claim_token = NULL, claim_expires_at = NULL, updated_at = NOW()
+         WHERE id = $1`,
+        [existing!.id],
+      );
+    }
+
+    const intent = plan.intent;
+    const jobId = existing && !mustReplaceExisting ? existing.id : randomUUID();
+    const targetSignature = appointmentNotificationSignature(intent.appointment);
+    if (existing && !mustReplaceExisting) {
+      await client.query(
+        `UPDATE notification_outbox
+         SET action = $2, status = 'queued', source = $3, appointment = $4::jsonb,
+             previous_appointment = $5::jsonb, original_position_signature = $6,
+             target_signature = $7, queued_at = $8::timestamptz,
+             due_at = $9::timestamptz, next_attempt_at = NULL,
+             claim_token = NULL, claim_expires_at = NULL, last_error = NULL,
+             provider_result = NULL, updated_at = NOW()
+         WHERE id = $1`,
+        [jobId, intent.action, options.source || "calendar-state", JSON.stringify(intent.appointment), JSON.stringify(intent.previousAppointment), intent.originalPositionSignature, targetSignature, intent.queuedAt, intent.dueAt],
+      );
+      await client.query(
+        `UPDATE notification_history
+         SET kind = $2, created_at = $3::timestamptz, error = $4
+         WHERE notification_job_id = $1 AND status = 'queued'`,
+        [jobId, `${intent.action}_outbox`, intent.queuedAt, `eligible_at=${intent.dueAt}`],
+      );
+    } else {
+      await client.query(
+        `INSERT INTO notification_outbox (
+           id, account_id, calendar_item_id, action, status, source, appointment,
+           previous_appointment, original_position_signature, target_signature,
+           queued_at, due_at, created_at, updated_at
+         ) VALUES ($1, $2, $3, $4, 'queued', $5, $6::jsonb, $7::jsonb, $8, $9,
+                   $10::timestamptz, $11::timestamptz, NOW(), NOW())`,
+        [jobId, accountId, calendarItemId, intent.action, options.source || "calendar-state", JSON.stringify(intent.appointment), JSON.stringify(intent.previousAppointment), intent.originalPositionSignature, targetSignature, intent.queuedAt, intent.dueAt],
+      );
+      await client.query(
+        `INSERT INTO notification_history (
+           id, account_id, person_key, calendar_item_id, recipient, subject,
+           kind, status, provider, provider_id, error, notification_job_id, created_at
+         ) VALUES ($1, $2, '', $3, '', '', $4, 'queued', 'outbox', '', $5, $6, $7::timestamptz)`,
+        [randomUUID(), accountId, calendarItemId, `${intent.action}_outbox`, `eligible_at=${intent.dueAt}`, jobId, intent.queuedAt],
+      );
+    }
+    await client.query("COMMIT");
+    return { id: jobId, status: "queued", action: intent.action, calendarItemId, queuedAt: intent.queuedAt, dueAt: intent.dueAt };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 async function processAdminNotificationDebounce(
   accountId: string,
   previousItems = [],
   nextItems = [],
-  options = {},
+  options: { timeZone?: string; queueDiffs?: boolean } = {},
 ) {
   if (!accountId) throw missingAccountScope("admin_notification_debounce");
   const now = Date.now();
   const timeZone =
     cleanString(options.timeZone, "", 80) || (await accountTimeZoneFor(accountId));
-  const queueById = new Map(
-    (await readPendingAdminNotifications(accountId)).map((entry) => [
-      entry.calendarItemId,
-      entry,
-    ]),
-  );
   const previousById = appointmentById(previousItems);
   const nextById = appointmentById(nextItems);
   const results = [];
-  let queueChanged = false;
 
   if (options.queueDiffs !== false) {
     const ids = new Set([...previousById.keys(), ...nextById.keys()]);
     const queuedAt = nowIso();
-    const fireAfter = new Date(now + ADMIN_NOTIFICATION_DEBOUNCE_MS).toISOString();
+    const dueAt = new Date(now + ADMIN_NOTIFICATION_DEBOUNCE_MS).toISOString();
 
     for (const id of ids) {
       const previous = previousById.get(id);
       const next = nextById.get(id);
       const action = inferBookingAction(previous, next);
-      if (!action) continue;
-
-      const existing = queueById.get(id);
+      if (!action || !["booking", "rescheduled", "updated", "cancelled"].includes(action)) continue;
       if (next && isAppointmentInPast(next, timeZone)) {
-        if (existing) {
-          queueById.delete(id);
-          queueChanged = true;
-        }
         continue;
       }
-
-      if (action === "booking" && next) {
-        queueById.set(id, {
-          calendarItemId: id,
-          action: "booking",
-          queuedAt,
-          fireAfter,
-          originalPositionSignature: "",
-          targetSignature: appointmentNotificationSignature(next),
-          appointment: next,
-          previousAppointment: null,
-          deferrals: 0,
-        });
-        queueChanged = true;
-        continue;
-      }
-
-      if ((action === "rescheduled" || action === "updated") && next) {
-        const isPendingInitialBooking = existing?.action === "booking";
-        const originalPrevious = isPendingInitialBooking
-          ? null
-          : existing?.previousAppointment || previous || null;
-        const originalPositionSignature =
-          existing?.originalPositionSignature ||
-          (previous ? appointmentPositionSignature(previous) : "");
-        if (
-          existing &&
-          !isPendingInitialBooking &&
-          originalPositionSignature &&
-          appointmentPositionSignature(next) === originalPositionSignature
-        ) {
-          queueById.delete(id);
-          queueChanged = true;
-          continue;
-        }
-
-        queueById.set(id, {
-          calendarItemId: id,
-          action: isPendingInitialBooking ? "booking" : action,
-          queuedAt,
-          fireAfter,
-          originalPositionSignature: isPendingInitialBooking ? "" : originalPositionSignature,
-          targetSignature: appointmentNotificationSignature(next),
-          appointment: next,
-          previousAppointment: originalPrevious,
-          deferrals: 0,
-        });
-        queueChanged = true;
-        continue;
-      }
-
-      if (action === "cancelled" && previous) {
-        if (isAppointmentInPast(previous, timeZone)) {
-          if (existing) {
-            queueById.delete(id);
-            queueChanged = true;
-          }
-          continue;
-        }
-        if (existing?.action === "booking") {
-          queueById.delete(id);
-          queueChanged = true;
-          continue;
-        }
-        if (existing) {
-          queueById.delete(id);
-          queueChanged = true;
-        }
-        results.push(
-          ...(await notifyBookingEvent({
-            action,
-            appointment: previous,
-            previousAppointment: previous,
-            source: "calendar-state",
-          })),
-        );
-      }
+      if (action === "cancelled" && previous && isAppointmentInPast(previous, timeZone)) continue;
+      const queued = await queueAdminNotificationIntent(
+        accountId,
+        action as "booking" | "rescheduled" | "updated" | "cancelled",
+        previous,
+        next,
+        { queuedAt, dueAt, source: "calendar-state" },
+      );
+      if (queued) results.push(queued);
     }
   }
-
-  for (const [id, pending] of [...queueById.entries()]) {
-    if (parseTimestamp(pending.fireAfter) > now) continue;
-
-    const current = nextById.get(id);
-    queueById.delete(id);
-    queueChanged = true;
-    if (!current) {
-      console.warn("admin_notification_debounce:dropped", { calendarItemId: id, action: pending.action, reason: "item_deleted" });
-      continue;
-    }
-    // A late flush must not swallow the notification just because the lesson's
-    // (new) start time has since passed — the client still needs to hear about a
-    // reschedule that fired an hour late. Only genuinely stale entries (the
-    // lesson ended more than a day ago) are dropped, and the drop is logged.
-    if (appointmentMinutesSinceEnd(current, timeZone) > 24 * 60) {
-      console.warn("admin_notification_debounce:dropped", { calendarItemId: id, action: pending.action, reason: "ended_over_24h_ago" });
-      continue;
-    }
-    if (appointmentNotificationSignature(current) !== pending.targetSignature) {
-      // The appointment changed again after this entry was queued (a price tweak,
-      // a status change — anything outside inferBookingAction's diff). Dropping
-      // here silently was how admin reschedule emails went missing. Instead,
-      // re-queue against the current state so the email sends once editing
-      // settles; after a few deferrals send anyway rather than defer forever.
-      const deferrals = Number(pending.deferrals ?? 0);
-      if (deferrals < 5) {
-        queueById.set(id, {
-          ...pending,
-          deferrals: deferrals + 1,
-          fireAfter: new Date(now + ADMIN_NOTIFICATION_DEBOUNCE_MS).toISOString(),
-          targetSignature: appointmentNotificationSignature(current),
-          appointment: current,
-        });
-        continue;
-      }
-      console.warn("admin_notification_debounce:deferral_limit_reached_sending_anyway", { calendarItemId: id, action: pending.action });
-    }
-    if (
-      pending.originalPositionSignature &&
-      appointmentPositionSignature(current) === pending.originalPositionSignature
-    ) {
-      continue;
-    }
-
-    results.push(
-      ...(await notifyBookingEvent({
-        action: pending.action,
-        appointment: current,
-        previousAppointment: pending.previousAppointment,
-        source: "calendar-state-admin-debounce",
-      })),
-    );
-  }
-
-  if (queueChanged) await writePendingAdminNotifications(accountId, [...queueById.values()]);
   return results;
 }
 
-// Flush the admin notification debounce queue without queueing new diffs.
-// Called by the scheduled function (admin-notification-flush.mts) so queued
-// booking/reschedule emails send even when no admin browser tab is open to
-// fire the client-side setTimeout flush — previously the only trigger, which
-// is why admin reschedule emails went missing whenever the tab closed within
-// the 30-second debounce window.
-export async function flushAdminNotificationQueue() {
-  // Per business. The queue lives in that business's settings row and the
-  // debounce reads that business's calendar, so a single global pass would
-  // have flushed one coach's queue against another coach's lessons.
-  const accountIds = await listActiveAccountIds();
-  let pending = 0;
-  const results = [];
+async function migrateLegacyAdminNotificationQueue(accountId: string) {
+  const legacy = await readPendingAdminNotifications(accountId);
+  if (!legacy.length) return 0;
+  const state = await readCalendarState(accountId);
+  const currentById = appointmentById(state.items);
+  for (const pending of legacy) {
+    const current = currentById.get(pending.calendarItemId);
+    if (!current) {
+      // Do not resurrect a booking that disappeared before deployment, but do
+      // migrate it into the authoritative lifecycle as an auditable suppression.
+      const legacyJobId = `legacy-${createHash("sha256")
+        .update(JSON.stringify([accountId, pending.calendarItemId, pending.queuedAt, pending.action]))
+        .digest("hex")
+        .slice(0, 32)}`;
+      await db().pool.query(
+        `INSERT INTO notification_outbox (
+           id, account_id, calendar_item_id, action, status, source, appointment,
+           previous_appointment, original_position_signature, target_signature,
+           queued_at, due_at, last_error, created_at, updated_at
+         ) VALUES ($1, $2, $3, $4, 'cancelled', 'legacy-admin-debounce-migration',
+                   $5::jsonb, $6::jsonb, $7, $8, $9::timestamptz, $10::timestamptz,
+                   'item_deleted_before_legacy_queue_migration', NOW(), NOW())
+         ON CONFLICT (id) DO NOTHING`,
+        [legacyJobId, accountId, pending.calendarItemId, pending.action, JSON.stringify(pending.appointment), JSON.stringify(pending.previousAppointment), pending.originalPositionSignature, pending.targetSignature, pending.queuedAt, pending.fireAfter],
+      );
+      await db().pool.query(
+        `INSERT INTO notification_history (
+           id, account_id, person_key, calendar_item_id, recipient, subject,
+           kind, status, provider, provider_id, error, notification_job_id, created_at
+         ) VALUES ($1, $2, '', $3, '', '', $4, 'skipped', 'outbox', '',
+                   'item_deleted_before_legacy_queue_migration', $5, $6::timestamptz)
+         ON CONFLICT (id) DO NOTHING`,
+        [`${legacyJobId}-history`, accountId, pending.calendarItemId, `${pending.action}_outbox`, legacyJobId, pending.queuedAt],
+      );
+      continue;
+    }
+    await queueAdminNotificationIntent(
+      accountId,
+      pending.action,
+      pending.previousAppointment,
+      current || pending.appointment,
+      {
+        queuedAt: pending.queuedAt,
+        dueAt: pending.fireAfter,
+        source: "legacy-admin-debounce-migration",
+        skipIfExisting: true,
+      },
+    );
+  }
+  await writePendingAdminNotifications(accountId, []);
+  return legacy.length;
+}
+
+async function claimDueNotificationJobs(accountId = "", limit = 20) {
+  const claimToken = randomUUID();
+  const params: any[] = [Math.max(1, Math.min(50, limit)), claimToken];
+  const accountClause = accountId ? `AND account_id = $3` : "";
+  if (accountId) params.push(accountId);
+  const result = await db().pool.query(
+    `WITH due AS (
+       SELECT id FROM notification_outbox
+       WHERE (
+         (status IN ('queued', 'retry') AND COALESCE(next_attempt_at, due_at) <= NOW())
+         OR (status = 'processing' AND claim_expires_at <= NOW())
+       )
+       ${accountClause}
+       ORDER BY COALESCE(next_attempt_at, due_at), queued_at
+       FOR UPDATE SKIP LOCKED
+       LIMIT $1
+     )
+     UPDATE notification_outbox jobs
+     SET status = 'processing', claim_token = $2,
+         claim_expires_at = NOW() + INTERVAL '5 minutes',
+         first_attempted_at = COALESCE(first_attempted_at, NOW()),
+         attempted_at = NOW(), attempt_count = attempt_count + 1,
+         updated_at = NOW()
+     FROM due WHERE jobs.id = due.id
+     RETURNING jobs.*`,
+    params,
+  );
+  return result.rows.map(rowToNotificationOutboxJob);
+}
+
+async function markNotificationJobSent(job: NotificationOutboxJob, results: any[]) {
+  await db().pool.query(
+    `UPDATE notification_outbox
+     SET status = 'sent', sent_at = NOW(), provider_result = $3::jsonb,
+         last_error = NULL, claim_token = NULL, claim_expires_at = NULL,
+         next_attempt_at = NULL, updated_at = NOW()
+     WHERE id = $1 AND claim_token = $2`,
+    [job.id, job.claimToken, JSON.stringify(results || [])],
+  );
+}
+
+async function markNotificationJobRetry(job: NotificationOutboxJob, error: string, results: any[]) {
+  const nextAttemptAt = new Date(Date.now() + notificationRetryDelayMs(job.attemptCount)).toISOString();
+  await db().pool.query(
+    `UPDATE notification_outbox
+     SET status = 'retry', next_attempt_at = $3::timestamptz,
+         provider_result = $4::jsonb, last_error = $5,
+         claim_token = NULL, claim_expires_at = NULL, updated_at = NOW()
+     WHERE id = $1 AND claim_token = $2`,
+    [job.id, job.claimToken, nextAttemptAt, JSON.stringify(results || []), cleanString(error, "notification delivery failed", 2000)],
+  );
+}
+
+// Server-authoritative worker. Browser calls may invoke the same atomic claim
+// as a latency optimisation, but only the schedule guarantees eventual work.
+export async function flushAdminNotificationQueue(options: { accountId?: string } = {}) {
+  const accountIds = options.accountId ? [options.accountId] : await listActiveAccountIds();
+  let migrated = 0;
   for (const accountId of accountIds) {
     try {
-      const queued = await readPendingAdminNotifications(accountId);
-      if (!queued.length) continue;
-      pending += queued.length;
-      const state = await readCalendarState(accountId);
-      results.push(
-        ...(await processAdminNotificationDebounce(accountId, state.items, state.items, {
-          queueDiffs: false,
-          timeZone: state.account?.timezone,
-        })),
-      );
+      migrated += await migrateLegacyAdminNotificationQueue(accountId);
     } catch (error) {
-      console.error("admin_notification_flush:account_failed", { accountId, error });
+      console.error("notification_outbox:legacy_migration_failed", { accountId, error });
     }
   }
-  return { pending, results };
+  const worker = await runNotificationOutboxWorker({
+    claim: () => claimDueNotificationJobs(options.accountId || ""),
+    deliver: (job) => notifyBookingEvent({
+      action: job.action,
+      appointment: job.appointment,
+      previousAppointment: job.previousAppointment,
+      source: "notification-outbox",
+      notificationJobId: job.id,
+    }),
+    markSent: markNotificationJobSent,
+    markRetry: markNotificationJobRetry,
+  });
+  return { pending: worker.claimed, migrated, results: worker.outcomes };
 }
 
 // Cap reminder sends per scheduled run so a backlog (e.g. the feature being
@@ -13741,15 +13889,30 @@ async function routeBookingApiRequest(
           durationMs,
           verificationResult,
         });
-        scheduleAdminDeleteSideEffects(requestContext.accountId, context, current.items, nextState.items, nextState.account?.timezone);
-        const notificationResults = [];
+        let notificationResults = [];
+        let notificationWarning = "";
+        try {
+          notificationResults = await enqueueAdminDeleteNotification(
+            requestContext.accountId,
+            current.items,
+            nextState.items,
+            nextState.account?.timezone,
+          );
+        } catch (error) {
+          notificationWarning = "Booking was deleted, but its notification could not be queued.";
+          console.error("calendar_state:notification_failed", error);
+        }
+        const deleteWarnings = [
+          ...(Array.isArray(nextState.warnings) ? nextState.warnings : []),
+          ...(notificationWarning ? [notificationWarning] : []),
+        ];
         return json({
           ...publicCalendarState({
             ...nextState,
             notifications: nextState.notifications,
           }),
           notificationResults,
-          ...(nextState.warnings?.length ? { warnings: nextState.warnings } : {}),
+          ...(deleteWarnings.length ? { warnings: deleteWarnings } : {}),
           diagnostics: {
             code: "BOOKING_DELETE_VERIFY_COMPLETED",
             ...baseDetails,
@@ -13758,7 +13921,7 @@ async function routeBookingApiRequest(
             httpStatus: 200,
             durationMs,
             verificationResult,
-            sideEffectsPending: true,
+            sideEffectsPending: false,
           },
         });
       } catch (error) {
@@ -13789,12 +13952,8 @@ async function routeBookingApiRequest(
       let notificationResults = [];
       let notificationWarning = "";
       try {
-        notificationResults = await processAdminNotificationDebounce(
-          requestContext.accountId,
-          state.items,
-          state.items,
-          { queueDiffs: false, timeZone: state.account?.timezone },
-        );
+        const flushed = await flushAdminNotificationQueue({ accountId: requestContext.accountId });
+        notificationResults = flushed.results;
       } catch (error) {
         notificationWarning =
           "Booking alerts could not be processed.";
