@@ -10208,10 +10208,11 @@ async function applySandboxPublicSlug(sandboxId: string) {
  * Give a sandbox the settings of a brand-new business.
  *
  * Overwrites rather than seeds (seedSettings is DO NOTHING, so it cannot undo a
- * row that is already there). Only country, timezone and currency come from the
- * live business: they are facts about where the coach works, not their data,
- * and a sandbox pricing in the wrong currency tests nothing. The plan is left
- * alone so a plan the coach picked survives the rebuild.
+ * row that is already there). Only country and timezone come from the live
+ * business: they are facts about where the coach works, not their data. The
+ * fresh invoice settings carry no currency, so the sandbox prices in its
+ * country's currency -- a sandbox pricing in the wrong currency tests nothing.
+ * The plan is left alone so a plan the coach picked survives the rebuild.
  */
 async function writeFreshSandboxSettings(sandboxId: string, parentId: string) {
   const parentSettings = await readSettingsMap(parentId);
@@ -10228,7 +10229,6 @@ async function writeFreshSandboxSettings(sandboxId: string, parentId: string) {
     ...fresh,
     accountCountry: settingValue(parentSettings, "accountCountry"),
     accountTimezone: settingValue(parentSettings, "accountTimezone") || fresh.accountTimezone,
-    accountCurrency: settingValue(parentSettings, "accountCurrency"),
     // The plan is a copy of the live one, so entitlement checks run for real
     // rather than being bypassed. subscriptionStatus 'internal' is an existing
     // status isAccountActive() accepts, so the sandbox is entitled without
