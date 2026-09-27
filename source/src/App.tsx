@@ -24752,6 +24752,72 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         <section
           className={`workspace ${pointerSession?.mode === "place" || activeDockBooking ? "placing-from-dock" : ""}`}
         >
+          <div className="calendar-folder">
+          {/* Which calendar you're looking at, as folder tabs on top of it:
+              places on the left, people on the right. A coach who isn't an
+              admin only ever sees their own, so they get no tabs. */}
+          {isAdminUser ? (
+            <div className="calendar-scope-tabs" role="tablist" aria-label="Calendar">
+              <div className="calendar-scope-tab-group">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={effectiveCalendarPerspective === "all"}
+                  className={effectiveCalendarPerspective === "all" ? "is-active" : ""}
+                  onClick={() => {
+                    calendarPerspectiveChosenRef.current = true;
+                    setCalendarPerspective("all");
+                  }}
+                >
+                  All
+                </button>
+                {canUseFeature(activeAccount, "locationCalendar")
+                  ? activeLocations(accountLocations).map((location) => {
+                      const isActive =
+                        effectiveCalendarPerspective === "location" && selectedCalendarLocationId === location.id;
+                      return (
+                        <button
+                          type="button"
+                          role="tab"
+                          key={location.id}
+                          aria-selected={isActive}
+                          className={`is-location ${isActive ? "is-active" : ""}`}
+                          style={{ ["--location-hue" as string]: String(availabilityLocationHue(location.id)) } as CSSProperties}
+                          onClick={() => {
+                            calendarPerspectiveChosenRef.current = true;
+                            setCalendarPerspective("location");
+                            setCalendarLocationFilterId(location.id);
+                          }}
+                        >
+                          {location.shortName || location.name}
+                        </button>
+                      );
+                    })
+                  : null}
+              </div>
+              <div className="calendar-scope-tab-group">
+                {activeCoachList.map((coach) => {
+                  const isActive = effectiveCalendarPerspective === "coach" && selectedCalendarCoachId === coach.id;
+                  return (
+                    <button
+                      type="button"
+                      role="tab"
+                      key={coach.id}
+                      aria-selected={isActive}
+                      className={isActive ? "is-active" : ""}
+                      onClick={() => {
+                        calendarPerspectiveChosenRef.current = true;
+                        setCalendarPerspective("coach");
+                        setCalendarCoachFilterId(coach.id);
+                      }}
+                    >
+                      {coach.displayName || coach.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
           <div
             className={`calendar-card ${calendarDetailMode ? "calendar-detail-mode" : ""}`}
             onDoubleClick={toggleCalendarDetailMode}
@@ -24763,66 +24829,18 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   {calendarViewButtonLabel}
                 </button>
                 <h2>{weekTitle}</h2>
-                <div className="calendar-scope-controls" aria-label="Calendar scope">
-                  <select
-                    value={effectiveCalendarPerspective}
-                    onChange={(event) => {
-                      calendarPerspectiveChosenRef.current = true;
-                      setCalendarPerspective(event.target.value as CalendarPerspective);
-                    }}
-                    disabled={!isAdminUser}
-                  >
-                    {isAdminUser ? <option value="all">All calendars</option> : null}
-                    <option value="coach">Coach calendar</option>
-                    {isAdminUser && canUseFeature(activeAccount, "locationCalendar") ? <option value="location">Location calendar</option> : null}
-                  </select>
-                  {effectiveCalendarPerspective === "coach" ? (
-                    <select
-                      value={selectedCalendarCoachId}
-                      onChange={(event) => setCalendarCoachFilterId(event.target.value)}
-                      disabled={!isAdminUser}
-                    >
-                      {coachProfiles
-                        .filter((coach) => coach.active && !coach.archived && coach.bookable)
-                        .map((coach) => (
-                          <option key={coach.id} value={coach.id}>
-                            {coach.displayName || coach.name}
-                          </option>
-                        ))}
-                    </select>
-                  ) : null}
-                  {effectiveCalendarPerspective === "location" ? (
-                    <>
-                      <select
-                        value={selectedCalendarLocationId}
-                        onChange={(event) => setCalendarLocationFilterId(event.target.value)}
+                {effectiveCalendarPerspective !== "location" && hasMultipleAvailabilityLocations ? (
+                  <div className="calendar-location-key" aria-label="Location colours">
+                    {availabilityLocations.map((location) => (
+                      <span
+                        key={location.id}
+                        style={{ ["--location-hue" as string]: String(availabilityLocationHue(location.id)) } as CSSProperties}
                       >
-                        {activeLocations(locations).map((location) => (
-                          <option key={location.id} value={location.id}>
-                            {location.shortName || location.name}
-                          </option>
-                        ))}
-                      </select>
-                      {locationCalendarCoachGroups.length ? (
-                        <span className="calendar-scope-note">
-                          Coaches: {locationCalendarCoachGroups.map((coach) => coach.displayName || coach.name).join(", ")}
-                        </span>
-                      ) : null}
-                    </>
-                  ) : null}
-                  {effectiveCalendarPerspective !== "location" && hasMultipleAvailabilityLocations ? (
-                    <div className="calendar-location-key" aria-label="Location colours">
-                      {availabilityLocations.map((location) => (
-                        <span
-                          key={location.id}
-                          style={{ ["--location-hue" as string]: String(availabilityLocationHue(location.id)) } as CSSProperties}
-                        >
-                          {location.shortName || location.name}
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
+                        {location.shortName || location.name}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
               </div>
               <div className={`calendar-save-pill ${calendarSaveStatus}`}>
                 <strong>
@@ -25547,6 +25565,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 )}
               </div>
             )}
+          </div>
           </div>
 
         </section>

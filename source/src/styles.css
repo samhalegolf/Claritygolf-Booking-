@@ -3993,28 +3993,67 @@ button {
   line-height: 1.05;
 }
 
-.calendar-scope-controls {
+/* Calendar picker: folder tabs sitting on the calendar card, in the same
+   style as the message templates. Places on the left, coaches on the right;
+   the picked tab stands taller and joins the card's dark top edge. */
+.calendar-folder {
+  min-width: 0;
+}
+
+.calendar-scope-tabs {
   display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--c-space-4);
+  padding: 0 var(--c-radius-card);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.calendar-scope-tab-group {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  flex: 0 0 auto;
+}
+
+.calendar-scope-tabs button {
+  display: inline-flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.calendar-scope-controls select {
-  min-height: 34px;
-  border: 1px solid #d3d1c8;
-  border-radius: 6px;
-  background: #fff;
-  color: #24231f;
+  gap: var(--c-space-2);
+  padding: var(--c-space-3) var(--c-space-4);
+  border: 2px solid var(--c-accent);
+  border-bottom: 0;
+  border-radius: var(--c-radius-control) var(--c-radius-control) 0 0;
+  background: var(--c-text-body);
+  color: var(--c-accent-text);
   font: inherit;
-  font-size: 13px;
-  padding: 0 30px 0 10px;
+  font-size: var(--c-size-group);
+  font-weight: 700;
+  white-space: nowrap;
+  opacity: 0.62;
+  cursor: pointer;
 }
 
-.calendar-scope-note {
-  color: #6e6b65;
-  font-size: 12px;
-  white-space: nowrap;
+.calendar-scope-tabs button.is-active {
+  padding-top: 9px;
+  padding-bottom: 9px;
+  background: var(--c-accent);
+  font-size: var(--c-size-meta);
+  opacity: 1;
+}
+
+/* A location tab carries its calendar colour. */
+.calendar-scope-tabs button.is-location::before {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: hsl(var(--location-hue) 60% 50%);
+  content: "";
+}
+
+.calendar-folder .calendar-scope-tabs + .calendar-card {
+  border-top: 2px solid var(--c-accent);
 }
 
 /* Time gutter, then the week pager. The seven day columns live inside the
