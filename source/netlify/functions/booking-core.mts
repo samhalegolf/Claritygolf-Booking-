@@ -1494,12 +1494,19 @@ function cleanCoachProfile(raw = {}, fallback = defaultCoachProfileFromAccount()
   };
 }
 
+/**
+ * A business's coaches, exactly as stored. Only a business that has never
+ * saved a coach list is seeded, with the owner's coach profile; a saved empty
+ * list means the owner runs the business without coaching and is kept empty.
+ * A business with no bookable coach simply shows no availability.
+ */
 function normalizeCoachProfiles(rawProfiles, account = defaultCoachAccount()) {
+  const seeded = !Array.isArray(rawProfiles);
   const fallback = defaultCoachProfileFromAccount(account);
-  const source = Array.isArray(rawProfiles) && rawProfiles.length ? rawProfiles : [fallback];
+  const source = seeded ? [fallback] : rawProfiles;
   const seen = new Set();
   const cleaned = source.map((raw, index) => {
-    const coach = cleanCoachProfile(raw, index === 0 ? fallback : undefined, index);
+    const coach = cleanCoachProfile(raw, seeded ? fallback : blankCoachProfile(fallback.accountId), index);
     let id = coach.id;
     let suffix = 2;
     while (seen.has(id)) {
@@ -1509,10 +1516,27 @@ function normalizeCoachProfiles(rawProfiles, account = defaultCoachAccount()) {
     seen.add(id);
     return { ...coach, id };
   });
-  if (!cleaned.some((coach) => coach.active && !coach.archived && coach.bookable)) {
-    cleaned[0] = { ...cleaned[0], active: true, archived: false, bookable: true };
-  }
   return cleaned.sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.displayName.localeCompare(b.displayName));
+}
+
+// What a stored coach is missing is left blank, never borrowed from the
+// business: a coach's name and email are their own.
+function blankCoachProfile(accountId = "") {
+  return { ...defaultCoachProfileFromAccount(), id: "", accountId, name: "", displayName: "", shortName: "", email: "" };
+}
+
+/**
+ * The signed-in person's own coach profile, or "" when they have none. The
+ * owner's is the one seeded with the business (its id is the account id)
+ * until their membership names one; an owner who deleted theirs has none and
+ * is never handed another coach's calendar. Anyone else keeps the old
+ * first-coach fallback.
+ */
+function ownCoachIdFor(actor, coaches, accountId) {
+  const live = (id) => (id && coaches.some((coach) => coach.id === id) ? id : "");
+  if (live(actor?.coachId)) return actor.coachId;
+  if (actor?.isOwner) return live(cleanSlug(accountId, ""));
+  return firstCoachId(coaches);
 }
 
 /**
@@ -1525,7 +1549,7 @@ function firstCoachId(coaches) {
   return (
     coaches.find((coach) => coach.active && !coach.archived)?.id ||
     coaches[0]?.id ||
-    defaultCoachProfileFromAccount().id
+    ""
   );
 }
 
@@ -1544,12 +1568,9 @@ function coachSnapshot(coach) {
   };
 }
 
-function bookingCoachSnapshotFor(coachId, coaches, account) {
-  const profile =
-    coachById(coaches, coachId) ||
-    coachById(coaches, firstCoachId(coaches)) ||
-    defaultCoachProfileFromAccount(account);
-  return coachSnapshot(profile);
+function bookingCoachSnapshotFor(coachId, coaches) {
+  const profile = coachById(coaches, coachId) || coachById(coaches, firstCoachId(coaches));
+  return profile ? coachSnapshot(profile) : undefined;
 }
 
 function cleanBookingCoachSnapshot(raw, fallback) {
@@ -1684,12 +1705,12 @@ function calendarItemLocation(item, service, locations, account) {
 function calendarItemCoach(item, coaches, account) {
   return (
     cleanBookingCoachSnapshot(item?.coach) ||
-    bookingCoachSnapshotFor(item?.coachId, coaches, account)
+    bookingCoachSnapshotFor(item?.coachId, coaches)
   );
 }
 
 function resolvedCalendarItemCoachId(item, service, coaches, account) {
-  return item?.coachId || item?.coach?.coachId || primaryServiceCoachId(service) || calendarItemCoach(item, coaches, account).coachId || firstCoachId(coaches);
+  return item?.coachId || item?.coach?.coachId || primaryServiceCoachId(service) || calendarItemCoach(item, coaches, account)?.coachId || firstCoachId(coaches);
 }
 
 function resolvedCalendarItemLocationId(item, service, locations, account) {
@@ -2460,7 +2481,7 @@ async function defaultSettings(accountId = "", identity: Partial<ReturnType<type
     accountInvoiceSettingsJson: JSON.stringify(account.invoiceSettings),
     coachName: account.businessName,
     workspaceAccountsJson: JSON.stringify(normalizeWorkspaceAccounts([], account)),
-    coachProfilesJson: JSON.stringify(normalizeCoachProfiles([], account)),
+    coachProfilesJson: JSON.stringify(normalizeCoachProfiles(null, account)),
     appUsersJson: JSON.stringify([defaultAppUserFromAccount(account)]),
     locationsJson: JSON.stringify(normalizeLocations([], account)),
     servicesJson: JSON.stringify(original ? defaultServices : []),
@@ -5732,7 +5753,7 @@ function workspaceAccountsFromSettings(settings, account) {
 
 function coachProfilesFromSettings(settings, account) {
   return normalizeCoachProfiles(
-    parseSettingJson(settings, "coachProfilesJson", []),
+    parseSettingJson(settings, "coachProfilesJson", null),
     account,
   );
 }
@@ -5879,12 +5900,10 @@ async function readCoachProfiles(accountId: string) {
   await ensureSeeded();
   const account = await readCoachAccount(accountId);
   try {
-    return normalizeCoachProfiles(
-      JSON.parse((await getSetting(accountId, "coachProfilesJson")) || "[]"),
-      account,
-    );
+    const stored = await getSetting(accountId, "coachProfilesJson");
+    return normalizeCoachProfiles(stored ? JSON.parse(stored) : null, account);
   } catch {
-    return normalizeCoachProfiles([], account);
+    return normalizeCoachProfiles(null, account);
   }
 }
 
@@ -6037,7 +6056,6 @@ async function readWorkspaceBootstrap(membership: CoachActor): Promise<Workspace
     const { settings: settingsMap } = await readStateSettingsSnapshot(membership.accountId);
     const account = coachAccountFromSettings(settingsMap, membership.accountId);
     const coaches = coachProfilesFromSettings(settingsMap, account);
-    const fallbackCoachId = coaches.find((coach) => coach.active && !coach.archived)?.id || coaches[0]?.id || "";
     const coachName = settingValue(settingsMap, "accountCoachName") || account.coachName;
     return {
       accountId: membership.accountId,
@@ -6051,7 +6069,7 @@ async function readWorkspaceBootstrap(membership: CoachActor): Promise<Workspace
         accountId: membership.accountId,
         name: coachName,
         role: appUserRoleForMembership(membership.role),
-        coachId: membership.coachId || fallbackCoachId,
+        coachId: ownCoachIdFor(membership, coaches, membership.accountId) || undefined,
         permissions: membership.isAdmin
           ? { bookings: "all", services: "all", availability: "all", locations: "all", clients: "all", settings: "all" }
           : { bookings: "own", services: "own", availability: "own", locations: "none", clients: "own", settings: "none" },
@@ -8365,7 +8383,7 @@ function bookingGoogleCalendarUrl({ appointment, service, account, rescheduleUrl
   );
   const params = new URLSearchParams({
     action: "TEMPLATE",
-    text: `${service?.name || "Golf Lesson"} with ${account.coachName || account.businessName}`,
+    text: `${service?.name || "Golf Lesson"} with ${appointment.coach?.displayName || appointment.coach?.name || account.businessName}`,
     dates: `${start}/${end}`,
     details: [
       `${service?.name || "Golf Lesson"} for ${appointment.client || appointment.title || "Client"}.`,
@@ -8475,7 +8493,6 @@ function resolveAppointmentCoach(appointment, coaches = [], account = defaultCoa
   const name =
     cleanString(profile?.displayName || profile?.name, "", 120) ||
     cleanString(snapshot?.displayName || snapshot?.name, "", 120) ||
-    cleanString(account?.coachName, "", 120) ||
     cleanString(account?.businessName, "", 120);
   return { coachId, email, name };
 }
@@ -8500,7 +8517,7 @@ function bookingEmailVariables({ appointment, service, account, coach = null }) 
   return {
     client,
     firstName: client.split(/\s+/)[0] || client,
-    coach: coach?.name || account.coachName || account.businessName,
+    coach: coach?.name || account.businessName,
     service: service?.name || "Golf Lesson",
     date: formatBookingDate(itemWeek(appointment), appointment.day),
     // A review's slot is a deadline, so the clock range it happens to occupy
@@ -9713,7 +9730,7 @@ async function sendPortalInviteEmail({ accountId, req, email, name, token, withC
   const businessName = account.businessName || "Clarity Golf";
   const { subject, html, text } = portalInviteEmailContent({
     businessName,
-    coachName: account.coachName || businessName,
+    coachName: businessName,
     name: cleanString(name, "", 180),
     linkUrl: portalInviteUrl(req, token, variant),
     caddyUrl: caddyAppUrl(),
@@ -11676,7 +11693,7 @@ async function createPublicBooking(accountId: string, payload: Record<string, an
   const coachId = chosen.coachId;
   const location = cleanBookingLocationSnapshot(locationSnapshot(chosen.location));
   const coach = cleanBookingCoachSnapshot(
-    bookingCoachSnapshotFor(coachId, accountState.coaches || [], accountState.account),
+    bookingCoachSnapshotFor(coachId, accountState.coaches || []),
   );
   const appointment = {
     id: `appt-${Date.now()}`,
@@ -12185,7 +12202,7 @@ async function reschedulePublicBooking(accountId: string, payload: Record<string
     ...(changedCoach
       ? {
           coachId: moved.coachId,
-          coach: cleanBookingCoachSnapshot(bookingCoachSnapshotFor(moved.coachId, accountState.coaches || [], accountState.account)),
+          coach: cleanBookingCoachSnapshot(bookingCoachSnapshotFor(moved.coachId, accountState.coaches || [])),
         }
       : {}),
     ...(changedLocation
