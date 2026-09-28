@@ -132,7 +132,12 @@ const MIN_ACTIVE_SELECTION_SIZE = 0.01;
 const SNAPSHOT_STORAGE_WARNING_LIMIT = 12;
 const SNAPSHOT_PREVIEW_WIDTH = 88;
 const SNAPSHOT_PREVIEW_HEIGHT = 50;
-const DEFAULT_PLAYER_ID = "player-demo-1";
+/**
+ * Scratch key for the recovery slot while nobody has been picked yet. It is
+ * never written onto a saved video: saving without a player asks who it
+ * belongs to first.
+ */
+const UNASSIGNED_WORKSPACE_ID = "unassigned";
 /**
  * The box the freshly-captured frame shrinks into, in the composer.
  *
@@ -240,6 +245,11 @@ export interface VideoWorkspaceNavigationContext {
   reason: "toolbar-back" | "save" | "my-library-save";
 }
 
+export interface VideoWorkspacePlayerChoice {
+  playerId: string;
+  playerName: string;
+}
+
 export interface VideoWorkspaceSaveResult extends VideoWorkspaceNavigationContext {
   savedItems: SavedVideoItem[];
   reason: "save" | "my-library-save";
@@ -252,7 +262,7 @@ interface LiveRecordingSession {
   startedAt: number | null;
 }
 
-interface VideoWorkspaceProps {
+export interface VideoWorkspaceProps {
   playerId?: string;
   playerName?: string;
   lessonId?: string;
@@ -265,6 +275,11 @@ interface VideoWorkspaceProps {
   onLocalSaveComplete?: (result: VideoWorkspaceSaveResult) => void | Promise<void>;
   onSaveAndSend?: (result: VideoWorkspaceSaveResult) => Promise<void>;
   onOpenCloudSettings?: () => void;
+  /**
+   * Asked on save when the workspace was opened without a player. Resolve with
+   * the player the video belongs to, or null if the coach backed out.
+   */
+  onChoosePlayerForSave?: () => Promise<VideoWorkspacePlayerChoice | null>;
   /** Return false to tell the note panel the save failed and keep the text. */
   onSaveNote?: (text: string) => boolean | void | Promise<boolean | void>;
   /** Open the camera recorder as soon as the workspace mounts. */
@@ -559,6 +574,7 @@ export function VideoWorkspace({
   onLocalSaveComplete,
   onSaveAndSend,
   onOpenCloudSettings,
+  onChoosePlayerForSave,
   onSaveNote,
   autoStartLiveRecording,
   initialVideoFile,
@@ -572,7 +588,7 @@ export function VideoWorkspace({
   const rightUploadInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordingChunksRef = useRef<Blob[]>([]);
-  const resolvedPlayerId = playerId || DEFAULT_PLAYER_ID;
+  const resolvedPlayerId = playerId || UNASSIGNED_WORKSPACE_ID;
   const resolvedPlayerName = playerName || resolvedPlayerId;
   const persistenceLayer = useMemo(() => createVideoAnalysisPersistence(persistence), [persistence]);
   const defaultSavedVideoLibrary = useMemo(() => createIndexedDbSavedVideoLibrary(), []);
@@ -2912,6 +2928,24 @@ export function VideoWorkspace({
       return null;
     }
 
+    // Every saved video belongs to a player. Opened without one, ask now.
+    let owner: VideoWorkspacePlayerChoice | null = playerId
+      ? { playerId, playerName: resolvedPlayerName }
+      : null;
+    if (!owner) {
+      if (!onChoosePlayerForSave) {
+        setSaveStatus("error");
+        setSaveMessage("Open this video from a player profile to save it.");
+        return null;
+      }
+      owner = await onChoosePlayerForSave();
+      if (!owner) {
+        setSaveStatus("idle");
+        setSaveMessage("Save cancelled. Pick a player to save this video.");
+        return null;
+      }
+    }
+
     setSaveStatus("saving");
     setSaveMessage(options.archiveToMyLibrary ? "Saving permanently to My Library..." : "Saving...");
     setCloudUploadFailure(null);
@@ -2946,13 +2980,16 @@ export function VideoWorkspace({
 
         const item = await savedVideoStore.saveItem({
           savedVideoId: nextSavedVideoIds[side],
-          playerId: resolvedPlayerId,
+          playerId: owner.playerId,
           lessonId,
           title: playerVideo.title,
           sourceSide: side,
-          sourceVideo: playerVideo,
+          sourceVideo: { ...playerVideo, playerId: owner.playerId },
           sourceBlob: transient.blob,
-          analysisSnapshot: analysisStore.analysis as VideoAnalysis,
+          analysisSnapshot: {
+            ...(analysisStore.analysis as VideoAnalysis),
+            playerId: owner.playerId,
+          },
           workspaceSnapshot: buildWorkspaceState(),
           thumbnailDataUrl: captureSideThumbnail(side),
           archiveToMyLibrary: options.archiveToMyLibrary,
@@ -2988,9 +3025,13 @@ export function VideoWorkspace({
             : `Saved ${savedItems.length} videos safely on this device. Preparing Clarity Cloud.`
       );
       setSaveStatus("saved");
+      const navigation = buildNavigationContext(reason);
       return {
-        ...buildNavigationContext(reason),
-        savedVideoId: savedItems[0]?.savedVideoId || buildNavigationContext(reason).savedVideoId,
+        ...navigation,
+        playerId: owner.playerId,
+        playerName: owner.playerName,
+        hasPlayerContext: true,
+        savedVideoId: savedItems[0]?.savedVideoId || navigation.savedVideoId,
         savedItems,
         reason,
       } satisfies VideoWorkspaceSaveResult;
@@ -3013,12 +3054,15 @@ export function VideoWorkspace({
     currentSavedVideoIds,
     leftStore,
     lessonId,
+    onChoosePlayerForSave,
     onSavedVideoLibraryChange,
     persistenceLayer.videoStore,
     persistenceLayer.workspaceAdapter,
+    playerId,
     playerVideoLeft,
     playerVideoRight,
     resolvedPlayerId,
+    resolvedPlayerName,
     rightStore,
     saveableSides,
     savedVideoStore,

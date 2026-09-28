@@ -189,6 +189,7 @@ import {
 import { currentPublicBookingScreenId, publicApi, publicBookingPath } from "./modules/public-booking/bookingScreen";
 import type {
   VideoWorkspaceNavigationContext,
+  VideoWorkspacePlayerChoice,
   VideoWorkspaceSaveResult,
 } from "./modules/video-analysis";
 import {
@@ -5964,6 +5965,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const [playerAddSearch, setPlayerAddSearch] = useState("");
   const [playerAddNew, setPlayerAddNew] = useState({ name: "", email: "", phone: "" });
   const [playerAddSaving, setPlayerAddSaving] = useState(false);
+  // Set while the dialog is answering "whose video is this?" for an unassigned
+  // save in the video workspace. Closing the dialog answers null.
+  const [playerAddForVideoSave, setPlayerAddForVideoSave] = useState(false);
+  const videoSavePlayerResolverRef = useRef<((choice: VideoWorkspacePlayerChoice | null) => void) | null>(null);
   const videoStoreRef = useRef<VideoBlobStore | null>(null);
   if (videoStoreRef.current === null) {
     videoStoreRef.current = createIndexedDbVideoStore();
@@ -13875,13 +13880,36 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   function openPlayerAddDialog() {
     setPlayerAddSearch("");
     setPlayerAddNew({ name: "", email: "", phone: "" });
+    setPlayerAddForVideoSave(false);
     setShowPlayerAddDialog(true);
   }
 
-  function promoteExistingPlayer(client: { id: string; name: string }) {
-    setPlayerProfilesLocal((current) => addManualPlayer(current, client.id));
+  function chooseVideoSavePlayer(): Promise<VideoWorkspacePlayerChoice | null> {
+    videoSavePlayerResolverRef.current?.(null);
+    setPlayerAddSearch("");
+    setPlayerAddNew({ name: "", email: "", phone: "" });
+    setPlayerAddForVideoSave(true);
+    setShowPlayerAddDialog(true);
+    return new Promise((resolve) => {
+      videoSavePlayerResolverRef.current = resolve;
+    });
+  }
+
+  function closePlayerAddDialog(chosen: Pick<Person, "id" | "name" | "email" | "phone"> | null = null) {
     setShowPlayerAddDialog(false);
-    setToast({ message: `${client.name} added to player profiles.` });
+    const resolve = videoSavePlayerResolverRef.current;
+    videoSavePlayerResolverRef.current = null;
+    resolve?.(
+      chosen
+        ? { playerId: preferredVideoPlayerId(chosen, videoPlayerIds), playerName: chosen.name }
+        : null,
+    );
+  }
+
+  function promoteExistingPlayer(client: Pick<Person, "id" | "name" | "email" | "phone">) {
+    setPlayerProfilesLocal((current) => addManualPlayer(current, client.id));
+    closePlayerAddDialog(client);
+    if (!playerAddForVideoSave) setToast({ message: `${client.name} added to player profiles.` });
   }
 
   async function createNewPlayer() {
@@ -13913,11 +13941,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       if (!response.ok) throw new Error(await readApiFailure(response, "Could not add player."));
       const result = (await response.json()) as PeopleUpdateResult;
       if (Array.isArray(result.people)) setPeople(cleanPeople(result.people));
-      const newId = result.person?.id;
-      if (newId) {
-        setPlayerProfilesLocal((current) => addManualPlayer(current, newId));
+      const person = result.person;
+      if (person?.id) {
+        setPlayerProfilesLocal((current) => addManualPlayer(current, person.id));
       }
-      setShowPlayerAddDialog(false);
+      closePlayerAddDialog(person?.id ? person : null);
       setToast({ message: name ? `${name} added to player profiles.` : "Player added." });
     } catch (error) {
       setToast({ message: error instanceof Error ? error.message : "Could not add player." });
@@ -24348,7 +24376,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   if (quickCreate) backLayers.push({ id: "quick-create", close: () => (setQuickCreate(null), true) });
   if (selectedClient || isAddingClient) backLayers.push({ id: "client-profile", close: () => (closeClientModal(), true) });
   if (clientMergeReview) backLayers.push({ id: "client-merge", close: () => (closeClientMergeReview(), true) });
-  if (showPlayerAddDialog) backLayers.push({ id: "player-add", close: () => (setShowPlayerAddDialog(false), true) });
+  if (showPlayerAddDialog) backLayers.push({ id: "player-add", close: () => (closePlayerAddDialog(), true) });
   // Topmost on purpose: the archive/delete confirm can stand over any of them.
   if (pendingService && pendingServiceAction) {
     backLayers.push({ id: "service-action", close: () => (closeServiceActionModal(), true) });
@@ -27467,16 +27495,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             className="player-add-overlay"
             role="dialog"
             aria-modal="true"
-            aria-label="Add player profile"
-            onClick={() => setShowPlayerAddDialog(false)}
+            aria-label={playerAddForVideoSave ? "Save video to a player" : "Add player profile"}
+            onClick={() => closePlayerAddDialog()}
           >
             <div className="player-add-dialog" onClick={(event) => event.stopPropagation()}>
               <div className="player-add-header">
-                <h3>Add player profile</h3>
+                <h3>{playerAddForVideoSave ? "Who is this video for?" : "Add player profile"}</h3>
                 <button
                   type="button"
                   className="icon-button"
-                  onClick={() => setShowPlayerAddDialog(false)}
+                  onClick={() => closePlayerAddDialog()}
                   aria-label="Close"
                 >
                   <X size={16} />
@@ -27484,25 +27512,26 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               </div>
 
               <div className="player-add-section">
-                <label>Add an existing client</label>
+                <label>{playerAddForVideoSave ? "Pick a player" : "Add an existing client"}</label>
                 <input
                   value={playerAddSearch}
                   onChange={(event) => setPlayerAddSearch(event.target.value)}
-                  placeholder="Search clients"
+                  placeholder={playerAddForVideoSave ? "Search players and clients" : "Search clients"}
                 />
                 <div className="player-add-results">
-                  {playerAddSearch.trim().length > 0 &&
-                    clients
-                      .filter((client) => clientMatchesSearchTerm(client, playerAddSearch.trim()))
-                      .slice(0, 6)
+                  {(playerAddSearch.trim().length > 0
+                    ? clients.filter((client) => clientMatchesSearchTerm(client, playerAddSearch.trim()))
+                    : playerAddForVideoSave
+                      ? playerProfiles
+                      : []
+                  )
+                      .slice(0, playerAddForVideoSave ? 20 : 6)
                       .map((client) => (
                         <button
                           type="button"
                           key={client.id}
                           className="player-add-result"
-                          onClick={() =>
-                            promoteExistingPlayer({ id: client.id, name: client.name })
-                          }
+                          onClick={() => promoteExistingPlayer(client)}
                         >
                           <span>{client.name}</span>
                           <span className="muted">{client.email || client.phone}</span>
@@ -27511,7 +27540,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 </div>
               </div>
 
-              <div className="player-add-divider">or add someone new</div>
+              <div className="player-add-divider">
+                {playerAddForVideoSave ? "or create a new player" : "or add someone new"}
+              </div>
 
               <div className="player-add-section">
                 <input
@@ -27541,7 +27572,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   disabled={playerAddSaving}
                   onClick={createNewPlayer}
                 >
-                  {playerAddSaving ? "Adding…" : "Add new player"}
+                  {playerAddSaving
+                    ? "Adding…"
+                    : playerAddForVideoSave
+                      ? "Create player and save"
+                      : "Add new player"}
                 </button>
               </div>
             </div>
@@ -27575,6 +27610,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   setActiveView("settings");
                   setSettingsTab(isPlatformAdmin ? "admin" : "developer");
                 }}
+                onChoosePlayerForSave={chooseVideoSavePlayer}
               />
             </Suspense>
           </section>
