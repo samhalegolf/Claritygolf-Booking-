@@ -29,7 +29,8 @@
 // queue nobody opens twice.
 
 import { useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, Inbox, Ticket, Undo2, UserPlus } from "lucide-react";
+import { ChevronDown, ChevronRight, Inbox, Undo2 } from "lucide-react";
+import { ClarityAddClient, ClarityPassesCredits } from "../shared/ClarityIcons";
 
 import { Loading } from "../shared/Loading";
 
@@ -374,7 +375,7 @@ export function PassInboxPanel({
               disabled={busy || !selected}
               onClick={() => onIssue(purchase.id, selected, typed)}
             >
-              <Ticket size={15} />
+              <ClarityPassesCredits size={15} />
               {busy ? "Issuing…" : "Issue pass"}
             </button>
           </div>
@@ -497,7 +498,7 @@ export function PassInboxPanel({
                       disabled={busy || !person}
                       onClick={() => onAttach(pass.id, person)}
                     >
-                      <UserPlus size={15} />
+                      <ClarityAddClient size={15} />
                       {busy ? "Attaching…" : "Attach"}
                     </button>
                   </div>

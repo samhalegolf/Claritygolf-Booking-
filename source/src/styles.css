@@ -12,6 +12,11 @@
   box-sizing: border-box;
 }
 
+/* The green half of every Clarity icon. The dark half is currentColor. */
+.clarity-icon-accent {
+  fill: var(--c-icon-accent);
+}
+
 /* Keep the scrollbar's space reserved whether or not there is one. Otherwise a
    screen that fits the window and one that does not are two different widths,
    and everything shifts sideways as you move between them. */
@@ -13214,6 +13219,9 @@ button {
 }
 
 .sell-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 7px 14px;
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -14230,6 +14238,17 @@ button {
   text-align: left;
   cursor: pointer;
   transition: background var(--c-t-hover);
+}
+
+.settings-group-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.settings-group-title svg {
+  flex: none;
 }
 
 .settings-group-header:hover {
@@ -15516,6 +15535,9 @@ button {
 }
 
 .coach-profile .cp-section h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 0;
   padding: var(--c-space-5) var(--c-space-6);
   border-bottom: 1px solid var(--c-border-soft);

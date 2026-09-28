@@ -6,7 +6,8 @@ import { Loading } from "../shared/Loading";
 // list and every request; what lives here is form and disclosure state.
 
 import { Fragment, useMemo, useState } from "react";
-import { AlertTriangle, ChevronDown, ChevronRight, Copy, Download, Plus, Search, Ticket, X } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, Copy, Download, Plus, Search, X } from "lucide-react";
+import { ClarityPassesCredits } from "../shared/ClarityIcons";
 import type { BillingCoupon, CouponImportCandidate, CouponRedemption, VoucherAmountRule } from "./types";
 
 /** What a scan came back with. `scannedCount` is how many charges were read,
@@ -382,7 +383,7 @@ export function CouponsPanel({
             <span>Gift vouchers</span>
             <h2>{formatMoney(outstanding, currency)} outstanding</h2>
           </div>
-          <Ticket size={24} />
+          <ClarityPassesCredits size={24} />
         </div>
         <p className="field-help">
           Vouchers people have paid for and not yet spent. That total is money you owe in lessons and gear, not takings -
@@ -877,7 +878,7 @@ export function CouponsPanel({
             <span>Coupons</span>
             <h2>{visible.length} shown</h2>
           </div>
-          <Ticket size={24} />
+          <ClarityPassesCredits size={24} />
         </div>
         {loadState === "loading" && <Loading what="coupons" />}
         {loadState === "error" && (

@@ -5,7 +5,8 @@ import { Loading } from "../shared/Loading";
 // callbacks. It owns no fetching or range state - App.tsx does - so it stays
 // decoupled from workspace state, matching the other billing slice components.
 
-import { Download, FileText } from "lucide-react";
+import { Download } from "lucide-react";
+import { ClarityBookingPages } from "../shared/ClarityIcons";
 import type { BillingReportSummary } from "./types";
 import {
   REPORT_PRESET_LABELS,
@@ -102,7 +103,7 @@ export function BillingReportsPanel({
               <Download size={16} /> CSV
             </button>
             <button className="outline-button" onClick={onDownloadPdf} disabled={!summary} type="button">
-              <FileText size={16} /> PDF
+              <ClarityBookingPages size={16} /> PDF
             </button>
           </div>
         </div>

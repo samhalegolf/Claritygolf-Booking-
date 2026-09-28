@@ -6,7 +6,8 @@
 // sale, booking or invoice then has it without anyone typing it twice.
 
 import { useState } from "react";
-import { Check, Mail } from "lucide-react";
+import { Check } from "lucide-react";
+import { ClarityEmail } from "../shared/ClarityIcons";
 import { postPosJson } from "./posCheckoutPoll";
 
 export type ReceiptEmailPromptProps = {
@@ -76,7 +77,7 @@ export function ReceiptEmailPrompt({
   return (
     <div className="receipt-email">
       <p className="receipt-email-question">
-        <Mail size={15} />
+        <ClarityEmail size={15} />
         {onFile ? <>Email a receipt to {onFile}?</> : <>Email a receipt?</>}
       </p>
       {!onFile && (

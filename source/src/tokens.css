@@ -56,6 +56,9 @@
      Both values were already in styles.css as literals; named here so new code
      has somewhere to read them from. */
   --c-success-wash: #eef8ef;
+  /* The green half of the Clarity icon set (src/modules/shared/ClarityIcons).
+     Not swapped in dark: the green is the brand, and it reads on both. */
+  --c-icon-accent: #00b85a;
   --c-danger-wash: #fff3f0;
 
   /* Pressure / load. One scale for both feet, so a heatmap can be read as an

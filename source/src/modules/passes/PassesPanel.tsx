@@ -7,7 +7,8 @@
 // that arithmetic is the whole point of the ledger underneath.
 
 import { useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, FileText, MinusCircle, Plus, Ticket } from "lucide-react";
+import { ChevronDown, ChevronRight, MinusCircle, Plus } from "lucide-react";
+import { ClarityBookingPages, ClarityPassesCredits } from "../shared/ClarityIcons";
 
 import { Loading } from "../shared/Loading";
 import { invoicedSessions, lineWord, sessionWord } from "./invoicedSessions";
@@ -487,7 +488,7 @@ export function PassesPanel({
             <div className="profile-history-row pass-row" key={pass.id}>
               <div>
                 <strong>
-                  <Ticket size={15} /> {pass.name}
+                  <ClarityPassesCredits size={15} /> {pass.name}
                 </strong>
                 <span>
                   {covers ? `Covers ${covers}` : "No covered service set"}
@@ -584,7 +585,7 @@ export function PassesPanel({
                       aria-expanded={passInvoiced.open}
                       onClick={() => toggleInvoiced(pass.id)}
                     >
-                      <FileText size={14} />
+                      <ClarityBookingPages size={14} />
                       <span>
                         Invoiced for {passInvoiced.sessions}{" "}
                         {sessionWord(passInvoiced.sessions)} that look like this

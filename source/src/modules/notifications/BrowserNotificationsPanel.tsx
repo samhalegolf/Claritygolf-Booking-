@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { BellRing } from "lucide-react";
+import { ClarityNotifications } from "../shared/ClarityIcons";
 
 import { disablePush, enablePush, loadPushStatus, sendTestPush, type PushStatus } from "./browserPush";
 
@@ -51,7 +51,7 @@ export default function BrowserNotificationsPanel() {
           <span>Notifications</span>
           <h2>Browser notifications</h2>
         </div>
-        <BellRing size={24} />
+        <ClarityNotifications size={24} />
       </div>
 
       <p className="field-help">

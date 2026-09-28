@@ -1,6 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { createElement, useCallback, useEffect, useMemo, useState } from "react";
 
 import { AutoSaved, InlineEditProvider, InlineEditRow } from "../shared/InlineEdit";
+import {
+  ClarityAdmin,
+  ClarityAssignManage,
+  ClarityInsights,
+  ClarityNotifications,
+  ClaritySecurity,
+  type IconComponent,
+} from "../shared/ClarityIcons";
 
 /**
  * The Developer tab's connection screen.
@@ -620,6 +628,13 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
     activity: "Activity",
     health: "Health",
   };
+  const TAB_ICONS: Record<Tab, IconComponent> = {
+    webhooks: ClarityNotifications,
+    api: ClarityAdmin,
+    mapping: ClarityAssignManage,
+    activity: ClarityInsights,
+    health: ClaritySecurity,
+  };
   const TAB_HINTS: Record<Tab, string> = {
     webhooks: `What ${providerLabel} sends us`,
     api: `What we send ${providerLabel}`,
@@ -658,6 +673,7 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
             aria-selected={tab === value}
             type="button"
           >
+            {createElement(TAB_ICONS[value], { size: 16 })}
             {TAB_LABELS[value]}
             {value === "activity" && events.length ? <b>{events.length}</b> : null}
             {value === "health" && attention ? <b>!</b> : null}

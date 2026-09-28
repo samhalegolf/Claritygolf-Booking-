@@ -13,23 +13,28 @@ import { Loading } from "../shared/Loading";
 // a docket plus a payment state machine plus a poll timer through App.tsx would
 // add noise there without making anything reusable.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { createElement, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
-  CalendarClock,
   Check,
   ChevronDown,
-  CreditCard,
   ExternalLink,
   Minus,
-  Package,
   Plus,
   Search,
-  Ticket,
   Trash2,
-  User,
   X,
 } from "lucide-react";
+import {
+  ClarityCalendar,
+  ClarityPassesCredits,
+  ClarityPayments,
+  ClarityProducts,
+  ClarityProfile,
+  ClarityServices,
+  ClarityStore,
+  type IconComponent,
+} from "../shared/ClarityIcons";
 import type { BillingCatalogItem, BillingCatalogKind, BillingCoupon, PosPaymentMethod, PosTransaction } from "./types";
 import { couponApplyAmount, remainingAfterCoupon } from "./couponMath";
 import { CouponPicker, useSpendableCoupons } from "./CouponPicker";
@@ -83,11 +88,11 @@ export type SellScreenProps = {
 
 type TabKey = "all" | BillingCatalogKind;
 
-const TAB_LABELS: Record<TabKey, string> = {
-  all: "All",
-  product: "Products",
-  service: "Services",
-  package: "Packages",
+const TABS: Record<TabKey, { label: string; Icon: IconComponent }> = {
+  all: { label: "All", Icon: ClarityStore },
+  product: { label: "Products", Icon: ClarityProducts },
+  service: { label: "Services", Icon: ClarityServices },
+  package: { label: "Packages", Icon: ClarityPassesCredits },
 };
 
 const TAB_ORDER: TabKey[] = ["all", "product", "service", "package"];
@@ -650,7 +655,8 @@ export function SellScreen({
               aria-selected={tab === key}
               type="button"
             >
-              {TAB_LABELS[key]}
+              {createElement(TABS[key].Icon, { size: 14 })}
+              {TABS[key].label}
             </button>
           ))}
         </div>
@@ -678,7 +684,7 @@ export function SellScreen({
         {lessonGroups.length > 0 && (
           <div className="sell-lessons" aria-label="Unpaid lessons">
             <h3>
-              <CalendarClock size={14} /> Lessons with no payment recorded
+              <ClarityCalendar size={14} /> Lessons with no payment recorded
             </h3>
             {lessonGroups.map((group) => {
               const open = !group.collapsed || openLessonGroups.includes(group.key);
@@ -767,7 +773,7 @@ export function SellScreen({
 
         {customerName ? (
           <div className="sell-customer-chip">
-            <User size={15} />
+            <ClarityProfile size={15} />
             {customerId && !customerId.startsWith("appointment-") ? (
               <button
                 className="sell-customer-open"
@@ -836,7 +842,7 @@ export function SellScreen({
         <div className="sell-lines">
           {!lines.length && (
             <div className="sell-empty">
-              <Package size={26} />
+              <ClarityProducts size={26} />
               <p>Nothing on the docket yet.</p>
               <span>Tap an item on the right, or scan a barcode into the search box.</span>
             </div>
@@ -916,7 +922,7 @@ export function SellScreen({
             <>
               <div className="sell-total-row coupon">
                 <span>
-                  <Ticket size={13} /> Paid by coupon {coupon.code}
+                  <ClarityPassesCredits size={13} /> Paid by coupon {coupon.code}
                 </span>
                 <span>-{formatMoney(appliedCoupon, currency)}</span>
               </div>
@@ -1030,7 +1036,7 @@ export function SellScreen({
                 )}
                 {coupon && !couponApplied && couponAmount > 0 && (
                   <button className="sell-coupon-pay" disabled={busy} onClick={payWithCoupon} type="button">
-                    <Ticket size={16} />
+                    <ClarityPassesCredits size={16} />
                     <span>
                       <strong>Pay with coupon</strong>
                       <em>
@@ -1052,7 +1058,7 @@ export function SellScreen({
                       onClick={() => chooseMethod(method)}
                       type="button"
                     >
-                      {method.kind === "clarity_pay" && <CreditCard size={15} />}
+                      {method.kind === "clarity_pay" && <ClarityPayments size={15} />}
                       {method.name}
                       {!method.settlesImmediately && <span className="pos-method-tag">owed</span>}
                     </button>
@@ -1210,6 +1216,7 @@ export function SellScreen({
                 />
                 <div className="panel-actions">
                   <button className="primary-button" onClick={resetSale} type="button">
+                    <ClarityStore size={16} />
                     New sale
                   </button>
                 </div>

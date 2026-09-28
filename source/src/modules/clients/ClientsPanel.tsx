@@ -11,6 +11,7 @@ import { Loading } from "../shared/Loading";
 import type { ChangeEvent } from "react";
 import { useMemo, useState } from "react";
 import { ArrowRight, Check, GitMerge, Plus, Search, Upload } from "lucide-react";
+import { ClarityAddClient, ClarityClientsPlayers, ClarityIntegrations } from "../shared/ClarityIcons";
 
 import type { PeopleImportDiagnostic, Person } from "./clientsModel";
 
@@ -174,6 +175,7 @@ export function ClientsPanel<T extends ClientRow>({
           aria-selected={listTab === "main"}
           type="button"
         >
+          <ClarityClientsPlayers size={16} />
           Clients ({mainList.length})
         </button>
         <button
@@ -183,6 +185,7 @@ export function ClientsPanel<T extends ClientRow>({
           aria-selected={listTab === "external"}
           type="button"
         >
+          <ClarityIntegrations size={16} />
           External bookings ({externalList.length})
         </button>
       </div>
@@ -223,16 +226,19 @@ export function ClientsPanel<T extends ClientRow>({
           <Loading size="panel" what="clients" detail="Your client list is on its way." />
         ) : listTab === "external" ? (
           <div className="empty-panel compact">
+            <ClarityIntegrations size={28} />
             <h2>No external booking clients</h2>
             <p>People created by a booking from a connected system appear here until you merge or move them into your clients.</p>
           </div>
         ) : term ? (
           <div className="empty-panel compact">
+            <ClarityClientsPlayers size={28} />
             <h2>No clients found</h2>
             <p>Try a different name, email, or phone number.</p>
           </div>
         ) : (
           <div className="empty-panel compact">
+            <ClarityAddClient size={28} />
             <h2>No clients yet</h2>
             <p>Add one with +, import a list, or take a booking.</p>
           </div>
