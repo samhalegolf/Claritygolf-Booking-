@@ -44,6 +44,24 @@ import {
   STRIPE_CONNECTION_SETTING,
 } from "./_shared/stripe.mts";
 import type { StripeCheckoutInput } from "./_shared/stripe.mts";
+import {
+  posCardDueCents,
+  settlePosTransaction,
+  type CardPayment,
+  type PosTender,
+  type SettlementStore,
+} from "./_shared/pos-settlement.mts";
+import {
+  cancelTerminalPaymentIntent,
+  cardPaymentsCapability,
+  createConnectionToken,
+  createTerminalLocation,
+  createTerminalPaymentIntent,
+  retrieveTerminalPaymentIntent,
+  terminalAvailability,
+  type TerminalIntent,
+} from "./_shared/terminal.mts";
+import { cleanPhoneCountry } from "./_shared/phone.mts";
 
 // Billing is a new, isolated top-level app section. This function owns its
 // own tables (billing_products_services, billing_invoices,
@@ -210,21 +228,6 @@ function encodeFilter(value: unknown) {
 }
 
 // --- Auth + account scoping ------------------------------------------------
-
-/**
- * The business this request acts for.
- *
- * Billing used to answer that question for itself: requireAdmin only proved a
- * session row existed, and resolveAccountId then derived the account from the
- * global settings table -- accountCalendarSlug, else accountBusinessName, else
- * coachName, else "Sam Hale Golf" -- so every till, invoice and report resolved
- * to the original business no matter who was signed in. It now uses the same
- * actor resolver Booking does, so there is one notion of "the current business"
- * rather than two that can disagree.
- */
-async function requireAccountId(req: Request): Promise<string> {
-  return (await requireCoachActor(req)).accountId;
-}
 
 async function parseBody(req: Request) {
   const raw = await req.text();
@@ -3301,6 +3304,9 @@ function posRowToApi(row: Record<string, unknown>) {
     note: String(row.note ?? ""),
     couponId: String(row.coupon_id ?? ""),
     couponAmount: Number(row.coupon_amount) || 0,
+    // How the card part arrived (QR page, Tap to Pay). Empty for manual methods
+    // and for sales settled before channels were recorded.
+    paymentChannel: String(row.payment_channel ?? ""),
     paidAt: String(row.paid_at ?? ""),
     createdAt: String(row.created_at ?? ""),
     updatedAt: String(row.updated_at ?? ""),
@@ -3598,13 +3604,18 @@ async function listOptixPosRecords(accountId: string, range: { from: string; to:
   });
 }
 
-async function getPosTransaction(accountId: string, id: string) {
+async function posTransactionRow(accountId: string, id: string) {
   const rows = await supabase("billing_pos_transactions", {
     query: `select=*&id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}&limit=1`,
   });
-  if (!rows.length) return null;
-  const items = (await posItemsForTransactions(accountId, [String(rows[0].id ?? "")]))[String(rows[0].id ?? "")] || [];
-  return { ...posRowToApi(rows[0]), items };
+  return (rows[0] as Record<string, unknown> | undefined) || null;
+}
+
+async function getPosTransaction(accountId: string, id: string) {
+  const row = await posTransactionRow(accountId, id);
+  if (!row) return null;
+  const items = (await posItemsForTransactions(accountId, [String(row.id ?? "")]))[String(row.id ?? "")] || [];
+  return { ...posRowToApi(row), items };
 }
 
 // Selling a voucher product issues a coupon for it, so a voucher bought over
@@ -3904,12 +3915,10 @@ async function createPosTransaction(accountId: string, body: Record<string, unkn
   // exists so a coupon can never outlive a receipt that failed to write.
   const issuedCoupons = await issueCouponsForSale(accountId, row, items);
   // Cash and Eftpos are paid the moment they are recorded, so the stock leaves
-  // the shelf now. Clarity Pay and On account wait for their status change.
-  if (status === "paid") await syncPosStock(accountId, String(row.id), status);
-  // And so does the pass. Only once the money is in: a pending Clarity Pay
-  // session is not a purchase, and credits handed out before it clears are
-  // credits handed out for nothing.
-  const issuedPasses = status === "paid" ? await issuePassesForPosSale(accountId, row, items) : [];
+  // the shelf and the passes are issued now. Clarity Pay and On account wait
+  // for their status change: a pending Clarity Pay payment is not a purchase,
+  // and credits handed out before it clears are credits handed out for nothing.
+  const { issuedPasses } = status === "paid" ? await applyPosPaidEffects(accountId, row) : { issuedPasses: [] };
 
   return {
     issuedCoupons,
@@ -3934,6 +3943,26 @@ async function updatePosTransactionStatus(accountId: string, id: string, body: R
   if (!["pending", "paid", "refunded", "void"].includes(status)) {
     throw Object.assign(new Error("Unknown status."), { status: 400 });
   }
+  // Changing a sale a card is still paying for -- voiding it, or marking it
+  // paid by hand -- would leave money taken against a void receipt, or take it
+  // twice. Stand the Terminal payment down first: one that already went
+  // through settles the sale instead, and one still processing stops the change
+  // until Stripe decides.
+  if (status !== "pending") {
+    const released = await releaseTerminalAttempt(accountId, id);
+    if (released.state === "succeeded") {
+      throw Object.assign(new Error("A card payment for this sale has just gone through, so it is now paid."), {
+        status: 409,
+        code: "POS_ALREADY_PAID",
+      });
+    }
+    if (released.state === "processing") {
+      throw Object.assign(new Error("A card payment for this sale is still processing. Wait for it to finish."), {
+        status: 409,
+        code: "TERMINAL_PROCESSING",
+      });
+    }
+  }
   const patch: Record<string, unknown> = { status, updated_at: nowIso() };
   if (status === "paid") patch.paid_at = nowIso();
   if (body?.note !== undefined) patch.note = cleanString(body?.note, "", 600) || null;
@@ -3944,28 +3973,24 @@ async function updatePosTransactionStatus(accountId: string, id: string, body: R
     prefer: "return=representation",
   });
   if (!rows.length) throw Object.assign(new Error("Transaction not found."), { status: 404 });
-  // Marking a sale paid takes its items off the shelf; refunding or voiding it
-  // puts them back. movePosStock() is the thing that makes each of those happen
-  // exactly once, however many times the status is flipped.
-  await syncPosStock(accountId, id, status);
-  await syncPosCoupon(accountId, rows[0] as Record<string, unknown>, status);
-  const items = (await posItemsForTransactions(accountId, [id]))[id] || [];
-  // Marking an On account sale paid is the moment the package was bought. Safe
-  // to press twice: issuing is keyed on the sale and its line.
+  // Marking a sale paid takes its items off the shelf and, for an On account
+  // sale, is the moment the package was bought; refunding or voiding puts the
+  // stock back. Each effect happens exactly once however many times the status
+  // is flipped.
   //
   // Note what is NOT here: refunding or voiding does not take a pass back. A
   // credit already spent is a lesson that happened, and quietly removing an
   // entitlement someone may have made plans around is worse than a coach
   // voiding it deliberately from the client's profile.
-  const issuedPasses =
-    status === "paid"
-      ? await issuePassesForPosSale(
-          accountId,
-          rows[0] as Record<string, unknown>,
-          items as Array<{ productId: string; quantity: number }>,
-        )
-      : [];
-  const refreshed = (await getPosTransaction(accountId, id)) || { ...posRowToApi(rows[0]), items };
+  let issuedPasses: string[] = [];
+  if (status === "paid") {
+    ({ issuedPasses } = await applyPosPaidEffects(accountId, rows[0] as Record<string, unknown>));
+  } else {
+    await syncPosStock(accountId, id, status);
+    await syncPosCoupon(accountId, rows[0] as Record<string, unknown>, status);
+  }
+  const refreshed = await getPosTransaction(accountId, id);
+  if (!refreshed) throw Object.assign(new Error("Transaction not found."), { status: 404 });
   return { transaction: refreshed, issuedPasses };
 }
 
@@ -4093,6 +4118,73 @@ async function emailPosReceipt(accountId: string, id: string, body: Record<strin
   return { sent: true, recipient: to, savedToClient };
 }
 
+// --- Settling a sale ---------------------------------------------------------
+// What "paid" does to a sale, in one place. Manual methods (Cash, On account
+// marked paid) run the effects directly; a card payment goes through
+// settlePosTransaction, which adds the paid transition and the tender records
+// around them. Every effect here is idempotent on its own, so a retry finishes
+// whatever an interrupted call left undone.
+
+async function applyPosPaidEffects(accountId: string, row: Record<string, unknown>) {
+  const id = String(row.id ?? "");
+  await syncPosStock(accountId, id, "paid");
+  await syncPosCoupon(accountId, row, "paid");
+  const items = (await posItemsForTransactions(accountId, [id]))[id] || [];
+  return { issuedPasses: await issuePassesForPosSale(accountId, row, items) };
+}
+
+async function posCardDueCentsFor(accountId: string, id: string) {
+  const row = await posTransactionRow(accountId, id);
+  if (!row) throw Object.assign(new Error("Transaction not found."), { status: 404 });
+  return posCardDueCents(row);
+}
+
+async function recordPosTenders(accountId: string, purchaseRef: string, tenders: PosTender[]) {
+  await supabase("billing_payment_tenders", {
+    method: "POST",
+    query: "on_conflict=account_id,purchase_ref,tender_kind",
+    prefer: "resolution=ignore-duplicates,return=minimal",
+    body: tenders.map((tender) => ({
+      id: `tender-${randomUUID()}`,
+      account_id: accountId,
+      purchase_ref: purchaseRef,
+      tender_kind: tender.kind,
+      channel: tender.channel,
+      amount_cents: tender.amountCents,
+      currency: tender.currency,
+      external_payment_ref: tender.externalRef,
+      card_brand: tender.cardBrand,
+      card_last4: tender.cardLast4,
+      created_at: nowIso(),
+    })),
+  });
+}
+
+function posSettlementStore(accountId: string): SettlementStore {
+  return {
+    readTransaction: (id) => posTransactionRow(accountId, id),
+    async claimPaid(id, patch) {
+      const rows = await supabase("billing_pos_transactions", {
+        method: "PATCH",
+        query: `id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}&status=eq.pending`,
+        body: { ...patch, updated_at: nowIso() },
+        prefer: "return=representation",
+      });
+      return (rows[0] as Record<string, unknown> | undefined) || null;
+    },
+    applyPaidEffects: (row) => applyPosPaidEffects(accountId, row),
+    recordTenders: (purchaseRef, tenders) => recordPosTenders(accountId, purchaseRef, tenders),
+  };
+}
+
+/** A card has paid for this sale. Safe to call for the same payment any number of times. */
+async function settlePosCardPayment(accountId: string, id: string, card: CardPayment) {
+  const settled = await settlePosTransaction(posSettlementStore(accountId), id, card);
+  const transaction = await getPosTransaction(accountId, id);
+  if (!transaction) throw Object.assign(new Error("Transaction not found."), { status: 404 });
+  return { ...settled, transaction };
+}
+
 // Clarity Pay at the counter: create a Stripe Checkout session for this sale.
 // The client renders the returned URL as a QR code so the customer can pay
 // contactless from their own phone (Apple Pay / Google Pay), or opens it
@@ -4106,12 +4198,33 @@ async function createPosCheckout(accountId: string, id: string, req: Request) {
 
   const credential = await stripeFor(accountId);
   requireStripeFeature(credential, "till");
+  // Switching from Tap to Pay to the QR: the tap has to be finished with first,
+  // or the customer could pay both ways.
+  const released = await releaseTerminalAttempt(accountId, id);
+  if (released.state === "succeeded") {
+    throw Object.assign(new Error(`${transaction.receiptNumber} is already paid.`), { status: 409, code: "POS_ALREADY_PAID" });
+  }
+  if (released.state === "processing") {
+    throw Object.assign(new Error("A card tap for this sale is still processing. Wait a moment and check again."), {
+      status: 409,
+      code: "TERMINAL_PROCESSING",
+    });
+  }
+  // What the card owes, from the stored sale: a voucher's slice is already paid
+  // and must not be charged again.
+  const dueCents = await posCardDueCentsFor(accountId, id);
+  if (dueCents <= 0) {
+    throw Object.assign(new Error(`${transaction.receiptNumber} has nothing left for a card to pay.`), {
+      status: 409,
+      code: "POS_NOTHING_DUE",
+    });
+  }
   const branding = await resolveInvoiceBranding(accountId);
   const origin = new URL(req.url).origin;
   const receiptNumber = String(transaction.receiptNumber);
 
   const session = await createStripeCheckoutSessionWith(credential, {
-    amount: transaction.amount,
+    amount: dueCents / 100,
     currency: String(transaction.currency),
     productName: `${transaction.description} - ${branding.businessName}`,
     productDescription: transaction.customerName ? `For ${transaction.customerName}` : "",
@@ -4149,35 +4262,460 @@ async function syncPosCheckout(accountId: string, id: string) {
   const session = await retrieveStripeCheckoutSession(accountId, sessionId);
   if (!session.paid) return { transaction, paid: false, expired: session.expired };
 
-  const updated = await supabase("billing_pos_transactions", {
-    method: "PATCH",
-    query: `id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}`,
-    body: {
-      status: "paid",
-      paid_at: nowIso(),
-      stripe_payment_intent_id: session.paymentIntentId || null,
-      updated_at: nowIso(),
-    },
-    prefer: "return=representation",
+  // Stripe has confirmed. This poll runs every few seconds while the QR is on
+  // screen and keeps running after the sale clears, which is exactly why
+  // settling is safe to repeat.
+  const settled = await settlePosCardPayment(accountId, id, {
+    channel: "stripe_checkout",
+    paymentIntentId: session.paymentIntentId || sessionId,
+    amountCents: session.amountTotal,
   });
-  await syncPosStock(accountId, id, "paid");
-  if (updated.length) await syncPosCoupon(accountId, updated[0] as Record<string, unknown>, "paid");
-  const items = (await posItemsForTransactions(accountId, [id]))[id] || [];
-  // Stripe has confirmed, so the package is bought. This poll runs every few
-  // seconds while the QR is on screen and keeps running after the sale clears,
-  // which is exactly why issuing is idempotent rather than guarded by a flag.
-  const issuedPasses = updated.length
-    ? await issuePassesForPosSale(
-        accountId,
-        updated[0] as Record<string, unknown>,
-        items as Array<{ productId: string; quantity: number }>,
-      )
-    : [];
+  return { transaction: settled.transaction, paid: true, issuedPasses: settled.issuedPasses };
+}
+
+// --- Tap to Pay (Stripe Terminal) --------------------------------------------
+// Another way for Clarity Pay to collect the card part of an existing sale. The
+// sale, its amount and everything paying it does stay exactly where they were:
+// the phone is handed a PaymentIntent the server priced from the stored sale,
+// and success comes back through settlePosCardPayment like the QR does.
+//
+// billing_terminal_payments holds one row per intent. At most one is open per
+// sale (a partial unique index), which is what stops two taps -- or a tap and a
+// QR -- from both charging.
+
+type TerminalAttempt = {
+  id: string;
+  transaction_id: string;
+  payment_intent_id: string | null;
+  status: "open" | "succeeded" | "canceled";
+  channel: "terminal_tap_to_pay" | "terminal_reader";
+  created_at: string;
+};
+
+// A claimed slot whose intent never arrived (the function died between the two
+// writes) stops blocking the sale after this long.
+const TERMINAL_CLAIM_STALE_MS = 2 * 60 * 1000;
+
+async function terminalCredential(accountId: string) {
+  const credential = await stripeFor(accountId);
+  requireStripeFeature(credential, "terminal");
+  return credential;
+}
+
+async function terminalAttempts(accountId: string, transactionId: string, onlyOpen = false) {
+  return (await supabase("billing_terminal_payments", {
+    query:
+      `select=*&account_id=eq.${encodeFilter(accountId)}&transaction_id=eq.${encodeFilter(transactionId)}` +
+      `${onlyOpen ? "&status=eq.open" : ""}&order=created_at.desc&limit=1`,
+  })) as TerminalAttempt[];
+}
+
+async function setTerminalAttempt(accountId: string, attemptId: string, patch: Record<string, unknown>) {
+  await supabase("billing_terminal_payments", {
+    method: "PATCH",
+    query: `id=eq.${encodeFilter(attemptId)}&account_id=eq.${encodeFilter(accountId)}`,
+    body: { ...patch, updated_at: nowIso() },
+    prefer: "return=minimal",
+  });
+}
+
+async function posTendersFor(accountId: string, transactionId: string) {
+  const rows = (await supabase("billing_payment_tenders", {
+    query:
+      `select=tender_kind,channel,amount_cents,currency,card_brand,card_last4` +
+      `&account_id=eq.${encodeFilter(accountId)}&purchase_ref=eq.${encodeFilter(`pos:${transactionId}`)}&order=created_at.asc`,
+  }).catch(() => [])) as Array<Record<string, unknown>>;
+  return rows.map((row) => ({
+    kind: String(row.tender_kind ?? ""),
+    channel: String(row.channel ?? ""),
+    amount: (Number(row.amount_cents) || 0) / 100,
+    currency: String(row.currency ?? ""),
+    cardBrand: String(row.card_brand ?? ""),
+    cardLast4: String(row.card_last4 ?? ""),
+  }));
+}
+
+async function terminalPaidResponse(accountId: string, transactionId: string, issuedPasses: string[] = []) {
+  const transaction = await getPosTransaction(accountId, transactionId);
+  if (!transaction) throw Object.assign(new Error("Transaction not found."), { status: 404 });
+  return { state: "succeeded" as const, transaction, tenders: await posTendersFor(accountId, transactionId), issuedPasses };
+}
+
+/** A Terminal intent Stripe says succeeded: settle the sale it belongs to. */
+async function settleTerminalIntent(accountId: string, attempt: TerminalAttempt, intent: TerminalIntent) {
+  const settled = await settlePosCardPayment(accountId, attempt.transaction_id, {
+    channel: attempt.channel,
+    paymentIntentId: intent.id,
+    amountCents: intent.amountCents,
+    cardBrand: intent.cardBrand,
+    cardLast4: intent.cardLast4,
+  });
+  await setTerminalAttempt(accountId, attempt.id, { status: "succeeded" });
+  return terminalPaidResponse(accountId, attempt.transaction_id, settled.issuedPasses);
+}
+
+type ClarityLocation = { id: string; name: string; address: string; isDefault: boolean };
+
+async function clarityLocations(accountId: string): Promise<ClarityLocation[]> {
+  const rows = await supabase("settings", {
+    query: settingsSelectQuery(accountId, {
+      select: "value",
+      filters: [`key=eq.${encodeFilter("locationsJson")}`, "limit=1"],
+    }),
+  });
+  let raw: unknown = [];
+  try {
+    raw = rows[0]?.value ? JSON.parse(rows[0].value) : [];
+  } catch {
+    raw = [];
+  }
+  return (Array.isArray(raw) ? raw : [])
+    .filter((entry) => entry && typeof entry === "object" && entry.active !== false && entry.archived !== true)
+    .map((entry) => ({
+      id: cleanString(entry.id, "", 120),
+      name: cleanString(entry.name, "", 140),
+      address: cleanString(entry.address, "", 400),
+      isDefault: entry.isDefault === true,
+    }))
+    .filter((entry) => entry.id);
+}
+
+async function accountCountry(accountId: string) {
+  const rows = await supabase("settings", {
+    query: settingsSelectQuery(accountId, {
+      select: "value",
+      filters: [`key=eq.${encodeFilter("accountCountry")}`, "limit=1"],
+    }),
+  });
+  return cleanPhoneCountry(rows[0]?.value);
+}
+
+/**
+ * The Stripe Terminal location for the Clarity location this phone is at,
+ * created with Stripe the first time it is needed. Falls back to the default
+ * location when the phone has not picked one (or picked one that has gone).
+ */
+async function terminalLocation(
+  accountId: string,
+  credential: Awaited<ReturnType<typeof terminalCredential>>,
+  requestedId: unknown,
+) {
+  const locations = await clarityLocations(accountId);
+  const wanted = cleanString(requestedId, "", 120);
+  const location =
+    locations.find((entry) => entry.id === wanted) || locations.find((entry) => entry.isDefault) || locations[0];
+  if (!location) {
+    throw Object.assign(new Error("Add a location with its address in Settings › Locations before using Tap to Pay."), {
+      status: 409,
+      code: "TERMINAL_LOCATION_REQUIRED",
+    });
+  }
+  const mappingQuery =
+    `select=stripe_terminal_location_id&account_id=eq.${encodeFilter(accountId)}` +
+    `&clarity_location_id=eq.${encodeFilter(location.id)}&livemode=eq.${credential.livemode}&limit=1`;
+  const existing = await supabase("billing_terminal_locations", { query: mappingQuery });
+  if (existing[0]?.stripe_terminal_location_id) {
+    return { clarityLocationId: location.id, name: location.name, stripeLocationId: String(existing[0].stripe_terminal_location_id) };
+  }
+  const stripeLocationId = await createTerminalLocation(credential, {
+    displayName: location.name,
+    address: location.address,
+    country: await accountCountry(accountId),
+    clarityLocationId: location.id,
+  });
+  await supabase("billing_terminal_locations", {
+    method: "POST",
+    query: "on_conflict=account_id,clarity_location_id,livemode",
+    prefer: "resolution=ignore-duplicates,return=minimal",
+    body: [
+      {
+        account_id: accountId,
+        clarity_location_id: location.id,
+        livemode: credential.livemode,
+        stripe_terminal_location_id: stripeLocationId,
+        created_at: nowIso(),
+        updated_at: nowIso(),
+      },
+    ],
+  });
+  // Two phones setting up at once each make a Stripe location; the first
+  // mapping written is the one everybody uses from then on.
+  const stored = await supabase("billing_terminal_locations", { query: mappingQuery });
   return {
-    transaction: updated.length ? { ...posRowToApi(updated[0]), items } : transaction,
-    paid: true,
-    issuedPasses,
+    clarityLocationId: location.id,
+    name: location.name,
+    stripeLocationId: String(stored[0]?.stripe_terminal_location_id || stripeLocationId),
   };
+}
+
+async function terminalStatus(accountId: string) {
+  const connection = await accountStripeConnection(accountId);
+  let capability = "";
+  try {
+    const credential = resolveStripeCredential(connection);
+    if (credential.route === "clarity_pay") capability = await cardPaymentsCapability(credential);
+  } catch (error) {
+    // Not set up, or Stripe unreachable: either way the answer is "not now",
+    // and terminalAvailability says why in words a coach can act on.
+    console.error("billing_api:terminal_status_capability", accountId, (error as Error)?.message);
+  }
+  const availability = terminalAvailability(connection, capability);
+  const locations = availability.available
+    ? (await clarityLocations(accountId)).map(({ id, name, isDefault }) => ({ id, name, isDefault }))
+    : [];
+  return { ...availability, locations };
+}
+
+async function terminalLocationFor(accountId: string, body: Record<string, unknown>) {
+  const credential = await terminalCredential(accountId);
+  return { ...(await terminalLocation(accountId, credential, body?.locationId)), testMode: !credential.livemode };
+}
+
+async function terminalConnectionToken(accountId: string, body: Record<string, unknown>) {
+  const credential = await terminalCredential(accountId);
+  const location = await terminalLocation(accountId, credential, body?.locationId);
+  return { secret: await createConnectionToken(credential, location.stripeLocationId) };
+}
+
+/**
+ * Start (or pick back up) the card payment for a pending sale.
+ *
+ * The request names the sale and nothing else about the money. The amount is
+ * what the stored sale says the card owes. A second call for the same sale gets
+ * the same open intent back rather than a new one, so a double tap, a restart or
+ * a flaky connection cannot put two charges on the go.
+ */
+export async function startTerminalPayment(
+  accountId: string,
+  actorId: string,
+  body: Record<string, unknown>,
+) {
+  const transactionId = cleanString(body?.transactionId, "", 160);
+  const credential = await terminalCredential(accountId);
+  const row = await posTransactionRow(accountId, transactionId);
+  if (!row) throw Object.assign(new Error("Transaction not found."), { status: 404 });
+  if (row.status === "paid") return terminalPaidResponse(accountId, transactionId);
+  if (row.status !== "pending") {
+    throw Object.assign(new Error(`${row.receipt_number} is ${row.status} and cannot be paid.`), {
+      status: 409,
+      code: "POS_NOT_PENDING",
+    });
+  }
+
+  // The QR may have been shown first. If the customer already paid there, that
+  // is the payment; if not, it is closed so they cannot pay both ways.
+  const sessionId = cleanString(row.stripe_session_id, "", 200);
+  if (sessionId) {
+    const sync = await syncPosCheckout(accountId, transactionId);
+    if (sync.paid) return terminalPaidResponse(accountId, transactionId, sync.issuedPasses || []);
+    if (!sync.expired) {
+      await stripeRequestWith(credential, `checkout/sessions/${encodeURIComponent(sessionId)}/expire`, {
+        method: "POST",
+      }).catch(async (error) => {
+        // Expiring fails when the session completed in the meantime.
+        const again = await syncPosCheckout(accountId, transactionId);
+        if (!again.paid) throw error;
+      });
+      const after = await posTransactionRow(accountId, transactionId);
+      if (after?.status === "paid") return terminalPaidResponse(accountId, transactionId);
+    }
+  }
+
+  const due = posCardDueCents(row);
+  if (due <= 0) {
+    throw Object.assign(new Error(`${row.receipt_number} has nothing left for a card to pay.`), {
+      status: 409,
+      code: "POS_NOTHING_DUE",
+    });
+  }
+  const currency = cleanString(row.currency, "", 3).toUpperCase();
+
+  const [open] = await terminalAttempts(accountId, transactionId, true);
+  if (open) {
+    if (!open.payment_intent_id) {
+      if (Date.now() - new Date(open.created_at).getTime() < TERMINAL_CLAIM_STALE_MS) {
+        throw Object.assign(new Error("This payment is already being started on another device."), {
+          status: 409,
+          code: "TERMINAL_BUSY",
+        });
+      }
+      await setTerminalAttempt(accountId, open.id, { status: "canceled" });
+    } else {
+      const intent = await retrieveTerminalPaymentIntent(credential, open.payment_intent_id);
+      if (intent.state === "succeeded") return settleTerminalIntent(accountId, open, intent);
+      if (intent.state === "processing") return { state: "processing" as const };
+      if ((intent.state === "open" || intent.state === "declined") && intent.amountCents === due) {
+        return {
+          state: "open" as const,
+          paymentIntentId: intent.id,
+          clientSecret: intent.clientSecret,
+          amount: due / 100,
+          currency,
+          reused: true,
+        };
+      }
+      // Cancelled at Stripe, or for an amount the sale no longer owes.
+      const cancelled = await cancelTerminalPaymentIntent(credential, intent.id);
+      if (cancelled.state === "succeeded") return settleTerminalIntent(accountId, open, cancelled);
+      if (cancelled.state === "processing") return { state: "processing" as const };
+      await setTerminalAttempt(accountId, open.id, { status: "canceled" });
+    }
+  }
+
+  const location = await terminalLocation(accountId, credential, body?.locationId);
+  const device = (body?.device || {}) as Record<string, unknown>;
+  const attempt = {
+    id: randomUUID(),
+    account_id: accountId,
+    transaction_id: transactionId,
+    payment_intent_id: null as string | null,
+    amount_cents: due,
+    currency,
+    livemode: credential.livemode,
+    status: "open",
+    channel: "terminal_tap_to_pay",
+    device_id: cleanString(device.id, "", 120) || null,
+    device_name: cleanString(device.name, "", 120) || null,
+    actor_id: actorId || null,
+    clarity_location_id: location.clarityLocationId,
+    stripe_terminal_location_id: location.stripeLocationId,
+    created_at: nowIso(),
+    updated_at: nowIso(),
+  };
+  try {
+    await supabase("billing_terminal_payments", { method: "POST", body: [attempt], prefer: "return=minimal" });
+  } catch (error) {
+    if ((error as { supabaseStatus?: number })?.supabaseStatus === 409) {
+      throw Object.assign(new Error("This payment is already being started on another device."), {
+        status: 409,
+        code: "TERMINAL_BUSY",
+      });
+    }
+    throw error;
+  }
+
+  let intent: TerminalIntent;
+  try {
+    intent = await createTerminalPaymentIntent(credential, {
+      amountCents: due,
+      currency,
+      // One key per attempt: a retry of this create returns the same intent,
+      // and a fresh attempt after a cancel gets a fresh one.
+      idempotencyKey: `clarity-terminal-${attempt.id}`,
+      description: `${cleanString(row.receipt_number, "", 60)} ${cleanString(row.description, "", 200)}`.trim(),
+      // Reconciliation context only. The Clarity rows stay the record.
+      metadata: {
+        clarity_account_id: accountId,
+        clarity_transaction_id: transactionId,
+        clarity_receipt_number: cleanString(row.receipt_number, "", 60),
+        booking_id: cleanString(row.booking_id, "", 160),
+        customer_id: cleanString(row.customer_id, "", 160),
+        source: cleanString(row.source, "", 40),
+      },
+    });
+  } catch (error) {
+    await setTerminalAttempt(accountId, attempt.id, { status: "canceled" }).catch(() => null);
+    throw error;
+  }
+  await setTerminalAttempt(accountId, attempt.id, { payment_intent_id: intent.id });
+  return {
+    state: "open" as const,
+    paymentIntentId: intent.id,
+    clientSecret: intent.clientSecret,
+    amount: due / 100,
+    currency,
+    reused: false,
+  };
+}
+
+/**
+ * Where the card payment for a sale stands, settling it if Stripe says it
+ * went through.
+ *
+ * This is what the phone asks whenever it is unsure -- the tap finished but the
+ * answer never arrived, the app was closed mid-payment, the signal dropped.
+ * Stripe is asked directly, so a missing or late webhook changes nothing.
+ */
+export async function terminalPaymentState(accountId: string, transactionId: string) {
+  const row = await posTransactionRow(accountId, transactionId);
+  if (!row) throw Object.assign(new Error("Transaction not found."), { status: 404 });
+  const [attempt] = await terminalAttempts(accountId, transactionId);
+  if (attempt?.payment_intent_id && attempt.status !== "canceled") {
+    const credential = await terminalCredential(accountId);
+    const intent = await retrieveTerminalPaymentIntent(credential, attempt.payment_intent_id);
+    if (intent.state === "succeeded") return settleTerminalIntent(accountId, attempt, intent);
+    if (row.status === "paid") return terminalPaidResponse(accountId, transactionId);
+    if (intent.state === "cancelled") {
+      await setTerminalAttempt(accountId, attempt.id, { status: "canceled" });
+      return { state: "cancelled" as const };
+    }
+    if (intent.state === "declined") return { state: "declined" as const, message: intent.declineMessage };
+    return { state: intent.state };
+  }
+  if (row.status === "paid") return terminalPaidResponse(accountId, transactionId);
+  return { state: attempt?.status === "open" ? ("open" as const) : ("none" as const) };
+}
+
+/**
+ * Stripe's payment_intent.succeeded, for a Tap to Pay payment.
+ *
+ * The phone normally settles its own payment by asking the server
+ * (terminalPaymentState). This is for when it could not: the app was closed
+ * or lost signal after the tap. The event only says which intent to look at;
+ * the intent is fetched fresh from Stripe and the attempt row must belong to
+ * this business, so nothing in the event body is trusted beyond its id. A
+ * settle already done by the phone makes this a no-op.
+ *
+ * Returns what happened rather than throwing on a payment that does not add up
+ * (voided sale, wrong amount, second card): those need a person, and a webhook
+ * error would only make Stripe redeliver the same event for days.
+ */
+export async function settleTerminalPaymentFromWebhook(accountId: string, paymentIntentId: string) {
+  if (!/^pi_[A-Za-z0-9]+$/.test(paymentIntentId)) return { ignored: "not_a_payment_intent" };
+  const rows = (await supabase("billing_terminal_payments", {
+    query:
+      `select=*&account_id=eq.${encodeFilter(accountId)}` +
+      `&payment_intent_id=eq.${encodeFilter(paymentIntentId)}&limit=1`,
+  })) as TerminalAttempt[];
+  const attempt = rows[0];
+  // A Clarity Pay charge that is not a Tap to Pay one (the QR, an invoice).
+  if (!attempt) return { ignored: "not_a_terminal_payment" };
+  const credential = await terminalCredential(accountId);
+  const intent = await retrieveTerminalPaymentIntent(credential, paymentIntentId);
+  if (intent.state !== "succeeded") return { ignored: `intent_${intent.state}` };
+  try {
+    const settled = await settleTerminalIntent(accountId, attempt, intent);
+    return { settled: attempt.transaction_id, receipt: settled.transaction.receiptNumber };
+  } catch (error) {
+    const status = Number((error as { status?: unknown })?.status);
+    if (status === 409 || status === 404) {
+      console.error("billing_api:terminal_webhook_needs_attention", accountId, paymentIntentId, (error as Error).message);
+      return { needsAttention: (error as { code?: string })?.code || "conflict", transaction: attempt.transaction_id };
+    }
+    throw error;
+  }
+}
+
+/**
+ * Stand down the open Terminal payment on a sale, if there is one.
+ *
+ * Only an intent Stripe still holds open is cancelled. One that went through is
+ * settled and reported as such; one still processing is left alone and
+ * reported, because the card may have been charged.
+ */
+export async function releaseTerminalAttempt(accountId: string, transactionId: string) {
+  const [open] = await terminalAttempts(accountId, transactionId, true);
+  if (!open) return { state: "none" as const };
+  if (!open.payment_intent_id) {
+    await setTerminalAttempt(accountId, open.id, { status: "canceled" });
+    return { state: "cancelled" as const };
+  }
+  const credential = await terminalCredential(accountId);
+  const intent = await cancelTerminalPaymentIntent(credential, open.payment_intent_id);
+  if (intent.state === "succeeded") return settleTerminalIntent(accountId, open, intent);
+  if (intent.state === "processing") return { state: "processing" as const };
+  await setTerminalAttempt(accountId, open.id, { status: "canceled" });
+  return { state: "cancelled" as const };
 }
 
 // bookingId -> the sale that settled it. Drives the "paid at POS" badge on
@@ -5104,7 +5642,12 @@ export default async function handler(req: Request) {
   const action = url.pathname.replace(/^\/api\/billing\/?/, "").replace(/\/$/, "");
 
   try {
-    const accountId = await requireAccountId(req);
+    // The business this request acts for, from the same actor resolver Booking
+    // uses, so there is one notion of "the current business" rather than two
+    // that can disagree. Billing once derived it from global settings, and every
+    // till resolved to the original business whoever was signed in.
+    const actor = await requireCoachActor(req);
+    const accountId = actor.accountId;
 
     if (action === "products" && req.method === "GET") return json(await listProducts(accountId));
     if (action === "products" && req.method === "POST") return json(await createProduct(accountId, await parseBody(req)));
@@ -5247,6 +5790,26 @@ export default async function handler(req: Request) {
       const transactionId = action.slice("pos/transactions/".length, -"/checkout-status".length);
       return json(await syncPosCheckout(accountId, transactionId));
     }
+    // Tap to Pay. Every route here needs Clarity Pay (requireStripeFeature
+    // "terminal") except status, which is how a phone finds out it does not.
+    if (action === "terminal/status" && req.method === "GET") return json(await terminalStatus(accountId));
+    if (action === "terminal/location" && req.method === "POST") {
+      return json(await terminalLocationFor(accountId, await parseBody(req)));
+    }
+    if (action === "terminal/connection-token" && req.method === "POST") {
+      return json(await terminalConnectionToken(accountId, await parseBody(req)));
+    }
+    if (action === "terminal/payment-intent" && req.method === "POST") {
+      return json(await startTerminalPayment(accountId, actor.authUserId, await parseBody(req)));
+    }
+    if (action.startsWith("terminal/payment-intent/") && action.endsWith("/status") && req.method === "GET") {
+      return json(await terminalPaymentState(accountId, action.slice("terminal/payment-intent/".length, -"/status".length)));
+    }
+    if (action === "terminal/cancel" && req.method === "POST") {
+      const body = await parseBody(req);
+      return json(await releaseTerminalAttempt(accountId, cleanString(body?.transactionId, "", 160)));
+    }
+
     if (action.startsWith("pos/transactions/") && req.method === "GET") {
       const transaction = await getPosTransaction(accountId, action.slice("pos/transactions/".length));
       if (!transaction) return json({ error: "not_found", message: "Transaction not found." }, 404);

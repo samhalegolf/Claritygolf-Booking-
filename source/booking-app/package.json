@@ -1,0 +1,19 @@
+{
+  "name": "clarity-booking-staff-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The Clarity Booking staff iPhone app: the live Booking workspace plus Tap to Pay. Its own package so the Player app (source/) never picks up the Terminal plugin.",
+  "scripts": {
+    "ios": "npx cap sync ios && npx cap open ios",
+    "sync": "npx cap sync ios"
+  },
+  "dependencies": {
+    "@capacitor/core": "^8.5.0",
+    "@capacitor/ios": "^8.5.0",
+    "@claritygolf/capacitor-terminal": "file:../native/clarity-terminal"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.0",
+    "typescript": "^5.9.3"
+  }
+}

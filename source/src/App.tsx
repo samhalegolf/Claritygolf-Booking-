@@ -286,6 +286,7 @@ import {
   printableInvoiceCustomFields,
 } from "./modules/billing/invoiceSettings";
 import { computeInvoiceTotals, invoiceLineNet, invoiceLineGross, lineDiscountAmount } from "./modules/billing/invoiceMath";
+import { posMethodLabel } from "./modules/billing/terminal";
 import type { CouponIssueValues, CouponScanResult, VoucherRepairResult } from "./modules/billing/CouponsPanel";
 import type { VoucherAmountRule } from "./modules/billing/types";
 import type { ProductFormValues, StockAdjustInput } from "./modules/billing/ProductsPanel";
@@ -27185,7 +27186,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                             <strong>{row.sale.description || row.sale.receiptNumber}</strong>
                                             <span>
                                               {formatMoney(row.sale.amount, row.sale.currency)} ·{" "}
-                                              {row.sale.paymentMethodName} · {row.sale.receiptNumber}
+                                              {posMethodLabel(row.sale)} · {row.sale.receiptNumber}
                                               {row.sale.isLessonPass ? " · Lesson pass" : ""}
                                             </span>
                                           </div>
@@ -30829,7 +30830,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                   )}
                               </td>
                               <td>{transactionCustomerLink(row.sale.customerId, row.sale.customerName)}</td>
-                              <td>{row.sale.paymentMethodName}</td>
+                              <td>{posMethodLabel(row.sale)}</td>
                               <td>{formatMoney(row.sale.amount, row.sale.currency)}</td>
                               <td>
                                 <span className={`invoice-status-pill invoice-status-${row.sale.status === "paid" ? "paid" : row.sale.status === "void" ? "void" : "published"}`}>
@@ -34331,7 +34332,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           <div>
                             <strong>{row.sale.description || row.sale.receiptNumber}</strong>
                             <span>
-                              {row.sale.receiptNumber} · {row.sale.paymentMethodName}
+                              {row.sale.receiptNumber} · {posMethodLabel(row.sale)}
                               {row.sale.isLessonPass ? " · Lesson pass" : ""}
                             </span>
                           </div>

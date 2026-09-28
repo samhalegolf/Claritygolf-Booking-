@@ -12345,6 +12345,102 @@ button {
   font-size: 12px;
 }
 
+/* Tap to Pay on the staff iPhone app. One column, big amount, big targets:
+   it is read at arm's length by a coach holding the phone out to a customer. */
+.pos-tap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 18px 4px 4px;
+  text-align: center;
+}
+
+.pos-tap-amount {
+  font-size: 34px;
+  line-height: 1.1;
+}
+
+.pos-tap-title {
+  margin: 4px 0 0;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--c-text);
+}
+
+.pos-tap-icon {
+  color: var(--c-icon-accent);
+}
+
+.pos-tap-spin {
+  color: var(--c-muted);
+  animation: pos-tap-spin 1s linear infinite;
+}
+
+@keyframes pos-tap-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pos-tap-spin {
+    animation: none;
+  }
+}
+
+.pos-tap-test {
+  margin: 4px 0 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--c-active);
+  color: var(--c-text-soft);
+  font-size: 12px;
+}
+
+.pos-tap-location {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  max-width: 280px;
+  font-size: 12px;
+  color: var(--c-text-soft);
+  text-align: left;
+}
+
+.pos-tap-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+  max-width: 280px;
+  margin-top: 12px;
+}
+
+.pos-tap-actions > button {
+  justify-content: center;
+  min-height: 44px;
+}
+
+/* What paid for a sale, one line per tender: "Gift voucher  $20",
+   "Visa •••• 4242  $70". */
+.pos-tenders {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+}
+
+.pos-tenders li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+  font-size: 14px;
+  color: var(--c-text-body);
+}
+
 /* "Paid" line under the price on a lesson card. */
 .pos-paid-line {
   color: var(--muted);

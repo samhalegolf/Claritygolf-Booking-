@@ -91,7 +91,7 @@ test("a business that has not connected cannot take a payment", () => {
       assert.equal(status.configured, false);
       assert.equal(status.account, "");
       assert.equal(status.route, "");
-      assert.deepEqual(status.features, { invoices: false, till: false, portal: false });
+      assert.deepEqual(status.features, { invoices: false, till: false, portal: false, terminal: false });
     }
   });
 });
@@ -175,7 +175,7 @@ test("Clarity Pay takes cards everywhere", () => {
     const credential = resolveStripeCredential(CLARITY_PAY);
     assert.equal(credential.route, "clarity_pay");
     for (const feature of ["invoices", "till", "portal"] as const) requireStripeFeature(credential, feature);
-    assert.deepEqual(stripeCredentialStatus(CLARITY_PAY).features, { invoices: true, till: true, portal: true });
+    assert.deepEqual(stripeCredentialStatus(CLARITY_PAY).features, { invoices: true, till: true, portal: true, terminal: true });
   });
 });
 
