@@ -163,9 +163,9 @@ import {
   isValidPhone,
   setActiveRegion,
 } from "./lib/activeCountry";
-import { CoachProfilePanel } from "./modules/profile/CoachProfilePanel";
+import { BusinessHubPanel } from "./modules/profile/BusinessHubPanel";
 import { RegionSettings, TimeZoneSelect, type RegionValues } from "./modules/settings/RegionSettings";
-import type { ProfileInternalJob, ProfileTarget } from "./modules/profile/CoachProfilePanel";
+import type { ProfileInternalJob, ProfileTarget } from "./modules/profile/BusinessHubPanel";
 import {
   cleanNotificationTemplates,
   DEFAULT_MAP_LINK_LABEL,
@@ -31465,7 +31465,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
         {!isEmbedMode && adminWorkspaceReady && activeView === "profile" && (
           <section className="profile-page">
-            <CoachProfilePanel
+            <BusinessHubPanel
               identity={{
                 coachName: ownCoachProfile?.displayName || ownCoachProfile?.name || currentAppUser.name,
                 roleLabel: isPlatformAdmin

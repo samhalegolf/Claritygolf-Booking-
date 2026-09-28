@@ -64,7 +64,7 @@ export type ProfileInternalJob = {
   facts: Array<[string, string]>;
 };
 
-export type CoachProfileIdentity = {
+export type BusinessHubIdentity = {
   coachName: string;
   roleLabel: string;
   email: string;
@@ -182,15 +182,15 @@ function providerInitial(label: string): string {
   return words.length === 1 ? words[0].slice(0, 2) : words.map((word) => word[0]).join("").slice(0, 2);
 }
 
-export type CoachProfilePanelProps = {
-  identity: CoachProfileIdentity;
+export type BusinessHubPanelProps = {
+  identity: BusinessHubIdentity;
   /** Clarity's own settings, with facts read from live workspace state. */
   internalJobs: ProfileInternalJob[];
   /** `label` is what the card is called, so an overlay can name itself. */
   onOpen: (target: ProfileTarget, label: string) => void;
 };
 
-export function CoachProfilePanel({ identity, internalJobs, onOpen }: CoachProfilePanelProps) {
+export function BusinessHubPanel({ identity, internalJobs, onOpen }: BusinessHubPanelProps) {
   // One shared integration resource for the whole workspace. Settings and the
   // profile now join the same in-flight request and reuse the same cached
   // snapshot instead of mounting their own independent fetch lifecycle.
