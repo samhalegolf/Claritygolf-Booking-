@@ -6,7 +6,9 @@
  *   1. Which Stripe account the money lands in. Getting this wrong for the
  *      second business to sign up means their customers' payments arrive in
  *      someone else's account, and nothing in the app would look broken.
- *   2. What is on the shelf. The shop is priced from the catalogue on the
+ *   2. Clarity Pay's cut. Every card payment carries it, and it must never be
+ *      the whole payment -- Stripe refuses that, and the sale fails.
+ *   3. What is on the shelf. The shop is priced from the catalogue on the
  *      server, so anything wrongly on it is something a player can be charged
  *      for -- and anything wrongly priced at zero is a card form that charges
  *      nothing.
@@ -17,6 +19,8 @@ import test from "node:test";
 
 import { checkoutSourceRef, findPlayerShopItem, playerShopItems } from "./player-shop.mts";
 import {
+  clarityPayFeeCents,
+  createStripeCheckoutSession,
   parseStripeConnection,
   resolveStripeCredential,
   stripeCredentialStatus,
@@ -79,7 +83,8 @@ test("a business that has not connected cannot take a payment", () => {
         assert.equal(error.code, "STRIPE_NOT_CONFIGURED");
         return true;
       });
-      assert.deepEqual(stripeCredentialStatus(value), { configured: false, account: "", testMode: false });
+      const { fee: _fee, ...status } = stripeCredentialStatus(value);
+      assert.deepEqual(status, { configured: false, account: "", testMode: false });
     }
   });
 });
@@ -98,6 +103,43 @@ test("only a real connected account id is accepted", () => {
   assert.deepEqual(parseStripeConnection({ account: "acct_x1", livemode: "yes" }), { account: "acct_x1", livemode: false });
   assert.equal(parseStripeConnection("not json"), null);
   assert.equal(parseStripeConnection({ account: "acct_; DROP" }), null);
+});
+
+/* --- Clarity Pay's cut -------------------------------------------------- */
+
+test("Clarity Pay takes its percentage plus any flat fee, rounded to the cent", () => {
+  assert.equal(clarityPayFeeCents(10000, { percent: 1, fixedCents: 0 }), 100);
+  assert.equal(clarityPayFeeCents(1250, { percent: 1, fixedCents: 0 }), 13);
+  assert.equal(clarityPayFeeCents(10000, { percent: 0.5, fixedCents: 10 }), 60);
+});
+
+test("Clarity Pay's cut is never the whole payment", () => {
+  // Stripe refuses an application fee that is not less than the charge.
+  assert.equal(clarityPayFeeCents(50, { percent: 1, fixedCents: 100 }), 49);
+  assert.equal(clarityPayFeeCents(1, { percent: 50, fixedCents: 0 }), 0);
+});
+
+test("a zero fee sends no application fee at all", () => {
+  assert.equal(clarityPayFeeCents(10000, { percent: 0, fixedCents: 0 }), 0);
+});
+
+test("a card checkout carries Clarity Pay's cut as the application fee", async () => {
+  const realFetch = globalThis.fetch;
+  let sent = new URLSearchParams();
+  globalThis.fetch = (async (_url: string, init: { body: string }) => {
+    sent = new URLSearchParams(init.body);
+    return new Response(JSON.stringify({ id: "cs_1", url: "https://checkout.stripe.com/x" }));
+  }) as typeof fetch;
+  try {
+    await createStripeCheckoutSession(
+      { secret: TEST_PLATFORM, account: "acct_coachtest1", livemode: false },
+      { amount: 80, currency: "NZD", productName: "Lesson", successUrl: "https://x/ok", cancelUrl: "https://x/no" },
+    );
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  assert.equal(sent.get("line_items[0][price_data][unit_amount]"), "8000");
+  assert.equal(sent.get("payment_intent_data[application_fee_amount]"), String(clarityPayFeeCents(8000)));
 });
 
 /* --- What is on the shelf ----------------------------------------------- */

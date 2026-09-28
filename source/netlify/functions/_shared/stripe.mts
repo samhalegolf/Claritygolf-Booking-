@@ -21,6 +21,10 @@
  *          STRIPE_CONNECT_WEBHOOK_SECRET
  *   test   STRIPE_CONNECT_TEST_CLIENT_ID, STRIPE_PLATFORM_TEST_SECRET_KEY,
  *          STRIPE_CONNECT_TEST_WEBHOOK_SECRET
+ *
+ * Clarity Pay's cut (see clarityPayFeeCents), both modes:
+ *
+ *          CLARITY_PAY_FEE_PERCENT (default 1), CLARITY_PAY_FEE_FIXED_CENTS (default 0)
  */
 
 /** Where a business's connection lives in `settings`. */
@@ -47,6 +51,15 @@ export type StripeCredentialStatus = {
   account: string;
   /** True for a test-mode connection, which takes no real money. */
   testMode: boolean;
+  /** Clarity Pay's cut of each card payment, so the business can see it. */
+  fee: ClarityPayFee;
+};
+
+export type ClarityPayFee = {
+  /** Percent of the charge, 1 = 1%. */
+  percent: number;
+  /** Flat amount per charge, in cents. */
+  fixedCents: number;
 };
 
 export type StripePlatform = {
@@ -72,6 +85,34 @@ export function stripePlatform(livemode: boolean): StripePlatform {
         secret: env("STRIPE_PLATFORM_TEST_SECRET_KEY"),
         webhookSecret: env("STRIPE_CONNECT_TEST_WEBHOOK_SECRET"),
       };
+}
+
+function feeNumber(name: string, fallback: number) {
+  const raw = env(name);
+  const value = raw === "" ? fallback : Number(raw);
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+/** Clarity Pay's cut, as set for the platform. */
+export function clarityPayFee(): ClarityPayFee {
+  return {
+    percent: feeNumber("CLARITY_PAY_FEE_PERCENT", 1),
+    fixedCents: Math.round(feeNumber("CLARITY_PAY_FEE_FIXED_CENTS", 0)),
+  };
+}
+
+/**
+ * Clarity Pay's cut of a charge, in cents, sent to Stripe as the application
+ * fee. Stripe moves it from the business's payment to Clarity's platform
+ * balance; Stripe's own processing fee is still paid by the business, apart
+ * from this.
+ *
+ * 0 means "take nothing" and callers leave the parameter off. Stripe refuses a
+ * fee that is not less than the charge, so it is capped one cent under it.
+ */
+export function clarityPayFeeCents(amountCents: number, fee: ClarityPayFee = clarityPayFee()) {
+  const cents = Math.round((amountCents * fee.percent) / 100 + fee.fixedCents);
+  return Math.max(0, Math.min(cents, amountCents - 1));
 }
 
 /** A stored connection, or null for anything that is not one. */
@@ -123,11 +164,13 @@ export function resolveStripeCredential(connectionValue: unknown): StripeCredent
  */
 export function stripeCredentialStatus(connectionValue: unknown): StripeCredentialStatus {
   const connection = parseStripeConnection(connectionValue);
-  if (!connection) return { configured: false, account: "", testMode: false };
+  const fee = clarityPayFee();
+  if (!connection) return { configured: false, account: "", testMode: false, fee };
   return {
     configured: Boolean(stripePlatform(connection.livemode).secret),
     account: connection.account,
     testMode: !connection.livemode,
+    fee,
   };
 }
 
@@ -203,6 +246,8 @@ export async function createStripeCheckoutSession(
   // A single line for the whole total keeps the charged amount identical to our
   // record (no per-line rounding drift; tax is already reflected in the total).
   params.set("line_items[0][quantity]", "1");
+  const applicationFee = clarityPayFeeCents(amountInCents);
+  if (applicationFee > 0) params.set("payment_intent_data[application_fee_amount]", String(applicationFee));
   params.set("line_items[0][price_data][currency]", String(input.currency || "NZD").toLowerCase());
   params.set("line_items[0][price_data][unit_amount]", String(amountInCents));
   params.set("line_items[0][price_data][product_data][name]", input.productName);

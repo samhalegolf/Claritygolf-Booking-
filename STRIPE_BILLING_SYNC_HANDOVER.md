@@ -56,3 +56,16 @@ Actions: `syncAll` (default), `syncInvoices`, `syncProducts`. Optional `since` (
 - Webhook failures return 500 so Stripe retries; unrecognised events are acknowledged and ignored
 - Everything upserts, so webhook retries and repeated backfills are harmless
 - Stripe-synced invoices are editable in-app like any other row, but a later Stripe update to the same invoice overwrites in-app edits (Stripe is the source of truth for `in_...` rows)
+
+## Clarity Pay fee (platform cut)
+
+Every card payment Clarity creates on a business's connected account carries an application fee, which Stripe moves to Clarity's platform balance: till (POS) checkouts, invoice "Clarity Pay" checkouts, emailed invoice payment links, and player-portal purchases. The business keeps the rest and gets its own payouts from its own Stripe. Stripe's processing fee is still paid by the business, separate from Clarity's cut.
+
+- Rate: `CLARITY_PAY_FEE_PERCENT` (default `1`, meaning 1%) plus `CLARITY_PAY_FEE_FIXED_CENTS` (default `0`) in Netlify. The same rate applies in test and live mode.
+- Set it to `0` / `0` to take nothing.
+- The fee is always capped one cent under the charge (Stripe refuses anything bigger).
+- The Card payments card in Billing settings shows the business the current rate.
+- Invoices a business creates directly in its own Stripe dashboard carry no fee; only payments started from Clarity do.
+- Payment links already emailed before this change carry no fee.
+- Refunds made from the business's Stripe dashboard do not return Clarity's fee automatically; refund it from Connect › Collected fees if you want to.
+- Collected fees show in Clarity's Stripe dashboard under Connect › Collected fees.

@@ -35,6 +35,7 @@ import { currencyForAccountSettings } from "./_shared/locale.mts";
 import { taxDefaultsForCountry } from "./_shared/region.mts";
 import {
   createStripeCheckoutSession as createStripeCheckoutSessionWith,
+  clarityPayFeeCents,
   resolveStripeCredential,
   retrieveStripeCheckoutSession as retrieveStripeCheckoutSessionWith,
   stripeCredentialStatus,
@@ -2792,6 +2793,8 @@ async function createStripePaymentLink(input: {
   params.set("line_items[0][price]", String(price.id));
   params.set("line_items[0][quantity]", "1");
   params.set("restrictions[completed_sessions][limit]", "1");
+  const applicationFee = clarityPayFeeCents(amountInCents);
+  if (applicationFee > 0) params.set("application_fee_amount", String(applicationFee));
   params.set("after_completion[type]", "redirect");
   params.set("after_completion[redirect][url]", input.redirectUrl);
   for (const [key, value] of Object.entries(input.metadata || {})) {

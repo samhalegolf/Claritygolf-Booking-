@@ -4952,6 +4952,15 @@ function isoDateDiffDays(laterIso: string, earlierIso: string) {
 
 // Currency follows the workspace country. It was hardcoded to NZD, which meant
 // a coach in another country was quoted prices in New Zealand dollars.
+/* Clarity Pay's cut in words: "1%", "1% + $0.30", "$0.30". */
+function clarityPayFeeLabel(fee: { percent: number; fixedCents: number }) {
+  const parts = [
+    fee.percent > 0 ? `${fee.percent}%` : "",
+    fee.fixedCents > 0 ? formatMoney(fee.fixedCents / 100) : "",
+  ].filter(Boolean);
+  return parts.length ? parts.join(" + ") : "nothing";
+}
+
 function formatMoney(amount: number, currency = activeCurrency()) {
   return new Intl.NumberFormat(activeLocale(), {
     style: "currency",
@@ -5857,6 +5866,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     configured: boolean;
     account: string;
     testMode: boolean;
+    /* Clarity Pay's cut of each card payment. */
+    fee?: { percent: number; fixedCents: number };
   } | null>(null);
   const [stripeSaving, setStripeSaving] = useState(false);
   const [voucherRules, setVoucherRules] = useState<VoucherAmountRule[]>([]);
@@ -30158,6 +30169,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         Card payments — the till, invoice links and anything a player buys in
                         their portal — go straight to your Stripe account ({stripeStatus.account}).
                         Clarity never holds the money.
+                        {stripeStatus.fee ? ` Clarity Pay keeps ${clarityPayFeeLabel(stripeStatus.fee)} of each card payment; Stripe's own processing fee is separate.` : ""}
                         {stripeStatus.testMode ? " This is a test-mode connection, so no real money moves." : ""}
                         {!stripeStatus.configured ? " Payments are paused while Clarity's Stripe platform is unavailable." : ""}
                       </>
