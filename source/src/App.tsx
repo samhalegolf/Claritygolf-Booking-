@@ -40,6 +40,7 @@ import {
   Upload,
   X,
   FlaskConical,
+  Webhook,
 } from "lucide-react";
 import {
   ClarityAccessPermissions,
@@ -398,6 +399,7 @@ const PosCheckoutModal = lazy(() =>
 // rather than with the workspace; the integrations one carries the 50 KB
 // detail panel for every provider, which nobody visiting Booking asked for.
 const IntegrationsPanel = lazy(() => import("./modules/integrations/IntegrationsPanel"));
+const ApiAccessPanel = lazy(() => import("./modules/api-access/ApiAccessPanel"));
 const SandboxPanel = lazy(() => import("./modules/sandbox/SandboxPanel"));
 const BrowserNotificationsPanel = lazy(() => import("./modules/notifications/BrowserNotificationsPanel"));
 const MessageTemplatesPanel = lazy(() =>
@@ -1543,6 +1545,9 @@ const SETTINGS_SECTIONS: Array<{
   // coach's own accounts. Admin is "what is this software made of" — the
   // services Clarity runs on, which a coach never picks.
   { key: "developer", label: "Integrations", icon: ClarityIntegrations, adminOnly: true },
+  // The other direction: not what this business has plugged in, but what may
+  // plug into it -- API keys and webhooks for other software.
+  { key: "api", label: "API & webhooks", icon: Webhook, adminOnly: true },
   // Platform-only, not account-admin. Its own description says these are "the
   // services Clarity itself runs on, not things a coach picks" -- shared
   // infrastructure whose state belongs to the platform, not to any one
@@ -1565,6 +1570,7 @@ type SettingsTab =
   | "email-sms"
   | "account"
   | "developer"
+  | "api"
   | "admin"
   | "sandbox";
 
@@ -32148,6 +32154,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               {settingsTab === "developer" ? (
                 <Suspense fallback={<Loading what="your connections" />}>
                   <IntegrationsPanel audience="integration" />
+                </Suspense>
+              ) : null}
+              {/* Own tab only: it reads keys and webhook endpoints on mount. */}
+              {isAdminUser && settingsTab === "api" ? (
+                <Suspense fallback={<Loading what="API access" />}>
+                  <ApiAccessPanel />
                 </Suspense>
               ) : null}
               {/* Own tab only, like the panels either side of it: it asks the

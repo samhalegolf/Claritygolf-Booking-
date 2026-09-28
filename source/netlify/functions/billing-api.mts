@@ -1450,7 +1450,7 @@ async function nextInvoiceNumber(accountId: string, prefixInput?: unknown) {
   return { prefix, sequence, invoiceNumber: `${prefix}-${String(sequence).padStart(4, "0")}` };
 }
 
-async function createInvoice(accountId: string, body: Record<string, unknown>) {
+export async function createInvoice(accountId: string, body: Record<string, unknown>) {
   const autoNumber = body?.autoNumber === true;
   // autoNumber => server assigns the next number in the series (the aligned
   // path). Otherwise honour an explicit client-supplied number.
@@ -1652,7 +1652,7 @@ async function updateInvoiceDraft(accountId: string, id: string, body: Record<st
   return getInvoiceWithItems(accountId, id);
 }
 
-async function updateInvoiceStatus(accountId: string, id: string, body: Record<string, unknown>) {
+export async function updateInvoiceStatus(accountId: string, id: string, body: Record<string, unknown>) {
   const nextStatus = String(body?.status || "");
   if (!["draft", "sent", "paid", "overdue", "void"].includes(nextStatus)) {
     throw Object.assign(new Error("Invalid invoice status."), { status: 400 });
@@ -1744,7 +1744,7 @@ async function issuePassesForInvoice(accountId: string, invoiceId: string, invoi
 // Hard-delete an invoice. Its items and booking links are removed by the ON
 // DELETE CASCADE foreign keys. The UI only calls this for drafts/voided
 // invoices; committed ones are voided (status change) instead of deleted.
-async function deleteInvoice(accountId: string, id: string) {
+export async function deleteInvoice(accountId: string, id: string) {
   await supabase("billing_invoices", {
     method: "DELETE",
     query: `id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}`,
@@ -2614,7 +2614,7 @@ function pdfFilename(invoice: InvoiceApi) {
   return `${String(invoice.invoiceNumber || "invoice").replace(/[^A-Za-z0-9._-]/g, "_")}.pdf`;
 }
 
-async function sendInvoice(accountId: string, id: string, body: Record<string, unknown>, origin: string) {
+export async function sendInvoice(accountId: string, id: string, body: Record<string, unknown>, origin: string) {
   const invoice = await getInvoiceWithItems(accountId, id);
   if (!invoice) throw Object.assign(new Error("Invoice not found."), { status: 404 });
   const to = cleanString(body?.email, "", 180) || cleanString(invoice.customerEmail, "", 180);

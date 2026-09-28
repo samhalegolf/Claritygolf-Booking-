@@ -628,10 +628,22 @@ function rowToPass(row: Record<string, unknown>): PassView {
  */
 export async function readPassesForPerson(accountId: string, personId: string): Promise<PassView[]> {
   if (!accountId || !personId) return [];
+  return readPassesWhere(accountId, "person", personId);
+}
+
+/** One pass, with its ledger. Null when this business has no such pass. */
+export async function readPassById(accountId: string, passId: string): Promise<PassView | null> {
+  if (!accountId || !passId) return null;
+  return (await readPassesWhere(accountId, "pass", passId))[0] || null;
+}
+
+async function readPassesWhere(accountId: string, by: "person" | "pass", value: string): Promise<PassView[]> {
   // Before answering, give back anything whose booking has since gone. Every
   // surface that shows a balance goes through here, so this is the one place
   // that guarantees a cancelled lesson's credit is never shown as spent.
   await sweepReturnableCredits(accountId);
+  const personId = by === "person" ? value : null;
+  const passId = by === "pass" ? value : null;
   const rows = await db().sql`
     SELECT
       b.*,
@@ -663,7 +675,9 @@ export async function readPassesForPerson(accountId: string, personId: string): 
       ), '[]'::json) AS redemptions
     FROM public.pass_balances b
     JOIN public.passes p ON p.id = b.pass_id AND p.account_id = ${accountId}
-    WHERE b.account_id = ${accountId} AND b.person_id = ${personId}
+    WHERE b.account_id = ${accountId}
+      AND (${personId}::text IS NULL OR b.person_id = ${personId})
+      AND (${passId}::text IS NULL OR b.pass_id = ${passId})
     ORDER BY p.issued_at DESC
   `;
   return (rows as Record<string, unknown>[]).map(rowToPass);
@@ -692,7 +706,7 @@ export async function grantPass(
   input: PassGrantInput,
   templates: PassTemplate[],
   actor: PassActor,
-): Promise<{ passes: PassView[]; merged: boolean; duplicate: boolean }> {
+): Promise<{ passes: PassView[]; merged: boolean; duplicate: boolean; passId: string }> {
   const grant = normaliseGrant(input, templates);
   const { accountId } = actor;
   if (!accountId) fail("No account.", 403, "forbidden");
@@ -706,11 +720,12 @@ export async function grantPass(
       )
     : undefined;
 
+  // The pass these credits land on: the one topped up, or a new one.
+  let passId = compatible?.id || "";
   const client = await db().pool.connect();
   try {
     await client.query("BEGIN");
 
-    let passId = compatible?.id || "";
     if (!passId) {
       passId = `pass-${randomUUID()}`;
       await client.query(
@@ -780,6 +795,7 @@ export async function grantPass(
         passes: await readPassesForPerson(accountId, grant.personId),
         merged: Boolean(compatible),
         duplicate: true,
+        passId,
       };
     }
     throw error;
@@ -791,6 +807,7 @@ export async function grantPass(
     passes: await readPassesForPerson(accountId, grant.personId),
     merged: Boolean(compatible),
     duplicate: false,
+    passId,
   };
 }
 
@@ -1899,13 +1916,13 @@ export async function redeemPassManually(input: {
          id, account_id, pass_id, allocation_id, booking_id, credits, note,
          redeemed_at, redeemed_by, created_at
        )
-       SELECT $1, $2, $3, a.allocation_id, NULL, $4, $5, NOW(), $6, NOW()
+       SELECT $1, $2, $3, a.allocation_id, NULL, $4::int, $5, NOW(), $6, NOW()
        FROM public.pass_allocation_balances a
        JOIN public.passes p ON p.id = a.pass_id AND p.account_id = a.account_id
        WHERE a.pass_id = $3
          AND a.account_id = $2
          AND a.is_live
-         AND a.credits_available >= $4
+         AND a.credits_available >= $4::int
          AND p.status = 'active'
          AND (p.expires_at IS NULL OR p.expires_at > NOW())
          AND (p.starts_at IS NULL OR p.starts_at <= NOW())
