@@ -3943,11 +3943,12 @@ async function updatePosTransactionStatus(accountId: string, id: string, body: R
   if (!["pending", "paid", "refunded", "void"].includes(status)) {
     throw Object.assign(new Error("Unknown status."), { status: 400 });
   }
-  // Closing a sale that a card is still paying for would leave money taken
-  // against a void receipt. Stand the Terminal payment down first: one that
-  // already went through settles the sale instead, and one still processing
-  // stops the close until Stripe decides.
-  if (status === "void" || status === "refunded") {
+  // Changing a sale a card is still paying for -- voiding it, or marking it
+  // paid by hand -- would leave money taken against a void receipt, or take it
+  // twice. Stand the Terminal payment down first: one that already went
+  // through settles the sale instead, and one still processing stops the change
+  // until Stripe decides.
+  if (status !== "pending") {
     const released = await releaseTerminalAttempt(accountId, id);
     if (released.state === "succeeded") {
       throw Object.assign(new Error("A card payment for this sale has just gone through, so it is now paid."), {
