@@ -4779,7 +4779,7 @@ async function importPeople(rawPeople, source = "import", accountId: string) {
   return result;
 }
 
-async function updatePerson(rawPerson, accountId: string) {
+export async function updatePerson(rawPerson, accountId: string) {
   const cleanAccountId = cleanSlug(accountId, "");
   if (!cleanAccountId) throw missingAccountScope("update_person");
   const person = cleanPerson(rawPerson, "manual_update", cleanAccountId);
@@ -4812,42 +4812,37 @@ async function updatePerson(rawPerson, accountId: string) {
     if (existingId) {
       const emailUnchanged =
         normalizedPersonEmail(existing?.email) === normalizedPersonEmail(person.email);
+      // One statement whether or not the email changed: $10 says which. Two
+      // statements used to share one parameter list, and the one that leaves
+      // the email alone never mentioned $3 -- which Postgres refuses outright
+      // ("could not determine data type of parameter $3"), so editing a
+      // client without changing their email failed.
       await client.query(
-        emailUnchanged
-          ? `UPDATE people
-             SET name = $2,
-                 phone = NULLIF($4, ''),
-                 notes = NULLIF($5, ''),
-                 source = COALESCE(NULLIF($6, ''), source),
-                 caddy_profile_id = NULLIF($7, ''),
-                 caddy_profile_url = NULLIF($8, ''),
-                 account_id = COALESCE(NULLIF($9, ''), account_id),
-                 updated_at = NOW()
-             WHERE id = $1`
-          : `UPDATE people
-             SET name = $2,
-                 email = NULLIF($3, ''),
-                 phone = NULLIF($4, ''),
-                 notes = NULLIF($5, ''),
-                 source = COALESCE(NULLIF($6, ''), source),
-                 caddy_profile_id = NULLIF($7, ''),
-                 caddy_profile_url = NULLIF($8, ''),
-                 account_id = COALESCE(NULLIF($9, ''), account_id),
-                 updated_at = NOW()
-             WHERE id = $1`,
+        `UPDATE people
+         SET name = $2,
+             email = CASE WHEN $10::boolean THEN email ELSE NULLIF($3, '') END,
+             phone = NULLIF($4, ''),
+             notes = NULLIF($5, ''),
+             source = COALESCE(NULLIF($6, ''), source),
+             caddy_profile_id = NULLIF($7, ''),
+             caddy_profile_url = NULLIF($8, ''),
+             account_id = COALESCE(NULLIF($9, ''), account_id),
+             updated_at = NOW()
+         WHERE id = $1`,
         [
           personId,
           person.name,
           person.email,
           person.phone,
           person.notes,
-	          person.source,
-	          person.caddyProfileId,
-	          person.caddyProfileUrl,
-            cleanAccountId,
-	        ],
-	      );
-	    } else {
+          person.source,
+          person.caddyProfileId,
+          person.caddyProfileUrl,
+          cleanAccountId,
+          emailUnchanged,
+        ],
+      );
+    } else {
 	      await client.query(
 	        `INSERT INTO people (
 	          id, name, email, phone, notes, source, caddy_profile_id, caddy_profile_url, account_id, created_at, updated_at
@@ -5798,7 +5793,7 @@ async function readWorkspaceBootstrap(membership: CoachActor): Promise<Workspace
   }
 }
 
-async function readCalendarState(accountId: string) {
+export async function readCalendarState(accountId: string) {
   const { settings: settingsMap, syncKey, updatedAt } = await readStateSettingsSnapshot(accountId);
   const account = coachAccountFromSettings(settingsMap, accountId);
   // No Google Calendar status here: it is per coach, read by the coach
@@ -6078,7 +6073,7 @@ export async function readPublicSlotContext({ accountId, serviceId, week } = {},
   };
 }
 
-async function readPublicCatalogState(accountId: string) {
+export async function readPublicCatalogState(accountId: string) {
   const { settings: settingsMap, syncKey, updatedAt } = await readStateSettingsSnapshot(accountId);
   const account = coachAccountFromSettings(settingsMap, accountId);
   return {
@@ -7161,7 +7156,7 @@ function schedulePublicBookingSideEffects(accountId: string, context, appointmen
     );
     const [stamped] = stampResolvedPersonIds([appointment], peopleSync.resolvedIds);
     if (stamped.personId && stamped.personId !== appointment.personId) {
-      await writeItems([stamped]);
+      await writeItems([stamped], { accountId });
     }
     await syncGoogleCalendarChangesIfEnabled(
       accountId,
@@ -8359,6 +8354,7 @@ async function sendBookingNotifications(
 
     try {
       await recordNotification({
+        accountId,
         personKey,
         calendarItemId: appointment.id,
         recipient,
@@ -8396,6 +8392,7 @@ async function sendBookingNotifications(
     const notificationKind = `${kind}_${channel}_email`;
     try {
       await recordNotification({
+        accountId,
         personKey,
         calendarItemId: appointment.id,
         recipient,
@@ -8651,6 +8648,7 @@ async function sendInitialBookingNotifications(accountId: string, appointment: R
         };
         fallbackResults.push(result);
         await recordNotification({
+          accountId,
           personKey,
           calendarItemId: appointment?.id || "",
           recipient,
@@ -10560,6 +10558,86 @@ function assertAccountAdminContext(context, message = "You do not have permissio
  * for a different account would be a bug, so the id is re-derived here rather
  * than trusted from it.
  */
+/**
+ * Save one calendar item for a business, with everything a single-booking
+ * change sets off: resource assignment, bay rebook/release, Optix auto-book,
+ * Google Calendar sync and the booking notifications.
+ *
+ * The coach app's `upsert_item` and the public API's cancel both come through
+ * here, so a booking changed from outside Clarity has exactly the same
+ * consequences as one changed on the calendar. Permission checks are the
+ * caller's job; `accountId` is already authoritative when it arrives.
+ */
+export async function upsertCalendarItemForAccount(accountId, item, current, context = null) {
+  const previousItem = current.items.find((existing) => existing.id === item.id) || null;
+  const nextItems = previousItem
+    ? current.items.map((existing) => (existing.id === item.id ? item : existing))
+    : [...current.items, item];
+  const writtenItem = await writeItems([item], {
+    returnMode: "single",
+    accountId: accountId,
+  });
+  const [savedItem] = (
+    await assignClarityResources(
+      accountId,
+      [
+        ...current.items.filter((existing) => existing.id !== item.id),
+        { ...(writtenItem || item), resourceId: previousItem?.resourceId || "" },
+      ],
+      current,
+      itemsNeedingResourceCheck(new Map(previousItem ? [[previousItem.id, previousItem]] : []), [writtenItem || item]),
+    )
+  ).filter((entry) => entry.id === item.id);
+  const updatedAt = nowIso();
+  await setSetting(accountId, "updatedAt", updatedAt);
+  // A moved lesson takes its Optix bay with it — moved in the
+  // background (see deferOptixBayRebook). Only while the lesson is
+  // still live: a completed or already-finished lesson keeps its record.
+  const previousById = new Map(previousItem ? [[previousItem.id, previousItem]] : []);
+  await deferOptixBayRebook(
+    accountId,
+    appointmentsWhoseBayFollows(previousById, [item]).map((entry) => entry.id),
+    context,
+  );
+  await deferResourceRelease(
+    accountId,
+    appointmentsWhoseResourceIsFreed(previousById, [item]),
+    context,
+  );
+  // A lesson created through this route (no previous row) is as new as
+  // one from a whole-calendar save, and gets the same Auto-book.
+  if (!previousItem) {
+    const created = newlyCreatedAutoBookableAppointments(previousById, [savedItem || item], current.services);
+    await queueOptixAutoBook(accountId, created);
+    deferOptixAutoBook(accountId, created, context);
+  }
+  // Keep Google Calendar in step with every single-booking change (drag
+  // reschedule, edit, lesson-complete). Deferred like the other save
+  // paths so the round trip runs after the response rather than inside
+  // it.
+  const googleCalendarSync = deferGoogleCalendarSync(
+    accountId,
+    [{ id: item.id, action: "upsert" }],
+    "admin_item_upsert",
+    context,
+  );
+  let notificationResults = [];
+  let notificationWarning = "";
+  try {
+    notificationResults = await processAdminNotificationDebounce(
+      accountId,
+      current.items,
+      nextItems,
+      { timeZone: current.account?.timezone },
+    );
+  } catch (error) {
+    notificationWarning =
+      "Calendar saved, but booking alerts could not be processed.";
+    console.error("calendar_state:notification_failed", error);
+  }
+  return { savedItem, updatedAt, notificationResults, notificationWarning, googleCalendarSync };
+}
+
 async function resolveBackendRequestContext(req, settings = null) {
   const actor = await currentActor(req);
   const resolvedSettings = settings || (await readBackendSettings(actor.accountId));
@@ -11268,7 +11346,7 @@ function publicSlotUnavailableError(detail) {
   });
 }
 
-async function createPublicBooking(accountId: string, payload: Record<string, any>, context = null) {
+export async function createPublicBooking(accountId: string, payload: Record<string, any>, context = null) {
   const state = await readFastPublicCalendarState(accountId);
   const workspaceAccount = publicWorkspaceAccount(state);
   assertAccountFeature(workspaceAccount, "publicBooking");
@@ -11302,6 +11380,9 @@ async function createPublicBooking(accountId: string, payload: Record<string, an
   const phone = cleanString(payload.phone, "", 80);
   const handedness = cleanHandedness(payload.handedness);
   const playerNotes = cleanString(payload.notes, "", 800);
+  // Where the booking came from, for the coach's note. The booking page sends
+  // nothing; the public API names itself and the key that made the booking.
+  const bookedVia = cleanString(payload.bookedVia, "", 120) || "public booking page";
 
   if (!firstName || !lastName || !email) {
     throw Object.assign(
@@ -11460,8 +11541,8 @@ async function createPublicBooking(accountId: string, payload: Record<string, an
     note: [
       handednessNoteLine(handedness),
       reviewDue
-        ? `Video review booked from public booking page. Due back ${formatBookingDate(reviewDue.week, reviewDue.day)}.`
-        : "Booked from public booking page.",
+        ? `Video review booked from ${bookedVia}. Due back ${formatBookingDate(reviewDue.week, reviewDue.day)}.`
+        : `Booked from ${bookedVia}.`,
       playerNotes ? `Player notes: ${playerNotes}` : "",
     ].filter(Boolean).join("\n"),
     location,
@@ -11841,7 +11922,19 @@ async function lookupPublicReschedule(accountId: string, payload: Record<string,
   return { matches };
 }
 
-async function reschedulePublicBooking(accountId: string, payload: Record<string, any>, context = null) {
+/**
+ * `options.contactVerified` is for callers that have already proved they act
+ * for this business (the public API, with a key). It skips the email + phone
+ * match a player has to pass. It is an argument rather than a payload field
+ * on purpose: the payload is whatever a public request body said.
+ */
+export async function reschedulePublicBooking(
+  accountId: string,
+  payload: Record<string, any>,
+  context = null,
+  options: { contactVerified?: boolean } = {},
+) {
+  const contactVerified = options.contactVerified === true;
   const appointmentId = cleanString(payload?.appointmentId, "", 120);
   const email = normalizeRescheduleContact(payload?.email);
   const phone = normalizeRescheduleContact(payload?.phone);
@@ -11849,7 +11942,7 @@ async function reschedulePublicBooking(accountId: string, payload: Record<string
   const day = Number(payload?.day);
   const start = Number(payload?.start);
 
-  if (!appointmentId || !email || !phone) {
+  if (!appointmentId || (!contactVerified && (!email || !phone))) {
     throw Object.assign(new Error("Choose the booking to reschedule."), {
       status: 400,
     });
@@ -11878,7 +11971,7 @@ async function reschedulePublicBooking(accountId: string, payload: Record<string
     availability: (state.availability || []).map((day) => day.filter((window) => recordBelongsToAccount(window, workspaceAccount.id))),
   };
   const appointment = await readPublicAppointmentById(appointmentId, workspaceAccount.id);
-  if (!appointment || !matchesRescheduleContact(appointment, email, phone)) {
+  if (!appointment || (!contactVerified && !matchesRescheduleContact(appointment, email, phone))) {
     throw Object.assign(new Error("That booking could not be verified."), {
       status: 404,
     });
@@ -11989,51 +12082,6 @@ async function reschedulePublicBooking(accountId: string, payload: Record<string
   return { appointment: updatedAppointment, notifications };
 }
 
-async function cancelPublicBooking(accountId: string, payload: Record<string, any>) {
-  const appointmentId = cleanString(payload?.appointmentId, "", 120);
-  const email = normalizeRescheduleContact(payload?.email);
-  const phone = normalizeRescheduleContact(payload?.phone);
-
-  if (!appointmentId || !email || !phone) {
-    throw Object.assign(new Error("Choose the booking to cancel."), {
-      status: 400,
-    });
-  }
-
-  const state = await readPublicCalendarState(accountId);
-  const workspaceAccount = publicWorkspaceAccount(state);
-  assertAccountFeature(workspaceAccount, "publicBooking");
-  const appointment = state.items.find((item) => recordBelongsToAccount(item, workspaceAccount.id) && item.id === appointmentId);
-  if (!appointment || !matchesRescheduleContact(appointment, email, phone)) {
-    throw Object.assign(new Error("That booking could not be verified."), {
-      status: 404,
-    });
-  }
-
-  const nextState = await writePublicBookingState(
-    accountId,
-    state,
-    state.items.filter((item) => item.id !== appointment.id),
-  );
-
-  const notificationsTask = notifyBookingEvent({
-    action: "cancelled",
-    appointment,
-    previousAppointment: appointment,
-    source: "public-cancel",
-    coachPush: true,
-  }).catch((error) => {
-    console.error("public_cancel:notification_failed", error);
-    return [];
-  });
-
-  if (payload?.context && typeof payload.context.waitUntil === "function") {
-    payload.context.waitUntil(notificationsTask);
-  }
-
-  return { appointment, notifications: [], state: nextState };
-}
-
 export async function handlePublicRescheduleLookupRequest(req) {
   try {
     return json(await lookupPublicReschedule(await resolvePublicAccountId(req), await parseBody(req)));
@@ -12079,40 +12127,6 @@ export async function handlePublicRescheduleRequest(req, context = null) {
           error instanceof Error
             ? error.message
             : "Unknown public reschedule error",
-      },
-      status,
-    );
-  }
-}
-
-export async function handlePublicCancelRequest(req, context = null) {
-  try {
-    if (req.method !== "POST") {
-      return json({ error: "method_not_allowed" }, 405);
-    }
-    const result = await cancelPublicBooking(await resolvePublicAccountId(req), { ...(await parseBody(req)), context });
-    return json({
-      ok: true,
-      appointment: {
-        id: result.appointment.id,
-        week: result.appointment.week,
-        day: result.appointment.day,
-        start: result.appointment.start,
-        duration: result.appointment.duration,
-      },
-      state: { items: publicBookingState(result.state).items },
-      notifications: clientNotificationResults(result.notifications),
-    });
-  } catch (error) {
-    console.error("public_cancel:failed", error);
-    const status = error?.status || 500;
-    return json(
-      {
-        error: status === 500 ? "public_cancel_error" : "request_error",
-        message:
-          error instanceof Error
-            ? error.message
-            : "Unknown public cancellation error",
       },
       status,
     );
@@ -12804,10 +12818,6 @@ async function routeBookingApiRequest(
       return json(
         await triggerPublicBookingNotifications(await resolvePublicAccountId(req), await parseBody(req)),
       );
-    }
-
-    if (req.method === "POST" && pathname === "/api/public-cancel") {
-      return handlePublicCancelRequest(req, context);
     }
 
     if (req.method === "GET" && pathname === "/api/public-diagnostics") {
@@ -13596,71 +13606,8 @@ async function routeBookingApiRequest(
         try {
           const previousItem = current.items.find((existing) => existing.id === item.id) || null;
           assertCanWriteCalendarItem(requestContext, item, previousItem, current);
-          const nextItems = previousItem
-            ? current.items.map((existing) => (existing.id === item.id ? item : existing))
-            : [...current.items, item];
-          const writtenItem = await writeItems([item], {
-            returnMode: "single",
-            accountId: requestContext.accountId,
-          });
-          const [savedItem] = (
-            await assignClarityResources(
-              requestContext.accountId,
-              [
-                ...current.items.filter((existing) => existing.id !== item.id),
-                { ...(writtenItem || item), resourceId: previousItem?.resourceId || "" },
-              ],
-              current,
-              itemsNeedingResourceCheck(new Map(previousItem ? [[previousItem.id, previousItem]] : []), [writtenItem || item]),
-            )
-          ).filter((entry) => entry.id === item.id);
-          const updatedAt = nowIso();
-          await setSetting(await currentAccountId(req), "updatedAt", updatedAt);
-          // A moved lesson takes its Optix bay with it — moved in the
-          // background (see deferOptixBayRebook). Only while the lesson is
-          // still live: a completed or already-finished lesson keeps its record.
-          const previousById = new Map(previousItem ? [[previousItem.id, previousItem]] : []);
-          await deferOptixBayRebook(
-            requestContext.accountId,
-            appointmentsWhoseBayFollows(previousById, [item]).map((entry) => entry.id),
-            context,
-          );
-          await deferResourceRelease(
-            requestContext.accountId,
-            appointmentsWhoseResourceIsFreed(previousById, [item]),
-            context,
-          );
-          // A lesson created through this route (no previous row) is as new as
-          // one from a whole-calendar save, and gets the same Auto-book.
-          if (!previousItem) {
-            const created = newlyCreatedAutoBookableAppointments(previousById, [savedItem || item], current.services);
-            await queueOptixAutoBook(requestContext.accountId, created);
-            deferOptixAutoBook(requestContext.accountId, created, context);
-          }
-          // Keep Google Calendar in step with every single-booking change (drag
-          // reschedule, edit, lesson-complete). Deferred like the other save
-          // paths so the round trip runs after the response rather than inside
-          // it.
-          const googleCalendarSync = deferGoogleCalendarSync(
-            requestContext.accountId,
-            [{ id: item.id, action: "upsert" }],
-            "admin_item_upsert",
-            context,
-          );
-          let notificationResults = [];
-          let notificationWarning = "";
-          try {
-            notificationResults = await processAdminNotificationDebounce(
-              requestContext.accountId,
-              current.items,
-              nextItems,
-              { timeZone: current.account?.timezone },
-            );
-          } catch (error) {
-            notificationWarning =
-              "Calendar saved, but booking alerts could not be processed.";
-            console.error("calendar_state:notification_failed", error);
-          }
+          const { savedItem, updatedAt, notificationResults, notificationWarning, googleCalendarSync } =
+            await upsertCalendarItemForAccount(requestContext.accountId, item, current, context);
           const durationMs = Date.now() - startAt;
           console.info("upsert_item_saved", {
             ...timedDetails,

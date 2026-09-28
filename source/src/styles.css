@@ -629,6 +629,7 @@ button {
 .settings-grid.settings-tab-email-sms > .settings-email-sms,
 .settings-grid.settings-tab-account > .settings-account,
 .settings-grid.settings-tab-developer > .settings-developer,
+.settings-grid.settings-tab-api > .settings-api,
 .settings-grid.settings-tab-admin > .settings-admin,
 .settings-grid.settings-tab-sandbox > .settings-sandbox {
   display: grid !important;
