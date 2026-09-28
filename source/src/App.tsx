@@ -212,6 +212,8 @@ import {
   listClarityCloudImportTransfers,
   markClarityCloudSubmissionSeen,
   pauseSavedVideoCloudUpload,
+  LEGACY_UNASSIGNED_PLAYER_ID,
+  reassignSavedVideoPlayer,
   reconnectManagedLocalVideoLibrary,
   removeSavedVideoCloudTransfer,
   rescanManagedLocalVideoLibrary,
@@ -10047,6 +10049,26 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     );
   }, [clients, lessonNotePlayerIds, playerProfilesLocal.manualIds, portalPlayerIds, videoPlayerIds]);
 
+  // Videos saved before the workspace asked whose they were. Device copies and
+  // cloud-only copies both count, once each.
+  const unassignedVideos = useMemo(() => {
+    const list: Array<{ savedVideoId: string; title: string; createdAt: string }> = [];
+    const seen = new Set<string>();
+    savedVideoItems.forEach((item) => {
+      if (item.playerId !== LEGACY_UNASSIGNED_PLAYER_ID) return;
+      seen.add(item.savedVideoId);
+      list.push({ savedVideoId: item.savedVideoId, title: item.title, createdAt: item.createdAt });
+    });
+    clarityCloudImports.forEach((transfer) => {
+      const video = transfer.savedVideo;
+      if (!video || video.playerId !== LEGACY_UNASSIGNED_PLAYER_ID || seen.has(video.savedVideoId)) return;
+      seen.add(video.savedVideoId);
+      list.push({ savedVideoId: video.savedVideoId, title: video.title, createdAt: video.createdAt });
+    });
+    return list;
+  }, [clarityCloudImports, savedVideoItems]);
+  const [assigningVideoId, setAssigningVideoId] = useState("");
+
   const quickClientInput = {
     name: quickClientSearch,
     email: quickCreate?.email ?? "",
@@ -13904,6 +13926,27 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         ? { playerId: preferredVideoPlayerId(chosen, videoPlayerIds), playerName: chosen.name }
         : null,
     );
+  }
+
+  async function assignUnassignedVideo(savedVideoId: string) {
+    const choice = await chooseVideoSavePlayer();
+    if (!choice) return;
+    setAssigningVideoId(savedVideoId);
+    try {
+      await reassignSavedVideoPlayer(savedVideoId, choice.playerId, savedVideoLibraryRef.current);
+      setToast({ message: `Video moved to ${choice.playerName}.` });
+    } catch (error) {
+      setToast({
+        message:
+          error instanceof Error
+            ? `Video could not be fully moved: ${error.message}`
+            : "Video could not be moved.",
+      });
+    } finally {
+      setAssigningVideoId("");
+      refreshSavedVideoLibrary();
+      void refreshClarityCloudImports();
+    }
   }
 
   function promoteExistingPlayer(client: Pick<Person, "id" | "name" | "email" | "phone">) {
@@ -25998,6 +26041,32 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 </button>
               </div>
             </div>
+
+            {unassignedVideos.length > 0 && (
+              <div className="player-unassigned-videos">
+                <p>
+                  {unassignedVideos.length === 1
+                    ? "1 video was saved without a player."
+                    : `${unassignedVideos.length} videos were saved without a player.`}
+                </p>
+                {unassignedVideos.map((video) => (
+                  <div className="player-unassigned-video" key={video.savedVideoId}>
+                    <span>
+                      {video.title || "Saved video"}
+                      <span className="muted"> · {formatTimestampForDisplay(video.createdAt)}</span>
+                    </span>
+                    <button
+                      type="button"
+                      className="outline-button"
+                      disabled={Boolean(assigningVideoId)}
+                      onClick={() => void assignUnassignedVideo(video.savedVideoId)}
+                    >
+                      {assigningVideoId === video.savedVideoId ? "Moving…" : "Assign to player"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
 
             <div className="player-profiles-layout">
               <div className="player-profiles-list">

@@ -1688,7 +1688,9 @@ const normaliseImportedAnalysis = (
   const now = nowIso();
   return {
     id: analysis.id || savedVideo.analysisId,
-    playerId: analysis.playerId || savedVideo.playerId,
+    // The transfer row is who the video belongs to now. The analysis file in
+    // the cloud keeps whoever it was first saved under, so it only fills gaps.
+    playerId: savedVideo.playerId || analysis.playerId,
     lessonId: analysis.lessonId || savedVideo.lessonId,
     videoId: analysis.videoId || savedVideoId,
     videoMeta: analysis.videoMeta || { title: savedVideo.title },
@@ -2301,6 +2303,64 @@ export const verifyManagedLocalVideoLibrary = async (store: SavedVideoLibrarySto
 };
 
 export const rescanManagedLocalVideoLibrary = verifyManagedLocalVideoLibrary;
+
+/**
+ * The id the video workspace used to file saves under when it was opened
+ * without a player. It matches no client, so those videos sat on no profile
+ * until the coach reassigns them.
+ */
+export const LEGACY_UNASSIGNED_PLAYER_ID = "player-demo-1";
+
+/**
+ * Move a saved video to another player: the device copy (and its My Library
+ * folder, which is laid out by player) and the Clarity Cloud record, whichever
+ * exist. The device copy moves first so a cloud failure leaves it usable.
+ */
+export const reassignSavedVideoPlayer = async (
+  savedVideoId: string,
+  playerId: string,
+  store: SavedVideoLibraryStore | null
+): Promise<void> => {
+  const item = store ? await store.getItem(savedVideoId) : null;
+  if (store && item && item.playerId !== playerId) {
+    const moved: SavedVideoItem = {
+      ...item,
+      playerId,
+      analysisSnapshot: { ...item.analysisSnapshot, playerId },
+      cloudCatalogue: item.cloudCatalogue ? { ...item.cloudCatalogue, playerId } : undefined,
+    };
+    let next = moved;
+    if (item.local.managed?.status === "healthy") {
+      const blob = await store.getBlob(savedVideoId);
+      if (blob) {
+        try {
+          next = await writeManagedSavedVideo(moved, {
+            savedVideoId,
+            blob,
+            sizeBytes: blobSize(blob),
+            mimeType: blob.type || item.source.mimeType || "video/mp4",
+            checksumSha256: item.source.checksumSha256 || (await calculateBlobSha256(blob)),
+            updatedAt: nowIso(),
+          });
+          await removeManagedSavedVideoDirectory(item);
+        } catch (error) {
+          next = markManagedFailure(moved, error);
+        }
+      }
+    }
+    await store.putItem(next);
+  }
+
+  const inCloud = !item || (item.cloud?.status && item.cloud.status !== "not-uploaded");
+  if (!inCloud) return;
+  const response = await apiFetch(transferUrl("coach", savedVideoId, "reassign"), {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify({ playerId }),
+  });
+  const data = await safeJson<any>(response, "Reassign did not return JSON.", "CLARITY_CLOUD_PROVIDER_FAILED");
+  if (!response.ok || data.ok === false) throw apiFailure(data, "CLARITY_CLOUD_PROVIDER_FAILED");
+};
 
 export const createIndexedDbSavedVideoLibrary = (): SavedVideoLibraryStore | null => {
   if (!isIndexedDbFactoryAvailable()) return null;

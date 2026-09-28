@@ -2627,6 +2627,29 @@ async function updateSessionStatus(accountId: string, savedVideoId: string, stat
   return json({ ok: true, status: next.status, session: publicTransferSession(next), ...publicTransferSession(next) });
 }
 
+/**
+ * Refile a coach's own saved video under another player. Only the coach's
+ * device uploads move: submissions and returns are addressed to a person, and
+ * moving them would change whose portal they show up in.
+ */
+async function handleReassignPlayer(req: Request, accountId: string, savedVideoId: string) {
+  const body = await readJson(req) as any;
+  const playerId = cleanString(body?.playerId, "", 160);
+  if (!savedVideoId || !playerId) {
+    return json({ error: "invalid_request", message: "A saved video and a player are required." }, 400);
+  }
+  const rows = await supabase(transferSessionTable, {
+    method: "PATCH",
+    query:
+      `account_id=eq.${encodeURIComponent(accountId)}` +
+      `&saved_video_id=eq.${encodeURIComponent(savedVideoId)}` +
+      `&direction=eq.coach-device&select=transfer_id`,
+    prefer: "return=representation",
+    body: { player_id: playerId },
+  });
+  return json({ ok: true, updated: Array.isArray(rows) ? rows.length : 0 });
+}
+
 async function listImportableSessions(accountId: string, playerId?: string) {
   // playerId narrows the query in Postgres rather than after the fact, so a
   // busy account's 50-row cap doesn't silently drop an older video that
@@ -4222,6 +4245,7 @@ async function routeVideoTransferRequest(
       });
       return json({ ok: true, session: publicTransferSession(seen) });
     }
+    if (req.method === "POST" && parts[1] === "reassign") return await handleReassignPlayer(req, accountId, parts[0]);
     if (req.method === "POST" && parts[1] === "import-receipt") return await handleImportReceipt(req, accountId, parts[0]);
     if (req.method === "GET" && parts[1] === "status") return await handleStatus(accountId, await ensureDriveReady(accountId, diagnostics), settings, parts[0], diagnostics);
     if (req.method === "DELETE" && (parts[1] === "session" || parts[0])) {
