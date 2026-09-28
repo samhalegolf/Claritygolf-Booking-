@@ -18,7 +18,7 @@
 //   Internal — Clarity's own settings. They always exist, so a card opens to
 //     show what it currently says and the gear goes to where it is changed.
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { integrationsStore, type IntegrationCard } from "../integrations/integrationsStore";
 import { AlertCircle, ChevronDown, ChevronUp, Phone, Plus } from "lucide-react";
 import {
@@ -70,6 +70,59 @@ export type BusinessHubIdentity = {
   email: string;
   phone: string;
 };
+
+/**
+ * The top of the hub for an owner who runs the business without a coach
+ * profile of their own. Anyone who coaches gets CoachProfilePanel instead.
+ */
+export function OwnerIdentityCard({
+  identity,
+  onOpenCoaches,
+}: {
+  identity: BusinessHubIdentity;
+  onOpenCoaches: () => void;
+}) {
+  const initials =
+    identity.coachName
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((word) => word[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase() || "?";
+  return (
+    <article className="bh-identity">
+      <span className="bh-avatar" aria-hidden="true">
+        {initials}
+      </span>
+      <div className="bh-identity-main">
+        <div className="bh-identity-name">
+          <strong>{identity.coachName || "Your name"}</strong>
+          <span className="bh-role">{identity.roleLabel}</span>
+        </div>
+        <div className="bh-identity-facts">
+          {(
+            [
+              ["Email", identity.email, ClarityEmail],
+              ["Phone", identity.phone, Phone],
+            ] as Array<[string, string, IconComponent]>
+          ).map(([key, value, Icon]) => (
+            <div key={key}>
+              <span>
+                <Icon size={14} />
+                {key}
+              </span>
+              <strong>{value || "Not set"}</strong>
+            </div>
+          ))}
+        </div>
+      </div>
+      <button className="bh-gear" onClick={onOpenCoaches} title="Settings › Business › Coaches" type="button">
+        <ClaritySettings size={16} />
+      </button>
+    </article>
+  );
+}
 
 /**
  * The job a connection does, which is how somebody arrives here: "I want my
@@ -183,19 +236,23 @@ function providerInitial(label: string): string {
 }
 
 export type BusinessHubPanelProps = {
-  identity: BusinessHubIdentity;
+  /** Who this hub belongs to: the coach profile, or OwnerIdentityCard for an owner who does not coach. */
+  profile: ReactNode;
   /** Clarity's own settings, with facts read from live workspace state. */
   internalJobs: ProfileInternalJob[];
   /** `label` is what the card is called, so an overlay can name itself. */
   onOpen: (target: ProfileTarget, label: string) => void;
+  /** Connections shown elsewhere on the hub (your Google Calendar is on your profile). */
+  hiddenIntegrationIds?: string[];
 };
 
-export function BusinessHubPanel({ identity, internalJobs, onOpen }: BusinessHubPanelProps) {
+export function BusinessHubPanel({ profile, internalJobs, onOpen, hiddenIntegrationIds = [] }: BusinessHubPanelProps) {
   // One shared integration resource for the whole workspace. Settings and the
   // profile now join the same in-flight request and reuse the same cached
   // snapshot instead of mounting their own independent fetch lifecycle.
   const store = integrationsStore("integration");
-  const { items: cards, status: connectionsStatus, error } = store.useState();
+  const { items: allCards, status: connectionsStatus, error } = store.useState();
+  const cards = allCards.filter((card) => !hiddenIntegrationIds.includes(card.id));
   const [openDetail, setOpenDetail] = useState("");
 
   useEffect(() => {
@@ -203,15 +260,6 @@ export function BusinessHubPanel({ identity, internalJobs, onOpen }: BusinessHub
     // profile wins the race, this starts the same deduped request itself.
     void store.load({ maxAgeMs: 30_000 }).catch(() => undefined);
   }, [store]);
-
-  const initials =
-    identity.coachName
-      .split(/\s+/)
-      .filter(Boolean)
-      .map((word) => word[0])
-      .join("")
-      .slice(0, 2)
-      .toUpperCase() || "?";
 
   // Sections hold external connections and internal settings together: a coach
   // looking for "how do lessons reach my diary" should not have to know which
@@ -263,41 +311,7 @@ export function BusinessHubPanel({ identity, internalJobs, onOpen }: BusinessHub
 
   return (
     <div className="business-hub">
-      <article className="bh-identity">
-        <span className="bh-avatar" aria-hidden="true">
-          {initials}
-        </span>
-        <div className="bh-identity-main">
-          <div className="bh-identity-name">
-            <strong>{identity.coachName || "Your name"}</strong>
-            <span className="bh-role">{identity.roleLabel}</span>
-          </div>
-          <div className="bh-identity-facts">
-            {(
-              [
-                ["Email", identity.email, ClarityEmail],
-                ["Phone", identity.phone, Phone],
-              ] as Array<[string, string, IconComponent]>
-            ).map(([key, value, Icon]) => (
-              <div key={key}>
-                <span>
-                  <Icon size={14} />
-                  {key}
-                </span>
-                <strong>{value || "Not set"}</strong>
-              </div>
-            ))}
-          </div>
-        </div>
-        <button
-          className="bh-gear"
-          onClick={() => onOpen({ kind: "settings", tab: "business", group: "coaches" }, "Coaches")}
-          title="Settings › Business › Coaches"
-          type="button"
-        >
-          <ClaritySettings size={16} />
-        </button>
-      </article>
+      {profile}
 
       {error && (
         <div className="bh-error" role="alert">

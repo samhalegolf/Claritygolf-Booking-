@@ -1,5 +1,4 @@
 import type { Config } from "@netlify/functions";
-import { createHash } from "node:crypto";
 
 import {
   clearGoogleCalendarDebugLog,
@@ -9,17 +8,12 @@ import {
   getGoogleCalendarDebugLog,
   getGoogleCalendarSyncStatus,
   googleCalendarDebugErrorFromUnknown,
-  migrateLegacyGoogleCalendarConnection,
+  resolveGoogleCalendarCoach,
   setGoogleCalendarDebugEnabled,
   syncGoogleCalendarNow,
   updateGoogleCalendarSyncSettings,
 } from "./google-calendar-sync.mts";
-import { requireCoachActor } from "./_shared/coach-auth.mts";
 
-
-function env(name: string, fallback = "") {
-  return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
-}
 
 function json(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), {
@@ -33,23 +27,6 @@ function html(value: string, status = 200) {
     status,
     headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
   });
-}
-
-function supabaseConfig() {
-  const url = env("SUPABASE_URL").replace(/\/$/, "");
-  const key = env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY");
-  if (!url || !key) throw new Error("Supabase is not configured.");
-  return { url, key };
-}
-
-async function supabase(table: string, query: string) {
-  const { url, key } = supabaseConfig();
-  const response = await fetch(`${url}/rest/v1/${table}?${query}`, {
-    headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-  });
-  const text = await response.text();
-  if (!response.ok) throw new Error(`Supabase GET ${table} failed ${response.status}: ${text.slice(0, 500)}`);
-  return text ? JSON.parse(text) : [];
 }
 
 async function parseBody(req: Request) {
@@ -77,7 +54,7 @@ function callbackPage(ok: boolean, message: string) {
     <main>
       <h1>${ok ? "Google Calendar connected" : "Google Calendar not connected"}</h1>
       <p>${escaped}</p>
-      <a href="/?view=settings">Back to Clarity Booking</a>
+      <a href="/?view=profile">Back to Clarity Booking</a>
     </main>
   </body>
 </html>`;
@@ -96,26 +73,26 @@ export default async function handler(req: Request) {
       return html(callbackPage(true, `Connected${status.accountEmail ? ` as ${status.accountEmail}` : ""}. You can close this tab.`));
     }
 
-    // Google is connected per business, so every route below needs the
-    // business the caller actually administers -- not "a session exists".
-    const accountId = (await requireCoachActor(req)).accountId;
+    // Google Calendar is connected per coach, so every route below needs the
+    // coach (?coachId=, defaulting to the caller's own) and a caller allowed
+    // to act for them -- themselves, or the owner or an admin.
+    const { accountId, coachId } = await resolveGoogleCalendarCoach(req, url.searchParams.get("coachId") || "");
 
-    if (req.method === "GET" && action === "status") return json(await getGoogleCalendarSyncStatus(accountId, req));
-    if (req.method === "POST" && action === "connect") return json(await createGoogleCalendarAuthUrl(accountId, req));
-    if (req.method === "POST" && action === "migrate-provider-token") return json(await migrateLegacyGoogleCalendarConnection(accountId, req));
-    if (req.method === "POST" && action === "sync") return json(await syncGoogleCalendarNow(accountId, "manual_sync_now"));
-    if (req.method === "POST" && action === "disconnect") return json(await disconnectGoogleCalendar(accountId, req));
+    if (req.method === "GET" && action === "status") return json(await getGoogleCalendarSyncStatus(accountId, coachId, req));
+    if (req.method === "POST" && action === "connect") return json(await createGoogleCalendarAuthUrl(accountId, coachId, req));
+    if (req.method === "POST" && action === "sync") return json(await syncGoogleCalendarNow(accountId, coachId, "manual_sync_now"));
+    if (req.method === "POST" && action === "disconnect") return json(await disconnectGoogleCalendar(accountId, coachId, req));
     if ((req.method === "PUT" || req.method === "POST") && action === "settings") {
-      return json(await updateGoogleCalendarSyncSettings(accountId, await parseBody(req)));
+      return json(await updateGoogleCalendarSyncSettings(accountId, coachId, await parseBody(req)));
     }
 
     // Sync diagnostics: every trigger, the Google failure code, and the event
-    // body that was sent. Read by the Integrations tab debug window.
-    if (req.method === "GET" && action === "debug") return json(await getGoogleCalendarDebugLog(accountId));
-    if (req.method === "POST" && action === "debug/clear") return json(await clearGoogleCalendarDebugLog(accountId));
+    // body that was sent. Read by the coach profile's debug window.
+    if (req.method === "GET" && action === "debug") return json(await getGoogleCalendarDebugLog(accountId, coachId));
+    if (req.method === "POST" && action === "debug/clear") return json(await clearGoogleCalendarDebugLog(accountId, coachId));
     if (req.method === "POST" && action === "debug/toggle") {
       const body = await parseBody(req);
-      return json(await setGoogleCalendarDebugEnabled(accountId, body?.enabled !== false));
+      return json(await setGoogleCalendarDebugEnabled(accountId, coachId, body?.enabled !== false));
     }
 
     return json({ error: "not_found", message: "Google Calendar route not found." }, 404);

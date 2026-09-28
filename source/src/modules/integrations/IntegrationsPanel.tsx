@@ -127,7 +127,6 @@ export default function IntegrationsPanel({
       <strong>{card.label}</strong>
       <em>{card.summary}</em>
       <span className="integration-card-status">{status.label}</span>
-      {card.sharesGrantWith ? <span className="integration-card-note">Same sign-in as {card.sharesGrantWith}</span> : null}
       {card.caveat ? <span className="integration-card-note is-caveat">{card.caveat}</span> : null}
     </button>
   );

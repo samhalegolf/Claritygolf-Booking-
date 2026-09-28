@@ -163,7 +163,8 @@ import {
   isValidPhone,
   setActiveRegion,
 } from "./lib/activeCountry";
-import { BusinessHubPanel } from "./modules/business-hub/BusinessHubPanel";
+import { BusinessHubPanel, OwnerIdentityCard } from "./modules/business-hub/BusinessHubPanel";
+import { CoachAvatar, CoachProfilePanel, type CoachWeekDay, type CoachWeekEntry } from "./modules/business-hub/CoachProfilePanel";
 import { RegionSettings, TimeZoneSelect, type RegionValues } from "./modules/settings/RegionSettings";
 import type { ProfileInternalJob, ProfileTarget } from "./modules/business-hub/BusinessHubPanel";
 import {
@@ -1819,8 +1820,9 @@ type CalendarStateSaveResponse = {
   notificationResults?: EmailSendResult[];
   updatedAt?: string;
   items?: CalendarItem[];
-  googleCalendar?: Partial<GoogleCalendarSyncStatus>;
-  googleCalendarSync?: Partial<GoogleCalendarSyncStatus> & { ok?: boolean; error?: string };
+  // Whether the save's Google push was queued. The connection status itself is
+  // per coach and read by the coach profile, not carried on a calendar save.
+  googleCalendarSync?: { ok?: boolean; error?: string };
   syncKey?: string;
   warnings?: string[];
   /** Things that went right but the coach should know about -- a returned pass credit. */
@@ -1870,7 +1872,8 @@ type GoogleCalendarSyncStatus = {
   grantedScopes?: string[];
   missingScopes?: string[];
   connectionStatus?: string;
-  legacyMigrationRequired?: boolean;
+  /** Whose calendar this is. Google Calendar is connected per coach. */
+  coachId?: string;
   sources?: GoogleCalendarSourceStatus[];
   sourceListError?: string;
   importRules?: GoogleCalendarImportRule[];
@@ -1961,7 +1964,7 @@ type GoogleCalendarDebugLog = {
   calendarId: string;
   entries: GoogleCalendarDebugEntry[];
 };
-type GoogleCalendarActionState = "idle" | "connecting" | "saving" | "syncing" | "disconnecting" | "migrating";
+type GoogleCalendarActionState = "idle" | "connecting" | "saving" | "syncing" | "disconnecting";
 type GoogleDriveActionState = "idle" | "connecting" | "testing" | "disconnecting";
 type AuthStatus = "checking" | "authenticated" | "guest";
 
@@ -3486,6 +3489,16 @@ function cleanUrl(value: unknown, fallback: string) {
   }
 }
 
+// A coach photo: either a link, or a small image uploaded from the coach
+// profile screen and kept as a data URL beside the coach (like the logo).
+const COACH_PHOTO_DATA_URL = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$/;
+function cleanCoachPhoto(value: unknown) {
+  if (typeof value === "string" && value.startsWith("data:image/")) {
+    return value.length <= 200_000 && COACH_PHOTO_DATA_URL.test(value) ? value : "";
+  }
+  return cleanUrl(value, "");
+}
+
 function cleanEmail(value: unknown, fallback: string) {
   if (typeof value !== "string") return fallback;
   const email = value.trim().toLowerCase().slice(0, 180);
@@ -3928,7 +3941,7 @@ function cleanCoachProfile(raw?: Partial<CoachProfile>, fallback?: CoachProfile,
     email: cleanEmail(raw?.email, base.email),
     phone: typeof raw?.phone === "string" && raw.phone.trim() ? raw.phone.trim().slice(0, 80) : undefined,
     bio: typeof raw?.bio === "string" && raw.bio.trim() ? raw.bio.trim().slice(0, 600) : undefined,
-    photoUrl: cleanUrl(raw?.photoUrl, "") || undefined,
+    photoUrl: cleanCoachPhoto(raw?.photoUrl) || undefined,
     active: raw?.active !== false,
     archived: raw?.archived === true,
     bookable: raw?.bookable !== false,
@@ -4799,9 +4812,9 @@ function googleSyncTimeLabel(createdAt = "") {
 }
 
 // Human labels for the Google Calendar debug window. The trigger codes are the
-// literals each server-side sync call site passes to syncGoogleCalendarIfEnabled().
+// literals each server-side sync call site passes as its trigger.
 const googleCalendarTriggerLabels: Record<string, string> = {
-  manual_sync_now: "Sync now (Integrations tab)",
+  manual_sync_now: "Sync now (coach profile)",
   api_google_calendar_sync_post: "Sync via /api/google-calendar-sync",
   admin_calendar_save: "Calendar saved (admin)",
   admin_item_upsert: "Booking edited / moved (admin)",
@@ -4810,7 +4823,8 @@ const googleCalendarTriggerLabels: Record<string, string> = {
   public_booking_state_write: "Public booking state write",
   public_booking_cancelled: "Public booking cancelled",
   auto_sync: "Automatic sync",
-  legacy_untargeted_call: "Legacy untargeted sync call",
+  availability_save: "Availability saved",
+  scheduled_reconcile: "Nightly check",
 };
 
 const googleCalendarSkipReasonLabels: Record<string, string> = {
@@ -4818,11 +4832,8 @@ const googleCalendarSkipReasonLabels: Record<string, string> = {
   manual_sync_only: "Build is pinned to manual-sync-only, so nothing was sent.",
   google_oauth_not_configured: "GOOGLE_CALENDAR_CLIENT_ID / _SECRET are missing from the environment.",
   google_calendar_not_connected: "No connected Google account with calendar scope.",
-  google_calendar_token_migration_required: "Legacy plaintext token must be migrated before syncing.",
   no_google_relevant_changes: "The save touched nothing Google Calendar cares about, so no request was sent.",
   unchanged: "Every targeted booking already matched Google, so no request was needed.",
-  targeted_change_required:
-    "A caller asked for a sync without naming which bookings changed. Full rebuilds must now be explicit, so nothing was sent.",
 };
 
 const googleCalendarStageLabels: Record<string, string> = {
@@ -5629,7 +5640,6 @@ const defaultGoogleDriveTransferStatus: GoogleDriveTransferStatus = {
   configured: false,
   connected: false,
   state: "not_connected",
-  calendarConnected: false,
   driveScopeGranted: false,
   accountEmail: "",
   redirectUri: "",
@@ -5810,11 +5820,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const [showLocationEditor, setShowLocationEditor] = useState(false);
   const [locationSaveState, setLocationSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [locationEditorError, setLocationEditorError] = useState("");
-  const [coachEditor, setCoachEditor] = useState<CoachProfile>(() => defaultCoachProfileFromAccount(getStoredCoachAccount()));
-  const [editingCoachId, setEditingCoachId] = useState<string | null>(null);
-  const [showCoachEditor, setShowCoachEditor] = useState(false);
-  const [coachSaveState, setCoachSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  const [coachEditorError, setCoachEditorError] = useState("");
+  // The coach open in Settings › Coaches. Null shows the list; newCoach is a
+  // blank record being added, which has no id in the saved list yet.
+  const [openCoachId, setOpenCoachId] = useState<string | null>(null);
+  const [newCoach, setNewCoach] = useState<CoachProfile | null>(null);
   const [serviceEditor, setServiceEditor] = useState<ServiceEditor>(emptyServiceEditor);
   // Resource types opened in the lesson type editor to choose single resources.
   const [openResourceTypes, setOpenResourceTypes] = useState<string[]>([]);
@@ -6427,7 +6436,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const [googleCalendarAction, setGoogleCalendarAction] = useState<GoogleCalendarActionState>("idle");
   const [googleCalendarStatusError, setGoogleCalendarStatusError] = useState("");
   /** When the Google Calendar status last came back, so Settings does not re-ask on every visit. */
-  const googleCalendarStatusLoadedAtRef = useRef(0);
+  const googleCalendarCoachRef = useRef("");
   const [googleCalendarDebug, setGoogleCalendarDebug] = useState<GoogleCalendarDebugLog | null>(null);
   const [googleCalendarDebugOpen, setGoogleCalendarDebugOpen] = useState(false);
   // Which import rule is open for editing. A saved rule collapses to a summary;
@@ -7097,6 +7106,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const ownCoachProfile = currentAppUser.coachId
     ? accountCoachProfiles.find((coach) => coach.id === currentAppUser.coachId)
     : undefined;
+  // Whose Google Calendar the controls are showing: the coach open in
+  // Settings › Coaches, else your own while you are on the Business Hub.
+  const googleCalendarProfileCoachId =
+    openCoachId && !newCoach ? openCoachId : activeView === "profile" && ownCoachProfile ? ownCoachProfile.id : "";
   const activeCoachList = accountCoachProfiles.filter((coach) => coach.active && !coach.archived && coach.bookable);
   const effectiveCalendarPerspective: CalendarPerspective =
     isAdminUser && (calendarPerspective !== "location" || canUseFeature(activeAccount, "locationCalendar"))
@@ -8617,7 +8630,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           ? data.warnings.find((warning) => typeof warning === "string" && warning.trim())
           : "";
         if (clientSyncWarning) setToast({ message: clientSyncWarning });
-        applyGoogleCalendarStatus(data.googleCalendarSync || data.googleCalendar);
         finishDiagnosticTimer(timer, "verified", {
           httpStatus: response.status,
           details: {
@@ -8677,13 +8689,19 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     return () => window.clearInterval(timer);
   }, [activeView, authStatus, isEmbedMode]);
 
+  // The Google Calendar controls live on a coach profile and follow whichever
+  // one is open: a coach in Settings › Coaches, or your own on the Business Hub.
+  // A different coach means a different Google account, so start clean.
   useEffect(() => {
-    if (isEmbedMode || authStatus !== "authenticated" || activeView !== "settings") return;
-    // Boot already asked, and every connect and disconnect asks again, so a
-    // status from the last half minute is not worth another round trip.
-    if (Date.now() - googleCalendarStatusLoadedAtRef.current < 30_000) return;
+    googleCalendarCoachRef.current = googleCalendarProfileCoachId;
+    if (isEmbedMode || authStatus !== "authenticated" || !googleCalendarProfileCoachId) return;
+    applyGoogleCalendarStatus(undefined);
+    setGoogleCalendarStatusError("");
+    setGoogleCalendarDebug(null);
+    setGoogleCalendarDebugOpen(false);
+    setEditingImportRuleId(null);
     void refreshGoogleCalendarStatus();
-  }, [activeView, authStatus, isEmbedMode]);
+  }, [authStatus, googleCalendarProfileCoachId, isEmbedMode]);
 
   // The debug log is only fetched while its panel is open -- it carries full
   // event payloads, so there is no reason to pull it on every Settings visit.
@@ -9195,7 +9213,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       settings?: Partial<NotificationSettings>;
       brand?: Partial<BrandSettings>;
       account?: Partial<CoachAccount>;
-      googleCalendar?: Partial<GoogleCalendarSyncStatus>;
       updatedAt?: string;
       diagnostics?: {
         calendarState?: {
@@ -9331,13 +9348,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     applyNotificationSettings(data.settings);
     applyCoachAccount(data.account);
     applyBrandSettings(data.brand);
-    // The shell route does not read the Google status -- it says so with
-    // googleSyncStatusDeferred, exactly like people and notifications above.
-    // Applying its placeholder anyway was what greyed out Connect Google: the
-    // real status from /api/google-calendar/status arrived first and this
-    // overwrote it with configured: false. refreshGoogleCalendarStatus() runs
-    // right after hydration, so skipping here loses nothing.
-    if (!googleSyncStatusDeferred) applyGoogleCalendarStatus(data.googleCalendar);
     hasLoadedCalendarApiRef.current = true;
     finishDiagnosticTimer(timer, "success", {
       httpStatus: response.status,
@@ -13040,6 +13050,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     // Opening Video from the nav is the general workspace (no player context).
     if (view === "video") setVideoContext(null);
     if (view !== "calendar") closeCalendarDetails();
+    // Settings › Coaches opens on the list again, not on whoever was open last.
+    openCoachProfile(null);
     // Arriving anywhere by hand clears whatever the profile last pointed at, so
     // a section does not spring open the next time Settings is opened normally,
     // and an overlay belonging to a profile card does not survive leaving it.
@@ -13065,6 +13077,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     setActiveEditableBlockId(null);
     setWorkspaceOverlay(null);
     setRequestedSettingsGroup("");
+    openCoachProfile(null);
     return true;
   }
 
@@ -14502,14 +14515,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     setNotificationSettings((current) => ({ ...current, [field]: value }));
   }
 
+  // Stored as typed; saveBrandSettings cleans. Cleaning here trimmed every
+  // keystroke, so a space could never be typed into the brand name.
   function updateBrandSetting<K extends keyof BrandSettings>(field: K, value: BrandSettings[K]) {
     setBrandSaveState("idle");
-    setBrandSettings((current) => cleanBrandSettings({ ...current, [field]: value }));
-  }
-
-  function updateCoachAccount<K extends keyof CoachAccount>(field: K, value: CoachAccount[K]) {
-    setCoachAccountSaveState("idle");
-    setCoachAccount((current) => cleanCoachAccount({ ...current, [field]: value }));
+    setBrandSettings((current) => ({ ...current, [field]: value }));
   }
 
   function updateLocationEditor<K extends keyof Location>(field: K, value: Location[K]) {
@@ -14828,12 +14838,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     void persistLocations(next, `${location.name} set as default.`);
   }
 
-  function updateCoachEditor<K extends keyof CoachProfile>(field: K, value: CoachProfile[K]) {
-    setCoachSaveState("idle");
-    setCoachEditorError("");
-    setCoachEditor((current) => ({ ...current, [field]: value }));
-  }
-
   function startNewCoach() {
     if (!canUseFeature(activeAccount, "multiCoach") && activeCoachList.length >= 1) {
       setToast({ message: featureUnavailableMessage("multiCoach") });
@@ -14844,8 +14848,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       return;
     }
     const assignedLocationId = defaultLocationId(locations);
-    setEditingCoachId(null);
-    setCoachEditor({
+    setOpenCoachId(null);
+    setNewCoach({
       ...blankCoachProfile(activeAccountId),
       id: `coach-${Date.now()}`,
       accountId: activeAccountId,
@@ -14863,17 +14867,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       defaultLocationId: assignedLocationId,
       sortOrder: coachProfiles.length,
     });
-    setShowCoachEditor(true);
-    setCoachSaveState("idle");
-    setCoachEditorError("");
   }
 
-  function editCoach(coach: CoachProfile) {
-    setEditingCoachId(coach.id);
-    setCoachEditor(coach);
-    setShowCoachEditor(true);
-    setCoachSaveState("idle");
-    setCoachEditorError("");
+  function openCoachProfile(coachId: string | null) {
+    setNewCoach(null);
+    setOpenCoachId(coachId);
   }
 
   async function persistCoaches(nextCoaches: CoachProfile[], message = `${terms.staffPlural} saved.`): Promise<boolean> {
@@ -14898,8 +14896,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     let failureRoute = "PUT /api/coaches";
     let failureStage = "coach_put_request_failed";
     setCoachProfiles(clean);
-    setCoachSaveState("saving");
-    setCoachEditorError("");
     try {
       failureRoute = "PUT /api/coaches";
       failureStage = "coach_put_request_failed";
@@ -15023,17 +15019,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         returnedAccountId: summarizeWorkspaceAccountIds(calendarCoachRecords),
         details: { returnedCount: loadedCoachRecords?.length ?? 0 },
       });
-      setCoachSaveState("saved");
-      setCoachEditorError("");
       setToast({ message });
-      window.setTimeout(() => {
-        if (isCurrentSave()) setCoachSaveState("idle");
-      }, 1600);
       return true;
     } catch (error) {
       if (!isCurrentSave()) return false;
       setCoachProfiles(snapshot);
-      setCoachSaveState("error");
       const errorMessage = workspaceSaveFailureMessage(
         error,
         "Coach",
@@ -15049,7 +15039,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         humanMessage: errorMessage,
         returnedAccountId: summarizeWorkspaceAccountIds(workspaceRouteRecords(failureRoute, diagnostic)),
       });
-      setCoachEditorError(errorMessage);
       setToast({ message: errorMessage });
       return false;
     } finally {
@@ -15057,20 +15046,22 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     }
   }
 
-  async function saveEditedCoach() {
-    if (!coachEditor.name.trim()) {
-      setToast({ message: "Give the coach a name before saving." });
-      return;
+  // Owner-side save for the coach profile screen, from Settings › Coaches or
+  // the owner's own profile on the Business Hub.
+  async function saveEditedCoach(draft: CoachProfile): Promise<boolean> {
+    if (!draft.name.trim()) {
+      setToast({ message: `Give the ${terms.staffSingular.toLowerCase()} a name before saving.` });
+      return false;
     }
-    const assignedLocationIds = (coachEditor.assignedLocationIds ?? []).filter(Boolean);
-    const defaultAssignedLocationId = assignedLocationIds.includes(coachEditor.defaultLocationId || "")
-      ? coachEditor.defaultLocationId
+    const assignedLocationIds = (draft.assignedLocationIds ?? []).filter(Boolean);
+    const defaultAssignedLocationId = assignedLocationIds.includes(draft.defaultLocationId || "")
+      ? draft.defaultLocationId
       : assignedLocationIds[0] || defaultLocationId(locations);
     const clean = cleanCoachProfile(
       {
-        ...coachEditor,
-        accountId: coachEditor.accountId || activeAccountId,
-        displayName: coachEditor.displayName || coachEditor.name,
+        ...draft,
+        accountId: draft.accountId || activeAccountId,
+        displayName: draft.displayName.trim() || draft.name,
         assignedLocationIds: assignedLocationIds.length
           ? assignedLocationIds
           : [defaultAssignedLocationId].filter((id): id is string => Boolean(id)),
@@ -15079,20 +15070,56 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       blankCoachProfile(activeAccountId),
       coachProfiles.length,
     );
-    const exists = coachProfiles.some((coach) => coach.id === (editingCoachId || clean.id));
+    const stableId = draft.id || clean.id;
+    const exists = coachProfiles.some((coach) => coach.id === stableId);
     if (!exists && !canCreateWithinLimit(activeAccount, activeCoachList.length, "maxCoaches")) {
       setToast({ message: limitReachedMessage("maxCoaches", accountLimit(activeAccount, "maxCoaches")) });
-      return;
+      return false;
     }
-    const stableId = editingCoachId || clean.id;
     const cleanedCoach = { ...clean, id: stableId };
     const next = exists
       ? coachProfiles.map((coach) => (coach.id === stableId ? cleanedCoach : coach))
       : [...coachProfiles, cleanedCoach];
-    setEditingCoachId(stableId);
-    setCoachEditor(cleanedCoach);
     const saved = await persistCoaches(next, exists ? `${clean.displayName} updated.` : `${clean.displayName} added.`);
-    if (saved) setShowCoachEditor(false);
+    // A coach just added stays open, now as their saved profile.
+    if (saved && !exists) openCoachProfile(stableId);
+    return saved;
+  }
+
+  // A coach editing their own profile. Only the personal fields travel; the
+  // server applies them to the signed-in person's coach record and nothing else.
+  async function saveOwnCoachProfile(draft: CoachProfile): Promise<boolean> {
+    try {
+      const response = await fetch("/api/coaches/me", {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({
+          displayName: draft.displayName,
+          phone: draft.phone ?? "",
+          bio: draft.bio ?? "",
+          photoUrl: draft.photoUrl ?? "",
+        }),
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        return false;
+      }
+      if (!response.ok) {
+        const detail = await readApiFailureDetail(response, "Profile save failed");
+        throw new Error(detail.message || detail.error || "Profile save failed");
+      }
+      const data = (await response.json()) as { coach?: CoachProfile };
+      if (!data.coach) throw new Error("Profile save failed");
+      const saved = cleanCoachProfile(data.coach, blankCoachProfile(activeAccountId));
+      setCoachProfiles((current) => current.map((coach) => (coach.id === saved.id ? saved : coach)));
+      setToast({ message: "Profile saved." });
+      return true;
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not save your profile." });
+      return false;
+    }
   }
 
   // A business can run with no active coach -- an owner who only manages
@@ -19617,9 +19644,17 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     ) : null;
   }
 
+  // Google Calendar is per coach: every call names the coach whose profile is
+  // open, and the server checks the caller may act for them.
+  function googleCalendarApi(action: string) {
+    const coachId = googleCalendarCoachRef.current;
+    return `/api/google-calendar/${action}${coachId ? `?coachId=${encodeURIComponent(coachId)}` : ""}`;
+  }
+
   async function refreshGoogleCalendarStatus() {
+    const coachId = googleCalendarCoachRef.current;
     try {
-      const response = await fetch("/api/google-calendar/status", { headers: { Accept: "application/json" } });
+      const response = await fetch(googleCalendarApi("status"), { headers: { Accept: "application/json" } });
       if (response.status === 401) {
         setAuthStatus("guest");
         return;
@@ -19640,9 +19675,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         );
         return;
       }
+      const status = (await response.json()) as Partial<GoogleCalendarSyncStatus>;
+      // A profile switched while this was in flight shows the new coach, not
+      // this answer about the old one.
+      if (coachId !== googleCalendarCoachRef.current) return;
       setGoogleCalendarStatusError("");
-      applyGoogleCalendarStatus((await response.json()) as Partial<GoogleCalendarSyncStatus>);
-      googleCalendarStatusLoadedAtRef.current = Date.now();
+      applyGoogleCalendarStatus(status);
     } catch (error) {
       setGoogleCalendarStatusError(
         `Could not reach the Google Calendar status endpoint${
@@ -19656,7 +19694,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     setGoogleCalendarDebugLoading(true);
     setGoogleCalendarDebugError("");
     try {
-      const response = await fetch("/api/google-calendar/debug", { headers: { Accept: "application/json" } });
+      const response = await fetch(googleCalendarApi("debug"), { headers: { Accept: "application/json" } });
       if (response.status === 401) {
         setAuthStatus("guest");
         return;
@@ -19710,12 +19748,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   }
 
   function clearGoogleCalendarDebugLog() {
-    void postGoogleCalendarDebugAction("/api/google-calendar/debug/clear", undefined, "Google Calendar debug log cleared.");
+    void postGoogleCalendarDebugAction(googleCalendarApi("debug/clear"), undefined, "Google Calendar debug log cleared.");
   }
 
   function toggleGoogleCalendarDebugLogging(enabled: boolean) {
     void postGoogleCalendarDebugAction(
-      "/api/google-calendar/debug/toggle",
+      googleCalendarApi("debug/toggle"),
       { enabled },
       enabled ? "Google Calendar debug logging on." : "Google Calendar debug logging off.",
     );
@@ -20006,7 +20044,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     }
     setGoogleCalendarAction("connecting");
     try {
-      const response = await fetch("/api/google-calendar/connect", {
+      const response = await fetch(googleCalendarApi("connect"), {
         method: "POST",
         headers: { Accept: "application/json" },
       });
@@ -20032,7 +20070,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     setGoogleCalendar(nextStatus);
     setGoogleCalendarAction("saving");
     try {
-      const response = await fetch("/api/google-calendar/settings", {
+      const response = await fetch(googleCalendarApi("settings"), {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({
@@ -20111,7 +20149,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     }
     setGoogleCalendarAction("syncing");
     try {
-      const response = await fetch("/api/google-calendar/sync", {
+      const response = await fetch(googleCalendarApi("sync"), {
         method: "POST",
         headers: { Accept: "application/json" },
       });
@@ -20147,38 +20185,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     }
   }
 
-  async function migrateGoogleCalendarProviderToken() {
-    if (!canUseFeature(activeAccount, "googleCalendarSync")) {
-      setToast({ message: featureUnavailableMessage("googleCalendarSync") });
-      return;
-    }
-    setGoogleCalendarAction("migrating");
-    try {
-      const response = await fetch("/api/google-calendar/migrate-provider-token", {
-        method: "POST",
-        headers: { Accept: "application/json" },
-      });
-      const data = (await response.json()) as {
-        ok?: boolean;
-        migrated?: boolean;
-        message?: string;
-        status?: Partial<GoogleCalendarSyncStatus>;
-      };
-      if (response.status === 401) {
-        setAuthStatus("guest");
-        throw new Error("Admin login required");
-      }
-      if (!response.ok || data.ok === false) throw new Error(data.message || "Google Calendar token migration failed.");
-      applyGoogleCalendarStatus(data.status);
-      setToast({ message: data.migrated ? "Google Calendar token migrated securely." : "Google Calendar token storage is already secure." });
-    } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Google Calendar token migration failed." });
-      void refreshGoogleCalendarStatus();
-    } finally {
-      setGoogleCalendarAction("idle");
-    }
-  }
-
   async function disconnectGoogleCalendar() {
     if (!canUseFeature(activeAccount, "googleCalendarSync")) {
       setToast({ message: featureUnavailableMessage("googleCalendarSync") });
@@ -20186,7 +20192,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     }
     setGoogleCalendarAction("disconnecting");
     try {
-      const response = await fetch("/api/google-calendar/disconnect", {
+      const response = await fetch(googleCalendarApi("disconnect"), {
         method: "POST",
         headers: { Accept: "application/json" },
       });
@@ -21472,7 +21478,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         if (persistedSyncKey && persistedSyncKey !== calendarSyncKey) setCalendarSyncKey(persistedSyncKey);
         const nextNotifications = Array.isArray(verifyData.notifications) ? verifyData.notifications : data.notifications;
         if (Array.isArray(nextNotifications)) setNotifications(cleanNotificationRecords(nextNotifications));
-        applyGoogleCalendarStatus(data.googleCalendarSync || data.googleCalendar || verifyData.googleCalendarSync || verifyData.googleCalendar);
         setCalendarFeedStatus("connected");
         setCalendarSaveStatus("saved");
         setCalendarSaveError("");
@@ -22819,8 +22824,704 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     </SettingsGroup>
   );
 
+  /**
+   * One coach's next seven days, today first, for the calendar widget on their
+   * profile. Read from the same items and the same ownership rule as the coach
+   * calendar, so the two cannot disagree about whose lesson is whose.
+   */
+  function coachWeekFor(coachId: string): CoachWeekDay[] {
+    const weekMs = 7 * 24 * 60 * 60 * 1000;
+    const today = businessNow().date;
+    today.setHours(0, 0, 0, 0);
+    return Array.from({ length: 7 }, (_, offset) => {
+      const date = new Date(today);
+      date.setDate(today.getDate() + offset);
+      const week = Math.round(
+        (calendarDateUtcTime(startOfCalendarWeek(date)) - calendarDateUtcTime(baseWeekStart)) / weekMs,
+      );
+      const day = (date.getDay() + 6) % 7;
+      const entries = accountItems
+        .filter((item) => {
+          if (itemWeek(item) !== week || item.day !== day) return false;
+          if (item.syntheticGroupSlot || isInactiveForConflict(item) || isCancelledGroupSessionItem(item)) return false;
+          return calendarItemBelongsToCoach(item, coachId, itemService(item, services), coachProfiles, coachAccount);
+        })
+        .sort((a, b) => a.start - b.start)
+        .map((item): CoachWeekEntry => {
+          const lesson = item.kind === "appointment";
+          return {
+            id: item.id,
+            time: formatTime(item.start),
+            title: lesson ? item.client || item.title : item.title || "Blocked",
+            kind: lesson ? "lesson" : "block",
+            color: lesson ? calendarLessonColor(itemService(item, services)) : undefined,
+          };
+        });
+      return {
+        key: `${week}-${day}`,
+        short: baseWeekDays[day],
+        date: date.getDate(),
+        isToday: offset === 0,
+        entries,
+      };
+    });
+  }
+
+  const coachLocationOptions = activeLocationList.map((location) => ({
+    id: location.id,
+    label: location.shortName || location.name,
+  }));
+
+  function coachRoleLabel(coach: CoachProfile) {
+    return coach.id === currentAppUser.coachId && isAdminUser ? `${terms.staffSingular} · Admin` : terms.staffSingular;
+  }
+
+  function openCoachCalendar(coachId: string) {
+    calendarPerspectiveChosenRef.current = true;
+    setCalendarPerspective("coach");
+    setCalendarCoachFilterId(coachId);
+    setWorkspaceOverlay(null);
+    switchView("calendar");
+  }
+
+  function openCoachAvailability(coachId: string) {
+    setAvailabilityCoachChoice(coachId);
+    // On the Settings page itself this is a tab change; from anywhere else
+    // (the Business Hub, or an overlay opened from it) it opens over the top.
+    if (activeView === "settings" && !workspaceOverlay) {
+      switchSettingsTab("booking");
+      setRequestedSettingsGroup("availability");
+      return;
+    }
+    openProfileTarget({ kind: "settings", tab: "booking", group: "availability" }, "Availability");
+  }
+
+  const openCoach = newCoach ?? (openCoachId ? coachProfiles.find((coach) => coach.id === openCoachId) : undefined);
+
+  /**
+   * One coach's Google Calendar: connect, sync, choose the calendar, what to
+   * import back, and the sync debug window. Drawn on that coach's profile --
+   * each coach connects their own Google account -- and always about
+   * googleCalendarProfileCoachId, the profile currently open.
+   */
+  const googleCalendarControls = (
+    <article className="cp-card cp-google-calendar">
+      <header className="cp-card-head">
+        <h3>
+          <ClarityCalendarSync size={14} />
+          Google Calendar
+        </h3>
+      </header>
+      <div className="cp-google-calendar-body">
+              <div className={`sync-status ${googleCalendar.connected ? "connected" : googleCalendar.configured ? "checking" : "offline"}`}>
+                <span>Direct Google API</span>
+                <strong>
+                  {!googleCalendarSyncEnabled
+                    ? "Plan feature unavailable"
+                    : googleCalendarStatusError
+                    ? "Status check failed"
+                    : !googleCalendar.configured
+                    ? "Needs OAuth credentials"
+                    : googleCalendar.connected
+                      ? googleCalendar.manualOnly
+                        ? "Manual sync only"
+                        : googleCalendar.lastSyncStatus === "failed"
+                        ? "Connected, sync failed"
+                        : "Connected"
+                      : "Ready to connect"}
+                </strong>
+                <em>
+                  {!googleCalendarSyncEnabled
+                    ? featureUnavailableMessage("googleCalendarSync")
+                    : googleCalendarStatusError
+                    ? `${googleCalendarStatusError} — the settings below are placeholders, not the live configuration.`
+                    : googleCalendar.lastSyncError
+                    ? googleCalendar.manualOnly
+                      ? `Last sync failed: ${googleCalendar.lastSyncError}`
+                      : googleCalendar.lastSyncError
+                    : googleCalendar.connected
+                      ? `${googleCalendar.accountEmail || "Google account"} · ${googleSyncTimeLabel(googleCalendar.lastSyncAt)}`
+                      : googleCalendar.redirectUri || "Add Google OAuth credentials in Netlify."}
+                </em>
+              </div>
+
+              <details className="settings-subsection">
+                <summary className="settings-subsection-title">
+                  <ClarityIntegrations size={18} />
+                  <div>
+                    <span>Direct API sync</span>
+                    <strong>{googleCalendar.calendarId || "primary"}</strong>
+                  </div>
+                </summary>
+                <label className="sync-field">
+                  <span>Google calendar ID</span>
+                  <input
+                    value={googleCalendar.calendarId}
+                    disabled={!googleCalendarSyncEnabled}
+                    onChange={(event) => setGoogleCalendar((current) => ({ ...current, calendarId: event.target.value }))}
+                    placeholder="primary or calendar email"
+                  />
+                </label>
+                <div className="sync-meta">
+                  <span>Sync mode</span>
+                  <strong>{googleCalendar.manualOnly ? "Manual only" : "Automatic after every change"}</strong>
+                </div>
+                <div className="sync-meta">
+                  <span>Redirect URI</span>
+                  <code>{googleCalendar.redirectUri || "Set GOOGLE_CALENDAR_REDIRECT_URI or use /api/google-calendar/callback"}</code>
+                </div>
+                <div className="sync-actions">
+                  {!googleCalendar.connected ? (
+                    <button
+                      className="primary-button"
+                      disabled={!googleCalendarSyncEnabled || !googleCalendar.configured || googleCalendarAction !== "idle"}
+                      onClick={connectGoogleCalendar}
+                      type="button"
+                    >
+                      <ExternalLink size={16} />
+                      {googleCalendarAction === "connecting" ? "Opening Google" : "Connect Google"}
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        className="primary-button"
+                        disabled={!googleCalendarSyncEnabled || googleCalendarAction !== "idle"}
+                        onClick={syncGoogleCalendarNow}
+                        type="button"
+                      >
+                        <RefreshCw size={16} />
+                        {googleCalendarAction === "syncing" ? "Syncing" : "Sync now"}
+                      </button>
+                      <button
+                        className="outline-button"
+                        disabled={!googleCalendarSyncEnabled || googleCalendarAction !== "idle"}
+                        onClick={() => void saveGoogleCalendarSettings()}
+                        type="button"
+                      >
+                        <Check size={16} />
+                        {googleCalendarAction === "saving" ? "Saving" : "Save settings"}
+                      </button>
+                      <button
+                        className="danger-button"
+                        disabled={!googleCalendarSyncEnabled || googleCalendarAction !== "idle"}
+                        onClick={disconnectGoogleCalendar}
+                        type="button"
+                      >
+                        <X size={16} />
+                        {googleCalendarAction === "disconnecting" ? "Disconnecting" : "Disconnect"}
+                      </button>
+                    </>
+                  )}
+                </div>
+              </details>
+
+              <details className="settings-subsection">
+                <summary className="settings-subsection-title">
+                  <ClarityCalendar size={18} />
+                  <div>
+                    <span>Selective external calendar import</span>
+                    <strong>
+                      {googleCalendar.importRules?.length
+                        ? `${googleCalendar.importRules.filter(importRuleIsActive).length} of ${googleCalendar.importRules.length} rule${googleCalendar.importRules.length === 1 ? "" : "s"} active`
+                        : "Name the outside sources Clarity should pull in"}
+                    </strong>
+                  </div>
+                </summary>
+
+                <p className="google-calendar-source-intro">
+                  Clarity only imports Google events that match a rule below. Name the source — "Golf HQ Portal" — list the
+                  spellings that identify it, and Clarity will match them against the event's organiser, title, description
+                  and location. Add keywords to narrow it further; leave them blank to take everything from that source.
+                </p>
+
+                {googleCalendar.sourceListError ? (
+                  <p className="gcal-debug-error" role="alert">
+                    {googleCalendar.sourceListError}
+                  </p>
+                ) : null}
+
+                {!googleCalendar.importRules?.length ? (
+                  <p className="google-calendar-source-empty">
+                    No import rules yet, so nothing from Google appears on the calendar. Add one to start pulling a source in.
+                  </p>
+                ) : (
+                  <div className="gcal-rule-list">
+                    {googleCalendar.importRules.map((rule) => {
+                      const busy = !googleCalendarSyncEnabled || googleCalendarAction !== "idle";
+                      if (editingImportRuleId !== rule.id) {
+                        const scope = rule.calendarIds.length
+                          ? rule.calendarIds
+                              .map((id) => googleCalendar.sources?.find((source) => source.id === id)?.name || id)
+                              .join(", ")
+                          : "All calendars";
+                        return (
+                          <div className={`gcal-rule-card is-summary ${importRuleIsActive(rule) ? "" : "is-off"}`} key={rule.id}>
+                            <div className="gcal-rule-head">
+                              <div className="gcal-rule-summary">
+                                <strong>{rule.name.trim() || "Unnamed source"}</strong>
+                                <span>
+                                  {rule.aliases.trim() ? `Matches ${rule.aliases.trim()}` : "No aliases yet, so nothing imports"}
+                                </span>
+                                <span>
+                                  {rule.keywords.trim() ? `Only when it mentions ${rule.keywords.trim()}` : "Everything from this source"}
+                                </span>
+                                <span>{scope}</span>
+                              </div>
+                              <div className="gcal-rule-summary-actions">
+                                <button
+                                  className="outline-button"
+                                  type="button"
+                                  disabled={busy}
+                                  onClick={() => setEditingImportRuleId(rule.id)}
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  className="icon-button"
+                                  type="button"
+                                  aria-label={`Remove ${rule.name.trim() || "source"}`}
+                                  disabled={busy}
+                                  onClick={() => removeGoogleCalendarImportRule(rule.id)}
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              </div>
+                            </div>
+                            <label className="google-calendar-source-toggle">
+                              <span>Rule active</span>
+                              <input
+                                type="checkbox"
+                                checked={rule.enabled}
+                                disabled={busy}
+                                onChange={(event) => updateGoogleCalendarImportRule(rule.id, { enabled: event.target.checked })}
+                              />
+                            </label>
+                          </div>
+                        );
+                      }
+                      return (
+                        <div className="gcal-rule-card is-editing" key={rule.id}>
+                          <div className="gcal-rule-head">
+                            <input
+                              className="gcal-rule-name"
+                              type="text"
+                              value={rule.name}
+                              placeholder="Source name, e.g. Golf HQ Portal"
+                              disabled={busy}
+                              onChange={(event) => updateGoogleCalendarImportRule(rule.id, { name: event.target.value })}
+                            />
+                            <button
+                              className="icon-button"
+                              type="button"
+                              aria-label="Remove rule"
+                              disabled={busy}
+                              onClick={() => removeGoogleCalendarImportRule(rule.id)}
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+
+                          <label className="gcal-rule-field">
+                            <span>Aliases</span>
+                            <input
+                              type="text"
+                              value={rule.aliases}
+                              placeholder="Golf HQ, golfhq.com, bookings@golfhq.co.nz"
+                              disabled={busy}
+                              onChange={(event) => updateGoogleCalendarImportRule(rule.id, { aliases: event.target.value })}
+                            />
+                            <em>Comma separated. An event must contain one of these to match. No aliases means the rule is off.</em>
+                          </label>
+
+                          <label className="gcal-rule-field">
+                            <span>Keywords (optional)</span>
+                            <input
+                              type="text"
+                              value={rule.keywords}
+                              placeholder="lesson, fitting"
+                              disabled={busy}
+                              onChange={(event) => updateGoogleCalendarImportRule(rule.id, { keywords: event.target.value })}
+                            />
+                            <em>Narrows the source. Leave blank to import everything it puts on the calendar.</em>
+                          </label>
+
+                          <div className="gcal-rule-field">
+                            <span>Look in</span>
+                            {!googleCalendar.sources?.length ? (
+                              <em>
+                                {googleCalendar.connected
+                                  ? "No calendars loaded yet. Reconnect Google and refresh this panel."
+                                  : "Connect Google Calendar to choose calendars."}
+                              </em>
+                            ) : (
+                              <>
+                                <div className="gcal-rule-calendars">
+                                  {googleCalendar.sources.map((source) => (
+                                    <label className="gcal-rule-calendar" key={source.id}>
+                                      <input
+                                        type="checkbox"
+                                        checked={rule.calendarIds.includes(source.id)}
+                                        disabled={busy}
+                                        onChange={(event) =>
+                                          toggleGoogleCalendarImportRuleCalendar(rule.id, source.id, event.target.checked)
+                                        }
+                                      />
+                                      <span>{source.name}</span>
+                                      {source.primary ? <em>Primary</em> : null}
+                                    </label>
+                                  ))}
+                                </div>
+                                <em>
+                                  {rule.calendarIds.length
+                                    ? `Scanning ${rule.calendarIds.length} calendar${rule.calendarIds.length === 1 ? "" : "s"}.`
+                                    : "Nothing ticked, so every calendar on the account is scanned."}
+                                </em>
+                              </>
+                            )}
+                          </div>
+
+                          <div className="gcal-rule-toggles">
+                            <label className="google-calendar-source-toggle">
+                              <span>Show event title</span>
+                              <input
+                                type="checkbox"
+                                checked={rule.showLabel}
+                                disabled={busy}
+                                onChange={(event) => updateGoogleCalendarImportRule(rule.id, { showLabel: event.target.checked })}
+                              />
+                            </label>
+                            <label className="google-calendar-source-toggle">
+                              <span>Rule active</span>
+                              <input
+                                type="checkbox"
+                                checked={rule.enabled}
+                                disabled={busy}
+                                onChange={(event) => updateGoogleCalendarImportRule(rule.id, { enabled: event.target.checked })}
+                              />
+                            </label>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <div className="gcal-rule-actions">
+                  <button
+                    className="outline-button"
+                    type="button"
+                    disabled={!googleCalendarSyncEnabled || googleCalendarAction !== "idle"}
+                    onClick={addGoogleCalendarImportRule}
+                  >
+                    <Plus size={16} />
+                    Add source
+                  </button>
+                  <button
+                    className="primary-button"
+                    type="button"
+                    disabled={!googleCalendarSyncEnabled || googleCalendarAction !== "idle"}
+                    onClick={() => void saveGoogleCalendarSettings()}
+                  >
+                    <Check size={16} />
+                    {googleCalendarAction === "saving" ? "Saving" : "Save rules"}
+                  </button>
+                </div>
+              </details>
+
+              <details
+                className="settings-subsection gcal-debug"
+                open={googleCalendarDebugOpen}
+                onToggle={(event) => setGoogleCalendarDebugOpen((event.target as HTMLDetailsElement).open)}
+              >
+                <summary className="settings-subsection-title">
+                  <ClarityAdmin size={18} />
+                  <div>
+                    <span>Sync debug window</span>
+                    <strong>
+                      {googleCalendarDebug
+                        ? `${googleCalendarDebug.entries.length} recent trigger${googleCalendarDebug.entries.length === 1 ? "" : "s"}`
+                        : "Google failure codes, payloads and triggers"}
+                    </strong>
+                  </div>
+                </summary>
+
+                <p className="gcal-debug-intro">
+                  Every Google Calendar sync attempt is recorded here — what triggered it, the exact event payload sent to
+                  the Calendar API, and the failure code Google returned.
+                </p>
+
+                <div className="gcal-debug-toolbar">
+                  <button
+                    className="outline-button"
+                    disabled={googleCalendarDebugLoading}
+                    onClick={() => void refreshGoogleCalendarDebugLog()}
+                    type="button"
+                  >
+                    <RefreshCw size={16} />
+                    {googleCalendarDebugLoading ? loadingLabel() : "Refresh"}
+                  </button>
+                  <button
+                    className="outline-button"
+                    disabled={googleCalendarDebugLoading || !googleCalendarDebug?.entries.length}
+                    onClick={clearGoogleCalendarDebugLog}
+                    type="button"
+                  >
+                    <Trash2 size={16} />
+                    Clear log
+                  </button>
+                  <label className="gcal-debug-toggle">
+                    <input
+                      type="checkbox"
+                      checked={googleCalendarDebug?.enabled !== false}
+                      disabled={googleCalendarDebugLoading || !googleCalendarDebug}
+                      onChange={(event) => toggleGoogleCalendarDebugLogging(event.target.checked)}
+                    />
+                    <span>Record sync attempts</span>
+                  </label>
+                </div>
+
+                {googleCalendarDebugError ? (
+                  <p className="gcal-debug-error" role="alert">
+                    {googleCalendarDebugError}
+                  </p>
+                ) : null}
+
+                {googleCalendarDebug ? (
+                  <div className="gcal-debug-facts">
+                    <div>
+                      <span>Auto-sync</span>
+                      <strong>{googleCalendarDebug.manualOnly ? "Manual only" : googleCalendarDebug.autoSync ? "On" : "Off"}</strong>
+                    </div>
+                    <div>
+                      <span>Target calendar</span>
+                      <strong>{googleCalendarDebug.calendarId || "primary"}</strong>
+                    </div>
+                    <div>
+                      <span>Log capacity</span>
+                      <strong>Last {googleCalendarDebug.maxEntries} runs</strong>
+                    </div>
+                  </div>
+                ) : null}
+
+                {googleCalendarDebug && !googleCalendarDebug.entries.length ? (
+                  <p className="gcal-debug-empty">
+                    No sync attempts recorded yet. Hit <strong>Sync now</strong> above, or save a booking, then refresh this
+                    panel. If nothing ever appears, the sync is not being triggered at all.
+                  </p>
+                ) : null}
+
+                <ol className="gcal-debug-list">
+                  {(googleCalendarDebug?.entries || []).map((entry) => {
+                    const expanded = expandedGoogleCalendarDebugId === entry.id;
+                    const failureCode = googleCalendarFailureCode(entry.error);
+                    return (
+                      <li key={entry.id} className={`gcal-debug-entry is-${entry.outcome}`}>
+                        <button
+                          className="gcal-debug-entry-head"
+                          onClick={() => setExpandedGoogleCalendarDebugId(expanded ? null : entry.id)}
+                          aria-expanded={expanded}
+                          type="button"
+                        >
+                          <span className={`gcal-debug-badge is-${entry.outcome}`}>{entry.outcome}</span>
+                          <span className="gcal-debug-entry-main">
+                            <strong>{googleCalendarTriggerLabel(entry.trigger)}</strong>
+                            <em>
+                              {googleCalendarDebugTimestamp(entry.startedAt)}
+                              {relativeTimeLabel(entry.startedAt) ? ` · ${relativeTimeLabel(entry.startedAt)}` : ""}
+                              {` · ${entry.durationMs}ms`}
+                            </em>
+                          </span>
+                          <span className="gcal-debug-entry-result">
+                            {entry.outcome === "failed"
+                              ? failureCode
+                              : entry.outcome === "skipped"
+                                ? entry.reason || "skipped"
+                                : `${entry.upserted} sent · ${entry.deleted} removed${
+                                    entry.unchanged ? ` · ${entry.unchanged} unchanged` : ""
+                                  }`}
+                          </span>
+                        </button>
+
+                        {expanded ? (
+                          <div className="gcal-debug-entry-body">
+                            <div className="gcal-debug-grid">
+                              <div>
+                                <span>Trigger code</span>
+                                <code>{entry.trigger}</code>
+                              </div>
+                              <div>
+                                <span>Stage reached</span>
+                                <code>{googleCalendarStageLabel(entry.stage)}</code>
+                              </div>
+                              <div>
+                                <span>Calendar</span>
+                                <code>{entry.calendarId || "primary"}</code>
+                              </div>
+                              <div>
+                                <span>Google account</span>
+                                <code>{entry.accountEmail || "—"}</code>
+                              </div>
+                              <div>
+                                <span>Sync mode</span>
+                                <code>{entry.mode === "full" ? "Full rebuild" : "Targeted changes"}</code>
+                              </div>
+                              <div>
+                                <span>{entry.mode === "full" ? "Bookings in run" : "Bookings targeted"}</span>
+                                <code>{entry.itemCount}</code>
+                              </div>
+                              <div>
+                                <span>Already up to date</span>
+                                <code>{entry.unchanged || 0}</code>
+                              </div>
+                              <div>
+                                <span>Rate-limit retries</span>
+                                <code>{entry.retries || 0}</code>
+                              </div>
+                              <div>
+                                <span>Finished</span>
+                                <code>{googleCalendarDebugTimestamp(entry.finishedAt)}</code>
+                              </div>
+                            </div>
+
+                            {entry.changes?.length ? (
+                              <section className="gcal-debug-block">
+                                <h4>Bookings this run targeted</h4>
+                                <pre className="gcal-debug-pre">
+                                  {entry.changes.map((change) => `${change.action.toUpperCase()}  ${change.id}`).join("\n")}
+                                </pre>
+                              </section>
+                            ) : null}
+
+                            {entry.outcome === "skipped" || (entry.outcome === "success" && entry.reason) ? (
+                              <p className="gcal-debug-note">
+                                {googleCalendarSkipReasonLabels[entry.reason] ||
+                                  `${entry.outcome === "skipped" ? "Skipped" : "Nothing sent"}: ${entry.reason || "unknown reason"}`}
+                              </p>
+                            ) : null}
+
+                            {entry.error ? (
+                              <section className="gcal-debug-block is-error">
+                                <h4>Google failure</h4>
+                                <div className="gcal-debug-grid">
+                                  <div>
+                                    <span>HTTP status</span>
+                                    <code>
+                                      {entry.error.httpStatus
+                                        ? `${entry.error.httpStatus}${entry.error.httpStatusText ? ` ${entry.error.httpStatusText}` : ""}`
+                                        : "— (failed before the request)"}
+                                    </code>
+                                  </div>
+                                  <div>
+                                    <span>error.code</span>
+                                    <code>{entry.error.googleCode || "—"}</code>
+                                  </div>
+                                  <div>
+                                    <span>error.status</span>
+                                    <code>{entry.error.googleStatus || "—"}</code>
+                                  </div>
+                                  <div>
+                                    <span>errors[0].reason</span>
+                                    <code>{entry.error.googleReason || "—"}</code>
+                                  </div>
+                                  <div>
+                                    <span>errors[0].domain</span>
+                                    <code>{entry.error.googleDomain || "—"}</code>
+                                  </div>
+                                  <div>
+                                    <span>Clarity code</span>
+                                    <code>{entry.error.providerCode || "—"}</code>
+                                  </div>
+                                </div>
+                                <p className="gcal-debug-message">{entry.error.googleMessage || entry.error.message}</p>
+                                {googleCalendarFailureHint(entry.error) ? (
+                                  <p className="gcal-debug-note">{googleCalendarFailureHint(entry.error)}</p>
+                                ) : null}
+                                {entry.error.rawBody ? (
+                                  <>
+                                    <h5>Raw response body</h5>
+                                    <pre className="gcal-debug-pre">{entry.error.rawBody}</pre>
+                                  </>
+                                ) : null}
+                              </section>
+                            ) : null}
+
+                            {entry.request ? (
+                              <section className="gcal-debug-block">
+                                <h4>
+                                  {entry.requestIsSample ? "Payload sent (sample from this run)" : "Payload that failed"}
+                                </h4>
+                                <div className="gcal-debug-grid">
+                                  <div>
+                                    <span>Method</span>
+                                    <code>{entry.request.method}</code>
+                                  </div>
+                                  <div>
+                                    <span>Booking</span>
+                                    <code>{entry.request.itemLabel || entry.request.itemId || "—"}</code>
+                                  </div>
+                                  <div>
+                                    <span>Event ID</span>
+                                    <code>{entry.request.eventId || "—"}</code>
+                                  </div>
+                                  <div>
+                                    <span>Clarity booking ID</span>
+                                    <code>{entry.request.itemId || "—"}</code>
+                                  </div>
+                                </div>
+                                <h5>Endpoint</h5>
+                                <pre className="gcal-debug-pre">{entry.request.url}</pre>
+                                {entry.request.payload ? (
+                                  <>
+                                    <h5>Request body</h5>
+                                    <pre className="gcal-debug-pre">{formatDebugJson(entry.request.payload)}</pre>
+                                  </>
+                                ) : (
+                                  <p className="gcal-debug-note">No request body (DELETE request).</p>
+                                )}
+                              </section>
+                            ) : entry.outcome !== "skipped" ? (
+                              <p className="gcal-debug-note">
+                                No payload captured — the run failed before building an event, or there were no bookings to send.
+                              </p>
+                            ) : null}
+
+                            <div className="gcal-debug-entry-actions">
+                              <button className="outline-button" onClick={() => copyGoogleCalendarDebugEntry(entry)} type="button">
+                                <Copy size={16} />
+                                Copy entry JSON
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
+                      </li>
+                    );
+                  })}
+                </ol>
+              </details>
+      </div>
+    </article>
+  );
+
   const coachesSettingsPanel = (
     <SettingsGroup id="coaches" icon={ClarityCoachesStaff} section="business" title={terms.staffPlural}>
+      {openCoach ? (
+        <CoachProfilePanel
+          coach={openCoach}
+          isNew={Boolean(newCoach)}
+          access="owner"
+          roleLabel={coachRoleLabel(openCoach)}
+          staffSingular={terms.staffSingular}
+          staffPlural={terms.staffPlural}
+          locations={coachLocationOptions}
+          week={newCoach ? [] : coachWeekFor(openCoach.id)}
+          onSave={saveEditedCoach}
+          onBack={() => openCoachProfile(null)}
+          onOpenCalendar={() => openCoachCalendar(openCoach.id)}
+          onOpenAvailability={() => openCoachAvailability(openCoach.id)}
+        >
+          {googleCalendarSyncEnabled && googleCalendarProfileCoachId === openCoach.id ? googleCalendarControls : null}
+        </CoachProfilePanel>
+      ) : (
       <div className="data-card wide">
         <div className="data-card-header">
           <div>
@@ -22835,138 +23536,19 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           {terms.staffSingular} profiles are bookable operator identities. Admin users are a permission layer, not the owner of bookings.
         </p>
 
-        {showCoachEditor && (
-          <article className="service-editor-card">
-            <div className="data-card-header compact">
-              <div>
-                <span>{editingCoachId ? `Edit ${terms.staffSingular.toLowerCase()}` : `New ${terms.staffSingular.toLowerCase()}`}</span>
-                <h3>{coachEditor.displayName || coachEditor.name || `${terms.staffSingular} details`}</h3>
-              </div>
-              <button
-                className="icon-button"
-                disabled={coachSaveState === "saving"}
-                onClick={() => setShowCoachEditor(false)}
-                type="button"
-                aria-label="Close coach editor"
-              >
-                <X size={16} />
-              </button>
-            </div>
-            <div className="service-form-grid">
-              <label className="settings-field">
-                <span>Name</span>
-                <input value={coachEditor.name} onChange={(event) => updateCoachEditor("name", event.target.value)} />
-              </label>
-              <label className="settings-field">
-                <span>Public name</span>
-                <input value={coachEditor.displayName} onChange={(event) => updateCoachEditor("displayName", event.target.value)} />
-              </label>
-              <label className="settings-field">
-                <span>Short name</span>
-                <input value={coachEditor.shortName ?? ""} onChange={(event) => updateCoachEditor("shortName", event.target.value)} />
-              </label>
-              <label className="settings-field">
-                <span>Email</span>
-                <input value={coachEditor.email} onChange={(event) => updateCoachEditor("email", event.target.value)} />
-              </label>
-              <label className="settings-field">
-                <span>Phone</span>
-                <input value={coachEditor.phone ?? ""} onChange={(event) => updateCoachEditor("phone", event.target.value)} />
-              </label>
-              <label className="settings-field">
-                <span>Photo URL</span>
-                <input value={coachEditor.photoUrl ?? ""} onChange={(event) => updateCoachEditor("photoUrl", event.target.value)} />
-              </label>
-              <label className="settings-field">
-                <span>Default location</span>
-                <select
-                  value={coachEditor.defaultLocationId || defaultLocationId(locations)}
-                  onChange={(event) => updateCoachEditor("defaultLocationId", event.target.value)}
-                >
-                  {activeLocationList.map((location) => (
-                    <option key={location.id} value={location.id}>
-                      {location.shortName || location.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="settings-field">
-                <span>Sort order</span>
-                <input
-                  value={coachEditor.sortOrder ?? 0}
-                  inputMode="numeric"
-                  onChange={(event) => updateCoachEditor("sortOrder", Number(event.target.value))}
-                  type="text"
-                />
-              </label>
-            </div>
-            <label className="settings-field">
-              <span>Bio</span>
-              <textarea value={coachEditor.bio ?? ""} onChange={(event) => updateCoachEditor("bio", event.target.value)} rows={3} />
-            </label>
-            <div className="service-form-row">
-              <label className="settings-toggle">
-                <input
-                  checked={coachEditor.active !== false && coachEditor.archived !== true}
-                  onChange={(event) => {
-                    updateCoachEditor("active", event.target.checked);
-                    updateCoachEditor("archived", !event.target.checked);
-                  }}
-                  type="checkbox"
-                />
-                <span>Active</span>
-              </label>
-            </div>
-            <div className="settings-field">
-              <span>Assigned locations</span>
-              <div className="booking-screen-list">
-                {activeLocationList.map((location) => (
-                  <label key={location.id}>
-                    <input
-                      checked={(coachEditor.assignedLocationIds ?? []).includes(location.id)}
-                      onChange={(event) => {
-                        const current = coachEditor.assignedLocationIds ?? [];
-                        updateCoachEditor(
-                          "assignedLocationIds",
-                          event.target.checked
-                            ? Array.from(new Set([...current, location.id]))
-                            : current.filter((id) => id !== location.id),
-                        );
-                      }}
-                      type="checkbox"
-                    />
-                    <span>{location.shortName || location.name}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-            {coachSaveState === "error" && coachEditorError && (
-              <p className="workspace-save-error" role="alert">
-                {coachEditorError}
-              </p>
-            )}
-            <button className="primary-button settings-save" disabled={coachSaveState === "saving"} onClick={saveEditedCoach} type="button">
-              {coachSaveState === "saving"
-                ? "Saving"
-                : coachSaveState === "saved"
-                  ? "Saved"
-                  : coachSaveState === "error"
-                    ? "Not saved"
-                    : `Save ${terms.staffSingular}`}
-            </button>
-          </article>
-        )}
-
         <div className="service-list" aria-label={terms.staffPlural}>
           {coachProfiles.map((coach) => (
-            <article className={`service-row ${coach.active && !coach.archived ? "" : "is-archived"}`} key={coach.id}>
-              <button className="service-row-main" onClick={() => editCoach(coach)} type="button">
-                <span>{coach.active && !coach.archived ? "Active" : "Archived"}</span>
-                <strong>{coach.displayName || coach.name}</strong>
-                {coach.email && <em>{coach.email}</em>}
-                <em>
-                  Assigned to {(coach.assignedLocationIds ?? []).length || 0} location{(coach.assignedLocationIds ?? []).length === 1 ? "" : "s"}
-                </em>
+            <article className={`service-row coach-row ${coach.active && !coach.archived ? "" : "is-archived"}`} key={coach.id}>
+              <button className="service-row-main" onClick={() => openCoachProfile(coach.id)} type="button">
+                <CoachAvatar name={coach.displayName || coach.name} photoUrl={coach.photoUrl} size={44} />
+                <span className="coach-row-text">
+                  <span>{coach.active && !coach.archived ? "Active" : "Archived"}</span>
+                  <strong>{coach.displayName || coach.name}</strong>
+                  {coach.email && <em>{coach.email}</em>}
+                  <em>
+                    Assigned to {(coach.assignedLocationIds ?? []).length || 0} location{(coach.assignedLocationIds ?? []).length === 1 ? "" : "s"}
+                  </em>
+                </span>
               </button>
               <div className="service-row-meta">
                 <strong>{coach.shortName || coach.name}</strong>
@@ -22995,6 +23577,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           ))}
         </div>
       </div>
+      )}
     </SettingsGroup>
   );
 
@@ -24736,6 +25319,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     terms,
   ]);
 
+  // Owners and admins run a business from the hub; a coach-level account's
+  // version of the same screen is their own profile.
+  const hubLabel = isAdminUser ? "Business Hub" : `${terms.staffSingular} profile`;
   const pageHeading: { title: string; subtitle?: string } =
     activeView === "calendar"
       ? {
@@ -24756,8 +25342,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             }
           : activeView === "profile"
             ? {
-                title: "Business Hub",
-                subtitle: "Your business, and everything Clarity is plugged into on your behalf",
+                title: hubLabel,
+                subtitle: isAdminUser
+                  ? "Your business, and everything Clarity is plugged into on your behalf"
+                  : "Your profile, your calendar, and the settings that are yours",
               }
             : { title: sectionTitle(activeView, terms) };
   const failedDiagnosticEvents = diagnosticEvents.filter((event) => event.status === "failed");
@@ -24829,7 +25417,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             onClick={() => switchView("profile")}
           >
             <ClarityDashboardHome size={18} />
-            Business Hub
+            {hubLabel}
           </button>
           <button className={activeView === "calendar" ? "active" : ""} onClick={() => switchView("calendar")}>
             <ClarityCalendar size={18} />
@@ -31466,19 +32054,40 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         {!isEmbedMode && adminWorkspaceReady && activeView === "profile" && (
           <section className="business-hub-page">
             <BusinessHubPanel
-              identity={{
-                coachName: ownCoachProfile?.displayName || ownCoachProfile?.name || currentAppUser.name,
-                roleLabel: isPlatformAdmin
-                  ? "Platform admin"
-                  : isAdminUser
-                    ? ownCoachProfile
-                      ? `${terms.staffSingular} · Admin`
-                      : "Admin"
-                    : terms.staffSingular,
-                email: ownCoachProfile?.email || currentAppUser.email,
-                phone: ownCoachProfile?.phone || "",
-              }}
+              profile={
+                ownCoachProfile ? (
+                  <CoachProfilePanel
+                    coach={ownCoachProfile}
+                    access={isAdminUser ? "owner" : "self"}
+                    roleLabel={isPlatformAdmin ? "Platform admin" : coachRoleLabel(ownCoachProfile)}
+                    staffSingular={terms.staffSingular}
+                    staffPlural={terms.staffPlural}
+                    locations={coachLocationOptions}
+                    week={coachWeekFor(ownCoachProfile.id)}
+                    onSave={isAdminUser ? saveEditedCoach : saveOwnCoachProfile}
+                    onOpenCalendar={() => openCoachCalendar(ownCoachProfile.id)}
+                    onOpenAvailability={() => openCoachAvailability(ownCoachProfile.id)}
+                  >
+                    {googleCalendarSyncEnabled && googleCalendarProfileCoachId === ownCoachProfile.id
+                      ? googleCalendarControls
+                      : null}
+                  </CoachProfilePanel>
+                ) : (
+                  <OwnerIdentityCard
+                    identity={{
+                      coachName: currentAppUser.name,
+                      roleLabel: isPlatformAdmin ? "Platform admin" : "Admin",
+                      email: currentAppUser.email,
+                      phone: "",
+                    }}
+                    onOpenCoaches={() => openProfileTarget({ kind: "settings", tab: "business", group: "coaches" }, terms.staffPlural)}
+                  />
+                )
+              }
               internalJobs={profileInternalJobs}
+              // Your own Google Calendar is managed on your profile above, so
+              // it is not listed a second time among the connections.
+              hiddenIntegrationIds={ownCoachProfile ? ["google-calendar"] : []}
               onOpen={(target, label) => openProfileTarget(target, label)}
             />
           </section>
@@ -31966,605 +32575,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 </div>
               </SettingsGroup>
 
-              <SettingsGroup id="google-calendar" icon={ClarityCalendarSync} section="developer" title="Google Calendar sync" className="sync-card">
-
-                <div className={`sync-status ${googleCalendar.connected ? "connected" : googleCalendar.configured ? "checking" : "offline"}`}>
-                  <span>Direct Google API</span>
-                  <strong>
-                    {!googleCalendarSyncEnabled
-                      ? "Plan feature unavailable"
-                      : googleCalendarStatusError
-                      ? "Status check failed"
-                      : !googleCalendar.configured
-                      ? "Needs OAuth credentials"
-                      : googleCalendar.connected
-                        ? googleCalendar.manualOnly
-                          ? "Manual sync only"
-                          : googleCalendar.lastSyncStatus === "failed"
-                          ? "Connected, sync failed"
-                          : "Connected"
-                        : "Ready to connect"}
-                  </strong>
-                  <em>
-                    {!googleCalendarSyncEnabled
-                      ? featureUnavailableMessage("googleCalendarSync")
-                      : googleCalendarStatusError
-                      ? `${googleCalendarStatusError} — the settings below are placeholders, not the live configuration.`
-                      : googleCalendar.lastSyncError
-                      ? googleCalendar.manualOnly
-                        ? `Last sync failed: ${googleCalendar.lastSyncError}`
-                        : googleCalendar.lastSyncError
-                      : googleCalendar.connected
-                        ? `${googleCalendar.accountEmail || "Google account"} · ${googleSyncTimeLabel(googleCalendar.lastSyncAt)}`
-                        : googleCalendar.legacyMigrationRequired
-                          ? "Legacy plaintext token migration required."
-                          : googleCalendar.redirectUri || "Add Google OAuth credentials in Netlify."}
-                  </em>
-                </div>
-
-                <details className="settings-subsection">
-                  <summary className="settings-subsection-title">
-                    <ClarityIntegrations size={18} />
-                    <div>
-                      <span>Direct API sync</span>
-                      <strong>{googleCalendar.calendarId || "primary"}</strong>
-                    </div>
-                  </summary>
-                  <label className="sync-field">
-                    <span>Google calendar ID</span>
-                    <input
-                      value={googleCalendar.calendarId}
-                      disabled={!googleCalendarSyncEnabled}
-                      onChange={(event) => setGoogleCalendar((current) => ({ ...current, calendarId: event.target.value }))}
-                      placeholder="primary or calendar email"
-                    />
-                  </label>
-                  <div className="sync-meta">
-                    <span>Sync mode</span>
-                    <strong>{googleCalendar.manualOnly ? "Manual only" : "Automatic after every change"}</strong>
-                  </div>
-                  <div className="sync-meta">
-                    <span>Redirect URI</span>
-                    <code>{googleCalendar.redirectUri || "Set GOOGLE_CALENDAR_REDIRECT_URI or use /api/google-calendar/callback"}</code>
-                  </div>
-                  <div className="sync-actions">
-                    {googleCalendar.legacyMigrationRequired ? (
-                      <button
-                        className="primary-button"
-                        disabled={!googleCalendarSyncEnabled || googleCalendarAction !== "idle"}
-                        onClick={migrateGoogleCalendarProviderToken}
-                        type="button"
-                      >
-                        <ClarityAccessPermissions size={16} />
-                        {googleCalendarAction === "migrating" ? "Migrating" : "Secure existing token"}
-                      </button>
-                    ) : !googleCalendar.connected ? (
-                      <button
-                        className="primary-button"
-                        disabled={!googleCalendarSyncEnabled || !googleCalendar.configured || googleCalendarAction !== "idle"}
-                        onClick={connectGoogleCalendar}
-                        type="button"
-                      >
-                        <ExternalLink size={16} />
-                        {googleCalendarAction === "connecting" ? "Opening Google" : "Connect Google"}
-                      </button>
-                    ) : (
-                      <>
-                        <button
-                          className="primary-button"
-                          disabled={!googleCalendarSyncEnabled || googleCalendarAction !== "idle"}
-                          onClick={syncGoogleCalendarNow}
-                          type="button"
-                        >
-                          <RefreshCw size={16} />
-                          {googleCalendarAction === "syncing" ? "Syncing" : "Sync now"}
-                        </button>
-                        <button
-                          className="outline-button"
-                          disabled={!googleCalendarSyncEnabled || googleCalendarAction !== "idle"}
-                          onClick={() => void saveGoogleCalendarSettings()}
-                          type="button"
-                        >
-                          <Check size={16} />
-                          {googleCalendarAction === "saving" ? "Saving" : "Save settings"}
-                        </button>
-                        <button
-                          className="danger-button"
-                          disabled={!googleCalendarSyncEnabled || googleCalendarAction !== "idle"}
-                          onClick={disconnectGoogleCalendar}
-                          type="button"
-                        >
-                          <X size={16} />
-                          {googleCalendarAction === "disconnecting" ? "Disconnecting" : "Disconnect"}
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </details>
-
-                <details className="settings-subsection">
-                  <summary className="settings-subsection-title">
-                    <ClarityCalendar size={18} />
-                    <div>
-                      <span>Selective external calendar import</span>
-                      <strong>
-                        {googleCalendar.importRules?.length
-                          ? `${googleCalendar.importRules.filter(importRuleIsActive).length} of ${googleCalendar.importRules.length} rule${googleCalendar.importRules.length === 1 ? "" : "s"} active`
-                          : "Name the outside sources Clarity should pull in"}
-                      </strong>
-                    </div>
-                  </summary>
-
-                  <p className="google-calendar-source-intro">
-                    Clarity only imports Google events that match a rule below. Name the source — "Golf HQ Portal" — list the
-                    spellings that identify it, and Clarity will match them against the event's organiser, title, description
-                    and location. Add keywords to narrow it further; leave them blank to take everything from that source.
-                  </p>
-
-                  {googleCalendar.sourceListError ? (
-                    <p className="gcal-debug-error" role="alert">
-                      {googleCalendar.sourceListError}
-                    </p>
-                  ) : null}
-
-                  {!googleCalendar.importRules?.length ? (
-                    <p className="google-calendar-source-empty">
-                      No import rules yet, so nothing from Google appears on the calendar. Add one to start pulling a source in.
-                    </p>
-                  ) : (
-                    <div className="gcal-rule-list">
-                      {googleCalendar.importRules.map((rule) => {
-                        const busy = !googleCalendarSyncEnabled || googleCalendarAction !== "idle";
-                        if (editingImportRuleId !== rule.id) {
-                          const scope = rule.calendarIds.length
-                            ? rule.calendarIds
-                                .map((id) => googleCalendar.sources?.find((source) => source.id === id)?.name || id)
-                                .join(", ")
-                            : "All calendars";
-                          return (
-                            <div className={`gcal-rule-card is-summary ${importRuleIsActive(rule) ? "" : "is-off"}`} key={rule.id}>
-                              <div className="gcal-rule-head">
-                                <div className="gcal-rule-summary">
-                                  <strong>{rule.name.trim() || "Unnamed source"}</strong>
-                                  <span>
-                                    {rule.aliases.trim() ? `Matches ${rule.aliases.trim()}` : "No aliases yet, so nothing imports"}
-                                  </span>
-                                  <span>
-                                    {rule.keywords.trim() ? `Only when it mentions ${rule.keywords.trim()}` : "Everything from this source"}
-                                  </span>
-                                  <span>{scope}</span>
-                                </div>
-                                <div className="gcal-rule-summary-actions">
-                                  <button
-                                    className="outline-button"
-                                    type="button"
-                                    disabled={busy}
-                                    onClick={() => setEditingImportRuleId(rule.id)}
-                                  >
-                                    Edit
-                                  </button>
-                                  <button
-                                    className="icon-button"
-                                    type="button"
-                                    aria-label={`Remove ${rule.name.trim() || "source"}`}
-                                    disabled={busy}
-                                    onClick={() => removeGoogleCalendarImportRule(rule.id)}
-                                  >
-                                    <Trash2 size={16} />
-                                  </button>
-                                </div>
-                              </div>
-                              <label className="google-calendar-source-toggle">
-                                <span>Rule active</span>
-                                <input
-                                  type="checkbox"
-                                  checked={rule.enabled}
-                                  disabled={busy}
-                                  onChange={(event) => updateGoogleCalendarImportRule(rule.id, { enabled: event.target.checked })}
-                                />
-                              </label>
-                            </div>
-                          );
-                        }
-                        return (
-                          <div className="gcal-rule-card is-editing" key={rule.id}>
-                            <div className="gcal-rule-head">
-                              <input
-                                className="gcal-rule-name"
-                                type="text"
-                                value={rule.name}
-                                placeholder="Source name, e.g. Golf HQ Portal"
-                                disabled={busy}
-                                onChange={(event) => updateGoogleCalendarImportRule(rule.id, { name: event.target.value })}
-                              />
-                              <button
-                                className="icon-button"
-                                type="button"
-                                aria-label="Remove rule"
-                                disabled={busy}
-                                onClick={() => removeGoogleCalendarImportRule(rule.id)}
-                              >
-                                <Trash2 size={16} />
-                              </button>
-                            </div>
-
-                            <label className="gcal-rule-field">
-                              <span>Aliases</span>
-                              <input
-                                type="text"
-                                value={rule.aliases}
-                                placeholder="Golf HQ, golfhq.com, bookings@golfhq.co.nz"
-                                disabled={busy}
-                                onChange={(event) => updateGoogleCalendarImportRule(rule.id, { aliases: event.target.value })}
-                              />
-                              <em>Comma separated. An event must contain one of these to match. No aliases means the rule is off.</em>
-                            </label>
-
-                            <label className="gcal-rule-field">
-                              <span>Keywords (optional)</span>
-                              <input
-                                type="text"
-                                value={rule.keywords}
-                                placeholder="lesson, fitting"
-                                disabled={busy}
-                                onChange={(event) => updateGoogleCalendarImportRule(rule.id, { keywords: event.target.value })}
-                              />
-                              <em>Narrows the source. Leave blank to import everything it puts on the calendar.</em>
-                            </label>
-
-                            <div className="gcal-rule-field">
-                              <span>Look in</span>
-                              {!googleCalendar.sources?.length ? (
-                                <em>
-                                  {googleCalendar.connected
-                                    ? "No calendars loaded yet. Reconnect Google and refresh this panel."
-                                    : "Connect Google Calendar to choose calendars."}
-                                </em>
-                              ) : (
-                                <>
-                                  <div className="gcal-rule-calendars">
-                                    {googleCalendar.sources.map((source) => (
-                                      <label className="gcal-rule-calendar" key={source.id}>
-                                        <input
-                                          type="checkbox"
-                                          checked={rule.calendarIds.includes(source.id)}
-                                          disabled={busy}
-                                          onChange={(event) =>
-                                            toggleGoogleCalendarImportRuleCalendar(rule.id, source.id, event.target.checked)
-                                          }
-                                        />
-                                        <span>{source.name}</span>
-                                        {source.primary ? <em>Primary</em> : null}
-                                      </label>
-                                    ))}
-                                  </div>
-                                  <em>
-                                    {rule.calendarIds.length
-                                      ? `Scanning ${rule.calendarIds.length} calendar${rule.calendarIds.length === 1 ? "" : "s"}.`
-                                      : "Nothing ticked, so every calendar on the account is scanned."}
-                                  </em>
-                                </>
-                              )}
-                            </div>
-
-                            <div className="gcal-rule-toggles">
-                              <label className="google-calendar-source-toggle">
-                                <span>Show event title</span>
-                                <input
-                                  type="checkbox"
-                                  checked={rule.showLabel}
-                                  disabled={busy}
-                                  onChange={(event) => updateGoogleCalendarImportRule(rule.id, { showLabel: event.target.checked })}
-                                />
-                              </label>
-                              <label className="google-calendar-source-toggle">
-                                <span>Rule active</span>
-                                <input
-                                  type="checkbox"
-                                  checked={rule.enabled}
-                                  disabled={busy}
-                                  onChange={(event) => updateGoogleCalendarImportRule(rule.id, { enabled: event.target.checked })}
-                                />
-                              </label>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  <div className="gcal-rule-actions">
-                    <button
-                      className="outline-button"
-                      type="button"
-                      disabled={!googleCalendarSyncEnabled || googleCalendarAction !== "idle"}
-                      onClick={addGoogleCalendarImportRule}
-                    >
-                      <Plus size={16} />
-                      Add source
-                    </button>
-                    <button
-                      className="primary-button"
-                      type="button"
-                      disabled={!googleCalendarSyncEnabled || googleCalendarAction !== "idle"}
-                      onClick={() => void saveGoogleCalendarSettings()}
-                    >
-                      <Check size={16} />
-                      {googleCalendarAction === "saving" ? "Saving" : "Save rules"}
-                    </button>
-                  </div>
-                </details>
-
-                <details
-                  className="settings-subsection gcal-debug"
-                  open={googleCalendarDebugOpen}
-                  onToggle={(event) => setGoogleCalendarDebugOpen((event.target as HTMLDetailsElement).open)}
-                >
-                  <summary className="settings-subsection-title">
-                    <ClarityAdmin size={18} />
-                    <div>
-                      <span>Sync debug window</span>
-                      <strong>
-                        {googleCalendarDebug
-                          ? `${googleCalendarDebug.entries.length} recent trigger${googleCalendarDebug.entries.length === 1 ? "" : "s"}`
-                          : "Google failure codes, payloads and triggers"}
-                      </strong>
-                    </div>
-                  </summary>
-
-                  <p className="gcal-debug-intro">
-                    Every Google Calendar sync attempt is recorded here — what triggered it, the exact event payload sent to
-                    the Calendar API, and the failure code Google returned.
-                  </p>
-
-                  <div className="gcal-debug-toolbar">
-                    <button
-                      className="outline-button"
-                      disabled={googleCalendarDebugLoading}
-                      onClick={() => void refreshGoogleCalendarDebugLog()}
-                      type="button"
-                    >
-                      <RefreshCw size={16} />
-                      {googleCalendarDebugLoading ? loadingLabel() : "Refresh"}
-                    </button>
-                    <button
-                      className="outline-button"
-                      disabled={googleCalendarDebugLoading || !googleCalendarDebug?.entries.length}
-                      onClick={clearGoogleCalendarDebugLog}
-                      type="button"
-                    >
-                      <Trash2 size={16} />
-                      Clear log
-                    </button>
-                    <label className="gcal-debug-toggle">
-                      <input
-                        type="checkbox"
-                        checked={googleCalendarDebug?.enabled !== false}
-                        disabled={googleCalendarDebugLoading || !googleCalendarDebug}
-                        onChange={(event) => toggleGoogleCalendarDebugLogging(event.target.checked)}
-                      />
-                      <span>Record sync attempts</span>
-                    </label>
-                  </div>
-
-                  {googleCalendarDebugError ? (
-                    <p className="gcal-debug-error" role="alert">
-                      {googleCalendarDebugError}
-                    </p>
-                  ) : null}
-
-                  {googleCalendarDebug ? (
-                    <div className="gcal-debug-facts">
-                      <div>
-                        <span>Auto-sync</span>
-                        <strong>{googleCalendarDebug.manualOnly ? "Manual only" : googleCalendarDebug.autoSync ? "On" : "Off"}</strong>
-                      </div>
-                      <div>
-                        <span>Target calendar</span>
-                        <strong>{googleCalendarDebug.calendarId || "primary"}</strong>
-                      </div>
-                      <div>
-                        <span>Log capacity</span>
-                        <strong>Last {googleCalendarDebug.maxEntries} runs</strong>
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {googleCalendarDebug && !googleCalendarDebug.entries.length ? (
-                    <p className="gcal-debug-empty">
-                      No sync attempts recorded yet. Hit <strong>Sync now</strong> above, or save a booking, then refresh this
-                      panel. If nothing ever appears, the sync is not being triggered at all.
-                    </p>
-                  ) : null}
-
-                  <ol className="gcal-debug-list">
-                    {(googleCalendarDebug?.entries || []).map((entry) => {
-                      const expanded = expandedGoogleCalendarDebugId === entry.id;
-                      const failureCode = googleCalendarFailureCode(entry.error);
-                      return (
-                        <li key={entry.id} className={`gcal-debug-entry is-${entry.outcome}`}>
-                          <button
-                            className="gcal-debug-entry-head"
-                            onClick={() => setExpandedGoogleCalendarDebugId(expanded ? null : entry.id)}
-                            aria-expanded={expanded}
-                            type="button"
-                          >
-                            <span className={`gcal-debug-badge is-${entry.outcome}`}>{entry.outcome}</span>
-                            <span className="gcal-debug-entry-main">
-                              <strong>{googleCalendarTriggerLabel(entry.trigger)}</strong>
-                              <em>
-                                {googleCalendarDebugTimestamp(entry.startedAt)}
-                                {relativeTimeLabel(entry.startedAt) ? ` · ${relativeTimeLabel(entry.startedAt)}` : ""}
-                                {` · ${entry.durationMs}ms`}
-                              </em>
-                            </span>
-                            <span className="gcal-debug-entry-result">
-                              {entry.outcome === "failed"
-                                ? failureCode
-                                : entry.outcome === "skipped"
-                                  ? entry.reason || "skipped"
-                                  : `${entry.upserted} sent · ${entry.deleted} removed${
-                                      entry.unchanged ? ` · ${entry.unchanged} unchanged` : ""
-                                    }`}
-                            </span>
-                          </button>
-
-                          {expanded ? (
-                            <div className="gcal-debug-entry-body">
-                              <div className="gcal-debug-grid">
-                                <div>
-                                  <span>Trigger code</span>
-                                  <code>{entry.trigger}</code>
-                                </div>
-                                <div>
-                                  <span>Stage reached</span>
-                                  <code>{googleCalendarStageLabel(entry.stage)}</code>
-                                </div>
-                                <div>
-                                  <span>Calendar</span>
-                                  <code>{entry.calendarId || "primary"}</code>
-                                </div>
-                                <div>
-                                  <span>Google account</span>
-                                  <code>{entry.accountEmail || "—"}</code>
-                                </div>
-                                <div>
-                                  <span>Sync mode</span>
-                                  <code>{entry.mode === "full" ? "Full rebuild" : "Targeted changes"}</code>
-                                </div>
-                                <div>
-                                  <span>{entry.mode === "full" ? "Bookings in run" : "Bookings targeted"}</span>
-                                  <code>{entry.itemCount}</code>
-                                </div>
-                                <div>
-                                  <span>Already up to date</span>
-                                  <code>{entry.unchanged || 0}</code>
-                                </div>
-                                <div>
-                                  <span>Rate-limit retries</span>
-                                  <code>{entry.retries || 0}</code>
-                                </div>
-                                <div>
-                                  <span>Finished</span>
-                                  <code>{googleCalendarDebugTimestamp(entry.finishedAt)}</code>
-                                </div>
-                              </div>
-
-                              {entry.changes?.length ? (
-                                <section className="gcal-debug-block">
-                                  <h4>Bookings this run targeted</h4>
-                                  <pre className="gcal-debug-pre">
-                                    {entry.changes.map((change) => `${change.action.toUpperCase()}  ${change.id}`).join("\n")}
-                                  </pre>
-                                </section>
-                              ) : null}
-
-                              {entry.outcome === "skipped" || (entry.outcome === "success" && entry.reason) ? (
-                                <p className="gcal-debug-note">
-                                  {googleCalendarSkipReasonLabels[entry.reason] ||
-                                    `${entry.outcome === "skipped" ? "Skipped" : "Nothing sent"}: ${entry.reason || "unknown reason"}`}
-                                </p>
-                              ) : null}
-
-                              {entry.error ? (
-                                <section className="gcal-debug-block is-error">
-                                  <h4>Google failure</h4>
-                                  <div className="gcal-debug-grid">
-                                    <div>
-                                      <span>HTTP status</span>
-                                      <code>
-                                        {entry.error.httpStatus
-                                          ? `${entry.error.httpStatus}${entry.error.httpStatusText ? ` ${entry.error.httpStatusText}` : ""}`
-                                          : "— (failed before the request)"}
-                                      </code>
-                                    </div>
-                                    <div>
-                                      <span>error.code</span>
-                                      <code>{entry.error.googleCode || "—"}</code>
-                                    </div>
-                                    <div>
-                                      <span>error.status</span>
-                                      <code>{entry.error.googleStatus || "—"}</code>
-                                    </div>
-                                    <div>
-                                      <span>errors[0].reason</span>
-                                      <code>{entry.error.googleReason || "—"}</code>
-                                    </div>
-                                    <div>
-                                      <span>errors[0].domain</span>
-                                      <code>{entry.error.googleDomain || "—"}</code>
-                                    </div>
-                                    <div>
-                                      <span>Clarity code</span>
-                                      <code>{entry.error.providerCode || "—"}</code>
-                                    </div>
-                                  </div>
-                                  <p className="gcal-debug-message">{entry.error.googleMessage || entry.error.message}</p>
-                                  {googleCalendarFailureHint(entry.error) ? (
-                                    <p className="gcal-debug-note">{googleCalendarFailureHint(entry.error)}</p>
-                                  ) : null}
-                                  {entry.error.rawBody ? (
-                                    <>
-                                      <h5>Raw response body</h5>
-                                      <pre className="gcal-debug-pre">{entry.error.rawBody}</pre>
-                                    </>
-                                  ) : null}
-                                </section>
-                              ) : null}
-
-                              {entry.request ? (
-                                <section className="gcal-debug-block">
-                                  <h4>
-                                    {entry.requestIsSample ? "Payload sent (sample from this run)" : "Payload that failed"}
-                                  </h4>
-                                  <div className="gcal-debug-grid">
-                                    <div>
-                                      <span>Method</span>
-                                      <code>{entry.request.method}</code>
-                                    </div>
-                                    <div>
-                                      <span>Booking</span>
-                                      <code>{entry.request.itemLabel || entry.request.itemId || "—"}</code>
-                                    </div>
-                                    <div>
-                                      <span>Event ID</span>
-                                      <code>{entry.request.eventId || "—"}</code>
-                                    </div>
-                                    <div>
-                                      <span>Clarity booking ID</span>
-                                      <code>{entry.request.itemId || "—"}</code>
-                                    </div>
-                                  </div>
-                                  <h5>Endpoint</h5>
-                                  <pre className="gcal-debug-pre">{entry.request.url}</pre>
-                                  {entry.request.payload ? (
-                                    <>
-                                      <h5>Request body</h5>
-                                      <pre className="gcal-debug-pre">{formatDebugJson(entry.request.payload)}</pre>
-                                    </>
-                                  ) : (
-                                    <p className="gcal-debug-note">No request body (DELETE request).</p>
-                                  )}
-                                </section>
-                              ) : entry.outcome !== "skipped" ? (
-                                <p className="gcal-debug-note">
-                                  No payload captured — the run failed before building an event, or there were no bookings to send.
-                                </p>
-                              ) : null}
-
-                              <div className="gcal-debug-entry-actions">
-                                <button className="outline-button" onClick={() => copyGoogleCalendarDebugEntry(entry)} type="button">
-                                  <Copy size={16} />
-                                  Copy entry JSON
-                                </button>
-                              </div>
-                            </div>
-                          ) : null}
-                        </li>
-                      );
-                    })}
-                  </ol>
-                </details>
+              <SettingsGroup id="google-calendar" icon={ClarityCalendarSync} section="developer" title="Calendar feed & video storage" className="sync-card">
 
                 <section className="settings-subsection video-storage-section" aria-labelledby="video-storage-heading">
                   <div className="video-storage-heading">
@@ -33643,10 +33654,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     <input
                       value={businessNameDraft.businessName}
                       readOnly={businessNameIsLocked}
+                      maxLength={100}
                       onChange={(event) =>
-                        businessNameEditor.setDraftValue((current) =>
-                          cleanCoachAccount({ ...current, businessName: event.target.value }),
-                        )
+                        // Kept raw while typing: cleaning trims, which ate the
+                        // space between words. saveCoachAccount cleans on save.
+                        businessNameEditor.setDraftValue((current) => ({ ...current, businessName: event.target.value }))
                       }
                     />
                   </label>
@@ -33665,6 +33677,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     <span>Brand name</span>
                     <input
                       value={brandSettings.coachName}
+                      maxLength={80}
                       onChange={(event) => updateBrandSetting("coachName", event.target.value)}
                       onBlur={() => void saveBrandSettings()}
                       placeholder={coachAccount.businessName}

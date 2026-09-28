@@ -8,7 +8,6 @@ import {
 } from "./_shared/clarity-cloud-google-config.mts";
 import {
   getGoogleAccessToken,
-  googleCalendarScopes,
   googleDriveFileScope,
   hasGoogleScopes,
   loadGoogleProviderConnection,
@@ -20,12 +19,13 @@ import {
 import { requireCoachActor } from "./_shared/coach-auth.mts";
 
 const driveFileScope = googleDriveFileScope;
-const requiredDriveScopes = [...googleCalendarScopes, googleDriveFileScope];
+// Drive is its own sign-in now, separate from each coach's calendar: it asks
+// for Drive and the email to show, nothing else.
+const requiredDriveScopes = [googleDriveFileScope, "https://www.googleapis.com/auth/userinfo.email"];
 
 type DriveStatusState =
   | "not_connected"
   | "connected"
-  | "permission_upgrade_required"
   | "reconnect_required"
   | "blocked"
   | "error";
@@ -116,7 +116,6 @@ async function driveStatusFromSettings(accountId: string, req: Request, settings
   const configured = config.configured;
   const connection = await loadGoogleProviderConnection(accountId);
   const providerStatus = publicGoogleProviderStatus(connection, requiredDriveScopes);
-  const calendarConnected = Boolean(connection?.calendarEnabled && hasGoogleScopes(connection, googleCalendarScopes));
   const driveScopeGranted = Boolean(connection && hasGoogleScopes(connection, [driveFileScope]));
   const encryptionConfigured = isClarityCloudProviderTokenEncryptionConfigured();
   const providerStorageConfigured = true;
@@ -139,7 +138,6 @@ async function driveStatusFromSettings(accountId: string, req: Request, settings
   let state: DriveStatusState = "not_connected";
   if (!configured) state = "blocked";
   else if (blocker) state = "blocked";
-  else if (calendarConnected && !driveScopeGranted) state = "permission_upgrade_required";
   else if (driveScopeGranted && connection?.driveEnabled && connection.connectionStatus === "connected") state = "connected";
   else if (connection?.connectionStatus === "reconnect_required") state = "reconnect_required";
   else if (connection?.connectionStatus === "error") state = "error";
@@ -152,9 +150,8 @@ async function driveStatusFromSettings(accountId: string, req: Request, settings
     connected,
     state,
     accountId,
-    calendarConnected,
     driveScopeGranted,
-    accountEmail: providerStatus.accountEmail || settings.googleCalendarAccountEmail || "",
+    accountEmail: providerStatus.accountEmail,
     redirectUri: config.redirectUri,
     scope: driveFileScope,
     requestedScopes: requiredDriveScopes.join(" "),
@@ -172,9 +169,7 @@ async function driveStatusFromSettings(accountId: string, req: Request, settings
     blocker,
     message:
       blocker ||
-      (state === "permission_upgrade_required"
-        ? "Clarity Cloud permission required."
-        : state === "connected"
+      (state === "connected"
           ? "Clarity Cloud can send saved videos."
           : state === "reconnect_required"
             ? "Reconnect the Clarity Cloud provider before transfers can be prepared."
@@ -278,10 +273,8 @@ async function finishGoogleDriveOAuth(req: Request) {
       : requiredDriveScopes,
     // Google told us; anything else is a guess and must not overwrite the truth.
     scopesFromProvider: cleanString(token.scope, "", 3000).split(/\s+/).filter(Boolean).length > 0,
-    providerEmail: profile.email || settings.googleCalendarAccountEmail || "",
+    providerEmail: profile.email,
     providerUserId: profile.id,
-    enableCalendar: true,
-    enableDrive: true,
   });
   await setSettings(accountId, {
     googleDriveOAuthState: "",

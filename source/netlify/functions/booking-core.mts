@@ -9,9 +9,8 @@ import {
 } from "node:crypto";
 
 import {
-  getGoogleCalendarSyncStatus,
+  syncAllCoachCalendarsNow,
   syncGoogleCalendarChangesIfEnabled,
-  syncGoogleCalendarNow,
 } from "./google-calendar-sync.mts";
 import { inferBookingAction, notifyBookingEvent, sendCoachPushForBooking } from "./notification-engine.mts";
 import { cancelOptixCustomerBooking } from "./_shared/optix-cancel.mts";
@@ -679,6 +678,16 @@ function cleanHexColor(value, fallback) {
   return /^#[0-9a-f]{6}$/i.test(trimmed) ? trimmed : fallback;
 }
 
+// A coach photo: either a link, or a small image uploaded from the coach
+// profile screen and kept as a data URL beside the coach (like the logo).
+const COACH_PHOTO_DATA_URL = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$/;
+function cleanCoachPhoto(value) {
+  if (typeof value === "string" && value.startsWith("data:image/")) {
+    return value.length <= 200_000 && COACH_PHOTO_DATA_URL.test(value) ? value : "";
+  }
+  return cleanUrl(value, "");
+}
+
 function cleanLogoPreview(value) {
   if (typeof value !== "string" || !value.startsWith("data:image/")) return "";
   return value.slice(0, 180_000);
@@ -1246,7 +1255,7 @@ function cleanCoachProfile(raw = {}, fallback = defaultCoachProfileFromAccount()
     email: cleanEmail(raw?.email, fallback.email),
     phone: cleanString(raw?.phone, "", 80) || undefined,
     bio: cleanString(raw?.bio, "", 600) || undefined,
-    photoUrl: cleanUrl(raw?.photoUrl, "", 300) || undefined,
+    photoUrl: cleanCoachPhoto(raw?.photoUrl) || undefined,
     active: raw?.active !== false,
     archived: raw?.archived === true,
     bookable: raw?.bookable !== false,
@@ -5792,11 +5801,13 @@ async function readWorkspaceBootstrap(membership: CoachActor): Promise<Workspace
 async function readCalendarState(accountId: string) {
   const { settings: settingsMap, syncKey, updatedAt } = await readStateSettingsSnapshot(accountId);
   const account = coachAccountFromSettings(settingsMap, accountId);
-  const [items, people, notifications, googleCalendar] = await Promise.all([
+  // No Google Calendar status here: it is per coach, read by the coach
+  // profile, and a connected one costs a Google API call -- which every read
+  // of the calendar used to pay.
+  const [items, people, notifications] = await Promise.all([
     readItems(accountId),
     readPeople(accountId),
     readNotificationHistory(accountId),
-    getGoogleCalendarSyncStatus(accountId),
   ]);
   return {
     syncKey,
@@ -5814,7 +5825,6 @@ async function readCalendarState(accountId: string) {
     brand: brandSettingsFromSettings(settingsMap, account),
     accountId,
     account,
-    googleCalendar,
   };
 }
 
@@ -6380,7 +6390,8 @@ function deferGoogleCalendarSync(accountId, changes, trigger = "admin_calendar_s
  * the calendar, which is the last thing a save should be made to wait for.
  */
 function deferGoogleCalendarAvailabilitySync(accountId, netlifyContext = null) {
-  const task = syncGoogleCalendarNow(accountId, "availability_save")
+  // Every connected coach, since one save can change several coaches' hours.
+  const task = syncAllCoachCalendarsNow(accountId, "availability_save")
     .then((result) => console.info("availability:google_sync_completed_after_response", { ok: result?.ok !== false }))
     .catch((error) => console.error("availability:google_sync_failed_after_response", error));
   if (netlifyContext && typeof netlifyContext.waitUntil === "function") {
@@ -6799,26 +6810,20 @@ async function writeCalendarState(accountId: string, nextState: Record<string, a
   // readAdminSettings/readBrandSettings/readCoachAccount all derive from the same settings
   // table, so share one bulk read across them instead of each fetching its own copy in parallel.
   const sharedSettingsMap = await readSettingsMap(accountId);
-  const [people, notifications, settings, brand, account, googleCalendar] = await Promise.all([
+  const [people, notifications, settings, brand, account] = await Promise.all([
     readPeople(peopleAccountId),
     readNotificationHistory(accountId),
     readAdminSettings(accountId, sharedSettingsMap),
     readBrandSettings(accountId, sharedSettingsMap),
     readCoachAccount(accountId, sharedSettingsMap),
-    getGoogleCalendarSyncStatus(accountId),
   ]);
-  // Fired, not awaited: see deferGoogleCalendarSync. The connection status the
-  // client shows comes from the read above, so the pending marker adds to it
-  // rather than replacing it with a bare flag.
-  const googleCalendarSync = {
-    ...googleCalendar,
-    ...deferGoogleCalendarSync(
-      accountId,
-      googleCalendarChangesBetween(current.items, items),
-      "admin_calendar_save",
-      netlifyContext,
-    ),
-  };
+  // Fired, not awaited: see deferGoogleCalendarSync.
+  const googleCalendarSync = deferGoogleCalendarSync(
+    accountId,
+    googleCalendarChangesBetween(current.items, items),
+    "admin_calendar_save",
+    netlifyContext,
+  );
   return {
     syncKey,
     items: context ? items.filter((item) => canReadCalendarItem(context, item, { ...current, items })) : items,
@@ -6834,7 +6839,6 @@ async function writeCalendarState(accountId: string, nextState: Record<string, a
     settings,
     brand,
     account,
-    googleCalendar,
     googleCalendarSync,
   };
 }
@@ -7252,7 +7256,6 @@ function publicCalendarState(state) {
     settings: state.settings,
     brand: state.brand,
     account: state.account,
-    googleCalendar: state.googleCalendar,
     googleCalendarSync: state.googleCalendarSync,
     diagnostics: state.diagnostics,
   };
@@ -14187,6 +14190,33 @@ async function routeBookingApiRequest(
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountAdminContext(requestContext, "You do not have permission to manage coaches.");
       return json({ coaches: await writeCoachProfiles(requestContext.accountId, body.coaches, requestContext) });
+    }
+
+    // A coach editing their own profile. Only the personal fields are read,
+    // and only the signed-in person's own coach record is touched, so this is
+    // open to every role -- unlike PUT /api/coaches, which rewrites the list.
+    if (req.method === "PUT" && pathname === "/api/coaches/me") {
+      const body = await parseBody(req);
+      const state = await readSettingsState(await currentAccountId(req));
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAuthenticatedContext(requestContext);
+      const own = (state.coaches || []).find(
+        (coach) => coach.id === requestContext.coachId && recordBelongsToAccount(coach, requestContext.accountId),
+      );
+      if (!own) throw permissionDenied("You do not have a coach profile to edit.");
+      const next = (state.coaches || []).map((coach) =>
+        coach.id === own.id
+          ? {
+              ...coach,
+              displayName: cleanString(body?.displayName, "", 120) || coach.name,
+              phone: cleanString(body?.phone, "", 80),
+              bio: cleanString(body?.bio, "", 600),
+              photoUrl: cleanCoachPhoto(body?.photoUrl),
+            }
+          : coach,
+      );
+      const saved = await writeCoachProfiles(requestContext.accountId, next, requestContext);
+      return json({ coach: saved.find((coach) => coach.id === own.id) });
     }
 
     if (req.method === "GET" && pathname === "/api/availability") {
