@@ -28,6 +28,8 @@ import { couponApplyAmount, remainingAfterCoupon } from "./couponMath";
 import { CouponPicker, useSpendableCoupons } from "./CouponPicker";
 import { ReceiptEmailPrompt } from "./ReceiptEmailPrompt";
 import { postPosJson, renderQrSvg, usePosPaymentPoll } from "./posCheckoutPoll";
+import { TerminalPayment, tapIsBusy } from "./TerminalPayment";
+import { tenderLabel, useTapToPay, type PosTender, type TapState } from "./terminal";
 import { addToBasket, basketTotal, describeBasket, isLowStock, lineTotal, round2, setBasketQuantity } from "./stockMath";
 import type { BasketLine } from "./stockMath";
 
@@ -96,7 +98,12 @@ export function PosCheckoutModal({
   const [payByCoupon, setPayByCoupon] = useState(false);
   const [confirmingCoupon, setConfirmingCoupon] = useState(false);
 
-  const [stage, setStage] = useState<"form" | "qr" | "done">("form");
+  const [stage, setStage] = useState<"form" | "tap" | "qr" | "done">("form");
+  // Tap to Pay: only ever ready inside the staff iPhone app. Everywhere else
+  // the Clarity Pay route is the QR, exactly as before.
+  const tapToPay = useTapToPay();
+  const [tapState, setTapState] = useState<TapState | null>(null);
+  const [tenders, setTenders] = useState<PosTender[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [transaction, setTransaction] = useState<PosTransaction | null>(null);
@@ -163,7 +170,9 @@ export function PosCheckoutModal({
   const ctaHint = passId || payByCoupon
     ? ""
     : selectedMethod?.kind === "clarity_pay"
-      ? "Shows a QR code the customer scans to pay."
+      ? tapToPay.ready
+        ? "Customer taps their card on this iPhone. The QR is there if they'd rather."
+        : "Shows a QR code the customer scans to pay."
       : selectedMethod && !selectedMethod.settlesImmediately
         ? "Recorded as owed. Mark it paid from the POS list once settled."
         : "";
@@ -364,18 +373,48 @@ export function PosCheckoutModal({
         setStage("done");
         return;
       }
-
-      const checkout = (await postPosJson(`/api/billing/pos/transactions/${encodeURIComponent(sale.id)}/checkout`, {})) as {
-        url?: string;
-      };
-      if (!checkout.url) throw new Error("Stripe did not return a checkout link.");
-      setCheckoutUrl(checkout.url);
-      setStage("qr");
+      if (tapToPay.ready) {
+        setStage("tap");
+        return;
+      }
+      await showQr(sale);
     } catch (paymentError) {
       setError(paymentError instanceof Error ? paymentError.message : "Payment could not be recorded.");
     } finally {
       setBusy(false);
     }
+  }
+
+  // The QR for a pending Clarity Pay sale. Also the way out of Tap to Pay: the
+  // server stands the tap down first, so the customer can only pay one way.
+  async function showQr(sale: PosTransaction) {
+    const checkout = (await postPosJson(`/api/billing/pos/transactions/${encodeURIComponent(sale.id)}/checkout`, {})) as {
+      url?: string;
+    };
+    if (!checkout.url) throw new Error("Stripe did not return a checkout link.");
+    setCheckoutUrl(checkout.url);
+    setStage("qr");
+  }
+
+  async function switchToQr() {
+    if (!transaction) return;
+    setBusy(true);
+    setError("");
+    try {
+      await showQr(transaction);
+    } catch (qrError) {
+      setError(qrError instanceof Error ? qrError.message : "Could not show the QR.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function tapPaid(paid: Extract<TapState, { kind: "succeeded" }>) {
+    setTransaction(paid.transaction);
+    setTenders(paid.tenders);
+    setStage("done");
+    onCompleted(paid.transaction);
+    if (paid.issuedPasses.length) onToast(`${paid.issuedPasses.join(", ")} added to their profile.`);
   }
 
   // Abandoning a Clarity Pay sale voids the pending record rather than leaving
@@ -390,17 +429,21 @@ export function PosCheckoutModal({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "void" }),
       });
-      if (response.ok) {
-        const data = (await response.json()) as { transaction?: PosTransaction };
-        if (data.transaction) onCompleted(data.transaction);
+      const data = (await response.json().catch(() => null)) as { transaction?: PosTransaction; message?: string } | null;
+      if (!response.ok) {
+        // Refused because a card is paying for it right now, or just did.
+        // Stay open so the coach sees how it ends.
+        setError(data?.message || "Could not cancel the sale.");
+        setBusy(false);
+        return;
       }
+      if (data?.transaction) onCompleted(data.transaction);
       onToast(`${transaction.receiptNumber} cancelled.`);
     } catch {
       onToast("Could not cancel the sale - check the POS list.");
-    } finally {
-      setBusy(false);
-      onClose();
     }
+    setBusy(false);
+    onClose();
   }
 
   // A Clarity Pay sale that never cleared has to be voided on the way out,
@@ -412,6 +455,8 @@ export function PosCheckoutModal({
     Boolean(transaction) && transaction?.status === "pending" && transaction?.paymentMethodKind === "clarity_pay";
 
   function closeModal() {
+    // Never while a card may be mid-charge.
+    if (stage === "tap" && tapIsBusy(tapState)) return;
     if (abandonable) {
       void cancelPendingSale();
       return;
@@ -419,12 +464,13 @@ export function PosCheckoutModal({
     onClose();
   }
 
-  const heading = stage === "done" ? "Payment recorded" : stage === "qr" ? "Waiting for payment" : "Checkout";
+  const heading =
+    stage === "done" ? "Payment recorded" : stage === "qr" || stage === "tap" ? "Waiting for payment" : "Checkout";
 
   // Backdrop dismissal is disabled while the QR is up so a stray tap on a till
   // screen can't void a payment the customer is mid-way through.
   return (
-    <div className="details-overlay" role="presentation" onPointerDown={stage === "qr" ? undefined : closeModal}>
+    <div className="details-overlay" role="presentation" onPointerDown={stage === "qr" || stage === "tap" ? undefined : closeModal}>
       <aside
         className="details-panel details-modal pos-checkout-modal"
         role="dialog"
@@ -872,7 +918,7 @@ export function PosCheckoutModal({
                         ? `Pay ${formatMoney(amount, currency)} with coupon`
                         : "Pay with coupon"
                       : selectedMethod?.kind === "clarity_pay"
-                        ? `Charge ${amountValid ? formatMoney(dueNow, currency) : ""}`.trim()
+                        ? `${tapToPay.ready ? "Tap card" : "Charge"} ${amountValid ? formatMoney(dueNow, currency) : ""}`.trim()
                         : selectedMethod && !selectedMethod.settlesImmediately
                           ? `Record ${amountValid ? formatMoney(dueNow, currency) : "payment"} as owed`
                           : `Record ${amountValid ? formatMoney(dueNow, currency) : "payment"}`}
@@ -882,10 +928,37 @@ export function PosCheckoutModal({
           </>
         )}
 
+        {stage === "tap" && transaction && tapToPay.ready && (
+          <>
+            <p className="muted">
+              {transaction.customerName ? `${transaction.customerName} - ` : ""}
+              {transaction.receiptNumber}
+            </p>
+            {(transaction.couponAmount ?? 0) > 0 && (
+              <p className="field-help">
+                {formatMoney(transaction.amount, transaction.currency)}, less{" "}
+                {formatMoney(transaction.couponAmount ?? 0, transaction.currency)} on a voucher.
+              </p>
+            )}
+            <TerminalPayment
+              transactionId={transaction.id}
+              amount={remainingAfterCoupon(transaction.amount, transaction.couponAmount ?? 0)}
+              currency={transaction.currency}
+              status={tapToPay.status}
+              formatMoney={formatMoney}
+              onPaid={tapPaid}
+              onShowQr={switchToQr}
+              onCancelSale={cancelPendingSale}
+              onStateChange={setTapState}
+            />
+          </>
+        )}
+
         {stage === "qr" && transaction && (
           <>
             <p className="muted">
-              {formatMoney(transaction.amount, transaction.currency)} - {transaction.receiptNumber}
+              {formatMoney(remainingAfterCoupon(transaction.amount, transaction.couponAmount ?? 0), transaction.currency)} -{" "}
+              {transaction.receiptNumber}
             </p>
             <p className="field-help">
               Customer scans this with their phone camera and pays with Apple Pay, Google Pay or a card. This screen
@@ -899,6 +972,11 @@ export function PosCheckoutModal({
               <a className="outline-button" href={checkoutUrl} target="_blank" rel="noreferrer noopener">
                 <ExternalLink size={15} /> Pay on this device
               </a>
+              {tapToPay.ready && (
+                <button className="outline-button" disabled={busy} onClick={() => setStage("tap")} type="button">
+                  Tap card instead
+                </button>
+              )}
             </div>
           </>
         )}
@@ -914,11 +992,22 @@ export function PosCheckoutModal({
                 </span>
               </div>
             </div>
-            {(transaction.couponAmount ?? 0) > 0 && (
-              <p className="field-help">
-                {formatMoney(transaction.couponAmount ?? 0, transaction.currency)} of it paid by coupon
-                {coupon ? ` ${coupon.code}` : ""}.
-              </p>
+            {tenders.length > 0 ? (
+              <ul className="pos-tenders">
+                {tenders.map((tender) => (
+                  <li key={`${tender.kind}-${tender.channel}`}>
+                    <span>{tenderLabel(tender)}</span>
+                    <span>{formatMoney(tender.amount, tender.currency || transaction.currency)}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              (transaction.couponAmount ?? 0) > 0 && (
+                <p className="field-help">
+                  {formatMoney(transaction.couponAmount ?? 0, transaction.currency)} of it paid by coupon
+                  {coupon ? ` ${coupon.code}` : ""}.
+                </p>
+              )
             )}
             {transaction.status === "pending" && (
               <p className="field-help">

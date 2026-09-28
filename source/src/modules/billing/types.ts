@@ -382,6 +382,9 @@ export type PosTransaction = {
   // it off the payment method.
   couponId?: string;
   couponAmount?: number;
+  // How the card part arrived: "stripe_checkout" (QR), "terminal_tap_to_pay".
+  // Empty for manual methods and older sales.
+  paymentChannel?: string;
   paidAt: string;
   createdAt: string;
   updatedAt: string;

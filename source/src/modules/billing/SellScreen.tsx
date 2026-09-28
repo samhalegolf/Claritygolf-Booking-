@@ -56,6 +56,8 @@ import {
 import { catalogTiles, offTabMatchCount } from "./catalogSearch";
 import type { SellLine } from "./stockMath";
 import { postPosJson, renderQrSvg, usePosPaymentPoll } from "./posCheckoutPoll";
+import { TerminalPayment } from "./TerminalPayment";
+import { tenderLabel, useTapToPay, type PosTender, type TapState } from "./terminal";
 
 export type SellScreenProps = {
   currency: string;
@@ -184,8 +186,11 @@ export function SellScreen({
   const [openLessonGroups, setOpenLessonGroups] = useState<string[]>([]);
 
   // Payment overlay. "closed" -> "method" -> ("coupon" to confirm a part
-  // payment, "cash" for tendering) -> "qr" -> "done".
-  const [payStage, setPayStage] = useState<"closed" | "method" | "coupon" | "cash" | "qr" | "done">("closed");
+  // payment, "cash" for tendering) -> ("tap" on the staff iPhone app, else
+  // "qr") -> "done".
+  const [payStage, setPayStage] = useState<"closed" | "method" | "coupon" | "cash" | "tap" | "qr" | "done">("closed");
+  const tapToPay = useTapToPay();
+  const [tenders, setTenders] = useState<PosTender[]>([]);
   const [methodId, setMethodId] = useState("");
   const [tendered, setTendered] = useState("");
   const [busy, setBusy] = useState(false);
@@ -311,6 +316,7 @@ export function SellScreen({
     setCoupon(null);
     setCouponApplied(false);
     setIssuedCoupons([]);
+    setTenders([]);
     setPayStage("closed");
     searchRef.current?.focus();
   }
@@ -524,19 +530,49 @@ export function SellScreen({
         setPayStage("done");
         return;
       }
-
-      const checkout = (await postPosJson(
-        `/api/billing/pos/transactions/${encodeURIComponent(created.id)}/checkout`,
-        {},
-      )) as { url?: string };
-      if (!checkout.url) throw new Error("Stripe did not return a checkout link.");
-      setCheckoutUrl(checkout.url);
-      setPayStage("qr");
+      if (tapToPay.ready) {
+        setPayStage("tap");
+        return;
+      }
+      await showQr(created);
     } catch (paymentError) {
       setError(paymentError instanceof Error ? paymentError.message : "The sale could not be recorded.");
     } finally {
       setBusy(false);
     }
+  }
+
+  // The QR for a pending Clarity Pay sale, and the way out of Tap to Pay: the
+  // server stands the tap down first, so the customer can only pay one way.
+  async function showQr(pending: PosTransaction) {
+    const checkout = (await postPosJson(
+      `/api/billing/pos/transactions/${encodeURIComponent(pending.id)}/checkout`,
+      {},
+    )) as { url?: string };
+    if (!checkout.url) throw new Error("Stripe did not return a checkout link.");
+    setCheckoutUrl(checkout.url);
+    setPayStage("qr");
+  }
+
+  async function switchToQr() {
+    if (!sale) return;
+    setBusy(true);
+    setError("");
+    try {
+      await showQr(sale);
+    } catch (qrError) {
+      setError(qrError instanceof Error ? qrError.message : "Could not show the QR.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function tapPaid(paid: Extract<TapState, { kind: "succeeded" }>) {
+    setSale(paid.transaction);
+    setTenders(paid.tenders);
+    if (paid.issuedPasses.length) setIssuedPasses(paid.issuedPasses);
+    setPayStage("done");
+    onSaleCompleted(paid.transaction);
   }
 
   usePosPaymentPoll(
@@ -565,21 +601,25 @@ export function SellScreen({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "void" }),
       });
-      if (response.ok) {
-        const data = (await response.json()) as { transaction?: PosTransaction };
-        if (data.transaction) onSaleCompleted(data.transaction);
+      const data = (await response.json().catch(() => null)) as { transaction?: PosTransaction; message?: string } | null;
+      if (!response.ok) {
+        // Refused because a card is paying for it right now, or just did.
+        // Stay on the payment so the coach sees how it ends.
+        setError(data?.message || "Could not cancel the sale.");
+        setBusy(false);
+        return;
       }
+      if (data?.transaction) onSaleCompleted(data.transaction);
       onToast(`${sale.receiptNumber} cancelled.`);
       // Voiding puts any voucher value back; show the restored balance.
       if (sale.couponId) couponBook.reload();
     } catch {
       onToast("Could not cancel the sale - check the POS list.");
-    } finally {
-      setBusy(false);
-      setSale(null);
-      setCheckoutUrl("");
-      setPayStage("closed");
     }
+    setBusy(false);
+    setSale(null);
+    setCheckoutUrl("");
+    setPayStage("closed");
   }
 
   const qrMarkup = useMemo(() => (checkoutUrl ? renderQrSvg(checkoutUrl) : ""), [checkoutUrl]);
@@ -1001,7 +1041,7 @@ export function SellScreen({
           <aside className="details-panel details-modal sell-pay-panel" role="dialog" aria-modal="true">
             <div className="panel-header">
               <span>Payment</span>
-              {payStage !== "qr" && (
+              {payStage !== "qr" && payStage !== "tap" && (
                 <button
                   className="icon-button small"
                   onClick={() => (payStage === "done" ? resetSale() : setPayStage("closed"))}
@@ -1133,9 +1173,25 @@ export function SellScreen({
               </>
             )}
 
+            {payStage === "tap" && sale && tapToPay.ready && (
+              <TerminalPayment
+                transactionId={sale.id}
+                amount={remainingAfterCoupon(sale.amount, sale.couponAmount ?? 0)}
+                currency={sale.currency}
+                status={tapToPay.status}
+                formatMoney={formatMoney}
+                onPaid={tapPaid}
+                onShowQr={switchToQr}
+                onCancelSale={() => void cancelPendingSale()}
+              />
+            )}
+
             {payStage === "qr" && sale && (
               <>
-                <h2 className="sell-pay-total">{formatMoney(sale.amount, sale.currency)}</h2>
+                {/* What the QR charges: the voucher's slice is already paid. */}
+                <h2 className="sell-pay-total">
+                  {formatMoney(remainingAfterCoupon(sale.amount, sale.couponAmount ?? 0), sale.currency)}
+                </h2>
                 <p className="field-help">
                   Customer scans this and pays with Apple Pay, Google Pay or a card. This screen updates on its own the
                   moment it clears.
@@ -1150,6 +1206,11 @@ export function SellScreen({
                   <a className="outline-button" href={checkoutUrl} target="_blank" rel="noreferrer noopener">
                     <ExternalLink size={15} /> Pay on this device
                   </a>
+                  {tapToPay.ready && (
+                    <button className="outline-button" disabled={busy} onClick={() => setPayStage("tap")} type="button">
+                      Tap card instead
+                    </button>
+                  )}
                 </div>
               </>
             )}
@@ -1165,11 +1226,22 @@ export function SellScreen({
                     </span>
                   </div>
                 </div>
-                {(sale.couponAmount ?? 0) > 0 && (
-                  <p className="field-help">
-                    {formatMoney(sale.couponAmount ?? 0, sale.currency)} of it paid by coupon
-                    {coupon ? ` ${coupon.code}` : ""}.
-                  </p>
+                {tenders.length > 0 ? (
+                  <ul className="pos-tenders">
+                    {tenders.map((tender) => (
+                      <li key={`${tender.kind}-${tender.channel}`}>
+                        <span>{tenderLabel(tender)}</span>
+                        <span>{formatMoney(tender.amount, tender.currency || sale.currency)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  (sale.couponAmount ?? 0) > 0 && (
+                    <p className="field-help">
+                      {formatMoney(sale.couponAmount ?? 0, sale.currency)} of it paid by coupon
+                      {coupon ? ` ${coupon.code}` : ""}.
+                    </p>
+                  )
                 )}
                 {tendered !== "" && change > 0 && (
                   <div className="sell-change">

@@ -3943,6 +3943,25 @@ async function updatePosTransactionStatus(accountId: string, id: string, body: R
   if (!["pending", "paid", "refunded", "void"].includes(status)) {
     throw Object.assign(new Error("Unknown status."), { status: 400 });
   }
+  // Closing a sale that a card is still paying for would leave money taken
+  // against a void receipt. Stand the Terminal payment down first: one that
+  // already went through settles the sale instead, and one still processing
+  // stops the close until Stripe decides.
+  if (status === "void" || status === "refunded") {
+    const released = await releaseTerminalAttempt(accountId, id);
+    if (released.state === "succeeded") {
+      throw Object.assign(new Error("A card payment for this sale has just gone through, so it is now paid."), {
+        status: 409,
+        code: "POS_ALREADY_PAID",
+      });
+    }
+    if (released.state === "processing") {
+      throw Object.assign(new Error("A card payment for this sale is still processing. Wait for it to finish."), {
+        status: 409,
+        code: "TERMINAL_PROCESSING",
+      });
+    }
+  }
   const patch: Record<string, unknown> = { status, updated_at: nowIso() };
   if (status === "paid") patch.paid_at = nowIso();
   if (body?.note !== undefined) patch.note = cleanString(body?.note, "", 600) || null;
