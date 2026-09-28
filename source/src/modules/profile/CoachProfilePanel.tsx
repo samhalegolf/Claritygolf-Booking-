@@ -1,4 +1,4 @@
-// The Coach profile: who the coach is, and everything Clarity is plugged into
+// The Business Hub: who the coach is, and everything Clarity is plugged into
 // on their behalf, on one screen.
 //
 // It is a map, not a second Settings. Every card routes to the screen that
@@ -20,16 +20,27 @@
 
 import { useEffect, useState } from "react";
 import { integrationsStore, type IntegrationCard } from "../integrations/integrationsStore";
-import { AlertCircle, ChevronDown, ChevronUp, Plus } from "lucide-react";
+import { AlertCircle, ChevronDown, ChevronUp, Phone, Plus } from "lucide-react";
 import {
+  ClarityBookingPages,
   ClarityCalendar,
+  ClarityClientsPlayers,
+  ClarityEmail,
   ClarityFilesMedia,
   ClarityIntegrations,
+  ClarityInvoices,
+  ClarityLessonsProgrammes,
+  ClarityLocations,
+  ClarityMessages,
   ClarityNotifications,
   ClarityPayments,
   ClarityPlayerPortal,
+  ClarityPreferences,
+  ClarityProducts,
+  ClarityProfile,
   ClarityResources,
   ClaritySettings,
+  ClarityVideoAnalysis,
   type IconComponent,
 } from "../shared/ClarityIcons";
 
@@ -116,6 +127,23 @@ function SectionTitle({ name }: { name: string }) {
     </h3>
   );
 }
+
+/** The icon each of Clarity's own settings wears, keyed by ProfileInternalJob id. */
+const INTERNAL_JOB_ICONS: Record<string, IconComponent> = {
+  "lesson-types": ClarityLessonsProgrammes,
+  locations: ClarityLocations,
+  "booking-page": ClarityBookingPages,
+  "coach-branding": ClarityPreferences,
+  "email-notifications": ClarityEmail,
+  "notification-templates": ClarityNotifications,
+  "sms-notifications": ClarityMessages,
+  invoicing: ClarityInvoices,
+  products: ClarityProducts,
+  clients: ClarityClientsPlayers,
+  players: ClarityProfile,
+  video: ClarityVideoAnalysis,
+  practice: ClarityCalendar,
+};
 
 const EXTERNAL_SECTION_JOBS: Record<string, string> = {
   Calendar: "Calendar",
@@ -247,12 +275,15 @@ export function CoachProfilePanel({ identity, internalJobs, onOpen }: CoachProfi
           <div className="cp-identity-facts">
             {(
               [
-                ["Email", identity.email],
-                ["Phone", identity.phone],
-              ] as Array<[string, string]>
-            ).map(([key, value]) => (
+                ["Email", identity.email, ClarityEmail],
+                ["Phone", identity.phone, Phone],
+              ] as Array<[string, string, IconComponent]>
+            ).map(([key, value, Icon]) => (
               <div key={key}>
-                <span>{key}</span>
+                <span>
+                  <Icon size={14} />
+                  {key}
+                </span>
                 <strong>{value || "Not set"}</strong>
               </div>
             ))}
@@ -377,6 +408,14 @@ export function CoachProfilePanel({ identity, internalJobs, onOpen }: CoachProfi
             {section.internal.map((job) => (
               <article className="cp-cell" key={job.id}>
                 <div className="cp-cell-head">
+                  {(() => {
+                    const Icon = INTERNAL_JOB_ICONS[job.id];
+                    return Icon ? (
+                      <span className="cp-job-icon" aria-hidden="true">
+                        <Icon size={18} />
+                      </span>
+                    ) : null;
+                  })()}
                   <span className="cp-cell-title">
                     <strong>{job.label}</strong>
                   </span>

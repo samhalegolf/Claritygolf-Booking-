@@ -15502,7 +15502,9 @@ button {
 }
 
 .coach-profile .cp-identity-facts span {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   color: var(--c-muted);
   font-size: var(--c-size-group);
   text-transform: uppercase;
@@ -15566,6 +15568,13 @@ button {
   display: flex;
   align-items: center;
   gap: var(--c-space-4);
+}
+
+/* Clarity's own settings wear an icon where an outside connection wears its mark. */
+.cp-job-icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--c-text-soft);
 }
 
 .cp-cell-title {

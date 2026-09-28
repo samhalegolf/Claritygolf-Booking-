@@ -2790,7 +2790,7 @@ function sectionTitle(view: View, terms: BusinessTerminology = terminologyFor())
     case "players":
       return `${terms.customerSingular} Profiles`;
     case "profile":
-      return `${terms.staffSingular} profile`;
+      return "Business Hub";
     default:
       return "Calendar";
   }
@@ -24756,8 +24756,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             }
           : activeView === "profile"
             ? {
-                title: `${terms.staffSingular} profile`,
-                subtitle: "Who you are, and everything Clarity is plugged into on your behalf",
+                title: "Business Hub",
+                subtitle: "Your business, and everything Clarity is plugged into on your behalf",
               }
             : { title: sectionTitle(activeView, terms) };
   const failedDiagnosticEvents = diagnosticEvents.filter((event) => event.status === "failed");
@@ -24829,7 +24829,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             onClick={() => switchView("profile")}
           >
             <ClarityDashboardHome size={18} />
-            {terms.staffSingular} profile
+            Business Hub
           </button>
           <button className={activeView === "calendar" ? "active" : ""} onClick={() => switchView("calendar")}>
             <ClarityCalendar size={18} />
