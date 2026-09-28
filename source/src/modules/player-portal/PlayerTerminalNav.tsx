@@ -10,6 +10,17 @@
 // way in is the card on the home route -- a permanent link in the bar would put
 // "leave here" next to every screen in the terminal.
 import { terminologyFor, type BusinessTerminology } from "../../../netlify/functions/_shared/business-terminology.mts";
+import {
+  ClarityAssessments,
+  ClarityBookingPages,
+  ClarityCalendar,
+  ClarityDashboardHome,
+  ClarityLessonsProgrammes,
+  ClarityNewBooking,
+  ClarityPassesCredits,
+  ClarityVideoAnalysis,
+  type IconComponent,
+} from "../shared/ClarityIcons";
 
 export type PlayerTerminalDestination =
   | "home"
@@ -24,6 +35,7 @@ export type PlayerTerminalDestination =
 type NavLink = {
   id: PlayerTerminalDestination;
   label: string;
+  Icon: IconComponent;
 };
 
 // The order of the thing: a lesson happens, the coach reviews it, practice
@@ -39,13 +51,13 @@ type NavLink = {
 // configured an outside booking widget, and it is named by that business
 // rather than by us, so it is appended from `externalBooking` below.
 const NAV_LINKS: NavLink[] = [
-  { id: "home", label: "Home" },
-  { id: "lessons", label: "Lessons" },
-  { id: "reviews", label: "Reviews" },
-  { id: "passes", label: "Passes" },
-  { id: "practice", label: "Practice" },
-  { id: "notes", label: "Notes" },
-  { id: "videos", label: "Videos" },
+  { id: "home", label: "Home", Icon: ClarityDashboardHome },
+  { id: "lessons", label: "Lessons", Icon: ClarityCalendar },
+  { id: "reviews", label: "Reviews", Icon: ClarityAssessments },
+  { id: "passes", label: "Passes", Icon: ClarityPassesCredits },
+  { id: "practice", label: "Practice", Icon: ClarityLessonsProgrammes },
+  { id: "notes", label: "Notes", Icon: ClarityBookingPages },
+  { id: "videos", label: "Videos", Icon: ClarityVideoAnalysis },
 ];
 
 // Lessons -- and booking with it -- doesn't exist for a guest at all, and
@@ -113,7 +125,7 @@ export function PlayerTerminalNav({
   // read one from.
   const visibleLinks =
     !guest && externalBooking
-      ? [...baseLinks, { id: "book" as const, label: externalBooking.label }]
+      ? [...baseLinks, { id: "book" as const, label: externalBooking.label, Icon: ClarityNewBooking }]
       : baseLinks;
 
   return (
@@ -146,6 +158,7 @@ export function PlayerTerminalNav({
               aria-current={active === link.id ? "page" : undefined}
               onClick={() => onNavigate(link.id)}
             >
+              <link.Icon size={16} />
               {link.label}
             </button>
           ))}

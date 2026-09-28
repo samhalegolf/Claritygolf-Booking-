@@ -1138,9 +1138,13 @@
     gap: 0;
   }
 
+  /* Icon over label on a phone, so the whole bar still fits one row. */
   .player-terminal-nav-links button {
-    padding: 0 8px;
-    font-size: 13px;
+    flex-direction: column;
+    gap: 3px;
+    min-height: 48px;
+    padding: 4px 6px;
+    font-size: 12px;
   }
 
   .player-terminal .player-portal,
