@@ -73,7 +73,7 @@ export function openApiSpec(origin: string) {
       title: "Clarity API",
       version: "v1",
       description:
-        "Read and write a Clarity business's bookings, clients, passes, invoices, lesson types, coaches, locations and availability, " +
+        "Read and write a Clarity business's bookings, clients, passes, invoices, till sales, lesson types, coaches, locations and availability, " +
         "and receive webhooks when they change. Authenticate with an API key from Settings › API & webhooks, sent as " +
         "`Authorization: Bearer ck_live_…` (or `ck_test_…` for a sandbox). Times are ISO 8601 with an offset; money is in " +
         "minor units (cents). Lists page with `limit` and `cursor`. Errors are `{ error: { type, code, message, param, request_id } }`.",
@@ -239,6 +239,55 @@ export function openApiSpec(origin: string) {
             lines: { type: "array", description: "Only on a single invoice.", items: ref("InvoiceLine") },
           },
         },
+        Product: {
+          type: "object",
+          properties: {
+            object: { const: "product" }, id: { type: "string" }, name: { type: "string" },
+            kind: { type: "string" }, description: { type: "string" },
+            price: { type: "object", properties: { amount: { type: "integer" }, currency: { type: "string" } } },
+            tax_rate: { type: "number" }, sku: { type: ["string", "null"] },
+            track_stock: { type: "boolean" }, stock_level: { type: ["number", "null"] },
+            is_voucher: { type: "boolean", description: "Selling it issues a gift voucher." }, active: { type: "boolean" },
+          },
+        },
+        PaymentMethod: {
+          type: "object",
+          properties: {
+            object: { const: "payment_method" }, id: { type: "string" }, name: { type: "string" },
+            kind: { type: "string", enum: ["custom", "clarity_pay", "pass", "coupon"] },
+            settles_immediately: { type: "boolean", description: "False for On account: the sale is owed until marked paid." },
+            active: { type: "boolean" },
+            usable_through_api: { type: "boolean", description: "Only manual methods. Card, pass and coupon payments are taken in Clarity." },
+          },
+        },
+        Sale: {
+          type: "object",
+          properties: {
+            object: { const: "sale" }, id: { type: "string" }, receipt_number: { type: "string" },
+            status: { type: "string", enum: ["pending", "paid", "refunded", "void"] },
+            payment_method: { type: "object", properties: { id: { type: ["string", "null"] }, name: { type: "string" }, kind: { type: "string" } } },
+            description: { type: "string" },
+            amount: { type: "integer", description: "Taken, cents." },
+            listed_amount: { type: ["integer", "null"], description: "What it would have cost. The difference is a discount." },
+            coupon_amount: { type: "integer" }, currency: { type: "string" },
+            client: { type: "object", properties: { id: { type: ["string", "null"] }, name: { type: "string" }, email: { type: "string" } } },
+            booking_ids: { type: "array", items: { type: "string" } },
+            source: { type: "string", enum: ["lesson", "client", "counter"] },
+            channel: { type: ["string", "null"] }, note: { type: "string" },
+            paid_at: { type: ["string", "null"] }, created_at: DateTime, updated_at: DateTime,
+            items: {
+              type: "array",
+              description: "Only on a single sale.",
+              items: {
+                type: "object",
+                properties: {
+                  id: { type: "string" }, product_id: { type: ["string", "null"] }, name: { type: "string" }, sku: { type: "string" },
+                  quantity: { type: "number" }, unit_amount: { type: "integer" }, amount: { type: "integer" },
+                },
+              },
+            },
+          },
+        },
         Event: {
           type: "object",
           properties: {
@@ -249,7 +298,7 @@ export function openApiSpec(origin: string) {
             data: {
               type: "object",
               properties: {
-                object: { oneOf: [ref("Booking"), ref("Client"), ref("Pass"), ref("Invoice")] },
+                object: { oneOf: [ref("Booking"), ref("Client"), ref("Pass"), ref("Invoice"), ref("Sale")] },
                 redemption: { type: "object", description: "On pass.redeemed: the spend itself." },
                 previous_attributes: { type: "object", description: "On updates: the changed fields' previous values." },
               },
@@ -489,6 +538,74 @@ export function openApiSpec(origin: string) {
       },
       "/invoices/{id}/void": {
         post: op("voidInvoice", "Void an unpaid invoice", "invoices:write", ref("Invoice"), { parameters: [idParam("invoice"), idempotencyHeader] }),
+      },
+      "/products": {
+        get: op("listProducts", "What the till sells (lesson types are sold as items too, as lesson:<service id>)", "catalog:read", listOf("Product"), {
+          parameters: [query("active", "false to include retired products.", { type: "boolean" })],
+        }),
+      },
+      "/payment_methods": { get: op("listPaymentMethods", "The till's payment methods", "sales:read", listOf("PaymentMethod")) },
+      "/sales": {
+        get: op("listSales", "Till sales, newest first", "sales:read", listOf("Sale"), {
+          parameters: [
+            query("status", "pending, paid, refunded or void."),
+            query("client_id", "One client's sales."),
+            query("booking_id", "Sales that paid for this booking."),
+            query("receipt_number", "Exact receipt number."),
+            query("created_after", "ISO 8601.", { type: "string", format: "date-time" }),
+            query("created_before", "ISO 8601.", { type: "string", format: "date-time" }),
+            query("updated_since", "ISO 8601.", { type: "string", format: "date-time" }),
+            ...paging,
+          ],
+        }),
+        post: {
+          ...op("createSale", "Record a sale paid elsewhere (Cash, Eftpos) or owed (On account). Stock, vouchers and passes follow as at the till.", "sales:write", ref("Sale")),
+          parameters: [idempotencyHeader],
+          requestBody: json({
+            type: "object",
+            required: ["payment_method_id"],
+            properties: {
+              payment_method_id: { type: "string", description: "A method with usable_through_api." },
+              items: {
+                type: "array",
+                items: {
+                  type: "object",
+                  required: ["product_id"],
+                  properties: {
+                    product_id: { type: "string", description: "A product id, or lesson:<service id>." },
+                    quantity: { type: "integer" },
+                    unit_amount: { type: "integer", description: "Cents. Default: the catalogue price." },
+                  },
+                },
+              },
+              description: { type: "string", description: "Needed without items." },
+              amount: { type: "integer", description: "Cents. Needed without items; with items, overrides the total (a discount)." },
+              client_id: { type: "string" },
+              client: { type: "object", properties: { name: { type: "string" }, email: { type: "string" } } },
+              booking_ids: { type: "array", items: { type: "string" }, description: "Lessons this sale pays for." },
+              note: { type: "string" },
+            },
+          }),
+        },
+      },
+      "/sales/{id}": { get: op("getSale", "One sale, with its items", "sales:read", ref("Sale"), { parameters: [idParam("sale")] }) },
+      "/sales/{id}/mark_paid": {
+        post: op("markSalePaid", "An On account sale has been paid", "sales:write", ref("Sale"), { parameters: [idParam("sale"), idempotencyHeader] }),
+      },
+      "/sales/{id}/refund": {
+        post: op("refundSale", "Record money given back outside Clarity. Card sales are refunded in Clarity.", "sales:write", ref("Sale"), {
+          parameters: [idParam("sale"), idempotencyHeader],
+          requestBody: json({ type: "object", properties: { reason: { type: "string" } } }),
+        }),
+      },
+      "/sales/{id}/void": {
+        post: op("voidSale", "Cancel an unpaid sale", "sales:write", ref("Sale"), { parameters: [idParam("sale"), idempotencyHeader] }),
+      },
+      "/sales/{id}/send_receipt": {
+        post: op("sendSaleReceipt", "Email the receipt", "sales:write", ref("Sale"), {
+          parameters: [idParam("sale"), idempotencyHeader],
+          requestBody: json({ type: "object", properties: { email: { type: "string", description: "Default: the client's email." } } }),
+        }),
       },
       "/events": {
         get: op("listEvents", "Everything that happened, oldest first, for 30 days. Keep the last `next_cursor` to resume.", "events:read", listOf("Event"), {

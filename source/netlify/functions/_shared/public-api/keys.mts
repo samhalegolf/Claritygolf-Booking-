@@ -28,6 +28,8 @@ export const API_SCOPES = [
   "passes:write",
   "invoices:read",
   "invoices:write",
+  "sales:read",
+  "sales:write",
   "events:read",
   "webhooks:manage",
 ] as const;
@@ -43,6 +45,8 @@ export const SCOPE_LABELS: Record<ApiScope, string> = {
   "passes:write": "Issue, redeem and void passes",
   "invoices:read": "Read invoices",
   "invoices:write": "Create, send, mark paid, void and delete draft invoices",
+  "sales:read": "Read till sales, products and payment methods",
+  "sales:write": "Record till sales, mark them paid, refund, void and email receipts",
   "events:read": "Read the event feed",
   "webhooks:manage": "Subscribe and unsubscribe webhooks",
 };

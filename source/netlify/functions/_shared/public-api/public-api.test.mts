@@ -5,6 +5,7 @@ import { cleanScopes, hashApiKey, looksLikeApiKey, mintApiKey } from "./keys.mts
 import { decodeCursor, encodeCursor, listPage, pageLimit, requestHash } from "./http.mts";
 import { cleanEventList, collapseChanges, eventTypeFor, isPrivateAddress, nextAttemptAt, objectIdFor, RETRY_SCHEDULE_MINUTES } from "./events.mts";
 import { billingLines, dateOnly, invoiceObject } from "./commerce.mts";
+import { API_PAYMENT_METHOD_KINDS, saleObject, tillItems } from "./sales.mts";
 import { bookingFromRow, previousAttributes, slotKey, isoToSlotKey, type Catalog } from "./serialize.mts";
 import { ROUTES, matchRoute } from "./routes.mts";
 import { openApiSpec } from "./openapi.mts";
@@ -287,4 +288,48 @@ test("invoice lines are cents in, dollars to the billing engine, and checked", (
   assert.throws(() => billingLines([{ unit_amount: 100 }]), /description/);
   assert.throws(() => billingLines([{ description: "x", unit_amount: 12.5 }]), /whole number of cents/);
   assert.throws(() => billingLines([{ description: "x", unit_amount: 100, quantity: 0 }]), /quantity/);
+});
+
+// ---------------------------------------------------------------------------
+// Till sales
+
+test("sale status changes are their own events", () => {
+  const sale = { id: "s1", status: "pending" };
+  const t = "billing_pos_transactions";
+  assert.equal(eventTypeFor({ table: t, before: null, after: sale }), "sale.created");
+  assert.equal(eventTypeFor({ table: t, before: sale, after: { ...sale, status: "paid" } }), "sale.paid");
+  assert.equal(eventTypeFor({ table: t, before: { ...sale, status: "paid" }, after: { ...sale, status: "refunded" } }), "sale.refunded");
+  assert.equal(eventTypeFor({ table: t, before: sale, after: { ...sale, status: "void" } }), "sale.voided");
+  assert.equal(eventTypeFor({ table: t, before: sale, after: { ...sale, stock_applied: true } }), "sale.updated");
+});
+
+test("a sale leaves the API in cents, with every booking it paid for", () => {
+  const sale = saleObject(
+    {
+      id: "s1", receipt_number: "POS-0042", status: "paid", payment_method_id: "m1", payment_method_name: "Eftpos",
+      payment_method_kind: "custom", description: "Glove x2", amount: "45.00", listed_amount: "50", coupon_amount: "0",
+      currency: "NZD", customer_id: null, customer_name: "Walk-in", booking_id: "appt-1", booking_ids: ["appt-1", "appt-2"],
+    },
+    [{ id: "i1", product_id: "glove", name: "Glove", sku: "GL-1", quantity: "2", unit_price: "25", line_total: "50" }],
+  );
+  assert.equal(sale.amount, 4500);
+  assert.equal(sale.listed_amount, 5000);
+  assert.equal(sale.currency, "nzd");
+  assert.deepEqual(sale.booking_ids, ["appt-1", "appt-2"]);
+  assert.deepEqual(sale.items?.[0], { id: "i1", product_id: "glove", name: "Glove", sku: "GL-1", quantity: 2, unit_amount: 2500, amount: 5000 });
+  assert.equal(saleObject({ id: "s2", listed_amount: null }, null).listed_amount, null);
+});
+
+test("till items are cents in, dollars to the till, and checked", () => {
+  assert.deepEqual(tillItems([{ product_id: "glove", quantity: 2 }]), [{ productId: "glove", quantity: 2, unitPrice: null }]);
+  assert.deepEqual(tillItems([{ product_id: "lesson:lesson-60", unit_amount: 8000 }]), [{ productId: "lesson:lesson-60", quantity: 1, unitPrice: 80 }]);
+  assert.deepEqual(tillItems(undefined), []);
+  assert.throws(() => tillItems([{ quantity: 1 }]), /product_id/);
+  assert.throws(() => tillItems([{ product_id: "g", quantity: 1.5 }]), /quantity/);
+  assert.throws(() => tillItems([{ product_id: "g", unit_amount: -1 }]), /cents/);
+  assert.throws(() => tillItems("glove"), /list/);
+});
+
+test("only manual payment methods can be recorded through the API", () => {
+  assert.deepEqual(API_PAYMENT_METHOD_KINDS, ["custom"]);
 });

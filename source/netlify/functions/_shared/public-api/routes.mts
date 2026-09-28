@@ -55,6 +55,7 @@ import {
   updateEndpoint,
 } from "./events.mts";
 import { commerceHandlers as commerce } from "./commerce.mts";
+import { salesHandlers as sales } from "./sales.mts";
 
 export type RouteContext = {
   principal: ApiPrincipal;
@@ -674,6 +675,16 @@ export const ROUTES: Route[] = [
   route("POST", "/invoices/:id/send", "invoices:write", commerce.sendInvoice),
   route("POST", "/invoices/:id/mark_paid", "invoices:write", commerce.markInvoicePaid),
   route("POST", "/invoices/:id/void", "invoices:write", commerce.voidInvoice),
+
+  route("GET", "/products", "catalog:read", sales.listProducts),
+  route("GET", "/payment_methods", "sales:read", sales.listPaymentMethods),
+  route("GET", "/sales", "sales:read", sales.listSales),
+  route("POST", "/sales", "sales:write", sales.createSale),
+  route("GET", "/sales/:id", "sales:read", sales.getSale),
+  route("POST", "/sales/:id/mark_paid", "sales:write", sales.markSalePaid),
+  route("POST", "/sales/:id/refund", "sales:write", sales.refundSale),
+  route("POST", "/sales/:id/void", "sales:write", sales.voidSale),
+  route("POST", "/sales/:id/send_receipt", "sales:write", sales.sendReceipt),
 
   route("GET", "/events", "events:read", listEvents),
   route("GET", "/event_types", null, listEventTypes),

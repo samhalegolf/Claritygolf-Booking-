@@ -21,6 +21,7 @@
  *   pass.updated          credits added, a spend given back, or other change
  *   invoice.created / invoice.sent / invoice.paid / invoice.voided /
  *   invoice.updated / invoice.deleted
+ *   sale.created / sale.paid / sale.refunded / sale.voided / sale.updated
  *
  * Delivery follows Stripe's contract, which most receivers already handle:
  * POST JSON, `X-Clarity-Signature: t=<unix>,v1=<hex HMAC-SHA256 of "t.body">`,
@@ -45,6 +46,7 @@ import {
 import { bookingFromRow, clientFromRow, loadCatalog, previousAttributes, type Catalog } from "./serialize.mts";
 import { API_VERSION, pruneApiWorkingTables } from "./http.mts";
 import { invoiceObject, readInvoiceObject, readPassObject } from "./commerce.mts";
+import { readSaleObject, saleObject } from "./sales.mts";
 
 export const EVENT_TYPES = [
   "booking.created",
@@ -66,6 +68,11 @@ export const EVENT_TYPES = [
   "invoice.voided",
   "invoice.updated",
   "invoice.deleted",
+  "sale.created",
+  "sale.paid",
+  "sale.refunded",
+  "sale.voided",
+  "sale.updated",
 ] as const;
 export type EventType = (typeof EVENT_TYPES)[number];
 
@@ -176,6 +183,16 @@ export function eventTypeFor(change: Pick<CollapsedChange, "table" | "before" | 
     }
     return "invoice.updated";
   }
+  if (change.table === "billing_pos_transactions") {
+    if (!before) return "sale.created";
+    if (!after) return "sale.voided";
+    if (before.status !== after.status) {
+      if (after.status === "paid") return "sale.paid";
+      if (after.status === "refunded") return "sale.refunded";
+      if (after.status === "void") return "sale.voided";
+    }
+    return "sale.updated";
+  }
   if (change.table !== "calendar_items") return null;
   if (!before) return "booking.created";
   if (!after) return "booking.cancelled";
@@ -197,6 +214,7 @@ const OBJECT_TYPE: Record<string, string> = {
   pass_allocations: "pass",
   pass_redemptions: "pass",
   billing_invoices: "invoice",
+  billing_pos_transactions: "sale",
 };
 
 /** Which object an event is about. A spend or a top-up is news about its pass. */
@@ -247,6 +265,17 @@ async function eventData(change: CollapsedChange, catalog: Catalog): Promise<Rec
     const data: Record<string, unknown> = { object };
     if (change.before) {
       const previous = previousAttributes(invoiceObject(change.before, null), invoiceObject(change.after, null));
+      if (Object.keys(previous).length) data.previous_attributes = previous;
+    }
+    return data;
+  }
+  if (change.table === "billing_pos_transactions") {
+    if (!change.after) return { object: { ...saleObject(change.before, null), deleted: true } };
+    // Items are written just after the sale row, like invoice lines.
+    const object = (await readSaleObject(change.accountId, change.rowId)) || saleObject(change.after, null);
+    const data: Record<string, unknown> = { object };
+    if (change.before) {
+      const previous = previousAttributes(saleObject(change.before, null), saleObject(change.after, null));
       if (Object.keys(previous).length) data.previous_attributes = previous;
     }
     return data;

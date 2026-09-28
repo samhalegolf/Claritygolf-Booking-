@@ -1,6 +1,6 @@
 # Clarity API (v1)
 
-Clarity's public API lets other software read and change a business's bookings, clients, passes and invoices, read its lesson types, coaches, locations and availability, and hear about every change through webhooks.
+Clarity's public API lets other software read and change a business's bookings, clients, passes, invoices and till sales, read its lesson types, coaches, locations and availability, and hear about every change through webhooks.
 
 It follows the conventions of the APIs developers already know best, mainly Stripe's. If you have integrated with Stripe, Square or Cal.com, nothing here should surprise you.
 
@@ -50,11 +50,13 @@ Each key is given only the permissions it needs:
 | `bookings:write` | Create, cancel and reschedule bookings |
 | `clients:read` | List and read clients |
 | `clients:write` | Create and update clients |
-| `catalog:read` | Lesson types, pass types, coaches, locations, availability |
+| `catalog:read` | Lesson types, pass types, products, coaches, locations, availability |
 | `passes:read` | List and read passes and their balances |
 | `passes:write` | Issue, redeem and void passes |
 | `invoices:read` | List and read invoices |
 | `invoices:write` | Create, send, mark paid, void and delete draft invoices |
+| `sales:read` | Read till sales and payment methods |
+| `sales:write` | Record till sales, mark them paid, refund, void, and email receipts |
 | `events:read` | The event feed |
 | `webhooks:manage` | Subscribe and unsubscribe webhooks through the API |
 
@@ -131,6 +133,15 @@ A request without the scope it needs gets `403 permission_error / insufficient_s
 | POST | `/invoices/{id}/send` | invoices:write | Emails the PDF. Optional `email`, `include_payment_link`. |
 | POST | `/invoices/{id}/mark_paid` | invoices:write | Records a payment taken elsewhere. Optional `amount_paid` (cents, defaults to the total). |
 | POST | `/invoices/{id}/void` | invoices:write | Unpaid invoices only |
+| GET | `/products` | catalog:read | What the till sells. `?active=false` includes retired products. |
+| GET | `/payment_methods` | sales:read | `usable_through_api` marks the ones a sale can be recorded against |
+| GET | `/sales` | sales:read | Newest first. `status`, `client_id`, `booking_id`, `receipt_number`, `created_after`, `created_before`, `updated_since` |
+| POST | `/sales` | sales:write | Record a sale. See below. |
+| GET | `/sales/{id}` | sales:read | Includes `items` |
+| POST | `/sales/{id}/mark_paid` | sales:write | An "On account" sale has been paid |
+| POST | `/sales/{id}/refund` | sales:write | Records money given back outside Clarity. Optional `reason`. |
+| POST | `/sales/{id}/void` | sales:write | Cancels an unpaid sale |
+| POST | `/sales/{id}/send_receipt` | sales:write | Emails the receipt. Optional `email`. |
 | GET | `/events` | events:read | `type` (comma separated), `object_id`, `created_after` |
 | GET | `/events/{id}` | events:read | |
 | GET | `/event_types` | none | |
@@ -208,6 +219,44 @@ curl -X POST "$BASE/invoices" -H "Authorization: Bearer $KEY" -H "Content-Type: 
   - only drafts can be deleted;
   - a void invoice can't be sent.
 
+### Till sales
+
+A sale is one receipt rung up at the till (`POS-0042`). The API records sales whose money moved **somewhere else**: cash in the drawer, an Eftpos terminal, a website checkout, or "On account" (owed until marked paid).
+
+```bash
+curl -X POST "$BASE/sales" -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+  -H "Idempotency-Key: webshop-9913" -d '{
+    "payment_method_id": "<Eftpos id from /payment_methods>",
+    "client_id": "6d659614-…",
+    "items": [
+      { "product_id": "glove", "quantity": 2 },
+      { "product_id": "lesson:lesson-60", "unit_amount": 8000 }
+    ],
+    "amount": 14000
+  }'
+```
+
+- **Items** are products from `/products`, or lesson types written as `lesson:<service id>`. They're priced from the catalogue unless you give a `unit_amount`.
+- **Discounts.** `amount` overrides the basket total. The difference from `listed_amount` shows up as a discount, just as it does at the till.
+- **Without items**, give a `description` and an `amount`.
+- **What follows automatically**, exactly as for a sale rung up in Clarity:
+  - stock leaves the shelf;
+  - voucher products issue a gift voucher;
+  - pass types issue a pass.
+
+  For "On account" sales, these happen when the sale is marked paid.
+- **`booking_ids`** says which lessons the sale pays for, so their cards show them as paid.
+- **What stays in Clarity:**
+  - **Clarity Pay** needs the card presented to Stripe; recording it wouldn't charge anyone.
+  - **Pass** and **Coupon** payments spend a client's credit or voucher value, and have their own checks.
+
+  `/payment_methods` marks which methods are `usable_through_api`.
+- **Refunds.** `refund` only *records* a refund of money you gave back yourself. It puts stock back. Card sales are refunded in Clarity, so the money actually returns to the card.
+- **What's refused:**
+  - `mark_paid` only works on a pending sale;
+  - `refund` only on a paid one;
+  - `void` only on an unpaid one (refund a paid sale instead).
+
 ---
 
 ## Webhooks
@@ -230,6 +279,7 @@ Clarity POSTs each change to your URL, usually within a minute.
 | `pass.voided` | Switched off |
 | `pass.updated` | Credits added (a top-up), a spend given back (for example the lesson was cancelled), or another change |
 | `invoice.created`, `invoice.sent`, `invoice.paid`, `invoice.voided`, `invoice.updated`, `invoice.deleted` | `invoice.sent` means published. A Stripe invoice synced into Billing produces these events too. |
+| `sale.created`, `sale.paid`, `sale.refunded`, `sale.voided`, `sale.updated` | Every till sale: in Clarity, on Tap to Pay, from the player portal, or through the API. A cash sale arrives as `sale.created` already `paid`. `sale.paid` is a pending sale being paid (On account, or a card clearing). |
 
 ### Payload
 
@@ -317,7 +367,7 @@ api_change_log ──► api-webhook-worker (every minute) ──► api_events 
 ```
 
 - **Change capture uses a database trigger, not application hooks.** Bookings and clients are written from about eight different code paths: the calendar, the booking page, public cancel, the Google import, Optix, the API and others. A trigger sees every one of them, including paths added later. It records the change in the same transaction as the write, so a change that rolls back is never announced. If the trigger itself fails, it logs a warning and lets the booking save anyway.
-- Passes and invoices are captured the same way, from `passes`, `pass_allocations`, `pass_redemptions` and `billing_invoices` (migration `20260930000200_public_api_passes_invoices`). Their events carry the pass or invoice **as it is when the event is sent**, not a snapshot of the row. A pass's balance lives in a view over three tables, and an invoice's lines are written just after the invoice itself, so neither is complete in a single row.
+- Passes and invoices are captured the same way, from `passes`, `pass_allocations`, `pass_redemptions` and `billing_invoices` (migration `20260930000200_public_api_passes_invoices`), and till sales from `billing_pos_transactions` (migration `20260930000300_public_api_sales`). Their events carry the pass or invoice **as it is when the event is sent**, not a snapshot of the row. A pass's balance lives in a view over three tables, and an invoice's lines are written just after the invoice itself, so neither is complete in a single row.
 - A save that rewrites a row without changing it (the calendar's whole-state save does this) produces no event. Neither does a block or time off.
 - Within one worker run, housekeeping writes to a row are folded into the event before them. For example, a new booking getting its bay and client link two seconds later is still one `booking.created`. A change that means something on its own (a cancellation, a move) always gets its own event.
 - The management screen talks to `/api/api-access` using the normal coach login. An API key can never make more keys.
@@ -340,5 +390,5 @@ api_change_log ──► api-webhook-worker (every minute) ──► api_events 
 
 - **OAuth 2.0 "Sign in with Clarity"** for third-party apps that many businesses install (a marketplace). API keys cover one business connecting its own tools, which is what exists today.
 - **A published Zapier / Make app.** The spec and REST hooks are what those are built from.
-- **More resources:** POS sales, payments and refunds, practice blocks, and marking a booking completed or no-show through the API.
+- **More resources:** taking card payments (Clarity Pay checkout links) and pass or coupon payments through the API, practice blocks, and marking a booking completed or no-show.
 - **Webhook delivery in seconds.** Today it takes up to a minute, because of the worker's schedule.

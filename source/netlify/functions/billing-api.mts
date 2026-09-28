@@ -3201,7 +3201,7 @@ function cleanPaymentMethodPayload(raw: Record<string, unknown>) {
   };
 }
 
-async function listPaymentMethods(accountId: string) {
+export async function listPaymentMethods(accountId: string) {
   let rows = await supabase("billing_payment_methods", {
     query: `select=*&account_id=eq.${encodeFilter(accountId)}&order=sort_order.asc,name.asc`,
   });
@@ -3703,7 +3703,7 @@ async function syncPosCoupon(accountId: string, row: Record<string, unknown>, st
   });
 }
 
-async function createPosTransaction(accountId: string, body: Record<string, unknown>) {
+export async function createPosTransaction(accountId: string, body: Record<string, unknown>) {
   // Prices come back off the product rows, not the request body, so a basket
   // can't be re-priced by whoever is holding the till's browser open.
   const items = await resolvePosItems(accountId, body?.items);
@@ -3938,7 +3938,7 @@ async function createPosTransaction(accountId: string, body: Record<string, unkn
   };
 }
 
-async function updatePosTransactionStatus(accountId: string, id: string, body: Record<string, unknown>) {
+export async function updatePosTransactionStatus(accountId: string, id: string, body: Record<string, unknown>) {
   const status = String(body?.status || "");
   if (!["pending", "paid", "refunded", "void"].includes(status)) {
     throw Object.assign(new Error("Unknown status."), { status: 400 });
@@ -4002,7 +4002,7 @@ async function updatePosTransactionStatus(accountId: string, id: string, body: R
 // When the till typed the address in because the client had none, it is also
 // written to their profile -- but only into an empty field. A receipt going to
 // a different address than the one on file is a one-off, not a correction.
-async function emailPosReceipt(accountId: string, id: string, body: Record<string, unknown>) {
+export async function emailPosReceipt(accountId: string, id: string, body: Record<string, unknown>) {
   const transaction = await getPosTransaction(accountId, id);
   if (!transaction) throw Object.assign(new Error("Transaction not found."), { status: 404 });
   const to = cleanString(body?.email, "", 180).toLowerCase() || cleanString(transaction.customerEmail, "", 180);
