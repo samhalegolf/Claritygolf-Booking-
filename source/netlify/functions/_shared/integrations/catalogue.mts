@@ -22,10 +22,11 @@ import type {
  */
 
 /**
- * Stripe: Clarity Pay at the counter, and invoices and charges in Billing.
+ * Stripe: a business's own Stripe account, for invoice payments.
  *
- * Each business signs in to its own Stripe (Connect) and the money lands
- * there. Clarity's platform key and its one Connect webhook are set once in
+ * This is the "own Stripe" route: the business signs in (Connect) and the
+ * money lands there. The till and the player portal need Clarity Pay instead,
+ * which is set up from Billing settings, not here. Clarity's platform key and its one Connect webhook are set once in
  * Netlify, never per business -- see _shared/stripe.mts.
  */
 const stripe: IntegrationDescriptor = {
@@ -34,15 +35,15 @@ const stripe: IntegrationDescriptor = {
   audience: "integration",
   category: "payments",
   caveat: "A sandbox connects in Stripe's test mode, so it takes no real money.",
-  summary: "Card payments from your clients, and your Stripe invoices and charges in Billing.",
+  summary: "Invoice payments into a Stripe account you already have, and your Stripe invoices and charges in Billing. For the till and player portal, use Clarity Pay in Billing settings.",
   connections: [
     {
       kind: "oauth2",
       title: "Stripe account",
-      summary: "One sign-in. Payments go straight to your own Stripe account.",
+      summary: "One sign-in. Invoice payments go straight to your own Stripe account.",
       connectPath: "/api/stripe-connect/connect",
       operations: [
-        { id: "checkout.session", label: "Open a hosted checkout" },
+        { id: "checkout.session", label: "Open a hosted checkout for an invoice" },
         { id: "payment_link", label: "Add a payment link to an invoice" },
         { id: "invoices.read", label: "Read your invoices and charges into Billing" },
       ],

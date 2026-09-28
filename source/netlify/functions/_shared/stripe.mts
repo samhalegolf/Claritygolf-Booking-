@@ -4,11 +4,18 @@
  * Every charge this app takes runs through here, and the only question this
  * module exists to answer is which Stripe account the money lands in.
  *
- * Each business signs in to its own Stripe with Stripe Connect (see
- * stripe-connect.mts) and Clarity keeps only the connected account's id.
- * Every request is then made with Clarity's platform key plus a
- * Stripe-Account header naming that account, so the money lands with the
- * business and Clarity never holds a business's key.
+ * A business takes cards one of two ways (see stripe-connect.mts):
+ *
+ *   Clarity Pay   Clarity creates the business's Stripe account and Stripe
+ *                 runs the signup. Everything works: the till, the player
+ *                 portal and invoices. Clarity keeps a small cut of each
+ *                 payment (the application fee).
+ *   Own Stripe    The business signs in to a Stripe account it already has.
+ *                 Invoices only, and Clarity takes nothing.
+ *
+ * Either way Clarity keeps only the connected account's id, and every request
+ * is made with Clarity's platform key plus a Stripe-Account header naming that
+ * account, so the money lands with the business and it gets its own payouts.
  *
  * Mode follows the business, not the deployment: a sandbox connects in test
  * mode and is served by the platform's test key, so it can never take real
@@ -21,15 +28,36 @@
  *          STRIPE_CONNECT_WEBHOOK_SECRET
  *   test   STRIPE_CONNECT_TEST_CLIENT_ID, STRIPE_PLATFORM_TEST_SECRET_KEY,
  *          STRIPE_CONNECT_TEST_WEBHOOK_SECRET
+ *
+ * Clarity Pay's cut (see clarityPayFeeCents), both modes:
+ *
+ *          CLARITY_PAY_FEE_PERCENT (default 0.5), CLARITY_PAY_FEE_FIXED_CENTS (default 0)
  */
 
 /** Where a business's connection lives in `settings`. */
 export const STRIPE_CONNECTION_SETTING = "accountStripeConnection";
 
+/** Which way this business takes cards. See the top of this file. */
+export type StripeRoute = "clarity_pay" | "own_stripe";
+
+/** What each route can charge for. */
+export type StripeFeatures = {
+  invoices: boolean;
+  till: boolean;
+  portal: boolean;
+};
+
+export function stripeFeatures(route: StripeRoute | ""): StripeFeatures {
+  if (route === "clarity_pay") return { invoices: true, till: true, portal: true };
+  if (route === "own_stripe") return { invoices: true, till: false, portal: false };
+  return { invoices: false, till: false, portal: false };
+}
+
 export type StripeConnection = {
   /** The connected account, acct_… */
   account: string;
   livemode: boolean;
+  route: StripeRoute;
 };
 
 export type StripeCredential = {
@@ -38,6 +66,7 @@ export type StripeCredential = {
   /** Sent as Stripe-Account, so the request acts on the business's account. */
   account: string;
   livemode: boolean;
+  route: StripeRoute;
 };
 
 export type StripeCredentialStatus = {
@@ -47,6 +76,18 @@ export type StripeCredentialStatus = {
   account: string;
   /** True for a test-mode connection, which takes no real money. */
   testMode: boolean;
+  /** Which way this business takes cards. Empty when not connected. */
+  route: StripeRoute | "";
+  features: StripeFeatures;
+  /** Clarity Pay's cut of each card payment, so the business can see it. */
+  fee: ClarityPayFee;
+};
+
+export type ClarityPayFee = {
+  /** Percent of the charge, 0.5 = 0.5%. */
+  percent: number;
+  /** Flat amount per charge, in cents. */
+  fixedCents: number;
 };
 
 export type StripePlatform = {
@@ -74,6 +115,34 @@ export function stripePlatform(livemode: boolean): StripePlatform {
       };
 }
 
+function feeNumber(name: string, fallback: number) {
+  const raw = env(name);
+  const value = raw === "" ? fallback : Number(raw);
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+/** Clarity Pay's cut, as set for the platform. */
+export function clarityPayFee(): ClarityPayFee {
+  return {
+    percent: feeNumber("CLARITY_PAY_FEE_PERCENT", 0.5),
+    fixedCents: Math.round(feeNumber("CLARITY_PAY_FEE_FIXED_CENTS", 0)),
+  };
+}
+
+/**
+ * Clarity Pay's cut of a charge, in cents, sent to Stripe as the application
+ * fee. Stripe moves it from the business's payment to Clarity's platform
+ * balance; Stripe's own processing fee is still paid by the business, apart
+ * from this.
+ *
+ * 0 means "take nothing" and callers leave the parameter off. Stripe refuses a
+ * fee that is not less than the charge, so it is capped one cent under it.
+ */
+export function clarityPayFeeCents(amountCents: number, fee: ClarityPayFee = clarityPayFee()) {
+  const cents = Math.round((amountCents * fee.percent) / 100 + fee.fixedCents);
+  return Math.max(0, Math.min(cents, amountCents - 1));
+}
+
 /** A stored connection, or null for anything that is not one. */
 export function parseStripeConnection(value: unknown): StripeConnection | null {
   let parsed: unknown = value;
@@ -87,7 +156,9 @@ export function parseStripeConnection(value: unknown): StripeConnection | null {
   const record = (parsed || {}) as Record<string, unknown>;
   const account = typeof record.account === "string" ? record.account.trim() : "";
   if (!/^acct_[A-Za-z0-9]+$/.test(account)) return null;
-  return { account, livemode: record.livemode === true };
+  // Connections made before Clarity Pay existed were all Stripe sign-ins.
+  const route: StripeRoute = record.route === "clarity_pay" ? "clarity_pay" : "own_stripe";
+  return { account, livemode: record.livemode === true, route };
 }
 
 /**
@@ -112,7 +183,25 @@ export function resolveStripeCredential(connectionValue: unknown): StripeCredent
       { status: 503, code: "STRIPE_PLATFORM_NOT_CONFIGURED" },
     );
   }
-  return { secret, account: connection.account, livemode: connection.livemode };
+  return { secret, account: connection.account, livemode: connection.livemode, route: connection.route };
+}
+
+/**
+ * Stops a charge the business's route does not cover. The till and the player
+ * portal are Clarity Pay only; a business on its own Stripe gets invoices.
+ */
+export function requireStripeFeature(credential: StripeCredential, feature: keyof StripeFeatures) {
+  if (stripeFeatures(credential.route)[feature]) return;
+  const what = feature === "till" ? "Card payments at the till" : "Player portal purchases";
+  throw Object.assign(
+    new Error(`${what} need Clarity Pay. Set it up in Settings › Billing › Card payments.`),
+    { status: 409, code: "CLARITY_PAY_REQUIRED" },
+  );
+}
+
+/** The application fee for a charge on this connection. Only Clarity Pay pays one. */
+export function applicationFeeCents(credential: StripeCredential, amountCents: number) {
+  return credential.route === "clarity_pay" ? clarityPayFeeCents(amountCents) : 0;
 }
 
 /**
@@ -123,24 +212,33 @@ export function resolveStripeCredential(connectionValue: unknown): StripeCredent
  */
 export function stripeCredentialStatus(connectionValue: unknown): StripeCredentialStatus {
   const connection = parseStripeConnection(connectionValue);
-  if (!connection) return { configured: false, account: "", testMode: false };
+  const fee = clarityPayFee();
+  if (!connection) {
+    return { configured: false, account: "", testMode: false, route: "", features: stripeFeatures(""), fee };
+  }
+  const configured = Boolean(stripePlatform(connection.livemode).secret);
   return {
-    configured: Boolean(stripePlatform(connection.livemode).secret),
+    configured,
     account: connection.account,
     testMode: !connection.livemode,
+    route: connection.route,
+    features: stripeFeatures(configured ? connection.route : ""),
+    fee,
   };
 }
 
 /** The headers every request on a business's behalf carries. */
-export function stripeHeaders(credential: StripeCredential): Record<string, string> {
+export function stripeHeaders(credential: Pick<StripeCredential, "secret" | "account">): Record<string, string> {
   return {
     Authorization: `Bearer ${credential.secret}`,
-    "Stripe-Account": credential.account,
+    // No account means a request on Clarity's own platform account, such as
+    // creating a Clarity Pay account.
+    ...(credential.account ? { "Stripe-Account": credential.account } : {}),
   };
 }
 
 export async function stripeRequest(
-  credential: StripeCredential,
+  credential: Pick<StripeCredential, "secret" | "account">,
   path: string,
   options: { method?: string; params?: URLSearchParams } = {},
 ) {
@@ -203,6 +301,8 @@ export async function createStripeCheckoutSession(
   // A single line for the whole total keeps the charged amount identical to our
   // record (no per-line rounding drift; tax is already reflected in the total).
   params.set("line_items[0][quantity]", "1");
+  const applicationFee = applicationFeeCents(credential, amountInCents);
+  if (applicationFee > 0) params.set("payment_intent_data[application_fee_amount]", String(applicationFee));
   params.set("line_items[0][price_data][currency]", String(input.currency || "NZD").toLowerCase());
   params.set("line_items[0][price_data][unit_amount]", String(amountInCents));
   params.set("line_items[0][price_data][product_data][name]", input.productName);

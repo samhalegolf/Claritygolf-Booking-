@@ -35,6 +35,8 @@ import { currencyForAccountSettings } from "./_shared/locale.mts";
 import { taxDefaultsForCountry } from "./_shared/region.mts";
 import {
   createStripeCheckoutSession as createStripeCheckoutSessionWith,
+  applicationFeeCents,
+  requireStripeFeature,
   resolveStripeCredential,
   retrieveStripeCheckoutSession as retrieveStripeCheckoutSessionWith,
   stripeCredentialStatus,
@@ -2781,17 +2783,20 @@ async function createStripePaymentLink(input: {
 
   // A payment link needs a Price object, unlike a session's inline price_data.
   // product_data creates the product in the same call, so this stays one trip.
+  const credential = await stripeFor(accountId);
   const priceParams = new URLSearchParams();
   priceParams.set("currency", String(input.currency || "NZD").toLowerCase());
   priceParams.set("unit_amount", String(amountInCents));
   priceParams.set("product_data[name]", input.productName);
-  const price = await stripeRequest(accountId, "prices", { method: "POST", params: priceParams });
+  const price = await stripeRequestWith(credential, "prices", { method: "POST", params: priceParams });
   if (!price?.id) throw Object.assign(new Error("Stripe did not return a price."), { status: 502 });
 
   const params = new URLSearchParams();
   params.set("line_items[0][price]", String(price.id));
   params.set("line_items[0][quantity]", "1");
   params.set("restrictions[completed_sessions][limit]", "1");
+  const applicationFee = applicationFeeCents(credential, amountInCents);
+  if (applicationFee > 0) params.set("application_fee_amount", String(applicationFee));
   params.set("after_completion[type]", "redirect");
   params.set("after_completion[redirect][url]", input.redirectUrl);
   for (const [key, value] of Object.entries(input.metadata || {})) {
@@ -2802,7 +2807,7 @@ async function createStripePaymentLink(input: {
     params.set(`payment_intent_data[metadata][${key}]`, value);
   }
 
-  const link = await stripeRequest(accountId, "payment_links", { method: "POST", params });
+  const link = await stripeRequestWith(credential, "payment_links", { method: "POST", params });
   if (!link?.url) throw Object.assign(new Error("Stripe did not return a payment link."), { status: 502 });
   return { url: String(link.url), paymentLinkId: String(link.id || "") };
 }
@@ -4099,11 +4104,13 @@ async function createPosCheckout(accountId: string, id: string, req: Request) {
     throw Object.assign(new Error(`${transaction.receiptNumber} is already paid.`), { status: 409, code: "POS_ALREADY_PAID" });
   }
 
+  const credential = await stripeFor(accountId);
+  requireStripeFeature(credential, "till");
   const branding = await resolveInvoiceBranding(accountId);
   const origin = new URL(req.url).origin;
   const receiptNumber = String(transaction.receiptNumber);
 
-  const session = await createStripeCheckoutSession(accountId, {
+  const session = await createStripeCheckoutSessionWith(credential, {
     amount: transaction.amount,
     currency: String(transaction.currency),
     productName: `${transaction.description} - ${branding.businessName}`,

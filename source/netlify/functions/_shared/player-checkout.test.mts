@@ -6,7 +6,10 @@
  *   1. Which Stripe account the money lands in. Getting this wrong for the
  *      second business to sign up means their customers' payments arrive in
  *      someone else's account, and nothing in the app would look broken.
- *   2. What is on the shelf. The shop is priced from the catalogue on the
+ *   2. Clarity Pay's cut, and what each route may charge for. Clarity Pay
+ *      payments carry the fee, own-Stripe ones never do, and the fee must
+ *      never be the whole payment -- Stripe refuses that, and the sale fails.
+ *   3. What is on the shelf. The shop is priced from the catalogue on the
  *      server, so anything wrongly on it is something a player can be charged
  *      for -- and anything wrongly priced at zero is a card form that charges
  *      nothing.
@@ -17,7 +20,11 @@ import test from "node:test";
 
 import { checkoutSourceRef, findPlayerShopItem, playerShopItems } from "./player-shop.mts";
 import {
+  applicationFeeCents,
+  clarityPayFeeCents,
+  createStripeCheckoutSession,
   parseStripeConnection,
+  requireStripeFeature,
   resolveStripeCredential,
   stripeCredentialStatus,
   stripeHeaders,
@@ -29,6 +36,7 @@ const LIVE_PLATFORM = "sk_live_platformkey000000";
 const TEST_PLATFORM = "sk_test_platformkey000000";
 const LIVE = JSON.stringify({ account: "acct_coachlive1", livemode: true });
 const TEST = JSON.stringify({ account: "acct_coachtest1", livemode: false });
+const CLARITY_PAY = JSON.stringify({ account: "acct_claritypay1", livemode: true, route: "clarity_pay" });
 
 function withPlatformKeys(keys: { live?: string; test?: string }, run: () => void) {
   const before = {
@@ -79,7 +87,11 @@ test("a business that has not connected cannot take a payment", () => {
         assert.equal(error.code, "STRIPE_NOT_CONFIGURED");
         return true;
       });
-      assert.deepEqual(stripeCredentialStatus(value), { configured: false, account: "", testMode: false });
+      const status = stripeCredentialStatus(value);
+      assert.equal(status.configured, false);
+      assert.equal(status.account, "");
+      assert.equal(status.route, "");
+      assert.deepEqual(status.features, { invoices: false, till: false, portal: false });
     }
   });
 });
@@ -94,10 +106,89 @@ test("a connection is not usable until Clarity's platform key for its mode is se
 });
 
 test("only a real connected account id is accepted", () => {
-  assert.deepEqual(parseStripeConnection(LIVE), { account: "acct_coachlive1", livemode: true });
-  assert.deepEqual(parseStripeConnection({ account: "acct_x1", livemode: "yes" }), { account: "acct_x1", livemode: false });
+  assert.deepEqual(parseStripeConnection(LIVE), { account: "acct_coachlive1", livemode: true, route: "own_stripe" });
+  assert.deepEqual(parseStripeConnection({ account: "acct_x1", livemode: "yes" }), {
+    account: "acct_x1",
+    livemode: false,
+    route: "own_stripe",
+  });
   assert.equal(parseStripeConnection("not json"), null);
   assert.equal(parseStripeConnection({ account: "acct_; DROP" }), null);
+});
+
+/* --- Clarity Pay's cut -------------------------------------------------- */
+
+test("Clarity Pay takes its percentage plus any flat fee, rounded to the cent", () => {
+  assert.equal(clarityPayFeeCents(10000, { percent: 1, fixedCents: 0 }), 100);
+  assert.equal(clarityPayFeeCents(1250, { percent: 1, fixedCents: 0 }), 13);
+  assert.equal(clarityPayFeeCents(10000, { percent: 0.5, fixedCents: 10 }), 60);
+});
+
+test("Clarity Pay's cut is never the whole payment", () => {
+  // Stripe refuses an application fee that is not less than the charge.
+  assert.equal(clarityPayFeeCents(50, { percent: 1, fixedCents: 100 }), 49);
+  assert.equal(clarityPayFeeCents(1, { percent: 50, fixedCents: 0 }), 0);
+});
+
+test("a zero fee sends no application fee at all", () => {
+  assert.equal(clarityPayFeeCents(10000, { percent: 0, fixedCents: 0 }), 0);
+});
+
+test("the default cut is half a percent", () => {
+  assert.equal(clarityPayFeeCents(10000), 50);
+});
+
+async function checkoutParams(route: "clarity_pay" | "own_stripe") {
+  const realFetch = globalThis.fetch;
+  let sent = new URLSearchParams();
+  globalThis.fetch = (async (_url: string, init: { body: string }) => {
+    sent = new URLSearchParams(init.body);
+    return new Response(JSON.stringify({ id: "cs_1", url: "https://checkout.stripe.com/x" }));
+  }) as typeof fetch;
+  try {
+    await createStripeCheckoutSession(
+      { secret: TEST_PLATFORM, account: "acct_coachtest1", livemode: false, route },
+      { amount: 80, currency: "NZD", productName: "Lesson", successUrl: "https://x/ok", cancelUrl: "https://x/no" },
+    );
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  return sent;
+}
+
+test("a Clarity Pay checkout carries Clarity's cut as the application fee", async () => {
+  const sent = await checkoutParams("clarity_pay");
+  assert.equal(sent.get("line_items[0][price_data][unit_amount]"), "8000");
+  assert.equal(sent.get("payment_intent_data[application_fee_amount]"), String(clarityPayFeeCents(8000)));
+});
+
+test("an own-Stripe checkout pays Clarity nothing", async () => {
+  const sent = await checkoutParams("own_stripe");
+  assert.equal(sent.get("payment_intent_data[application_fee_amount]"), null);
+  assert.equal(applicationFeeCents({ secret: "", account: "acct_x1", livemode: true, route: "own_stripe" }, 8000), 0);
+});
+
+/* --- What each route can charge for ------------------------------------- */
+
+test("Clarity Pay takes cards everywhere", () => {
+  withPlatformKeys({ live: LIVE_PLATFORM }, () => {
+    const credential = resolveStripeCredential(CLARITY_PAY);
+    assert.equal(credential.route, "clarity_pay");
+    for (const feature of ["invoices", "till", "portal"] as const) requireStripeFeature(credential, feature);
+    assert.deepEqual(stripeCredentialStatus(CLARITY_PAY).features, { invoices: true, till: true, portal: true });
+  });
+});
+
+test("an own-Stripe business takes invoice payments only", () => {
+  withPlatformKeys({ live: LIVE_PLATFORM }, () => {
+    // LIVE predates routes, so it reads as a Stripe sign-in.
+    const credential = resolveStripeCredential(LIVE);
+    assert.equal(credential.route, "own_stripe");
+    requireStripeFeature(credential, "invoices");
+    for (const feature of ["till", "portal"] as const) {
+      assert.throws(() => requireStripeFeature(credential, feature), (error: { code?: string }) => error.code === "CLARITY_PAY_REQUIRED");
+    }
+  });
 });
 
 /* --- What is on the shelf ----------------------------------------------- */
