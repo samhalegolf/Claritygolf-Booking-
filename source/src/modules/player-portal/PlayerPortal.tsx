@@ -12,6 +12,16 @@ import {
 } from "react";
 
 import "./playerPortal.css";
+import {
+  ClarityAssessments,
+  ClarityBookingPages,
+  ClarityCalendar,
+  ClarityLessonsProgrammes,
+  ClarityLocations,
+  ClarityNewBooking,
+  ClarityPassesCredits,
+  ClarityVideoAnalysis,
+} from "../shared/ClarityIcons";
 import { apiFetch } from "../auth/apiFetch";
 import { signOut, type Session } from "../auth/session";
 import { hasGuestToken, NATIVE } from "../auth/apiFetch";
@@ -1802,7 +1812,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                           className="player-portal-home-card"
                           onClick={() => navigateTerminal("notes")}
                         >
-                          <span className="player-portal-home-card-title">Notes</span>
+                          <span className="player-portal-home-card-title"><ClarityBookingPages size={18} />Notes</span>
                           <span className="player-portal-home-card-sub">Quick notes for yourself</span>
                         </button>
                         <button
@@ -1810,7 +1820,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                           className="player-portal-home-card"
                           onClick={() => navigateTerminal("videos")}
                         >
-                          <span className="player-portal-home-card-title">Videos</span>
+                          <span className="player-portal-home-card-title"><ClarityVideoAnalysis size={18} />Videos</span>
                           <span className="player-portal-home-card-sub">
                             {savedVideos.length ? `${savedVideos.length} saved` : "Saved on this device"}
                           </span>
@@ -1820,7 +1830,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                           className="player-portal-home-card player-portal-home-card-wide"
                           onClick={startRecording}
                         >
-                          <span className="player-portal-home-card-title">Record a video</span>
+                          <span className="player-portal-home-card-title"><ClarityVideoAnalysis size={18} />Record a video</span>
                           <span className="player-portal-home-card-sub">{recordCardSub}</span>
                         </button>
                       </>
@@ -1831,7 +1841,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                           className="player-portal-home-card"
                           onClick={() => navigateTerminal("lessons")}
                         >
-                          <span className="player-portal-home-card-title">Next {terms.serviceSingular.toLowerCase()}</span>
+                          <span className="player-portal-home-card-title"><ClarityCalendar size={18} />Next {terms.serviceSingular.toLowerCase()}</span>
                           <span className="player-portal-home-card-sub">
                             {profileLoading && !bookings.length
                               ? "Loading…"
@@ -1850,7 +1860,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                             className="player-portal-home-card"
                             onClick={() => navigateTerminal("lessons")}
                           >
-                            <span className="player-portal-home-card-title">Your passes</span>
+                            <span className="player-portal-home-card-title"><ClarityPassesCredits size={18} />Your passes</span>
                             <span className="player-portal-home-card-sub">
                               {spendableCredits
                                 ? `${spendableCredits} lesson${spendableCredits === 1 ? "" : "s"} left`
@@ -1863,7 +1873,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                           className="player-portal-home-card"
                           onClick={() => navigateTerminal("reviews")}
                         >
-                          <span className="player-portal-home-card-title">Swing reviews</span>
+                          <span className="player-portal-home-card-title"><ClarityAssessments size={18} />Swing reviews</span>
                           <span className="player-portal-home-card-sub">
                             {(profileLoading || cloudLoading) && !swingReviews.length
                               ? "Loading\u2026"
@@ -1881,7 +1891,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                           className="player-portal-home-card"
                           onClick={() => navigateTerminal("practice")}
                         >
-                          <span className="player-portal-home-card-title">Practice</span>
+                          <span className="player-portal-home-card-title"><ClarityLessonsProgrammes size={18} />Practice</span>
                           <span className="player-portal-home-card-sub">
                             {profileLoading && !practice.length
                               ? "Loading…"
@@ -1895,7 +1905,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                           className="player-portal-home-card"
                           onClick={() => navigateTerminal("notes")}
                         >
-                          <span className="player-portal-home-card-title">Notes</span>
+                          <span className="player-portal-home-card-title"><ClarityBookingPages size={18} />Notes</span>
                           <span className="player-portal-home-card-sub">
                             {sortedNotes.length
                               ? `${sortedNotes.length} ${terms.serviceSingular.toLowerCase()} note${sortedNotes.length === 1 ? "" : "s"}`
@@ -1907,7 +1917,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                           className="player-portal-home-card"
                           onClick={() => navigateTerminal("videos")}
                         >
-                          <span className="player-portal-home-card-title">Videos</span>
+                          <span className="player-portal-home-card-title"><ClarityVideoAnalysis size={18} />Videos</span>
                           <span className="player-portal-home-card-sub">
                             {unseenReturnCount
                               ? `${unseenReturnCount} new from your coach`
@@ -1923,7 +1933,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                           className="player-portal-home-card player-portal-home-card-wide"
                           onClick={startRecording}
                         >
-                          <span className="player-portal-home-card-title">Record a video</span>
+                          <span className="player-portal-home-card-title"><ClarityVideoAnalysis size={18} />Record a video</span>
                           <span className="player-portal-home-card-sub">{recordCardSub}</span>
                         </button>
                       </>
@@ -1979,6 +1989,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                       className={lessonsSubtab === "book" ? "active" : ""}
                       onClick={() => setLessonsSubtab("book")}
                     >
+                      <ClarityNewBooking size={14} />
                       Book now
                     </button>
                     <button
@@ -1988,6 +1999,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                       className={lessonsSubtab === "upcoming" ? "active" : ""}
                       onClick={() => setLessonsSubtab("upcoming")}
                     >
+                      <ClarityCalendar size={14} />
                       Past bookings
                     </button>
                   </div>
@@ -2012,6 +2024,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                             className={bookMode === "in-person" ? "active" : ""}
                             onClick={() => setBookMode("in-person")}
                           >
+                            <ClarityLocations size={14} />
                             In person
                           </button>
                           <button
@@ -2021,6 +2034,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                             className={bookMode === "review" ? "active" : ""}
                             onClick={() => setBookMode("review")}
                           >
+                            <ClarityVideoAnalysis size={14} />
                             Swing review
                           </button>
                         </div>

@@ -21,7 +21,17 @@
 import { useEffect, useState } from "react";
 import { integrationsStore, type IntegrationCard } from "../integrations/integrationsStore";
 import { AlertCircle, ChevronDown, ChevronUp, Plus } from "lucide-react";
-import { ClarityIntegrations, ClaritySettings } from "../shared/ClarityIcons";
+import {
+  ClarityCalendar,
+  ClarityFilesMedia,
+  ClarityIntegrations,
+  ClarityNotifications,
+  ClarityPayments,
+  ClarityPlayerPortal,
+  ClarityResources,
+  ClaritySettings,
+  type IconComponent,
+} from "../shared/ClarityIcons";
 
 /** Where a card sends you. The profile owns no forms of its own. */
 export type ProfileTarget =
@@ -87,6 +97,25 @@ const SECTION_ORDER = [
   "Customer experience",
   "Player portal",
 ];
+
+const SECTION_ICONS: Record<string, IconComponent> = {
+  Calendar: ClarityCalendar,
+  "Resource booking": ClarityResources,
+  Storage: ClarityFilesMedia,
+  Accounting: ClarityPayments,
+  "Customer experience": ClarityNotifications,
+  "Player portal": ClarityPlayerPortal,
+};
+
+function SectionTitle({ name }: { name: string }) {
+  const Icon = SECTION_ICONS[name];
+  return (
+    <h3>
+      {Icon ? <Icon size={14} /> : null}
+      {name}
+    </h3>
+  );
+}
 
 const EXTERNAL_SECTION_JOBS: Record<string, string> = {
   Calendar: "Calendar",
@@ -252,7 +281,7 @@ export function CoachProfilePanel({ identity, internalJobs, onOpen }: CoachProfi
       <div className="cp-sections">
         {sections.map((section) => (
           <section className="cp-section" key={section.name}>
-            <h3>{section.name}</h3>
+            <SectionTitle name={section.name} />
 
             {connectionsStatus !== "loaded" && section.external.length === 0 && EXTERNAL_SECTION_JOBS[section.name] ? (
               <article className="cp-cell cp-cell-pending" aria-busy="true">

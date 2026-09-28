@@ -13219,6 +13219,9 @@ button {
 }
 
 .sell-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 7px 14px;
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -14235,6 +14238,17 @@ button {
   text-align: left;
   cursor: pointer;
   transition: background var(--c-t-hover);
+}
+
+.settings-group-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.settings-group-title svg {
+  flex: none;
 }
 
 .settings-group-header:hover {
@@ -15521,6 +15535,9 @@ button {
 }
 
 .coach-profile .cp-section h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 0;
   padding: var(--c-space-5) var(--c-space-6);
   border-bottom: 1px solid var(--c-border-soft);

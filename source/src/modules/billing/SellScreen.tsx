@@ -13,7 +13,7 @@ import { Loading } from "../shared/Loading";
 // a docket plus a payment state machine plus a poll timer through App.tsx would
 // add noise there without making anything reusable.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { createElement, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   Check,
@@ -31,6 +31,9 @@ import {
   ClarityPayments,
   ClarityProducts,
   ClarityProfile,
+  ClarityServices,
+  ClarityStore,
+  type IconComponent,
 } from "../shared/ClarityIcons";
 import type { BillingCatalogItem, BillingCatalogKind, BillingCoupon, PosPaymentMethod, PosTransaction } from "./types";
 import { couponApplyAmount, remainingAfterCoupon } from "./couponMath";
@@ -85,11 +88,11 @@ export type SellScreenProps = {
 
 type TabKey = "all" | BillingCatalogKind;
 
-const TAB_LABELS: Record<TabKey, string> = {
-  all: "All",
-  product: "Products",
-  service: "Services",
-  package: "Packages",
+const TABS: Record<TabKey, { label: string; Icon: IconComponent }> = {
+  all: { label: "All", Icon: ClarityStore },
+  product: { label: "Products", Icon: ClarityProducts },
+  service: { label: "Services", Icon: ClarityServices },
+  package: { label: "Packages", Icon: ClarityPassesCredits },
 };
 
 const TAB_ORDER: TabKey[] = ["all", "product", "service", "package"];
@@ -652,7 +655,8 @@ export function SellScreen({
               aria-selected={tab === key}
               type="button"
             >
-              {TAB_LABELS[key]}
+              {createElement(TABS[key].Icon, { size: 14 })}
+              {TABS[key].label}
             </button>
           ))}
         </div>
@@ -1212,6 +1216,7 @@ export function SellScreen({
                 />
                 <div className="panel-actions">
                   <button className="primary-button" onClick={resetSale} type="button">
+                    <ClarityStore size={16} />
                     New sale
                   </button>
                 </div>

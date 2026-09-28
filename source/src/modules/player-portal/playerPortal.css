@@ -236,6 +236,9 @@
 }
 
 .player-portal-home-card-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-size: 14px;
   font-weight: 700;
 }
@@ -269,6 +272,10 @@
 
 .player-portal-pill-toggle button {
   flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   min-height: 36px;
   border: 0;
   border-radius: 999px;

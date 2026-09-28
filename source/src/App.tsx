@@ -43,10 +43,14 @@ import {
 } from "lucide-react";
 import {
   ClarityAccessPermissions,
+  ClarityAddClient,
+  ClarityAssessments,
   ClarityAdmin,
   ClarityBookingPages,
   ClarityCalendar,
+  ClarityCalendarSync,
   ClarityClientsPlayers,
+  ClarityCoachesStaff,
   ClarityDashboardHome,
   ClarityEmail,
   ClarityFacilitiesRooms,
@@ -55,12 +59,17 @@ import {
   ClarityInvoices,
   ClarityLessonsProgrammes,
   ClarityLocations,
+  ClarityMessages,
   ClarityMore,
+  ClarityNewBooking,
   ClarityNotifications,
   ClarityPassesCredits,
   ClarityPayments,
+  ClarityPlayerPortal,
+  ClarityPreferences,
   ClarityProducts,
   ClarityProfile,
+  ClarityPublicBooking,
   ClarityReports,
   ClarityServices,
   ClaritySessions,
@@ -1451,12 +1460,14 @@ function SettingsGroup({
   id,
   section,
   title,
+  icon: Icon,
   className = "",
   children,
 }: {
   id: string;
   section: string;
   title: string;
+  icon: IconComponent;
   className?: string;
   children: ReactNode;
 }) {
@@ -1484,7 +1495,10 @@ function SettingsGroup({
         onClick={() => context?.setOpenGroup(open ? "" : id)}
         type="button"
       >
-        <span>{title}</span>
+        <span className="settings-group-title">
+          <Icon size={18} />
+          {title}
+        </span>
         <span className="settings-group-caret" aria-hidden="true">▾</span>
       </button>
       <div className={`disclosure-wrap${open ? " is-open" : ""}`} inert={!open}>
@@ -22341,7 +22355,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     pendingServiceAction ? services.find((service) => service.id === pendingServiceAction.serviceId) ?? null : null;
 
   const locationsSettingsPanel = (
-    <SettingsGroup id="locations" section="business" title="Locations">
+    <SettingsGroup id="locations" icon={ClarityLocations} section="business" title="Locations">
       <div className="data-card wide">
         <div className="data-card-header">
           <div>
@@ -22682,7 +22696,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   );
 
   const terminologySettingsPanel = (
-    <SettingsGroup id="terminology" section="business" title="Terminology">
+    <SettingsGroup id="terminology" icon={ClarityServices} section="business" title="Terminology">
       <EditableSettingsBlock
         id="terminology-block"
         title="Terminology"
@@ -22735,7 +22749,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   );
 
   const coachesSettingsPanel = (
-    <SettingsGroup id="coaches" section="business" title={terms.staffPlural}>
+    <SettingsGroup id="coaches" icon={ClarityCoachesStaff} section="business" title={terms.staffPlural}>
       <div className="data-card wide">
         <div className="data-card-header">
           <div>
@@ -22914,7 +22928,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   );
 
   const availabilitySettingsPanel = (
-    <SettingsGroup id="availability" section="booking" title="Availability">
+    <SettingsGroup id="availability" icon={ClaritySessions} section="booking" title="Availability">
       <div className="availability-layout">
         <div className="data-card wide">
           <div className="data-card-header">
@@ -23154,7 +23168,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
    * no tab.
    */
   const playerBookingEmbedPanel = (
-    <SettingsGroup id="player-booking-embed" section="booking" title="Player portal booking widget">
+    <SettingsGroup id="player-booking-embed" icon={ClarityNewBooking} section="booking" title="Player portal booking widget">
       <EditableSettingsBlock
         id="player-booking-embed-block"
         title="Player portal booking widget"
@@ -23261,7 +23275,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   );
 
   const bookingSettingsPanel = (
-    <SettingsGroup id="booking-page" section="booking" title="Booking page" className="booking-page-settings">
+    <SettingsGroup id="booking-page" icon={ClarityBookingPages} section="booking" title="Booking page" className="booking-page-settings">
       <details className="settings-subsection">
         <summary className="settings-subsection-title">
           <Eye size={18} />
@@ -26128,7 +26142,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 <div className="player-tool-card">
                                   <div className="player-tool-card-header">
                                     <div>
-                                      <strong>Bookings</strong>
+                                      <strong><ClarityCalendar size={16} />Bookings</strong>
                                       <span>
                                         {playerToolAppointments.length} booking
                                         {playerToolAppointments.length === 1 ? "" : "s"}
@@ -26188,7 +26202,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 <div className="player-tool-card">
                                   <div className="player-tool-card-header">
                                     <div>
-                                      <strong>Swing reviews</strong>
+                                      <strong><ClarityAssessments size={16} />Swing reviews</strong>
                                       <span>
                                         {playerSwingReviewGroups.length} review
                                         {playerSwingReviewGroups.length === 1 ? "" : "s"} · videos, screenshot notes and practice
@@ -26388,7 +26402,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 <div className="player-tool-card">
                                   <div className="player-tool-card-header">
                                     <div>
-                                      <strong>Emails</strong>
+                                      <strong><ClarityEmail size={16} />Emails</strong>
                                       <span>Everything sent to this person</span>
                                     </div>
                                   </div>
@@ -26429,7 +26443,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 <div className="player-tool-card">
                                   <div className="player-tool-card-header">
                                     <div>
-                                      <strong>Transactions</strong>
+                                      <strong><ClarityPayments size={16} />Transactions</strong>
                                       <span>Everything billed to this person</span>
                                     </div>
                                     {billingWorkspaceEnabled && (
@@ -26531,7 +26545,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 <div className="player-tool-card">
                                   <div className="player-tool-card-header">
                                     <div>
-                                      <strong>Passes</strong>
+                                      <strong><ClarityPassesCredits size={16} />Passes</strong>
                                       <span>Lesson credits held by this person</span>
                                     </div>
                                   </div>
@@ -26762,7 +26776,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                   <div className="player-tool-card">
                                     <div className="player-tool-card-header">
                                       <div>
-                                        <strong>Practice</strong>
+                                        <strong><ClarityLessonsProgrammes size={16} />Practice</strong>
                                         <span>
                                           {activePlayerPracticeBlocks.length} active block
                                           {activePlayerPracticeBlocks.length === 1 ? "" : "s"}
@@ -27964,6 +27978,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         )}
                       </h2>
                     </div>
+                    <ClarityInvoices size={24} />
                   </div>
                   {billingDataLoadState === "loading" && !recentInvoices.length ? (
                     <Loading what="invoices" />
@@ -29683,6 +29698,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       <span>{expenseDraft.id ? "Edit" : "Log"}</span>
                       <h2>{expenseDraft.id ? "Edit expense" : "Log an expense"}</h2>
                     </div>
+                    <ClarityInvoices size={24} />
                   </div>
                   <div className="billing-catalog-editor">
                     <label className="settings-field">
@@ -29768,6 +29784,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       <span>History</span>
                       <h2>Recent expenses</h2>
                     </div>
+                    <ClarityReports size={24} />
                   </div>
                   {expenseLoadState === "loading" && !expenses.length ? (
                     <Loading what="expenses" />
@@ -31408,7 +31425,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   below: it reads block types and favourites on mount, and
                   those are two requests nobody visiting Booking asked for. */}
               {settingsTab === "practice" ? (
-                <SettingsGroup id="practice-blocks" section="practice" title="Practice blocks">
+                <SettingsGroup id="practice-blocks" icon={ClarityLessonsProgrammes} section="practice" title="Practice blocks">
                   <Suspense fallback={<Loading what="practice settings" />}>
                     <PracticeSettingsPanel onToast={(message) => setToast({ message })} />
                   </Suspense>
@@ -31423,7 +31440,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   server whether a sandbox exists, and that is not a question
                   anyone visiting Booking asked. */}
               {isAdminUser && settingsTab === "sandbox" ? (
-                <SettingsGroup id="sandbox" section="sandbox" title="Sandbox workspace">
+                <SettingsGroup id="sandbox" icon={FlaskConical} section="sandbox" title="Sandbox workspace">
                   <Suspense fallback={<Loading what="the sandbox" />}>
                     <SandboxPanel />
                   </Suspense>
@@ -31451,7 +31468,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               {isAdminUser ? locationsSettingsPanel : null}
               {availabilitySettingsPanel}
               {isAdminUser ? (
-                <SettingsGroup id="resource-system" section="booking" title="Bay & room system">
+                <SettingsGroup id="resource-system" icon={ClarityFacilitiesRooms} section="booking" title="Bay & room system">
                   <div className="data-card wide">
                     <ResourceSystemPanel canEdit={isAdminUser} />
                   </div>
@@ -31461,7 +31478,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               {isAdminUser ? playerBookingEmbedPanel : null}
               {/* Where the business is. Not the coach's: every coach in the
                   workspace shares its time zone, currency and tax. */}
-              <SettingsGroup id="region" section="account" title="Country & region" className="notification-card account-card">
+              <SettingsGroup id="region" icon={ClarityPublicBooking} section="account" title="Country & region" className="notification-card account-card">
                 <EditableSettingsBlock
                   id="region-block"
                   title="Country & region"
@@ -31488,7 +31505,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 </EditableSettingsBlock>
               </SettingsGroup>
 
-              <SettingsGroup id="coach-account" section="account" title="Account" className="notification-card account-card">
+              <SettingsGroup id="coach-account" icon={ClarityProfile} section="account" title="Account" className="notification-card account-card">
                 <details className="settings-subsection">
                   <summary className="settings-subsection-title">
                     <ClarityPayments size={18} />
@@ -31844,7 +31861,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 </div>
               </SettingsGroup>
 
-              <SettingsGroup id="google-calendar" section="developer" title="Google Calendar sync" className="sync-card">
+              <SettingsGroup id="google-calendar" icon={ClarityCalendarSync} section="developer" title="Google Calendar sync" className="sync-card">
 
                 <div className={`sync-status ${googleCalendar.connected ? "connected" : googleCalendar.configured ? "checking" : "offline"}`}>
                   <span>Direct Google API</span>
@@ -32863,7 +32880,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   reminder on, watched reminders go out, and still read "Off"
                   here — a half-written save that the shared header had no way
                   to show. */}
-              <SettingsGroup id="email-notifications" section="email-sms" title="Sender & delivery" className="notification-card">
+              <SettingsGroup id="email-notifications" icon={ClarityIntegrations} section="email-sms" title="Sender & delivery" className="notification-card">
                 <EditableSettingsBlock
                   id="email-notifications-block"
                   title="Sender & delivery"
@@ -33039,7 +33056,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   itself and then renders whatever the server sent back, so the
                   card cannot drift from the send path the way the old shared
                   block did. */}
-              <SettingsGroup id="email-sending-rules" section="email-sms" title="What sends" className="notification-card">
+              <SettingsGroup id="email-sending-rules" icon={ClarityNotifications} section="email-sms" title="What sends" className="notification-card">
                 <section className="sending-rules" id="email-sending-rules-block">
                   <div className="sending-rules-head">
                     <span>What sends</span>
@@ -33165,7 +33182,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               {/* Settings › Email / SMS › SMS. The provider wiring only. The
                   words a text carries are the smsText field of each template,
                   in Notifications › Templates. */}
-              <SettingsGroup id="text-machine" section="email-sms" title="SMS" className="notification-card">
+              <SettingsGroup id="text-machine" icon={ClarityMessages} section="email-sms" title="SMS" className="notification-card">
                 <EditableSettingsBlock
                   id="text-machine-block"
                   title="SMS"
@@ -33274,6 +33291,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   Coach profile's links still land here. */}
               <SettingsGroup
                 id="message-templates"
+                icon={ClarityEmail}
                 section="notifications"
                 title="Templates"
                 className="notification-card message-templates-card"
@@ -33422,7 +33440,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 </EditableSettingsBlock>
               </SettingsGroup>
 
-              <SettingsGroup id="theme" section="business" title="Theme" className="notification-card">
+              <SettingsGroup id="theme" icon={ClarityPreferences} section="business" title="Theme" className="notification-card">
                 <details className="settings-subsection">
                   <summary className="settings-subsection-title">
                     <ClaritySettings size={18} />
@@ -33488,7 +33506,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 </details>
               </SettingsGroup>
 
-              <SettingsGroup id="coach-branding" section="business" title="Business branding" className="brand-vein-card">
+              <SettingsGroup id="coach-branding" icon={ClarityPlayerPortal} section="business" title="Business branding" className="brand-vein-card">
 
                 <div className="brand-vein-preview">
                   <div className="brand-vein-logo">
@@ -33635,7 +33653,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 </details>
               </SettingsGroup>
 
-              <SettingsGroup id="import-clients" section="account" title="Import clients" className="import-card">
+              <SettingsGroup id="import-clients" icon={ClarityAddClient} section="account" title="Import clients" className="import-card">
                 <details className="settings-subsection">
                   <summary className="settings-subsection-title">
                     <Upload size={18} />
