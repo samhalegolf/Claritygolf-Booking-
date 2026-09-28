@@ -59,3 +59,5 @@ google-scope-fix.tgz
 # The npm lockfile, deliberately untracked.
 source/package-lock.json
 source/node_modules
+# The staff app's own install (booking-app/ has its own package.json).
+source/booking-app/node_modules/
