@@ -17,6 +17,7 @@ import test from "node:test";
 
 import {
   releaseTerminalAttempt,
+  settleTerminalPaymentFromWebhook,
   startTerminalPayment,
   terminalPaymentState,
 } from "../billing-api.mts";
@@ -406,6 +407,72 @@ test("another business can never start, read or cancel this sale", async () => {
     await assert.rejects(terminalPaymentState("acct-b", "sale-1"), { status: 404 });
     assert.deepEqual(await releaseTerminalAttempt("acct-b", "sale-1"), { state: "none" });
     assert.equal(hosts.counts.intentCreates, 0);
+  } finally {
+    hosts.restore();
+  }
+});
+
+/* --- The webhook, for a phone that never heard back ------------------------ */
+
+const succeeded = {
+  status: "succeeded",
+  amount_received: 7000,
+  latest_charge: { payment_method_details: { card_present: { brand: "visa", last4: "4242" } } },
+};
+
+test("the webhook settles a tap the phone never heard back about, once", async () => {
+  const hosts = fakeHosts();
+  try {
+    await startTerminalPayment("acct-a", "coach-1", { transactionId: "sale-1" });
+    Object.assign(hosts.intents.get("pi_1")!, succeeded);
+    const first = await settleTerminalPaymentFromWebhook("acct-a", "pi_1");
+    assert.deepEqual(first, { settled: "sale-1", receipt: "POS-1048" });
+    // Stripe redelivers, and the phone comes back and asks too.
+    await settleTerminalPaymentFromWebhook("acct-a", "pi_1");
+    assert.equal((await terminalPaymentState("acct-a", "sale-1")).state, "succeeded");
+    assert.equal(hosts.counts.paidTransitions, 1);
+    assert.equal(hosts.tables.billing_payment_tenders.length, 2);
+    assert.equal(hosts.tables.billing_terminal_payments[0].status, "succeeded");
+  } finally {
+    hosts.restore();
+  }
+});
+
+test("the webhook trusts Stripe's intent, not the event, and ignores what is not a tap", async () => {
+  const hosts = fakeHosts();
+  try {
+    await startTerminalPayment("acct-a", "coach-1", { transactionId: "sale-1" });
+    // The event says succeeded, but Stripe says the intent is still open.
+    assert.deepEqual(await settleTerminalPaymentFromWebhook("acct-a", "pi_1"), { ignored: "intent_open" });
+    // A QR or invoice payment has no Terminal attempt.
+    assert.deepEqual(await settleTerminalPaymentFromWebhook("acct-a", "pi_other"), { ignored: "not_a_terminal_payment" });
+    assert.equal(hosts.sale().status, "pending");
+  } finally {
+    hosts.restore();
+  }
+});
+
+test("the webhook cannot settle another business's tap", async () => {
+  const hosts = fakeHosts();
+  try {
+    await startTerminalPayment("acct-a", "coach-1", { transactionId: "sale-1" });
+    Object.assign(hosts.intents.get("pi_1")!, succeeded);
+    assert.deepEqual(await settleTerminalPaymentFromWebhook("acct-b", "pi_1"), { ignored: "not_a_terminal_payment" });
+    assert.equal(hosts.sale().status, "pending");
+  } finally {
+    hosts.restore();
+  }
+});
+
+test("a tap that lands on a voided sale is flagged for a person, not retried forever", async () => {
+  const hosts = fakeHosts();
+  try {
+    await startTerminalPayment("acct-a", "coach-1", { transactionId: "sale-1" });
+    Object.assign(hosts.intents.get("pi_1")!, succeeded);
+    hosts.sale().status = "void";
+    const result = await settleTerminalPaymentFromWebhook("acct-a", "pi_1");
+    assert.deepEqual(result, { needsAttention: "POS_PAID_AFTER_CLOSE", transaction: "sale-1" });
+    assert.equal(hosts.counts.paidTransitions, 0);
   } finally {
     hosts.restore();
   }

@@ -35,6 +35,8 @@ Player never sees it.
 6. Page → `GET /terminal/payment-intent/:id/status` until the server knows.
    The server asks Stripe and, on success, settles the sale through
    `settlePosTransaction` — stock, voucher, passes, tenders, exactly once.
+   If the phone never gets that far, Stripe's `payment_intent.succeeded`
+   webhook settles it the same way.
 
 If anything is uncertain after a card is read, the screen says **Checking
 payment… Do not charge again yet** and keeps asking. It never says "failed" on
@@ -54,6 +56,12 @@ and Stripe lets an intent succeed only once.
   in.
 - Tap to Pay on iPhone must be available in the business's country. Check
   Stripe's current list before offering it to a new market.
+- **Webhook event.** On Clarity's platform Stripe account, the Connect
+  webhook endpoint (`/api/stripe-billing-webhook`, both live and test) must
+  also send **`payment_intent.succeeded`**. That settles a tap whose phone
+  never heard the answer (app closed, signal lost). Without it such a sale
+  stays pending until someone touches its payment again. The phone and the
+  webhook can both settle the same payment; the second finds it done.
 - Each connected account accepts **Apple's Tap to Pay terms** once, the first
   time it connects on any iPhone (Apple ID sign-in). Stripe's SDK presents
   this. Stripe also offers onboarding links to do it on the web first.
@@ -124,12 +132,6 @@ platform's live key serves it. Before the first live payment, check:
 
 ## Not built yet
 
-- **Webhook settlement.** A tap that succeeds while the app is closed settles
-  the next time anyone touches that sale's payment — starts the tap again,
-  switches to the QR, voids it or marks it paid — because each of those asks
-  Stripe first. Until then it sits as pending. A `payment_intent.succeeded`
-  webhook would settle it without anyone looking; the settlement path is ready
-  for it.
 - **Physical readers.** The data model (`terminal_reader` channel, locations,
   device on each attempt) is ready; the plugin only discovers Tap to Pay.
 - **Refunds from Clarity.** Refunding a Tap to Pay sale is done in Stripe, as

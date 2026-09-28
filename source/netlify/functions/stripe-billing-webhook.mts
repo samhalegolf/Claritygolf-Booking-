@@ -4,6 +4,7 @@ import { accountsForClarityPayAccount, syncClarityPay } from "./_shared/clarity-
 import { accountsForStripeAccount } from "./_shared/integration-credentials.mts";
 import { stripePlatform, STRIPE_CONNECTION_SETTING } from "./_shared/stripe.mts";
 import { getDatabase } from "./_shared/database.mts";
+import { settleTerminalPaymentFromWebhook } from "./billing-api.mts";
 import {
   deleteStripeInvoice,
   syncStripeCharge,
@@ -29,10 +30,14 @@ import {
 // invoice.paid, invoice.payment_failed, invoice.voided,
 // invoice.marked_uncollectible, invoice.deleted, charge.succeeded,
 // charge.updated, charge.captured, charge.refunded,
-// account.application.deauthorized, account.updated.
+// account.application.deauthorized, account.updated, payment_intent.succeeded.
 //
 // account.updated is how a Clarity Pay account switches on once Stripe has
 // finished checking the business, even if they closed the tab mid-signup.
+//
+// payment_intent.succeeded settles a Tap to Pay sale whose phone never heard
+// the answer (app closed, signal lost). The phone settles the same payment
+// itself when it can; whichever gets there second finds it already done.
 
 function json(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), {
@@ -151,6 +156,8 @@ async function handleEvent(event: Record<string, any>, object: Record<string, an
     case "charge.captured":
     case "charge.refunded":
       return syncStripeCharge(object, accountId);
+    case "payment_intent.succeeded":
+      return settleTerminalPaymentFromWebhook(accountId, String(object?.id || ""));
     default:
       // Unhandled event types are acknowledged so Stripe doesn't retry them.
       return { ignored: event?.type || "unknown" };

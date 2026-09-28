@@ -4657,6 +4657,46 @@ export async function terminalPaymentState(accountId: string, transactionId: str
 }
 
 /**
+ * Stripe's payment_intent.succeeded, for a Tap to Pay payment.
+ *
+ * The phone normally settles its own payment by asking the server
+ * (terminalPaymentState). This is for when it could not: the app was closed
+ * or lost signal after the tap. The event only says which intent to look at;
+ * the intent is fetched fresh from Stripe and the attempt row must belong to
+ * this business, so nothing in the event body is trusted beyond its id. A
+ * settle already done by the phone makes this a no-op.
+ *
+ * Returns what happened rather than throwing on a payment that does not add up
+ * (voided sale, wrong amount, second card): those need a person, and a webhook
+ * error would only make Stripe redeliver the same event for days.
+ */
+export async function settleTerminalPaymentFromWebhook(accountId: string, paymentIntentId: string) {
+  if (!/^pi_[A-Za-z0-9]+$/.test(paymentIntentId)) return { ignored: "not_a_payment_intent" };
+  const rows = (await supabase("billing_terminal_payments", {
+    query:
+      `select=*&account_id=eq.${encodeFilter(accountId)}` +
+      `&payment_intent_id=eq.${encodeFilter(paymentIntentId)}&limit=1`,
+  })) as TerminalAttempt[];
+  const attempt = rows[0];
+  // A Clarity Pay charge that is not a Tap to Pay one (the QR, an invoice).
+  if (!attempt) return { ignored: "not_a_terminal_payment" };
+  const credential = await terminalCredential(accountId);
+  const intent = await retrieveTerminalPaymentIntent(credential, paymentIntentId);
+  if (intent.state !== "succeeded") return { ignored: `intent_${intent.state}` };
+  try {
+    const settled = await settleTerminalIntent(accountId, attempt, intent);
+    return { settled: attempt.transaction_id, receipt: settled.transaction.receiptNumber };
+  } catch (error) {
+    const status = Number((error as { status?: unknown })?.status);
+    if (status === 409 || status === 404) {
+      console.error("billing_api:terminal_webhook_needs_attention", accountId, paymentIntentId, (error as Error).message);
+      return { needsAttention: (error as { code?: string })?.code || "conflict", transaction: attempt.transaction_id };
+    }
+    throw error;
+  }
+}
+
+/**
  * Stand down the open Terminal payment on a sale, if there is one.
  *
  * Only an intent Stripe still holds open is cancelled. One that went through is
