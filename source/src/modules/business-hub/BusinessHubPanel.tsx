@@ -231,7 +231,7 @@ export function BusinessHubPanel({ identity, internalJobs, onOpen }: BusinessHub
     const open = openDetail === id;
     return (
       <button
-        className="cp-detail-toggle"
+        className="bh-detail-toggle"
         onClick={() => setOpenDetail(open ? "" : id)}
         disabled={!hasFacts}
         aria-expanded={open}
@@ -246,14 +246,14 @@ export function BusinessHubPanel({ identity, internalJobs, onOpen }: BusinessHub
   function facts(id: string, list: Array<[string, string]>, path: string) {
     if (openDetail !== id) return null;
     return (
-      <div className="cp-facts">
+      <div className="bh-facts">
         {list.map(([key, value]) => (
-          <div className="cp-fact" key={key}>
+          <div className="bh-fact" key={key}>
             <span>{key}</span>
             <span>{value}</span>
           </div>
         ))}
-        <p className="cp-fact-path">
+        <p className="bh-fact-path">
           <ClaritySettings size={14} />
           {path}
         </p>
@@ -262,17 +262,17 @@ export function BusinessHubPanel({ identity, internalJobs, onOpen }: BusinessHub
   }
 
   return (
-    <div className="coach-profile">
-      <article className="cp-identity">
-        <span className="cp-avatar" aria-hidden="true">
+    <div className="business-hub">
+      <article className="bh-identity">
+        <span className="bh-avatar" aria-hidden="true">
           {initials}
         </span>
-        <div className="cp-identity-main">
-          <div className="cp-identity-name">
+        <div className="bh-identity-main">
+          <div className="bh-identity-name">
             <strong>{identity.coachName || "Your name"}</strong>
-            <span className="cp-role">{identity.roleLabel}</span>
+            <span className="bh-role">{identity.roleLabel}</span>
           </div>
-          <div className="cp-identity-facts">
+          <div className="bh-identity-facts">
             {(
               [
                 ["Email", identity.email, ClarityEmail],
@@ -290,7 +290,7 @@ export function BusinessHubPanel({ identity, internalJobs, onOpen }: BusinessHub
           </div>
         </div>
         <button
-          className="cp-gear"
+          className="bh-gear"
           onClick={() => onOpen({ kind: "settings", tab: "business", group: "coaches" }, "Coaches")}
           title="Settings › Business › Coaches"
           type="button"
@@ -300,7 +300,7 @@ export function BusinessHubPanel({ identity, internalJobs, onOpen }: BusinessHub
       </article>
 
       {error && (
-        <div className="cp-error" role="alert">
+        <div className="bh-error" role="alert">
           <strong>Your connections are unavailable</strong>
           {error}
           <button className="text-button" onClick={() => void store.load().catch(() => undefined)} type="button">
@@ -309,23 +309,23 @@ export function BusinessHubPanel({ identity, internalJobs, onOpen }: BusinessHub
         </div>
       )}
 
-      <div className="cp-sections">
+      <div className="bh-sections">
         {sections.map((section) => (
-          <section className="cp-section" key={section.name}>
+          <section className="bh-section" key={section.name}>
             <SectionTitle name={section.name} />
 
             {connectionsStatus !== "loaded" && section.external.length === 0 && EXTERNAL_SECTION_JOBS[section.name] ? (
-              <article className="cp-cell cp-cell-pending" aria-busy="true">
-                <div className="cp-cell-head">
-                  <span className="cp-mark is-placeholder">…</span>
-                  <span className="cp-cell-title">
+              <article className="bh-cell bh-cell-pending" aria-busy="true">
+                <div className="bh-cell-head">
+                  <span className="bh-mark is-placeholder">…</span>
+                  <span className="bh-cell-title">
                     <strong>{EXTERNAL_SECTION_JOBS[section.name]}</strong>
-                    <span className="cp-external" title="External connection">
+                    <span className="bh-external" title="External connection">
                       <ClarityIntegrations size={14} />
                     </span>
                   </span>
                 </div>
-                <p className="cp-cell-summary">Checking connection…</p>
+                <p className="bh-cell-summary">Checking connection…</p>
               </article>
             ) : null}
 
@@ -341,43 +341,43 @@ export function BusinessHubPanel({ identity, internalJobs, onOpen }: BusinessHub
                 ["Status", card.connectedAs ? `Connected · ${card.connectedAs}` : connected ? "Ready" : "Not set up"],
               ];
               return (
-                <article className="cp-cell" key={card.id}>
-                  <div className="cp-cell-head">
+                <article className="bh-cell" key={card.id}>
+                  <div className="bh-cell-head">
                     {/* Connected: the provider's own mark identifies it. Not
                         connected: initials in a dashed box, because the card is
                         the job at that point ("Calendar", not "Google
                         Calendar") and a full-colour logo would advertise a
                         connection that does not exist. */}
                     {connected && PROVIDER_LOGOS.has(card.id) ? (
-                      <span className="cp-mark is-logo" title={card.label}>
+                      <span className="bh-mark is-logo" title={card.label}>
                         <img src={`/assets/integrations/${card.id}.svg`} alt="" />
                       </span>
                     ) : (
-                      <span className={`cp-mark${connected ? "" : " is-placeholder"}`} title={card.label}>
+                      <span className={`bh-mark${connected ? "" : " is-placeholder"}`} title={card.label}>
                         {providerInitial(card.label)}
                       </span>
                     )}
-                    <span className="cp-cell-title">
+                    <span className="bh-cell-title">
                       <strong>{title}</strong>
-                      <span className="cp-external" title="An outside account, connected to Clarity">
+                      <span className="bh-external" title="An outside account, connected to Clarity">
                         <ClarityIntegrations size={14} />
                       </span>
                     </span>
-                    <span className="cp-cell-actions">
+                    <span className="bh-cell-actions">
                       {connected && detailToggle(card.id, true)}
                       {state === "ok" && (
-                        <span className="cp-chip is-ok" title="Connected and healthy">
+                        <span className="bh-chip is-ok" title="Connected and healthy">
                           <ClarityIntegrations size={15} />
                         </span>
                       )}
                       {state === "bad" && (
-                        <span className="cp-chip is-bad" title="Needs attention">
+                        <span className="bh-chip is-bad" title="Needs attention">
                           <AlertCircle size={15} />
                         </span>
                       )}
                       {connected ? (
                         <button
-                          className="cp-gear"
+                          className="bh-gear"
                           onClick={() => onOpen(INTEGRATION_TARGET, card.label)}
                           title={`Manage — Settings › Integrations › ${card.label}`}
                           type="button"
@@ -386,7 +386,7 @@ export function BusinessHubPanel({ identity, internalJobs, onOpen }: BusinessHub
                         </button>
                       ) : (
                         <button
-                          className="cp-setup"
+                          className="bh-setup"
                           onClick={() => onOpen(INTEGRATION_TARGET, job)}
                           title={`Set up ${job}`}
                           type="button"
@@ -396,37 +396,37 @@ export function BusinessHubPanel({ identity, internalJobs, onOpen }: BusinessHub
                       )}
                     </span>
                   </div>
-                  <p className="cp-cell-summary">{card.summary}</p>
+                  <p className="bh-cell-summary">{card.summary}</p>
                   {/* The point of the failing state is the sentence, not the
                       colour: what actually broke, in the coach's words. */}
-                  {state === "bad" && <p className="cp-cell-error">{card.connectionError}</p>}
+                  {state === "bad" && <p className="bh-cell-error">{card.connectionError}</p>}
                   {facts(card.id, detail, "Settings › Integrations")}
                 </article>
               );
             })}
 
             {section.internal.map((job) => (
-              <article className="cp-cell" key={job.id}>
-                <div className="cp-cell-head">
+              <article className="bh-cell" key={job.id}>
+                <div className="bh-cell-head">
                   {(() => {
                     const Icon = INTERNAL_JOB_ICONS[job.id];
                     return Icon ? (
-                      <span className="cp-job-icon" aria-hidden="true">
+                      <span className="bh-job-icon" aria-hidden="true">
                         <Icon size={18} />
                       </span>
                     ) : null;
                   })()}
-                  <span className="cp-cell-title">
+                  <span className="bh-cell-title">
                     <strong>{job.label}</strong>
                   </span>
-                  <span className="cp-cell-actions">
+                  <span className="bh-cell-actions">
                     {detailToggle(job.id, job.facts.length > 0)}
-                    <button className="cp-gear" onClick={() => onOpen(job.target, job.label)} title={`Manage — ${job.path}`} type="button">
+                    <button className="bh-gear" onClick={() => onOpen(job.target, job.label)} title={`Manage — ${job.path}`} type="button">
                       <ClaritySettings size={16} />
                     </button>
                   </span>
                 </div>
-                <p className="cp-cell-summary">{job.summary}</p>
+                <p className="bh-cell-summary">{job.summary}</p>
                 {facts(job.id, job.facts, job.path)}
               </article>
             ))}
