@@ -4000,7 +4000,9 @@ button {
 
 /* Calendar picker: folder tabs sitting on the calendar card, in the same
    style as the message templates. Places on the left, coaches on the right;
-   the picked tab stands taller and joins the card's dark top edge. */
+   the picked tab stands taller and is filled with the card's own colour. It
+   drops over the card's top edge so the two read as one piece; the others sit
+   just above that edge. */
 .calendar-folder {
   min-width: 0;
 }
@@ -4010,6 +4012,9 @@ button {
   align-items: flex-end;
   justify-content: space-between;
   gap: var(--c-space-4);
+  position: relative;
+  z-index: 1;
+  margin-bottom: -2px;
   padding: 0 var(--c-radius-card);
   overflow-x: auto;
   scrollbar-width: none;
@@ -4037,13 +4042,16 @@ button {
   font-weight: 700;
   white-space: nowrap;
   opacity: 0.62;
+  margin-bottom: 2px;
   cursor: pointer;
 }
 
 .calendar-scope-tabs button.is-active {
+  margin-bottom: 0;
   padding-top: 9px;
-  padding-bottom: 9px;
-  background: var(--c-accent);
+  padding-bottom: 11px;
+  background: var(--panel);
+  color: var(--c-text-body);
   font-size: var(--c-size-meta);
   opacity: 1;
 }
@@ -6152,6 +6160,11 @@ button {
     linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 46%),
     var(--panel);
   border-color: var(--border);
+}
+
+/* The picked calendar tab matches the top of the card it joins, wash and all. */
+.theme-dark .calendar-scope-tabs button.is-active {
+  background: linear-gradient(rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.035)), var(--panel);
 }
 
 .theme-dark .sidebar {
