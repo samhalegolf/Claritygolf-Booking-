@@ -8744,7 +8744,7 @@ button {
 
 /* Settings > Account > Plan. Everything here is read-only, so per Rule 01 it is
    text, not boxes: the workspace name and ID are a plain definition list, the
-   status is a pill (tint plus word, like .cp-chip), and usage sits on soft
+   status is a pill (tint plus word, like .bh-chip), and usage sits on soft
    unbordered tiles like .integration-stat-grid so it does not break the nesting
    law inside the accordion's own box. */
 .settings-subsection-title strong.account-plan-heading {
@@ -15433,17 +15433,17 @@ button {
    into on their behalf. White cards on the page rather than one outer box, so
    a section reads as its own thing and nothing nests. */
 
-.profile-page {
+.business-hub-page {
   min-width: 0;
 }
 
-.coach-profile {
+.business-hub {
   display: grid;
   gap: var(--c-space-6);
   min-width: 0;
 }
 
-.coach-profile .cp-identity {
+.business-hub .bh-identity {
   display: flex;
   gap: var(--c-space-7);
   align-items: flex-start;
@@ -15454,7 +15454,7 @@ button {
   background: var(--c-surface);
 }
 
-.cp-avatar {
+.bh-avatar {
   width: 72px;
   height: 72px;
   flex: none;
@@ -15467,23 +15467,23 @@ button {
   font-weight: 800;
 }
 
-.cp-identity-main {
+.bh-identity-main {
   flex: 1 1 320px;
   min-width: 0;
 }
 
-.cp-identity-name {
+.bh-identity-name {
   display: flex;
   align-items: baseline;
   gap: var(--c-space-4);
   flex-wrap: wrap;
 }
 
-.cp-identity-name strong {
+.bh-identity-name strong {
   font-size: 22px;
 }
 
-.coach-profile .cp-role {
+.business-hub .bh-role {
   padding: 3px var(--c-space-4);
   border-radius: var(--c-radius-pill);
   background: var(--c-active);
@@ -15494,15 +15494,17 @@ button {
   letter-spacing: 0.06em;
 }
 
-.cp-identity-facts {
+.bh-identity-facts {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
   gap: var(--c-space-5);
   margin-top: var(--c-space-5);
 }
 
-.coach-profile .cp-identity-facts span {
-  display: block;
+.business-hub .bh-identity-facts span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   color: var(--c-muted);
   font-size: var(--c-size-group);
   text-transform: uppercase;
@@ -15510,7 +15512,7 @@ button {
   letter-spacing: 0.04em;
 }
 
-.cp-identity-facts strong {
+.bh-identity-facts strong {
   display: block;
   margin-top: 3px;
   font-size: var(--c-size-secondary);
@@ -15520,12 +15522,12 @@ button {
 
 /* Two columns of section cards. `columns` rather than a grid because the
    sections are different heights and should pack, not line up in rows. */
-.cp-sections {
+.bh-sections {
   columns: 2;
   column-gap: var(--c-space-6);
 }
 
-.coach-profile .cp-section {
+.business-hub .bh-section {
   margin: 0 0 var(--c-space-6);
   border: 1px solid var(--c-border);
   border-radius: var(--c-radius-card);
@@ -15534,7 +15536,7 @@ button {
   break-inside: avoid;
 }
 
-.coach-profile .cp-section h3 {
+.business-hub .bh-section h3 {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -15550,7 +15552,7 @@ button {
 
 /* Cells ruled by hairlines rather than a box each: eleven boxes inside a box
    is the nesting the rest of this app spent a long time getting rid of. */
-.cp-cell {
+.bh-cell {
   display: grid;
   gap: var(--c-space-4);
   align-content: start;
@@ -15558,17 +15560,24 @@ button {
   border-bottom: 1px solid var(--c-border-soft);
 }
 
-.cp-section .cp-cell:last-child {
+.bh-section .bh-cell:last-child {
   border-bottom: 0;
 }
 
-.cp-cell-head {
+.bh-cell-head {
   display: flex;
   align-items: center;
   gap: var(--c-space-4);
 }
 
-.cp-cell-title {
+/* Clarity's own settings wear an icon where an outside connection wears its mark. */
+.bh-job-icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--c-text-soft);
+}
+
+.bh-cell-title {
   flex: 1;
   min-width: 0;
   display: flex;
@@ -15576,12 +15585,12 @@ button {
   gap: var(--c-space-2);
 }
 
-.cp-cell-title strong {
+.bh-cell-title strong {
   min-width: 0;
   font-size: var(--c-size-card-heading);
 }
 
-.coach-profile .cp-cell-summary {
+.business-hub .bh-cell-summary {
   margin: 0;
   color: var(--c-text-soft);
   font-size: var(--c-size-meta);
@@ -15589,7 +15598,7 @@ button {
 }
 
 /* The point of the failing state is the sentence, not the colour. */
-.coach-profile .cp-cell-error {
+.business-hub .bh-cell-error {
   margin: 0;
   color: var(--c-danger);
   font-size: var(--c-size-meta);
@@ -15597,7 +15606,7 @@ button {
 }
 
 /* An outside account, so it can be absent in a way a Clarity setting cannot. */
-.coach-profile .cp-external {
+.business-hub .bh-external {
   flex: none;
   display: inline-flex;
   color: var(--c-text-disabled);
@@ -15605,7 +15614,7 @@ button {
 
 /* The provider's mark. Dashed while it is only a possibility, solid once the
    connection exists. */
-.cp-mark {
+.bh-mark {
   width: 32px;
   height: 32px;
   flex: none;
@@ -15619,7 +15628,7 @@ button {
   font-weight: 700;
 }
 
-.cp-mark.is-placeholder {
+.bh-mark.is-placeholder {
   border-style: dashed;
   color: var(--c-pencil);
 }
@@ -15631,27 +15640,27 @@ button {
    square, so the container gives up its own chrome: the full-bleed marks fill
    the rounded box like the app icons they are, and the glyphs get the whole
    32px instead of 24. */
-.cp-mark.is-logo {
+.bh-mark.is-logo {
   padding: 0;
   border: 0;
   background: transparent;
   overflow: hidden;
 }
 
-.cp-mark.is-logo img {
+.bh-mark.is-logo img {
   width: 100%;
   height: 100%;
   object-fit: contain;
   display: block;
 }
 
-.cp-cell-actions {
+.bh-cell-actions {
   display: flex;
   align-items: center;
   gap: var(--c-space-2);
 }
 
-.cp-chip {
+.bh-chip {
   width: 30px;
   height: 30px;
   flex: none;
@@ -15660,18 +15669,18 @@ button {
   border-radius: var(--c-radius-control);
 }
 
-.cp-chip.is-ok {
+.bh-chip.is-ok {
   background: var(--c-success-wash);
   color: var(--c-success-text);
 }
 
-.cp-chip.is-bad {
+.bh-chip.is-bad {
   background: var(--c-danger-wash);
   color: var(--c-danger);
 }
 
-.cp-gear,
-.cp-detail-toggle {
+.bh-gear,
+.bh-detail-toggle {
   width: 30px;
   height: 30px;
   flex: none;
@@ -15685,19 +15694,19 @@ button {
   cursor: pointer;
 }
 
-.cp-gear:hover,
-.cp-detail-toggle:hover:not(:disabled) {
+.bh-gear:hover,
+.bh-detail-toggle:hover:not(:disabled) {
   background: var(--c-hover);
   color: var(--c-text);
 }
 
-.cp-detail-toggle:disabled {
+.bh-detail-toggle:disabled {
   color: var(--c-text-disabled);
   cursor: default;
 }
 
 /* Setting one up is the one thing on this screen worth a filled button. */
-.cp-setup {
+.bh-setup {
   width: 30px;
   height: 30px;
   flex: none;
@@ -15711,16 +15720,16 @@ button {
   cursor: pointer;
 }
 
-.cp-setup:hover {
+.bh-setup:hover {
   background: var(--c-text-body);
 }
 
-.cp-facts {
+.bh-facts {
   border-top: 1px solid var(--c-border-soft);
   padding-top: var(--c-space-3);
 }
 
-.cp-fact {
+.bh-fact {
   display: flex;
   justify-content: space-between;
   gap: var(--c-space-5);
@@ -15728,19 +15737,19 @@ button {
   border-bottom: 1px solid var(--c-active);
 }
 
-.coach-profile .cp-fact > span:first-child {
+.business-hub .bh-fact > span:first-child {
   color: var(--c-muted);
   font-size: var(--c-size-group);
 }
 
-.coach-profile .cp-fact > span:last-child {
+.business-hub .bh-fact > span:last-child {
   color: var(--c-text-body);
   font-size: var(--c-size-meta);
   text-align: right;
   overflow-wrap: anywhere;
 }
 
-.coach-profile .cp-fact-path {
+.business-hub .bh-fact-path {
   display: flex;
   align-items: center;
   gap: var(--c-space-2);
@@ -15749,7 +15758,7 @@ button {
   font-size: var(--c-size-group);
 }
 
-.coach-profile .cp-error {
+.business-hub .bh-error {
   display: grid;
   gap: var(--c-space-2);
   justify-items: start;
@@ -15762,7 +15771,7 @@ button {
 }
 
 @media (max-width: 900px) {
-  .cp-sections {
+  .bh-sections {
     columns: 1;
   }
 }

@@ -163,9 +163,9 @@ import {
   isValidPhone,
   setActiveRegion,
 } from "./lib/activeCountry";
-import { CoachProfilePanel } from "./modules/profile/CoachProfilePanel";
+import { BusinessHubPanel } from "./modules/business-hub/BusinessHubPanel";
 import { RegionSettings, TimeZoneSelect, type RegionValues } from "./modules/settings/RegionSettings";
-import type { ProfileInternalJob, ProfileTarget } from "./modules/profile/CoachProfilePanel";
+import type { ProfileInternalJob, ProfileTarget } from "./modules/business-hub/BusinessHubPanel";
 import {
   cleanNotificationTemplates,
   DEFAULT_MAP_LINK_LABEL,
@@ -1201,12 +1201,12 @@ const BILLING_SECTIONS: Exclude<BillingSection, "none">[] = [
 // What an overlay is currently showing. A settings overlay carries the tab so
 // the section's own tab CSS still applies and the group to focus; a billing
 // overlay carries the section. Both carry the title they announce themselves
-// with, which is the coach-profile card's own label.
+// with, which is the Business Hub card's own label.
 type WorkspaceOverlay =
   | { kind: "settings"; tab: Exclude<SettingsTab, "none">; group: string; title: string }
   | { kind: "billing"; section: Exclude<BillingSection, "none">; title: string };
 
-// The views a coach-profile card is allowed to send you to. Not every View:
+// The views a Business Hub card is allowed to send you to. Not every View:
 // "booking" is the public page, and "settings" and "billing" open over the
 // profile rather than replacing it.
 const PROFILE_LINKED_VIEWS: View[] = ["calendar", "clients", "players", "sell", "billing", "video"];
@@ -2790,7 +2790,7 @@ function sectionTitle(view: View, terms: BusinessTerminology = terminologyFor())
     case "players":
       return `${terms.customerSingular} Profiles`;
     case "profile":
-      return `${terms.staffSingular} profile`;
+      return "Business Hub";
     default:
       return "Calendar";
   }
@@ -24519,7 +24519,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
    * title back in capitals.
    */
   /**
-   * Clarity's own settings, as coach-profile cards.
+   * Clarity's own settings, as Business Hub cards.
    *
    * Every fact here is read from live workspace state rather than restated, so
    * a card cannot claim a lesson type exists after it has been deleted. A job
@@ -24756,8 +24756,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             }
           : activeView === "profile"
             ? {
-                title: `${terms.staffSingular} profile`,
-                subtitle: "Who you are, and everything Clarity is plugged into on your behalf",
+                title: "Business Hub",
+                subtitle: "Your business, and everything Clarity is plugged into on your behalf",
               }
             : { title: sectionTitle(activeView, terms) };
   const failedDiagnosticEvents = diagnosticEvents.filter((event) => event.status === "failed");
@@ -24829,7 +24829,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             onClick={() => switchView("profile")}
           >
             <ClarityDashboardHome size={18} />
-            {terms.staffSingular} profile
+            Business Hub
           </button>
           <button className={activeView === "calendar" ? "active" : ""} onClick={() => switchView("calendar")}>
             <ClarityCalendar size={18} />
@@ -31464,8 +31464,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         )}
 
         {!isEmbedMode && adminWorkspaceReady && activeView === "profile" && (
-          <section className="profile-page">
-            <CoachProfilePanel
+          <section className="business-hub-page">
+            <BusinessHubPanel
               identity={{
                 coachName: ownCoachProfile?.displayName || ownCoachProfile?.name || currentAppUser.name,
                 roleLabel: isPlatformAdmin
