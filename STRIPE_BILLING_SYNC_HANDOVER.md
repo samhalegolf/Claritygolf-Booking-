@@ -35,7 +35,7 @@ No existing files were modified. Type-checked with the repo's `typecheck:functio
 ## Setup after deploy
 
 1. Each business connects its own Stripe from Settings › Billing › Card payments (Stripe Connect sign-in). Requests use Clarity's platform key on that connected account.
-2. Once, on Clarity's platform Stripe account (Connect › Webhooks, "events on connected accounts"), add an endpoint at `https://YOUR-BOOKING-SITE/api/stripe-billing-webhook` with: `invoice.created`, `invoice.updated`, `invoice.finalized`, `invoice.sent`, `invoice.paid`, `invoice.payment_failed`, `invoice.payment_action_required`, `invoice.voided`, `invoice.marked_uncollectible`, `invoice.deleted`, `charge.succeeded`, `charge.updated`, `charge.captured`, `charge.refunded`, `account.application.deauthorized`. Do the same in test mode.
+2. Once, on Clarity's platform Stripe account (Connect › Webhooks, "events on connected accounts"), add an endpoint at `https://YOUR-BOOKING-SITE/api/stripe-billing-webhook` with: `invoice.created`, `invoice.updated`, `invoice.finalized`, `invoice.sent`, `invoice.paid`, `invoice.payment_failed`, `invoice.payment_action_required`, `invoice.voided`, `invoice.marked_uncollectible`, `invoice.deleted`, `charge.succeeded`, `charge.updated`, `charge.captured`, `charge.refunded`, `account.application.deauthorized`, `account.updated`. Do the same in test mode.
 3. Set `STRIPE_CONNECT_WEBHOOK_SECRET` (and `STRIPE_CONNECT_TEST_WEBHOOK_SECRET`) in Netlify to those endpoints' signing secrets.
 4. Run the backfill while logged in as admin — from the browser console on the admin app:
 
@@ -57,15 +57,26 @@ Actions: `syncAll` (default), `syncInvoices`, `syncProducts`. Optional `since` (
 - Everything upserts, so webhook retries and repeated backfills are harmless
 - Stripe-synced invoices are editable in-app like any other row, but a later Stripe update to the same invoice overwrites in-app edits (Stripe is the source of truth for `in_...` rows)
 
-## Clarity Pay fee (platform cut)
+## Two ways to take cards
 
-Every card payment Clarity creates on a business's connected account carries an application fee, which Stripe moves to Clarity's platform balance: till (POS) checkouts, invoice "Clarity Pay" checkouts, emailed invoice payment links, and player-portal purchases. The business keeps the rest and gets its own payouts from its own Stripe. Stripe's processing fee is still paid by the business, separate from Clarity's cut.
+Billing settings › Card payments offers both.
 
-- Rate: `CLARITY_PAY_FEE_PERCENT` (default `1`, meaning 1%) plus `CLARITY_PAY_FEE_FIXED_CENTS` (default `0`) in Netlify. The same rate applies in test and live mode.
-- Set it to `0` / `0` to take nothing.
-- The fee is always capped one cent under the charge (Stripe refuses anything bigger).
-- The Card payments card in Billing settings shows the business the current rate.
-- Invoices a business creates directly in its own Stripe dashboard carry no fee; only payments started from Clarity do.
-- Payment links already emailed before this change carry no fee.
-- Refunds made from the business's Stripe dashboard do not return Clarity's fee automatically; refund it from Connect › Collected fees if you want to.
-- Collected fees show in Clarity's Stripe dashboard under Connect › Collected fees.
+**Clarity Pay** (the easy route). Clarity creates the business's Stripe account on the platform and Stripe runs a short hosted signup (identity and bank details). Once Stripe approves it, Clarity Pay switches on by itself, from the return page, the settings screen or the `account.updated` webhook, whichever sees it first.
+- Works everywhere: till, invoices (Pay button and emailed links) and player portal purchases. In-person payments will build on this route.
+- Clarity takes an application fee on every payment: `CLARITY_PAY_FEE_PERCENT` (default `0.5`) plus `CLARITY_PAY_FEE_FIXED_CENTS` (default `0`), capped one cent under the charge.
+- The account is Standard-like: Stripe charges the business its card fees directly and carries fraud and chargeback risk, and the business gets a full Stripe dashboard for payouts.
+- Turning Clarity Pay off and back on reuses the same account (kept in the `clarityPayAccount` setting).
+- A business moving from its own Stripe keeps taking invoice payments there until Clarity Pay is approved. Then Clarity switches over and disconnects the old sign-in.
+
+**Own Stripe.** The business signs in to a Stripe account it already has (Connect OAuth, as before).
+- Invoice payments only (Pay button and emailed links). The till and player portal ask for Clarity Pay.
+- No Clarity fee.
+- Connections made before this change are treated as own Stripe.
+
+Setup on Clarity's platform Stripe account:
+- Complete the Connect platform profile and the Connect onboarding branding (name, colour, icon), which Stripe's hosted signup requires.
+
+Notes:
+- Invoices a business creates directly in Stripe carry no fee; only payments started from Clarity do.
+- Payment links emailed before this change carry no fee.
+- Refunds made from the business's Stripe dashboard don't return Clarity's fee automatically; refund it from Connect › Collected fees if you want to.

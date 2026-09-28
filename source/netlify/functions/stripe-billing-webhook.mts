@@ -1,5 +1,6 @@
 import type { Config } from "@netlify/functions";
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { accountsForClarityPayAccount, syncClarityPay } from "./_shared/clarity-pay.mts";
 import { accountsForStripeAccount } from "./_shared/integration-credentials.mts";
 import { stripePlatform, STRIPE_CONNECTION_SETTING } from "./_shared/stripe.mts";
 import { getDatabase } from "./_shared/database.mts";
@@ -28,7 +29,10 @@ import {
 // invoice.paid, invoice.payment_failed, invoice.voided,
 // invoice.marked_uncollectible, invoice.deleted, charge.succeeded,
 // charge.updated, charge.captured, charge.refunded,
-// account.application.deauthorized.
+// account.application.deauthorized, account.updated.
+//
+// account.updated is how a Clarity Pay account switches on once Stripe has
+// finished checking the business, even if they closed the tab mid-signup.
 
 function json(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), {
@@ -85,6 +89,18 @@ export default async function handler(req: Request) {
   if (!event) return json({ error: "invalid_signature" }, 400);
 
   const stripeAccount = String(event.account || "");
+
+  if (event.type === "account.updated") {
+    try {
+      const owners = await accountsForClarityPayAccount(stripeAccount, event.livemode === true);
+      for (const owner of owners) await syncClarityPay(owner, event.livemode === true);
+      return json({ received: true, clarityPay: owners.length });
+    } catch (error) {
+      console.error("stripe_billing_webhook:clarity_pay_sync_failed", error);
+      return json({ error: "webhook_processing_failed" }, 500);
+    }
+  }
+
   const businesses = await accountsForStripeAccount(stripeAccount, event.livemode === true);
   // Acknowledged, not failed: a business that has disconnected is not coming
   // back for these, and a 4xx/5xx would only make Stripe retry for days.

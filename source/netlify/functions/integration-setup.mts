@@ -202,7 +202,9 @@ async function oauthState(descriptor: IntegrationDescriptor, accountId: string) 
     const status = stripeCredentialStatus(await readAccountStripeConnection(accountId));
     return {
       connected: status.configured,
-      account: status.account ? `${status.account}${status.testMode ? " (test mode)" : ""}` : "",
+      account: status.account
+        ? `${status.account}${status.route === "clarity_pay" ? " (Clarity Pay)" : ""}${status.testMode ? " (test mode)" : ""}`
+        : "",
       scopes: [] as string[],
       lastUsed: "",
       error: "",

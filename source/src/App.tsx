@@ -5860,15 +5860,18 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
      from the inbox: that is what is unfinished, this is what is done. */
   const [issuedPasses, setIssuedPasses] = useState<IssuedPass[]>([]);
   const [issuedPassesLoadState, setIssuedPassesLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
-  /* Which Stripe account this business's money lands in, connected by a
-     Stripe sign-in. */
+  /* How this business takes cards: Clarity Pay (an account Clarity creates,
+     everything works) or its own Stripe (invoice payments only). */
   const [stripeStatus, setStripeStatus] = useState<{
     configured: boolean;
     account: string;
     testMode: boolean;
+    route: "clarity_pay" | "own_stripe" | "";
     /* Clarity Pay's cut of each card payment. */
-    fee?: { percent: number; fixedCents: number };
+    fee: { percent: number; fixedCents: number };
   } | null>(null);
+  /* A Clarity Pay account started but not yet approved by Stripe. */
+  const [clarityPaySetup, setClarityPaySetup] = useState<"none" | "pending" | "active">("none");
   const [stripeSaving, setStripeSaving] = useState(false);
   const [voucherRules, setVoucherRules] = useState<VoucherAmountRule[]>([]);
   const [stripeResyncing, setStripeResyncing] = useState(false);
@@ -20443,10 +20446,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
   async function fetchStripeStatus() {
     try {
-      const response = await fetch("/api/payments/stripe", { credentials: "same-origin" });
+      const response = await fetch("/api/stripe-connect/status", { credentials: "same-origin" });
       if (!response.ok) return;
-      const data = (await response.json()) as { stripe?: typeof stripeStatus };
+      const data = (await response.json()) as { stripe?: typeof stripeStatus; clarityPay?: typeof clarityPaySetup };
       if (data.stripe) setStripeStatus(data.stripe);
+      setClarityPaySetup(data.clarityPay || "none");
     } catch {
       // A settings card that cannot read its own status is not worth a toast.
     }
@@ -20470,6 +20474,30 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     }
   }
 
+  async function setUpClarityPay() {
+    setStripeSaving(true);
+    try {
+      const response = await fetch("/api/stripe-connect/clarity-pay/start", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) throw new Error(await readApiFailure(response, "Could not start Clarity Pay setup."));
+      const data = (await response.json()) as { url?: string };
+      if (data.url) {
+        window.location.assign(data.url);
+        return;
+      }
+      // Stripe had already approved this account, so it is simply back on.
+      setStripeSaving(false);
+      await fetchStripeStatus();
+      setToast({ message: "Clarity Pay is on." });
+    } catch (error) {
+      setStripeSaving(false);
+      setToast({ message: error instanceof Error ? error.message : "Could not start Clarity Pay setup." });
+    }
+  }
+
   async function disconnectStripe() {
     setStripeSaving(true);
     try {
@@ -20478,8 +20506,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         credentials: "same-origin",
       });
       if (!response.ok) throw new Error(await readApiFailure(response, "Could not disconnect Stripe."));
-      setStripeStatus({ configured: false, account: "", testMode: false });
-      setToast({ message: "Stripe disconnected. Card payments are off until you connect again." });
+      setStripeStatus((current) => (current ? { ...current, configured: false, account: "", route: "" } : current));
+      setClarityPaySetup("none");
+      setToast({ message: "Card payments are off until you set them up again." });
     } catch (error) {
       setToast({ message: error instanceof Error ? error.message : "Could not disconnect Stripe." });
     } finally {
@@ -30159,45 +30188,81 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   <div className="data-card-header">
                     <div>
                       <span>Card payments</span>
-                      <h2>{stripeStatus?.account ? "Your own Stripe account" : "Not set up"}</h2>
+                      <h2>
+                        {stripeStatus?.route === "clarity_pay"
+                          ? "Clarity Pay is on"
+                          : stripeStatus?.route === "own_stripe"
+                            ? "Your own Stripe account"
+                            : "Not set up"}
+                      </h2>
                     </div>
                     <CreditCard size={24} />
                   </div>
                   <p className="field-help">
-                    {stripeStatus?.account ? (
+                    {stripeStatus?.route === "clarity_pay" ? (
                       <>
-                        Card payments — the till, invoice links and anything a player buys in
-                        their portal — go straight to your Stripe account ({stripeStatus.account}).
-                        Clarity never holds the money.
-                        {stripeStatus.fee ? ` Clarity Pay keeps ${clarityPayFeeLabel(stripeStatus.fee)} of each card payment; Stripe's own processing fee is separate.` : ""}
-                        {stripeStatus.testMode ? " This is a test-mode connection, so no real money moves." : ""}
-                        {!stripeStatus.configured ? " Payments are paused while Clarity's Stripe platform is unavailable." : ""}
+                        Card payments at the till, on invoices and in the player portal go straight to
+                        your account ({stripeStatus.account}), and Stripe pays them out to your bank.
+                        Clarity Pay keeps {clarityPayFeeLabel(stripeStatus.fee)} of each payment; Stripe's
+                        own card fee is separate.
+                      </>
+                    ) : stripeStatus?.route === "own_stripe" ? (
+                      <>
+                        Invoice payments go straight to your Stripe account ({stripeStatus.account}), with no
+                        Clarity fee. The till and the player portal need Clarity Pay.
+                        {clarityPaySetup === "pending"
+                          ? " Your Clarity Pay setup isn't finished; you'll keep using your own Stripe until it is."
+                          : ""}
                       </>
                     ) : (
                       <>
-                        No card payments are possible yet. Sign in to your Stripe account to take
-                        payments at the till, on invoice links, and in the player portal.
+                        <strong>Clarity Pay</strong> is the easy way: we set up your payment account, Stripe
+                        checks your details, and you can take cards at the till, on invoices and in the
+                        player portal. Payouts go to your bank. Clarity Pay keeps{" "}
+                        {stripeStatus ? clarityPayFeeLabel(stripeStatus.fee) : "a small cut"} of each payment.
+                        {clarityPaySetup === "pending" ? " Your setup isn't finished yet." : ""}
+                        <br />
+                        Already have Stripe? Connect it for invoice payments only, with no Clarity fee.
                       </>
                     )}
+                    {stripeStatus?.account && stripeStatus.testMode ? " This is a test-mode connection, so no real money moves." : ""}
+                    {stripeStatus?.account && !stripeStatus.configured ? " Payments are paused while Clarity's Stripe platform is unavailable." : ""}
                   </p>
                   <div className="settings-field-row">
-                    {stripeStatus?.account ? (
+                    {stripeStatus?.route !== "clarity_pay" && (
+                      <button
+                        className="primary-button"
+                        type="button"
+                        disabled={stripeSaving}
+                        onClick={() => void setUpClarityPay()}
+                      >
+                        {stripeSaving
+                          ? "Opening…"
+                          : clarityPaySetup === "pending"
+                            ? "Finish Clarity Pay setup"
+                            : stripeStatus?.route === "own_stripe"
+                              ? "Switch to Clarity Pay"
+                              : "Set up Clarity Pay"}
+                      </button>
+                    )}
+                    {!stripeStatus?.route && (
+                      <button
+                        className="outline-button"
+                        type="button"
+                        disabled={stripeSaving}
+                        onClick={() => void connectStripe()}
+                      >
+                        Connect my own Stripe
+                      </button>
+                    )}
+                    {stripeStatus?.route && (
                       <button
                         className="outline-button"
                         type="button"
                         disabled={stripeSaving}
                         onClick={() => void disconnectStripe()}
                       >
-                        {stripeSaving ? "Disconnecting…" : "Disconnect"}
-                      </button>
-                    ) : (
-                      <button
-                        className="primary-button"
-                        type="button"
-                        disabled={stripeSaving}
-                        onClick={() => void connectStripe()}
-                      >
-                        {stripeSaving ? "Opening Stripe…" : "Connect Stripe"}
+                        {stripeStatus.route === "clarity_pay" ? "Turn off Clarity Pay" : "Disconnect"}
                       </button>
                     )}
                   </div>

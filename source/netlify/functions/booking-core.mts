@@ -68,6 +68,7 @@ import {
 } from "./_shared/player-shop.mts";
 import {
   createStripeCheckoutSession,
+  requireStripeFeature,
   resolveStripeCredential,
   retrieveStripeCheckoutSession,
   stripeCredentialStatus,
@@ -10043,7 +10044,8 @@ async function readPlayerProfile(session) {
   const flexibleValueCents = session.personId
     ? await readFlexibleValueForPerson(accountId, session.personId, currency)
     : 0;
-  const shop = stripeStatus.configured ? playerShopItems(serviceList, currency) : [];
+  // The portal shop is Clarity Pay only; a business on its own Stripe has none.
+  const shop = stripeStatus.features.portal ? playerShopItems(serviceList, currency) : [];
 
   /* Everything the New Swing Review screen needs to decide what it can offer.
    *
@@ -10077,7 +10079,7 @@ async function readPlayerProfile(session) {
           })),
         /** False when the business cannot take a card, so the screen offers a
          *  credit or nothing rather than a button that cannot charge. */
-        canBuy: stripeStatus.configured && reviewService.price > 0,
+        canBuy: stripeStatus.features.portal && reviewService.price > 0,
       }
     : null;
 
@@ -13093,6 +13095,7 @@ async function routeBookingApiRequest(
       const state = await readPublicCatalogState(accountId);
       const settingsMap = await readSettingsMap(accountId);
       const credential = resolveStripeCredential(settingsMap[STRIPE_CONNECTION_SETTING]);
+      requireStripeFeature(credential, "portal");
 
       // Priced from the catalogue on the server, never from the request. The
       // browser sends which thing, not what it costs.
@@ -14842,19 +14845,6 @@ async function readPassInbox(accountId: string, services) {
     })),
   };
 }
-
-    /* --- Card payments: whose Stripe account this business uses -----------
-     *
-     * Read-only. Connecting and disconnecting are a Stripe sign-in, handled by
-     * stripe-connect.mts; this only reports the result.
-     */
-    if (req.method === "GET" && pathname === "/api/payments/stripe") {
-      const state = await readSettingsState(await currentAccountId(req));
-      const requestContext = await resolveBackendRequestContext(req, state);
-      assertAccountFeature(requestContext.account, "invoicing");
-      const settingsMap = await readSettingsMap(requestContext.accountId);
-      return json({ stripe: stripeCredentialStatus(settingsMap[STRIPE_CONNECTION_SETTING]) });
-    }
 
     // Billing's Passes tab: everything issued, whoever holds it. The inbox
     // below is what is still unfinished; this is what is done.
