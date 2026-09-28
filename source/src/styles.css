@@ -5549,7 +5549,7 @@ button {
       transparent 0 calc(var(--hour-height) - 1px),
       color-mix(in srgb, var(--grid-line) 45%, transparent) calc(var(--hour-height) - 1px) var(--hour-height)
     ),
-    var(--available);
+    var(--band-fill, var(--available));
   /* A window rarely starts on the hour, so the tick pattern is pulled back by
      the band's own offset from the top of the grid. --band-offset is set per
      band; without it the ticks would count hours from the band edge instead of
@@ -17137,19 +17137,11 @@ button {
   font: inherit;
 }
 
-/* A band tinted by the location the coach is working at. The hue is set per
-   band; the tint mixes into --available so it holds in both themes. */
+/* A band tinted by the location the coach is working at. Only a whisper of
+   the hue goes into --available, so the band still reads as open time and the
+   location is a tint rather than a colour. Holds in both themes. */
 .available-band.has-location {
-  background:
-    repeating-linear-gradient(
-      to bottom,
-      transparent 0 calc(var(--hour-height) - 1px),
-      color-mix(in srgb, var(--grid-line) 45%, transparent) calc(var(--hour-height) - 1px) var(--hour-height)
-    ),
-    color-mix(in srgb, hsl(var(--location-hue) 65% 50%) 16%, var(--available));
-  background-position: 0 calc(var(--band-offset, 0px) * -1), 0 0;
-  border-color: color-mix(in srgb, hsl(var(--location-hue) 60% 45%) 45%, transparent);
-  box-shadow: inset 3px 0 0 hsl(var(--location-hue) 60% 45%);
+  --band-fill: color-mix(in srgb, hsl(var(--location-hue) 45% 55%) 7%, var(--available));
 }
 
 .available-band-location {
@@ -17158,37 +17150,18 @@ button {
   left: 8px;
   right: 6px;
   overflow: hidden;
-  color: color-mix(in srgb, hsl(var(--location-hue) 60% 45%) 65%, var(--c-text));
+  color: var(--c-muted);
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.02em;
+  opacity: 0.8;
   text-overflow: ellipsis;
   text-transform: uppercase;
   white-space: nowrap;
 }
 
-.calendar-location-key {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
-}
-
-.calendar-location-key span {
-  display: inline-flex;
-  gap: 5px;
-  align-items: center;
-  color: var(--c-muted);
-  font-size: var(--c-size-meta);
-  font-weight: 600;
-}
-
-.calendar-location-key span::before {
-  width: 10px;
-  height: 10px;
-  border-radius: 3px;
-  background: hsl(var(--location-hue) 60% 50%);
-  content: "";
+.available-band.has-location .available-band-location {
+  color: color-mix(in srgb, hsl(var(--location-hue) 45% 40%) 45%, var(--c-muted));
 }
 
 /* Settings › Availability: one week per location, picked by tab. The coloured

@@ -7350,6 +7350,18 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     const location = availabilityLocations.find((entry) => entry.id === locationId);
     return location ? location.shortName || location.name : "Any location";
   };
+  // Where a window on the calendar is. Hours saved before locations existed
+  // carry no locationId; they still belong to the one place the coach is
+  // rostered, so read it off the coach. A coach at several places with an
+  // unpinned window really is open at any of them, so that stays unresolved.
+  const availabilityWindowLocationId = (window: AvailabilityWindow) => {
+    if (window.locationId) return window.locationId;
+    const coach = accountCoachProfiles.find((entry) => entry.id === (window.coachId || activeCoachId));
+    const assigned = (coach?.assignedLocationIds ?? []).filter((id) =>
+      availabilityLocations.some((location) => location.id === id),
+    );
+    return assigned.length === 1 ? assigned[0] : "";
+  };
   // Settings › Availability edits one coach at a time. An admin picks whose
   // week; a coach only ever sees their own.
   const availabilityEditorCoaches = useMemo(() => {
@@ -11603,10 +11615,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     const bandTop = calendarMinutesToTop(visibleWindow.start);
     // The location view is one location already; everywhere else the band says
     // where the coach is working.
-    const hue =
-      hasMultipleAvailabilityLocations && effectiveCalendarPerspective !== "location"
-        ? availabilityLocationHue(window.locationId)
-        : null;
+    const showLocation = hasMultipleAvailabilityLocations && effectiveCalendarPerspective !== "location";
+    const locationId = showLocation ? availabilityWindowLocationId(window) : "";
+    const hue = locationId ? availabilityLocationHue(locationId) : null;
     return (
       <div
         className={`available-band ${hue !== null ? "has-location" : ""}`}
@@ -11621,7 +11632,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           ...(hue !== null ? { ["--location-hue" as string]: String(hue) } : {}),
         } as CSSProperties}
       >
-        {hue !== null ? <span className="available-band-location">{availabilityLocationLabel(window.locationId)}</span> : null}
+        {showLocation ? <span className="available-band-location">{availabilityLocationLabel(locationId)}</span> : null}
       </div>
     );
   }
@@ -25784,18 +25795,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   {calendarViewButtonLabel}
                 </button>
                 <h2>{weekTitle}</h2>
-                {effectiveCalendarPerspective !== "location" && hasMultipleAvailabilityLocations ? (
-                  <div className="calendar-location-key" aria-label="Location colours">
-                    {availabilityLocations.map((location) => (
-                      <span
-                        key={location.id}
-                        style={{ ["--location-hue" as string]: String(availabilityLocationHue(location.id)) } as CSSProperties}
-                      >
-                        {location.shortName || location.name}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
               </div>
               <div className={`calendar-save-pill ${calendarSaveStatus}`}>
                 <strong>
