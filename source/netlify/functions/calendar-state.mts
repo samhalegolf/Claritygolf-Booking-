@@ -110,6 +110,16 @@ function cleanUrl(value: unknown, fallback = "") {
   }
 }
 
+// A coach photo: either a link, or a small image uploaded from the coach
+// profile screen and kept as a data URL beside the coach (like the logo).
+const COACH_PHOTO_DATA_URL = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$/;
+function cleanCoachPhoto(value: unknown) {
+  if (typeof value === "string" && value.startsWith("data:image/")) {
+    return value.length <= 200_000 && COACH_PHOTO_DATA_URL.test(value) ? value : "";
+  }
+  return cleanUrl(value, "");
+}
+
 function json(value: unknown, status = 200) {
   return new Response(safeJsonStringify(value), {
     status,
@@ -377,7 +387,7 @@ function normalizeCoachProfiles(rawProfiles: unknown, account = defaultCoachAcco
       email: cleanEmail(item.email, fallback.email),
       phone: cleanString(item.phone, "", 80) || undefined,
       bio: cleanString(item.bio, "", 600) || undefined,
-      photoUrl: cleanUrl(item.photoUrl, "", 300) || undefined,
+      photoUrl: cleanCoachPhoto(item.photoUrl) || undefined,
       active: item.active !== false,
       archived: item.archived === true,
       bookable: item.bookable !== false,

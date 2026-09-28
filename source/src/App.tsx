@@ -163,7 +163,8 @@ import {
   isValidPhone,
   setActiveRegion,
 } from "./lib/activeCountry";
-import { BusinessHubPanel } from "./modules/business-hub/BusinessHubPanel";
+import { BusinessHubPanel, OwnerIdentityCard } from "./modules/business-hub/BusinessHubPanel";
+import { CoachAvatar, CoachProfilePanel, type CoachWeekDay, type CoachWeekEntry } from "./modules/business-hub/CoachProfilePanel";
 import { RegionSettings, TimeZoneSelect, type RegionValues } from "./modules/settings/RegionSettings";
 import type { ProfileInternalJob, ProfileTarget } from "./modules/business-hub/BusinessHubPanel";
 import {
@@ -3486,6 +3487,16 @@ function cleanUrl(value: unknown, fallback: string) {
   }
 }
 
+// A coach photo: either a link, or a small image uploaded from the coach
+// profile screen and kept as a data URL beside the coach (like the logo).
+const COACH_PHOTO_DATA_URL = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$/;
+function cleanCoachPhoto(value: unknown) {
+  if (typeof value === "string" && value.startsWith("data:image/")) {
+    return value.length <= 200_000 && COACH_PHOTO_DATA_URL.test(value) ? value : "";
+  }
+  return cleanUrl(value, "");
+}
+
 function cleanEmail(value: unknown, fallback: string) {
   if (typeof value !== "string") return fallback;
   const email = value.trim().toLowerCase().slice(0, 180);
@@ -3928,7 +3939,7 @@ function cleanCoachProfile(raw?: Partial<CoachProfile>, fallback?: CoachProfile,
     email: cleanEmail(raw?.email, base.email),
     phone: typeof raw?.phone === "string" && raw.phone.trim() ? raw.phone.trim().slice(0, 80) : undefined,
     bio: typeof raw?.bio === "string" && raw.bio.trim() ? raw.bio.trim().slice(0, 600) : undefined,
-    photoUrl: cleanUrl(raw?.photoUrl, "") || undefined,
+    photoUrl: cleanCoachPhoto(raw?.photoUrl) || undefined,
     active: raw?.active !== false,
     archived: raw?.archived === true,
     bookable: raw?.bookable !== false,
@@ -5810,11 +5821,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const [showLocationEditor, setShowLocationEditor] = useState(false);
   const [locationSaveState, setLocationSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [locationEditorError, setLocationEditorError] = useState("");
-  const [coachEditor, setCoachEditor] = useState<CoachProfile>(() => defaultCoachProfileFromAccount(getStoredCoachAccount()));
-  const [editingCoachId, setEditingCoachId] = useState<string | null>(null);
-  const [showCoachEditor, setShowCoachEditor] = useState(false);
-  const [coachSaveState, setCoachSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  const [coachEditorError, setCoachEditorError] = useState("");
+  // The coach open in Settings › Coaches. Null shows the list; newCoach is a
+  // blank record being added, which has no id in the saved list yet.
+  const [openCoachId, setOpenCoachId] = useState<string | null>(null);
+  const [newCoach, setNewCoach] = useState<CoachProfile | null>(null);
   const [serviceEditor, setServiceEditor] = useState<ServiceEditor>(emptyServiceEditor);
   // Resource types opened in the lesson type editor to choose single resources.
   const [openResourceTypes, setOpenResourceTypes] = useState<string[]>([]);
@@ -13040,6 +13050,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     // Opening Video from the nav is the general workspace (no player context).
     if (view === "video") setVideoContext(null);
     if (view !== "calendar") closeCalendarDetails();
+    // Settings › Coaches opens on the list again, not on whoever was open last.
+    openCoachProfile(null);
     // Arriving anywhere by hand clears whatever the profile last pointed at, so
     // a section does not spring open the next time Settings is opened normally,
     // and an overlay belonging to a profile card does not survive leaving it.
@@ -13065,6 +13077,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     setActiveEditableBlockId(null);
     setWorkspaceOverlay(null);
     setRequestedSettingsGroup("");
+    openCoachProfile(null);
     return true;
   }
 
@@ -14502,14 +14515,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     setNotificationSettings((current) => ({ ...current, [field]: value }));
   }
 
+  // Stored as typed; saveBrandSettings cleans. Cleaning here trimmed every
+  // keystroke, so a space could never be typed into the brand name.
   function updateBrandSetting<K extends keyof BrandSettings>(field: K, value: BrandSettings[K]) {
     setBrandSaveState("idle");
-    setBrandSettings((current) => cleanBrandSettings({ ...current, [field]: value }));
-  }
-
-  function updateCoachAccount<K extends keyof CoachAccount>(field: K, value: CoachAccount[K]) {
-    setCoachAccountSaveState("idle");
-    setCoachAccount((current) => cleanCoachAccount({ ...current, [field]: value }));
+    setBrandSettings((current) => ({ ...current, [field]: value }));
   }
 
   function updateLocationEditor<K extends keyof Location>(field: K, value: Location[K]) {
@@ -14828,12 +14838,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     void persistLocations(next, `${location.name} set as default.`);
   }
 
-  function updateCoachEditor<K extends keyof CoachProfile>(field: K, value: CoachProfile[K]) {
-    setCoachSaveState("idle");
-    setCoachEditorError("");
-    setCoachEditor((current) => ({ ...current, [field]: value }));
-  }
-
   function startNewCoach() {
     if (!canUseFeature(activeAccount, "multiCoach") && activeCoachList.length >= 1) {
       setToast({ message: featureUnavailableMessage("multiCoach") });
@@ -14844,8 +14848,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       return;
     }
     const assignedLocationId = defaultLocationId(locations);
-    setEditingCoachId(null);
-    setCoachEditor({
+    setOpenCoachId(null);
+    setNewCoach({
       ...blankCoachProfile(activeAccountId),
       id: `coach-${Date.now()}`,
       accountId: activeAccountId,
@@ -14863,17 +14867,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       defaultLocationId: assignedLocationId,
       sortOrder: coachProfiles.length,
     });
-    setShowCoachEditor(true);
-    setCoachSaveState("idle");
-    setCoachEditorError("");
   }
 
-  function editCoach(coach: CoachProfile) {
-    setEditingCoachId(coach.id);
-    setCoachEditor(coach);
-    setShowCoachEditor(true);
-    setCoachSaveState("idle");
-    setCoachEditorError("");
+  function openCoachProfile(coachId: string | null) {
+    setNewCoach(null);
+    setOpenCoachId(coachId);
   }
 
   async function persistCoaches(nextCoaches: CoachProfile[], message = `${terms.staffPlural} saved.`): Promise<boolean> {
@@ -14898,8 +14896,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     let failureRoute = "PUT /api/coaches";
     let failureStage = "coach_put_request_failed";
     setCoachProfiles(clean);
-    setCoachSaveState("saving");
-    setCoachEditorError("");
     try {
       failureRoute = "PUT /api/coaches";
       failureStage = "coach_put_request_failed";
@@ -15023,17 +15019,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         returnedAccountId: summarizeWorkspaceAccountIds(calendarCoachRecords),
         details: { returnedCount: loadedCoachRecords?.length ?? 0 },
       });
-      setCoachSaveState("saved");
-      setCoachEditorError("");
       setToast({ message });
-      window.setTimeout(() => {
-        if (isCurrentSave()) setCoachSaveState("idle");
-      }, 1600);
       return true;
     } catch (error) {
       if (!isCurrentSave()) return false;
       setCoachProfiles(snapshot);
-      setCoachSaveState("error");
       const errorMessage = workspaceSaveFailureMessage(
         error,
         "Coach",
@@ -15049,7 +15039,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         humanMessage: errorMessage,
         returnedAccountId: summarizeWorkspaceAccountIds(workspaceRouteRecords(failureRoute, diagnostic)),
       });
-      setCoachEditorError(errorMessage);
       setToast({ message: errorMessage });
       return false;
     } finally {
@@ -15057,20 +15046,22 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     }
   }
 
-  async function saveEditedCoach() {
-    if (!coachEditor.name.trim()) {
-      setToast({ message: "Give the coach a name before saving." });
-      return;
+  // Owner-side save for the coach profile screen, from Settings › Coaches or
+  // the owner's own profile on the Business Hub.
+  async function saveEditedCoach(draft: CoachProfile): Promise<boolean> {
+    if (!draft.name.trim()) {
+      setToast({ message: `Give the ${terms.staffSingular.toLowerCase()} a name before saving.` });
+      return false;
     }
-    const assignedLocationIds = (coachEditor.assignedLocationIds ?? []).filter(Boolean);
-    const defaultAssignedLocationId = assignedLocationIds.includes(coachEditor.defaultLocationId || "")
-      ? coachEditor.defaultLocationId
+    const assignedLocationIds = (draft.assignedLocationIds ?? []).filter(Boolean);
+    const defaultAssignedLocationId = assignedLocationIds.includes(draft.defaultLocationId || "")
+      ? draft.defaultLocationId
       : assignedLocationIds[0] || defaultLocationId(locations);
     const clean = cleanCoachProfile(
       {
-        ...coachEditor,
-        accountId: coachEditor.accountId || activeAccountId,
-        displayName: coachEditor.displayName || coachEditor.name,
+        ...draft,
+        accountId: draft.accountId || activeAccountId,
+        displayName: draft.displayName.trim() || draft.name,
         assignedLocationIds: assignedLocationIds.length
           ? assignedLocationIds
           : [defaultAssignedLocationId].filter((id): id is string => Boolean(id)),
@@ -15079,20 +15070,56 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       blankCoachProfile(activeAccountId),
       coachProfiles.length,
     );
-    const exists = coachProfiles.some((coach) => coach.id === (editingCoachId || clean.id));
+    const stableId = draft.id || clean.id;
+    const exists = coachProfiles.some((coach) => coach.id === stableId);
     if (!exists && !canCreateWithinLimit(activeAccount, activeCoachList.length, "maxCoaches")) {
       setToast({ message: limitReachedMessage("maxCoaches", accountLimit(activeAccount, "maxCoaches")) });
-      return;
+      return false;
     }
-    const stableId = editingCoachId || clean.id;
     const cleanedCoach = { ...clean, id: stableId };
     const next = exists
       ? coachProfiles.map((coach) => (coach.id === stableId ? cleanedCoach : coach))
       : [...coachProfiles, cleanedCoach];
-    setEditingCoachId(stableId);
-    setCoachEditor(cleanedCoach);
     const saved = await persistCoaches(next, exists ? `${clean.displayName} updated.` : `${clean.displayName} added.`);
-    if (saved) setShowCoachEditor(false);
+    // A coach just added stays open, now as their saved profile.
+    if (saved && !exists) openCoachProfile(stableId);
+    return saved;
+  }
+
+  // A coach editing their own profile. Only the personal fields travel; the
+  // server applies them to the signed-in person's coach record and nothing else.
+  async function saveOwnCoachProfile(draft: CoachProfile): Promise<boolean> {
+    try {
+      const response = await fetch("/api/coaches/me", {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({
+          displayName: draft.displayName,
+          phone: draft.phone ?? "",
+          bio: draft.bio ?? "",
+          photoUrl: draft.photoUrl ?? "",
+        }),
+      });
+      if (response.status === 401) {
+        setAuthStatus("guest");
+        return false;
+      }
+      if (!response.ok) {
+        const detail = await readApiFailureDetail(response, "Profile save failed");
+        throw new Error(detail.message || detail.error || "Profile save failed");
+      }
+      const data = (await response.json()) as { coach?: CoachProfile };
+      if (!data.coach) throw new Error("Profile save failed");
+      const saved = cleanCoachProfile(data.coach, blankCoachProfile(activeAccountId));
+      setCoachProfiles((current) => current.map((coach) => (coach.id === saved.id ? saved : coach)));
+      setToast({ message: "Profile saved." });
+      return true;
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : "Could not save your profile." });
+      return false;
+    }
   }
 
   // A business can run with no active coach -- an owner who only manages
@@ -22819,8 +22846,98 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     </SettingsGroup>
   );
 
+  /**
+   * One coach's next seven days, today first, for the calendar widget on their
+   * profile. Read from the same items and the same ownership rule as the coach
+   * calendar, so the two cannot disagree about whose lesson is whose.
+   */
+  function coachWeekFor(coachId: string): CoachWeekDay[] {
+    const weekMs = 7 * 24 * 60 * 60 * 1000;
+    const today = businessNow().date;
+    today.setHours(0, 0, 0, 0);
+    return Array.from({ length: 7 }, (_, offset) => {
+      const date = new Date(today);
+      date.setDate(today.getDate() + offset);
+      const week = Math.round(
+        (calendarDateUtcTime(startOfCalendarWeek(date)) - calendarDateUtcTime(baseWeekStart)) / weekMs,
+      );
+      const day = (date.getDay() + 6) % 7;
+      const entries = accountItems
+        .filter((item) => {
+          if (itemWeek(item) !== week || item.day !== day) return false;
+          if (item.syntheticGroupSlot || isInactiveForConflict(item) || isCancelledGroupSessionItem(item)) return false;
+          return calendarItemBelongsToCoach(item, coachId, itemService(item, services), coachProfiles, coachAccount);
+        })
+        .sort((a, b) => a.start - b.start)
+        .map((item): CoachWeekEntry => {
+          const lesson = item.kind === "appointment";
+          return {
+            id: item.id,
+            time: formatTime(item.start),
+            title: lesson ? item.client || item.title : item.title || "Blocked",
+            kind: lesson ? "lesson" : "block",
+            color: lesson ? calendarLessonColor(itemService(item, services)) : undefined,
+          };
+        });
+      return {
+        key: `${week}-${day}`,
+        short: baseWeekDays[day],
+        date: date.getDate(),
+        isToday: offset === 0,
+        entries,
+      };
+    });
+  }
+
+  const coachLocationOptions = activeLocationList.map((location) => ({
+    id: location.id,
+    label: location.shortName || location.name,
+  }));
+
+  function coachRoleLabel(coach: CoachProfile) {
+    return coach.id === currentAppUser.coachId && isAdminUser ? `${terms.staffSingular} · Admin` : terms.staffSingular;
+  }
+
+  function openCoachCalendar(coachId: string) {
+    calendarPerspectiveChosenRef.current = true;
+    setCalendarPerspective("coach");
+    setCalendarCoachFilterId(coachId);
+    setWorkspaceOverlay(null);
+    switchView("calendar");
+  }
+
+  function openCoachAvailability(coachId: string) {
+    setAvailabilityCoachChoice(coachId);
+    // On the Settings page itself this is a tab change; from anywhere else
+    // (the Business Hub, or an overlay opened from it) it opens over the top.
+    if (activeView === "settings" && !workspaceOverlay) {
+      switchSettingsTab("booking");
+      setRequestedSettingsGroup("availability");
+      return;
+    }
+    openProfileTarget({ kind: "settings", tab: "booking", group: "availability" }, "Availability");
+  }
+
+  const openCoach = newCoach ?? (openCoachId ? coachProfiles.find((coach) => coach.id === openCoachId) : undefined);
+
   const coachesSettingsPanel = (
     <SettingsGroup id="coaches" icon={ClarityCoachesStaff} section="business" title={terms.staffPlural}>
+      {openCoach ? (
+        <CoachProfilePanel
+          coach={openCoach}
+          isNew={Boolean(newCoach)}
+          access="owner"
+          roleLabel={coachRoleLabel(openCoach)}
+          staffSingular={terms.staffSingular}
+          staffPlural={terms.staffPlural}
+          locations={coachLocationOptions}
+          week={newCoach ? [] : coachWeekFor(openCoach.id)}
+          onSave={saveEditedCoach}
+          onBack={() => openCoachProfile(null)}
+          onOpenCalendar={() => openCoachCalendar(openCoach.id)}
+          onOpenAvailability={() => openCoachAvailability(openCoach.id)}
+        />
+      ) : (
       <div className="data-card wide">
         <div className="data-card-header">
           <div>
@@ -22835,138 +22952,19 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           {terms.staffSingular} profiles are bookable operator identities. Admin users are a permission layer, not the owner of bookings.
         </p>
 
-        {showCoachEditor && (
-          <article className="service-editor-card">
-            <div className="data-card-header compact">
-              <div>
-                <span>{editingCoachId ? `Edit ${terms.staffSingular.toLowerCase()}` : `New ${terms.staffSingular.toLowerCase()}`}</span>
-                <h3>{coachEditor.displayName || coachEditor.name || `${terms.staffSingular} details`}</h3>
-              </div>
-              <button
-                className="icon-button"
-                disabled={coachSaveState === "saving"}
-                onClick={() => setShowCoachEditor(false)}
-                type="button"
-                aria-label="Close coach editor"
-              >
-                <X size={16} />
-              </button>
-            </div>
-            <div className="service-form-grid">
-              <label className="settings-field">
-                <span>Name</span>
-                <input value={coachEditor.name} onChange={(event) => updateCoachEditor("name", event.target.value)} />
-              </label>
-              <label className="settings-field">
-                <span>Public name</span>
-                <input value={coachEditor.displayName} onChange={(event) => updateCoachEditor("displayName", event.target.value)} />
-              </label>
-              <label className="settings-field">
-                <span>Short name</span>
-                <input value={coachEditor.shortName ?? ""} onChange={(event) => updateCoachEditor("shortName", event.target.value)} />
-              </label>
-              <label className="settings-field">
-                <span>Email</span>
-                <input value={coachEditor.email} onChange={(event) => updateCoachEditor("email", event.target.value)} />
-              </label>
-              <label className="settings-field">
-                <span>Phone</span>
-                <input value={coachEditor.phone ?? ""} onChange={(event) => updateCoachEditor("phone", event.target.value)} />
-              </label>
-              <label className="settings-field">
-                <span>Photo URL</span>
-                <input value={coachEditor.photoUrl ?? ""} onChange={(event) => updateCoachEditor("photoUrl", event.target.value)} />
-              </label>
-              <label className="settings-field">
-                <span>Default location</span>
-                <select
-                  value={coachEditor.defaultLocationId || defaultLocationId(locations)}
-                  onChange={(event) => updateCoachEditor("defaultLocationId", event.target.value)}
-                >
-                  {activeLocationList.map((location) => (
-                    <option key={location.id} value={location.id}>
-                      {location.shortName || location.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="settings-field">
-                <span>Sort order</span>
-                <input
-                  value={coachEditor.sortOrder ?? 0}
-                  inputMode="numeric"
-                  onChange={(event) => updateCoachEditor("sortOrder", Number(event.target.value))}
-                  type="text"
-                />
-              </label>
-            </div>
-            <label className="settings-field">
-              <span>Bio</span>
-              <textarea value={coachEditor.bio ?? ""} onChange={(event) => updateCoachEditor("bio", event.target.value)} rows={3} />
-            </label>
-            <div className="service-form-row">
-              <label className="settings-toggle">
-                <input
-                  checked={coachEditor.active !== false && coachEditor.archived !== true}
-                  onChange={(event) => {
-                    updateCoachEditor("active", event.target.checked);
-                    updateCoachEditor("archived", !event.target.checked);
-                  }}
-                  type="checkbox"
-                />
-                <span>Active</span>
-              </label>
-            </div>
-            <div className="settings-field">
-              <span>Assigned locations</span>
-              <div className="booking-screen-list">
-                {activeLocationList.map((location) => (
-                  <label key={location.id}>
-                    <input
-                      checked={(coachEditor.assignedLocationIds ?? []).includes(location.id)}
-                      onChange={(event) => {
-                        const current = coachEditor.assignedLocationIds ?? [];
-                        updateCoachEditor(
-                          "assignedLocationIds",
-                          event.target.checked
-                            ? Array.from(new Set([...current, location.id]))
-                            : current.filter((id) => id !== location.id),
-                        );
-                      }}
-                      type="checkbox"
-                    />
-                    <span>{location.shortName || location.name}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-            {coachSaveState === "error" && coachEditorError && (
-              <p className="workspace-save-error" role="alert">
-                {coachEditorError}
-              </p>
-            )}
-            <button className="primary-button settings-save" disabled={coachSaveState === "saving"} onClick={saveEditedCoach} type="button">
-              {coachSaveState === "saving"
-                ? "Saving"
-                : coachSaveState === "saved"
-                  ? "Saved"
-                  : coachSaveState === "error"
-                    ? "Not saved"
-                    : `Save ${terms.staffSingular}`}
-            </button>
-          </article>
-        )}
-
         <div className="service-list" aria-label={terms.staffPlural}>
           {coachProfiles.map((coach) => (
-            <article className={`service-row ${coach.active && !coach.archived ? "" : "is-archived"}`} key={coach.id}>
-              <button className="service-row-main" onClick={() => editCoach(coach)} type="button">
-                <span>{coach.active && !coach.archived ? "Active" : "Archived"}</span>
-                <strong>{coach.displayName || coach.name}</strong>
-                {coach.email && <em>{coach.email}</em>}
-                <em>
-                  Assigned to {(coach.assignedLocationIds ?? []).length || 0} location{(coach.assignedLocationIds ?? []).length === 1 ? "" : "s"}
-                </em>
+            <article className={`service-row coach-row ${coach.active && !coach.archived ? "" : "is-archived"}`} key={coach.id}>
+              <button className="service-row-main" onClick={() => openCoachProfile(coach.id)} type="button">
+                <CoachAvatar name={coach.displayName || coach.name} photoUrl={coach.photoUrl} size={44} />
+                <span className="coach-row-text">
+                  <span>{coach.active && !coach.archived ? "Active" : "Archived"}</span>
+                  <strong>{coach.displayName || coach.name}</strong>
+                  {coach.email && <em>{coach.email}</em>}
+                  <em>
+                    Assigned to {(coach.assignedLocationIds ?? []).length || 0} location{(coach.assignedLocationIds ?? []).length === 1 ? "" : "s"}
+                  </em>
+                </span>
               </button>
               <div className="service-row-meta">
                 <strong>{coach.shortName || coach.name}</strong>
@@ -22995,6 +22993,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           ))}
         </div>
       </div>
+      )}
     </SettingsGroup>
   );
 
@@ -24736,6 +24735,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     terms,
   ]);
 
+  // Owners and admins run a business from the hub; a coach-level account's
+  // version of the same screen is their own profile.
+  const hubLabel = isAdminUser ? "Business Hub" : `${terms.staffSingular} profile`;
   const pageHeading: { title: string; subtitle?: string } =
     activeView === "calendar"
       ? {
@@ -24756,8 +24758,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             }
           : activeView === "profile"
             ? {
-                title: "Business Hub",
-                subtitle: "Your business, and everything Clarity is plugged into on your behalf",
+                title: hubLabel,
+                subtitle: isAdminUser
+                  ? "Your business, and everything Clarity is plugged into on your behalf"
+                  : "Your profile, your calendar, and the settings that are yours",
               }
             : { title: sectionTitle(activeView, terms) };
   const failedDiagnosticEvents = diagnosticEvents.filter((event) => event.status === "failed");
@@ -24829,7 +24833,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             onClick={() => switchView("profile")}
           >
             <ClarityDashboardHome size={18} />
-            Business Hub
+            {hubLabel}
           </button>
           <button className={activeView === "calendar" ? "active" : ""} onClick={() => switchView("calendar")}>
             <ClarityCalendar size={18} />
@@ -31466,18 +31470,32 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         {!isEmbedMode && adminWorkspaceReady && activeView === "profile" && (
           <section className="business-hub-page">
             <BusinessHubPanel
-              identity={{
-                coachName: ownCoachProfile?.displayName || ownCoachProfile?.name || currentAppUser.name,
-                roleLabel: isPlatformAdmin
-                  ? "Platform admin"
-                  : isAdminUser
-                    ? ownCoachProfile
-                      ? `${terms.staffSingular} · Admin`
-                      : "Admin"
-                    : terms.staffSingular,
-                email: ownCoachProfile?.email || currentAppUser.email,
-                phone: ownCoachProfile?.phone || "",
-              }}
+              profile={
+                ownCoachProfile ? (
+                  <CoachProfilePanel
+                    coach={ownCoachProfile}
+                    access={isAdminUser ? "owner" : "self"}
+                    roleLabel={isPlatformAdmin ? "Platform admin" : coachRoleLabel(ownCoachProfile)}
+                    staffSingular={terms.staffSingular}
+                    staffPlural={terms.staffPlural}
+                    locations={coachLocationOptions}
+                    week={coachWeekFor(ownCoachProfile.id)}
+                    onSave={isAdminUser ? saveEditedCoach : saveOwnCoachProfile}
+                    onOpenCalendar={() => openCoachCalendar(ownCoachProfile.id)}
+                    onOpenAvailability={() => openCoachAvailability(ownCoachProfile.id)}
+                  />
+                ) : (
+                  <OwnerIdentityCard
+                    identity={{
+                      coachName: currentAppUser.name,
+                      roleLabel: isPlatformAdmin ? "Platform admin" : "Admin",
+                      email: currentAppUser.email,
+                      phone: "",
+                    }}
+                    onOpenCoaches={() => openProfileTarget({ kind: "settings", tab: "business", group: "coaches" }, terms.staffPlural)}
+                  />
+                )
+              }
               internalJobs={profileInternalJobs}
               onOpen={(target, label) => openProfileTarget(target, label)}
             />
@@ -33643,10 +33661,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     <input
                       value={businessNameDraft.businessName}
                       readOnly={businessNameIsLocked}
+                      maxLength={100}
                       onChange={(event) =>
-                        businessNameEditor.setDraftValue((current) =>
-                          cleanCoachAccount({ ...current, businessName: event.target.value }),
-                        )
+                        // Kept raw while typing: cleaning trims, which ate the
+                        // space between words. saveCoachAccount cleans on save.
+                        businessNameEditor.setDraftValue((current) => ({ ...current, businessName: event.target.value }))
                       }
                     />
                   </label>
@@ -33665,6 +33684,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     <span>Brand name</span>
                     <input
                       value={brandSettings.coachName}
+                      maxLength={80}
                       onChange={(event) => updateBrandSetting("coachName", event.target.value)}
                       onBlur={() => void saveBrandSettings()}
                       placeholder={coachAccount.businessName}

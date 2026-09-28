@@ -679,6 +679,16 @@ function cleanHexColor(value, fallback) {
   return /^#[0-9a-f]{6}$/i.test(trimmed) ? trimmed : fallback;
 }
 
+// A coach photo: either a link, or a small image uploaded from the coach
+// profile screen and kept as a data URL beside the coach (like the logo).
+const COACH_PHOTO_DATA_URL = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$/;
+function cleanCoachPhoto(value) {
+  if (typeof value === "string" && value.startsWith("data:image/")) {
+    return value.length <= 200_000 && COACH_PHOTO_DATA_URL.test(value) ? value : "";
+  }
+  return cleanUrl(value, "");
+}
+
 function cleanLogoPreview(value) {
   if (typeof value !== "string" || !value.startsWith("data:image/")) return "";
   return value.slice(0, 180_000);
@@ -1246,7 +1256,7 @@ function cleanCoachProfile(raw = {}, fallback = defaultCoachProfileFromAccount()
     email: cleanEmail(raw?.email, fallback.email),
     phone: cleanString(raw?.phone, "", 80) || undefined,
     bio: cleanString(raw?.bio, "", 600) || undefined,
-    photoUrl: cleanUrl(raw?.photoUrl, "", 300) || undefined,
+    photoUrl: cleanCoachPhoto(raw?.photoUrl) || undefined,
     active: raw?.active !== false,
     archived: raw?.archived === true,
     bookable: raw?.bookable !== false,
@@ -14187,6 +14197,33 @@ async function routeBookingApiRequest(
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountAdminContext(requestContext, "You do not have permission to manage coaches.");
       return json({ coaches: await writeCoachProfiles(requestContext.accountId, body.coaches, requestContext) });
+    }
+
+    // A coach editing their own profile. Only the personal fields are read,
+    // and only the signed-in person's own coach record is touched, so this is
+    // open to every role -- unlike PUT /api/coaches, which rewrites the list.
+    if (req.method === "PUT" && pathname === "/api/coaches/me") {
+      const body = await parseBody(req);
+      const state = await readSettingsState(await currentAccountId(req));
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAuthenticatedContext(requestContext);
+      const own = (state.coaches || []).find(
+        (coach) => coach.id === requestContext.coachId && recordBelongsToAccount(coach, requestContext.accountId),
+      );
+      if (!own) throw permissionDenied("You do not have a coach profile to edit.");
+      const next = (state.coaches || []).map((coach) =>
+        coach.id === own.id
+          ? {
+              ...coach,
+              displayName: cleanString(body?.displayName, "", 120) || coach.name,
+              phone: cleanString(body?.phone, "", 80),
+              bio: cleanString(body?.bio, "", 600),
+              photoUrl: cleanCoachPhoto(body?.photoUrl),
+            }
+          : coach,
+      );
+      const saved = await writeCoachProfiles(requestContext.accountId, next, requestContext);
+      return json({ coach: saved.find((coach) => coach.id === own.id) });
     }
 
     if (req.method === "GET" && pathname === "/api/availability") {
