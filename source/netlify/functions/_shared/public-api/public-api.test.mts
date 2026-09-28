@@ -3,7 +3,8 @@ import test from "node:test";
 
 import { cleanScopes, hashApiKey, looksLikeApiKey, mintApiKey } from "./keys.mts";
 import { decodeCursor, encodeCursor, listPage, pageLimit, requestHash } from "./http.mts";
-import { cleanEventList, collapseChanges, eventTypeFor, isPrivateAddress, nextAttemptAt, RETRY_SCHEDULE_MINUTES } from "./events.mts";
+import { cleanEventList, collapseChanges, eventTypeFor, isPrivateAddress, nextAttemptAt, objectIdFor, RETRY_SCHEDULE_MINUTES } from "./events.mts";
+import { billingLines, dateOnly, invoiceObject } from "./commerce.mts";
 import { bookingFromRow, previousAttributes, slotKey, isoToSlotKey, type Catalog } from "./serialize.mts";
 import { ROUTES, matchRoute } from "./routes.mts";
 import { openApiSpec } from "./openapi.mts";
@@ -218,4 +219,72 @@ test("the OpenAPI spec describes every route there is", () => {
     const path = route.path.replace(/:id/g, "{id}");
     assert.ok(described.has(`${route.method} ${path}`), `${route.method} ${path} is not in the spec`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Passes and invoices
+
+test("pass changes are events about the pass, whichever table moved", () => {
+  const pass = { id: "pass-1", status: "active" };
+  assert.equal(eventTypeFor({ table: "passes", before: null, after: pass }), "pass.created");
+  assert.equal(eventTypeFor({ table: "passes", before: pass, after: { ...pass, status: "void" } }), "pass.voided");
+  assert.equal(eventTypeFor({ table: "passes", before: pass, after: { ...pass, note: "x" } }), "pass.updated");
+  assert.equal(eventTypeFor({ table: "pass_allocations", before: null, after: { pass_id: "pass-1" } }), "pass.updated");
+  const spend = { id: "red-1", pass_id: "pass-1", credits: 1 };
+  assert.equal(eventTypeFor({ table: "pass_redemptions", before: null, after: spend }), "pass.redeemed");
+  assert.equal(eventTypeFor({ table: "pass_redemptions", before: spend, after: { ...spend, reversed_at: "t" } }), "pass.updated");
+  assert.equal(objectIdFor({ table: "pass_redemptions", rowId: "red-1", before: null, after: spend }), "pass-1");
+  assert.equal(objectIdFor({ table: "passes", rowId: "pass-1", before: null, after: pass }), "pass-1");
+});
+
+test("invoice status changes are their own events", () => {
+  const invoice = { id: "inv-1", status: "draft" };
+  const t = "billing_invoices";
+  assert.equal(eventTypeFor({ table: t, before: null, after: invoice }), "invoice.created");
+  assert.equal(eventTypeFor({ table: t, before: invoice, after: { ...invoice, status: "sent" } }), "invoice.sent");
+  assert.equal(eventTypeFor({ table: t, before: { ...invoice, status: "sent" }, after: { ...invoice, status: "paid" } }), "invoice.paid");
+  assert.equal(eventTypeFor({ table: t, before: invoice, after: { ...invoice, status: "void" } }), "invoice.voided");
+  assert.equal(eventTypeFor({ table: t, before: invoice, after: { ...invoice, total: 90 } }), "invoice.updated");
+  assert.equal(eventTypeFor({ table: t, before: invoice, after: null }), "invoice.deleted");
+});
+
+test("an invoice leaves the API in cents, whatever the table keeps", () => {
+  const invoice = invoiceObject(
+    {
+      id: "inv-1", invoice_number: "INV-0007", status: "sent", customer_id: "p1", customer_name: "Alex",
+      issue_date: new Date(2026, 8, 28), due_date: "2026-10-12", currency: "NZD",
+      subtotal: "78.26", tax_total: "11.74", discount_total: "0", total: "90.00", amount_paid: "40.5",
+    },
+    [{ id: "l1", source_type: "product", source_id: "package-5", description: "5 pack", quantity: "1", unit_price: "90", tax_rate: "15", tax_amount: "11.74", discount_amount: "0", line_total: "90", service_date: null }],
+  );
+  assert.equal(invoice.total, 9000);
+  assert.equal(invoice.amount_paid, 4050);
+  assert.equal(invoice.amount_due, 4950);
+  assert.equal(invoice.currency, "nzd");
+  assert.equal(invoice.issue_date, "2026-09-28");
+  assert.equal(invoice.due_date, "2026-10-12");
+  assert.deepEqual(invoice.lines?.[0], {
+    id: "l1", type: "product", booking_id: null, service_id: "package-5", description: "5 pack", quantity: 1,
+    unit_amount: 9000, discount: 0, tax_rate: 15, tax: 1174, amount: 9000, service_date: null,
+  });
+  assert.equal(invoiceObject({ id: "x" }, null).lines, undefined, "a list row carries no lines");
+});
+
+test("a pg date column keeps its day in any server time zone", () => {
+  assert.equal(dateOnly(new Date(2026, 0, 1)), "2026-01-01");
+  assert.equal(dateOnly("2026-01-01"), "2026-01-01");
+  assert.equal(dateOnly(null), null);
+});
+
+test("invoice lines are cents in, dollars to the billing engine, and checked", () => {
+  assert.deepEqual(billingLines([{ description: "Lesson", unit_amount: 9000, booking_id: "appt-1" }])[0], {
+    sourceType: "booking", sourceId: "appt-1", description: "Lesson", quantity: 1,
+    unitPrice: 90, discountAmount: 0, taxRate: 0, serviceDate: "",
+  });
+  assert.equal(billingLines([{ description: "5 pack", unit_amount: 45000, service_id: "package-5" }])[0].sourceType, "product");
+  assert.equal(billingLines([{ description: "Balls", unit_amount: 500 }])[0].sourceType, "manual");
+  assert.throws(() => billingLines([]), /at least one/);
+  assert.throws(() => billingLines([{ unit_amount: 100 }]), /description/);
+  assert.throws(() => billingLines([{ description: "x", unit_amount: 12.5 }]), /whole number of cents/);
+  assert.throws(() => billingLines([{ description: "x", unit_amount: 100, quantity: 0 }]), /quantity/);
 });

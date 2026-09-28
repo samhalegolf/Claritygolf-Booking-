@@ -25,7 +25,7 @@ import {
 } from "./apiAccessApi";
 import "./api-access.css";
 
-const READ_ONLY = ["bookings:read", "clients:read", "catalog:read", "events:read"];
+const READ_ONLY = ["bookings:read", "clients:read", "catalog:read", "passes:read", "invoices:read", "events:read"];
 
 function when(value: string | null) {
   if (!value) return "never";

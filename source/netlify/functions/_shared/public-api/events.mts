@@ -15,6 +15,12 @@
  *   booking.no_show       marked as a no-show
  *   booking.updated       anything else about it changed
  *   client.created / client.updated / client.deleted
+ *   pass.created          a pass issued to a client
+ *   pass.redeemed         credits spent (a booking, a sale, or by hand)
+ *   pass.voided           switched off
+ *   pass.updated          credits added, a spend given back, or other change
+ *   invoice.created / invoice.sent / invoice.paid / invoice.voided /
+ *   invoice.updated / invoice.deleted
  *
  * Delivery follows Stripe's contract, which most receivers already handle:
  * POST JSON, `X-Clarity-Signature: t=<unix>,v1=<hex HMAC-SHA256 of "t.body">`,
@@ -38,6 +44,7 @@ import {
 } from "../resource-webhook.mts";
 import { bookingFromRow, clientFromRow, loadCatalog, previousAttributes, type Catalog } from "./serialize.mts";
 import { API_VERSION, pruneApiWorkingTables } from "./http.mts";
+import { invoiceObject, readInvoiceObject, readPassObject } from "./commerce.mts";
 
 export const EVENT_TYPES = [
   "booking.created",
@@ -49,6 +56,16 @@ export const EVENT_TYPES = [
   "client.created",
   "client.updated",
   "client.deleted",
+  "pass.created",
+  "pass.redeemed",
+  "pass.voided",
+  "pass.updated",
+  "invoice.created",
+  "invoice.sent",
+  "invoice.paid",
+  "invoice.voided",
+  "invoice.updated",
+  "invoice.deleted",
 ] as const;
 export type EventType = (typeof EVENT_TYPES)[number];
 
@@ -142,6 +159,23 @@ export function eventTypeFor(change: Pick<CollapsedChange, "table" | "before" | 
     if (!after) return "client.deleted";
     return "client.updated";
   }
+  if (change.table === "passes") {
+    if (!before) return "pass.created";
+    if (!after || (before.status !== "void" && after.status === "void")) return "pass.voided";
+    return "pass.updated";
+  }
+  if (change.table === "pass_allocations") return "pass.updated";
+  if (change.table === "pass_redemptions") return !before && after ? "pass.redeemed" : "pass.updated";
+  if (change.table === "billing_invoices") {
+    if (!before) return "invoice.created";
+    if (!after) return "invoice.deleted";
+    if (before.status !== after.status) {
+      if (after.status === "sent") return "invoice.sent";
+      if (after.status === "paid") return "invoice.paid";
+      if (after.status === "void") return "invoice.voided";
+    }
+    return "invoice.updated";
+  }
   if (change.table !== "calendar_items") return null;
   if (!before) return "booking.created";
   if (!after) return "booking.cancelled";
@@ -156,8 +190,68 @@ export function eventTypeFor(change: Pick<CollapsedChange, "table" | "before" | 
   return "booking.updated";
 }
 
-function serializeFor(table: string, row: any, catalog: Catalog, deleted = false) {
-  return table === "people" ? clientFromRow(row, { deleted }) : bookingFromRow(row, catalog, { deleted });
+const OBJECT_TYPE: Record<string, string> = {
+  calendar_items: "booking",
+  people: "client",
+  passes: "pass",
+  pass_allocations: "pass",
+  pass_redemptions: "pass",
+  billing_invoices: "invoice",
+};
+
+/** Which object an event is about. A spend or a top-up is news about its pass. */
+export function objectIdFor(change: Pick<CollapsedChange, "table" | "rowId" | "before" | "after">) {
+  if (change.table === "pass_allocations" || change.table === "pass_redemptions") {
+    return String((change.after || change.before)?.pass_id || "");
+  }
+  return change.rowId;
+}
+
+/**
+ * The event body for one change. Bookings and clients are rendered from the
+ * row the trigger saw. Passes and invoices are read as they are now: a pass's
+ * balance lives in a view over three tables, and an invoice's lines are
+ * written just after the invoice itself, so neither is whole in one row.
+ */
+async function eventData(change: CollapsedChange, catalog: Catalog): Promise<Record<string, unknown> | null> {
+  if (change.table === "calendar_items" || change.table === "people") {
+    const render = (row: any, deleted = false) =>
+      change.table === "people" ? clientFromRow(row, { deleted }) : bookingFromRow(row, catalog, { deleted });
+    const object = change.after ? render(change.after) : render(change.before, true);
+    const data: Record<string, unknown> = { object };
+    if (change.before && change.after) {
+      const previous = previousAttributes(render(change.before), object);
+      if (Object.keys(previous).length) data.previous_attributes = previous;
+    }
+    return data;
+  }
+  if (OBJECT_TYPE[change.table] === "pass") {
+    const passId = objectIdFor(change);
+    const object = await readPassObject(change.accountId, passId);
+    const data: Record<string, unknown> = { object: object || { id: passId, object: "pass", deleted: true } };
+    if (change.table === "pass_redemptions") {
+      const redemption = change.after || change.before;
+      data.redemption = {
+        id: String(redemption.id),
+        credits: Number(redemption.credits) || 0,
+        booking_id: redemption.booking_id || null,
+        note: String(redemption.note || ""),
+        reversed_at: redemption.reversed_at || null,
+      };
+    }
+    return data;
+  }
+  if (change.table === "billing_invoices") {
+    if (!change.after) return { object: { ...invoiceObject(change.before, null), deleted: true } };
+    const object = (await readInvoiceObject(change.accountId, change.rowId)) || invoiceObject(change.after, null);
+    const data: Record<string, unknown> = { object };
+    if (change.before) {
+      const previous = previousAttributes(invoiceObject(change.before, null), invoiceObject(change.after, null));
+      if (Object.keys(previous).length) data.previous_attributes = previous;
+    }
+    return data;
+  }
+  return null;
 }
 
 /** The event body, as stored and as delivered. */
@@ -222,18 +316,18 @@ export async function processChangeLog(options: { batchSize?: number; maxBatches
       for (const accountId of accountIds) {
         catalogs.set(accountId, await loadCatalog(accountId, livemode.get(accountId) ?? true));
       }
+      // A new pass arrives as its row and its first credits together. That is
+      // one pass.created, not a created and an updated.
+      const newPasses = new Set(
+        changes.filter((change) => change.table === "passes" && !change.before).map((change) => change.rowId),
+      );
       for (const change of changes) {
         const type = eventTypeFor(change);
         const catalog = catalogs.get(change.accountId);
         if (!type || !catalog) continue;
-        const object = change.after
-          ? serializeFor(change.table, change.after, catalog)
-          : serializeFor(change.table, change.before, catalog, true);
-        const data: Record<string, unknown> = { object };
-        if (change.before && change.after) {
-          const previous = previousAttributes(serializeFor(change.table, change.before, catalog), object);
-          if (Object.keys(previous).length) data.previous_attributes = previous;
-        }
+        if (change.table === "pass_allocations" && !change.before && newPasses.has(objectIdFor(change))) continue;
+        const data = await eventData(change, catalog);
+        if (!data) continue;
         const eventId = newId("evt");
         await client.query(
           `INSERT INTO api_events (id, account_id, type, object_type, object_id, data, source, created_at)
@@ -242,8 +336,8 @@ export async function processChangeLog(options: { batchSize?: number; maxBatches
             eventId,
             change.accountId,
             type,
-            change.table === "people" ? "client" : "booking",
-            change.rowId,
+            OBJECT_TYPE[change.table] || change.table,
+            objectIdFor(change),
             JSON.stringify(data),
             change.at,
           ],

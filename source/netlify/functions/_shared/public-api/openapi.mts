@@ -73,7 +73,7 @@ export function openApiSpec(origin: string) {
       title: "Clarity API",
       version: "v1",
       description:
-        "Read and write a Clarity business's bookings, clients, lesson types, coaches, locations and availability, " +
+        "Read and write a Clarity business's bookings, clients, passes, invoices, lesson types, coaches, locations and availability, " +
         "and receive webhooks when they change. Authenticate with an API key from Settings › API & webhooks, sent as " +
         "`Authorization: Bearer ck_live_…` (or `ck_test_…` for a sandbox). Times are ISO 8601 with an offset; money is in " +
         "minor units (cents). Lists page with `limit` and `cursor`. Errors are `{ error: { type, code, message, param, request_id } }`.",
@@ -183,6 +183,62 @@ export function openApiSpec(origin: string) {
             remaining_spots: { type: "integer" },
           },
         },
+        PassType: {
+          type: "object",
+          properties: {
+            object: { const: "pass_type" }, id: { type: "string" }, name: { type: "string" },
+            credits: { type: "integer", description: "Credits a pass of this type starts with." },
+            covers_service_ids: { type: "array", items: { type: "string" } },
+            price: { type: ["object", "null"], properties: { amount: { type: "integer" }, currency: { type: "string" } } },
+          },
+        },
+        Pass: {
+          type: "object",
+          properties: {
+            object: { const: "pass" }, id: { type: "string" }, client_id: { type: ["string", "null"] },
+            name: { type: "string" }, pass_type_id: { type: ["string", "null"] },
+            covers_service_ids: { type: "array", items: { type: "string" } },
+            status: { type: "string", enum: ["active", "exhausted", "expired", "scheduled", "void"] },
+            credits: {
+              type: "object",
+              properties: { available: { type: "integer" }, issued: { type: "integer" }, used: { type: "integer" } },
+            },
+            stored_value: { type: ["object", "null"], properties: { amount: { type: "integer" }, currency: { type: "string" } } },
+            next_expiry: { type: ["string", "null"] }, expires_at: { type: ["string", "null"] },
+            source: { type: "string" }, note: { type: "string" }, issued_at: DateTime,
+            lots: { type: "array", description: "Only on a single pass: each batch of credits added.", items: { type: "object" } },
+            redemptions: { type: "array", description: "Only on a single pass: each spend.", items: { type: "object" } },
+          },
+        },
+        InvoiceLine: {
+          type: "object",
+          properties: {
+            id: { type: "string" }, type: { type: "string", enum: ["booking", "product", "manual"] },
+            booking_id: { type: ["string", "null"] }, service_id: { type: ["string", "null"] },
+            description: { type: "string" }, quantity: { type: "number" },
+            unit_amount: { type: "integer" }, discount: { type: "integer" }, tax_rate: { type: "number", description: "Percent." },
+            tax: { type: "integer" }, amount: { type: "integer" }, service_date: { type: ["string", "null"], format: "date" },
+          },
+        },
+        Invoice: {
+          type: "object",
+          properties: {
+            object: { const: "invoice" }, id: { type: "string" }, number: { type: "string" },
+            status: { type: "string", enum: ["draft", "sent", "paid", "overdue", "void"] },
+            client: {
+              type: "object",
+              properties: { id: { type: ["string", "null"] }, name: { type: "string" }, email: { type: "string" }, phone: { type: "string" } },
+            },
+            issue_date: { type: ["string", "null"], format: "date" }, due_date: { type: ["string", "null"], format: "date" },
+            currency: { type: "string" }, tax_inclusive: { type: "boolean" },
+            subtotal: { type: "integer" }, tax: { type: "integer" }, discount: { type: "integer" },
+            total: { type: "integer" }, amount_paid: { type: "integer" }, amount_due: { type: "integer" },
+            customer_note: { type: "string" }, internal_note: { type: "string" }, reference: { type: "string" },
+            payment_url: { type: ["string", "null"] }, sent_at: { type: ["string", "null"] }, paid_at: { type: ["string", "null"] },
+            created_at: DateTime, updated_at: DateTime,
+            lines: { type: "array", description: "Only on a single invoice.", items: ref("InvoiceLine") },
+          },
+        },
         Event: {
           type: "object",
           properties: {
@@ -193,7 +249,8 @@ export function openApiSpec(origin: string) {
             data: {
               type: "object",
               properties: {
-                object: { oneOf: [ref("Booking"), ref("Client")] },
+                object: { oneOf: [ref("Booking"), ref("Client"), ref("Pass"), ref("Invoice")] },
+                redemption: { type: "object", description: "On pass.redeemed: the spend itself." },
                 previous_attributes: { type: "object", description: "On updates: the changed fields' previous values." },
               },
             },
@@ -320,6 +377,118 @@ export function openApiSpec(origin: string) {
             properties: { name: { type: "string" }, email: { type: "string" }, phone: { type: "string" }, notes: { type: "string" } },
           }),
         }),
+      },
+      "/pass_types": { get: op("listPassTypes", "The kinds of pass this business sells (its package lesson types)", "catalog:read", listOf("PassType")) },
+      "/passes": {
+        get: op("listPasses", "Passes, newest first", "passes:read", listOf("Pass"), {
+          parameters: [
+            query("client_id", "One client's passes."),
+            query("status", "active, exhausted, expired, scheduled or void."),
+            query("pass_type_id", "Passes of one type."),
+            ...paging,
+          ],
+        }),
+        post: {
+          ...op("issuePass", "Issue a pass to a client. Tops up a matching pass they already hold (200) unless merge is false; a new pass is 201.", "passes:write", ref("Pass")),
+          parameters: [idempotencyHeader],
+          requestBody: json({
+            type: "object",
+            required: ["client_id", "pass_type_id"],
+            properties: {
+              client_id: { type: "string" }, pass_type_id: { type: "string" },
+              credits: { type: "integer", description: "Default: the pass type's credits. 1-100." },
+              expiry_months: { type: "integer", description: "Default 12; 0 never expires." },
+              amount_paid: { type: "integer", description: "What was paid for it, in cents, if anything." },
+              merge: { type: "boolean", description: "Default true." },
+              note: { type: "string" },
+            },
+          }),
+        },
+      },
+      "/passes/{id}": { get: op("getPass", "One pass, with its lots and redemptions", "passes:read", ref("Pass"), { parameters: [idParam("pass")] }) },
+      "/passes/{id}/redeem": {
+        post: op("redeemPass", "Spend credits by hand (not for a booking). Needs a note saying why.", "passes:write", ref("Pass"), {
+          parameters: [idParam("pass"), idempotencyHeader],
+          requestBody: json({
+            type: "object",
+            required: ["note"],
+            properties: { credits: { type: "integer", description: "Default 1." }, note: { type: "string" } },
+          }),
+        }),
+      },
+      "/passes/{id}/void": {
+        post: op("voidPass", "Switch a pass off. Credits already spent stay spent.", "passes:write", ref("Pass"), {
+          parameters: [idParam("pass"), idempotencyHeader],
+          requestBody: json({ type: "object", properties: { reason: { type: "string" } } }),
+        }),
+      },
+      "/invoices": {
+        get: op("listInvoices", "Invoices, newest first", "invoices:read", listOf("Invoice"), {
+          parameters: [
+            query("status", "draft, sent, paid, overdue or void."),
+            query("client_id", "One client's invoices."),
+            query("number", "Exact invoice number."),
+            query("updated_since", "Changed at or after (ISO 8601).", { type: "string", format: "date-time" }),
+            ...paging,
+          ],
+        }),
+        post: {
+          ...op("createInvoice", "Create an invoice. Numbered automatically unless `number` is given.", "invoices:write", ref("Invoice")),
+          parameters: [idempotencyHeader],
+          requestBody: json({
+            type: "object",
+            required: ["lines"],
+            properties: {
+              client_id: { type: "string" },
+              client: { type: "object", properties: { name: { type: "string" }, email: { type: "string" }, phone: { type: "string" } } },
+              status: { type: "string", enum: ["draft", "sent"], description: "Default draft. 'sent' publishes without emailing." },
+              number: { type: "string" }, issue_date: { type: "string", format: "date" }, due_date: { type: "string", format: "date" },
+              currency: { type: "string" }, tax_inclusive: { type: "boolean" },
+              discount: { type: "integer", description: "Whole-invoice discount, cents." },
+              customer_note: { type: "string" }, internal_note: { type: "string" }, reference: { type: "string" },
+              lines: {
+                type: "array",
+                items: {
+                  type: "object",
+                  required: ["description"],
+                  properties: {
+                    description: { type: "string" }, quantity: { type: "number" },
+                    unit_amount: { type: "integer", description: "Cents." }, discount: { type: "integer", description: "Cents." },
+                    tax_rate: { type: "number", description: "Percent." },
+                    booking_id: { type: "string", description: "Bills this booking (it cannot then be on another live invoice)." },
+                    service_id: { type: "string", description: "A lesson type or pass type. A pass type issues the pass when the invoice is paid." },
+                    service_date: { type: "string", format: "date" },
+                  },
+                },
+              },
+            },
+          }),
+        },
+      },
+      "/invoices/{id}": {
+        get: op("getInvoice", "One invoice, with its lines", "invoices:read", ref("Invoice"), { parameters: [idParam("invoice")] }),
+        delete: op("deleteInvoice", "Delete a draft. Published invoices are voided instead.", "invoices:write", { type: "object" }, { parameters: [idParam("invoice")] }),
+      },
+      "/invoices/{id}/send": {
+        post: op("sendInvoice", "Email the invoice as a PDF, optionally with a Clarity Pay link", "invoices:write", ref("Invoice"), {
+          parameters: [idParam("invoice"), idempotencyHeader],
+          requestBody: json({
+            type: "object",
+            properties: {
+              email: { type: "string", description: "Default: the client's email." },
+              include_payment_link: { type: "boolean" },
+            },
+          }),
+        }),
+      },
+      "/invoices/{id}/mark_paid": {
+        post: op("markInvoicePaid", "Record a payment taken elsewhere. Issues any passes the invoice bought.", "invoices:write", ref("Invoice"), {
+          parameters: [idParam("invoice"), idempotencyHeader],
+          requestBody: json({ type: "object", properties: { amount_paid: { type: "integer", description: "Cents. Default: the total." } } }),
+        }),
+      },
+      "/invoices/{id}/void": {
+        post: op("voidInvoice", "Void an unpaid invoice", "invoices:write", ref("Invoice"), { parameters: [idParam("invoice"), idempotencyHeader] }),
       },
       "/events": {
         get: op("listEvents", "Everything that happened, oldest first, for 30 days. Keep the last `next_cursor` to resume.", "events:read", listOf("Event"), {

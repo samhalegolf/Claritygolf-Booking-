@@ -24,6 +24,10 @@ export const API_SCOPES = [
   "clients:read",
   "clients:write",
   "catalog:read",
+  "passes:read",
+  "passes:write",
+  "invoices:read",
+  "invoices:write",
   "events:read",
   "webhooks:manage",
 ] as const;
@@ -34,7 +38,11 @@ export const SCOPE_LABELS: Record<ApiScope, string> = {
   "bookings:write": "Create, cancel and reschedule bookings",
   "clients:read": "Read clients",
   "clients:write": "Create and update clients",
-  "catalog:read": "Read lesson types, coaches, locations and availability",
+  "catalog:read": "Read lesson types, pass types, coaches, locations and availability",
+  "passes:read": "Read passes and their balances",
+  "passes:write": "Issue, redeem and void passes",
+  "invoices:read": "Read invoices",
+  "invoices:write": "Create, send, mark paid, void and delete draft invoices",
   "events:read": "Read the event feed",
   "webhooks:manage": "Subscribe and unsubscribe webhooks",
 };

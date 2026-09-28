@@ -54,6 +54,7 @@ import {
   readEndpoint,
   updateEndpoint,
 } from "./events.mts";
+import { commerceHandlers as commerce } from "./commerce.mts";
 
 export type RouteContext = {
   principal: ApiPrincipal;
@@ -658,6 +659,21 @@ export const ROUTES: Route[] = [
   route("POST", "/clients", "clients:write", createClient),
   route("GET", "/clients/:id", "clients:read", getClient),
   route("PATCH", "/clients/:id", "clients:write", updateClient),
+
+  route("GET", "/pass_types", "catalog:read", commerce.listPassTypes),
+  route("GET", "/passes", "passes:read", commerce.listPasses),
+  route("POST", "/passes", "passes:write", commerce.issuePass),
+  route("GET", "/passes/:id", "passes:read", commerce.getPass),
+  route("POST", "/passes/:id/redeem", "passes:write", commerce.redeemPass),
+  route("POST", "/passes/:id/void", "passes:write", commerce.voidPass),
+
+  route("GET", "/invoices", "invoices:read", commerce.listInvoices),
+  route("POST", "/invoices", "invoices:write", commerce.createInvoice),
+  route("GET", "/invoices/:id", "invoices:read", commerce.getInvoice),
+  route("DELETE", "/invoices/:id", "invoices:write", commerce.deleteDraftInvoice),
+  route("POST", "/invoices/:id/send", "invoices:write", commerce.sendInvoice),
+  route("POST", "/invoices/:id/mark_paid", "invoices:write", commerce.markInvoicePaid),
+  route("POST", "/invoices/:id/void", "invoices:write", commerce.voidInvoice),
 
   route("GET", "/events", "events:read", listEvents),
   route("GET", "/event_types", null, listEventTypes),
