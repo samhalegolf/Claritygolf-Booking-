@@ -44,6 +44,13 @@ import {
   STRIPE_CONNECTION_SETTING,
 } from "./_shared/stripe.mts";
 import type { StripeCheckoutInput } from "./_shared/stripe.mts";
+import {
+  posCardDueCents,
+  settlePosTransaction,
+  type CardPayment,
+  type PosTender,
+  type SettlementStore,
+} from "./_shared/pos-settlement.mts";
 
 // Billing is a new, isolated top-level app section. This function owns its
 // own tables (billing_products_services, billing_invoices,
@@ -3301,6 +3308,9 @@ function posRowToApi(row: Record<string, unknown>) {
     note: String(row.note ?? ""),
     couponId: String(row.coupon_id ?? ""),
     couponAmount: Number(row.coupon_amount) || 0,
+    // How the card part arrived (QR page, Tap to Pay). Empty for manual methods
+    // and for sales settled before channels were recorded.
+    paymentChannel: String(row.payment_channel ?? ""),
     paidAt: String(row.paid_at ?? ""),
     createdAt: String(row.created_at ?? ""),
     updatedAt: String(row.updated_at ?? ""),
@@ -3598,13 +3608,18 @@ async function listOptixPosRecords(accountId: string, range: { from: string; to:
   });
 }
 
-async function getPosTransaction(accountId: string, id: string) {
+async function posTransactionRow(accountId: string, id: string) {
   const rows = await supabase("billing_pos_transactions", {
     query: `select=*&id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}&limit=1`,
   });
-  if (!rows.length) return null;
-  const items = (await posItemsForTransactions(accountId, [String(rows[0].id ?? "")]))[String(rows[0].id ?? "")] || [];
-  return { ...posRowToApi(rows[0]), items };
+  return (rows[0] as Record<string, unknown> | undefined) || null;
+}
+
+async function getPosTransaction(accountId: string, id: string) {
+  const row = await posTransactionRow(accountId, id);
+  if (!row) return null;
+  const items = (await posItemsForTransactions(accountId, [String(row.id ?? "")]))[String(row.id ?? "")] || [];
+  return { ...posRowToApi(row), items };
 }
 
 // Selling a voucher product issues a coupon for it, so a voucher bought over
@@ -3904,12 +3919,10 @@ async function createPosTransaction(accountId: string, body: Record<string, unkn
   // exists so a coupon can never outlive a receipt that failed to write.
   const issuedCoupons = await issueCouponsForSale(accountId, row, items);
   // Cash and Eftpos are paid the moment they are recorded, so the stock leaves
-  // the shelf now. Clarity Pay and On account wait for their status change.
-  if (status === "paid") await syncPosStock(accountId, String(row.id), status);
-  // And so does the pass. Only once the money is in: a pending Clarity Pay
-  // session is not a purchase, and credits handed out before it clears are
-  // credits handed out for nothing.
-  const issuedPasses = status === "paid" ? await issuePassesForPosSale(accountId, row, items) : [];
+  // the shelf and the passes are issued now. Clarity Pay and On account wait
+  // for their status change: a pending Clarity Pay payment is not a purchase,
+  // and credits handed out before it clears are credits handed out for nothing.
+  const { issuedPasses } = status === "paid" ? await applyPosPaidEffects(accountId, row) : { issuedPasses: [] };
 
   return {
     issuedCoupons,
@@ -3944,28 +3957,24 @@ async function updatePosTransactionStatus(accountId: string, id: string, body: R
     prefer: "return=representation",
   });
   if (!rows.length) throw Object.assign(new Error("Transaction not found."), { status: 404 });
-  // Marking a sale paid takes its items off the shelf; refunding or voiding it
-  // puts them back. movePosStock() is the thing that makes each of those happen
-  // exactly once, however many times the status is flipped.
-  await syncPosStock(accountId, id, status);
-  await syncPosCoupon(accountId, rows[0] as Record<string, unknown>, status);
-  const items = (await posItemsForTransactions(accountId, [id]))[id] || [];
-  // Marking an On account sale paid is the moment the package was bought. Safe
-  // to press twice: issuing is keyed on the sale and its line.
+  // Marking a sale paid takes its items off the shelf and, for an On account
+  // sale, is the moment the package was bought; refunding or voiding puts the
+  // stock back. Each effect happens exactly once however many times the status
+  // is flipped.
   //
   // Note what is NOT here: refunding or voiding does not take a pass back. A
   // credit already spent is a lesson that happened, and quietly removing an
   // entitlement someone may have made plans around is worse than a coach
   // voiding it deliberately from the client's profile.
-  const issuedPasses =
-    status === "paid"
-      ? await issuePassesForPosSale(
-          accountId,
-          rows[0] as Record<string, unknown>,
-          items as Array<{ productId: string; quantity: number }>,
-        )
-      : [];
-  const refreshed = (await getPosTransaction(accountId, id)) || { ...posRowToApi(rows[0]), items };
+  let issuedPasses: string[] = [];
+  if (status === "paid") {
+    ({ issuedPasses } = await applyPosPaidEffects(accountId, rows[0] as Record<string, unknown>));
+  } else {
+    await syncPosStock(accountId, id, status);
+    await syncPosCoupon(accountId, rows[0] as Record<string, unknown>, status);
+  }
+  const refreshed = await getPosTransaction(accountId, id);
+  if (!refreshed) throw Object.assign(new Error("Transaction not found."), { status: 404 });
   return { transaction: refreshed, issuedPasses };
 }
 
@@ -4093,6 +4102,73 @@ async function emailPosReceipt(accountId: string, id: string, body: Record<strin
   return { sent: true, recipient: to, savedToClient };
 }
 
+// --- Settling a sale ---------------------------------------------------------
+// What "paid" does to a sale, in one place. Manual methods (Cash, On account
+// marked paid) run the effects directly; a card payment goes through
+// settlePosTransaction, which adds the paid transition and the tender records
+// around them. Every effect here is idempotent on its own, so a retry finishes
+// whatever an interrupted call left undone.
+
+async function applyPosPaidEffects(accountId: string, row: Record<string, unknown>) {
+  const id = String(row.id ?? "");
+  await syncPosStock(accountId, id, "paid");
+  await syncPosCoupon(accountId, row, "paid");
+  const items = (await posItemsForTransactions(accountId, [id]))[id] || [];
+  return { issuedPasses: await issuePassesForPosSale(accountId, row, items) };
+}
+
+async function posCardDueCentsFor(accountId: string, id: string) {
+  const row = await posTransactionRow(accountId, id);
+  if (!row) throw Object.assign(new Error("Transaction not found."), { status: 404 });
+  return posCardDueCents(row);
+}
+
+async function recordPosTenders(accountId: string, purchaseRef: string, tenders: PosTender[]) {
+  await supabase("billing_payment_tenders", {
+    method: "POST",
+    query: "on_conflict=account_id,purchase_ref,tender_kind",
+    prefer: "resolution=ignore-duplicates,return=minimal",
+    body: tenders.map((tender) => ({
+      id: `tender-${randomUUID()}`,
+      account_id: accountId,
+      purchase_ref: purchaseRef,
+      tender_kind: tender.kind,
+      channel: tender.channel,
+      amount_cents: tender.amountCents,
+      currency: tender.currency,
+      external_payment_ref: tender.externalRef,
+      card_brand: tender.cardBrand,
+      card_last4: tender.cardLast4,
+      created_at: nowIso(),
+    })),
+  });
+}
+
+function posSettlementStore(accountId: string): SettlementStore {
+  return {
+    readTransaction: (id) => posTransactionRow(accountId, id),
+    async claimPaid(id, patch) {
+      const rows = await supabase("billing_pos_transactions", {
+        method: "PATCH",
+        query: `id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}&status=eq.pending`,
+        body: { ...patch, updated_at: nowIso() },
+        prefer: "return=representation",
+      });
+      return (rows[0] as Record<string, unknown> | undefined) || null;
+    },
+    applyPaidEffects: (row) => applyPosPaidEffects(accountId, row),
+    recordTenders: (purchaseRef, tenders) => recordPosTenders(accountId, purchaseRef, tenders),
+  };
+}
+
+/** A card has paid for this sale. Safe to call for the same payment any number of times. */
+async function settlePosCardPayment(accountId: string, id: string, card: CardPayment) {
+  const settled = await settlePosTransaction(posSettlementStore(accountId), id, card);
+  const transaction = await getPosTransaction(accountId, id);
+  if (!transaction) throw Object.assign(new Error("Transaction not found."), { status: 404 });
+  return { ...settled, transaction };
+}
+
 // Clarity Pay at the counter: create a Stripe Checkout session for this sale.
 // The client renders the returned URL as a QR code so the customer can pay
 // contactless from their own phone (Apple Pay / Google Pay), or opens it
@@ -4106,12 +4182,21 @@ async function createPosCheckout(accountId: string, id: string, req: Request) {
 
   const credential = await stripeFor(accountId);
   requireStripeFeature(credential, "till");
+  // What the card owes, from the stored sale: a voucher's slice is already paid
+  // and must not be charged again.
+  const dueCents = await posCardDueCentsFor(accountId, id);
+  if (dueCents <= 0) {
+    throw Object.assign(new Error(`${transaction.receiptNumber} has nothing left for a card to pay.`), {
+      status: 409,
+      code: "POS_NOTHING_DUE",
+    });
+  }
   const branding = await resolveInvoiceBranding(accountId);
   const origin = new URL(req.url).origin;
   const receiptNumber = String(transaction.receiptNumber);
 
   const session = await createStripeCheckoutSessionWith(credential, {
-    amount: transaction.amount,
+    amount: dueCents / 100,
     currency: String(transaction.currency),
     productName: `${transaction.description} - ${branding.businessName}`,
     productDescription: transaction.customerName ? `For ${transaction.customerName}` : "",
@@ -4149,35 +4234,15 @@ async function syncPosCheckout(accountId: string, id: string) {
   const session = await retrieveStripeCheckoutSession(accountId, sessionId);
   if (!session.paid) return { transaction, paid: false, expired: session.expired };
 
-  const updated = await supabase("billing_pos_transactions", {
-    method: "PATCH",
-    query: `id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}`,
-    body: {
-      status: "paid",
-      paid_at: nowIso(),
-      stripe_payment_intent_id: session.paymentIntentId || null,
-      updated_at: nowIso(),
-    },
-    prefer: "return=representation",
+  // Stripe has confirmed. This poll runs every few seconds while the QR is on
+  // screen and keeps running after the sale clears, which is exactly why
+  // settling is safe to repeat.
+  const settled = await settlePosCardPayment(accountId, id, {
+    channel: "stripe_checkout",
+    paymentIntentId: session.paymentIntentId || sessionId,
+    amountCents: session.amountTotal,
   });
-  await syncPosStock(accountId, id, "paid");
-  if (updated.length) await syncPosCoupon(accountId, updated[0] as Record<string, unknown>, "paid");
-  const items = (await posItemsForTransactions(accountId, [id]))[id] || [];
-  // Stripe has confirmed, so the package is bought. This poll runs every few
-  // seconds while the QR is on screen and keeps running after the sale clears,
-  // which is exactly why issuing is idempotent rather than guarded by a flag.
-  const issuedPasses = updated.length
-    ? await issuePassesForPosSale(
-        accountId,
-        updated[0] as Record<string, unknown>,
-        items as Array<{ productId: string; quantity: number }>,
-      )
-    : [];
-  return {
-    transaction: updated.length ? { ...posRowToApi(updated[0]), items } : transaction,
-    paid: true,
-    issuedPasses,
-  };
+  return { transaction: settled.transaction, paid: true, issuedPasses: settled.issuedPasses };
 }
 
 // bookingId -> the sale that settled it. Drives the "paid at POS" badge on

@@ -7,8 +7,8 @@
  * A business takes cards one of two ways (see stripe-connect.mts):
  *
  *   Clarity Pay   Clarity creates the business's Stripe account and Stripe
- *                 runs the signup. Everything works: the till, the player
- *                 portal and invoices. Clarity keeps a small cut of each
+ *                 runs the signup. Everything works: the till (QR and Tap
+ *                 to Pay), the player portal and invoices. Clarity keeps a small cut of each
  *                 payment (the application fee).
  *   Own Stripe    The business signs in to a Stripe account it already has.
  *                 Invoices only, and Clarity takes nothing.
@@ -45,12 +45,14 @@ export type StripeFeatures = {
   invoices: boolean;
   till: boolean;
   portal: boolean;
+  /** Tap to Pay (and later card readers) through Stripe Terminal. */
+  terminal: boolean;
 };
 
 export function stripeFeatures(route: StripeRoute | ""): StripeFeatures {
-  if (route === "clarity_pay") return { invoices: true, till: true, portal: true };
-  if (route === "own_stripe") return { invoices: true, till: false, portal: false };
-  return { invoices: false, till: false, portal: false };
+  if (route === "clarity_pay") return { invoices: true, till: true, portal: true, terminal: true };
+  if (route === "own_stripe") return { invoices: true, till: false, portal: false, terminal: false };
+  return { invoices: false, till: false, portal: false, terminal: false };
 }
 
 export type StripeConnection = {
@@ -187,12 +189,18 @@ export function resolveStripeCredential(connectionValue: unknown): StripeCredent
 }
 
 /**
- * Stops a charge the business's route does not cover. The till and the player
- * portal are Clarity Pay only; a business on its own Stripe gets invoices.
+ * Stops a charge the business's route does not cover. The till, Tap to Pay and
+ * the player portal are Clarity Pay only; a business on its own Stripe gets
+ * invoices.
  */
 export function requireStripeFeature(credential: StripeCredential, feature: keyof StripeFeatures) {
   if (stripeFeatures(credential.route)[feature]) return;
-  const what = feature === "till" ? "Card payments at the till" : "Player portal purchases";
+  const what =
+    feature === "till"
+      ? "Card payments at the till"
+      : feature === "terminal"
+        ? "Tap to Pay"
+        : "Player portal purchases";
   throw Object.assign(
     new Error(`${what} need Clarity Pay. Set it up in Settings › Billing › Card payments.`),
     { status: 409, code: "CLARITY_PAY_REQUIRED" },
@@ -240,7 +248,7 @@ export function stripeHeaders(credential: Pick<StripeCredential, "secret" | "acc
 export async function stripeRequest(
   credential: Pick<StripeCredential, "secret" | "account">,
   path: string,
-  options: { method?: string; params?: URLSearchParams } = {},
+  options: { method?: string; params?: URLSearchParams; idempotencyKey?: string } = {},
 ) {
   const method = options.method || "GET";
   const query = method === "GET" && options.params ? `?${options.params.toString()}` : "";
@@ -249,6 +257,9 @@ export async function stripeRequest(
     headers: {
       ...stripeHeaders(credential),
       ...(method === "GET" ? {} : { "Content-Type": "application/x-www-form-urlencoded" }),
+      // A retried create with the same key returns the first result instead of
+      // making a second object -- the difference between one charge and two.
+      ...(options.idempotencyKey ? { "Idempotency-Key": options.idempotencyKey } : {}),
     },
     ...(method === "GET" ? {} : { body: (options.params || new URLSearchParams()).toString() }),
   });
