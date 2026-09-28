@@ -1,13 +1,13 @@
 import type { Config } from "@netlify/functions";
 import { createHash, randomUUID } from "node:crypto";
 import {
-  disconnectGoogleService,
+  disconnectGoogleConnection,
   getGoogleAccessToken,
   googleCalendarScopes as googleScopes,
   hasGoogleScopes,
+  listCoachCalendarConnections,
   loadGoogleProviderConnection,
   markConnectionHealthy,
-  migrateLegacyGoogleCalendarToken,
   noteGoogleApiFailure,
   publicGoogleProviderStatus,
   saveGoogleAuthorization,
@@ -16,6 +16,13 @@ import { unavailableSpans } from "./_shared/availability-blocks.mts";
 import { primaryServiceLocationId } from "./_shared/service-scope.mts";
 import { legacyOriginalWorkspaceId, slugify as cleanSlug } from "./_shared/account.mts";
 import { requireCoachActor } from "./_shared/coach-auth.mts";
+import {
+  availabilityForGoogleCoach,
+  googleCoachesFromSettings,
+  itemBelongsOnCoachCalendar,
+  ownGoogleCoachId,
+  type GoogleCoachProfile,
+} from "./_shared/google-calendar-coach.mts";
 import {
   SETTINGS_UPSERT_QUERY,
   settingsSelectQuery,
@@ -41,8 +48,8 @@ import {
 const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
 // Auto-sync every booking change to Google Calendar. Each booking mutation path
 // (admin save/delete, single-item upsert, public booking + cancel) calls
-// syncGoogleCalendarIfEnabled(); with this false those calls actually run,
-// gated only by the per-account googleCalendarAutoSync setting.
+// syncGoogleCalendarChangesIfEnabled(); with this false those calls actually
+// run, gated only by each coach's googleCalendarAutoSync setting.
 const googleCalendarManualSyncOnly = false;
 
 // Deliberately empty.
@@ -118,6 +125,85 @@ async function setSettings(accountId: string, values: Record<string, unknown>) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Per-coach settings
+//
+// Each coach's calendar has its own chosen calendar, event maps, import rules
+// and sync status, stored as "<key>:<coachId>". Everything else in settings is
+// the business's (lesson types, locations, availability, the debug log).
+// coachScopedSettings hands the sync a settings map where the plain key reads
+// as that coach's value, so the code below reads settings.googleCalendarId and
+// gets the right coach's calendar without spelling the suffix everywhere.
+// ---------------------------------------------------------------------------
+
+const COACH_SETTING_KEYS = [
+  "googleCalendarId",
+  "googleCalendarEventMapJson",
+  "googleCalendarEventHashMapJson",
+  "googleCalendarAutoSync",
+  "googleCalendarImportRulesJson",
+  "googleCalendarImportBusy",
+  "googleCalendarLastSyncAt",
+  "googleCalendarLastSyncStatus",
+  "googleCalendarLastSyncError",
+  "googleCalendarAccountEmail",
+  "googleCalendarConnectedAt",
+  "googleCalendarOAuthState",
+  "googleCalendarOAuthStartedAt",
+] as const;
+const coachSettingKeySet = new Set<string>(COACH_SETTING_KEYS);
+
+function coachSettingKey(key: string, coachId: string) {
+  return `${key}:${coachId}`;
+}
+
+function coachScopedSettings(settings: Record<string, string>, coachId: string) {
+  const scoped = { ...settings };
+  for (const key of COACH_SETTING_KEYS) scoped[key] = settings[coachSettingKey(key, coachId)] || "";
+  return scoped;
+}
+
+async function readCoachSettings(accountId: string, coachId: string) {
+  return coachScopedSettings(await readSettings(accountId), coachId);
+}
+
+async function setCoachSettings(accountId: string, coachId: string, values: Record<string, unknown>) {
+  await setSettings(
+    accountId,
+    Object.fromEntries(
+      Object.entries(values).map(([key, value]) => [coachSettingKeySet.has(key) ? coachSettingKey(key, coachId) : key, value]),
+    ),
+  );
+}
+
+function coachesFromSettings(accountId: string, settings: Record<string, string>): GoogleCoachProfile[] {
+  return googleCoachesFromSettings(accountId, settings.coachProfilesJson);
+}
+
+/**
+ * Which coach's calendar a request is about, and whether the caller may touch
+ * it. Anyone may manage their own; the owner and admins may manage any coach's
+ * in their business, from that coach's profile. With no coach named it is the
+ * caller's own.
+ */
+export async function resolveGoogleCalendarCoach(req: Request, requestedCoachId = "") {
+  const actor = await requireCoachActor(req);
+  const settings = await readSettings(actor.accountId);
+  const coaches = coachesFromSettings(actor.accountId, settings);
+  const ownCoachId = ownGoogleCoachId(actor, coaches, actor.accountId);
+  const coachId = cleanString(requestedCoachId, "", 140) || ownCoachId;
+  if (!coachId) {
+    throw Object.assign(new Error("You do not have a coach profile to connect a calendar to."), { status: 409 });
+  }
+  if (coachId !== ownCoachId && !actor.isAdmin) {
+    throw Object.assign(new Error("You can only manage your own calendar."), { status: 403 });
+  }
+  if (!coaches.some((coach) => coach.id === coachId)) {
+    throw Object.assign(new Error("That coach is not in this business."), { status: 404 });
+  }
+  return { accountId: actor.accountId, coachId };
+}
+
 function parseJson<T>(value: string | undefined, fallback: T): T {
   try {
     return value ? JSON.parse(value) : fallback;
@@ -184,6 +270,8 @@ export type GoogleCalendarSource = {
 
 export type GoogleCalendarDebugEntry = {
   id: string;
+  /** Whose calendar the run was for. The log itself is the business's. */
+  coachId: string;
   trigger: string;
   startedAt: string;
   finishedAt: string;
@@ -288,6 +376,7 @@ function trimDebugEntries(entries: GoogleCalendarDebugEntry[]) {
 /** Baseline entry so every recording site only spells out what it actually knows. */
 function newDebugEntry(overrides: Partial<Omit<GoogleCalendarDebugEntry, "id">>): Omit<GoogleCalendarDebugEntry, "id"> {
   return {
+    coachId: "",
     trigger: "unknown",
     startedAt: nowIso(),
     finishedAt: nowIso(),
@@ -327,8 +416,10 @@ async function recordGoogleCalendarDebugEntry(
   }
 }
 
-export async function getGoogleCalendarDebugLog(accountId: string) {
-  const settings = await readSettings(accountId);
+/** The runs for one coach's calendar. Entries written before calendars were per coach name none. */
+export async function getGoogleCalendarDebugLog(accountId: string, coachId: string) {
+  const settings = await readCoachSettings(accountId, coachId);
+  const entries = await readGoogleCalendarDebugEntries(accountId, settings);
   return {
     ok: true,
     enabled: debugLoggingEnabled(settings),
@@ -336,18 +427,18 @@ export async function getGoogleCalendarDebugLog(accountId: string) {
     autoSync: googleCalendarManualSyncOnly ? false : settings.googleCalendarAutoSync !== "false",
     manualOnly: googleCalendarManualSyncOnly,
     calendarId: settings.googleCalendarId || env("GOOGLE_CALENDAR_ID", "primary"),
-    entries: await readGoogleCalendarDebugEntries(accountId, settings),
+    entries: entries.filter((entry) => !entry.coachId || entry.coachId === coachId),
   };
 }
 
-export async function clearGoogleCalendarDebugLog(accountId: string) {
+export async function clearGoogleCalendarDebugLog(accountId: string, coachId: string) {
   await setSetting(accountId, debugLogSettingKey, "[]");
-  return getGoogleCalendarDebugLog(accountId);
+  return getGoogleCalendarDebugLog(accountId, coachId);
 }
 
-export async function setGoogleCalendarDebugEnabled(accountId: string, enabled: boolean) {
+export async function setGoogleCalendarDebugEnabled(accountId: string, coachId: string, enabled: boolean) {
   await setSetting(accountId, debugEnabledSettingKey, enabled ? "true" : "false");
-  return getGoogleCalendarDebugLog(accountId);
+  return getGoogleCalendarDebugLog(accountId, coachId);
 }
 
 function cleanUrl(value: unknown, fallback = "") {
@@ -469,13 +560,14 @@ async function listGoogleCalendarSources(accessToken: string) {
   });
 }
 
-export async function getGoogleCalendarSyncStatus(accountId: string, req?: Request) {
-  const settings = await readSettings(accountId);
+/** One coach's calendar connection. A business with no coach profile for the caller has no calendar. */
+export async function getGoogleCalendarSyncStatus(accountId: string, coachId: string, req?: Request) {
+  const settings = await readCoachSettings(accountId, coachId);
   const config = googleConfig(req);
   const configured = Boolean(config.clientId && config.clientSecret && config.redirectUri);
-  const connection = await loadGoogleProviderConnection(accountId);
+  // Never look up coach "": that is the business's Drive connection.
+  const connection = coachId ? await loadGoogleProviderConnection(accountId, coachId) : null;
   const providerStatus = publicGoogleProviderStatus(connection, googleScopes);
-  const legacyMigrationRequired = Boolean(settings.googleCalendarRefreshToken);
   const connected = Boolean(
     connection?.calendarEnabled &&
       connection.connectionStatus === "connected" &&
@@ -487,7 +579,7 @@ export async function getGoogleCalendarSyncStatus(accountId: string, req?: Reque
   let sourceListError = "";
   if (connected) {
     try {
-      sources = await listGoogleCalendarSources(await getGoogleAccessToken(accountId, googleScopes));
+      sources = await listGoogleCalendarSources(await getGoogleAccessToken(accountId, googleScopes, coachId));
     } catch (error) {
       sourceListError = error instanceof Error ? error.message.slice(0, 300) : "Google calendar sources could not be loaded.";
     }
@@ -496,29 +588,27 @@ export async function getGoogleCalendarSyncStatus(accountId: string, req?: Reque
     configured,
     connected,
     accountId,
+    coachId,
     calendarId,
     autoSync: googleCalendarManualSyncOnly ? false : settings.googleCalendarAutoSync !== "false",
     manualOnly: googleCalendarManualSyncOnly,
     accountEmail: providerStatus.accountEmail || settings.googleCalendarAccountEmail || "",
     lastSyncAt: settings.googleCalendarLastSyncAt || "",
-    lastSyncStatus: legacyMigrationRequired ? "migration_required" : settings.googleCalendarLastSyncStatus || "",
-    lastSyncError: legacyMigrationRequired
-      ? "Legacy Google Calendar token must be migrated to encrypted provider storage."
-      : providerStatus.lastErrorCode || settings.googleCalendarLastSyncError || "",
+    lastSyncStatus: settings.googleCalendarLastSyncStatus || "",
+    lastSyncError: providerStatus.lastErrorCode || settings.googleCalendarLastSyncError || "",
     connectedAt: providerStatus.connectedAt || settings.googleCalendarConnectedAt || "",
     redirectUri: config.redirectUri,
     scope: googleScopes.join(" "),
     grantedScopes: providerStatus.grantedScopes,
     missingScopes: providerStatus.missingScopes,
     connectionStatus: providerStatus.connectionStatus,
-    legacyMigrationRequired,
     sources,
     sourceListError,
     importRules,
   };
 }
 
-export async function updateGoogleCalendarSyncSettings(accountId: string, body: any) {
+export async function updateGoogleCalendarSyncSettings(accountId: string, coachId: string, body: any) {
   const values: Record<string, unknown> = {};
   if (Object.prototype.hasOwnProperty.call(body || {}, "calendarId")) {
     values.googleCalendarId = cleanCalendarId(body.calendarId);
@@ -533,20 +623,18 @@ export async function updateGoogleCalendarSyncSettings(accountId: string, body: 
       normalizeGoogleCalendarImportRules(body.importRules),
     );
   }
-  await setSettings(accountId, values);
-  return getGoogleCalendarSyncStatus(accountId);
+  await setCoachSettings(accountId, coachId, values);
+  return getGoogleCalendarSyncStatus(accountId, coachId);
 }
 
-export async function createGoogleCalendarAuthUrl(accountId: string, req: Request) {
+export async function createGoogleCalendarAuthUrl(accountId: string, coachId: string, req: Request) {
   const config = googleConfig(req);
   if (!config.clientId || !config.clientSecret) {
     throw Object.assign(new Error("Google Calendar OAuth is not configured."), { status: 400 });
   }
   const state = randomUUID().replaceAll("-", "");
-  const settings = await readSettings(accountId);
-  await setSettings(accountId, {
+  await setCoachSettings(accountId, coachId, {
     googleCalendarOAuthState: state,
-    googleCalendarOAuthAccountId: accountId,
     googleCalendarOAuthStartedAt: nowIso(),
   });
   const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
@@ -594,29 +682,35 @@ async function userEmail(accessToken: string) {
 }
 
 /**
- * Which business started this OAuth flow.
+ * Which business, and which coach in it, started this OAuth flow.
  *
- * The callback arrives from Google with no session, so the account has to come
- * out of the flow itself. The state is a 128-bit random value this server wrote
- * into that business's settings when it built the authorize URL, so looking the
- * account up *by* the state is both the CSRF check and the account resolution:
- * an attacker would have to guess the nonce to name a business, and a browser
- * cannot simply assert a slug.
+ * The callback arrives from Google with no session, so both have to come out
+ * of the flow itself. The state is a 128-bit random value this server wrote
+ * into that coach's settings key when it built the authorize URL, so looking
+ * the row up *by* the state is both the CSRF check and the resolution: an
+ * attacker would have to guess the nonce to name a business or a coach, and a
+ * browser cannot simply assert either.
  */
-async function accountForOAuthState(state: string): Promise<string> {
-  if (!state) return "";
+async function coachForOAuthState(state: string): Promise<{ accountId: string; coachId: string }> {
+  const none = { accountId: "", coachId: "" };
+  if (!state) return none;
+  const prefix = coachSettingKey("googleCalendarOAuthState", "");
   const rows = await supabase("settings", {
     query: [
-      "select=account_id",
-      `key=eq.${encodeURIComponent("googleCalendarOAuthState")}`,
+      "select=account_id,key",
+      `key=like.${encodeURIComponent(prefix)}*`,
       `value=eq.${encodeURIComponent(state)}`,
       "limit=2",
     ].join("&"),
   });
-  // Exactly one business may hold a given nonce. Anything else is a collision
-  // or tampering, and neither should pick a winner.
-  if (rows.length !== 1) return "";
-  return cleanString(rows[0]?.account_id, "", 80);
+  // Exactly one coach may hold a given nonce. Anything else is a collision or
+  // tampering, and neither should pick a winner.
+  if (rows.length !== 1) return none;
+  const key = cleanString(rows[0]?.key, "", 300);
+  return {
+    accountId: cleanString(rows[0]?.account_id, "", 80),
+    coachId: key.startsWith(prefix) ? key.slice(prefix.length) : "",
+  };
 }
 
 export async function finishGoogleCalendarOAuth(req: Request) {
@@ -631,11 +725,11 @@ export async function finishGoogleCalendarOAuth(req: Request) {
   if (!code || !state) {
     throw Object.assign(new Error("Google did not return the required authorization code."), { status: 400 });
   }
-  const accountId = await accountForOAuthState(state);
-  if (!accountId) {
+  const { accountId, coachId } = await coachForOAuthState(state);
+  if (!accountId || !coachId) {
     throw Object.assign(new Error("Google Calendar connection could not be verified."), { status: 400 });
   }
-  const settings = await readSettings(accountId);
+  const settings = await readCoachSettings(accountId, coachId);
   const expectedState = settings.googleCalendarOAuthState || "";
   if (!expectedState || state !== expectedState) {
     throw Object.assign(new Error("Google Calendar connection could not be verified."), { status: 400 });
@@ -656,6 +750,7 @@ export async function finishGoogleCalendarOAuth(req: Request) {
   const email = token.access_token ? await userEmail(token.access_token) : "";
   await saveGoogleAuthorization({
     accountId,
+    coachId,
     refreshToken: cleanString(token.refresh_token, "", 4000) || undefined,
     grantedScopes: cleanString(token.scope, "", 3000).split(/\s+/).filter(Boolean).length
       ? cleanString(token.scope, "", 3000).split(/\s+/).filter(Boolean)
@@ -663,42 +758,32 @@ export async function finishGoogleCalendarOAuth(req: Request) {
     // Google told us; anything else is a guess and must not overwrite the truth.
     scopesFromProvider: cleanString(token.scope, "", 3000).split(/\s+/).filter(Boolean).length > 0,
     providerEmail: email || settings.googleCalendarAccountEmail || "",
-    enableCalendar: true,
   });
-  await setSettings(accountId, {
-    googleCalendarRefreshToken: "",
+  await setCoachSettings(accountId, coachId, {
     googleCalendarAccountEmail: email,
     googleCalendarConnectedAt: nowIso(),
     googleCalendarAutoSync: "true",
     googleCalendarOAuthState: "",
-    googleCalendarOAuthAccountId: "",
     googleCalendarOAuthStartedAt: "",
     googleCalendarLastSyncStatus: "connected",
     googleCalendarLastSyncError: "",
   });
-  return getGoogleCalendarSyncStatus(accountId, req);
+  return getGoogleCalendarSyncStatus(accountId, coachId, req);
 }
 
-export async function disconnectGoogleCalendar(accountId: string, req?: Request) {
-  const settings = await readSettings(accountId);
-  await disconnectGoogleService(accountId, "calendar");
-  await setSettings(accountId, {
-    googleCalendarRefreshToken: "",
+export async function disconnectGoogleCalendar(accountId: string, coachId: string, req?: Request) {
+  await disconnectGoogleConnection(accountId, coachId);
+  // Both maps go: a reconnect is a fresh start, and a hash left behind for an
+  // event that no longer exists would make the next sync skip re-creating it.
+  await setCoachSettings(accountId, coachId, {
     googleCalendarAccountEmail: "",
     googleCalendarConnectedAt: "",
     googleCalendarEventMapJson: "{}",
+    googleCalendarEventHashMapJson: "{}",
     googleCalendarLastSyncStatus: "disconnected",
     googleCalendarLastSyncError: "",
   });
-  return getGoogleCalendarSyncStatus(accountId, req);
-}
-
-export async function migrateLegacyGoogleCalendarConnection(accountId: string, req?: Request) {
-  const result = await migrateLegacyGoogleCalendarToken(accountId);
-  return {
-    ...result,
-    status: await getGoogleCalendarSyncStatus(accountId, req),
-  };
+  return getGoogleCalendarSyncStatus(accountId, coachId, req);
 }
 
 function rowToItem(row: any) {
@@ -959,7 +1044,7 @@ async function listGoogleEvents(accessToken: string, calendarId: string, timeMin
  * caller wraps this, and the outcome is reported either way rather than
  * swallowed — a silent import is how a broken sync hides for three days.
  */
-async function importGoogleBusyBlocks(accountId: string, accessToken: string, settings: Record<string, string>) {
+async function importGoogleBusyBlocks(accountId: string, coachId: string, accessToken: string, settings: Record<string, string>) {
   const account = accountFromSettings(accountId, settings);
   const now = new Date();
   const timeMin = new Date(now.getTime() - busyImportWeeksBack * 7 * 86_400_000).toISOString();
@@ -1004,7 +1089,13 @@ async function importGoogleBusyBlocks(accountId: string, accessToken: string, se
           sourceId: calendarSourceId,
           sourceName: rule.name || sourceById.get(calendarSourceId)?.name || "",
           showLabel: rule.showLabel,
-        } satisfies GoogleCalendarSourceDisplay),
+        } satisfies GoogleCalendarSourceDisplay).map((block) => ({
+          ...block,
+          // And the coach, because two coaches can both read a shared calendar
+          // (the academy's own), and each needs their own copy of that busy
+          // time -- one row would be claimed back and forth between them.
+          id: `${block.id}-${cleanSlug(coachId, "coach")}`,
+        })),
       );
     }
   }
@@ -1012,22 +1103,22 @@ async function importGoogleBusyBlocks(accountId: string, accessToken: string, se
   // Only rows this import owns are ever read here, and therefore only they can
   // ever be deleted below. A lesson or a coach's own block is out of reach --
   // and so is another business's Google import, which the origin filter alone
-  // did not exclude.
+  // did not exclude, and another coach's, which the account filter did not.
   const existingRows = (await supabase("calendar_items", {
     query:
       `select=id,week,day,start,duration,title,external_source` +
       `&origin=eq.${encodeURIComponent(GOOGLE_IMPORT_ORIGIN)}` +
-      `&account_id=eq.${encodeURIComponent(accountId)}`,
+      `&account_id=eq.${encodeURIComponent(accountId)}` +
+      `&coach_id=eq.${encodeURIComponent(coachId)}`,
   })) as Array<Record<string, unknown>>;
   const plan = planBusyBlockImport(wanted, existingRows.map((row) => ({ ...row, id: String(row.id) })));
 
-  // The coach owns their own diary, so the block files under the same account
-  // and coach as everything else on this calendar. That account is the one this
-  // import is running for, not a slug read back out of settings.
-  const accountSlug = accountId;
+  // The coach owns their own diary, so the block files under the business and
+  // the coach this import is running for -- not a slug read back out of
+  // settings.
   const rowFor = (block: (typeof wanted)[number]) => ({
     id: block.id,
-    account_id: accountSlug,
+    account_id: accountId,
     kind: "block",
     title: block.title,
     client: "",
@@ -1036,7 +1127,7 @@ async function importGoogleBusyBlocks(accountId: string, accessToken: string, se
     start: block.start,
     duration: block.duration,
     status: "booked",
-    coach_id: accountSlug,
+    coach_id: coachId,
     service_id: "",
     person_id: "",
     location_id: "",
@@ -1061,11 +1152,12 @@ async function importGoogleBusyBlocks(accountId: string, accessToken: string, se
     const list = plan.deleteIds.map((id) => `"${id}"`).join(",");
     await supabase("calendar_items", {
       method: "DELETE",
-      // Account-scoped as well as origin-scoped: an id list on its own would
-      // let one business's import delete another's blocks.
+      // Account- and coach-scoped as well as origin-scoped: an id list on its
+      // own would let one import delete another's blocks.
       query:
         `origin=eq.${encodeURIComponent(GOOGLE_IMPORT_ORIGIN)}` +
         `&account_id=eq.${encodeURIComponent(accountId)}` +
+        `&coach_id=eq.${encodeURIComponent(coachId)}` +
         `&id=in.(${encodeURIComponent(list)})`,
     });
   }
@@ -1292,8 +1384,10 @@ async function deleteGoogleEvent(
  * on rather than a horizon that needs walking forward, and the event body never
  * changes just because time passed.
  */
-function unavailableSyncItems(settings: Record<string, string>) {
-  const availability = parseJson<any[][]>(settings.availabilityJson, []);
+function unavailableSyncItems(settings: Record<string, string>, coachId: string, coaches: GoogleCoachProfile[]) {
+  // This coach's hours only. Across coaches, the business is closed only when
+  // nobody works; one coach's calendar is closed whenever they do not.
+  const availability = availabilityForGoogleCoach(parseJson<any[][]>(settings.availabilityJson, []), coachId, coaches);
   return unavailableSpans(availability).map((span) => ({
     id: span.id,
     kind: "unavailable" as const,
@@ -1309,7 +1403,7 @@ function unavailableSyncItems(settings: Record<string, string>) {
   }));
 }
 
-async function calendarSyncPayload(accountId: string) {
+async function calendarSyncPayload(accountId: string, coachId: string) {
   const [settingsRows, itemRows] = await Promise.all([
     supabase("settings", { query: settingsSelectQuery(accountId) }),
     supabase("calendar_items", {
@@ -1318,24 +1412,33 @@ async function calendarSyncPayload(accountId: string) {
       query: `select=*&account_id=eq.${encodeURIComponent(accountId)}&order=week.asc,day.asc,start.asc,id.asc`,
     }),
   ]);
-  const settings = settingMap(settingsRows);
+  const settings = coachScopedSettings(settingMap(settingsRows), coachId);
+  const services = parseJson<any[]>(settings.servicesJson, defaultServices);
+  const coaches = coachesFromSettings(accountId, settings);
   return {
     settings,
-    items: [...itemRows.map(rowToItem).filter(isBusyGoogleItem), ...unavailableSyncItems(settings)],
-    services: parseJson(settings.servicesJson, defaultServices),
+    items: [
+      ...itemRows
+        .map(rowToItem)
+        .filter((item) => isBusyGoogleItem(item) && itemBelongsOnCoachCalendar(item, coachId, services, coaches)),
+      ...unavailableSyncItems(settings, coachId, coaches),
+    ],
+    services,
     locations: parseJson(settings.locationsJson, []),
   };
 }
 
-export async function syncGoogleCalendarNow(accountId: string, trigger = "manual_sync_now") {
+/** A full rebuild of one coach's Google Calendar from Clarity. */
+export async function syncGoogleCalendarNow(accountId: string, coachId: string, trigger = "manual_sync_now") {
   const startedAtMs = Date.now();
   const startedAt = nowIso();
-  const { settings, items, services, locations } = await calendarSyncPayload(accountId);
-  const status = await getGoogleCalendarSyncStatus(accountId);
+  const { settings, items, services, locations } = await calendarSyncPayload(accountId, coachId);
+  const status = await getGoogleCalendarSyncStatus(accountId, coachId);
   const calendarId = cleanCalendarId(settings.googleCalendarId || env("GOOGLE_CALENDAR_ID", "primary"));
 
   const finishEntry = (outcome: GoogleCalendarDebugEntry["outcome"], detail: Partial<Omit<GoogleCalendarDebugEntry, "id">> = {}) =>
     newDebugEntry({
+      coachId,
       trigger,
       startedAt,
       finishedAt: nowIso(),
@@ -1353,7 +1456,6 @@ export async function syncGoogleCalendarNow(accountId: string, trigger = "manual
     return { ...status, ok: false, skipped: true, reason };
   };
   if (!status.configured) return skip("google_oauth_not_configured");
-  if (status.legacyMigrationRequired) return skip("google_calendar_token_migration_required");
   if (!status.connected) return skip("google_calendar_not_connected");
 
   const previousMap = parseJson<Record<string, string>>(settings.googleCalendarEventMapJson, {});
@@ -1377,7 +1479,7 @@ export async function syncGoogleCalendarNow(accountId: string, trigger = "manual
   // item instead of none, which makes each retry hit the rate limit sooner
   // than the last.
   const persistProgress = async (extra: Record<string, unknown>) =>
-    setSettings(accountId, {
+    setCoachSettings(accountId, coachId, {
       googleCalendarId: calendarId,
       googleCalendarEventMapJson: JSON.stringify({ ...previousMap, ...nextMap }),
       googleCalendarEventHashMapJson: JSON.stringify({ ...previousHashMap, ...nextHashMap }),
@@ -1385,7 +1487,7 @@ export async function syncGoogleCalendarNow(accountId: string, trigger = "manual
     });
 
   try {
-    const accessToken = await getGoogleAccessToken(accountId, googleScopes);
+    const accessToken = await getGoogleAccessToken(accountId, googleScopes, coachId);
 
     stage = "upsert";
     for (const item of items) {
@@ -1443,7 +1545,7 @@ export async function syncGoogleCalendarNow(accountId: string, trigger = "manual
     }
 
     const syncedAt = nowIso();
-    await setSettings(accountId, {
+    await setCoachSettings(accountId, coachId, {
       googleCalendarId: calendarId,
       googleCalendarEventMapJson: JSON.stringify(nextMap),
       googleCalendarEventHashMapJson: JSON.stringify(nextHashMap),
@@ -1453,7 +1555,7 @@ export async function syncGoogleCalendarNow(accountId: string, trigger = "manual
     });
     // Work actually landed in Google, so the connection has earned "connected"
     // — the only place that claim is made. A token refresh no longer makes it.
-    await markConnectionHealthy(accountId).catch(() => undefined);
+    await markConnectionHealthy(accountId, coachId).catch(() => undefined);
 
     // Then the other direction: the coach's other commitments come back as
     // read-only busy blocks. Deliberately after the push and deliberately
@@ -1464,7 +1566,7 @@ export async function syncGoogleCalendarNow(accountId: string, trigger = "manual
     let busyImportError = "";
     if (settings.googleCalendarImportBusy !== "false") {
       try {
-        busyImport = await importGoogleBusyBlocks(accountId, accessToken, settings);
+        busyImport = await importGoogleBusyBlocks(accountId, coachId, accessToken, settings);
       } catch (error: any) {
         busyImportError = error instanceof Error ? error.message.slice(0, 300) : "Busy import failed.";
         // The import failing is isolated from the push, but it must not be
@@ -1498,7 +1600,7 @@ export async function syncGoogleCalendarNow(accountId: string, trigger = "manual
       settings,
     );
     return {
-      ...(await getGoogleCalendarSyncStatus(accountId)),
+      ...(await getGoogleCalendarSyncStatus(accountId, coachId)),
       ok: true,
       skipped: false,
       upserted,
@@ -1519,7 +1621,7 @@ export async function syncGoogleCalendarNow(accountId: string, trigger = "manual
     // recorded on the connection, so the health screen stops saying
     // "connected" while every write is refused. Rate limits and one-off
     // failures leave it alone.
-    await noteGoogleApiFailure(accountId, debugError.httpStatus, debugError.googleReason).catch(() => undefined);
+    await noteGoogleApiFailure(accountId, debugError.httpStatus, debugError.googleReason, coachId).catch(() => undefined);
     await recordGoogleCalendarDebugEntry(
       accountId,
       finishEntry("failed", {
@@ -1543,9 +1645,14 @@ export async function syncGoogleCalendarNow(accountId: string, trigger = "manual
 type GoogleCalendarChange = { id: string; action?: "upsert" | "delete" };
 let googleCalendarChangeQueue: Promise<unknown> = Promise.resolve();
 
+/**
+ * Push a handful of changed items to every connected coach calendar they
+ * touch. Each item is sent to the calendar of the coach it now belongs to, and
+ * taken off any other coach's calendar that still holds it -- a lesson handed
+ * from one coach to another has to leave the first diary as well as arrive in
+ * the second.
+ */
 async function syncGoogleCalendarChangesNow(accountId: string, changes: GoogleCalendarChange[], trigger = "auto_sync") {
-  const startedAtMs = Date.now();
-  const startedAt = nowIso();
   const normalizedById = new Map<string, { id: string; action: "upsert" | "delete" }>();
   for (const change of changes) {
     const id = cleanString(change?.id, "", 140);
@@ -1556,7 +1663,52 @@ async function syncGoogleCalendarChangesNow(accountId: string, changes: GoogleCa
     });
   }
   const normalized = Array.from(normalizedById.values());
+  if (!normalized.length) return { ok: true, skipped: true, reason: "no_google_relevant_changes", coaches: [] };
 
+  const connections = await listCoachCalendarConnections(accountId);
+  if (!connections.length) return { ok: true, skipped: true, reason: "google_calendar_not_connected", coaches: [] };
+
+  const accountSettings = await readSettings(accountId);
+  const services = parseJson<any[]>(accountSettings.servicesJson, defaultServices);
+  const coaches = coachesFromSettings(accountId, accountSettings);
+  const upsertIds = normalized.filter((change) => change.action !== "delete").map((change) => change.id);
+  const itemsById = new Map<string, any>();
+  if (upsertIds.length) {
+    const rows = await supabase("calendar_items", {
+      // Scoped by account as well as id: this decides what gets pushed to (or
+      // deleted from) this business's coaches' calendars.
+      query:
+        `select=*&id=in.(${encodeURIComponent(upsertIds.map((id) => `"${id}"`).join(","))})` +
+        `&account_id=eq.${encodeURIComponent(accountId)}`,
+    });
+    for (const row of rows) itemsById.set(String(row.id), rowToItem(row));
+  }
+
+  const results = [];
+  for (const connection of connections) {
+    // One coach's failure must not stop the others' calendars being updated.
+    try {
+      results.push(
+        await syncCoachCalendarChangesNow(accountId, connection.coachId, normalized, itemsById, services, coaches, trigger),
+      );
+    } catch (error) {
+      results.push({ ok: false, coachId: connection.coachId, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  return { ok: results.every((result) => result.ok !== false), skipped: false, coaches: results };
+}
+
+async function syncCoachCalendarChangesNow(
+  accountId: string,
+  coachId: string,
+  normalized: Array<{ id: string; action: "upsert" | "delete" }>,
+  itemsById: Map<string, any>,
+  services: any[],
+  coaches: GoogleCoachProfile[],
+  trigger: string,
+) {
+  const startedAtMs = Date.now();
+  const startedAt = nowIso();
   const finishEntry = (
     outcome: GoogleCalendarDebugEntry["outcome"],
     calendarId: string,
@@ -1564,6 +1716,7 @@ async function syncGoogleCalendarChangesNow(accountId: string, changes: GoogleCa
     detail: Partial<Omit<GoogleCalendarDebugEntry, "id">> = {},
   ) =>
     newDebugEntry({
+      coachId,
       trigger,
       startedAt,
       finishedAt: nowIso(),
@@ -1577,39 +1730,36 @@ async function syncGoogleCalendarChangesNow(accountId: string, changes: GoogleCa
       ...detail,
     });
 
-  if (!normalized.length) {
-    const status = await getGoogleCalendarSyncStatus(accountId);
-    await recordGoogleCalendarDebugEntry(
-      accountId,
-      finishEntry("skipped", status.calendarId, status.accountEmail || "", {
-        reason: "no_google_relevant_changes",
-        stage: "preflight",
-      }),
-    );
-    return { ...status, ok: true, skipped: true, reason: "no_google_relevant_changes" };
-  }
-
-  const settings = await readSettings(accountId);
+  const settings = await readCoachSettings(accountId, coachId);
   const calendarId = cleanCalendarId(settings.googleCalendarId || env("GOOGLE_CALENDAR_ID", "primary"));
+  const eventMap = parseJson<Record<string, string>>(settings.googleCalendarEventMapJson, {});
+  const hashMap = parseJson<Record<string, string>>(settings.googleCalendarEventHashMapJson, {});
+
+  // What this coach's calendar has to do: send what is theirs, and take down
+  // what it holds that no longer is. Everything else is another coach's
+  // business, and not even worth a request.
+  const work = normalized.flatMap((change) => {
+    const item = itemsById.get(change.id) || null;
+    const ours = Boolean(item) && itemBelongsOnCoachCalendar(item, coachId, services, coaches);
+    if (change.action !== "delete" && ours && isBusyGoogleItem(item)) return [{ id: change.id, item }];
+    return eventMap[change.id] || ours ? [{ id: change.id, item: null }] : [];
+  });
+  if (!work.length) return { ok: true, coachId, skipped: true, reason: "not_on_this_calendar" };
 
   const skip = async (reason: string, ok: boolean) => {
-    const status = await getGoogleCalendarSyncStatus(accountId);
+    const status = await getGoogleCalendarSyncStatus(accountId, coachId);
     await recordGoogleCalendarDebugEntry(
       accountId,
       finishEntry("skipped", calendarId, status.accountEmail || "", { reason, stage: "preflight" }),
       settings,
     );
-    return { ...status, ok, skipped: true, reason };
+    return { ok, coachId, skipped: true, reason };
   };
   if (settings.googleCalendarAutoSync === "false") return skip("auto_sync_disabled", true);
-  const status = await getGoogleCalendarSyncStatus(accountId);
+  const status = await getGoogleCalendarSyncStatus(accountId, coachId);
   if (!status.configured) return skip("google_oauth_not_configured", false);
-  if (status.legacyMigrationRequired) return skip("google_calendar_token_migration_required", false);
   if (!status.connected) return skip("google_calendar_not_connected", false);
 
-  const eventMap = parseJson<Record<string, string>>(settings.googleCalendarEventMapJson, {});
-  const hashMap = parseJson<Record<string, string>>(settings.googleCalendarEventHashMapJson, {});
-  const services = parseJson(settings.servicesJson, defaultServices);
   const locations = parseJson(settings.locationsJson, []);
   let sampleRequest: GoogleCalendarDebugRequest | null = null;
   let upserted = 0;
@@ -1619,27 +1769,16 @@ async function syncGoogleCalendarChangesNow(accountId: string, changes: GoogleCa
   const retryBudget: GoogleRetryBudget = { spentMs: 0, retries: 0 };
 
   try {
-    const accessToken = await getGoogleAccessToken(accountId, googleScopes);
+    const accessToken = await getGoogleAccessToken(accountId, googleScopes, coachId);
 
     stage = "changes";
-    for (const change of normalized) {
-      let item: any = null;
-      if (change.action !== "delete") {
-        const rows = await supabase("calendar_items", {
-          // Scoped by account as well as id: this decides what gets pushed to
-          // (or deleted from) this business's Google Calendar.
-          query:
-            `select=*&id=eq.${encodeURIComponent(change.id)}` +
-            `&account_id=eq.${encodeURIComponent(accountId)}&limit=1`,
-        });
-        item = rows[0] ? rowToItem(rows[0]) : null;
-      }
-      if (change.action === "delete" || !isBusyGoogleItem(item)) {
-        const eventId = eventMap[change.id] || googleEventId(change.id);
+    for (const { id, item } of work) {
+      if (!item) {
+        const eventId = eventMap[id] || googleEventId(id);
         stage = "delete";
-        if (await deleteGoogleEvent(accessToken, calendarId, eventId, change.id, retryBudget)) deleted += 1;
-        delete eventMap[change.id];
-        delete hashMap[change.id];
+        if (await deleteGoogleEvent(accessToken, calendarId, eventId, id, retryBudget)) deleted += 1;
+        delete eventMap[id];
+        delete hashMap[id];
         continue;
       }
 
@@ -1679,7 +1818,7 @@ async function syncGoogleCalendarChangesNow(accountId: string, changes: GoogleCa
     }
 
     const syncedAt = nowIso();
-    await setSettings(accountId, {
+    await setCoachSettings(accountId, coachId, {
       googleCalendarId: calendarId,
       googleCalendarEventMapJson: JSON.stringify(eventMap),
       googleCalendarEventHashMapJson: JSON.stringify(hashMap),
@@ -1690,7 +1829,7 @@ async function syncGoogleCalendarChangesNow(accountId: string, changes: GoogleCa
     const noWork = upserted === 0 && deleted === 0;
     // Only claim the connection works when something actually reached Google.
     // A run with nothing to do proves nothing, so it makes no such claim.
-    if (!noWork) await markConnectionHealthy(accountId).catch(() => undefined);
+    if (!noWork) await markConnectionHealthy(accountId, coachId).catch(() => undefined);
     await recordGoogleCalendarDebugEntry(
       accountId,
       finishEntry("success", calendarId, status.accountEmail || "", {
@@ -1705,29 +1844,20 @@ async function syncGoogleCalendarChangesNow(accountId: string, changes: GoogleCa
       }),
       settings,
     );
-    return {
-      ...(await getGoogleCalendarSyncStatus(accountId)),
-      ok: true,
-      skipped: noWork,
-      reason: noWork ? "unchanged" : undefined,
-      upserted,
-      deleted,
-      unchanged,
-      syncedAt,
-    };
+    return { ok: true, coachId, skipped: noWork, reason: noWork ? "unchanged" : undefined, upserted, deleted, unchanged, syncedAt };
   } catch (error: any) {
     const debugError = debugErrorFromUnknown(error, stage);
     // eventMap/hashMap are mutated in place as each change succeeds, so saving
     // them here keeps the work already accepted by Google and stops the next
     // run from re-creating those events.
-    await setSettings(accountId, {
+    await setCoachSettings(accountId, coachId, {
       googleCalendarEventMapJson: JSON.stringify(eventMap),
       googleCalendarEventHashMapJson: JSON.stringify(hashMap),
       googleCalendarLastSyncAt: nowIso(),
       googleCalendarLastSyncStatus: "failed",
       googleCalendarLastSyncError: debugError.message,
     });
-    await noteGoogleApiFailure(accountId, debugError.httpStatus, debugError.googleReason).catch(() => undefined);
+    await noteGoogleApiFailure(accountId, debugError.httpStatus, debugError.googleReason, coachId).catch(() => undefined);
     await recordGoogleCalendarDebugEntry(
       accountId,
       finishEntry("failed", calendarId, status.accountEmail || "", {
@@ -1752,24 +1882,34 @@ export function syncGoogleCalendarChangesIfEnabled(accountId: string, changes: G
   return run;
 }
 
-// Kept for compatibility. Automatic callers should pass explicit item changes;
-// a no-argument call must never fall back to a full-calendar rebuild. Recorded
-// in the debug log so a legacy caller shows up as a real (skipped) trigger
-// instead of looking like the sync never fired.
-export async function syncGoogleCalendarIfEnabled(accountId: string, trigger = "legacy_untargeted_call") {
-  const status = await getGoogleCalendarSyncStatus(accountId);
-  await recordGoogleCalendarDebugEntry(
-      accountId,
-    newDebugEntry({
-      trigger,
-      outcome: "skipped",
-      reason: "targeted_change_required",
-      stage: "preflight",
-      calendarId: status.calendarId,
-      accountEmail: status.accountEmail || "",
-    }),
-  );
-  return { ...status, ok: true, skipped: true, reason: "targeted_change_required" };
+/**
+ * A full rebuild of every connected coach calendar -- in one business, or in
+ * every business when no account is given (the nightly reconcile). Coaches run
+ * one after another, and one coach's failure is reported without stopping the
+ * rest.
+ */
+export async function syncAllCoachCalendarsNow(accountId: string, trigger: string) {
+  const connections = await listCoachCalendarConnections(accountId);
+  const results = [];
+  for (const connection of connections) {
+    try {
+      const result = await syncGoogleCalendarNow(connection.accountId, connection.coachId, trigger);
+      results.push({
+        accountId: connection.accountId,
+        coachId: connection.coachId,
+        ok: result.ok !== false,
+        reason: "reason" in result ? String(result.reason || "") : "",
+      });
+    } catch (error) {
+      results.push({
+        accountId: connection.accountId,
+        coachId: connection.coachId,
+        ok: false,
+        reason: error instanceof Error ? error.message.slice(0, 300) : String(error),
+      });
+    }
+  }
+  return { ok: results.every((result) => result.ok), calendars: results };
 }
 
 function json(value: unknown, status = 200) {
@@ -1782,12 +1922,11 @@ function json(value: unknown, status = 200) {
 export default async function googleCalendarSyncHandler(req: Request) {
   try {
     if (req.method === "GET" || req.method === "POST") {
-      // Google is a per-business connection, so the route needs the business,
-      // not just "somebody is logged in". requireCoachActor throws 401 without
-      // a session and 403 without a workspace membership.
-      const accountId = (await requireCoachActor(req)).accountId;
-      if (req.method === "GET") return json(await getGoogleCalendarSyncStatus(accountId, req));
-      return json(await syncGoogleCalendarNow(accountId, "api_google_calendar_sync_post"));
+      // A coach calendar belongs to one coach in one business, so the route
+      // needs both, and the caller has to be allowed that coach.
+      const { accountId, coachId } = await resolveGoogleCalendarCoach(req, new URL(req.url).searchParams.get("coachId") || "");
+      if (req.method === "GET") return json(await getGoogleCalendarSyncStatus(accountId, coachId, req));
+      return json(await syncGoogleCalendarNow(accountId, coachId, "api_google_calendar_sync_post"));
     }
     return json({ error: "method_not_allowed", message: "Use GET for status or POST to sync." }, 405);
   } catch (error: any) {

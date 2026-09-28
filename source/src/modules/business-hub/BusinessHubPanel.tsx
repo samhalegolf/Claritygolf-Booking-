@@ -242,14 +242,17 @@ export type BusinessHubPanelProps = {
   internalJobs: ProfileInternalJob[];
   /** `label` is what the card is called, so an overlay can name itself. */
   onOpen: (target: ProfileTarget, label: string) => void;
+  /** Connections shown elsewhere on the hub (your Google Calendar is on your profile). */
+  hiddenIntegrationIds?: string[];
 };
 
-export function BusinessHubPanel({ profile, internalJobs, onOpen }: BusinessHubPanelProps) {
+export function BusinessHubPanel({ profile, internalJobs, onOpen, hiddenIntegrationIds = [] }: BusinessHubPanelProps) {
   // One shared integration resource for the whole workspace. Settings and the
   // profile now join the same in-flight request and reuse the same cached
   // snapshot instead of mounting their own independent fetch lifecycle.
   const store = integrationsStore("integration");
-  const { items: cards, status: connectionsStatus, error } = store.useState();
+  const { items: allCards, status: connectionsStatus, error } = store.useState();
+  const cards = allCards.filter((card) => !hiddenIntegrationIds.includes(card.id));
   const [openDetail, setOpenDetail] = useState("");
 
   useEffect(() => {

@@ -16091,6 +16091,15 @@ button {
   font-style: normal;
 }
 
+/* Their Google Calendar: the same controls Settings used to hold, now on the
+   profile of the coach whose Google account it is. */
+.cp-google-calendar-body {
+  display: grid;
+  gap: var(--c-space-4);
+  min-width: 0;
+  padding: 0 var(--c-space-6) var(--c-space-6);
+}
+
 /* The coach list in Settings wears each coach's photo. */
 .coach-row .service-row-main {
   display: flex;

@@ -292,15 +292,6 @@ export type IntegrationDescriptor = {
   connections: ConnectionSpec[];
   /** What this provider calls the things a mapping points at. */
   vocabulary?: { workspace: string; resource: string };
-  /**
-   * Two entries over one authorisation.
-   *
-   * Google is a single OAuth grant doing two jobs: the coach's calendar and
-   * Clarity's video storage. Filing it once would put "connect my diary" in an
-   * admin area, or Clarity's storage in the coach's list. It is listed twice
-   * and connected once, and this is the id of the entry that owns the consent.
-   */
-  sharesGrantWith?: IntegrationId;
   /** Something true about this integration that is not a field. */
   caveat?: string;
 };

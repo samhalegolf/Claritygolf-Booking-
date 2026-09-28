@@ -198,27 +198,22 @@ const caddy: IntegrationDescriptor = {
 };
 
 /**
- * Google, listed twice and connected once.
+ * Google, as two separate sign-ins.
  *
- * One OAuth grant does two jobs that belong to different people. The calendar
- * is the coach's own diary, connected because they want their lessons in it —
- * an integration. Drive is where Clarity keeps lesson video, which is the
- * software's storage decision and not something a coach chooses — admin.
+ * The calendar is a coach's own diary, connected by that coach (or the owner
+ * on their behalf) from their coach profile, because they want their lessons
+ * in it — an integration, one per coach. Drive is where Clarity keeps lesson
+ * video, which is the business's storage decision — admin, one per business.
  *
- * Filing it once would have put "connect my diary" inside an admin area, or
- * Clarity's storage inside the coach's list. So both entries appear, both show
- * the same connected account, and both lead to the same Connect. Nobody signs
- * in twice.
- *
- * Worth knowing, because it caused a real bug: one grant means one scope list,
- * and a narrower re-consent for one product silently narrows the other. The
- * calendar sync failed for exactly this reason while every screen said the
- * scope was present.
+ * They used to be one grant listed twice. That meant one scope list, and a
+ * narrower re-consent for one product silently narrowed the other: the
+ * calendar sync failed for exactly that reason while every screen said the
+ * scope was present. It also could not work once each coach has a calendar.
  */
-const googleConnection: ConnectionSpec = {
+const googleCalendarConnection: ConnectionSpec = {
   kind: "oauth2",
   title: "Google account",
-  summary: "One sign-in. Calendar and Drive are separate permissions on it.",
+  summary: "Each coach signs in with their own Google account, from their coach profile.",
   connectPath: "/api/google-calendar/connect",
   // Signing in is the whole setup. The OAuth client ID and secret are
   // Clarity's own app, set once in Netlify for every business (see
@@ -234,13 +229,29 @@ const googleConnection: ConnectionSpec = {
   ],
 };
 
+const googleDriveConnection: ConnectionSpec = {
+  kind: "oauth2",
+  title: "Google account",
+  summary: "One sign-in for the business, with permission to keep files Clarity creates.",
+  connectPath: "/api/google-drive/connect",
+  fields: [
+    {
+      key: "__connect",
+      type: "oauth",
+      label: "Connection",
+      help: "Sign in with the Google account whose Drive should hold lesson video.",
+      required: false,
+    },
+  ],
+};
+
 const googleCalendar: IntegrationDescriptor = {
   id: "google-calendar",
   label: "Google Calendar",
   audience: "integration",
   category: "calendar",
   summary: "Puts your lessons in your own diary, and keeps them in step.",
-  connections: [googleConnection],
+  connections: [googleCalendarConnection],
 };
 
 const googleDrive: IntegrationDescriptor = {
@@ -249,8 +260,7 @@ const googleDrive: IntegrationDescriptor = {
   audience: "admin",
   category: "storage",
   summary: "Where lesson video is kept once it leaves the browser.",
-  sharesGrantWith: "google-calendar",
-  connections: [googleConnection],
+  connections: [googleDriveConnection],
 };
 
 const CATALOGUE: IntegrationDescriptor[] = [

@@ -1,5 +1,5 @@
 import type { Config } from "@netlify/functions";
-import { syncGoogleCalendarNow } from "./google-calendar-sync.mts";
+import { syncAllCoachCalendarsNow } from "./google-calendar-sync.mts";
 
 // Nightly reconciliation of the Google Calendar sync.
 //
@@ -19,16 +19,20 @@ import { syncGoogleCalendarNow } from "./google-calendar-sync.mts";
 // there is no horizon left to roll — but the reconciliation is worth keeping on
 // its own account.
 //
+// Every connected coach calendar, in every business. It used to call the sync
+// with its trigger name where the business id goes, so it ran against a
+// business called "scheduled_reconcile" and reconciled nothing at all.
+//
 // Runs on Netlify's scheduler, not a public endpoint, so no auth is needed:
 // nobody can trigger it over HTTP.
 
 export default async function handler() {
   try {
-    const result = await syncGoogleCalendarNow("scheduled_reconcile");
+    const result = await syncAllCoachCalendarsNow("", "scheduled_reconcile");
     console.log("google_calendar_reconcile:done", {
-      ok: result?.ok !== false,
-      skipped: result?.skipped === true,
-      reason: result?.reason || "",
+      ok: result.ok,
+      calendars: result.calendars.length,
+      failed: result.calendars.filter((calendar) => !calendar.ok),
     });
     return new Response("ok");
   } catch (error) {

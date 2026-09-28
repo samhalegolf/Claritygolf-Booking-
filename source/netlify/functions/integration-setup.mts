@@ -1,5 +1,6 @@
 import type { Config } from "@netlify/functions";
 import { requireCoachActor, type CoachActor } from "./_shared/coach-auth.mts";
+import { googleCoachesFromSettings, ownGoogleCoachId } from "./_shared/google-calendar-coach.mts";
 import {
   credentialFingerprint,
   isOriginalWorkspace,
@@ -197,7 +198,8 @@ function integrationStatus(descriptor: IntegrationDescriptor, value: ValueLookup
  * stored refresh token; Stripe's is the connected account saved by
  * stripe-connect.mts.
  */
-async function oauthState(descriptor: IntegrationDescriptor, accountId: string) {
+async function oauthState(descriptor: IntegrationDescriptor, actor: CoachActor) {
+  const accountId = actor.accountId;
   if (descriptor.id === "stripe") {
     const status = stripeCredentialStatus(await readAccountStripeConnection(accountId));
     return {
@@ -210,10 +212,17 @@ async function oauthState(descriptor: IntegrationDescriptor, accountId: string) 
       error: "",
     };
   }
+  // Google is two sign-ins: Drive is the business's (coach ""), and Calendar
+  // is per coach -- so the Calendar card shows the viewer's own calendar.
+  const coachId = descriptor.id === "google-calendar" ? await ownCalendarCoachId(actor) : "";
+  if (descriptor.id === "google-calendar" && !coachId) {
+    return { connected: false, account: "", scopes: [] as string[], lastUsed: "", error: "" };
+  }
   const rows = await integrationRequest(
     "google_provider_connections?select=provider_email,connection_status,granted_scopes_json," +
       "last_error_code,last_successful_use_at,revoked_at" +
-      `&account_id=eq.${encodeURIComponent(accountId)}&order=updated_at.desc&limit=1`,
+      `&account_id=eq.${encodeURIComponent(accountId)}&coach_id=eq.${encodeURIComponent(coachId)}` +
+      "&order=updated_at.desc&limit=1",
   ).catch(() => []);
   const row = (rows || [])[0];
   if (!row || row.revoked_at) return { connected: false, account: "", scopes: [] as string[], lastUsed: "", error: "" };
@@ -226,6 +235,13 @@ async function oauthState(descriptor: IntegrationDescriptor, accountId: string) 
     lastUsed: row.last_successful_use_at || "",
     error: row.last_error_code || "",
   };
+}
+
+async function ownCalendarCoachId(actor: CoachActor) {
+  const rows = await integrationRequest(
+    `settings?select=value&account_id=eq.${encodeURIComponent(actor.accountId)}&key=eq.coachProfilesJson&limit=1`,
+  ).catch(() => []);
+  return ownGoogleCoachId(actor, googleCoachesFromSettings(actor.accountId, rows?.[0]?.value), actor.accountId);
 }
 
 type OAuthState = Awaited<ReturnType<typeof oauthState>>;
@@ -251,12 +267,6 @@ function card(descriptor: IntegrationDescriptor, value: ValueLookup, editable: b
     audience: descriptor.audience,
     category: descriptor.category,
     caveat: descriptor.caveat || "",
-    // The card says "same sign-in as Google Calendar", so it needs the other
-    // entry's label — which the client cannot look up, because the twin lives
-    // in the other audience's list.
-    sharesGrantWith: descriptor.sharesGrantWith
-      ? integrationById(descriptor.sharesGrantWith)?.label || descriptor.sharesGrantWith
-      : "",
     summary: descriptor.summary,
     kinds: descriptor.connections.map((connection) => connection.kind),
     editable,
@@ -264,7 +274,10 @@ function card(descriptor: IntegrationDescriptor, value: ValueLookup, editable: b
   };
 }
 
-/** Owners and admins manage a business's connections; a coach can look. */
+/**
+ * Owners and admins manage a business's connections; a coach can look. A
+ * coach's own Google Calendar is connected from their coach profile.
+ */
 function canEdit(actor: CoachActor, descriptor: IntegrationDescriptor) {
   return isTenantIntegration(descriptor.id) && (actor.isOwner || actor.isAdmin);
 }
@@ -274,7 +287,7 @@ async function detail(descriptor: IntegrationDescriptor, actor: CoachActor, orig
   const value = await valuesFor(descriptor, accountId);
   const editable = canEdit(actor, descriptor);
   const oauth = descriptor.connections.some((connection) => connection.kind === "oauth2")
-    ? await oauthState(descriptor, accountId)
+    ? await oauthState(descriptor, actor)
     : null;
   const status = withOAuth(integrationStatus(descriptor, value), oauth);
 
@@ -416,7 +429,7 @@ export default async function handler(req: Request) {
           withOAuth(
             card(descriptor, await valuesFor(descriptor, actor.accountId), canEdit(actor, descriptor)),
             descriptor.connections.some((connection) => connection.kind === "oauth2")
-              ? await oauthState(descriptor, actor.accountId)
+              ? await oauthState(descriptor, actor)
               : null,
           ),
         ),

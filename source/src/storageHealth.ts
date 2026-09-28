@@ -10,7 +10,6 @@ import {
 export type GoogleDriveTransferState =
   | "not_connected"
   | "connected"
-  | "permission_upgrade_required"
   | "reconnect_required"
   | "blocked"
   | "error";
@@ -20,7 +19,6 @@ export type GoogleDriveTransferStatus = {
   configured: boolean;
   connected: boolean;
   state: GoogleDriveTransferState;
-  calendarConnected: boolean;
   driveScopeGranted: boolean;
   accountEmail: string;
   redirectUri: string;
@@ -282,16 +280,6 @@ export function getClarityCloudHealth(status: GoogleDriveTransferStatus): Clarit
     };
   }
 
-  if (status.state === "permission_upgrade_required") {
-    return {
-      ...cloudBase,
-      state: "permission-required",
-      statusLabel: "Permission required",
-      message: "Clarity needs permission to transfer saved videos.",
-      action: "grant-permission",
-    };
-  }
-
   if (status.state === "reconnect_required") {
     return {
       ...cloudBase,
@@ -465,7 +453,6 @@ export function getSavedVideoCloudStatusLabel(
     options.cloudState === "not_connected" ||
     options.cloudState === "blocked" ||
     options.cloudState === "error" ||
-    options.cloudState === "permission_upgrade_required" ||
     options.cloudState === "reconnect_required"
   ) {
     return "Cloud • Waiting to upload";

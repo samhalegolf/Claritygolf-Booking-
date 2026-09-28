@@ -1,6 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from "node:crypto";
 import { getClarityCloudGoogleConfig } from "./clarity-cloud-google-config.mts";
-import { legacyOriginalWorkspaceId as fallbackAccountId, defaultCalendarSlug } from "./account.mts";
 import { SETTINGS_BULK_EXCLUDE_FILTER } from "./settings-keys.mts";
 import {
   SETTINGS_UPSERT_QUERY,
@@ -34,6 +33,8 @@ type GoogleProviderConnectionRow = {
   id: string;
   account_id: string;
   provider: "google";
+  /** "" for the business's own connection (Drive); a coach id for that coach's calendar. */
+  coach_id: string;
   provider_user_id?: string | null;
   provider_email?: string | null;
   encrypted_refresh_token_json: string;
@@ -54,6 +55,7 @@ type GoogleProviderConnectionRow = {
 export type GoogleProviderConnection = {
   id: string;
   accountId: string;
+  coachId: string;
   providerEmail: string;
   providerUserId: string;
   grantedScopes: string[];
@@ -228,14 +230,6 @@ function parseJson<T>(value: string | undefined, fallback: T): T {
   }
 }
 
-function cleanSlug(value: unknown, fallback = fallbackAccountId()) {
-  const trimmed = cleanString(value, "", 140)
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return trimmed || fallback;
-}
-
 /**
  * Removed on purpose.
  *
@@ -262,6 +256,7 @@ function rowToConnection(row?: GoogleProviderConnectionRow | null): GoogleProvid
   return {
     id: row.id,
     accountId: row.account_id,
+    coachId: row.coach_id || "",
     providerEmail: row.provider_email || "",
     providerUserId: row.provider_user_id || "",
     grantedScopes: parseJson<string[]>(row.granted_scopes_json, []),
@@ -278,21 +273,43 @@ function rowToConnection(row?: GoogleProviderConnectionRow | null): GoogleProvid
   };
 }
 
-async function loadGoogleProviderConnectionRow(accountId: string): Promise<GoogleProviderConnectionRow | null> {
+/**
+ * Two kinds of Google connection live in this table.
+ *
+ *   coachId ""        the business's own: Drive, where lesson video is kept.
+ *   coachId <coach>   that coach's own Google Calendar.
+ *
+ * They are separate sign-ins on purpose. When one grant did both jobs, a
+ * narrower re-consent for one product silently narrowed the other — and a
+ * business has one video store but a calendar per coach.
+ */
+async function loadGoogleProviderConnectionRow(accountId: string, coachId = ""): Promise<GoogleProviderConnectionRow | null> {
   const rows = await supabase("google_provider_connections", {
-    query: `select=*&account_id=eq.${encodeURIComponent(accountId)}&provider=eq.${provider}&limit=1`,
+    query:
+      `select=*&account_id=eq.${encodeURIComponent(accountId)}&provider=eq.${provider}` +
+      `&coach_id=eq.${encodeURIComponent(coachId)}&limit=1`,
   });
   return rows[0] || null;
 }
 
-export async function loadGoogleProviderConnection(accountId: string) {
-  return rowToConnection(await loadGoogleProviderConnectionRow(accountId));
+export async function loadGoogleProviderConnection(accountId: string, coachId = "") {
+  return rowToConnection(await loadGoogleProviderConnectionRow(accountId, coachId));
+}
+
+/** Every coach calendar connection, in one business or (for the nightly reconcile) in all of them. */
+export async function listCoachCalendarConnections(accountId = "") {
+  const rows = (await supabase("google_provider_connections", {
+    query:
+      `select=*&provider=eq.${provider}&coach_id=neq.&calendar_enabled=is.true` +
+      (accountId ? `&account_id=eq.${encodeURIComponent(accountId)}` : ""),
+  })) as GoogleProviderConnectionRow[];
+  return rows.map(rowToConnection).filter((connection): connection is GoogleProviderConnection => Boolean(connection));
 }
 
 async function upsertGoogleProviderConnection(row: GoogleProviderConnectionRow) {
   await supabase("google_provider_connections", {
     method: "POST",
-    query: "on_conflict=account_id,provider",
+    query: "on_conflict=account_id,provider,coach_id",
     prefer: "resolution=merge-duplicates,return=minimal",
     body: [row],
   });
@@ -328,6 +345,8 @@ async function tokenRequest(params: Record<string, string>) {
 
 export async function saveGoogleAuthorization(args: {
   accountId: string;
+  /** A coach's calendar connection; omitted for the business's Drive connection. */
+  coachId?: string;
   refreshToken?: string;
   grantedScopes: string[];
   /**
@@ -337,10 +356,9 @@ export async function saveGoogleAuthorization(args: {
   scopesFromProvider?: boolean;
   providerEmail?: string;
   providerUserId?: string;
-  enableCalendar?: boolean;
-  enableDrive?: boolean;
 }) {
-  const existingRow = await loadGoogleProviderConnectionRow(args.accountId);
+  const coachId = args.coachId || "";
+  const existingRow = await loadGoogleProviderConnectionRow(args.accountId, coachId);
   const existingConnection = rowToConnection(existingRow);
   const now = nowIso();
   let encryptedRefreshTokenJson = existingRow?.encrypted_refresh_token_json || "";
@@ -377,6 +395,7 @@ export async function saveGoogleAuthorization(args: {
     id: existingRow?.id || randomUUID(),
     account_id: args.accountId,
     provider,
+    coach_id: coachId,
     provider_user_id: cleanString(args.providerUserId, existingRow?.provider_user_id || "", 180),
     provider_email: cleanString(args.providerEmail, existingRow?.provider_email || "", 180).toLowerCase(),
     encrypted_refresh_token_json: encryptedRefreshTokenJson,
@@ -384,9 +403,11 @@ export async function saveGoogleAuthorization(args: {
     granted_scopes_json: JSON.stringify(grantedScopes),
     // Enabled follows the scope actually held, not "was ever ticked". Same
     // failure as the scope merge: once true, always true, so a narrowed grant
-    // still reported both products as working.
-    calendar_enabled: grantedScopes.some((scope) => scope.includes("/auth/calendar")),
-    drive_enabled: grantedScopes.some((scope) => scope.includes("/auth/drive")),
+    // still reported both products as working. And each row does one job: a
+    // coach row is a calendar, the business row is Drive, whatever else
+    // Google's incremental consent happens to hand back.
+    calendar_enabled: Boolean(coachId) && grantedScopes.some((scope) => scope.includes("/auth/calendar")),
+    drive_enabled: !coachId && grantedScopes.some((scope) => scope.includes("/auth/drive")),
     connection_status: "connected",
     // A new refresh token is a new authorisation, so the date moves with it.
     // Keeping the first one forever is why this row said 10 July while the
@@ -403,8 +424,8 @@ export async function saveGoogleAuthorization(args: {
   return rowToConnection(row);
 }
 
-export async function markConnectionError(accountId: string, code: string) {
-  const existing = await loadGoogleProviderConnectionRow(accountId);
+export async function markConnectionError(accountId: string, code: string, coachId = "") {
+  const existing = await loadGoogleProviderConnectionRow(accountId, coachId);
   if (!existing) return;
   await upsertGoogleProviderConnection({
     ...existing,
@@ -429,8 +450,8 @@ export async function markConnectionError(accountId: string, code: string) {
  * So a refresh now records only that a refresh happened. Health is claimed by
  * work that actually succeeded — see markConnectionHealthy().
  */
-export async function markTokenRefreshed(accountId: string) {
-  const existing = await loadGoogleProviderConnectionRow(accountId);
+export async function markTokenRefreshed(accountId: string, coachId = "") {
+  const existing = await loadGoogleProviderConnectionRow(accountId, coachId);
   if (!existing) return;
   await upsertGoogleProviderConnection({
     ...existing,
@@ -440,8 +461,8 @@ export async function markTokenRefreshed(accountId: string) {
 }
 
 /** Called when a real Google API call succeeded — not merely a token refresh. */
-export async function markConnectionHealthy(accountId: string) {
-  const existing = await loadGoogleProviderConnectionRow(accountId);
+export async function markConnectionHealthy(accountId: string, coachId = "") {
+  const existing = await loadGoogleProviderConnectionRow(accountId, coachId);
   if (!existing) return;
   await upsertGoogleProviderConnection({
     ...existing,
@@ -483,21 +504,21 @@ export function googleConnectionFailureCode(status: number, googleReason = ""): 
  * Safe to call on every failure: a rate limit or a 404 leaves the connection
  * untouched.
  */
-export async function noteGoogleApiFailure(accountId: string, status: number, googleReason = "") {
+export async function noteGoogleApiFailure(accountId: string, status: number, googleReason = "", coachId = "") {
   const code = googleConnectionFailureCode(status, googleReason);
   if (!code) return null;
-  await markConnectionError(accountId, code);
+  await markConnectionError(accountId, code, coachId);
   return code;
 }
 
-export async function getGoogleAccessToken(accountId: string, requiredScopes: string[]) {
-  const row = await loadGoogleProviderConnectionRow(accountId);
+export async function getGoogleAccessToken(accountId: string, requiredScopes: string[], coachId = "") {
+  const row = await loadGoogleProviderConnectionRow(accountId, coachId);
   const connection = rowToConnection(row);
   if (!connection || !row) {
     throw Object.assign(new Error("Google connection not found."), { code: "GOOGLE_CONNECTION_NOT_FOUND", status: 409 });
   }
   if (!hasGoogleScopes(connection, requiredScopes)) {
-    await markConnectionError(accountId, "GOOGLE_SCOPE_MISSING");
+    await markConnectionError(accountId, "GOOGLE_SCOPE_MISSING", coachId);
     throw Object.assign(new Error("Google connection is missing required scopes."), { code: "GOOGLE_SCOPE_MISSING", status: 409 });
   }
   try {
@@ -509,52 +530,27 @@ export async function getGoogleAccessToken(accountId: string, requiredScopes: st
       refresh_token: refreshToken,
       grant_type: "refresh_token",
     });
-    await markTokenRefreshed(accountId);
+    await markTokenRefreshed(accountId, coachId);
     return data.access_token as string;
   } catch (error: any) {
-    await markConnectionError(accountId, error?.code || "GOOGLE_TOKEN_REFRESH_FAILED");
+    await markConnectionError(accountId, error?.code || "GOOGLE_TOKEN_REFRESH_FAILED", coachId);
     throw error;
   }
 }
 
-export async function disconnectGoogleService(accountId: string, service: "calendar" | "drive" | "all") {
-  const existing = await loadGoogleProviderConnectionRow(accountId);
+/** Retires one connection: a coach's calendar, or (coachId "") the business's Drive. */
+export async function disconnectGoogleConnection(accountId: string, coachId = "") {
+  const existing = await loadGoogleProviderConnectionRow(accountId, coachId);
   if (!existing) return;
   const now = nowIso();
-  const calendarEnabled = service === "calendar" ? false : service === "all" ? false : existing.calendar_enabled;
-  const driveEnabled = service === "drive" ? false : service === "all" ? false : existing.drive_enabled;
   await upsertGoogleProviderConnection({
     ...existing,
-    calendar_enabled: calendarEnabled,
-    drive_enabled: driveEnabled,
-    connection_status: calendarEnabled || driveEnabled ? existing.connection_status : "disconnected",
-    revoked_at: service === "all" ? now : existing.revoked_at,
+    calendar_enabled: false,
+    drive_enabled: false,
+    connection_status: "disconnected",
+    revoked_at: now,
     updated_at: now,
   });
-}
-
-export async function migrateLegacyGoogleCalendarToken(accountId: string, settings?: Record<string, string>) {
-  const currentSettings = settings || (await readSettings(accountId));
-  const legacyToken = cleanString(currentSettings.googleCalendarRefreshToken, "", 5000);
-  const existing = await loadGoogleProviderConnection(accountId);
-  if (!legacyToken) {
-    return { ok: true, migrated: false, accountId, reason: existing ? "already_migrated" : "no_legacy_token" };
-  }
-  const migrated = await saveGoogleAuthorization({
-    accountId,
-    refreshToken: legacyToken,
-    grantedScopes: googleCalendarScopes,
-    providerEmail: currentSettings.googleCalendarAccountEmail || "",
-    enableCalendar: true,
-  });
-  if (!migrated) {
-    throw Object.assign(new Error("Legacy Google token migration did not create a provider connection."), {
-      code: "GOOGLE_LEGACY_MIGRATION_FAILED",
-      status: 500,
-    });
-  }
-  await setSettings(accountId, { googleCalendarRefreshToken: "" });
-  return { ok: true, migrated: true, accountId };
 }
 
 export function publicGoogleProviderStatus(connection: GoogleProviderConnection | null, requiredScopes: string[] = []) {

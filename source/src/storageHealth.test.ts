@@ -26,7 +26,6 @@ const cloudStatus = (overrides: Partial<GoogleDriveTransferStatus> = {}): Google
   configured: true,
   connected: false,
   state: "not_connected",
-  calendarConnected: false,
   driveScopeGranted: false,
   accountEmail: "",
   redirectUri: "/api/google-drive/callback",
@@ -50,7 +49,6 @@ const readyCloudStatus = (overrides: Partial<GoogleDriveTransferStatus> = {}) =>
   cloudStatus({
     connected: true,
     state: "connected",
-    calendarConnected: true,
     driveScopeGranted: true,
     accountEmail: "coach@example.com",
     rootFolderId: "root",
@@ -173,8 +171,8 @@ describe("storage health model", () => {
   it("maps missing Drive permission to Clarity Cloud permission required", () => {
     const health = getClarityCloudHealth(cloudStatus({
       connected: true,
-      state: "permission_upgrade_required",
-      calendarConnected: true,
+      state: "connected",
+      driveScopeGranted: false,
     }));
 
     assert.equal(health.state, "permission-required");

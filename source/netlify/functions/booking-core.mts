@@ -9,9 +9,8 @@ import {
 } from "node:crypto";
 
 import {
-  getGoogleCalendarSyncStatus,
+  syncAllCoachCalendarsNow,
   syncGoogleCalendarChangesIfEnabled,
-  syncGoogleCalendarNow,
 } from "./google-calendar-sync.mts";
 import { inferBookingAction, notifyBookingEvent, sendCoachPushForBooking } from "./notification-engine.mts";
 import { cancelOptixCustomerBooking } from "./_shared/optix-cancel.mts";
@@ -5802,11 +5801,13 @@ async function readWorkspaceBootstrap(membership: CoachActor): Promise<Workspace
 async function readCalendarState(accountId: string) {
   const { settings: settingsMap, syncKey, updatedAt } = await readStateSettingsSnapshot(accountId);
   const account = coachAccountFromSettings(settingsMap, accountId);
-  const [items, people, notifications, googleCalendar] = await Promise.all([
+  // No Google Calendar status here: it is per coach, read by the coach
+  // profile, and a connected one costs a Google API call -- which every read
+  // of the calendar used to pay.
+  const [items, people, notifications] = await Promise.all([
     readItems(accountId),
     readPeople(accountId),
     readNotificationHistory(accountId),
-    getGoogleCalendarSyncStatus(accountId),
   ]);
   return {
     syncKey,
@@ -5824,7 +5825,6 @@ async function readCalendarState(accountId: string) {
     brand: brandSettingsFromSettings(settingsMap, account),
     accountId,
     account,
-    googleCalendar,
   };
 }
 
@@ -6390,7 +6390,8 @@ function deferGoogleCalendarSync(accountId, changes, trigger = "admin_calendar_s
  * the calendar, which is the last thing a save should be made to wait for.
  */
 function deferGoogleCalendarAvailabilitySync(accountId, netlifyContext = null) {
-  const task = syncGoogleCalendarNow(accountId, "availability_save")
+  // Every connected coach, since one save can change several coaches' hours.
+  const task = syncAllCoachCalendarsNow(accountId, "availability_save")
     .then((result) => console.info("availability:google_sync_completed_after_response", { ok: result?.ok !== false }))
     .catch((error) => console.error("availability:google_sync_failed_after_response", error));
   if (netlifyContext && typeof netlifyContext.waitUntil === "function") {
@@ -6809,26 +6810,20 @@ async function writeCalendarState(accountId: string, nextState: Record<string, a
   // readAdminSettings/readBrandSettings/readCoachAccount all derive from the same settings
   // table, so share one bulk read across them instead of each fetching its own copy in parallel.
   const sharedSettingsMap = await readSettingsMap(accountId);
-  const [people, notifications, settings, brand, account, googleCalendar] = await Promise.all([
+  const [people, notifications, settings, brand, account] = await Promise.all([
     readPeople(peopleAccountId),
     readNotificationHistory(accountId),
     readAdminSettings(accountId, sharedSettingsMap),
     readBrandSettings(accountId, sharedSettingsMap),
     readCoachAccount(accountId, sharedSettingsMap),
-    getGoogleCalendarSyncStatus(accountId),
   ]);
-  // Fired, not awaited: see deferGoogleCalendarSync. The connection status the
-  // client shows comes from the read above, so the pending marker adds to it
-  // rather than replacing it with a bare flag.
-  const googleCalendarSync = {
-    ...googleCalendar,
-    ...deferGoogleCalendarSync(
-      accountId,
-      googleCalendarChangesBetween(current.items, items),
-      "admin_calendar_save",
-      netlifyContext,
-    ),
-  };
+  // Fired, not awaited: see deferGoogleCalendarSync.
+  const googleCalendarSync = deferGoogleCalendarSync(
+    accountId,
+    googleCalendarChangesBetween(current.items, items),
+    "admin_calendar_save",
+    netlifyContext,
+  );
   return {
     syncKey,
     items: context ? items.filter((item) => canReadCalendarItem(context, item, { ...current, items })) : items,
@@ -6844,7 +6839,6 @@ async function writeCalendarState(accountId: string, nextState: Record<string, a
     settings,
     brand,
     account,
-    googleCalendar,
     googleCalendarSync,
   };
 }
@@ -7262,7 +7256,6 @@ function publicCalendarState(state) {
     settings: state.settings,
     brand: state.brand,
     account: state.account,
-    googleCalendar: state.googleCalendar,
     googleCalendarSync: state.googleCalendarSync,
     diagnostics: state.diagnostics,
   };

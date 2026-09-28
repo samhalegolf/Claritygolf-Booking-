@@ -15,7 +15,6 @@ export type IntegrationCard = {
   audience: IntegrationAudience;
   category: string;
   caveat?: string;
-  sharesGrantWith?: string;
   summary: string;
   kinds: string[];
   configured: boolean;

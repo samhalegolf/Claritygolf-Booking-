@@ -611,7 +611,6 @@ function publicCalendarState(state: Record<string, unknown>) {
     settings: state.settings,
     brand: state.brand,
     account: state.account,
-    googleCalendar: state.googleCalendar,
     googleCalendarSync: state.googleCalendarSync,
     diagnostics: state.diagnostics,
   };
