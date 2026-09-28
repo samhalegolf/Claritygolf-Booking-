@@ -675,6 +675,37 @@
   position: relative;
 }
 
+/* Videos saved before the workspace asked which player they were for. */
+.player-unassigned-videos {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel-soft);
+}
+
+.player-unassigned-videos p {
+  margin: 0;
+  color: var(--heading);
+  font-weight: 600;
+}
+
+.player-unassigned-video {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.player-unassigned-video .muted {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 /* --- Portal access ------------------------------------------------------- */
 
 .player-portal-access {

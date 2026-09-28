@@ -2,6 +2,7 @@ import React from "react";
 import {
   VideoWorkspace,
   type VideoWorkspaceNavigationContext,
+  type VideoWorkspaceProps,
   type VideoWorkspaceSaveResult,
   type VideoWorkspaceVariant,
 } from "./VideoWorkspace";
@@ -25,6 +26,7 @@ export interface VideoAnalysisPageProps {
   onLocalSaveComplete?: (result: VideoWorkspaceSaveResult) => void | Promise<void>;
   onSaveAndSend?: (result: VideoWorkspaceSaveResult) => Promise<void>;
   onOpenCloudSettings?: () => void;
+  onChoosePlayerForSave?: VideoWorkspaceProps["onChoosePlayerForSave"];
   onSaveNote?: (text: string) => boolean | void | Promise<boolean | void>;
   autoStartLiveRecording?: boolean;
   /** A video the caller already picked, loaded as soon as the workspace mounts. */
