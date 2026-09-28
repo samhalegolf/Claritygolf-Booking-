@@ -1,4 +1,5 @@
-import { Building2, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
+import { ClarityFacilitiesRooms } from "./modules/shared/ClarityIcons";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
@@ -223,7 +224,7 @@ export default function BookingResourcesPanel({ calendarItemId, onBooked }: Prop
        the coach reads it without opening anything. */
     <details className="booking-records-tab">
       <summary className="booking-records-summary">
-        <Building2 size={16} />
+        <ClarityFacilitiesRooms size={16} />
         <span>Resources</span>
         <em>{summaryLabel(outcome, busy)}</em>
       </summary>

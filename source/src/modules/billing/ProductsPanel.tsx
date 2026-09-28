@@ -17,7 +17,8 @@ import { Loading } from "../shared/Loading";
 
 import { Fragment, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
-import { AlertTriangle, ChevronDown, ChevronRight, Lock, Package, Plus, Search, X } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, Lock, Plus, Search, X } from "lucide-react";
+import { ClarityProducts } from "../shared/ClarityIcons";
 import type { BillingCatalogItem, BillingCatalogKind, StockMovement } from "./types";
 import { isLowStock } from "./stockMath";
 
@@ -481,7 +482,7 @@ export function ProductsPanel({
               {lowStockCount > 0 && <span className="unpaid-count-badge">{lowStockCount} low</span>}
             </h2>
           </div>
-          <Package size={24} />
+          <ClarityProducts size={24} />
         </div>
         <div className="settings-field-row product-search-row">
           <div className="settings-field product-search-field">

@@ -20,14 +20,8 @@
 
 import { useEffect, useState } from "react";
 import { integrationsStore, type IntegrationCard } from "../integrations/integrationsStore";
-import {
-  AlertCircle,
-  ChevronDown,
-  ChevronUp,
-  Link2,
-  Plus,
-  Settings as SettingsIcon,
-} from "lucide-react";
+import { AlertCircle, ChevronDown, ChevronUp, Plus } from "lucide-react";
+import { ClarityIntegrations, ClaritySettings } from "../shared/ClarityIcons";
 
 /** Where a card sends you. The profile owns no forms of its own. */
 export type ProfileTarget =
@@ -203,7 +197,7 @@ export function CoachProfilePanel({ identity, internalJobs, onOpen }: CoachProfi
           </div>
         ))}
         <p className="cp-fact-path">
-          <SettingsIcon size={14} />
+          <ClaritySettings size={14} />
           {path}
         </p>
       </div>
@@ -241,7 +235,7 @@ export function CoachProfilePanel({ identity, internalJobs, onOpen }: CoachProfi
           title="Settings › Business › Coaches"
           type="button"
         >
-          <SettingsIcon size={16} />
+          <ClaritySettings size={16} />
         </button>
       </article>
 
@@ -267,7 +261,7 @@ export function CoachProfilePanel({ identity, internalJobs, onOpen }: CoachProfi
                   <span className="cp-cell-title">
                     <strong>{EXTERNAL_SECTION_JOBS[section.name]}</strong>
                     <span className="cp-external" title="External connection">
-                      <Link2 size={14} />
+                      <ClarityIntegrations size={14} />
                     </span>
                   </span>
                 </div>
@@ -306,14 +300,14 @@ export function CoachProfilePanel({ identity, internalJobs, onOpen }: CoachProfi
                     <span className="cp-cell-title">
                       <strong>{title}</strong>
                       <span className="cp-external" title="An outside account, connected to Clarity">
-                        <Link2 size={14} />
+                        <ClarityIntegrations size={14} />
                       </span>
                     </span>
                     <span className="cp-cell-actions">
                       {connected && detailToggle(card.id, true)}
                       {state === "ok" && (
                         <span className="cp-chip is-ok" title="Connected and healthy">
-                          <Link2 size={15} />
+                          <ClarityIntegrations size={15} />
                         </span>
                       )}
                       {state === "bad" && (
@@ -328,7 +322,7 @@ export function CoachProfilePanel({ identity, internalJobs, onOpen }: CoachProfi
                           title={`Manage — Settings › Integrations › ${card.label}`}
                           type="button"
                         >
-                          <SettingsIcon size={16} />
+                          <ClaritySettings size={16} />
                         </button>
                       ) : (
                         <button
@@ -360,7 +354,7 @@ export function CoachProfilePanel({ identity, internalJobs, onOpen }: CoachProfi
                   <span className="cp-cell-actions">
                     {detailToggle(job.id, job.facts.length > 0)}
                     <button className="cp-gear" onClick={() => onOpen(job.target, job.label)} title={`Manage — ${job.path}`} type="button">
-                      <SettingsIcon size={16} />
+                      <ClaritySettings size={16} />
                     </button>
                   </span>
                 </div>

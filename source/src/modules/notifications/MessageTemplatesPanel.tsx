@@ -12,7 +12,8 @@
 // wording previewed here is the wording that goes out.
 
 import { useState } from "react";
-import { Check, Mail, MessageSquare, Pencil, RotateCcw, Smartphone, X } from "lucide-react";
+import { Check, Pencil, RotateCcw, Smartphone, X } from "lucide-react";
+import { ClarityEmail, ClarityMessages } from "../shared/ClarityIcons";
 import {
   emptyNotificationTemplate,
   isNotificationTemplateEdited,
@@ -199,7 +200,7 @@ export function MessageTemplatesPanel({
             aria-pressed={!isText}
             type="button"
           >
-            <Mail size={15} />
+            <ClarityEmail size={15} />
             Email
           </button>
           <button
@@ -211,7 +212,7 @@ export function MessageTemplatesPanel({
             aria-pressed={isText}
             type="button"
           >
-            <MessageSquare size={15} />
+            <ClarityMessages size={15} />
             Text
           </button>
         </div>
@@ -271,7 +272,7 @@ export function MessageTemplatesPanel({
               <>
                 <div className="mt-sms-head">
                   <span className="mt-sms-avatar">
-                    {logoUrl ? <img src={logoUrl} alt="" /> : <MessageSquare size={16} />}
+                    {logoUrl ? <img src={logoUrl} alt="" /> : <ClarityMessages size={16} />}
                   </span>
                   <div>
                     <strong>{businessName || "Your business name"}</strong>

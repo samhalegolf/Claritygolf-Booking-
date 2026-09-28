@@ -12,6 +12,11 @@
   box-sizing: border-box;
 }
 
+/* The green half of every Clarity icon. The dark half is currentColor. */
+.clarity-icon-accent {
+  fill: var(--c-icon-accent);
+}
+
 /* Keep the scrollbar's space reserved whether or not there is one. Otherwise a
    screen that fits the window and one that does not are two different widths,
    and everything shifts sideways as you move between them. */

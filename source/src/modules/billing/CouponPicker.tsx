@@ -12,7 +12,8 @@
 // Shared by the Sell screen and the checkout modal.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Search, Ticket, X } from "lucide-react";
+import { Search, X } from "lucide-react";
+import { ClarityPassesCredits } from "../shared/ClarityIcons";
 import type { BillingCoupon } from "./types";
 import { searchCoupons } from "./couponMath";
 
@@ -96,7 +97,7 @@ export function CouponPicker({
     const left = Math.max(0, held.remainingValue - applyAmount);
     return (
       <div className={`coupon-held${applied ? " applied" : ""}`}>
-        <Ticket size={14} />
+        <ClarityPassesCredits size={14} />
         <span>
           <strong>
             {held.code}

@@ -7,7 +7,7 @@
 // holder's name back to App.tsx to open their profile.
 
 import { useMemo, useState } from "react";
-import { Ticket } from "lucide-react";
+import { ClarityPassesCredits } from "../shared/ClarityIcons";
 
 import { Loading } from "../shared/Loading";
 import type { Pass } from "./PassesPanel";
@@ -137,7 +137,7 @@ export function IssuedPassesPanel({
                   </td>
                   <td>
                     <span className="issued-pass-name">
-                      <Ticket size={14} /> {pass.name}
+                      <ClarityPassesCredits size={14} /> {pass.name}
                     </span>
                     {pass.note ? <em className="pos-adjusted-note">{pass.note}</em> : null}
                   </td>

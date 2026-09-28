@@ -14,7 +14,8 @@ import { Loading } from "../shared/Loading";
 // POS-#### receipt number and is never summed into invoice revenue or aging.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Check, ChevronDown, ChevronUp, ExternalLink, Minus, Pencil, Plus, RotateCcw, Ticket, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, ChevronUp, ExternalLink, Minus, Pencil, Plus, RotateCcw, X } from "lucide-react";
+import { ClarityPassesCredits } from "../shared/ClarityIcons";
 import type {
   BillingCatalogItem,
   BillingCoupon,
@@ -590,7 +591,7 @@ export function PosCheckoutModal({
                       >
                         <span>
                           {product.name}
-                          {product.kind === "package" && <Ticket size={12} />}
+                          {product.kind === "package" && <ClarityPassesCredits size={12} />}
                           {isLowStock(product) && <AlertTriangle size={12} />}
                         </span>
                         <em>
@@ -686,7 +687,7 @@ export function PosCheckoutModal({
                       }}
                     >
                       <span className="pos-pass-name">
-                        <Ticket size={15} />
+                        <ClarityPassesCredits size={15} />
                         {option.name}
                       </span>
                       <span className="pos-pass-meta">
