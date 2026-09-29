@@ -22,14 +22,6 @@ export interface ClarityVoiceVocabularyTerm {
   summaryHint?: string;
 }
 
-export interface ClarityVoiceVocabularyMention {
-  phrase: string;
-  canonical: string;
-  category: ClarityVoiceVocabularyCategory;
-  summaryHint?: string;
-  index: number;
-}
-
 export type ClarityVoiceState =
   | 'unsupported'
   | 'idle'
@@ -50,15 +42,6 @@ export type ClarityVoiceErrorCode =
   | 'aborted'
   | 'already-started'
   | 'unknown';
-
-export type ClarityVoiceAccentPreset =
-  | 'en-NZ'
-  | 'en-AU'
-  | 'en-GB'
-  | 'en-US'
-  | 'en-CA'
-  | 'en-IE'
-  | 'en-ZA';
 
 export type ClarityVoicePermissionState =
   | 'unknown'
@@ -109,25 +92,6 @@ export interface ClarityVoiceTranscript {
   updatedAt: number;
 }
 
-export interface ClarityVoiceSmartEntities {
-  lessonTypes: string[];
-  durations: string[];
-  paymentMentions: string[];
-  equipmentMentions: string[];
-  swingPatternMentions: string[];
-  bookingIntent: 'create' | 'cancel' | 'reschedule' | 'complete' | null;
-  vocabularyMentions: ClarityVoiceVocabularyMention[];
-}
-
-export interface ClarityVoiceSmartNote {
-  rawText: string;
-  cleanedText: string;
-  title: string;
-  bullets: string[];
-  entities: ClarityVoiceSmartEntities;
-  confidenceHint: 'low' | 'medium' | 'high' | null;
-}
-
 export interface ClarityVoiceAudioActivity {
   isAvailable: boolean;
   isMonitoring: boolean;
@@ -138,8 +102,8 @@ export interface ClarityVoiceAudioActivity {
 }
 
 export interface ClarityVoiceOptions {
-  /** English only. Defaults to en-NZ for Sam/Clarity unless overridden. */
-  lang?: ClarityVoiceAccentPreset;
+  /** The speech locale to listen for, e.g. "en-NZ" or "de-CH". See clarityVoiceLanguage.ts. */
+  lang?: string;
   continuous?: boolean;
   interimResults?: boolean;
   /** Use 3-5 for smarter alternative selection when supported. */
@@ -158,7 +122,7 @@ export interface ClarityVoiceOptions {
   restartDelayMs?: number;
   /** Local domain vocabulary used to score recognition alternatives. */
   domainPhrases?: string[];
-  /** Brand/golf/booking jargon to normalise, score, extract, and store. */
+  /** Brand/golf/booking jargon used to score recognition alternatives. */
   vocabularyTerms?: ClarityVoiceVocabularyTerm[];
   /** Experimental Chrome on-device recognition flag, ignored where unsupported. */
   preferOnDevice?: boolean;
@@ -195,7 +159,7 @@ export interface ClarityVoiceController {
   stop(): void;
   abort(): void;
   reset(): void;
-  setLanguage(lang: ClarityVoiceAccentPreset): void;
+  setLanguage(lang: string): void;
   refreshSupportReport(): Promise<ClarityVoiceSupportReport>;
   destroy(): void;
 }

@@ -1,5 +1,4 @@
-import type { ClarityVoiceVocabularyCategory, ClarityVoiceVocabularyTerm, ClarityVoiceVocabularyMention } from './types';
-export const CLARITY_VOICE_VOCABULARY_VERSION = '2026-07-07-jargon-v1';
+import type { ClarityVoiceVocabularyCategory, ClarityVoiceVocabularyTerm } from './types';
 export const DEFAULT_CLARITY_VOICE_VOCABULARY: ClarityVoiceVocabularyTerm[] = [
   {"phrase": "Clarity Caddy", "canonical": "Clarity Caddy", "category": "brand", "aliases": ["clarity caddy", "clarity cadie", "clarity caddie"], "tags": ["brand", "app"], "summaryHint": "product"},
   {"phrase": "Clarity Golf Systems", "canonical": "Clarity Golf Systems", "category": "brand", "aliases": ["clarity golf systems", "clarity golf system"], "tags": ["brand"], "summaryHint": "company"},
@@ -254,7 +253,6 @@ export const DEFAULT_CLARITY_VOICE_VOCABULARY: ClarityVoiceVocabularyTerm[] = [
   {"phrase": "no-show", "canonical": "no-show", "category": "booking", "aliases": ["no show", "no-show"], "tags": ["booking"], "summaryHint": "status"},
 ];
 
-
 export function mergeClarityVocabularyTerms(
   baseTerms: ClarityVoiceVocabularyTerm[] = DEFAULT_CLARITY_VOICE_VOCABULARY,
   customTerms: ClarityVoiceVocabularyTerm[] = []
@@ -282,22 +280,6 @@ export function buildVocabularyPhrases(terms: ClarityVoiceVocabularyTerm[] = DEF
   return unique(terms.flatMap(term => [term.phrase, term.canonical, ...(term.aliases || [])]).filter(Boolean));
 }
 
-export function normaliseWithClarityVocabulary(
-  input: string,
-  terms: ClarityVoiceVocabularyTerm[] = DEFAULT_CLARITY_VOICE_VOCABULARY
-): string {
-  let output = input;
-  const sorted = [...terms].sort((left, right) => longestPhrase(right) - longestPhrase(left));
-  for (const term of sorted) {
-    const replacement = term.canonical || term.phrase;
-    for (const phrase of buildTermPhrases(term)) {
-      if (!phrase.trim()) continue;
-      output = output.replace(new RegExp(`\b${escapeRegExp(phrase)}\b`, 'gi'), replacement);
-    }
-  }
-  return output;
-}
-
 export function scoreWithClarityVocabulary(
   input: string,
   terms: ClarityVoiceVocabularyTerm[] = DEFAULT_CLARITY_VOICE_VOCABULARY
@@ -314,45 +296,8 @@ export function scoreWithClarityVocabulary(
   return score;
 }
 
-export function extractClarityVocabularyMentions(
-  input: string,
-  terms: ClarityVoiceVocabularyTerm[] = DEFAULT_CLARITY_VOICE_VOCABULARY
-): ClarityVoiceVocabularyMention[] {
-  const mentions: ClarityVoiceVocabularyMention[] = [];
-  const lower = input.toLowerCase();
-  for (const term of terms) {
-    for (const phrase of buildTermPhrases(term)) {
-      const phraseLower = phrase.toLowerCase();
-      const index = lower.indexOf(phraseLower);
-      if (index === -1) continue;
-      mentions.push({
-        phrase,
-        canonical: term.canonical || term.phrase,
-        category: term.category,
-        summaryHint: term.summaryHint,
-        index
-      });
-      break;
-    }
-  }
-  return mentions.sort((left, right) => left.index - right.index);
-}
-
-export function createVocabularyTerm(
-  phrase: string,
-  category: ClarityVoiceVocabularyCategory = 'custom',
-  aliases: string[] = [],
-  tags: string[] = []
-): ClarityVoiceVocabularyTerm {
-  return normaliseTerm({ phrase, canonical: phrase.trim(), category, aliases, tags, summaryHint: 'custom vocabulary' });
-}
-
 function buildTermPhrases(term: ClarityVoiceVocabularyTerm): string[] {
   return unique([term.phrase, term.canonical, ...(term.aliases || [])].filter(Boolean));
-}
-
-function longestPhrase(term: ClarityVoiceVocabularyTerm): number {
-  return Math.max(...buildTermPhrases(term).map(value => value.length));
 }
 
 function categoryWeight(category: ClarityVoiceVocabularyCategory): number {
@@ -381,6 +326,3 @@ function unique(values: string[]): string[] {
   return Array.from(new Set(values.filter(Boolean)));
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
