@@ -118,6 +118,12 @@ test("segment count is what the carrier charges for", () => {
   assert.equal(smsSegmentCount(""), 1);
   assert.equal(smsSegmentCount("x".repeat(160)), 1);
   assert.equal(smsSegmentCount("x".repeat(161)), 2);
+  assert.equal(smsSegmentCount("x".repeat(306)), 2);
+  assert.equal(smsSegmentCount("é".repeat(160)), 1);
+  assert.equal(smsSegmentCount("€".repeat(80)), 1);
+  assert.equal(smsSegmentCount("€".repeat(81)), 2);
+  assert.equal(smsSegmentCount("ł".repeat(70)), 1);
+  assert.equal(smsSegmentCount("予".repeat(71)), 2);
 });
 
 test("every default only uses merge fields the engine supplies", () => {

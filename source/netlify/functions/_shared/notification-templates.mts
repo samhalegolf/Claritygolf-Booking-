@@ -256,10 +256,23 @@ export function notificationVariantFor(
 }
 
 /**
- * How a text message counts against a carrier's 160-character segment. Shown
+ * How many texts a message is billed as. Shown
  * while editing, because the length is part of writing one - a stray sentence
  * quietly doubles what the send costs.
  */
 export function smsSegmentCount(text: string): number {
-  return Math.max(1, Math.ceil(text.length / 160));
+  // Carriers send plain Latin text in the GSM alphabet: 160 characters to a
+  // text, 153 once it is split. One character outside it -- Japanese, or a
+  // Polish ł -- sends the whole message as Unicode: 70, then 67. The GSM
+  // extension characters (€ [ ] { } and friends) take two places each.
+  const chars = [...text];
+  if (chars.every((char) => GSM_BASIC.includes(char) || GSM_EXTENDED.includes(char))) {
+    const length = chars.reduce((total, char) => total + (GSM_EXTENDED.includes(char) ? 2 : 1), 0);
+    return length <= 160 ? 1 : Math.ceil(length / 153);
+  }
+  return chars.length <= 70 ? 1 : Math.ceil(chars.length / 67);
 }
+
+const GSM_BASIC =
+  "@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà";
+const GSM_EXTENDED = "^{}\\[~]|€\f";
