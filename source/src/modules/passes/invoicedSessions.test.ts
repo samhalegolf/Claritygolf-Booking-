@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { invoicedSessions, lineSessions, lineWord, sessionWord } from "./invoicedSessions.ts";
+import { invoicedSessions, lineSessions } from "./invoicedSessions.ts";
 
 test("a multi-unit line counts as its quantity, not as one line", () => {
   assert.equal(invoicedSessions([{ quantity: 3 }]), 3);
@@ -27,9 +27,3 @@ test("part quantities round to whole sessions", () => {
   assert.equal(lineSessions({ quantity: 2.6 }), 3);
 });
 
-test("the words agree with the numbers", () => {
-  assert.equal(sessionWord(1), "session");
-  assert.equal(sessionWord(3), "sessions");
-  assert.equal(lineWord(1), "line");
-  assert.equal(lineWord(2), "lines");
-});

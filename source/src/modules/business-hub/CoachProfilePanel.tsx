@@ -11,7 +11,7 @@
 import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { ArrowLeft, Camera, Phone, Trash2 } from "lucide-react";
 import { ClarityCalendar, ClarityEmail, ClarityLocations, ClaritySessions, ClaritySettings } from "../shared/ClarityIcons";
-import { t } from "../../lib/i18n";
+import { t, tn } from "../../lib/i18n";
 
 /** The coach fields this screen reads and writes. App's CoachProfile satisfies it. */
 export type CoachProfileRecord = {
@@ -418,7 +418,7 @@ export function CoachProfilePanel<T extends CoachProfileRecord>({
           <header className="cp-card-head">
             <h3>
               <ClarityCalendar size={14} />{t("Next 7 days")}</h3>
-            <span className="cp-week-count">{t("{weekCount} lesson", { weekCount })}{weekCount === 1 ? "" : "s"}
+            <span className="cp-week-count">{tn(weekCount, "{count} lesson", "{count} lessons")}
             </span>
             {onOpenCalendar && (
               <button className="text-button" onClick={onOpenCalendar} type="button">{t("Open calendar")}</button>

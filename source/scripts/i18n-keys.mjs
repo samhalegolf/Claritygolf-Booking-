@@ -34,10 +34,21 @@ export function extractKeys() {
   const problems = [];
   for (const file of sourceFiles(SRC)) {
     const text = readFileSync(file, "utf8");
-    if (!/\bt\(/.test(text)) continue;
+    if (!/\bt(n)?\(/.test(text)) continue;
     const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, file.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
     const visit = (node) => {
-      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "t") {
+      const name = ts.isCallExpression(node) && ts.isIdentifier(node.expression) ? node.expression.text : "";
+      if (name === "tn") {
+        // tn(count, one, other, values?): the two sentences are the keys.
+        const forms = node.arguments.slice(1, 3);
+        if (forms.length === 2 && forms.every((form) => ts.isStringLiteral(form) || ts.isNoSubstitutionTemplateLiteral(form))) {
+          forms.forEach((form) => keys.add(form.text));
+        } else {
+          const { line } = sf.getLineAndCharacterOfPosition(node.getStart());
+          problems.push(`${path.relative(ROOT, file)}:${line + 1} ${node.getText().slice(0, 80)}`);
+        }
+      }
+      if (name === "t") {
         const first = node.arguments[0];
         if (first && (ts.isStringLiteral(first) || ts.isNoSubstitutionTemplateLiteral(first))) keys.add(first.text);
         else {

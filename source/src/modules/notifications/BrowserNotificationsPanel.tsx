@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ClarityNotifications } from "../shared/ClarityIcons";
 
 import { disablePush, enablePush, loadPushStatus, sendTestPush, type PushStatus } from "./browserPush";
-import { t } from "../../lib/i18n";
+import { t, tn } from "../../lib/i18n";
 
 /**
  * Settings → Email → Browser notifications.
@@ -74,7 +74,7 @@ export default function BrowserNotificationsPanel() {
             <span className="field-help">
               {status.deviceCount === 0
                 ? t("No devices registered.")
-                : t("{deviceCount} device{value} registered on this account.", { deviceCount: status.deviceCount, value: status.deviceCount === 1 ? "" : "s" })}
+                : tn(status.deviceCount, "{count} device registered on this account.", "{count} devices registered on this account.")}
             </span>
           </div>
 
@@ -107,7 +107,7 @@ export default function BrowserNotificationsPanel() {
                   const result = await sendTestPush();
                   setNote(
                     result.sent > 0
-                      ? t("Test sent to {sent} device{value}.", { sent: result.sent, value: result.sent === 1 ? "" : "s" })
+                      ? tn(result.sent, "Test sent to {count} device.", "Test sent to {count} devices.")
                       : t("No device accepted the test. Try turning notifications off and on again."),
                   );
                 })

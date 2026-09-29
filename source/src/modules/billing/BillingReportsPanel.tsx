@@ -14,7 +14,7 @@ import {
   type ReportRangePreset,
   type ReportSectionKey,
 } from "./reportsMath";
-import { t } from "../../lib/i18n";
+import { t, tn } from "../../lib/i18n";
 
 const PRESET_ORDER: ReportRangePreset[] = [
   "this-month",
@@ -182,7 +182,7 @@ export function BillingReportsPanel({
                   <article className="data-card report-stat">
                     <span>{t("Income")}</span>
                     <strong>{money(summary.income.total)}</strong>
-                    <small>{t("{invoiceCount} invoice", { invoiceCount: summary.income.invoiceCount })}{summary.income.invoiceCount === 1 ? "" : "s"}</small>
+                    <small>{tn(summary.income.invoiceCount, "{count} invoice", "{count} invoices")}</small>
                   </article>
                   <article className="data-card report-stat">
                     <span>{t("Expenses")}</span>
@@ -300,7 +300,7 @@ export function BillingReportsPanel({
                     <li key={customer.customerName}>
                       <span>
                         {customer.customerName}
-                        <small>{" "}{t("· {invoiceCount} invoice", { invoiceCount: customer.invoiceCount })}{customer.invoiceCount === 1 ? "" : "s"}</small>
+                        <small>{" "}{tn(customer.invoiceCount, "· {count} invoice", "· {count} invoices")}</small>
                       </span>
                       <strong>{money(customer.total)}</strong>
                     </li>

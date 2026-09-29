@@ -33,7 +33,7 @@ import { ChevronDown, ChevronRight, Inbox, Undo2 } from "lucide-react";
 import { ClarityAddClient, ClarityPassesCredits } from "../shared/ClarityIcons";
 
 import { Loading } from "../shared/Loading";
-import { t, readerLocale } from "../../lib/i18n";
+import { t, tn, readerLocale } from "../../lib/i18n";
 
 /** What a sale looks like it is. "unknown" is a real answer, not a failure. */
 export type PassInboxKind = "pass" | "unknown";
@@ -292,7 +292,7 @@ export function PassInboxPanel({
               >
                 <option value="">{t("Pick a package…")}</option>
                 {templates.map((template) => (
-                  <option key={template.serviceId} value={template.serviceId}>{t("{name} · {credits} credit", { name: template.name, credits: template.credits })}{template.credits === 1 ? "" : "s"}
+                  <option key={template.serviceId} value={template.serviceId}>{tn(template.credits, "{name} · {count} credit", "{name} · {count} credits", { name: template.name })}
                   </option>
                 ))}
             </select>
@@ -413,7 +413,7 @@ export function PassInboxPanel({
                 aria-expanded={showUnlikely}
                 onClick={() => setShowUnlikely((current) => !current)}
               >
-                {showUnlikely ? <ChevronDown size={15} /> : <ChevronRight size={15} />}{t("{length} other sale", { length: unlikely.length })}{unlikely.length === 1 ? "" : "s"}{" "}{t("that probably")}{unlikely.length === 1 ? t(" is not") : t(" are not")}{" "}{t("passes")}</button>
+                {showUnlikely ? <ChevronDown size={15} /> : <ChevronRight size={15} />}{tn(unlikely.length, "{count} other sale that probably is not a pass", "{count} other sales that probably are not passes")}</button>
               {showUnlikely && unlikely.map((purchase) => renderPurchase(purchase, true))}
             </div>
           )}
@@ -494,7 +494,7 @@ export function PassInboxPanel({
             aria-expanded={showDismissed}
             onClick={() => setShowDismissed((current) => !current)}
           >
-            {showDismissed ? <ChevronDown size={15} /> : <ChevronRight size={15} />}{t("{length} product", { length: dismissedTypes.length })}{dismissedTypes.length === 1 ? "" : "s"}{" "}{t("you have said")}{dismissedTypes.length === 1 ? t(" is") : t(" are")}{" "}{t("never a pass")}</button>
+            {showDismissed ? <ChevronDown size={15} /> : <ChevronRight size={15} />}{tn(dismissedTypes.length, "{count} product you have said is never a pass", "{count} products you have said are never a pass")}</button>
           {showDismissed && (
             <ul className="pass-inbox-dismissed">
               {dismissedTypes.map((entry) => (

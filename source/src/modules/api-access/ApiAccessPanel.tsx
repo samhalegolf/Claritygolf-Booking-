@@ -24,7 +24,7 @@ import {
   type WebhookEndpoint,
 } from "./apiAccessApi";
 import "./api-access.css";
-import { t, readerLocale } from "../../lib/i18n";
+import { t, tn, readerLocale } from "../../lib/i18n";
 
 const READ_ONLY = ["bookings:read", "clients:read", "catalog:read", "passes:read", "invoices:read", "sales:read", "events:read"];
 
@@ -228,7 +228,7 @@ function KeysSection({ state, busy, run, reload, reveal }: SectionProps) {
       ) : (
         <p className="integration-empty">{t("No keys yet.")}</p>
       )}
-      {revoked.length ? <p className="api-access-note">{t("{length} revoked", { length: revoked.length })}{" "}{revoked.length === 1 ? "key" : "keys"}{" "}{t("kept for the record.")}</p> : null}
+      {revoked.length ? <p className="api-access-note">{tn(revoked.length, "{count} revoked key kept for the record.", "{count} revoked keys kept for the record.")}</p> : null}
     </section>
   );
 }

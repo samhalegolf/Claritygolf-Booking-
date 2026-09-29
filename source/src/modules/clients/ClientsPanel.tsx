@@ -14,7 +14,7 @@ import { ArrowRight, Check, GitMerge, Plus, Search, Upload } from "lucide-react"
 import { ClarityAddClient, ClarityClientsPlayers, ClarityIntegrations } from "../shared/ClarityIcons";
 
 import type { PeopleImportDiagnostic, Person } from "./clientsModel";
-import { t } from "../../lib/i18n";
+import { t, tn } from "../../lib/i18n";
 
 /** What a row needs. The workspace's ClientSummary carries more; that is fine. */
 export type ClientRow = Person & { count: number };
@@ -203,7 +203,7 @@ export function ClientsPanel<T extends ClientRow>({
                   <span>{client.email || t("No email yet")}</span>
                 </div>
                 <span className="client-phone">{client.phone || t("No phone")}</span>
-                <span className="client-booking-count">{t("{count} booking", { count: client.count })}{client.count === 1 ? "" : "s"}
+                <span className="client-booking-count">{tn(client.count, "{count} booking", "{count} bookings")}
                   {(client.caddyProfileId || client.caddyProfileUrl) && <em>{t("Linked to Caddy")}</em>}
                 </span>
                 <span className="client-row-arrow">{mergeMode ? null : <ArrowRight size={17} />}</span>

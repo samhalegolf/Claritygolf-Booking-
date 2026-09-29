@@ -21,10 +21,3 @@ export function invoicedSessions(lines: CountableLine[]) {
   return (lines || []).reduce((total, line) => total + lineSessions(line), 0);
 }
 
-export function sessionWord(count: number) {
-  return count === 1 ? "session" : "sessions";
-}
-
-export function lineWord(count: number) {
-  return count === 1 ? "line" : "lines";
-}

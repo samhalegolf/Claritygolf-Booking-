@@ -9,7 +9,7 @@ import {
   ClaritySecurity,
   type IconComponent,
 } from "../shared/ClarityIcons";
-import { t, readerLocale } from "../../lib/i18n";
+import { t, tn, readerLocale } from "../../lib/i18n";
 
 /**
  * The Developer tab's connection screen.
@@ -600,7 +600,7 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
     if (!response.ok) return setIntegrationError(payload?.message || payload?.error || t("Pending events could not be processed."));
     setIntegration(payload.state); setIntegrationError("");
     const summary = Object.entries(payload.summary || {}).map(([key, value]) => `${key} ${value}`).join(" · ");
-    setReplayResult(`Processed ${payload.attempted || 0} event${payload.attempted === 1 ? "" : "s"}${summary ? ` — ${summary}` : ""}.`);
+    setReplayResult(tn(payload.attempted || 0, "Processed {count} event{summary}.", "Processed {count} events{summary}.", { summary: summary ? ` — ${summary}` : "" }));
   }
 
   async function retryEvent(eventKey: string) {
@@ -935,7 +935,7 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
             {pending.count ? (
               <div className={`integration-pending-bar${queueStuck ? " stuck" : ""}`}>
                 <div>
-                  <strong>{t("{count} event", { count: pending.count })}{pending.count === 1 ? "" : "s"}{" "}{t("waiting")}</strong>
+                  <strong>{tn(pending.count, "{count} event waiting", "{count} events waiting")}</strong>
                   <span>{t("Oldest")}{" "}{pending.oldest ? since(pending.oldest) : "—"}{t(". Bookings do not reach the calendar until these are processed.")}</span>
                 </div>
                 <label>{t("Replay the last")}<select value={replayDays} onChange={(event) => setReplayDays(Number(event.target.value))}>
@@ -1069,7 +1069,7 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
               <Check
                 ok={failedCount === 0}
                 label={t("Processing failures")}
-                detail={failedCount ? t("{failedCount} event{value} failed and can be retried from Activity.", { failedCount, value: failedCount === 1 ? "" : "s" }) : t("None.")}
+                detail={failedCount ? tn(failedCount, "{count} event failed and can be retried from Activity.", "{count} events failed and can be retried from Activity.") : t("None.")}
               />
             </div>
             {setup?.integration?.docsUrl ? (

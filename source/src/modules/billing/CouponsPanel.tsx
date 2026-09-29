@@ -9,7 +9,7 @@ import { Fragment, useMemo, useState } from "react";
 import { AlertTriangle, ChevronDown, ChevronRight, Copy, Download, Plus, Search, X } from "lucide-react";
 import { ClarityPassesCredits } from "../shared/ClarityIcons";
 import type { BillingCoupon, CouponImportCandidate, CouponRedemption, VoucherAmountRule } from "./types";
-import { t, readerLocale } from "../../lib/i18n";
+import { t, tn, readerLocale } from "../../lib/i18n";
 
 /** What a scan came back with. `scannedCount` is how many charges were read,
  *  so "nothing found" can be told apart from "nothing looked at". */
@@ -580,7 +580,7 @@ export function CouponsPanel({
           </button>
           {chosenCount > 0 && (
             <button className="primary-button" disabled={importing} onClick={() => void runImport()} type="button">
-              {importing ? t("Issuing…") : t("Issue {chosenCount} code{value}", { chosenCount, value: chosenCount === 1 ? "" : "s" })}
+              {importing ? t("Issuing…") : tn(chosenCount, "Issue {count} code", "Issue {count} codes")}
             </button>
           )}
           {chosenCount > 0 && (
@@ -598,8 +598,8 @@ export function CouponsPanel({
             {/* Said plainly, because the old version of this screen could not:
                 "nothing found" and "nothing looked at" rendered identically and
                 the difference was the entire bug. */}
-            <p className="field-help">{t("Read {scannedCount} payment", { scannedCount: scan.scannedCount })}{scan.scannedCount === 1 ? "" : "s"}{" "}{t("from the last {sinceDays} days.", { sinceDays: scan.sinceDays })}{" "}{scan.candidates.length
-                ? t("{length} look{value} like a voucher.", { length: scan.candidates.length, value: scan.candidates.length === 1 ? "s" : "" })
+            <p className="field-help">{tn(scan.scannedCount, "Read {count} payment from the last {sinceDays} days.", "Read {count} payments from the last {sinceDays} days.", { sinceDays: scan.sinceDays })}{" "}{scan.candidates.length
+                ? tn(scan.candidates.length, "{count} looks like a voucher.", "{count} look like a voucher.")
                 : t("None of them is named like a voucher.")}
             </p>
 
@@ -722,7 +722,7 @@ export function CouponsPanel({
                   aria-expanded={showOthers}
                   onClick={() => setShowOthers((current) => !current)}
                 >
-                  {showOthers ? <ChevronDown size={15} /> : <ChevronRight size={15} />}{t("{length} other payment", { length: scan.otherCharges.length })}{scan.otherCharges.length === 1 ? "" : "s"}{" "}{t("with no coupon — tick any that were vouchers")}</button>
+                  {showOthers ? <ChevronDown size={15} /> : <ChevronRight size={15} />}{tn(scan.otherCharges.length, "{count} other payment with no coupon — tick any that were vouchers", "{count} other payments with no coupon — tick any that were vouchers")}</button>
                 {showOthers && (
                   <ul className="coupon-candidates">
                     {scan.otherCharges.map((candidate) => (

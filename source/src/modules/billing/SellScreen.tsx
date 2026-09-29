@@ -58,7 +58,7 @@ import type { SellLine } from "./stockMath";
 import { postPosJson, renderQrSvg, usePosPaymentPoll } from "./posCheckoutPoll";
 import { TerminalPayment } from "./TerminalPayment";
 import { tenderLabel, useTapToPay, type PosTender, type TapState } from "./terminal";
-import { t } from "../../lib/i18n";
+import { t, tn } from "../../lib/i18n";
 
 export type SellScreenProps = {
   currency: string;
@@ -939,7 +939,7 @@ export function SellScreen({
             </div>
           )}
           <div className={`sell-total-row${appliedCoupon > 0 ? "" : " grand"}`}>
-            <span>{t("Total")}{itemCount > 0 && <em>{" "}{t("{itemCount} item", { itemCount })}{itemCount === 1 ? "" : "s"}</em>}
+            <span>{t("Total")}{itemCount > 0 && <em>{" "}{tn(itemCount, "{count} item", "{count} items")}</em>}
             </span>
             <span>{formatMoney(total, currency)}</span>
           </div>
@@ -996,7 +996,7 @@ export function SellScreen({
               <div key={entry.id} className="sell-parked-item">
                 <button onClick={() => resumeSale(entry)} type="button">
                   <strong>{entry.label || t("Parked sale")}</strong>
-                  <em>{t("{length} line", { length: entry.lines.length })}{entry.lines.length === 1 ? "" : "s"} -{" "}
+                  <em>{tn(entry.lines.length, "{count} line", "{count} lines")} -{" "}
                     {formatMoney(sellTotal(entry.lines), currency)}
                   </em>
                 </button>

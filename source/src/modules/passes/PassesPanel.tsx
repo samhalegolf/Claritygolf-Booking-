@@ -11,8 +11,8 @@ import { ChevronDown, ChevronRight, MinusCircle, Plus } from "lucide-react";
 import { ClarityBookingPages, ClarityPassesCredits } from "../shared/ClarityIcons";
 
 import { Loading } from "../shared/Loading";
-import { invoicedSessions, lineWord, sessionWord } from "./invoicedSessions";
-import { t, readerLocale } from "../../lib/i18n";
+import { invoicedSessions } from "./invoicedSessions";
+import { t, tn, readerLocale } from "../../lib/i18n";
 
 export type PassAllocation = {
   id: string;
@@ -574,7 +574,7 @@ export function PassesPanel({
                       onClick={() => toggleInvoiced(pass.id)}
                     >
                       <ClarityBookingPages size={14} />
-                      <span>{t("Invoiced for {sessions} {sessions2} that look like this", { sessions: passInvoiced.sessions, sessions2: sessionWord(passInvoiced.sessions) })}</span>
+                      <span>{tn(passInvoiced.sessions, "Invoiced for {count} session that looks like this", "Invoiced for {count} sessions that look like this")}</span>
                       {passInvoiced.open ? (
                         <ChevronDown className="pass-invoiced-chevron" size={15} />
                       ) : (
@@ -587,7 +587,7 @@ export function PassesPanel({
                             one case where "3 sessions" and a list of 2 rows
                             would read as a mistake. */}
                         {passInvoiced.sessions !== passInvoiced.lines.length && (
-                          <p className="pass-invoiced-caption">{t("Across {length} {length2}", { length: passInvoiced.lines.length, length2: lineWord(passInvoiced.lines.length) })}</p>
+                          <p className="pass-invoiced-caption">{tn(passInvoiced.lines.length, "Across {count} line", "Across {count} lines")}</p>
                         )}
                         <ul>
                           {passInvoiced.lines.map((line) => (
@@ -637,7 +637,7 @@ export function PassesPanel({
             aria-expanded={showUnmatched}
             onClick={() => setShowUnmatched((current) => !current)}
           >
-            {showUnmatched ? <ChevronDown size={15} /> : <ChevronRight size={15} />}{t("{unmatchedSessions} other invoiced {unmatchedSessions2} matching no pass", { unmatchedSessions, unmatchedSessions2: sessionWord(unmatchedSessions) })}</button>
+            {showUnmatched ? <ChevronDown size={15} /> : <ChevronRight size={15} />}{tn(unmatchedSessions, "{count} other invoiced session matching no pass", "{count} other invoiced sessions matching no pass")}</button>
           {showUnmatched && (
             <ul className="pass-invoiced-list">
               {unmatchedInvoicedLines.map((line) => (

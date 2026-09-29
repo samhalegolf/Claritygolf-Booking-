@@ -18,7 +18,7 @@ import { useState } from "react";
 
 import { formatDate } from "./format";
 import type { SavedVideoItem } from "../video-analysis/utils/savedVideoLibrary";
-import { t } from "../../lib/i18n";
+import { t, tn } from "../../lib/i18n";
 
 export type ReviewPassOption = {
   passId: string;
@@ -75,7 +75,7 @@ export function SwingReviewFlow({
     return (
       <section className="player-portal-section swing-review-flow">
         <h2>{t("Send it")}</h2>
-        <p className="player-portal-lead">{t("{name} — back with you within {turnaroundDays} day", { name: review.name, turnaroundDays: review.turnaroundDays })}{review.turnaroundDays === 1 ? "" : "s"}.
+        <p className="player-portal-lead">{tn(review.turnaroundDays, "{name} — back with you within {count} day.", "{name} — back with you within {count} days.", { name: review.name })}
         </p>
 
         <div className="swing-review-summary">

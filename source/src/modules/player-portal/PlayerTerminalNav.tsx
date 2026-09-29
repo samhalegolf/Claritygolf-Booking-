@@ -21,7 +21,7 @@ import {
   ClarityVideoAnalysis,
   type IconComponent,
 } from "../shared/ClarityIcons";
-import { t } from "../../lib/i18n";
+import { t, tn } from "../../lib/i18n";
 
 export type PlayerTerminalDestination =
   | "home"
@@ -174,7 +174,7 @@ export function PlayerTerminalNav({
               onClick={onOpenBalance}
             >
               <span>{t("Balance")}</span>
-              <strong>{t("{credits} credit", { credits: balance.credits })}{balance.credits === 1 ? "" : "s"}
+              <strong>{tn(balance.credits, "{count} credit", "{count} credits")}
               </strong>
             </button>
           )}

@@ -152,9 +152,29 @@ export function chooseLanguage(code: LanguageCode | ""): void {
 
 /** The English text, in the reader's language, with its {placeholders} filled. */
 export function t(text: string, values?: Record<string, string | number>): string {
+  return translate(text, values);
+}
+
+// The lookup itself, kept apart so tn() can pass a chosen form without the key
+// extraction (scripts/i18n-keys.mjs) seeing a t() call on a non-literal.
+function translate(text: string, values?: Record<string, string | number>): string {
   const translated = catalog[text] || text;
   if (!values) return translated;
   return translated.replace(/\{(\w+)\}/g, (match, name: string) =>
     name in values ? String(values[name]) : match,
   );
+}
+
+/**
+ * A count with its noun: tn(n, "{count} lesson", "{count} lessons"). Both are
+ * whole sentences so every language translates each on its own terms -- never
+ * glue an English "s" onto a translated word. {count} is filled in for you.
+ */
+export function tn(
+  count: number,
+  one: string,
+  other: string,
+  values?: Record<string, string | number>,
+): string {
+  return translate(count === 1 ? one : other, { count, ...values });
 }

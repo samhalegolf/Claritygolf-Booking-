@@ -335,7 +335,7 @@ import type {
   ReactNode,
   TouchEvent as ReactTouchEvent,
 } from "react";
-import { t } from "./lib/i18n";
+import { t, tn } from "./lib/i18n";
 
 // Video analysis and voice notes are heavy, coach-only features (together well
 // over a third of the client bundle). They never render on the public booking
@@ -2736,10 +2736,9 @@ function buildWeekDays(week: number): WeekDay[] {
   return baseWeekDays.map((short, index) => {
     const date = new Date(baseWeekStart);
     date.setDate(baseWeekStart.getDate() + week * 7 + index);
-    const month = date.toLocaleString(activeLocale(), { month: "short" });
     return {
       short,
-      label: t("{day}, {month} {date}", { day: fullDayNames[index], month, date: date.getDate() }),
+      label: new Intl.DateTimeFormat(activeLocale(), { weekday: "long", month: "short", day: "numeric" }).format(date),
       date: date.getDate(),
       isToday: isSameCalendarDay(date, today),
     };
@@ -2775,8 +2774,7 @@ function escapeIcsText(value: string) {
 function formatWeekTitle(week: number) {
   const date = new Date(baseWeekStart);
   date.setDate(baseWeekStart.getDate() + week * 7);
-  const month = date.toLocaleString(activeLocale(), { month: "long" });
-  return t("Week of {month} {date}, {year}", { month, date: date.getDate(), year: date.getFullYear() });
+  return t("Week of {date}", { date: new Intl.DateTimeFormat(activeLocale(), { month: "long", day: "numeric", year: "numeric" }).format(date) });
 }
 
 function sectionTitle(view: View, terms: BusinessTerminology = terminologyFor()) {
@@ -16862,13 +16860,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         const added = typeof result.approved === "number" ? result.approved : removeIds.size;
         setToast({
           message: failedIds.size
-            ? t("Added {added} expense{value}; {size} couldn't be added.", { added, value: added === 1 ? "" : "s", size: failedIds.size })
-            : t("Added {added} expense{value}.", { added, value: added === 1 ? "" : "s" }),
+            ? tn(added, "Added {count} expense; {size} couldn't be added.", "Added {count} expenses; {size} couldn't be added.", { size: failedIds.size })
+            : tn(added, "Added {count} expense.", "Added {count} expenses."),
         });
         void fetchExpenses();
       } else {
         const dismissed = typeof result.dismissed === "number" ? result.dismissed : removeIds.size;
-        setToast({ message: t("Dismissed {dismissed} transaction{value}.", { dismissed, value: dismissed === 1 ? "" : "s" }) });
+        setToast({ message: tn(dismissed, "Dismissed {count} transaction.", "Dismissed {count} transactions.") });
       }
     } catch (error) {
       setToast({ message: error instanceof Error ? error.message : t("Something went wrong.") });
@@ -22471,7 +22469,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       <div className="data-card wide">
         <div className="data-card-header">
           <div>
-            <h2>{t("{length} active place", { length: activeLocationList.length })}{activeLocationList.length === 1 ? "" : "s"}</h2>
+            <h2>{tn(activeLocationList.length, "{count} active place", "{count} active places")}</h2>
           </div>
           <button className="primary-button" onClick={startNewLocation} type="button">
             <Plus size={16} />
@@ -22756,11 +22754,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 <strong>{location.name}</strong>
                 {location.kind === "online" ? <em>{t("Online")}</em> : location.address && <em>{location.address}</em>}
                 {location.kind !== "online" && (location.resources ?? []).some((resource) => resource.active) ? (
-                  <em>{t("{length} resource", { length: (location.resources ?? []).filter((resource) => resource.active).length })}{(location.resources ?? []).filter((resource) => resource.active).length === 1 ? "" : "s"}
+                  <em>{tn((location.resources ?? []).filter((resource) => resource.active).length, "{count} resource", "{count} resources")}
                     {location.resourceSource === "external" ? t(" · kept by another system") : ""}
                   </em>
                 ) : null}
-                <em>{t("Used by {id} lesson type", { id: locationUsageCount(location.id) })}{locationUsageCount(location.id) === 1 ? "" : "s"}</em>
+                <em>{tn(locationUsageCount(location.id), "Used by {count} lesson type", "Used by {count} lesson types")}</em>
               </button>
               <div className="service-row-meta">
                 <strong>{location.shortName}</strong>
@@ -23039,7 +23037,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     <span>{t("Selective external calendar import")}</span>
                     <strong>
                       {googleCalendar.importRules?.length
-                        ? t("{length} of {length2} rule{value} active", { length: googleCalendar.importRules.filter(importRuleIsActive).length, length2: googleCalendar.importRules.length, value: googleCalendar.importRules.length === 1 ? "" : "s" })
+                        ? tn(googleCalendar.importRules.length, "{active} of {count} rule active", "{active} of {count} rules active", { active: googleCalendar.importRules.filter(importRuleIsActive).length })
                         : t("Name the outside sources Clarity should pull in")}
                     </strong>
                   </div>
@@ -23182,7 +23180,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 </div>
                                 <em>
                                   {rule.calendarIds.length
-                                    ? t("Scanning {length} calendar{value}.", { length: rule.calendarIds.length, value: rule.calendarIds.length === 1 ? "" : "s" })
+                                    ? tn(rule.calendarIds.length, "Scanning {count} calendar.", "Scanning {count} calendars.")
                                     : t("Nothing ticked, so every calendar on the account is scanned.")}
                                 </em>
                               </>
@@ -23246,7 +23244,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     <span>{t("Sync debug window")}</span>
                     <strong>
                       {googleCalendarDebug
-                        ? `${googleCalendarDebug.entries.length} recent trigger${googleCalendarDebug.entries.length === 1 ? "" : "s"}`
+                        ? tn(googleCalendarDebug.entries.length, "{count} recent trigger", "{count} recent triggers")
                         : t("Google failure codes, payloads and triggers")}
                     </strong>
                   </div>
@@ -23541,7 +23539,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   <span>{coach.active && !coach.archived ? t("Active") : t("Archived")}</span>
                   <strong>{coach.displayName || coach.name}</strong>
                   {coach.email && <em>{coach.email}</em>}
-                  <em>{t("Assigned to")}{" "}{(coach.assignedLocationIds ?? []).length || 0}{" "}{t("location")}{(coach.assignedLocationIds ?? []).length === 1 ? "" : "s"}
+                  <em>{tn((coach.assignedLocationIds ?? []).length || 0, "Assigned to {count} location", "Assigned to {count} locations")}
                   </em>
                 </span>
               </button>
@@ -23673,7 +23671,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           {availabilityConflictList.length ? (
             <div className="availability-conflicts" role="alert">
               <strong>
-                {availabilityConflictList.length === 1 ? t("One clash") : `${availabilityConflictList.length} clashes`}{t(": a coach is down at two locations at once")}</strong>
+                {tn(availabilityConflictList.length, "One clash: a coach is down at two locations at once", "{count} clashes: a coach is down at two locations at once")}</strong>
               <ul>
                 {availabilityConflictList.slice(0, 8).map((conflict, index) => {
                   const coach = availabilityEditorCoaches.find((entry) => entry.id === conflict.coachId);
@@ -24035,7 +24033,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   ) : bookingSlots.length ? (
                     visibleBookingSlots.map((slot) => {
                       const slotLabel = isGroupBookingTimeSelection
-                        ? `${dateForSlot(slot.week, slot.day).toLocaleDateString(activeLocale(), { weekday: "short", month: "short", day: "numeric" })} · ${formatTime(slot.start)} · ${slot.remainingSpots} spot${slot.remainingSpots === 1 ? "" : "s"} left`
+                        ? `${dateForSlot(slot.week, slot.day).toLocaleDateString(activeLocale(), { weekday: "short", month: "short", day: "numeric" })} · ${formatTime(slot.start)} · ${tn(slot.remainingSpots, "{count} spot left", "{count} spots left")}`
                         : formatTime(slot.start);
                       return (
                         <button
@@ -24249,7 +24247,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               onClick={() => updateBookingNoticeHours(hours)}
               type="button"
             >
-              {hours === 0 ? t("No buffer") : `${hours} hour${hours === 1 ? "" : "s"}`}
+              {hours === 0 ? t("No buffer") : tn(hours, "{count} hour", "{count} hours")}
             </button>
           ))}
         </div>
@@ -24436,7 +24434,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         <p className="muted booking-client-notes-preview">{profileNotesText(selectedPerson)}</p>
       )}
       {selected.kind === "appointment" && selectedPerson && selectedPerson.count > 1 && (
-        <p className="muted booking-client-history">{t("{count} booking", { count: selectedPerson.count })}{selectedPerson.count === 1 ? "" : "s"}{" "}{t("with this client")}</p>
+        <p className="muted booking-client-history">{tn(selectedPerson.count, "{count} booking with this client", "{count} bookings with this client")}</p>
       )}
       {/* Lesson type is editable in place: picking a different type re-times the
           booking to that type's duration, so a 30 minute lesson becomes an hour
@@ -26704,7 +26702,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                   <div className="player-tool-card-header">
                                     <div>
                                       <strong><ClarityCalendar size={16} />{t("Bookings")}</strong>
-                                      <span>{t("{length} booking", { length: playerToolAppointments.length })}{playerToolAppointments.length === 1 ? "" : "s"}
+                                      <span>{tn(playerToolAppointments.length, "{count} booking", "{count} bookings")}
                                         {playerToolUpcomingCount ? t(" · {playerToolUpcomingCount} upcoming", { playerToolUpcomingCount }) : ""}
                                       </span>
                                     </div>
@@ -26758,7 +26756,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                   <div className="player-tool-card-header">
                                     <div>
                                       <strong><ClarityAssessments size={16} />{t("Swing reviews")}</strong>
-                                      <span>{t("{length} review", { length: playerSwingReviewGroups.length })}{playerSwingReviewGroups.length === 1 ? "" : "s"}{" "}{t("· videos, screenshot notes and practice")}</span>
+                                      <span>{tn(playerSwingReviewGroups.length, "{count} review · videos, screenshot notes and practice", "{count} reviews · videos, screenshot notes and practice")}</span>
                                     </div>
                                     <button
                                       type="button"
@@ -26793,7 +26791,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                             </span>
                                             <span className="player-tool-row-main">
                                               <strong>{t("Swing review")}</strong>
-                                              <span>{t("{totalItems} item", { totalItems })}{totalItems === 1 ? "" : "s"}{" "}{t("in this review file")}</span>
+                                              <span>{tn(totalItems, "{count} item in this review file", "{count} items in this review file")}</span>
                                             </span>
                                             {expanded ? <ChevronUp size={17} /> : <ChevronDown size={17} />}
                                           </button>
@@ -27172,7 +27170,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                         <strong>{t("Clarity Caddy")}</strong>
                                         <span>{detail}</span>
                                         {status?.connected && status.coachCount && status.coachCount > 1 ? (
-                                          <span>{t("Also coached by")}{" "}{status.coachCount - 1}{" "}{t("other")}{status.coachCount - 1 === 1 ? "" : "s"}.</span>
+                                          <span>{tn(status.coachCount - 1, "Also coached by {count} other.", "Also coached by {count} others.")}</span>
                                         ) : null}
                                       </div>
                                       <div className="player-caddy-card-actions">
@@ -27294,7 +27292,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                     <div className="player-tool-card-header">
                                       <div>
                                         <strong><ClarityLessonsProgrammes size={16} />{t("Practice")}</strong>
-                                        <span>{t("{length} active block", { length: activePlayerPracticeBlocks.length })}{activePlayerPracticeBlocks.length === 1 ? "" : "s"}
+                                        <span>{tn(activePlayerPracticeBlocks.length, "{count} active block", "{count} active blocks")}
                                           {playerPracticeExpiringCount
                                             ? t(" · {playerPracticeExpiringCount} expiring next lesson", { playerPracticeExpiringCount })
                                             : ""}
@@ -27326,7 +27324,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                               {[
                                                 block.typeLabel,
                                                 block.steps
-                                                  ? `${block.steps} step${block.steps === 1 ? "" : "s"}`
+                                                  ? tn(block.steps, "{count} step", "{count} steps")
                                                   : "",
                                                 block.dose,
                                                 block.expiryType === "next_lesson"
@@ -27359,7 +27357,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                               <div className="player-tool-body">
                                 <div className="player-video-toolbar">
                                   <div className="player-video-toolbar-count">
-                                    <strong>{t("{total} saved video", { total: playerVideoSummary.total })}{playerVideoSummary.total === 1 ? "" : "s"}
+                                    <strong>{tn(playerVideoSummary.total, "{count} saved video", "{count} saved videos")}
                                     </strong>
                                     <span>{playerVideoSummary.detail}</span>
                                   </div>
@@ -27411,7 +27409,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                         <div key={group.key}>
                                           <div className="player-video-shelf-group">
                                             <strong>{group.label}</strong>
-                                            <span>{t("{length} clip", { length: group.clips.length })}{group.clips.length === 1 ? "" : "s"}
+                                            <span>{tn(group.clips.length, "{count} clip", "{count} clips")}
                                               {group.unseen ? t(" · {unseen} new", { unseen: group.unseen }) : ""}
                                             </span>
                                           </div>
@@ -28222,9 +28220,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   <article className={`data-card unpaid-banner unpaid-banner-level-${invoiceSettings.unpaidLoudness}`}>
                     <AlertTriangle size={invoiceSettings.unpaidLoudness === 3 ? 28 : 22} />
                     <div>
-                      <strong>{t("{length} unpaid invoice", { length: overdueInvoiceRecords.length })}{overdueInvoiceRecords.length === 1 ? "" : "s"}{" "}{t("overdue")}{invoiceSettings.unpaidLoudness === 3 ? t(" - follow up now") : ""}
+                      <strong>{tn(overdueInvoiceRecords.length, "{count} unpaid invoice overdue", "{count} unpaid invoices overdue")}{invoiceSettings.unpaidLoudness === 3 ? t(" - follow up now") : ""}
                       </strong>
-                      <span>{t("{overdueTotalOutstanding} outstanding - oldest is {overdueOldestDays} day", { overdueTotalOutstanding: formatMoney(overdueTotalOutstanding, invoiceSettings.currency), overdueOldestDays })}{overdueOldestDays === 1 ? "" : "s"}{" "}{t("overdue")}</span>
+                      <span>{tn(overdueOldestDays, "{overdueTotalOutstanding} outstanding - oldest is {count} day overdue", "{overdueTotalOutstanding} outstanding - oldest is {count} days overdue", { overdueTotalOutstanding: formatMoney(overdueTotalOutstanding, invoiceSettings.currency) })}</span>
                     </div>
                   </article>
                 )}
@@ -28657,7 +28655,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       </tbody>
                     </table>
                   ) : reconcileCandidates.length ? (
-                    <p>{t("All {length} bank payment", { length: reconcileCandidates.length })}{reconcileCandidates.length === 1 ? "" : "s"}{" "}{t("are hidden by the type filter above.")}</p>
+                    <p>{tn(reconcileCandidates.length, "The {count} bank payment is hidden by the type filter above.", "All {count} bank payments are hidden by the type filter above.")}</p>
                   ) : (
                     <p>{t("No bank payments waiting to reconcile.")}</p>
                   )}
@@ -29718,7 +29716,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         <div className="bank-bulk-actions" role="group" aria-label={t("Bulk actions")}>
                           <span className="field-help">
                             {hasBankFilters
-                              ? t("{length} matching transaction{value} ({length2} loaded)", { length: visibleBankCandidates.length, value: visibleBankCandidates.length === 1 ? "" : "s", length2: bankCandidates.length })
+                              ? tn(visibleBankCandidates.length, "{count} matching transaction ({loaded} loaded)", "{count} matching transactions ({loaded} loaded)", { loaded: bankCandidates.length })
                               : selectedVisibleBankCount
                                 ? `${selectedVisibleBankCount} selected`
                                 : t("Tick rows to select")}
@@ -29955,7 +29953,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         >
                           {expenseImportState === "importing"
                             ? t("Importing...")
-                            : t("Import {length} transaction{value}", { length: expenseImportSelectedCandidates.length, value: expenseImportSelectedCandidates.length === 1 ? "" : "s" })}
+                            : tn(expenseImportSelectedCandidates.length, "Import {count} transaction", "Import {count} transactions")}
                         </button>
                         <button className="outline-button" onClick={resetExpenseCsvImport} type="button">{t("Cancel")}</button>
                       </div>
@@ -29997,7 +29995,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       >{t("Clear")}</button>
                     )}
                   </div>
-                  <p className="field-help">{t("{length} expense", { length: activeExpenses.length })}{activeExpenses.length === 1 ? "" : "s"}
+                  <p className="field-help">{tn(activeExpenses.length, "{count} expense", "{count} expenses")}
                     {expenseRangeFrom || expenseRangeTo ? t(" in this range") : t(" (last 200)")}.
                   </p>
                 </article>
@@ -30337,7 +30335,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         <div key={entry.paymentMethodName} className="pos-method-total">
                           <span>{entry.paymentMethodName}</span>
                           <strong>{formatMoney(entry.total, posSummary.currency)}</strong>
-                          <em>{t("{count} sale", { count: entry.count })}{entry.count === 1 ? "" : "s"}
+                          <em>{tn(entry.count, "{count} sale", "{count} sales")}
                             {/* A Pass row is $0 and always will be -- the money
                                 came in when the pass was sold. Without this the
                                 tile reads as sales that took nothing; with it,
@@ -31172,7 +31170,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             ) : bookingSlots.length ? (
                               visibleBookingSlots.map((slot) => {
                                 const slotLabel = isGroupBookingTimeSelection
-                                  ? `${dateForSlot(slot.week, slot.day).toLocaleDateString(activeLocale(), { weekday: "short", month: "short", day: "numeric" })} · ${formatTime(slot.start)} · ${slot.remainingSpots} spot${slot.remainingSpots === 1 ? "" : "s"} left`
+                                  ? `${dateForSlot(slot.week, slot.day).toLocaleDateString(activeLocale(), { weekday: "short", month: "short", day: "numeric" })} · ${formatTime(slot.start)} · ${tn(slot.remainingSpots, "{count} spot left", "{count} spots left")}`
                                   : formatTime(slot.start);
                                 return (
                                   <button
@@ -33484,7 +33482,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   <div>
                     <ClarityCalendar size={16} />
                     <span>
-                      {selectedClient?.count ?? 0}{" "}{t("booking")}{selectedClient?.count === 1 ? "" : "s"}
+                      {tn(selectedClient?.count ?? 0, "{count} booking", "{count} bookings")}
                     </span>
                   </div>
                   {selectedClient && (

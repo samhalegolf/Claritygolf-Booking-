@@ -88,7 +88,7 @@ import type {
 } from "../video-analysis/VideoWorkspace";
 import { deleteGuestNote, listGuestNotes, saveGuestNote, type GuestNote } from "./guestNotesStore";
 import { terminologyFor, type BusinessTerminology } from "../../../netlify/functions/_shared/business-terminology.mts";
-import { t, readerLocale } from "../../lib/i18n";
+import { t, tn, readerLocale } from "../../lib/i18n";
 
 // The player's own app. It is chosen by the entry point from the session role,
 // not by hostname any more, and it never renders a login form of its own --
@@ -1706,7 +1706,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                                     ? `${savedVideos.length} on this device`
                                     : "",
                                   missingCloudVideos.length
-                                    ? `${missingCloudVideos.length} to download`
+                                    ? t("{count} to download", { count: missingCloudVideos.length })
                                     : "",
                                 ]
                                   .filter(Boolean)
@@ -1852,7 +1852,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                             <span className="player-portal-home-card-title"><ClarityPassesCredits size={18} />{t("Your passes")}</span>
                             <span className="player-portal-home-card-sub">
                               {spendableCredits
-                                ? `${spendableCredits} lesson${spendableCredits === 1 ? "" : "s"} left`
+                                ? tn(spendableCredits, "{count} lesson left", "{count} lessons left")
                                 : t("None left to use")}
                             </span>
                           </button>
@@ -1867,11 +1867,11 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                             {(profileLoading || cloudLoading) && !swingReviews.length
                               ? t("Loading…")
                               : unseenReviewCount
-                                ? `${unseenReviewCount} new from your coach`
+                                ? t("{count} new from your coach", { count: unseenReviewCount })
                                 : swingReviews.length
                                   ? formatDate(swingReviews[0].at)
                                     ? t("Last one {at}", { at: formatDate(swingReviews[0].at) })
-                                    : `${swingReviews.length} review${swingReviews.length === 1 ? "" : "s"}`
+                                    : tn(swingReviews.length, "{count} review", "{count} reviews")
                                   : t("Nothing reviewed yet")}
                           </span>
                         </button>
@@ -1899,8 +1899,8 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                           <span className="player-portal-home-card-title"><ClarityBookingPages size={18} />{t("Notes")}</span>
                           <span className="player-portal-home-card-sub">
                             {sortedNotes.length
-                              ? `${sortedNotes.length} ${terms.serviceSingular.toLowerCase()} note${sortedNotes.length === 1 ? "" : "s"}`
-                              : `${terms.serviceSingular} notes`}
+                              ? tn(sortedNotes.length, "{count} {service} note", "{count} {service} notes", { service: terms.serviceSingular.toLowerCase() })
+                              : t("{serviceSingular} notes", { serviceSingular: terms.serviceSingular })}
                           </span>
                         </button>
                         <button
@@ -1911,9 +1911,9 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                           <span className="player-portal-home-card-title"><ClarityVideoAnalysis size={18} />{t("Videos")}</span>
                           <span className="player-portal-home-card-sub">
                             {unseenReturnCount
-                              ? `${unseenReturnCount} new from your coach`
+                              ? t("{count} new from your coach", { count: unseenReturnCount })
                               : missingCloudVideos.length
-                                ? `${missingCloudVideos.length} to download`
+                                ? t("{count} to download", { count: missingCloudVideos.length })
                                 : mostRecentVideo
                                   ? t("Last saved {value}", { value: formatDate(mostRecentVideo.capturedAt || mostRecentVideo.createdAt) })
                                   : t("No videos yet")}
@@ -2026,7 +2026,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                       {bookMode === "review" && reviewOffer ? (
                         <section className="player-portal-section player-portal-review-hero">
                           <h2>{t("Swing review")}</h2>
-                          <p className="player-portal-lead">{t("Send a swing or a question — no time to turn up to. Back with you within {turnaroundDays} day", { turnaroundDays: reviewOffer.turnaroundDays })}{reviewOffer.turnaroundDays === 1 ? "" : "s"}.
+                          <p className="player-portal-lead">{tn(reviewOffer.turnaroundDays, "Send a swing or a question — no time to turn up to. Back with you within {count} day.", "Send a swing or a question — no time to turn up to. Back with you within {count} days.")}
                           </p>
                           <button
                             className="player-portal-primary"
@@ -2219,7 +2219,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                   {reviewOffer && (
                     <section className="player-portal-section player-portal-review-hero">
                       <h2>{t("New swing review")}</h2>
-                      <p className="player-portal-lead">{t("Send a swing or a question. Back with you within {turnaroundDays} day", { turnaroundDays: reviewOffer.turnaroundDays })}{reviewOffer.turnaroundDays === 1 ? "" : "s"}.
+                      <p className="player-portal-lead">{tn(reviewOffer.turnaroundDays, "Send a swing or a question. Back with you within {count} day.", "Send a swing or a question. Back with you within {count} days.")}
                       </p>
                       <button
                         className="player-portal-primary"
@@ -2288,7 +2288,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                                 <span>
                                   {[
                                     formatDate(review.at),
-                                    `${review.itemCount} item${review.itemCount === 1 ? "" : "s"}`,
+                                    tn(review.itemCount, "{count} item", "{count} items"),
                                   ]
                                     .filter(Boolean)
                                     .join(" · ")}
@@ -2590,7 +2590,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                       much they have built, and only then what is outstanding. */}
                   <p className="player-portal-lead">
                     {activePractice.length
-                      ? t("{length} thing{value} to work on. Tap a block to read it.", { length: activePractice.length, value: activePractice.length === 1 ? "" : "s" })
+                      ? tn(activePractice.length, "{count} thing to work on. Tap a block to read it.", "{count} things to work on. Tap a block to read it.")
                       : t("Everything your coach has set you. Tap a block to read it.")}
                   </p>
                   {profileLoading && !practice.length ? (

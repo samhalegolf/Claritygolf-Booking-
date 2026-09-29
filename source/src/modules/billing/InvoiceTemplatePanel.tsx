@@ -17,7 +17,7 @@ import { useState } from "react";
 import { Check, ImageIcon, Pencil, RotateCcw, Smartphone, X } from "lucide-react";
 import { computeInvoiceTotals } from "./invoiceMath";
 import type { InvoiceLine, InvoiceSettings } from "./types";
-import { t } from "../../lib/i18n";
+import { t, tn } from "../../lib/i18n";
 
 /** The fields this sheet owns. Everything else about invoicing stays a form field. */
 export type InvoiceTemplateField =
@@ -255,7 +255,7 @@ export function InvoiceTemplatePanel({
               <span>
                 {settings.paymentTermsDays === 0
                   ? t("Due on receipt")
-                  : t("Payment terms {paymentTermsDays} day{value}", { paymentTermsDays: settings.paymentTermsDays, value: settings.paymentTermsDays === 1 ? "" : "s" })}
+                  : tn(settings.paymentTermsDays, "Payment terms {count} day", "Payment terms {count} days")}
               </span>
             </div>
           </div>
