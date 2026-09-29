@@ -816,8 +816,8 @@ function bodyFor(
  * built from the same slotDate/rangeLabel the emails use so the pop-up and the
  * confirmation email can never disagree about when a lesson is.
  */
-function pushWhenLabel(week = 0, day = 0, start = 0, duration = 0, country = "") {
-  const date = slotDate(week, day).toLocaleDateString(localeForCountry(country), {
+function pushWhenLabel(week = 0, day = 0, start = 0, duration = 0, country = "", language = "en") {
+  const date = slotDate(week, day).toLocaleDateString(localeForCountry(country, language), {
     weekday: "short",
     day: "numeric",
     month: "short",
@@ -841,28 +841,35 @@ export function composeCoachPushMessage(input: {
   source?: string;
   /** The business's country, so the date reads the coach's way. */
   country?: string;
+  /** The screen language of the browser the pop-up goes to. */
+  language?: string;
 }): CoachPushMessage | null {
   const { action } = input;
   if (action !== "booking" && action !== "rescheduled" && action !== "cancelled") return null;
+  const language = cleanMessageLanguage(input.language);
+  const mt = messageText(language);
 
   const appt = normaliseAppointment(input.appointment);
   const previous = input.previousAppointment ? normaliseAppointment(input.previousAppointment) : null;
-  const serviceName = cleanText(input.serviceName, "Golf Lesson", 160);
+  const serviceName = cleanText(input.serviceName, mt("Golf Lesson"), 160);
   const fromOptix = String(input.source || "").startsWith("optix");
-  const when = pushWhenLabel(appt.week, appt.day, appt.start, appt.duration, input.country);
+  const when = pushWhenLabel(appt.week, appt.day, appt.start, appt.duration, input.country, language);
+  const client = appt.client;
 
   const title =
     action === "cancelled"
-      ? `Booking cancelled · ${appt.client}`
+      ? mt("Booking cancelled · {client}", { client })
       : action === "rescheduled"
-        ? `Booking moved · ${appt.client}`
+        ? mt("Booking moved · {client}", { client })
         : fromOptix
-          ? `New Optix booking · ${appt.client}`
-          : `New booking · ${appt.client}`;
+          ? mt("New Optix booking · {client}", { client })
+          : mt("New booking · {client}", { client });
 
   const body =
     action === "rescheduled" && previous
-      ? `${serviceName}\nNow ${when}\nWas ${pushWhenLabel(previous.week, previous.day, previous.start, previous.duration, input.country)}`
+      ? `${serviceName}\n${mt("Now {when}", { when })}\n${mt("Was {when}", {
+          when: pushWhenLabel(previous.week, previous.day, previous.start, previous.duration, input.country, language),
+        })}`
       : `${serviceName}\n${when}`;
 
   return {
@@ -893,17 +900,20 @@ export async function sendCoachPushForBooking(input: {
     ]);
     const serviceId = cleanText(input.appointment?.serviceId || input.appointment?.service_id, "", 160);
     const service = services.find((candidate: any) => candidate.id === serviceId);
-    const message = composeCoachPushMessage({
-      ...input,
-      serviceName: cleanText(service?.name, "Golf Lesson", 160),
-      // This business's own country, so the pop-up's date reads the way the
-      // coach writes dates. It used to come from a module value that belonged
-      // to whoever this warm instance served last.
-      country: settings.country,
-    });
-    if (!message) return;
+    const compose = (language: string) =>
+      composeCoachPushMessage({
+        ...input,
+        serviceName: cleanText(service?.name, "", 160),
+        // This business's own country, so the pop-up's date reads the way the
+        // coach writes dates. It used to come from a module value that belonged
+        // to whoever this warm instance served last.
+        country: settings.country,
+        // Each browser's own screen language; see sendCoachPush.
+        language,
+      });
+    if (!compose("en")) return;
 
-    await sendCoachPush(accountId, message);
+    await sendCoachPush(accountId, (language) => compose(language)!, settings.messageLanguage);
   } catch (error) {
     console.error("notification_engine:coach_push_failed", input.appointment?.id, error);
   }

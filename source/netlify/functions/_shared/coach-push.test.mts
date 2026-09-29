@@ -71,3 +71,15 @@ test("a booking with no matching lesson type still has a readable body", () => {
   const message = composeCoachPushMessage({ action: "booking", appointment, serviceName: "" });
   assert.match(message!.body, /^Golf Lesson\n/);
 });
+
+test("a pop-up is written in the language of the browser it goes to", () => {
+  const message = composeCoachPushMessage({
+    action: "rescheduled",
+    appointment,
+    previousAppointment: { ...appointment, start: 840 },
+    serviceName: "",
+    language: "de",
+  });
+  assert.equal(message?.title, "Buchung verschoben · Jane Smith");
+  assert.match(message!.body, /^Golfstunde\nJetzt .+\nVorher /);
+});

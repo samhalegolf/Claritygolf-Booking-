@@ -1,4 +1,4 @@
-import { t } from "../../lib/i18n";
+import { activeLanguage, t } from "../../lib/i18n";
 /**
  * Browser (web push) notifications for the coach.
  *
@@ -137,14 +137,51 @@ export async function enablePush(): Promise<PushStatus> {
     method: "POST",
     credentials: "same-origin",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ subscription: subscription.toJSON(), label: navigator.userAgent }),
+    body: JSON.stringify({ subscription: subscription.toJSON(), label: navigator.userAgent, language: activeLanguage() }),
   });
   if (!response.ok) {
     await subscription.unsubscribe();
     throw new Error(t("Could not register this browser for notifications."));
   }
+  rememberPushLanguage();
 
   return loadPushStatus();
+}
+
+const PUSH_LANGUAGE_KEY = "clarity.pushLanguage";
+
+function rememberPushLanguage() {
+  try {
+    localStorage.setItem(PUSH_LANGUAGE_KEY, activeLanguage());
+  } catch {
+    // Private mode: the next load checks again, which is harmless.
+  }
+}
+
+/**
+ * Pop-ups are written in the language this browser reads Clarity in, which the
+ * server learns when notifications are turned on. If the coach has since
+ * picked another language here, tell the server once. Called on every load of
+ * the workspace; it only talks to the server when the language has changed.
+ */
+export async function syncPushLanguage() {
+  if (!pushSupported()) return;
+  let sent = "";
+  try {
+    sent = localStorage.getItem(PUSH_LANGUAGE_KEY) || "";
+  } catch {
+    return;
+  }
+  if (sent === activeLanguage()) return;
+  const subscription = await currentSubscription().catch(() => null);
+  if (!subscription) return;
+  const response = await fetch(API, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ endpoint: subscription.endpoint, language: activeLanguage() }),
+  }).catch(() => null);
+  if (response?.ok) rememberPushLanguage();
 }
 
 export async function disablePush(): Promise<PushStatus> {

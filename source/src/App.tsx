@@ -168,6 +168,7 @@ import { BusinessHubPanel, OwnerIdentityCard } from "./modules/business-hub/Busi
 import { CoachAvatar, CoachProfilePanel, type CoachWeekDay, type CoachWeekEntry } from "./modules/business-hub/CoachProfilePanel";
 import { RegionSettings, TimeZoneSelect, type RegionValues } from "./modules/settings/RegionSettings";
 import { LanguageSelect } from "./modules/settings/LanguageSettings";
+import { syncPushLanguage } from "./modules/notifications/browserPush";
 import type { ProfileInternalJob, ProfileTarget } from "./modules/business-hub/BusinessHubPanel";
 import {
   cleanNotificationTemplates,
@@ -5774,6 +5775,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   useEffect(() => {
     setActiveRegion(coachAccount.country, coachAccount.invoiceSettings.currency);
   }, [coachAccount.country, coachAccount.invoiceSettings.currency]);
+  // Booking pop-ups are written in this browser's language; tell the server if
+  // the coach has switched language since turning them on.
+  useEffect(() => {
+    void syncPushLanguage().catch(() => undefined);
+  }, []);
   const [workspaceAccounts, setWorkspaceAccounts] = useState<WorkspaceAccount[]>(() =>
     bootstrap?.accounts ?? cleanWorkspaceAccounts(getStoredWorkspaceAccounts(), getStoredCoachAccount()),
   );
