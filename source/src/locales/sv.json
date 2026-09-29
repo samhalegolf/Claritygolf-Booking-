@@ -1041,7 +1041,6 @@
   "available times": "lediga tider",
   "No upcoming group lesson times are available yet.": "Det finns inga kommande grupplektionstider än.",
   "No public times available for this day.": "Inga offentliga tider finns den här dagen.",
-  "Choose a day first.": "Välj en dag först.",
   "Choose an appointment type first.": "Välj en bokningstyp först.",
   "Date not selected": "Inget datum valt",
   "Select appointment first": "Välj bokning först",
@@ -4056,5 +4055,11 @@
   "If your question is about a lesson time, cancellation, coaching service or payment arranged with a coach, contact the coach or golf business that provided your booking link. Those arrangements are managed by the individual business.": "Om din fråga gäller en lektionstid, avbokning, coachningtjänst eller betalning som har avtalats med en tränare, kontakta den tränare eller det golfföretag som gav dig bokningslänken. Dessa arrangemang hanteras av respektive företag.",
   "Google connection help": "Hjälp med Google-anslutning",
   "Coaches can manage Google Calendar and Clarity Cloud connections from the integrations area after signing in. If a connection needs to be reset or removed and you cannot access the app, contact Support.": "Tränare kan hantera anslutningar till Google Calendar och Clarity Cloud under integrationer efter inloggning. Om en anslutning behöver återställas eller tas bort och du inte kan komma åt appen, kontakta Support.",
-  "Email support": "E-postsupport"
+  "Email support": "E-postsupport",
+  "Look busy": "Se upptagen ut",
+  "No public times available this week.": "Inga offentliga tider lediga den här veckan.",
+  "On — fewer gaps between lessons": "På — färre luckor mellan lektionerna",
+  "Off — every open time is shown": "Av — alla lediga tider visas",
+  "Only offer times next to an existing booking or the start or end of your day": "Erbjud bara tider intill en befintlig bokning eller i början eller slutet av din dag",
+  "Your booking page shows fewer times, so your diary looks in demand and lessons book back to back instead of leaving gaps.": "Din bokningssida visar färre tider, så att din kalender ser efterfrågad ut och lektioner bokas i följd i stället för att lämna luckor."
 }

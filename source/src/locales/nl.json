@@ -1041,7 +1041,6 @@
   "available times": "beschikbare tijden",
   "No upcoming group lesson times are available yet.": "Er zijn nog geen komende groepslestijden beschikbaar.",
   "No public times available for this day.": "Geen openbare tijden beschikbaar op deze dag.",
-  "Choose a day first.": "Kies eerst een dag.",
   "Choose an appointment type first.": "Kies eerst een soort afspraak.",
   "Date not selected": "Geen datum gekozen",
   "Select appointment first": "Kies eerst een afspraak",
@@ -4056,5 +4055,11 @@
   "If your question is about a lesson time, cancellation, coaching service or payment arranged with a coach, contact the coach or golf business that provided your booking link. Those arrangements are managed by the individual business.": "Als uw vraag gaat over een lestijd, annulering, coachingdienst of betaling die met een coach is afgesproken, neem dan contact op met de coach of het golfbedrijf dat u de boekingslink heeft gegeven. Die afspraken worden door het betreffende bedrijf beheerd.",
   "Google connection help": "Hulp bij Google-koppeling",
   "Coaches can manage Google Calendar and Clarity Cloud connections from the integrations area after signing in. If a connection needs to be reset or removed and you cannot access the app, contact Support.": "Coaches kunnen na het inloggen de koppelingen met Google Calendar en Clarity Cloud beheren in het onderdeel Integraties. Als een koppeling moet worden gereset of verwijderd en u geen toegang hebt tot de app, neem dan contact op met Support.",
-  "Email support": "E-mailsupport"
+  "Email support": "E-mailsupport",
+  "Look busy": "Druk lijken",
+  "No public times available this week.": "Deze week zijn er geen openbare tijden beschikbaar.",
+  "On — fewer gaps between lessons": "Aan — minder gaten tussen lessen",
+  "Off — every open time is shown": "Uit — alle vrije tijden worden getoond",
+  "Only offer times next to an existing booking or the start or end of your day": "Alleen tijden aanbieden direct naast een bestaande boeking of aan het begin of einde van je dag",
+  "Your booking page shows fewer times, so your diary looks in demand and lessons book back to back instead of leaving gaps.": "Je boekingspagina toont minder tijden, zodat je agenda gewild oogt en lessen aansluitend worden geboekt in plaats van gaten te laten."
 }

@@ -1041,7 +1041,6 @@
   "available times": "ledige tider",
   "No upcoming group lesson times are available yet.": "Der er endnu ingen kommende tider for gruppelektioner.",
   "No public times available for this day.": "Ingen offentlige tider denne dag.",
-  "Choose a day first.": "Vælg en dag først.",
   "Choose an appointment type first.": "Vælg en aftaletype først.",
   "Date not selected": "Ingen dato valgt",
   "Select appointment first": "Vælg aftale først",
@@ -4056,5 +4055,11 @@
   "If your question is about a lesson time, cancellation, coaching service or payment arranged with a coach, contact the coach or golf business that provided your booking link. Those arrangements are managed by the individual business.": "Hvis dit spørgsmål handler om et lektionstidspunkt, en aflysning, en træningsydelse eller en betaling aftalt med en træner, skal du kontakte den træner eller golfvirksomhed, der gav dig bookinglinket. Disse ordninger administreres af den enkelte virksomhed.",
   "Google connection help": "Hjælp til Google-forbindelse",
   "Coaches can manage Google Calendar and Clarity Cloud connections from the integrations area after signing in. If a connection needs to be reset or removed and you cannot access the app, contact Support.": "Trænere kan administrere forbindelser til Google Calendar og Clarity Cloud under integrationer efter at have logget ind. Hvis en forbindelse skal nulstilles eller fjernes, og du ikke kan få adgang til appen, skal du kontakte Support.",
-  "Email support": "E-mailsupport"
+  "Email support": "E-mailsupport",
+  "Look busy": "Se travl ud",
+  "No public times available this week.": "Ingen offentlige tider ledige denne uge.",
+  "On — fewer gaps between lessons": "Til — færre huller mellem lektioner",
+  "Off — every open time is shown": "Fra — alle ledige tider vises",
+  "Only offer times next to an existing booking or the start or end of your day": "Tilbyd kun tider ved siden af en eksisterende booking eller starten eller slutningen af din dag",
+  "Your booking page shows fewer times, so your diary looks in demand and lessons book back to back instead of leaving gaps.": "Din bookingside viser færre tider, så din kalender ser efterspurgt ud, og lektioner bookes i forlængelse af hinanden i stedet for at efterlade huller."
 }

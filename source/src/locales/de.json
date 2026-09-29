@@ -1041,7 +1041,6 @@
   "available times": "verfügbare Zeiten",
   "No upcoming group lesson times are available yet.": "Noch keine kommenden Gruppenstunden verfügbar.",
   "No public times available for this day.": "Für diesen Tag sind keine öffentlichen Zeiten verfügbar.",
-  "Choose a day first.": "Wähle zuerst einen Tag.",
   "Choose an appointment type first.": "Wähle zuerst eine Terminart.",
   "Date not selected": "Kein Datum ausgewählt",
   "Select appointment first": "Zuerst Termin wählen",
@@ -4056,5 +4055,11 @@
   "If your question is about a lesson time, cancellation, coaching service or payment arranged with a coach, contact the coach or golf business that provided your booking link. Those arrangements are managed by the individual business.": "Wenn deine Frage eine Stundenzeit, eine Stornierung, eine Coaching-Leistung oder eine mit einem Coach vereinbarte Zahlung betrifft, wende dich an den Coach oder das Golfunternehmen, von dem du deinen Buchungslink erhalten hast. Diese Vereinbarungen werden vom jeweiligen Unternehmen verwaltet.",
   "Google connection help": "Hilfe bei der Google-Verbindung",
   "Coaches can manage Google Calendar and Clarity Cloud connections from the integrations area after signing in. If a connection needs to be reset or removed and you cannot access the app, contact Support.": "Coaches können die Verbindungen zu Google Calendar und Clarity Cloud nach der Anmeldung im Bereich Integrationen verwalten. Wenn eine Verbindung zurückgesetzt oder entfernt werden muss und du keinen Zugriff auf die App hast, wende dich an den Support.",
-  "Email support": "E-Mail-Support"
+  "Email support": "E-Mail-Support",
+  "Look busy": "Beschäftigt wirken",
+  "No public times available this week.": "Diese Woche sind keine öffentlichen Zeiten verfügbar.",
+  "On — fewer gaps between lessons": "An — weniger Lücken zwischen Stunden",
+  "Off — every open time is shown": "Aus — alle freien Zeiten werden angezeigt",
+  "Only offer times next to an existing booking or the start or end of your day": "Nur Zeiten direkt neben einer bestehenden Buchung oder am Anfang oder Ende deines Tages anbieten",
+  "Your booking page shows fewer times, so your diary looks in demand and lessons book back to back instead of leaving gaps.": "Deine Buchungsseite zeigt weniger Zeiten, sodass dein Kalender gefragt wirkt und Stunden direkt hintereinander gebucht werden, statt Lücken zu lassen."
 }

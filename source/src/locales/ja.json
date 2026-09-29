@@ -1041,7 +1041,6 @@
   "available times": "空き時間",
   "No upcoming group lesson times are available yet.": "今後のグループレッスンの枠はまだありません。",
   "No public times available for this day.": "この日は予約可能な時間がありません。",
-  "Choose a day first.": "先に日付を選択してください。",
   "Choose an appointment type first.": "先に予約の種類を選択してください。",
   "Date not selected": "日付が選択されていません",
   "Select appointment first": "先に予約内容を選択",
@@ -4056,5 +4055,11 @@
   "If your question is about a lesson time, cancellation, coaching service or payment arranged with a coach, contact the coach or golf business that provided your booking link. Those arrangements are managed by the individual business.": "レッスンの時間、キャンセル、コーチングサービス、またはコーチとの間で取り決めた支払いに関するご質問は、予約リンクを提供したコーチまたはゴルフ事業者にお問い合わせください。これらの取り決めは各事業者によって管理されています。",
   "Google connection help": "Google 接続のヘルプ",
   "Coaches can manage Google Calendar and Clarity Cloud connections from the integrations area after signing in. If a connection needs to be reset or removed and you cannot access the app, contact Support.": "コーチはサインイン後、連携エリアから Google Calendar および Clarity Cloud の接続を管理できます。接続のリセットまたは削除が必要で、アプリにアクセスできない場合は、サポートにお問い合わせください。",
-  "Email support": "サポートにメールする"
+  "Email support": "サポートにメールする",
+  "Look busy": "忙しく見せる",
+  "No public times available this week.": "今週は公開中の空き時間がありません。",
+  "On — fewer gaps between lessons": "オン — レッスン間の空きを減らす",
+  "Off — every open time is shown": "オフ — 空いている時間をすべて表示",
+  "Only offer times next to an existing booking or the start or end of your day": "既存の予約の前後、または1日の始まりか終わりに接する時間のみを提示する",
+  "Your booking page shows fewer times, so your diary looks in demand and lessons book back to back instead of leaving gaps.": "予約ページに表示される時間が少なくなり、スケジュールが埋まっているように見え、レッスンが間を空けずに続けて予約されます。"
 }

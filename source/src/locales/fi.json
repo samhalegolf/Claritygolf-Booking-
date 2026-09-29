@@ -1041,7 +1041,6 @@
   "available times": "vapaat ajat",
   "No upcoming group lesson times are available yet.": "Tulevia ryhmätuntien aikoja ei vielä ole.",
   "No public times available for this day.": "Tälle päivälle ei ole julkisia aikoja.",
-  "Choose a day first.": "Valitse ensin päivä.",
   "Choose an appointment type first.": "Valitse ensin ajanvaraustyyppi.",
   "Date not selected": "Päivää ei valittu",
   "Select appointment first": "Valitse ensin ajanvaraus",
@@ -4056,5 +4055,11 @@
   "If your question is about a lesson time, cancellation, coaching service or payment arranged with a coach, contact the coach or golf business that provided your booking link. Those arrangements are managed by the individual business.": "Jos kysymyksesi koskee oppitunnin ajankohtaa, peruutusta, valmennuspalvelua tai valmentajan kanssa sovittua maksua, ota yhteyttä valmentajaan tai golfyritykseen, joka antoi sinulle varauslinkin. Näitä järjestelyjä hallinnoi kukin yritys itse.",
   "Google connection help": "Apua Google-yhteyteen",
   "Coaches can manage Google Calendar and Clarity Cloud connections from the integrations area after signing in. If a connection needs to be reset or removed and you cannot access the app, contact Support.": "Valmentajat voivat hallita Google Calendar- ja Clarity Cloud -yhteyksiä integraatio-osiosta kirjauduttuaan sisään. Jos yhteys on nollattava tai poistettava etkä pääse sovellukseen, ota yhteyttä tukeen.",
-  "Email support": "Lähetä sähköpostia tukeen"
+  "Email support": "Lähetä sähköpostia tukeen",
+  "Look busy": "Näytä kiireiseltä",
+  "No public times available this week.": "Tällä viikolla ei ole vapaita julkisia aikoja.",
+  "On — fewer gaps between lessons": "Päällä — vähemmän taukoja tuntien välillä",
+  "Off — every open time is shown": "Pois — kaikki vapaat ajat näytetään",
+  "Only offer times next to an existing booking or the start or end of your day": "Tarjoa vain aikoja, jotka ovat olemassa olevan varauksen vieressä tai päiväsi alussa tai lopussa",
+  "Your booking page shows fewer times, so your diary looks in demand and lessons book back to back instead of leaving gaps.": "Varaussivusi näyttää vähemmän aikoja, joten kalenterisi näyttää kysytyltä ja tunnit varataan peräkkäin ilman aukkoja."
 }
