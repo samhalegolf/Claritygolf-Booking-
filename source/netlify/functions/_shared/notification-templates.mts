@@ -260,8 +260,6 @@ export function notificationVariantFor(
  * while editing, because the length is part of writing one - a stray sentence
  * quietly doubles what the send costs.
  */
-export function smsSegmentLabel(text: string): string {
-  const length = text.length;
-  const segments = Math.max(1, Math.ceil(length / 160));
-  return `${length} characters · ${segments} ${segments === 1 ? "segment" : "segments"}`;
+export function smsSegmentCount(text: string): number {
+  return Math.max(1, Math.ceil(text.length / 160));
 }

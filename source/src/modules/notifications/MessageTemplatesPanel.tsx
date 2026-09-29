@@ -15,18 +15,18 @@ import { useState } from "react";
 import { Check, Pencil, RotateCcw, Smartphone, X } from "lucide-react";
 import { ClarityEmail, ClarityMessages } from "../shared/ClarityIcons";
 import {
+  smsSegmentCount,
   emptyNotificationTemplate,
   isNotificationTemplateEdited,
   NOTIFICATION_VARIANTS,
   notificationTemplateText,
-  smsSegmentLabel,
 } from "../../../netlify/functions/_shared/notification-templates.mts";
 import type {
   NotificationTemplateField,
   NotificationTemplates,
   NotificationVariantId,
 } from "../../../netlify/functions/_shared/notification-templates.mts";
-import { t } from "../../lib/i18n";
+import { t, tn } from "../../lib/i18n";
 
 // The rows Clarity fills in per lesson. Not editable and deliberately shown:
 // they are most of what a client actually reads, and a coach writing the body
@@ -59,12 +59,46 @@ const PREVIEW_ROWS: Record<NotificationVariantId, Array<[string, string]>> = {
   ],
 };
 
+// The tab names and "when it is sent" lines, on the coach's screen. The shared
+// NOTIFICATION_VARIANTS list stays English (the send path and its tests read
+// it); this is only what the coach reads, so it goes through t().
+function variantScreenText(id: NotificationVariantId): { label: string; when: string } {
+  switch (id) {
+    case "booked":
+      return { label: t("New booking"), when: t("Sent the moment a lesson is booked") };
+    case "reschedule":
+      return { label: t("Rescheduled"), when: t("Sent when a lesson moves") };
+    case "reminder":
+      return { label: t("Reminder"), when: t("Sent before the lesson, at your reminder lead time") };
+    case "cancelled":
+      return { label: t("Cancelled"), when: t("Sent immediately on cancellation") };
+    case "group":
+      return { label: t("Group session"), when: t("Sent instead of New booking when the lesson type is a group") };
+    case "package":
+      return { label: t("Package"), when: t("Sent instead of New booking when the lesson type is a package") };
+    default:
+      return { label: String(id), when: "" };
+  }
+}
+
+/** Length and SMS segment count of a text, on screen. */
+function smsCountLabel(text: string): string {
+  const length = text.length;
+  const segments = smsSegmentCount(text);
+  return t("{characters} · {segments}", {
+    characters: tn(length, "{count} character", "{count} characters"),
+    segments: tn(segments, "{count} segment", "{count} segments"),
+  });
+}
+
 export type MessageTemplatesPanelProps = {
   templates: NotificationTemplates;
   mapLinkLabel: string;
   /** Read-only until the settings block is put into edit mode. */
   locked: boolean;
   businessName: string;
+  /** The business's message language (account messageLanguage): what the client reads. */
+  messageLanguage?: string;
   logoUrl: string;
   /** The venue name shown on the "Where" row of the preview. */
   venueName: string;
@@ -79,6 +113,7 @@ export function MessageTemplatesPanel({
   mapLinkLabel,
   locked,
   businessName,
+  messageLanguage = "en",
   logoUrl,
   venueName,
   renderPreview,
@@ -94,12 +129,13 @@ export function MessageTemplatesPanel({
   const [draft, setDraft] = useState("");
 
   const active = NOTIFICATION_VARIANTS.find((entry) => entry.id === variant) ?? NOTIFICATION_VARIANTS[0];
+  const activeScreen = variantScreenText(active.id);
   const isText = channel === "text";
   const phoneFrame = isText || narrow;
 
-  /** The effective wording: what the coach wrote, or Clarity's default. */
+  /** The effective wording: what the coach wrote, or Clarity's default in the language the client gets. */
   function text(field: NotificationTemplateField) {
-    return notificationTemplateText(templates, variant, field);
+    return notificationTemplateText(templates, variant, field, messageLanguage);
   }
 
   function beginEdit(field: NotificationTemplateField | "mapLink") {
@@ -234,7 +270,7 @@ export function MessageTemplatesPanel({
           disabled={locked || !isNotificationTemplateEdited(templates, variant)}
           type="button"
         >
-          <RotateCcw size={14} />{t("Reset {label}", { label: active.label.toLowerCase() })}</button>
+          <RotateCcw size={14} />{t("Reset {label}", { label: activeScreen.label.toLowerCase() })}</button>
       </div>
 
       <div className="mt-tabs" role="tablist" aria-label={t("What happened")}>
@@ -250,14 +286,14 @@ export function MessageTemplatesPanel({
             aria-selected={entry.id === variant}
             type="button"
           >
-            {entry.label}
+            {variantScreenText(entry.id).label}
             {isNotificationTemplateEdited(templates, entry.id) && <em className="mt-tab-dot" aria-label={t("Edited")} />}
           </button>
         ))}
       </div>
 
       <div className="mt-stage">
-        <p className="mt-when">{active.when}</p>
+        <p className="mt-when">{activeScreen.when}</p>
 
         <div className={`mt-mat${phoneFrame ? " is-phone" : ""}`}>
           <div className={`mt-sheet${narrow && !isText ? " is-narrow" : ""}`}>
@@ -280,7 +316,7 @@ export function MessageTemplatesPanel({
                     label: t("Text message"),
                     value: renderPreview(smsBody),
                   })}
-                  <span className="mt-sms-count">{smsSegmentLabel(smsBody)}</span>
+                  <span className="mt-sms-count">{smsCountLabel(smsBody)}</span>
                 </div>
               </>
             ) : (
@@ -349,8 +385,8 @@ export function MessageTemplatesPanel({
 
         <p className="mt-note">
           {isText
-            ? t("Links and merge fields are filled in per lesson. What you write is saved against {label} only.", { label: active.label })
-            : t("The booking table, the button's link and the footer are filled in per lesson and cannot be edited here. What you write is saved against {label} only.", { label: active.label })}
+            ? t("Links and merge fields are filled in per lesson. What you write is saved against {label} only.", { label: activeScreen.label })
+            : t("The booking table, the button's link and the footer are filled in per lesson and cannot be edited here. What you write is saved against {label} only.", { label: activeScreen.label })}
         </p>
       </div>
     </div>

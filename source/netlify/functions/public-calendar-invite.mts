@@ -2,6 +2,7 @@ import type { Config } from "@netlify/functions";
 import { LEGACY_DEFAULT_ACCOUNT_ID as LEGACY_ORIGINAL_WORKSPACE_ID, defaultCalendarSlug } from "./_shared/account.mts";
 import { resolvePublicAccount } from "./_shared/coach-auth.mts";
 import { settingsSelectQuery } from "./_shared/settings-scope.mts";
+import { cleanMessageLanguage, messageText } from "./_shared/message-language.mts";
 
 const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
 
@@ -144,6 +145,9 @@ async function readSettings(req: Request) {
     timezone: settings.accountTimezone || env("CLARITY_TIMEZONE", "Pacific/Auckland"),
     contactEmail: cleanEmail(settings.accountContactEmail, original ? env("CLARITY_CONTACT_EMAIL", "") : ""),
     bookingUrl: settings.accountBookingUrl || env("CLARITY_BOOKING_URL", "https://book.claritygolf.app"),
+    // The event title and description are Clarity's words to the client, so
+    // they follow the business's message language like its emails do.
+    messageLanguage: cleanMessageLanguage(settings.accountMessageLanguage),
   };
 }
 
@@ -243,22 +247,23 @@ function manageUrl(appointment: any, settings: any) {
 function generateInvite(appointment: any, settings: any) {
   // Strict: a lesson type with no owner belongs to nobody, not to every
   // business that happens to ask.
+  const mt = messageText(settings.messageLanguage);
   const service = settings.services.find(
     (candidate: any) => candidate.id === appointment.service_id && candidate.accountId === settings.account.id,
   );
-  const serviceName = cleanText(service?.name, "Golf Lesson", 160);
-  const client = cleanText(appointment.client || appointment.title, "Client", 160);
+  const serviceName = cleanText(service?.name, mt("Golf Lesson"), 160);
+  const client = cleanText(appointment.client || appointment.title, mt("Client"), 160);
   const location = cleanBookingLocationSnapshot(appointment.location, {
     name: settings.venueName,
     timezone: settings.timezone,
   });
   const manage = manageUrl(appointment, settings);
   const description = [
-    `${serviceName} for ${client}.`,
-    location?.address ? `Address: ${location.address}` : "",
-    location?.arrivalInstructions ? `Arrival: ${location.arrivalInstructions}` : "",
-    location?.mapUrl ? `Map: ${location.mapUrl}` : "",
-    manage ? `Manage / Reschedule: ${manage}` : "",
+    mt("{service} for {client}.", { service: serviceName, client }),
+    location?.address ? mt("Address: {address}", { address: location.address }) : "",
+    location?.arrivalInstructions ? mt("Arrival: {instructions}", { instructions: location.arrivalInstructions }) : "",
+    location?.mapUrl ? mt("Map: {url}", { url: location.mapUrl }) : "",
+    manage ? mt("Manage / Reschedule: {url}", { url: manage }) : "",
   ]
     .filter(Boolean)
     .join("\n");
@@ -274,7 +279,7 @@ function generateInvite(appointment: any, settings: any) {
     `DTSTAMP:${formatUtcStamp()}`,
     `DTSTART:${formatUtcStamp(zonedSlotToUtc(appointment.week, appointment.day, appointment.start, settings.timezone))}`,
     `DTEND:${formatUtcStamp(zonedSlotToUtc(appointment.week, appointment.day, Number(appointment.start || 0) + Number(appointment.duration || 0), settings.timezone))}`,
-    `SUMMARY:${escapeIcs(`${serviceName} with ${appointment.coach?.displayName || appointment.coach?.name || settings.businessName}`)}`,
+    `SUMMARY:${escapeIcs(mt("{service} with {coach}", { service: serviceName, coach: appointment.coach?.displayName || appointment.coach?.name || settings.businessName }))}`,
     `DESCRIPTION:${escapeIcs(description)}`,
     `LOCATION:${escapeIcs(bookingLocationDisplay(location))}`,
     settings.contactEmail ? `ORGANIZER;CN=${escapeIcs(settings.businessName)}:MAILTO:${escapeIcs(settings.contactEmail)}` : "",

@@ -177,7 +177,7 @@ import {
   NOTIFICATION_VARIANTS,
 } from "../netlify/functions/_shared/notification-templates.mts";
 import type { NotificationTemplates } from "../netlify/functions/_shared/notification-templates.mts";
-import { cleanMessageLanguage } from "../netlify/functions/_shared/message-language.mts";
+import { cleanMessageLanguage, messageText } from "../netlify/functions/_shared/message-language.mts";
 import {
   cleanPlayerBookingEmbedHeight,
   cleanPlayerBookingEmbedIntro,
@@ -7951,13 +7951,19 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     .filter(Boolean)
     .join(" ");
   const discountSet = invoiceDiscountTotal > 0 || invoiceDraft.discountLabel.trim() !== "";
-  const invoiceEmailSubject = `${activeInvoiceNumber} from ${coachAccount.businessName}`;
+  // What the client reads, so in the business's message language, not the
+  // coach's screen language.
+  const mt = messageText(coachAccount.messageLanguage);
+  const invoiceEmailSubject = mt("{number} from {businessName}", {
+    number: activeInvoiceNumber,
+    businessName: coachAccount.businessName,
+  });
   const invoiceEmailBody = [
     invoiceDraft.message,
     "",
-    `Invoice: ${activeInvoiceNumber}`,
-    `Total: ${formatMoney(invoiceTotal, invoiceSettings.currency)}`,
-    `Due: ${invoiceDraft.dueDate}`,
+    mt("Invoice: {number}", { number: activeInvoiceNumber }),
+    mt("Total: {amount}", { amount: formatMoney(invoiceTotal, invoiceSettings.currency) }),
+    mt("Due: {date}", { date: invoiceDraft.dueDate }),
     invoiceSettings.paymentInstructions,
   ]
     .filter(Boolean)
@@ -32900,6 +32906,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       mapLinkLabel={messageTemplatesDraft.mapLinkLabel}
                       locked={messageTemplatesIsLocked}
                       businessName={coachAccount.businessName}
+                      messageLanguage={coachAccount.messageLanguage}
                       logoUrl={brandSettings.showLogo ? brandSettings.logoPreview : ""}
                       venueName={coachAccount.venueShortName || coachAccount.venueName}
                       renderPreview={(template) => renderTemplate(template, emailTemplateVariables)}

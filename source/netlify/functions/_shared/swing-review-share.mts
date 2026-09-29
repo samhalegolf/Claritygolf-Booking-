@@ -21,6 +21,7 @@
  */
 
 import { publicSnapshots, type PublicSnapshot } from "./swing-review-snapshots.mts";
+import { cleanMessageLanguage, messageText } from "./message-language.mts";
 
 const text = (value: unknown, max = 600) => String(value ?? "").trim().slice(0, max);
 
@@ -231,47 +232,58 @@ export function reviewEmail(input: {
   videoCount: number;
   noteCount: number;
   practiceCount: number;
+  /** The business's message language (account.messageLanguage). English when absent. */
+  language?: string;
 }): { subject: string; text: string } {
+  const language = cleanMessageLanguage(input.language);
+  const mt = messageText(language);
   const coach = text(input.coachName, 120);
-  const subject = coach ? `${coach} sent you a swing review` : "Your swing review is ready";
+  const subject = coach
+    ? mt("{coach} sent you a swing review", { coach })
+    : mt("Your swing review is ready");
   const parts: string[] = [];
   const firstName = text(input.playerName, 120).split(/\s+/)[0] || "";
 
-  parts.push(firstName ? `Hi ${firstName},` : "Hi,");
+  parts.push(firstName ? mt("Hi {name},", { name: firstName }) : mt("Hi,"));
   parts.push("");
   parts.push(
     coach
-      ? `${coach} has finished a swing review for you.`
-      : "Your coach has finished a swing review for you.",
+      ? mt("{coach} has finished a swing review for you.", { coach })
+      : mt("Your coach has finished a swing review for you."),
   );
 
+  const count = input.videoCount;
+  const notes = input.noteCount;
+  const practice = input.practiceCount;
   const contents = [
-    input.videoCount ? `${input.videoCount} video${input.videoCount === 1 ? "" : "s"}` : "",
-    input.noteCount ? `${input.noteCount} note${input.noteCount === 1 ? "" : "s"}` : "",
-    input.practiceCount
-      ? `${input.practiceCount} practice block${input.practiceCount === 1 ? "" : "s"}`
+    count ? (count === 1 ? mt("{count} video", { count }) : mt("{count} videos", { count })) : "",
+    notes ? (notes === 1 ? mt("{count} note", { count: notes }) : mt("{count} notes", { count: notes })) : "",
+    practice
+      ? practice === 1
+        ? mt("{count} practice block", { count: practice })
+        : mt("{count} practice blocks", { count: practice })
       : "",
   ].filter(Boolean);
-  if (contents.length) parts.push(`It has ${listSentence(contents)} in it.`);
+  if (contents.length) parts.push(mt("It has {contents} in it.", { contents: listSentence(contents, mt) }));
 
   const message = text(input.coachMessage, 600);
   if (message) {
     parts.push("");
-    parts.push(`Their note: ${message}`);
+    parts.push(mt("Their note: {message}", { message }));
   }
 
   if (input.shareUrl) {
     parts.push("");
-    parts.push("Watch it here — no sign-in needed:");
+    parts.push(mt("Watch it here — no sign-in needed:"));
     parts.push(input.shareUrl);
-    const expiry = expiryLabel(input.expiresAt);
-    if (expiry) parts.push(`This link works until ${expiry}.`);
+    const expiry = expiryLabel(input.expiresAt, language);
+    if (expiry) parts.push(mt("This link works until {date}.", { date: expiry }));
   }
 
   if (input.portalUrl) {
     parts.push("");
     parts.push(
-      "Your player portal keeps every review, video and practice block for good — sign in any time:",
+      mt("Your player portal keeps every review, video and practice block for good — sign in any time:"),
     );
     parts.push(input.portalUrl);
   }
@@ -279,13 +291,16 @@ export function reviewEmail(input: {
   return { subject, text: parts.join("\n") };
 }
 
-function listSentence(items: string[]): string {
+function listSentence(items: string[], mt: ReturnType<typeof messageText>): string {
   if (items.length <= 1) return items[0] || "";
-  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+  return mt("{items} and {last}", { items: items.slice(0, -1).join(", "), last: items[items.length - 1] });
 }
 
-function expiryLabel(value: string): string {
+function expiryLabel(value: string, language = "en"): string {
   const date = new Date(text(value, 40));
   if (Number.isNaN(date.getTime())) return "";
-  return date.toDateString();
+  // English keeps the exact wording it always had; other languages get the
+  // same parts with their own month and weekday names.
+  if (language === "en") return date.toDateString();
+  return date.toLocaleDateString(language, { weekday: "short", year: "numeric", month: "short", day: "numeric" });
 }
