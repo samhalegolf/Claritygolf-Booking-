@@ -177,6 +177,7 @@ import {
   NOTIFICATION_VARIANTS,
 } from "../netlify/functions/_shared/notification-templates.mts";
 import type { NotificationTemplates } from "../netlify/functions/_shared/notification-templates.mts";
+import { cleanMessageLanguage } from "../netlify/functions/_shared/message-language.mts";
 import {
   cleanPlayerBookingEmbedHeight,
   cleanPlayerBookingEmbedIntro,
@@ -2171,6 +2172,8 @@ type CoachAccount = {
   timezone: string;
   /** ISO 3166-1 alpha-2. The workspace's home country. */
   country: string;
+  /** The language the business's emails and texts go out in. */
+  messageLanguage: string;
   contactEmail: string;
   bookingUrl: string;
   calendarSlug: string;
@@ -3433,6 +3436,7 @@ const defaultCoachAccount: CoachAccount = {
   venueShortName: "",
   timezone: "Pacific/Auckland",
   country: "NZ",
+  messageLanguage: "en",
   contactEmail: "",
   bookingUrl: "https://book.claritygolf.app",
   calendarSlug: "",
@@ -3535,6 +3539,7 @@ function cleanCoachAccount(account?: Partial<CoachAccount>): CoachAccount {
         ? account.timezone.trim().slice(0, 80)
         : defaultCoachAccount.timezone,
     country: cleanPhoneCountry(account?.country, defaultCoachAccount.country),
+    messageLanguage: cleanMessageLanguage(account?.messageLanguage),
     contactEmail: cleanEmail(account?.contactEmail, defaultCoachAccount.contactEmail),
     bookingUrl: cleanUrl(account?.bookingUrl, defaultCoachAccount.bookingUrl),
     calendarSlug: cleanSlug(account?.calendarSlug, cleanSlug(businessName, defaultCoachAccount.calendarSlug)),
@@ -6643,10 +6648,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
   function updateRegionDraft(next: Partial<RegionValues>) {
     regionEditor.setDraftValue((current) => {
-      const { country, timezone, ...invoice } = next;
+      const { country, timezone, messageLanguage, ...invoice } = next;
       return cleanCoachAccount({
         ...current,
         country: country ?? current.country,
+        messageLanguage: messageLanguage ?? current.messageLanguage,
         timezone: timezone ?? current.timezone,
         invoiceSettings: { ...current.invoiceSettings, ...invoice },
       });
@@ -31733,6 +31739,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   <RegionSettings
                     values={{
                       country: cleanPhoneCountry(regionDraft.country),
+                      messageLanguage: regionDraft.messageLanguage,
                       timezone: regionDraft.timezone,
                       currency: regionDraft.invoiceSettings.currency,
                       taxName: regionDraft.invoiceSettings.taxName,

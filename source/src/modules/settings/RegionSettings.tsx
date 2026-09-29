@@ -10,6 +10,7 @@
 import { useMemo } from "react";
 import { phoneCountryOptions } from "../../../netlify/functions/_shared/phone.mts";
 import { currencyForCountry } from "../../../netlify/functions/_shared/locale.mts";
+import { MESSAGE_LANGUAGES } from "../../../netlify/functions/_shared/message-language.mts";
 import {
   regionDefaultsForCountry,
   timeZoneOffsetLabel,
@@ -19,6 +20,7 @@ import { activeLanguage, t } from "../../lib/i18n";
 
 export type RegionValues = {
   country: string;
+  messageLanguage: string;
   timezone: string;
   currency: string;
   taxName: string;
@@ -162,6 +164,19 @@ export function RegionSettings({ values, locked, onChange, parseRate }: RegionSe
         </label>
       </div>
       <p className="field-help">{t("Choosing a country fills in its time zone, currency and usual tax. Change any of them if your business is different. The country also sets the dialling code for phone numbers and how dates are written.")}</p>
+      <div className="service-form-row">
+        <label className="settings-field">
+          <span>{t("Email & text language")}</span>
+          <select value={values.messageLanguage} disabled={locked} onChange={(event) => onChange({ messageLanguage: event.target.value })}>
+            {MESSAGE_LANGUAGES.map((option) => (
+              <option key={option.code} value={option.code}>
+                {option.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <p className="field-help">{t("The language of Clarity's wording in the emails and texts your clients receive. Anything you have written yourself in Message templates is sent exactly as you wrote it.")}</p>
     </>
   );
 }

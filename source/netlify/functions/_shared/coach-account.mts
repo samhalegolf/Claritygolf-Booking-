@@ -13,6 +13,7 @@
 import { defaultCalendarSlug, legacyOriginalWorkspaceId, slugify } from "./account.mts";
 import { terminologyFor } from "./business-terminology.mts";
 import { currencyForAccountSettings } from "./locale.mts";
+import { cleanMessageLanguage } from "./message-language.mts";
 import { cleanPhoneCountry, FALLBACK_PHONE_COUNTRY } from "./phone.mts";
 import { taxDefaultsForCountry } from "./region.mts";
 
@@ -125,6 +126,7 @@ export function neutralCoachAccount(accountId) {
     venueShortName: "",
     timezone: defaultTimeZone(),
     country: cleanPhoneCountry(env("CLARITY_COUNTRY", FALLBACK_PHONE_COUNTRY)),
+    messageLanguage: "en",
     contactEmail: "",
     bookingUrl: env("CLARITY_BOOKING_URL", "https://book.claritygolf.app"),
     calendarSlug: slugify(accountId, ""),
@@ -147,6 +149,9 @@ export function defaultCoachAccount() {
     // dropdown. Everything else that is currently hardcoded to New Zealand
     // (date formatting, currency) should eventually derive from this too.
     country: cleanPhoneCountry(env("CLARITY_COUNTRY", FALLBACK_PHONE_COUNTRY)),
+    // The language the business's emails and texts go out in. See
+    // message-language.mts.
+    messageLanguage: "en",
     contactEmail: env("CLARITY_CONTACT_EMAIL", ""),
     bookingUrl: env("CLARITY_BOOKING_URL", "https://book.claritygolf.app"),
     calendarSlug: defaultCalendarSlug(),
@@ -297,6 +302,7 @@ export function cleanCoachAccount(account) {
     ),
     timezone: cleanString(account?.timezone, defaults.timezone, 80),
     country: cleanPhoneCountry(account?.country, defaults.country),
+    messageLanguage: cleanMessageLanguage(account?.messageLanguage || defaults.messageLanguage),
     contactEmail: cleanEmail(account?.contactEmail, defaults.contactEmail),
     bookingUrl: cleanUrl(account?.bookingUrl, defaults.bookingUrl),
     calendarSlug: slugify(
@@ -364,6 +370,7 @@ export function coachAccountFromSettings(settings, accountId = "") {
       settingValue(settings, "accountVenueShortName") || defaults.venueShortName,
     timezone: settingValue(settings, "accountTimezone") || defaults.timezone,
     country: settingValue(settings, "accountCountry") || defaults.country,
+    messageLanguage: settingValue(settings, "accountMessageLanguage") || defaults.messageLanguage,
     contactEmail:
       settingValue(settings, "accountContactEmail") || defaults.contactEmail,
     bookingUrl: settingValue(settings, "accountBookingUrl") || defaults.bookingUrl,

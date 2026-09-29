@@ -15,6 +15,8 @@
 // a client receives come from the same defaults. It must not touch `process` or
 // any Node API.
 
+import { translateMessage } from "./message-language.mts";
+
 export type NotificationVariantId =
   | "booked"
   | "reschedule"
@@ -201,7 +203,8 @@ export function parseNotificationTemplates(raw?: unknown): NotificationTemplates
 }
 
 /**
- * One field's effective wording: what the coach wrote, or Clarity's default.
+ * One field's effective wording: what the coach wrote, exactly as written, or
+ * Clarity's default in the business's message language.
  *
  * A field the coach has deliberately emptied still falls back to the default -
  * there is no way to send a message with no subject, and "blank" is how Reset
@@ -212,10 +215,12 @@ export function notificationTemplateText(
   templates: NotificationTemplates | undefined,
   variant: NotificationVariantId,
   field: NotificationTemplateField,
+  language: unknown = "en",
 ): string {
   const written = templates?.[variant]?.[field];
   if (typeof written === "string" && written.trim()) return written;
-  return DEFAULT_NOTIFICATION_TEMPLATES[variant][field];
+  const fallback = DEFAULT_NOTIFICATION_TEMPLATES[variant][field];
+  return fallback ? translateMessage(language, fallback) : fallback;
 }
 
 /** True when this variant's field is the coach's wording rather than Clarity's. */

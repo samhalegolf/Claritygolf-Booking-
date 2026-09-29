@@ -5712,6 +5712,7 @@ async function writeCoachAccount(accountId: string, account) {
     accountVenueShortName: clean.venueShortName,
     accountTimezone: clean.timezone,
     accountCountry: clean.country,
+    accountMessageLanguage: clean.messageLanguage,
     accountContactEmail: clean.contactEmail,
     accountBookingUrl: clean.bookingUrl,
     accountCalendarSlug: clean.calendarSlug,
@@ -10230,6 +10231,7 @@ async function writeFreshSandboxSettings(sandboxId: string, parentId: string) {
   await setSettingsBulk(sandboxId, {
     ...fresh,
     accountCountry: settingValue(parentSettings, "accountCountry"),
+    accountMessageLanguage: settingValue(parentSettings, "accountMessageLanguage"),
     accountTimezone: settingValue(parentSettings, "accountTimezone") || fresh.accountTimezone,
     // The plan is a copy of the live one, so entitlement checks run for real
     // rather than being bypassed. subscriptionStatus 'internal' is an existing
