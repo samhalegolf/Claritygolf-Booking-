@@ -31,7 +31,8 @@ import {
 import type { ReservedPassPayment } from "./_shared/passes.mts";
 import type { PassSource, PassTemplate } from "./_shared/passes.mts";
 import { deliverEmail } from "./_shared/email-delivery.mts";
-import { currencyForAccountSettings } from "./_shared/locale.mts";
+import { currencyForAccountSettings, localeForCountry } from "./_shared/locale.mts";
+import { cleanMessageLanguage, messageText } from "./_shared/message-language.mts";
 import { taxDefaultsForCountry } from "./_shared/region.mts";
 import {
   createStripeCheckoutSession as createStripeCheckoutSessionWith,
@@ -2194,6 +2195,10 @@ type InvoiceBranding = {
   logoDataUrl: string;
   primaryColor: string;
   accentColor: string;
+  // The business's message language (accountMessageLanguage): what the client
+  // reads in the invoice/receipt email and on the invoice PDF.
+  messageLanguage: string;
+  country: string;
 };
 
 async function resolveInvoiceBranding(accountId: string): Promise<InvoiceBranding> {
@@ -2205,6 +2210,7 @@ async function resolveInvoiceBranding(accountId: string): Promise<InvoiceBrandin
       "accountContactEmail",
       "accountInvoiceSettingsJson",
       "accountCountry",
+      "accountMessageLanguage",
       "notificationFromName",
       "brandLogoPreview",
       "brandPrimary",
@@ -2238,6 +2244,8 @@ async function resolveInvoiceBranding(accountId: string): Promise<InvoiceBrandin
     logoDataUrl: typeof map.brandLogoPreview === "string" && map.brandLogoPreview.startsWith("data:image/") ? map.brandLogoPreview : "",
     primaryColor: cleanHexColor(map.brandPrimary, "#1fd36d"),
     accentColor: cleanHexColor(map.brandAccent, "#111318"),
+    messageLanguage: cleanMessageLanguage(map.accountMessageLanguage),
+    country: cleanString(map.accountCountry, "", 8),
   };
 }
 
@@ -2376,6 +2384,29 @@ export async function renderInvoicePdf(invoice: InvoiceApi, branding: InvoiceBra
   const font = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
 
+  // Clarity's labels in the business's message language. The standard PDF
+  // fonts only encode WinAnsi (Latin-1), so a label they cannot draw -- Polish,
+  // Japanese -- falls back to its English wording instead of failing the PDF.
+  const translate = messageText(branding.messageLanguage);
+  const english = messageText("en");
+  const mt = (label: string, values?: Record<string, string | number>) => {
+    const out = translate(label, values);
+    try {
+      font.widthOfTextAtSize(out, 10);
+      bold.widthOfTextAtSize(out, 10);
+      return out;
+    } catch {
+      return english(label, values);
+    }
+  };
+  const statusLabels: Record<string, string> = {
+    draft: mt("Draft"),
+    sent: mt("Sent"),
+    paid: mt("Paid"),
+    overdue: mt("Overdue"),
+    void: mt("Void"),
+  };
+
   const pageWidth = 595.28; // A4 portrait, points
   const pageHeight = 841.89;
   const margin = 50;
@@ -2429,18 +2460,19 @@ export async function renderInvoicePdf(invoice: InvoiceApi, branding: InvoiceBra
   const nameX = logo ? margin + logoW + 12 : margin;
   const nameY = logo ? headerTop - logoH / 2 - 6 : headerTop - 4;
   text(branding.businessName, nameX, nameY, { size: 16, bold: true });
-  textRight("INVOICE", contentRight, headerTop - 4, { size: 18, bold: true, color: brand });
+  textRight(mt("Invoice").toUpperCase(), contentRight, headerTop - 4, { size: 18, bold: true, color: brand });
   y = headerTop - Math.max(logoH, 22) - 8;
   const brandLines = [
     branding.businessAddress,
     branding.contactEmail,
-    branding.taxNumber ? `${branding.taxName} No: ${branding.taxNumber}` : "",
+    branding.taxNumber ? mt("{taxName} No: {taxNumber}", { taxName: branding.taxName, taxNumber: branding.taxNumber }) : "",
   ].filter(Boolean);
+  const status = String(invoice.status || "");
   const metaLines = [
-    `Invoice #: ${invoice.invoiceNumber}`,
-    `Issued: ${invoice.issueDate || ""}`,
-    invoice.dueDate ? `Due: ${invoice.dueDate}` : "",
-    `Status: ${String(invoice.status || "").toUpperCase()}`,
+    mt("Invoice #: {number}", { number: invoice.invoiceNumber }),
+    mt("Issued: {date}", { date: invoice.issueDate || "" }),
+    invoice.dueDate ? mt("Due: {date}", { date: invoice.dueDate }) : "",
+    mt("Status: {status}", { status: (statusLabels[status] || status).toUpperCase() }),
   ].filter(Boolean);
   const headerRows = Math.max(brandLines.length, metaLines.length);
   for (let i = 0; i < headerRows; i += 1) {
@@ -2453,11 +2485,11 @@ export async function renderInvoicePdf(invoice: InvoiceApi, branding: InvoiceBra
   y -= 22;
 
   // Bill to.
-  text("BILL TO", margin, y, { size: 8, bold: true, color: muted });
+  text(mt("Bill to").toUpperCase(), margin, y, { size: 8, bold: true, color: muted });
   y -= 14;
   text(invoice.customerName || "-", margin, y, { size: 11, bold: true });
   y -= 14;
-  for (const contact of [invoice.customerEmail, invoice.customerPhone, invoice.reference ? `Ref: ${invoice.reference}` : ""].filter(Boolean)) {
+  for (const contact of [invoice.customerEmail, invoice.customerPhone, invoice.reference ? mt("Ref: {reference}", { reference: invoice.reference }) : ""].filter(Boolean)) {
     text(contact, margin, y, { size: 9, color: muted });
     y -= 12;
   }
@@ -2467,10 +2499,10 @@ export async function renderInvoicePdf(invoice: InvoiceApi, branding: InvoiceBra
   const colQtyRight = margin + 320;
   const colUnitRight = margin + 410;
   const descWidth = colQtyRight - margin - 60;
-  text("DESCRIPTION", margin, y, { size: 8, bold: true, color: muted });
-  textRight("QTY", colQtyRight, y, { size: 8, bold: true, color: muted });
-  textRight("UNIT", colUnitRight, y, { size: 8, bold: true, color: muted });
-  textRight("AMOUNT", contentRight, y, { size: 8, bold: true, color: muted });
+  text(mt("Description").toUpperCase(), margin, y, { size: 8, bold: true, color: muted });
+  textRight(mt("Qty").toUpperCase(), colQtyRight, y, { size: 8, bold: true, color: muted });
+  textRight(mt("Unit").toUpperCase(), colUnitRight, y, { size: 8, bold: true, color: muted });
+  textRight(mt("Amount").toUpperCase(), contentRight, y, { size: 8, bold: true, color: muted });
   y -= 8;
   hrule(y);
   y -= 16;
@@ -2481,7 +2513,9 @@ export async function renderInvoicePdf(invoice: InvoiceApi, branding: InvoiceBra
     // column (which is net of the discount) reads clearly to the customer.
     const descText = item.description || "-";
     const descLines = wrapText(
-      lineDiscount > 0 ? `${descText}  (incl. ${formatMoney(lineDiscount, currency)} discount)` : descText,
+      lineDiscount > 0
+        ? mt("{description}  (incl. {amount} discount)", { description: descText, amount: formatMoney(lineDiscount, currency) })
+        : descText,
       font,
       10,
       descWidth,
@@ -2509,33 +2543,36 @@ export async function renderInvoicePdf(invoice: InvoiceApi, branding: InvoiceBra
     textRight(value, contentRight, y, { size, bold: opts.bold, color: opts.color ?? ink });
     y -= opts.bold ? 20 : 16;
   };
-  totalRow("Subtotal", formatMoney(invoice.subtotal, currency));
+  totalRow(mt("Subtotal"), formatMoney(invoice.subtotal, currency));
   if ((Number(invoice.discountTotal) || 0) > 0) {
-    totalRow(invoice.discountLabel || "Discount", `- ${formatMoney(invoice.discountTotal, currency)}`);
+    totalRow(invoice.discountLabel || mt("Discount"), `- ${formatMoney(invoice.discountTotal, currency)}`);
   }
   if ((Number(invoice.taxTotal) || 0) > 0) {
-    const taxName = branding.taxName || "Tax";
-    totalRow(`Total excl. ${taxName}`, formatMoney(round2((Number(invoice.total) || 0) - (Number(invoice.taxTotal) || 0)), currency));
+    const taxName = branding.taxName || mt("Tax");
+    totalRow(mt("Total excl. {taxName}", { taxName }), formatMoney(round2((Number(invoice.total) || 0) - (Number(invoice.taxTotal) || 0)), currency));
   }
   // Exclusive tax is a line added before the total; inclusive tax is shown as a
   // note under the total (it's already inside the prices).
   if (!invoice.taxInclusive && (Number(invoice.taxTotal) || 0) > 0) {
-    totalRow(branding.taxName || "Tax", formatMoney(invoice.taxTotal, currency));
+    totalRow(branding.taxName || mt("Tax"), formatMoney(invoice.taxTotal, currency));
   }
-  totalRow("Total", formatMoney(invoice.total, currency), { bold: true, size: 12, color: brand });
+  totalRow(mt("Total"), formatMoney(invoice.total, currency), { bold: true, size: 12, color: brand });
   if (invoice.taxInclusive && (Number(invoice.taxTotal) || 0) > 0) {
-    totalRow(`Includes ${branding.taxName || "Tax"}`, formatMoney(invoice.taxTotal, currency));
+    totalRow(mt("Includes {taxName}", { taxName: branding.taxName || mt("Tax") }), formatMoney(invoice.taxTotal, currency));
   }
   if ((Number(invoice.amountPaid) || 0) > 0) {
-    totalRow("Paid", `- ${formatMoney(invoice.amountPaid, currency)}`);
-    totalRow("Balance due", formatMoney(round2((Number(invoice.total) || 0) - (Number(invoice.amountPaid) || 0)), currency), { bold: true });
+    totalRow(mt("Paid"), `- ${formatMoney(invoice.amountPaid, currency)}`);
+    totalRow(mt("Balance due"), formatMoney(round2((Number(invoice.total) || 0) - (Number(invoice.amountPaid) || 0)), currency), { bold: true });
   }
 
   // Notes / payment instructions / footer.
   const noteBlocks: Array<{ heading: string; body: string }> = [];
-  if (invoice.customerNote) noteBlocks.push({ heading: "Notes", body: invoice.customerNote });
-  const paymentBody = [branding.paymentInstructions, branding.bankAccount ? `Bank account: ${branding.bankAccount}` : ""].filter(Boolean).join("\n");
-  if (paymentBody) noteBlocks.push({ heading: "Payment", body: paymentBody });
+  if (invoice.customerNote) noteBlocks.push({ heading: mt("Notes"), body: invoice.customerNote });
+  const paymentBody = [
+    branding.paymentInstructions,
+    branding.bankAccount ? mt("Bank account: {account}", { account: branding.bankAccount }) : "",
+  ].filter(Boolean).join("\n");
+  if (paymentBody) noteBlocks.push({ heading: mt("Payment"), body: paymentBody });
   if (branding.footerText) noteBlocks.push({ heading: "", body: branding.footerText });
 
   if (noteBlocks.length) {
@@ -2634,19 +2671,27 @@ export async function sendInvoice(accountId: string, id: string, body: Record<st
     : "";
 
   const pdf = await renderInvoicePdf(invoice, branding);
-  const subject = `Invoice ${invoice.invoiceNumber} from ${branding.businessName}`;
+  const mt = messageText(branding.messageLanguage);
+  const subject = mt("Invoice {number} from {businessName}", {
+    number: invoice.invoiceNumber,
+    businessName: branding.businessName,
+  });
+  const payOnlineLine = payUrl ? mt("Pay online: {url}", { url: payUrl }) : "";
   const bodyLines = [
-    `Hi ${invoice.customerName || "there"},`,
+    invoice.customerName ? mt("Hi {name},", { name: invoice.customerName }) : mt("Hi there,"),
     "",
-    `Please find attached invoice ${invoice.invoiceNumber} for ${formatMoney(invoice.total, invoice.currency)}.`,
-    invoice.dueDate ? `Due: ${invoice.dueDate}` : "",
+    mt("Please find attached invoice {number} for {amount}.", {
+      number: invoice.invoiceNumber,
+      amount: formatMoney(invoice.total, invoice.currency),
+    }),
+    invoice.dueDate ? mt("Due: {date}", { date: invoice.dueDate }) : "",
     // The plain-text part carries the URL itself - the HTML button below is the
     // same link, and a text-only client must not be left with no way to pay.
-    payUrl ? `Pay online: ${payUrl}` : "",
+    payOnlineLine,
     branding.paymentInstructions,
-    branding.bankAccount ? `Bank account: ${branding.bankAccount}` : "",
+    branding.bankAccount ? mt("Bank account: {account}", { account: branding.bankAccount }) : "",
     "",
-    "Thanks,",
+    mt("Thanks,"),
     branding.businessName,
   ].filter((line) => line !== undefined && line !== null) as string[];
   const plain = bodyLines.filter(Boolean).join("\n");
@@ -2657,14 +2702,14 @@ export async function sendInvoice(accountId: string, id: string, body: Record<st
       // No amount on the button. A link minted against a part-paid invoice
       // charges what is outstanding, and a reused link charges what it was
       // minted for - neither is reliably the total printed above it.
-      `Pay invoice ${escapeHtml(String(invoice.invoiceNumber))}</a></p>`
+      `${escapeHtml(mt("Pay invoice {number}", { number: String(invoice.invoiceNumber) }))}</a></p>`
     : "";
   const html =
     `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#1a1c1f">` +
     bodyLines
       // The URL line is replaced by the button in the HTML part; showing both
       // reads as two different ways to pay.
-      .filter((line) => !payUrl || line !== `Pay online: ${payUrl}`)
+      .filter((line) => !payUrl || line !== payOnlineLine)
       .map((line) => (line === "" ? "<br/>" : `<p style="margin:0 0 8px">${escapeHtml(line)}</p>`))
       .join("") +
     payButton +
@@ -2747,12 +2792,14 @@ async function createInvoiceCheckout(accountId: string, id: string, req: Request
   const branding = await resolveInvoiceBranding(accountId);
   const origin = new URL(req.url).origin;
   const invoiceNumber = String(invoice.invoiceNumber);
+  // The client reads these on Stripe's checkout page.
+  const mt = messageText(branding.messageLanguage);
 
   return createStripeCheckoutSession(accountId, {
     amount: Number(invoice.total) || 0,
     currency: String(invoice.currency || "NZD"),
-    productName: `Invoice ${invoiceNumber} - ${branding.businessName}`,
-    productDescription: invoice.customerName ? `Billed to ${invoice.customerName}` : "",
+    productName: mt("Invoice {number} - {businessName}", { number: invoiceNumber, businessName: branding.businessName }),
+    productDescription: invoice.customerName ? mt("Billed to {name}", { name: invoice.customerName }) : "",
     customerEmail: invoice.customerEmail ? String(invoice.customerEmail) : "",
     clientReferenceId: String(invoice.id),
     metadata: { invoice_id: String(invoice.id), account_id: accountId, invoice_number: invoiceNumber },
@@ -2835,10 +2882,11 @@ export async function resolveInvoicePaymentLink(
   if (outstanding <= 0 || invoice.status === "paid" || invoice.status === "void") return "";
 
   const invoiceNumber = String(invoice.invoiceNumber);
+  const mt = messageText(branding.messageLanguage);
   const { url, paymentLinkId } = await createStripePaymentLink({
     amount: outstanding,
     currency: String(invoice.currency || "NZD"),
-    productName: `Invoice ${invoiceNumber} - ${branding.businessName}`,
+    productName: mt("Invoice {number} - {businessName}", { number: invoiceNumber, businessName: branding.businessName }),
     metadata: { invoice_id: String(invoice.id), account_id: accountId, invoice_number: invoiceNumber },
     redirectUrl: `${origin}/?pay=success&invoice=${encodeURIComponent(invoiceNumber)}`,
   }, accountId);
@@ -4015,8 +4063,12 @@ export async function emailPosReceipt(accountId: string, id: string, body: Recor
   const couponAmount = round2(Number(transaction.couponAmount) || 0);
   const paidOnMethod = round2(Math.max(0, transaction.amount - couponAmount));
   const paidAt = new Date(transaction.paidAt || transaction.createdAt || Date.now());
+  const mt = messageText(branding.messageLanguage);
+  // English keeps the long-standing en-NZ date; another language dates the
+  // receipt in its own words, in the business's regional order.
+  const dateLocale = branding.messageLanguage === "en" ? "en-NZ" : localeForCountry(branding.country || "NZ", branding.messageLanguage);
   const dateLabel = Number.isFinite(paidAt.getTime())
-    ? paidAt.toLocaleDateString("en-NZ", { day: "numeric", month: "short", year: "numeric" })
+    ? paidAt.toLocaleDateString(dateLocale, { day: "numeric", month: "short", year: "numeric" })
     : "";
 
   const itemLines = transaction.items.length
@@ -4026,26 +4078,37 @@ export async function emailPosReceipt(accountId: string, id: string, body: Recor
       }))
     : [{ label: transaction.description, amount: transaction.amount }];
   const paymentLines = [
-    couponAmount > 0 ? { label: "Paid by gift voucher", amount: couponAmount } : null,
+    couponAmount > 0 ? { label: mt("Paid by gift voucher"), amount: couponAmount } : null,
     transaction.paymentMethodKind === "coupon" || (couponAmount > 0 && paidOnMethod <= 0)
       ? null
-      : { label: `Paid by ${transaction.paymentMethodName || "card"}`, amount: paidOnMethod },
+      : {
+          label: transaction.paymentMethodName
+            ? mt("Paid by {method}", { method: transaction.paymentMethodName })
+            : mt("Paid by card"),
+          amount: paidOnMethod,
+        },
   ].filter(Boolean) as Array<{ label: string; amount: number }>;
   const pending = transaction.status === "pending";
 
-  const subject = `Receipt ${transaction.receiptNumber} from ${branding.businessName}`;
+  const subject = mt("Receipt {number} from {businessName}", {
+    number: transaction.receiptNumber,
+    businessName: branding.businessName,
+  });
+  const greeting = transaction.customerName ? mt("Hi {name},", { name: transaction.customerName }) : mt("Hi there,");
   const plain = [
-    `Hi ${transaction.customerName || "there"},`,
+    greeting,
     "",
-    `Thanks for your purchase. Here is your receipt.`,
+    mt("Thanks for your purchase. Here is your receipt."),
     "",
-    `Receipt: ${transaction.receiptNumber}${dateLabel ? ` - ${dateLabel}` : ""}`,
+    dateLabel
+      ? mt("Receipt: {number} - {date}", { number: transaction.receiptNumber, date: dateLabel })
+      : mt("Receipt: {number}", { number: transaction.receiptNumber }),
     ...itemLines.map((line) => `${line.label}: ${formatMoney(line.amount, currency)}`),
-    `Total: ${formatMoney(transaction.amount, currency)}`,
+    mt("Total: {amount}", { amount: formatMoney(transaction.amount, currency) }),
     ...paymentLines.map((line) => `${line.label}: ${formatMoney(line.amount, currency)}`),
-    pending ? "Status: payment still owed" : "",
+    pending ? mt("Status: payment still owed") : "",
     "",
-    "Thanks,",
+    mt("Thanks,"),
     branding.businessName,
   ]
     .filter((line, index, all) => line !== "" || all[index - 1] !== "")
@@ -4056,16 +4119,16 @@ export async function emailPosReceipt(accountId: string, id: string, body: Recor
     `<td style="padding:4px 0;text-align:right;${bold ? "font-weight:600;" : ""}">${escapeHtml(amount)}</td></tr>`;
   const html =
     `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#1a1c1f;max-width:480px">` +
-    `<p style="margin:0 0 8px">Hi ${escapeHtml(transaction.customerName || "there")},</p>` +
-    `<p style="margin:0 0 16px">Thanks for your purchase. Here is your receipt.</p>` +
+    `<p style="margin:0 0 8px">${escapeHtml(greeting)}</p>` +
+    `<p style="margin:0 0 16px">${escapeHtml(mt("Thanks for your purchase. Here is your receipt."))}</p>` +
     `<p style="margin:0 0 8px;color:#5b6068">${escapeHtml(transaction.receiptNumber)}${dateLabel ? ` &middot; ${escapeHtml(dateLabel)}` : ""}</p>` +
     `<table style="width:100%;border-collapse:collapse;border-top:1px solid #d9dce1;border-bottom:1px solid #d9dce1">` +
     itemLines.map((line) => row(line.label, formatMoney(line.amount, currency))).join("") +
-    row("Total", formatMoney(transaction.amount, currency), true) +
+    row(mt("Total"), formatMoney(transaction.amount, currency), true) +
     paymentLines.map((line) => row(line.label, formatMoney(line.amount, currency))).join("") +
     `</table>` +
-    (pending ? `<p style="margin:12px 0 0">Payment for this sale is still owed.</p>` : "") +
-    `<p style="margin:16px 0 0">Thanks,<br/>${escapeHtml(branding.businessName)}</p>` +
+    (pending ? `<p style="margin:12px 0 0">${escapeHtml(mt("Payment for this sale is still owed."))}</p>` : "") +
+    `<p style="margin:16px 0 0">${escapeHtml(mt("Thanks,"))}<br/>${escapeHtml(branding.businessName)}</p>` +
     `</div>`;
 
   const result = await deliverEmail({
@@ -4222,12 +4285,13 @@ async function createPosCheckout(accountId: string, id: string, req: Request) {
   const branding = await resolveInvoiceBranding(accountId);
   const origin = new URL(req.url).origin;
   const receiptNumber = String(transaction.receiptNumber);
+  const mt = messageText(branding.messageLanguage);
 
   const session = await createStripeCheckoutSessionWith(credential, {
     amount: dueCents / 100,
     currency: String(transaction.currency),
     productName: `${transaction.description} - ${branding.businessName}`,
-    productDescription: transaction.customerName ? `For ${transaction.customerName}` : "",
+    productDescription: transaction.customerName ? mt("For {name}", { name: transaction.customerName }) : "",
     customerEmail: transaction.customerEmail || "",
     clientReferenceId: String(transaction.id),
     metadata: { pos_transaction_id: String(transaction.id), account_id: accountId, receipt_number: receiptNumber },

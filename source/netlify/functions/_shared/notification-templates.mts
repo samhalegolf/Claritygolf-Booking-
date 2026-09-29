@@ -15,6 +15,8 @@
 // a client receives come from the same defaults. It must not touch `process` or
 // any Node API.
 
+import { translateMessage } from "./message-language.mts";
+
 export type NotificationVariantId =
   | "booked"
   | "reschedule"
@@ -201,7 +203,8 @@ export function parseNotificationTemplates(raw?: unknown): NotificationTemplates
 }
 
 /**
- * One field's effective wording: what the coach wrote, or Clarity's default.
+ * One field's effective wording: what the coach wrote, exactly as written, or
+ * Clarity's default in the business's message language.
  *
  * A field the coach has deliberately emptied still falls back to the default -
  * there is no way to send a message with no subject, and "blank" is how Reset
@@ -212,10 +215,12 @@ export function notificationTemplateText(
   templates: NotificationTemplates | undefined,
   variant: NotificationVariantId,
   field: NotificationTemplateField,
+  language: unknown = "en",
 ): string {
   const written = templates?.[variant]?.[field];
   if (typeof written === "string" && written.trim()) return written;
-  return DEFAULT_NOTIFICATION_TEMPLATES[variant][field];
+  const fallback = DEFAULT_NOTIFICATION_TEMPLATES[variant][field];
+  return fallback ? translateMessage(language, fallback) : fallback;
 }
 
 /** True when this variant's field is the coach's wording rather than Clarity's. */
@@ -251,12 +256,23 @@ export function notificationVariantFor(
 }
 
 /**
- * How a text message counts against a carrier's 160-character segment. Shown
+ * How many texts a message is billed as. Shown
  * while editing, because the length is part of writing one - a stray sentence
  * quietly doubles what the send costs.
  */
-export function smsSegmentLabel(text: string): string {
-  const length = text.length;
-  const segments = Math.max(1, Math.ceil(length / 160));
-  return `${length} characters · ${segments} ${segments === 1 ? "segment" : "segments"}`;
+export function smsSegmentCount(text: string): number {
+  // Carriers send plain Latin text in the GSM alphabet: 160 characters to a
+  // text, 153 once it is split. One character outside it -- Japanese, or a
+  // Polish ł -- sends the whole message as Unicode: 70, then 67. The GSM
+  // extension characters (€ [ ] { } and friends) take two places each.
+  const chars = [...text];
+  if (chars.every((char) => GSM_BASIC.includes(char) || GSM_EXTENDED.includes(char))) {
+    const length = chars.reduce((total, char) => total + (GSM_EXTENDED.includes(char) ? 2 : 1), 0);
+    return length <= 160 ? 1 : Math.ceil(length / 153);
+  }
+  return chars.length <= 70 ? 1 : Math.ceil(chars.length / 67);
 }
+
+const GSM_BASIC =
+  "@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà";
+const GSM_EXTENDED = "^{}\\[~]|€\f";

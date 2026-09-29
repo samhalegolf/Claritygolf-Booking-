@@ -155,6 +155,7 @@ import {
   FALLBACK_PHONE_COUNTRY,
 } from "./_shared/phone.mts";
 import { deliverEmail } from "./_shared/email-delivery.mts";
+import { cleanMessageLanguage, messageText } from "./_shared/message-language.mts";
 import {
   notificationRetryDelayMs,
   planBookingNotificationIntent,
@@ -612,11 +613,11 @@ function formatRange(start, duration) {
   return `${formatTime(start)}-${formatTime(start + duration)}`;
 }
 
-function formatBookingDate(week, day, country = FALLBACK_PHONE_COUNTRY) {
+function formatBookingDate(week, day, country = FALLBACK_PHONE_COUNTRY, language = "en") {
   const date = dateForSlot(week, day);
   return new Date(
     Date.UTC(date.year, date.month - 1, date.day),
-  ).toLocaleDateString(localeForCountry(country), {
+  ).toLocaleDateString(localeForCountry(country, cleanMessageLanguage(language)), {
     weekday: "long",
     month: "short",
     day: "numeric",
@@ -5712,6 +5713,7 @@ async function writeCoachAccount(accountId: string, account) {
     accountVenueShortName: clean.venueShortName,
     accountTimezone: clean.timezone,
     accountCountry: clean.country,
+    accountMessageLanguage: clean.messageLanguage,
     accountContactEmail: clean.contactEmail,
     accountBookingUrl: clean.bookingUrl,
     accountCalendarSlug: clean.calendarSlug,
@@ -8042,29 +8044,31 @@ async function sendPasswordResetEmail(accountId, reset, req) {
   const account = await readCoachAccount(accountId);
   const resetUrl = passwordResetUrl(req, reset.token);
   const businessName = account.businessName || "Clarity Golf";
+  const mt = messageText(account.messageLanguage);
+  const title = mt("{business} password reset", { business: businessName });
   const html = `
     <div style="font-family:Arial,sans-serif;line-height:1.5;color:#111">
-      <h2>${escapeHtml(businessName)} password reset</h2>
-      <p>Use the button below to reset your Clarity Golf Booking admin password. This link expires in ${passwordResetMinutes} minutes.</p>
-      <p><a href="${escapeHtml(resetUrl)}" style="display:inline-block;background:#07100a;color:#fff;padding:12px 16px;text-decoration:none;border-radius:6px">Reset password</a></p>
-      <p>If the button does not work, paste this link into your browser:</p>
+      <h2>${escapeHtml(title)}</h2>
+      <p>${escapeHtml(mt("Use the button below to reset your Clarity Golf Booking admin password. This link expires in {minutes} minutes.", { minutes: passwordResetMinutes }))}</p>
+      <p><a href="${escapeHtml(resetUrl)}" style="display:inline-block;background:#07100a;color:#fff;padding:12px 16px;text-decoration:none;border-radius:6px">${escapeHtml(mt("Reset password"))}</a></p>
+      <p>${escapeHtml(mt("If the button does not work, paste this link into your browser:"))}</p>
       <p><a href="${escapeHtml(resetUrl)}">${escapeHtml(resetUrl)}</a></p>
-      <p>If you did not request this, you can ignore this email.</p>
+      <p>${escapeHtml(mt("If you did not request this, you can ignore this email."))}</p>
     </div>
   `;
   const textBody = [
-    `${businessName} password reset`,
+    title,
     "",
-    `Use this link to reset your Clarity Golf Booking admin password. It expires in ${passwordResetMinutes} minutes:`,
+    mt("Use this link to reset your Clarity Golf Booking admin password. It expires in {minutes} minutes:", { minutes: passwordResetMinutes }),
     resetUrl,
     "",
-    "If you did not request this, you can ignore this email.",
+    mt("If you did not request this, you can ignore this email."),
   ].join("\n");
 
   return deliverEmail({
     accountId,
     to: reset.email,
-    subject: `${businessName} password reset`,
+    subject: title,
     html,
     text: textBody,
     idempotencyKey: `password-reset-${hashToken(reset.token).slice(0, 24)}`,
@@ -8135,13 +8139,21 @@ function customGroupConfirmUrl(token) {
 
 function customGroupInviteEmail({ appointment, attendee, service, account, coach = null }) {
   const variables = bookingEmailVariables({ appointment, service, account, coach });
+  const mt = messageText(account.messageLanguage);
   const confirmUrl = customGroupConfirmUrl(attendee.token);
-  const title = `${appointment.client || "A golfer"} invited you to ${variables.service}`;
-  const intro = `${attendee.name || "Hi"}, you have been invited to join ${appointment.client || "the booker"} for ${variables.service}.`;
+  const title = mt("{client} invited you to {service}", {
+    client: appointment.client || mt("A golfer"),
+    service: variables.service,
+  });
+  const intro = mt("{name}, you have been invited to join {client} for {service}.", {
+    name: attendee.name || mt("Hi"),
+    client: appointment.client || mt("the booker"),
+    service: variables.service,
+  });
   const detailRows = `
-    <tr><td style="padding:8px;border-bottom:1px solid #dfe5d8;color:#697166">When</td><td style="padding:8px;border-bottom:1px solid #dfe5d8">${escapeHtml(variables.date)}, ${escapeHtml(variables.time)}</td></tr>
-    <tr><td style="padding:8px;border-bottom:1px solid #dfe5d8;color:#697166">Where</td><td style="padding:8px;border-bottom:1px solid #dfe5d8">${escapeHtml(variables.venue)}</td></tr>
-    <tr><td style="padding:8px;color:#697166">Group price</td><td style="padding:8px">${escapeHtml(variables.price)}</td></tr>
+    <tr><td style="padding:8px;border-bottom:1px solid #dfe5d8;color:#697166">${escapeHtml(mt("When"))}</td><td style="padding:8px;border-bottom:1px solid #dfe5d8">${escapeHtml(variables.date)}, ${escapeHtml(variables.time)}</td></tr>
+    <tr><td style="padding:8px;border-bottom:1px solid #dfe5d8;color:#697166">${escapeHtml(mt("Where"))}</td><td style="padding:8px;border-bottom:1px solid #dfe5d8">${escapeHtml(variables.venue)}</td></tr>
+    <tr><td style="padding:8px;color:#697166">${escapeHtml(mt("Group price"))}</td><td style="padding:8px">${escapeHtml(variables.price)}</td></tr>
   `;
   return {
     subject: title,
@@ -8150,8 +8162,8 @@ function customGroupInviteEmail({ appointment, attendee, service, account, coach
         <h2>${escapeHtml(title)}</h2>
         <p>${escapeHtml(intro)}</p>
         <table style="border-collapse:collapse;margin:18px 0;width:100%;max-width:520px">${detailRows}</table>
-        ${confirmUrl ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:22px 0 14px"><tr><td><a href="${escapeHtml(confirmUrl)}" style="display:inline-block;background:#07100a;color:#ffffff;padding:12px 18px;text-decoration:none;border-radius:6px;font-weight:700">Confirm attendance</a></td></tr></table>` : ""}
-        <p>Confirmation is helpful, but the booking is already in place.</p>
+        ${confirmUrl ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:22px 0 14px"><tr><td><a href="${escapeHtml(confirmUrl)}" style="display:inline-block;background:#07100a;color:#ffffff;padding:12px 18px;text-decoration:none;border-radius:6px;font-weight:700">${escapeHtml(mt("Confirm attendance"))}</a></td></tr></table>` : ""}
+        <p>${escapeHtml(mt("Confirmation is helpful, but the booking is already in place."))}</p>
       </div>
     `,
     text: [
@@ -8159,17 +8171,18 @@ function customGroupInviteEmail({ appointment, attendee, service, account, coach
       "",
       intro,
       "",
-      `When: ${variables.date}, ${variables.time}`,
-      `Where: ${variables.venue}`,
-      `Group price: ${variables.price}`,
-      confirmUrl ? `Confirm attendance: ${confirmUrl}` : "",
+      mt("When: {date}, {time}", { date: variables.date, time: variables.time }),
+      mt("Where: {venue}", { venue: variables.venue }),
+      mt("Group price: {price}", { price: variables.price }),
+      confirmUrl ? mt("Confirm attendance: {url}", { url: confirmUrl }) : "",
       "",
-      "Confirmation is helpful, but the booking is already in place.",
+      mt("Confirmation is helpful, but the booking is already in place."),
     ].filter(Boolean).join("\n"),
   };
 }
 
-function modernClientEmailFooter(value) {
+function modernClientEmailFooter(value, language = "en") {
+  const mt = messageText(language);
   const footer = cleanString(value, "", 900);
   const legacyChangeFooter =
     /need to (move|change)|reply to this email.*(move|change|reschedul)|email.*(move|change|reschedul)/i.test(
@@ -8177,7 +8190,7 @@ function modernClientEmailFooter(value) {
     );
   return footer && !legacyChangeFooter
     ? footer
-    : "We look forward to seeing you.";
+    : mt("We look forward to seeing you.");
 }
 
 // Coach emails used to go to a single global `settings.coachEmail`, ignoring the coach who
@@ -8201,7 +8214,8 @@ function resolveAppointmentCoach(appointment, coaches = [], account = defaultCoa
 }
 
 function bookingEmailVariables({ appointment, service, account, coach = null }) {
-  const client = appointment.client || appointment.title || "Client";
+  const mt = messageText(account.messageLanguage);
+  const client = appointment.client || appointment.title || mt("Client");
   const location = cleanBookingLocationSnapshot(appointment.location, {
     name: account.venueName,
     shortName: account.venueShortName,
@@ -8221,14 +8235,14 @@ function bookingEmailVariables({ appointment, service, account, coach = null }) 
     client,
     firstName: client.split(/\s+/)[0] || client,
     coach: coach?.name || account.businessName,
-    service: service?.name || "Golf Lesson",
-    date: formatBookingDate(itemWeek(appointment), appointment.day),
+    service: service?.name || mt("Golf Lesson"),
+    date: formatBookingDate(itemWeek(appointment), appointment.day, FALLBACK_PHONE_COUNTRY, account.messageLanguage),
     // A review's slot is a deadline, so the clock range it happens to occupy
     // is not a time to be anywhere. The templates are the coach's to edit, so
     // {{time}} keeps working -- it just stops naming an hour that means
     // nothing. {{date}}, the part that does mean something, is unchanged.
     time: isVideoReviewService(service)
-      ? "end of day"
+      ? mt("end of day")
       : formatRange(appointment.start, appointment.duration),
     venue: location?.name || account.venueName,
     location: location?.name || account.venueName,
@@ -8240,7 +8254,7 @@ function bookingEmailVariables({ appointment, service, account, coach = null }) 
     price: appointment.customGroup && Number.isFinite(Number(appointment.calculatedPrice))
       ? `NZ$${Number(appointment.calculatedPrice)}.00`
       : servicePriceLabel(service),
-    duration: `${appointment.duration} minutes`,
+    duration: mt("{minutes} minutes", { minutes: appointment.duration }),
     replyTo: account.contactEmail,
     rescheduleUrl: rescheduleUrl.toString(),
     googleCalendarUrl: bookingGoogleCalendarUrl({
@@ -8253,9 +8267,10 @@ function bookingEmailVariables({ appointment, service, account, coach = null }) 
   };
 }
 
-function bookingEmailHtml({ title, intro, footer, variables }) {
+function bookingEmailHtml({ title, intro, footer, variables, language = "en" }) {
+  const mt = messageText(language);
   const manageButton = variables.rescheduleUrl
-    ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:22px 0 14px"><tr><td><a href="${escapeHtml(variables.rescheduleUrl)}" style="display:inline-block;background:#07100a;color:#ffffff;padding:12px 18px;text-decoration:none;border-radius:6px;font-weight:700">Manage / Reschedule</a></td></tr></table>`
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:22px 0 14px"><tr><td><a href="${escapeHtml(variables.rescheduleUrl)}" style="display:inline-block;background:#07100a;color:#ffffff;padding:12px 18px;text-decoration:none;border-radius:6px;font-weight:700">${escapeHtml(mt("Manage / Reschedule"))}</a></td></tr></table>`
     : "";
   const calendarButtons = variables.googleCalendarUrl || variables.appleCalendarUrl
     ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 20px"><tr>${
@@ -8273,10 +8288,10 @@ function bookingEmailHtml({ title, intro, footer, variables }) {
       <h2>${escapeHtml(title)}</h2>
       <p>${escapeHtml(intro)}</p>
       <table style="border-collapse:collapse;margin:18px 0;width:100%;max-width:520px">
-        <tr><td style="padding:8px;border-bottom:1px solid #dfe5d8;color:#697166">Lesson</td><td style="padding:8px;border-bottom:1px solid #dfe5d8"><strong>${escapeHtml(variables.service)}</strong></td></tr>
-        <tr><td style="padding:8px;border-bottom:1px solid #dfe5d8;color:#697166">When</td><td style="padding:8px;border-bottom:1px solid #dfe5d8">${escapeHtml(variables.date)}, ${escapeHtml(variables.time)}</td></tr>
-        <tr><td style="padding:8px;border-bottom:1px solid #dfe5d8;color:#697166">Where</td><td style="padding:8px;border-bottom:1px solid #dfe5d8">${escapeHtml(variables.venue)}</td></tr>
-        <tr><td style="padding:8px;color:#697166">Price</td><td style="padding:8px">${escapeHtml(variables.price)}</td></tr>
+        <tr><td style="padding:8px;border-bottom:1px solid #dfe5d8;color:#697166">${escapeHtml(mt("Lesson"))}</td><td style="padding:8px;border-bottom:1px solid #dfe5d8"><strong>${escapeHtml(variables.service)}</strong></td></tr>
+        <tr><td style="padding:8px;border-bottom:1px solid #dfe5d8;color:#697166">${escapeHtml(mt("When"))}</td><td style="padding:8px;border-bottom:1px solid #dfe5d8">${escapeHtml(variables.date)}, ${escapeHtml(variables.time)}</td></tr>
+        <tr><td style="padding:8px;border-bottom:1px solid #dfe5d8;color:#697166">${escapeHtml(mt("Where"))}</td><td style="padding:8px;border-bottom:1px solid #dfe5d8">${escapeHtml(variables.venue)}</td></tr>
+        <tr><td style="padding:8px;color:#697166">${escapeHtml(mt("Price"))}</td><td style="padding:8px">${escapeHtml(variables.price)}</td></tr>
       </table>
       ${manageButton}
       ${calendarButtons}
@@ -8285,19 +8300,20 @@ function bookingEmailHtml({ title, intro, footer, variables }) {
   `;
 }
 
-function bookingEmailText({ title, intro, footer, variables }) {
+function bookingEmailText({ title, intro, footer, variables, language = "en" }) {
+  const mt = messageText(language);
   return [
     title,
     "",
     intro,
     "",
-    `Lesson: ${variables.service}`,
-    `When: ${variables.date}, ${variables.time}`,
-    `Where: ${variables.venue}`,
-    `Price: ${variables.price}`,
+    mt("Lesson: {service}", { service: variables.service }),
+    mt("When: {date}, {time}", { date: variables.date, time: variables.time }),
+    mt("Where: {venue}", { venue: variables.venue }),
+    mt("Price: {price}", { price: variables.price }),
     "",
     variables.rescheduleUrl
-      ? `Manage / Reschedule: ${variables.rescheduleUrl}`
+      ? mt("Manage / Reschedule: {url}", { url: variables.rescheduleUrl })
       : "",
     variables.googleCalendarUrl
       ? `Google Calendar: ${variables.googleCalendarUrl}`
@@ -8336,6 +8352,8 @@ async function sendBookingNotifications(
     phone: appointment.phone,
   });
   const replyTo = settings.replyToEmail || account.contactEmail;
+  const language = account.messageLanguage;
+  const mt = messageText(language);
   const jobs = [];
 
   async function sendAndRecord(channel, recipient, subject, html, text, key) {
@@ -8429,6 +8447,7 @@ async function sendBookingNotifications(
     const intro = renderTemplate(settings.clientEmailIntro, variables);
     const footerBase = modernClientEmailFooter(
       renderTemplate(settings.clientEmailFooter, variables),
+      language,
     );
     const recipient = testRecipient || appointment.email;
     const clientVariables = testRecipient
@@ -8449,12 +8468,14 @@ async function sendBookingNotifications(
           intro,
           footer: footerBase,
           variables: clientVariables,
+          language,
         }),
         bookingEmailText({
           title: subject,
           intro,
           footer: footerBase,
           variables: clientVariables,
+          language,
         }),
         `${kind}-client-${appointment.id}-${hashToken(recipient).slice(0, 12)}`,
       ),
@@ -8507,8 +8528,8 @@ async function sendBookingNotifications(
           "coach",
           recipient,
           subject,
-          bookingEmailHtml({ title: subject, intro, footer: "Coach booking alert.", variables }),
-          bookingEmailText({ title: subject, intro, footer: "Coach booking alert.", variables }),
+          bookingEmailHtml({ title: subject, intro, footer: mt("Coach booking alert."), variables, language }),
+          bookingEmailText({ title: subject, intro, footer: mt("Coach booking alert."), variables, language }),
           `${kind}-coach-${appointment.id}-${hashToken(recipient).slice(0, 12)}`,
         ),
       );
@@ -9410,40 +9431,42 @@ export function portalInviteEmailContent({
   caddyUrl,
   withCaddyPass = false,
   variant = "invite",
+  language = "en",
 }) {
+  const mt = messageText(language);
   const isReset = variant === "reset";
-  const greeting = name ? `Hi ${escapeHtml(String(name).split(/\s+/)[0])},` : "Hi,";
-  const heading = isReset ? "Reset your password" : "Welcome to the Clarity Player Portal";
+  const greeting = name ? mt("Hi {name},", { name: escapeHtml(String(name).split(/\s+/)[0]) }) : mt("Hi,");
+  const heading = isReset ? mt("Reset your password") : mt("Welcome to the Clarity Player Portal");
   const opening = isReset
-    ? `Someone asked to reset the password for your ${businessName} player portal.`
-    : `${coachName} has set up a player portal account for you. Set a password to see your lessons, your lesson notes and your videos, and to book your next session.`;
-  const buttonLabel = isReset ? "Choose a new password" : "Set your password";
+    ? mt("Someone asked to reset the password for your {business} player portal.", { business: businessName })
+    : mt("{coach} has set up a player portal account for you. Set a password to see your lessons, your lesson notes and your videos, and to book your next session.", { coach: coachName });
+  const buttonLabel = isReset ? mt("Choose a new password") : mt("Set your password");
   // A pass is only ever issued alongside a fresh invite, so a reset says
   // nothing about Caddy even if the flag were somehow passed.
   const mentionCaddy = withCaddyPass && !isReset;
   const expiry = isReset
-    ? `This link expires in ${portalResetMinutes} minutes.`
-    : `This link expires in ${portalInviteDays} days.`;
+    ? mt("This link expires in {minutes} minutes.", { minutes: portalResetMinutes })
+    : mt("This link expires in {days} days.", { days: portalInviteDays });
   // The line that matters on a reset nobody asked for. An invite has no
   // equivalent: ignoring it is already the whole remedy.
   const ignoreLine = isReset
-    ? "If you did not ask for this, ignore this email. Your password will not change."
+    ? mt("If you did not ask for this, ignore this email. Your password will not change.")
     : "";
 
   const subject = isReset
-    ? `Reset your ${businessName} player portal password`
+    ? mt("Reset your {business} player portal password", { business: businessName })
     : mentionCaddy
-      ? `Your ${businessName} player portal and Clarity Caddy pass`
-      : `Your ${businessName} player portal`;
+      ? mt("Your {business} player portal and Clarity Caddy pass", { business: businessName })
+      : mt("Your {business} player portal", { business: businessName });
 
   const html = `
     <div style="font-family:Arial,sans-serif;line-height:1.5;color:#111">
       <h2>${escapeHtml(heading)}</h2>
       <p>${greeting}</p>
       <p>${escapeHtml(opening)}</p>
-      ${mentionCaddy ? `<p><strong>You also have a Clarity Caddy pass.</strong> The same login works for both.</p>` : ""}
+      ${mentionCaddy ? `<p><strong>${escapeHtml(mt("You also have a Clarity Caddy pass."))}</strong> ${escapeHtml(mt("The same login works for both."))}</p>` : ""}
       <p><a href="${escapeHtml(linkUrl)}" style="display:inline-block;background:#07100a;color:#fff;padding:12px 16px;text-decoration:none;border-radius:6px">${escapeHtml(buttonLabel)}</a></p>
-      <p>If the button does not work, paste this link into your browser:</p>
+      <p>${escapeHtml(mt("If the button does not work, paste this link into your browser:"))}</p>
       <p><a href="${escapeHtml(linkUrl)}">${escapeHtml(linkUrl)}</a></p>
       ${mentionCaddy ? `<p>Clarity Caddy: <a href="${escapeHtml(caddyUrl)}">${escapeHtml(caddyUrl)}</a></p>` : ""}
       <p>${escapeHtml(expiry)}</p>
@@ -9454,9 +9477,9 @@ export function portalInviteEmailContent({
     heading,
     "",
     opening,
-    mentionCaddy ? "You also have a Clarity Caddy pass. The same login works for both." : "",
+    mentionCaddy ? mt("You also have a Clarity Caddy pass. The same login works for both.") : "",
     "",
-    isReset ? "Choose a new password:" : "Set a password to see your lessons, lesson notes and videos, and to book your next session:",
+    isReset ? mt("Choose a new password:") : mt("Set a password to see your lessons, lesson notes and videos, and to book your next session:"),
     linkUrl,
     mentionCaddy ? `\nClarity Caddy: ${caddyUrl}` : "",
     "",
@@ -9480,6 +9503,7 @@ async function sendPortalInviteEmail({ accountId, req, email, name, token, withC
     caddyUrl: caddyAppUrl(),
     withCaddyPass,
     variant,
+    language: account.messageLanguage,
   });
 
   return deliverEmail({
@@ -10230,6 +10254,7 @@ async function writeFreshSandboxSettings(sandboxId: string, parentId: string) {
   await setSettingsBulk(sandboxId, {
     ...fresh,
     accountCountry: settingValue(parentSettings, "accountCountry"),
+    accountMessageLanguage: settingValue(parentSettings, "accountMessageLanguage"),
     accountTimezone: settingValue(parentSettings, "accountTimezone") || fresh.accountTimezone,
     // The plan is a copy of the live one, so entitlement checks run for real
     // rather than being bypassed. subscriptionStatus 'internal' is an existing

@@ -3965,5 +3965,21 @@
   "{count} things to work on. Tap a block to read it.": "取り組むこと{count}件。ブロックをタップして確認してください。",
   "{count} credit": "{count}クレジット",
   "{name} — back with you within {count} day.": "{name} — {count}日以内にお返しします。",
-  "{name} — back with you within {count} days.": "{name} — {count}日以内にお返しします。"
+  "{name} — back with you within {count} days.": "{name} — {count}日以内にお返しします。",
+  "New booking": "新規予約",
+  "Sent the moment a lesson is booked": "レッスンが予約された時点で送信",
+  "Rescheduled": "日程変更",
+  "Sent when a lesson moves": "レッスンの日時が変更されたときに送信",
+  "Sent before the lesson, at your reminder lead time": "レッスン前、設定したリマインダーのタイミングで送信",
+  "Sent immediately on cancellation": "キャンセル時にすぐ送信",
+  "Group session": "グループセッション",
+  "Sent instead of New booking when the lesson type is a group": "レッスンの種類がグループの場合、「新規予約」の代わりに送信",
+  "Sent instead of New booking when the lesson type is a package": "レッスンの種類がパッケージの場合、「新規予約」の代わりに送信",
+  "{characters} · {segments}": "{characters} · {segments}",
+  "{count} character": "{count}文字",
+  "{count} characters": "{count}文字",
+  "{count} segment": "{count}セグメント",
+  "{count} segments": "{count}セグメント",
+  "Email & text language": "メールとSMSの言語",
+  "The language of Clarity's wording in the emails and texts your clients receive. Anything you have written yourself in Message templates is sent exactly as you wrote it.": "クライアントに届くメールとSMSで、Clarityが用意した文面に使われる言語です。メッセージテンプレートにご自身で入力した内容は、入力したとおりに送信されます。"
 }

@@ -33,6 +33,8 @@ import {
   type ReviewSharePayload,
 } from "./_shared/swing-review-share.mts";
 import { canonicalPhoneKey, cleanPhoneCountry } from "./_shared/phone.mts";
+import { localeForCountry } from "./_shared/locale.mts";
+import { cleanMessageLanguage, messageText } from "./_shared/message-language.mts";
 import {
   MAX_SNAPSHOT_IMAGE_BYTES,
   carryImageFileIds,
@@ -2918,6 +2920,19 @@ async function deliverCoachReturn(session: VideoTransferSession): Promise<VideoT
 }
 
 /**
+ * The business's message language (accountMessageLanguage) and country, read
+ * per call. Every email below goes out in that language -- the player's and
+ * the coach's alike. A failed read sends English rather than no email.
+ */
+async function accountMessageSettings(accountId: string) {
+  const settings = (await readSettings(accountId).catch(() => ({}))) as Record<string, string>;
+  return {
+    language: cleanMessageLanguage(settings.accountMessageLanguage),
+    country: cleanString(settings.accountCountry, "", 8),
+  };
+}
+
+/**
  * Emails the player that their coach has sent a video back.
  *
  * Unlike the coach's own alerts this goes to a real client address, so the
@@ -2937,12 +2952,14 @@ async function notifyPlayerOfCoachReturn(session: VideoTransferSession) {
   const to = cleanString(rows[0]?.email, "", 180);
   const siteUrl =
     env("URL") || env("DEPLOY_PRIME_URL") || env("CLARITY_SITE_URL", "https://claritygolf.app");
-  const subject = "Your coach sent you a video";
+  const { language } = await accountMessageSettings(accountId);
+  const mt = messageText(language);
+  const subject = mt("Your coach sent you a video");
   const message = cleanString(session.coachMessage, "", 600);
   const lines = [
-    "Your coach has sent a video back to your player portal.",
-    message ? `\nTheir note: ${message}` : "",
-    `\nSign in and open Videos to watch it: ${siteUrl}`,
+    mt("Your coach has sent a video back to your player portal."),
+    message ? `\n${mt("Their note: {message}", { message })}` : "",
+    `\n${mt("Sign in and open Videos to watch it: {url}", { url: siteUrl })}`,
   ].filter(Boolean);
 
   const delivery = await deliverEmail({
@@ -2978,13 +2995,17 @@ async function notifyCoachOfPlayerSubmission(session: VideoTransferSession) {
   // The transfer session names the business whose coach is being notified.
   const accountId = cleanString(session.accountId, "", 120);
   const to = env("CLARITY_ALERT_EMAIL") || env("CLARITY_COACH_EMAIL");
-  const playerName = cleanString(session.submittedByName, "A player", 180);
-  const subject = `${playerName} sent you a video`;
+  const { language } = await accountMessageSettings(accountId);
+  const mt = messageText(language);
+  const playerName = cleanString(session.submittedByName, "", 180);
+  const subject = playerName ? mt("{name} sent you a video", { name: playerName }) : mt("A player sent you a video");
   const message = cleanString(session.playerMessage, "", 600);
   const lines = [
-    `${playerName} has sent you a swing video through the player portal.`,
-    message ? `\nTheir note: ${message}` : "",
-    "\nOpen Player Profiles in Clarity Golf Booking to watch it.",
+    playerName
+      ? mt("{name} has sent you a swing video through the player portal.", { name: playerName })
+      : mt("A player has sent you a swing video through the player portal."),
+    message ? `\n${mt("Their note: {message}", { message })}` : "",
+    `\n${mt("Open Player Profiles in Clarity Golf Booking to watch it.")}`,
   ].filter(Boolean);
 
   const delivery = await deliverEmail({
@@ -3034,25 +3055,46 @@ async function notifyCoachOfPlayerSubmission(session: VideoTransferSession) {
 async function notifyCoachOfGuestSubmission(session: VideoTransferSession, coachViewToken: string) {
   const accountId = cleanString(session.accountId, "", 120);
   const to = env("CLARITY_ALERT_EMAIL") || env("CLARITY_COACH_EMAIL");
-  const senderName = cleanString(session.submittedByName, "Someone", 180);
+  const { language, country } = await accountMessageSettings(accountId);
+  const mt = messageText(language);
+  const typedName = cleanString(session.submittedByName, "", 180);
   const senderEmail = cleanString(session.submittedByEmail, "", 180);
   const message = cleanString(session.playerMessage, "", 600);
   const appUrl = (env("CLARITY_APP_URL", "") || "").replace(/\/$/, "");
   const shareUrl = appUrl
     ? `${appUrl}/?videoShare=${encodeURIComponent(coachViewToken)}`
     : "";
-  const expiryLabel = session.coachViewExpiresAt
-    ? new Date(session.coachViewExpiresAt).toDateString()
-    : `${guestRetentionDays} days from now`;
-  const subject = `${senderName} sent you a video`;
+  const expiryDate = session.coachViewExpiresAt ? new Date(session.coachViewExpiresAt) : null;
+  const expiryLabel = expiryDate
+    ? language === "en"
+      ? expiryDate.toDateString()
+      : expiryDate.toLocaleDateString(localeForCountry(country || "NZ", language), {
+          weekday: "short",
+          day: "numeric",
+          month: "short",
+          year: "numeric",
+        })
+    : mt("{count} days from now", { count: guestRetentionDays });
+  const subject = typedName ? mt("{name} sent you a video", { name: typedName }) : mt("Someone sent you a video");
+  // Say plainly that none of this is verified. They typed it themselves.
+  const senderName = typedName || mt("Someone");
+  const claimed = senderEmail
+    ? mt("They say they are {name} ({email}). They do not have an account yet, so none of that has been checked.", {
+        name: senderName,
+        email: senderEmail,
+      })
+    : mt("They say they are {name}. They do not have an account yet, so none of that has been checked.", { name: senderName });
   const lines = [
-    `${senderName} has sent you a swing video.`,
+    typedName
+      ? mt("{name} has sent you a swing video.", { name: typedName })
+      : mt("Someone has sent you a swing video."),
     "",
-    // Say plainly that none of this is verified. They typed it themselves.
-    `They say they are ${senderName}${senderEmail ? ` (${senderEmail})` : ""}. They do not have an account yet, so none of that has been checked.`,
-    message ? `\nTheir note: ${message}` : "",
-    shareUrl ? `\nWatch or download it here:\n${shareUrl}` : "\nOpen Clarity Golf Booking to watch it.",
-    `\nThis link and the video expire on ${expiryLabel}. Adding them as a player from Clarity Golf Booking keeps the video for good.`,
+    claimed,
+    message ? `\n${mt("Their note: {message}", { message })}` : "",
+    shareUrl
+      ? `\n${mt("Watch or download it here:")}\n${shareUrl}`
+      : `\n${mt("Open Clarity Golf Booking to watch it.")}`,
+    `\n${mt("This link and the video expire on {date}. Adding them as a player from Clarity Golf Booking keeps the video for good.", { date: expiryLabel })}`,
   ].filter(Boolean);
 
   const delivery = await deliverEmail({
@@ -4066,6 +4108,7 @@ async function handleReviewSend(req: Request, accountId: string, diagnostics: Pr
     videoCount: sessions.length,
     noteCount: notes.length,
     practiceCount: practice.length,
+    language: settings.accountMessageLanguage,
   });
 
   const delivery = await deliverEmail({

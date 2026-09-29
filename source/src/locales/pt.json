@@ -3965,5 +3965,21 @@
   "{count} things to work on. Tap a block to read it.": "{count} pontos a trabalhar. Toque num bloco para o ler.",
   "{count} credit": "{count} crédito",
   "{name} — back with you within {count} day.": "{name} — resposta no prazo de {count} dia.",
-  "{name} — back with you within {count} days.": "{name} — resposta no prazo de {count} dias."
+  "{name} — back with you within {count} days.": "{name} — resposta no prazo de {count} dias.",
+  "New booking": "Nova reserva",
+  "Sent the moment a lesson is booked": "Enviado assim que uma aula é marcada",
+  "Rescheduled": "Reagendada",
+  "Sent when a lesson moves": "Enviado quando uma aula muda de data ou hora",
+  "Sent before the lesson, at your reminder lead time": "Enviado antes da aula, com a antecedência definida para lembretes",
+  "Sent immediately on cancellation": "Enviado imediatamente após o cancelamento",
+  "Group session": "Sessão de grupo",
+  "Sent instead of New booking when the lesson type is a group": "Enviado em vez de Nova reserva quando o tipo de aula é de grupo",
+  "Sent instead of New booking when the lesson type is a package": "Enviado em vez de Nova reserva quando o tipo de aula é um pacote",
+  "{characters} · {segments}": "{characters} · {segments}",
+  "{count} character": "{count} carácter",
+  "{count} characters": "{count} caracteres",
+  "{count} segment": "{count} segmento",
+  "{count} segments": "{count} segmentos",
+  "Email & text language": "Idioma dos emails e SMS",
+  "The language of Clarity's wording in the emails and texts your clients receive. Anything you have written yourself in Message templates is sent exactly as you wrote it.": "O idioma dos textos do Clarity nos emails e SMS que os seus clientes recebem. Tudo o que escreveu nos Modelos de mensagem é enviado exatamente como o escreveu."
 }

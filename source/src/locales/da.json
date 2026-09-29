@@ -3965,5 +3965,21 @@
   "{count} things to work on. Tap a block to read it.": "{count} ting at arbejde med. Tryk på en blok for at læse den.",
   "{count} credit": "{count} klip",
   "{name} — back with you within {count} day.": "{name} — tilbage hos dig inden for {count} dag.",
-  "{name} — back with you within {count} days.": "{name} — tilbage hos dig inden for {count} dage."
+  "{name} — back with you within {count} days.": "{name} — tilbage hos dig inden for {count} dage.",
+  "New booking": "Ny booking",
+  "Sent the moment a lesson is booked": "Sendes, så snart en lektion bliver booket",
+  "Rescheduled": "Flyttet",
+  "Sent when a lesson moves": "Sendes, når en lektion bliver flyttet",
+  "Sent before the lesson, at your reminder lead time": "Sendes før lektionen, efter din valgte påmindelsestid",
+  "Sent immediately on cancellation": "Sendes straks ved aflysning",
+  "Group session": "Gruppesession",
+  "Sent instead of New booking when the lesson type is a group": "Sendes i stedet for Ny booking, når lektionstypen er en gruppe",
+  "Sent instead of New booking when the lesson type is a package": "Sendes i stedet for Ny booking, når lektionstypen er en pakke",
+  "{characters} · {segments}": "{characters} · {segments}",
+  "{count} character": "{count} tegn",
+  "{count} characters": "{count} tegn",
+  "{count} segment": "{count} segment",
+  "{count} segments": "{count} segmenter",
+  "Email & text language": "Sprog i mails og sms'er",
+  "The language of Clarity's wording in the emails and texts your clients receive. Anything you have written yourself in Message templates is sent exactly as you wrote it.": "Sproget i Claritys tekster i de mails og sms'er, dine klienter modtager. Alt, hvad du selv har skrevet i Beskedskabeloner, sendes præcis, som du skrev det."
 }

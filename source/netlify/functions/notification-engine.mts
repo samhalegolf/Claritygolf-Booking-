@@ -3,6 +3,7 @@ import { deliverEmail } from "./_shared/email-delivery.mts";
 import { settingsSelectQuery } from "./_shared/settings-scope.mts";
 import { localeForCountry } from "./_shared/locale.mts";
 import { cleanPhoneCountry } from "./_shared/phone.mts";
+import { cleanMessageLanguage, messageText } from "./_shared/message-language.mts";
 import { sendCoachPush, type CoachPushMessage } from "./_shared/push-notify.mts";
 import { SETTINGS_BULK_EXCLUDE_FILTER } from "./_shared/settings-keys.mts";
 
@@ -187,6 +188,15 @@ async function settingRows(accountId: string) {
 async function readSettings(accountId: string) {
   const rows = await settingRows(accountId);
   const s = Object.fromEntries(rows.map((row: any) => [row.key, row.value]));
+  // The language this business writes to its clients in. Per request, like the
+  // country below: never a module value on a lambda serving many businesses.
+  const messageLanguage = cleanMessageLanguage(s.accountMessageLanguage);
+  const mt = messageText(messageLanguage);
+  // The coach-alert wording shipped in English. A stored value equal to that
+  // shipped default was never touched, so it goes out in the business's
+  // language; anything the coach changed goes out as they wrote it.
+  const internalWording = (stored: unknown, shipped: string, translated: string) =>
+    !stored || stored === shipped ? translated : String(stored);
   const siteUrl = cleanUrl(
     env("URL") || env("DEPLOY_PRIME_URL") || env("CLARITY_SITE_URL", "https://claritygolf.app"),
     "https://claritygolf.app/",
@@ -215,19 +225,27 @@ async function readSettings(accountId: string) {
     clientEmailSubject: s.clientEmailSubject || "Your {{service}} is confirmed",
     clientEmailIntro: s.clientEmailIntro || "Thanks {{firstName}}, your booking with {{coach}} is confirmed.",
     clientEmailFooter: s.clientEmailFooter || "We look forward to seeing you.",
-    adminEmailSubject: s.adminEmailSubject || "New booking: {{client}}",
-    adminEmailIntro: s.adminEmailIntro || "{{client}} booked {{service}} for {{date}} at {{time}}.",
+    // The client legacy values above and below stay in shipped English on
+    // purpose: clientText() compares them with that English to tell untouched
+    // from customised, and falls back to the translated template default.
+    adminEmailSubject: internalWording(s.adminEmailSubject, "New booking: {{client}}", mt("New booking: {{client}}")),
+    adminEmailIntro: internalWording(
+      s.adminEmailIntro,
+      "{{client}} booked {{service}} for {{date}} at {{time}}.",
+      mt("{{client}} booked {{service}} for {{date}} at {{time}}."),
+    ),
     rescheduleClientSubject: s.rescheduleClientSubject || "Your {{service}} has been rescheduled",
-    rescheduleAdminSubject: s.rescheduleAdminSubject || "Rescheduled booking: {{client}}",
+    rescheduleAdminSubject: internalWording(s.rescheduleAdminSubject, "Rescheduled booking: {{client}}", mt("Rescheduled booking: {{client}}")),
     cancellationClientSubject: s.cancellationClientSubject || "Your {{service}} booking has been cancelled",
-    cancellationAdminSubject: s.cancellationAdminSubject || "Cancelled booking: {{client}}",
+    cancellationAdminSubject: internalWording(s.cancellationAdminSubject, "Cancelled booking: {{client}}", mt("Cancelled booking: {{client}}")),
     updateClientSubject: s.updateClientSubject || "Your {{service}} booking has been updated",
-    updateAdminSubject: s.updateAdminSubject || "Updated booking: {{client}}",
+    updateAdminSubject: internalWording(s.updateAdminSubject, "Updated booking: {{client}}", mt("Updated booking: {{client}}")),
     reminderClientSubject: s.reminderClientSubject || "Reminder: {{service}} at {{time}}",
     // Carried on the settings object rather than parked in a module: this is a
     // lambda serving many businesses, and the country of whichever one was read
     // last is not this one's. Every date formatter below takes it from here.
     country: cleanPhoneCountry(s.accountCountry),
+    messageLanguage,
     businessName: s.accountBusinessName || env("CLARITY_BUSINESS_NAME", ""),
     coachName: s.accountCoachName || env("CLARITY_COACH_NAME", ""),
     venueName: s.accountVenueName || env("CLARITY_VENUE_NAME", ""),
@@ -297,11 +315,11 @@ function slotDate(week = 0, day = 0) {
   return date;
 }
 
-function slotDateLabel(week = 0, day = 0, country = "") {
+function slotDateLabel(week = 0, day = 0, country = "", language = "en") {
   // The slot date is a UTC-midnight instant; format it as UTC so the label is
   // the same calendar day regardless of the runtime's local timezone (Netlify
   // is UTC, but the local dev server is not).
-  return slotDate(week, day).toLocaleDateString(localeForCountry(country), {
+  return slotDate(week, day).toLocaleDateString(localeForCountry(country, language), {
     weekday: "long",
     month: "short",
     day: "numeric",
@@ -334,7 +352,9 @@ function rangeLabel(start = 0, duration = 0) {
   return `${timeLabel(start)}-${timeLabel(Number(start || 0) + Number(duration || 0))}`;
 }
 
-function normaliseAppointment(raw: any = {}) {
+// clientFallback names a booking with no client in the business's language;
+// the coach push keeps the English default.
+function normaliseAppointment(raw: any = {}, clientFallback = "Client") {
   const client = cleanText(raw.client, cleanText(raw.title, [raw.firstName, raw.lastName].filter(Boolean).join(" "), 160), 160);
   const attendees = Array.isArray(raw.attendees)
     ? raw.attendees
@@ -360,7 +380,7 @@ function normaliseAppointment(raw: any = {}) {
     start: Number(raw.start ?? 0),
     duration: Number(raw.duration ?? 30),
     serviceId: cleanText(raw.serviceId || raw.service_id, "", 160),
-    client: client || "Client",
+    client: client || clientFallback,
     title: cleanText(raw.title, client || "Booking", 160),
     phone: cleanText(raw.phone, "", 80),
     email: cleanEmail(raw.email, ""),
@@ -401,20 +421,26 @@ function customGroupConfirmUrl(token: string, settings: any) {
 }
 
 function customGroupInviteBody(appt: any, attendee: any, serviceName: string, settings: any, variables: Record<string, string>) {
+  const mt = messageText(settings.messageLanguage);
   const confirmUrl = customGroupConfirmUrl(attendee.token, settings);
-  const subject = `${variables.client} invited you to ${serviceName}`;
-  const intro = `${variables.client} added you to a custom group lesson with ${settings.coachName || settings.businessName}.`;
+  const subject = mt("{client} invited you to {service}", { client: variables.client, service: serviceName });
+  const intro = mt("{client} added you to a custom group lesson with {coach}.", {
+    client: variables.client,
+    coach: settings.coachName || settings.businessName,
+  });
+  const heading = mt("Confirm your spot");
+  const confirmLabel = mt("Confirm attendance");
   const rows = [
-    ["Lesson", serviceName],
-    ["When", `${variables.date}, ${variables.time}`],
-    ["Where", variables.venue],
-    ["Invited attendee", attendee.name],
+    [mt("Lesson"), serviceName],
+    [mt("When"), `${variables.date}, ${variables.time}`],
+    [mt("Where"), variables.venue],
+    [mt("Invited attendee"), attendee.name],
   ] as Array<[string, string]>;
   const button = confirmUrl
-    ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:16px 0 12px"><tr><td><a href="${escapeHtml(confirmUrl)}" style="display:inline-block;background:#07100a;color:#ffffff;padding:13px 20px;text-decoration:none;border-radius:7px;font-weight:700">Confirm attendance</a></td></tr></table>`
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:16px 0 12px"><tr><td><a href="${escapeHtml(confirmUrl)}" style="display:inline-block;background:#07100a;color:#ffffff;padding:13px 20px;text-decoration:none;border-radius:7px;font-weight:700">${escapeHtml(confirmLabel)}</a></td></tr></table>`
     : "";
-  const html = `<div style="font-family:Arial,sans-serif;line-height:1.55;color:#0f1a13;background:#eff3ec;padding:18px 10px"><div style="max-width:620px;margin:0 auto"><div style="background:#fff;border:1px solid #e3e9df;border-radius:12px;padding:24px"><p style="margin:0;font-size:12px;letter-spacing:.03em;text-transform:uppercase;color:#667066">${escapeHtml(settings.businessName || settings.coachName || "Clarity Golf")}</p><h1 style="margin:8px 0 12px;font-size:30px;line-height:1.15;color:#121d14">Confirm your spot</h1><p style="margin:0;color:#3a473a;font-size:15px;line-height:1.7">${escapeHtml(intro)}</p><div style="margin:18px 0">${detailTable(rows)}</div>${button}<p style="margin:16px 0 0;color:#526054">If the button does not work, paste this link into your browser: ${escapeHtml(confirmUrl)}</p></div></div></div>`;
-  const text = ["Confirm your spot", "", intro, "", ...rows.map(([label, value]) => `${label}: ${value}`), "", confirmUrl ? `Confirm attendance: ${confirmUrl}` : ""].filter(Boolean).join("\n");
+  const html = `<div style="font-family:Arial,sans-serif;line-height:1.55;color:#0f1a13;background:#eff3ec;padding:18px 10px"><div style="max-width:620px;margin:0 auto"><div style="background:#fff;border:1px solid #e3e9df;border-radius:12px;padding:24px"><p style="margin:0;font-size:12px;letter-spacing:.03em;text-transform:uppercase;color:#667066">${escapeHtml(settings.businessName || settings.coachName || "Clarity Golf")}</p><h1 style="margin:8px 0 12px;font-size:30px;line-height:1.15;color:#121d14">${escapeHtml(heading)}</h1><p style="margin:0;color:#3a473a;font-size:15px;line-height:1.7">${escapeHtml(intro)}</p><div style="margin:18px 0">${detailTable(rows)}</div>${button}<p style="margin:16px 0 0;color:#526054">${escapeHtml(mt("If the button does not work, paste this link into your browser: {url}", { url: confirmUrl }))}</p></div></div></div>`;
+  const text = [heading, "", intro, "", ...rows.map(([label, value]) => `${label}: ${value}`), "", confirmUrl ? `${confirmLabel}: ${confirmUrl}` : ""].filter(Boolean).join("\n");
   return { subject, html, text };
 }
 
@@ -445,6 +471,7 @@ function rescheduleUrlFor(appt: any, settings: any) {
 }
 
 function googleCalendarUrlFor(appt: any, serviceName: string, settings: any, rescheduleUrl: string) {
+  const mt = messageText(settings.messageLanguage);
   const location = cleanBookingLocationSnapshot(appt.location, {
     name: settings.venueName,
     timezone: settings.timezone,
@@ -452,17 +479,17 @@ function googleCalendarUrlFor(appt: any, serviceName: string, settings: any, res
   const start = compactLocalDateTime(appt.week, appt.day, appt.start);
   const end = compactLocalDateTime(appt.week, appt.day, Number(appt.start || 0) + Number(appt.duration || 0));
   const details = [
-    `${serviceName} for ${appt.client || appt.title || "Client"}.`,
-    location?.address ? `Address: ${location.address}` : "",
-    location?.arrivalInstructions ? `Arrival: ${location.arrivalInstructions}` : "",
-    location?.mapUrl ? `Map: ${location.mapUrl}` : "",
-    rescheduleUrl ? `Manage or reschedule: ${rescheduleUrl}` : "",
+    mt("{service} for {client}.", { service: serviceName, client: appt.client || appt.title || mt("Client") }),
+    location?.address ? mt("Address: {address}", { address: location.address }) : "",
+    location?.arrivalInstructions ? mt("Arrival: {instructions}", { instructions: location.arrivalInstructions }) : "",
+    location?.mapUrl ? mt("Map: {url}", { url: location.mapUrl }) : "",
+    rescheduleUrl ? mt("Manage or reschedule: {url}", { url: rescheduleUrl }) : "",
   ]
     .filter(Boolean)
     .join("\n");
   const params = new URLSearchParams({
     action: "TEMPLATE",
-    text: `${serviceName} with ${settings.coachName || settings.businessName}`,
+    text: mt("{service} with {coach}", { service: serviceName, coach: settings.coachName || settings.businessName }),
     dates: `${start}/${end}`,
     details,
     location: bookingLocationDisplay(location),
@@ -512,24 +539,26 @@ async function recordNotification(row: any) {
   }
 }
 
-function actionLabels(action: BookingAction) {
-  if (action === "rescheduled") return { title: "Booking rescheduled", clientSubject: "Your golf lesson has been rescheduled", adminSubject: "Booking rescheduled" };
-  if (action === "cancelled") return { title: "Booking cancelled", clientSubject: "Your golf lesson has been cancelled", adminSubject: "Booking cancelled" };
-  if (action === "updated") return { title: "Booking updated", clientSubject: "Your golf lesson booking was updated", adminSubject: "Booking updated" };
-  if (action === "reminder") return { title: "Booking reminder", clientSubject: "Reminder: your golf lesson is coming up", adminSubject: "Booking reminder" };
-  if (action === "test") return { title: "Booking email test", clientSubject: "Clarity Golf booking email test", adminSubject: "Clarity Golf booking email test" };
-  return { title: "Booking confirmed", clientSubject: "Your golf lesson is confirmed", adminSubject: "New booking" };
+// The heading on the coach and admin copies, in the business's language.
+function actionTitle(action: BookingAction, mt: ReturnType<typeof messageText>) {
+  if (action === "rescheduled") return mt("Booking rescheduled");
+  if (action === "cancelled") return mt("Booking cancelled");
+  if (action === "updated") return mt("Booking updated");
+  if (action === "reminder") return mt("Booking reminder");
+  if (action === "test") return mt("Booking email test");
+  return mt("Booking confirmed");
 }
 
 function variablesFor(action: BookingAction, appt: any, previous: any, serviceName: string, settings: any, service?: any) {
   const rescheduleUrl = rescheduleUrlFor(appt, settings);
+  const mt = messageText(settings.messageLanguage);
   const location = cleanBookingLocationSnapshot(appt.location, {
     name: settings.venueName,
     timezone: settings.timezone,
   });
   return {
     client: appt.client || appt.title,
-    firstName: String(appt.client || appt.title || "Client").split(/\s+/)[0] || "Client",
+    firstName: String(appt.client || appt.title || mt("Client")).split(/\s+/)[0] || mt("Client"),
     coach: resolveAppointmentCoach(appt, settings).name || settings.coachName || settings.businessName,
     // The coach's first name alone. A sign-off reads "See you on the range,
     // Jordan" — the full name there sounds like a form letter.
@@ -539,9 +568,9 @@ function variablesFor(action: BookingAction, appt: any, previous: any, serviceNa
       ).split(/\s+/)[0] || "",
     business: settings.businessName,
     service: serviceName,
-    date: slotDateLabel(appt.week, appt.day, settings.country),
+    date: slotDateLabel(appt.week, appt.day, settings.country, settings.messageLanguage),
     time: rangeLabel(appt.start, appt.duration),
-    previousDate: previous ? slotDateLabel(previous.week, previous.day, settings.country) : "",
+    previousDate: previous ? slotDateLabel(previous.week, previous.day, settings.country, settings.messageLanguage) : "",
     previousTime: previous ? rangeLabel(previous.start, previous.duration) : "",
     venue: location?.name || settings.venueName,
     location: location?.name || settings.venueName,
@@ -550,8 +579,8 @@ function variablesFor(action: BookingAction, appt: any, previous: any, serviceNa
     mapUrl: location?.mapUrl || "",
     arrivalInstructions: location?.arrivalInstructions || "",
     publicNotes: location?.publicNotes || "",
-    phone: appt.phone || "Not supplied",
-    email: appt.email || "Not supplied",
+    phone: appt.phone || mt("Not supplied"),
+    email: appt.email || mt("Not supplied"),
     action,
     rescheduleUrl,
     // The public booking page, so a cancellation or package message can point
@@ -606,7 +635,7 @@ function clientText(
     return render(value, variables);
   }
 
-  return render(notificationTemplateText(settings.notificationTemplates, variant, field), variables);
+  return render(notificationTemplateText(settings.notificationTemplates, variant, field, settings.messageLanguage), variables);
 }
 
 function templateSubjects(
@@ -615,6 +644,7 @@ function templateSubjects(
   settings: any,
   variables: Record<string, string>,
 ) {
+  const mt = messageText(settings.messageLanguage);
   const sharedSubjectTemplate = cleanText(settings.notificationSubjectLine, "", 180);
   const sharedSubject = sharedSubjectTemplate.trim() ? render(sharedSubjectTemplate, variables) : "";
   if (sharedSubject) return { client: sharedSubject, admin: sharedSubject };
@@ -629,12 +659,12 @@ function templateSubjects(
         : action === "updated"
           ? render(settings.updateAdminSubject, variables)
           : action === "reminder"
-            ? `Reminder: ${variables.client}`
+            ? mt("Reminder: {client}", { client: variables.client })
             : action === "test"
-              ? "Clarity Golf booking email test"
+              ? mt("Clarity Golf booking email test")
               : render(settings.adminEmailSubject, variables);
 
-  if (action === "test") return { client: "Clarity Golf booking email test", admin };
+  if (action === "test") return { client: mt("Clarity Golf booking email test"), admin };
   return { client: clientText(variant, "subject", settings, variables), admin };
 }
 
@@ -644,7 +674,7 @@ function clientIntro(
   settings: any,
   variables: Record<string, string>,
 ) {
-  if (action === "test") return "This is a test of your booking email template.";
+  if (action === "test") return messageText(settings.messageLanguage)("This is a test of your booking email template.");
   return clientText(variant, "body", settings, variables);
 }
 
@@ -654,7 +684,7 @@ function clientFooter(
   settings: any,
   variables: Record<string, string>,
 ) {
-  if (action === "test") return "Email delivery is working.";
+  if (action === "test") return messageText(settings.messageLanguage)("Email delivery is working.");
   return clientText(variant, "signoff", settings, variables);
 }
 
@@ -668,10 +698,10 @@ function detailTable(rows: Array<[string, string]>) {
     .join("")}</table>`;
 }
 
-function reviewButtonHtml(url: string) {
+function reviewButtonHtml(url: string, label: string) {
   const reviewHref = cleanUrl(url, "");
   if (!reviewHref) return "";
-  return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 18px"><tr><td><a href="${escapeHtml(reviewHref)}" style="display:inline-block;background:#3b82c4;color:#ffffff;padding:13px 18px;text-decoration:none;border-radius:7px;font-weight:700">Leave a Google Review</a></td></tr></table>`;
+  return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 18px"><tr><td><a href="${escapeHtml(reviewHref)}" style="display:inline-block;background:#3b82c4;color:#ffffff;padding:13px 18px;text-decoration:none;border-radius:7px;font-weight:700">${escapeHtml(label)}</a></td></tr></table>`;
 }
 
 function clientActionButtonsHtml(
@@ -681,6 +711,7 @@ function clientActionButtonsHtml(
   settings: any,
 ) {
   if (action === "cancelled" || action === "test") return "";
+  const mt = messageText(settings?.messageLanguage);
   // The coach names the button; where it goes is not theirs to change. A blank
   // label means they cleared it, so the button drops off entirely.
   const manageLabel = clientText(variant, "cta", settings, variables).trim();
@@ -698,7 +729,7 @@ function clientActionButtonsHtml(
           : ""
       }</tr></table>`
     : "";
-  const reviewButton = reviewButtonHtml(settings?.googleReviewUrl || "");
+  const reviewButton = reviewButtonHtml(settings?.googleReviewUrl || "", mt("Leave a Google Review"));
   return `${manageButton}${calendarButtons}${reviewButton}`;
 }
 
@@ -709,13 +740,15 @@ function clientActionButtonsText(
   settings: any,
 ) {
   if (action === "cancelled" || action === "test") return [];
+  const mt = messageText(settings?.messageLanguage);
   const reviewUrl = cleanUrl(settings?.googleReviewUrl || "", "");
   const manageLabel = clientText(variant, "cta", settings, variables).trim();
   return [
     variables.rescheduleUrl && manageLabel ? `${manageLabel}: ${variables.rescheduleUrl}` : "",
+    // The calendar names are brands and stay as they are.
     variables.googleCalendarUrl ? `Google Calendar: ${variables.googleCalendarUrl}` : "",
     variables.appleCalendarUrl ? `Apple Calendar: ${variables.appleCalendarUrl}` : "",
-    reviewUrl ? `Leave a Google Review: ${reviewUrl}` : "",
+    reviewUrl ? mt("Leave a Google Review: {url}", { url: reviewUrl }) : "",
   ].filter(Boolean);
 }
 
@@ -729,43 +762,47 @@ function bodyFor(
   variables: Record<string, string>,
   channel: NotificationChannel,
 ) {
-  const labels = actionLabels(action);
+  const mt = messageText(settings.messageLanguage);
   const isClient = channel === "client";
   // The client sees the heading the coach wrote for this variant; the coach and
   // admin copies keep the plain internal title, which says what happened.
-  const title = isClient ? clientText(variant, "heading", settings, variables) : labels.title;
+  const title = isClient ? clientText(variant, "heading", settings, variables) : actionTitle(action, mt);
   const previousValue = previous ? `${variables.previousDate}, ${variables.previousTime}` : "";
   // "Where" carries the map link the coach named, when the location has one.
-  const mapLabel = cleanText(settings.mapLinkLabel, DEFAULT_MAP_LINK_LABEL, 40);
+  // The stored default means nobody renamed it, so it goes out translated.
+  const storedMapLabel = cleanText(settings.mapLinkLabel, DEFAULT_MAP_LINK_LABEL, 40);
+  const mapLabel = storedMapLabel === DEFAULT_MAP_LINK_LABEL ? mt("Take me there") : storedMapLabel;
   const whereValue = variables.mapUrl ? `${variables.venue} — ${mapLabel}: ${variables.mapUrl}` : variables.venue;
   const rows: Array<[string, string]> = isClient
     ? [
-        ["Lesson", serviceName],
-        ["When", `${variables.date}, ${variables.time}`],
-        ["Previous", previousValue],
-        ["Where", whereValue],
+        [mt("Lesson"), serviceName],
+        [mt("When"), `${variables.date}, ${variables.time}`],
+        [mt("Previous"), previousValue],
+        [mt("Where"), whereValue],
       ]
     : [
-        ["Client", variables.client],
-        ["Lesson", serviceName],
-        ["When", `${variables.date}, ${variables.time}`],
-        ["Previous", previousValue],
-        ["Phone", variables.phone],
-        ["Email", variables.email],
-        ["Where", variables.venue],
-        ["Booking ID", appt.id],
+        [mt("Client"), variables.client],
+        [mt("Lesson"), serviceName],
+        [mt("When"), `${variables.date}, ${variables.time}`],
+        [mt("Previous"), previousValue],
+        [mt("Phone"), variables.phone],
+        [mt("Email"), variables.email],
+        [mt("Where"), variables.venue],
+        [mt("Booking ID"), appt.id],
       ];
   const intro = isClient ? clientIntro(action, variant, settings, variables) : render(settings.adminEmailIntro, variables);
   const footer = isClient
     ? clientFooter(action, variant, settings, variables)
-    : `${channel === "coach" ? "Coach" : "Admin"} booking alert.`;
+    : channel === "coach"
+      ? mt("Coach booking alert.")
+      : mt("Admin booking alert.");
   const actionsHtml = isClient ? clientActionButtonsHtml(action, variant, variables, settings) : "";
   const actionsText = isClient ? clientActionButtonsText(action, variant, variables, settings) : [];
   const textRows = rows.filter(([, value]) => Boolean(value)).map(([label, value]) => `${label}: ${value}`);
   const brandName = escapeHtml(settings.businessName || settings.coachName || "Clarity Golf");
   const detailRows = detailTable(rows);
   const detailsSection = rows.length
-    ? `<p style="margin:0 0 8px;font-size:12px;letter-spacing:.03em;text-transform:uppercase;color:#667066">Booking details</p><table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;background:#f6f9f3;border:1px solid #e6ecdf;border-radius:8px;padding:12px;display:block"><tr><td style="padding:0">${detailRows}</td></tr></table>`
+    ? `<p style="margin:0 0 8px;font-size:12px;letter-spacing:.03em;text-transform:uppercase;color:#667066">${escapeHtml(mt("Booking details"))}</p><table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;background:#f6f9f3;border:1px solid #e6ecdf;border-radius:8px;padding:12px;display:block"><tr><td style="padding:0">${detailRows}</td></tr></table>`
     : "";
   const html = `<div style="font-family:Arial,sans-serif;line-height:1.55;color:#0f1a13;background:#eff3ec;padding:18px 10px"><div style="max-width:620px;margin:0 auto"><div style="background:#fff;border:1px solid #e3e9df;border-radius:12px;padding:24px"><p style="margin:0;font-size:12px;letter-spacing:.03em;text-transform:uppercase;color:#667066">${brandName}</p><h1 style="margin:8px 0 12px;font-size:30px;line-height:1.15;color:#121d14">${escapeHtml(title)}</h1><p style="margin:0;color:#3a473a;font-size:15px;line-height:1.7">${escapeHtml(intro)}</p><div style="margin:18px 0">${detailsSection}</div>${actionsHtml}<p style="margin:16px 0 0;color:#526054">${escapeHtml(footer).replace(/\n/g, "<br/>")}</p><p style="margin:10px 0 0;color:#8e9a8d;font-size:12px">${brandName}</p></div></div></div>`;
   const text = [title, "", intro, "", ...textRows, "", ...actionsText, actionsText.length ? "" : "", footer]
@@ -883,11 +920,12 @@ export async function notifyBookingEvent(input: NotifyInput) {
     return [];
   }
   const settings = await readSettings(accountId);
+  const mt = messageText(settings.messageLanguage);
   const services = await readServices(accountId);
-  const appt = normaliseAppointment(input.appointment);
-  const previous = input.previousAppointment ? normaliseAppointment(input.previousAppointment) : null;
+  const appt = normaliseAppointment(input.appointment, mt("Client"));
+  const previous = input.previousAppointment ? normaliseAppointment(input.previousAppointment, mt("Client")) : null;
   const service = services.find((candidate: any) => candidate.id === appt.serviceId);
-  const serviceName = cleanText(service?.name, "Golf Lesson", 160);
+  const serviceName = cleanText(service?.name, mt("Golf Lesson"), 160);
   const variables = variablesFor(action, appt, previous, serviceName, settings, service);
   // A new booking splits three ways on what was booked - see notificationVariantFor.
   const variant = notificationVariantFor(action, service?.lessonFormat);

@@ -3965,5 +3965,21 @@
   "{count} things to work on. Tap a block to read it.": "{count} dingen om aan te werken. Tik op een blok om het te lezen.",
   "{count} credit": "{count} credit",
   "{name} — back with you within {count} day.": "{name} — je krijgt binnen {count} dag antwoord.",
-  "{name} — back with you within {count} days.": "{name} — je krijgt binnen {count} dagen antwoord."
+  "{name} — back with you within {count} days.": "{name} — je krijgt binnen {count} dagen antwoord.",
+  "New booking": "Nieuwe boeking",
+  "Sent the moment a lesson is booked": "Verstuurd zodra een les is geboekt",
+  "Rescheduled": "Verzet",
+  "Sent when a lesson moves": "Verstuurd als een les wordt verzet",
+  "Sent before the lesson, at your reminder lead time": "Verstuurd vóór de les, op het tijdstip dat je voor herinneringen hebt ingesteld",
+  "Sent immediately on cancellation": "Direct verstuurd bij annulering",
+  "Group session": "Groepsles",
+  "Sent instead of New booking when the lesson type is a group": "Verstuurd in plaats van Nieuwe boeking als het lestype een groepsles is",
+  "Sent instead of New booking when the lesson type is a package": "Verstuurd in plaats van Nieuwe boeking als het lestype een pakket is",
+  "{characters} · {segments}": "{characters} · {segments}",
+  "{count} character": "{count} teken",
+  "{count} characters": "{count} tekens",
+  "{count} segment": "{count} segment",
+  "{count} segments": "{count} segmenten",
+  "Email & text language": "Taal van e-mails en sms'jes",
+  "The language of Clarity's wording in the emails and texts your clients receive. Anything you have written yourself in Message templates is sent exactly as you wrote it.": "De taal van Clarity's teksten in de e-mails en sms'jes die je klanten ontvangen. Alles wat je zelf in Berichtsjablonen hebt geschreven, wordt precies zo verstuurd als je het schreef."
 }

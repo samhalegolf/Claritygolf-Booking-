@@ -3965,5 +3965,21 @@
   "{count} things to work on. Tap a block to read it.": "{count} harjoiteltavaa asiaa. Napauta jaksoa lukeaksesi sen.",
   "{count} credit": "{count} krediitti",
   "{name} — back with you within {count} day.": "{name} – vastaus {count} päivän kuluessa.",
-  "{name} — back with you within {count} days.": "{name} – vastaus {count} päivän kuluessa."
+  "{name} — back with you within {count} days.": "{name} – vastaus {count} päivän kuluessa.",
+  "New booking": "Uusi varaus",
+  "Sent the moment a lesson is booked": "Lähetetään heti, kun tunti varataan",
+  "Rescheduled": "Siirretty",
+  "Sent when a lesson moves": "Lähetetään, kun tunti siirtyy",
+  "Sent before the lesson, at your reminder lead time": "Lähetetään ennen tuntia valitsemasi muistutusajan mukaan",
+  "Sent immediately on cancellation": "Lähetetään heti peruutuksen jälkeen",
+  "Group session": "Ryhmätunti",
+  "Sent instead of New booking when the lesson type is a group": "Lähetetään Uusi varaus -viestin sijaan, kun tuntityyppi on ryhmä",
+  "Sent instead of New booking when the lesson type is a package": "Lähetetään Uusi varaus -viestin sijaan, kun tuntityyppi on paketti",
+  "{characters} · {segments}": "{characters} · {segments}",
+  "{count} character": "{count} merkki",
+  "{count} characters": "{count} merkkiä",
+  "{count} segment": "{count} osa",
+  "{count} segments": "{count} osaa",
+  "Email & text language": "Sähköpostien ja tekstiviestien kieli",
+  "The language of Clarity's wording in the emails and texts your clients receive. Anything you have written yourself in Message templates is sent exactly as you wrote it.": "Kieli, jolla Clarityn tekstit näkyvät asiakkaidesi saamissa sähköposteissa ja tekstiviesteissä. Viestimalleihin itse kirjoittamasi teksti lähetetään täsmälleen sellaisenaan."
 }
