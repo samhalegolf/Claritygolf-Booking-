@@ -4625,7 +4625,7 @@ function notificationTone(status = "") {
 function notificationTimeLabel(createdAt = "") {
   if (!createdAt) return "";
   const time = new Date(createdAt);
-  return Number.isNaN(time.getTime()) ? "" : time.toLocaleString();
+  return Number.isNaN(time.getTime()) ? "" : time.toLocaleString(activeLocale());
 }
 
 function profileRecordDateLabel(createdAt = "") {
@@ -4813,7 +4813,7 @@ async function readJsonResponse<T>(response: Response, fallbackMessage: string):
 function googleSyncTimeLabel(createdAt = "") {
   if (!createdAt) return t("Not synced yet");
   const time = new Date(createdAt);
-  return Number.isNaN(time.getTime()) ? t("Not synced yet") : time.toLocaleString();
+  return Number.isNaN(time.getTime()) ? t("Not synced yet") : time.toLocaleString(activeLocale());
 }
 
 // Human labels for the Google Calendar debug window. The trigger codes are the
@@ -4864,7 +4864,7 @@ function googleCalendarStageLabel(stage: string) {
 function googleCalendarDebugTimestamp(value: string) {
   if (!value) return "—";
   const time = new Date(value);
-  return Number.isNaN(time.getTime()) ? value : time.toLocaleString();
+  return Number.isNaN(time.getTime()) ? value : time.toLocaleString(activeLocale());
 }
 
 function relativeTimeLabel(value: string) {
@@ -4936,7 +4936,7 @@ function formatDateForDisplay(value: string) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value || "");
   if (!match) return value || "—";
   const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-  return date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  return date.toLocaleDateString(activeLocale(), { day: "numeric", month: "short", year: "numeric" });
 }
 
 // An ISO timestamp -> "15 Jul 2026". Used where only the day matters.
@@ -4944,7 +4944,7 @@ function formatTimestampForDisplay(value?: string | null) {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  return date.toLocaleDateString(activeLocale(), { day: "numeric", month: "short", year: "numeric" });
 }
 
 /* The two-line date cell every player profile row leads with: the day on top,
@@ -4963,8 +4963,8 @@ function profileWhenParts(value?: string | null) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return { day: "", time: "" };
   return {
-    day: date.toLocaleDateString(undefined, { day: "numeric", month: "short" }),
-    time: date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false }),
+    day: date.toLocaleDateString(activeLocale(), { day: "numeric", month: "short" }),
+    time: date.toLocaleTimeString(activeLocale(), { hour: "2-digit", minute: "2-digit", hour12: false }),
   };
 }
 
@@ -10362,7 +10362,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       const valid = !Number.isNaN(date.getTime());
       const key = valid ? date.toISOString().slice(0, 10) : "undated";
       const label = valid
-        ? date.toLocaleDateString(undefined, { day: "numeric", month: "long" })
+        ? date.toLocaleDateString(activeLocale(), { day: "numeric", month: "long" })
         : t("No date recorded");
       const group = groups.get(key) || { label, clips: [] };
       group.clips.push(clip);
@@ -13170,7 +13170,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       id: preferredVideoPlayerId(client, videoPlayerIds),
       name: client.name,
       lessonId: `swing-review-${startedAt.getTime()}`,
-      lessonTitle: `Swing review · ${startedAt.toLocaleDateString()}`,
+      lessonTitle: `Swing review · ${startedAt.toLocaleDateString(activeLocale())}`,
     });
   }
 

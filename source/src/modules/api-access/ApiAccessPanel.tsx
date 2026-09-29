@@ -24,13 +24,13 @@ import {
   type WebhookEndpoint,
 } from "./apiAccessApi";
 import "./api-access.css";
-import { t } from "../../lib/i18n";
+import { t, readerLocale } from "../../lib/i18n";
 
 const READ_ONLY = ["bookings:read", "clients:read", "catalog:read", "passes:read", "invoices:read", "sales:read", "events:read"];
 
 function when(value: string | null) {
   if (!value) return "never";
-  return new Date(value).toLocaleString(undefined, { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" });
+  return new Date(value).toLocaleString(readerLocale(), { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
 function CopyValue({ value, label }: { value: string; label: string }) {

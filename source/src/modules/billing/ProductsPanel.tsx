@@ -21,7 +21,7 @@ import { AlertTriangle, ChevronDown, ChevronRight, Lock, Plus, Search, X } from 
 import { ClarityProducts } from "../shared/ClarityIcons";
 import type { BillingCatalogItem, BillingCatalogKind, StockMovement } from "./types";
 import { isLowStock } from "./stockMath";
-import { t } from "../../lib/i18n";
+import { t, readerLocale } from "../../lib/i18n";
 
 export type ProductFormValues = {
   id: string;
@@ -668,7 +668,7 @@ export function ProductsPanel({
                                               {movement.note ? ` - ${movement.note}` : ""}
                                             </span>
                                             <em>
-                                              {movement.createdAt ? new Date(movement.createdAt).toLocaleString() : ""}
+                                              {movement.createdAt ? new Date(movement.createdAt).toLocaleString(readerLocale()) : ""}
                                               {movement.resultingLevel === null ? "" : t(" - left {level}", { level: movement.resultingLevel })}
                                             </em>
                                           </div>

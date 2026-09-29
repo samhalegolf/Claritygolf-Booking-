@@ -127,6 +127,16 @@ export function activeLanguage(): LanguageCode {
 }
 
 /**
+ * The locale for dates and numbers on pages that do not know the business's
+ * country. The browser's own full tag when it speaks the language on screen
+ * (so es-MX keeps its own date order), otherwise just the language.
+ */
+export function readerLocale(): string {
+  const browser = globalThis.navigator?.language || "";
+  return matchLanguage(browser) === language ? browser : language;
+}
+
+/**
  * Saves the choice on this device and reloads into it. "" goes back to
  * following the browser.
  */

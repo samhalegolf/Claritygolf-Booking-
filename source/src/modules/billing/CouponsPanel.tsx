@@ -9,7 +9,7 @@ import { Fragment, useMemo, useState } from "react";
 import { AlertTriangle, ChevronDown, ChevronRight, Copy, Download, Plus, Search, X } from "lucide-react";
 import { ClarityPassesCredits } from "../shared/ClarityIcons";
 import type { BillingCoupon, CouponImportCandidate, CouponRedemption, VoucherAmountRule } from "./types";
-import { t } from "../../lib/i18n";
+import { t, readerLocale } from "../../lib/i18n";
 
 /** What a scan came back with. `scannedCount` is how many charges were read,
  *  so "nothing found" can be told apart from "nothing looked at". */
@@ -688,7 +688,7 @@ export function CouponsPanel({
                           {[
                             candidate.buyerName || candidate.buyerEmail || t("Unknown buyer"),
                             formatMoney(candidate.valueCents / 100, candidate.currency || currency),
-                            candidate.when ? new Date(candidate.when).toLocaleDateString() : "",
+                            candidate.when ? new Date(candidate.when).toLocaleDateString(readerLocale()) : "",
                             candidate.orderNumber,
                             // Where the name came from. A coach deciding
                             // whether to mint money should be able to see what
@@ -744,7 +744,7 @@ export function CouponsPanel({
                               {[
                                 candidate.buyerName || candidate.buyerEmail || t("Unknown buyer"),
                                 formatMoney(candidate.valueCents / 100, candidate.currency || currency),
-                                candidate.when ? new Date(candidate.when).toLocaleDateString() : "",
+                                candidate.when ? new Date(candidate.when).toLocaleDateString(readerLocale()) : "",
                                 candidate.orderNumber,
                               ]
                                 .filter(Boolean)
@@ -877,7 +877,7 @@ export function CouponsPanel({
                         </button>
                         <em className="product-row-meta">
                           {label}
-                          {coupon.expiresAt ? ` - expires ${new Date(coupon.expiresAt).toLocaleDateString()}` : ""}
+                          {coupon.expiresAt ? ` - expires ${new Date(coupon.expiresAt).toLocaleDateString(readerLocale())}` : ""}
                         </em>
                       </td>
                       <td>
@@ -918,7 +918,7 @@ export function CouponsPanel({
                                   </strong>
                                   <span>{entry.note || (entry.amount > 0 ? t("Redeemed") : t("Put back"))}</span>
                                   <em>
-                                    {entry.createdAt ? new Date(entry.createdAt).toLocaleString() : ""}
+                                    {entry.createdAt ? new Date(entry.createdAt).toLocaleString(readerLocale()) : ""}
                                     {entry.resultingBalance === null ? "" : ` - left ${entry.resultingBalance}`}
                                   </em>
                                 </div>

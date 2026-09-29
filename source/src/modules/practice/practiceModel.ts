@@ -1,4 +1,4 @@
-import { t } from "../../lib/i18n";
+import { t, readerLocale } from "../../lib/i18n";
 /* Practice blocks: the shapes, and small pure display helpers.
  *
  * Shared by the coach's builder and the player's Practice section, so the two
@@ -207,7 +207,7 @@ export function practiceContentFromSteps(steps: string[]): string {
 function shortDate(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  return date.toLocaleDateString(readerLocale(), { day: "numeric", month: "short" });
 }
 
 /** "18 Aug" -- the stamp on a brick, and nothing more. */

@@ -2,7 +2,7 @@ import { Loading } from "../shared/Loading";
 import { useCallback, useEffect, useState } from "react";
 
 import { videoShareToken } from "../shared/bookingHandoff";
-import { t } from "../../lib/i18n";
+import { t, readerLocale } from "../../lib/i18n";
 
 // The coach's view of a video someone with no account sent them.
 //
@@ -41,7 +41,7 @@ function formatDate(value?: string) {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  return date.toLocaleDateString(readerLocale(), { year: "numeric", month: "short", day: "numeric" });
 }
 
 export default function VideoSharePage() {

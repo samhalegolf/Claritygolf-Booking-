@@ -12,7 +12,7 @@ import { ClarityBookingPages, ClarityPassesCredits } from "../shared/ClarityIcon
 
 import { Loading } from "../shared/Loading";
 import { invoicedSessions, lineWord, sessionWord } from "./invoicedSessions";
-import { t } from "../../lib/i18n";
+import { t, readerLocale } from "../../lib/i18n";
 
 export type PassAllocation = {
   id: string;
@@ -137,7 +137,7 @@ function dateLabel(value: string | null) {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  return date.toLocaleDateString(readerLocale(), { day: "numeric", month: "short", year: "numeric" });
 }
 
 function statusLabel(pass: Pass) {

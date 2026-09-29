@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { SnapshotFrameViewer, type FrameViewerShot } from "../shared/SnapshotFrameViewer";
 
 import { reviewShareToken } from "../shared/bookingHandoff";
-import { t } from "../../lib/i18n";
+import { t, readerLocale } from "../../lib/i18n";
 
 // The player's view of a swing review their coach sent them.
 //
@@ -74,7 +74,7 @@ function formatDate(value?: string) {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  return date.toLocaleDateString(readerLocale(), { year: "numeric", month: "short", day: "numeric" });
 }
 
 /* The page is one column of cards on every width. A swing review is read top to

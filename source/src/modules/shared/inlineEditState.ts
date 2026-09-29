@@ -23,7 +23,7 @@
  *   blinked is the one outcome with no recovery.
  */
 
-import { t } from "../../lib/i18n";
+import { t, readerLocale } from "../../lib/i18n";
 
 export type InlineEditStatus = "resting" | "editing" | "saving" | "saved" | "failed";
 
@@ -124,6 +124,6 @@ export function inlineEditReducer<T>(
  */
 export function savedLabel(savedAt: number | null) {
   if (savedAt === null) return "";
-  const stamp = new Date(savedAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  const stamp = new Date(savedAt).toLocaleTimeString(readerLocale(), { hour: "2-digit", minute: "2-digit" });
   return t("Saved {stamp}", { stamp });
 }

@@ -88,7 +88,7 @@ import type {
 } from "../video-analysis/VideoWorkspace";
 import { deleteGuestNote, listGuestNotes, saveGuestNote, type GuestNote } from "./guestNotesStore";
 import { terminologyFor, type BusinessTerminology } from "../../../netlify/functions/_shared/business-terminology.mts";
-import { t } from "../../lib/i18n";
+import { t, readerLocale } from "../../lib/i18n";
 
 // The player's own app. It is chosen by the entry point from the session role,
 // not by hostname any more, and it never renders a login form of its own --
@@ -242,7 +242,7 @@ function isReviewBooking(booking: Booking) {
 
 function formatBookingWhen(booking: Booking) {
   const date = slotDate(booking.week, booking.day, booking.start);
-  const dateLabel = date.toLocaleDateString(undefined, {
+  const dateLabel = date.toLocaleDateString(readerLocale(), {
     weekday: "long",
     month: "short",
     day: "numeric",

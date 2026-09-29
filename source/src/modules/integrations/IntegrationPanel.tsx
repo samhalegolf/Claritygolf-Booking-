@@ -9,7 +9,7 @@ import {
   ClaritySecurity,
   type IconComponent,
 } from "../shared/ClarityIcons";
-import { t } from "../../lib/i18n";
+import { t, readerLocale } from "../../lib/i18n";
 
 /**
  * The Developer tab's connection screen.
@@ -958,7 +958,7 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
                     <summary>
                       <strong>{formatQuantity(row.quantity)}{row.item_name || t("Purchase")}</strong>
                       <span>{row.member_name || row.member_email || t("No customer")}</span>
-                      <time>{new Date(row.purchased_at).toLocaleString()}</time>
+                      <time>{new Date(row.purchased_at).toLocaleString(readerLocale())}</time>
                       <em>{formatAmount(row)}</em>
                     </summary>
                     <div className="event-facts">
@@ -966,7 +966,7 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
                       <span>{t("Classified")}{" "}<b>{row.classification}</b></span>
                       <span>{t("Purchase ID")}{" "}<b>{row.external_purchase_id || "—"}</b></span>
                       <span>{t("Sale #")}{" "}<b>{row.sale_number || "—"}</b></span>
-                      <span>{t("Paid")}{" "}<b>{row.paid_at ? new Date(row.paid_at).toLocaleString() : "—"}</b></span>
+                      <span>{t("Paid")}{" "}<b>{row.paid_at ? new Date(row.paid_at).toLocaleString(readerLocale()) : "—"}</b></span>
                       <span>{t("Client")}{" "}<b>{clientLabel(row)}</b></span>
                     </div>
                     <pre>{safeJson(row.rawPayload)}</pre>
@@ -987,7 +987,7 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
                     <summary>
                       <strong>{event.event_type || t("Unknown event")}</strong>
                       <span>{event.customer || t("No customer")}</span>
-                      <time>{event.received_at ? new Date(event.received_at).toLocaleString() : ""}</time>
+                      <time>{event.received_at ? new Date(event.received_at).toLocaleString(readerLocale()) : ""}</time>
                       <em>{event.processing_status}</em>
                     </summary>
                     <div className="event-facts">

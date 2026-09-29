@@ -11,7 +11,7 @@ import { ClarityPassesCredits } from "../shared/ClarityIcons";
 
 import { Loading } from "../shared/Loading";
 import type { Pass } from "./PassesPanel";
-import { t } from "../../lib/i18n";
+import { t, readerLocale } from "../../lib/i18n";
 
 export type IssuedPass = Pass & {
   personId: string | null;
@@ -42,7 +42,7 @@ function dateLabel(value: string | null) {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  return date.toLocaleDateString(readerLocale(), { day: "numeric", month: "short", year: "numeric" });
 }
 
 function statusText(pass: IssuedPass) {

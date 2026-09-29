@@ -33,7 +33,7 @@ import { ChevronDown, ChevronRight, Inbox, Undo2 } from "lucide-react";
 import { ClarityAddClient, ClarityPassesCredits } from "../shared/ClarityIcons";
 
 import { Loading } from "../shared/Loading";
-import { t } from "../../lib/i18n";
+import { t, readerLocale } from "../../lib/i18n";
 
 /** What a sale looks like it is. "unknown" is a real answer, not a failure. */
 export type PassInboxKind = "pass" | "unknown";
@@ -128,7 +128,7 @@ function formatWhen(value: string) {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  return date.toLocaleDateString(readerLocale(), { day: "numeric", month: "short", year: "numeric" });
 }
 
 function formatAmount(cents: number | null, currency: string) {

@@ -32,7 +32,7 @@ import { TerminalPayment, tapIsBusy } from "./TerminalPayment";
 import { tenderLabel, useTapToPay, type PosTender, type TapState } from "./terminal";
 import { addToBasket, basketTotal, describeBasket, isLowStock, lineTotal, round2, setBasketQuantity } from "./stockMath";
 import type { BasketLine } from "./stockMath";
-import { t } from "../../lib/i18n";
+import { t, readerLocale } from "../../lib/i18n";
 
 export type PosCheckoutModalProps = {
   context: PosCheckoutContext;
@@ -732,7 +732,7 @@ export function PosCheckoutModal({
                               ? t("Use Clarity balance · {amount} available", { amount: formatMoney(option.availableValueCents / 100, option.currency || currency) })
                               : t("{available} of {allocated} left", { available: option.creditsAvailable, allocated: option.creditsAllocated })) +
                             (option.nextExpiry
-                              ? t(" · expires {date}", { date: new Date(option.nextExpiry).toLocaleDateString(undefined, {
+                              ? t(" · expires {date}", { date: new Date(option.nextExpiry).toLocaleDateString(readerLocale(), {
                                   day: "numeric",
                                   month: "short",
                                   year: "numeric",
