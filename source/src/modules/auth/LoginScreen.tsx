@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState, type CSSProperties, type FormEvent } 
 import { apiFetch } from "./apiFetch";
 import { login, sessionFromLoginResponse, type Session } from "./session";
 import type { AuthSessionResponse } from "../../../netlify/functions/_shared/auth-contract.mts";
+import { t } from "../../lib/i18n";
 
 // The single front door. It used to live inside App.tsx, which meant a player
 // had to download the whole coach workspace just to reach a sign-in form. It is
@@ -97,8 +98,8 @@ export default function LoginScreen({ onSignedIn, onCancel }: LoginScreenProps) 
   // rather than the rare one, and telling the player to ask their coach would
   // be pointless advice for something they can redo themselves.
   const expiredMessage = isPortalReset
-    ? "That reset link has expired. Go back to sign in and request a new one."
-    : "That invite link has expired. Ask your coach to send a new one.";
+    ? t("That reset link has expired. Go back to sign in and request a new one.")
+    : t("That invite link has expired. Ask your coach to send a new one.");
 
   // An invite link is only worth showing a form for if the token is still good.
   const checkInvite = useCallback(async () => {
@@ -123,7 +124,7 @@ export default function LoginScreen({ onSignedIn, onCancel }: LoginScreenProps) 
       }
     } catch {
       setInviteState("invalid");
-      setError("Could not reach the booking server.");
+      setError(t("Could not reach the booking server."));
     }
   }, [inviteToken, isPortalReset, expiredMessage]);
 
@@ -141,7 +142,7 @@ export default function LoginScreen({ onSignedIn, onCancel }: LoginScreenProps) 
       setPassword("");
       onSignedIn(session);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Login failed.");
+      setError(caught instanceof Error ? caught.message : t("Login failed."));
     } finally {
       setBusy(false);
     }
@@ -161,13 +162,13 @@ export default function LoginScreen({ onSignedIn, onCancel }: LoginScreenProps) 
       });
       const data = (await response.json().catch(() => ({}))) as { ok?: boolean; message?: string };
       if (!response.ok || !data.ok) {
-        setError(data.message || "Could not send the reset email.");
+        setError(data.message || t("Could not send the reset email."));
         return;
       }
       setForgotSent(true);
-      setNotice(data.message || "If that email matches an account, a reset link has been sent.");
+      setNotice(data.message || t("If that email matches an account, a reset link has been sent."));
     } catch {
-      setError("Could not reach the booking server.");
+      setError(t("Could not reach the booking server."));
     } finally {
       setBusy(false);
     }
@@ -177,11 +178,11 @@ export default function LoginScreen({ onSignedIn, onCancel }: LoginScreenProps) 
     event.preventDefault();
     if (busy) return;
     if (newPassword.length < 8) {
-      setError("Use at least 8 characters.");
+      setError(t("Use at least 8 characters."));
       return;
     }
     if (newPassword !== confirmPassword) {
-      setError("Those passwords do not match.");
+      setError(t("Those passwords do not match."));
       return;
     }
     setBusy(true);
@@ -194,7 +195,7 @@ export default function LoginScreen({ onSignedIn, onCancel }: LoginScreenProps) 
       });
       const data = (await response.json().catch(() => ({}))) as Partial<AuthSessionResponse>;
       if (!response.ok || !data.authenticated) {
-        setError(data.message || "Could not reset password.");
+        setError(data.message || t("Could not reset password."));
         return;
       }
       clearQueryString();
@@ -202,7 +203,7 @@ export default function LoginScreen({ onSignedIn, onCancel }: LoginScreenProps) 
       // nothing to fill in here.
       onSignedIn(sessionFromLoginResponse(data));
     } catch {
-      setError("Could not reach the booking server.");
+      setError(t("Could not reach the booking server."));
     } finally {
       setBusy(false);
     }
@@ -215,11 +216,11 @@ export default function LoginScreen({ onSignedIn, onCancel }: LoginScreenProps) 
     event.preventDefault();
     if (busy) return;
     if (newPassword.length < 10) {
-      setError("Use at least 10 characters.");
+      setError(t("Use at least 10 characters."));
       return;
     }
     if (newPassword !== confirmPassword) {
-      setError("Those passwords do not match.");
+      setError(t("Those passwords do not match."));
       return;
     }
     setBusy(true);
@@ -242,7 +243,7 @@ export default function LoginScreen({ onSignedIn, onCancel }: LoginScreenProps) 
         setError(
           data.error === "invalid_token"
             ? expiredMessage
-            : data.message || "Could not set that password.",
+            : data.message || t("Could not set that password."),
         );
         return;
       }
@@ -250,7 +251,7 @@ export default function LoginScreen({ onSignedIn, onCancel }: LoginScreenProps) 
       clearQueryString();
       onSignedIn(session);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not set that password.");
+      setError(caught instanceof Error ? caught.message : t("Could not set that password."));
     } finally {
       setBusy(false);
     }
@@ -258,36 +259,40 @@ export default function LoginScreen({ onSignedIn, onCancel }: LoginScreenProps) 
 
   const eyebrow =
     mode === "forgot"
-      ? "Password Reset"
+      ? t("Password Reset")
       : mode === "reset"
-        ? "New Password"
+        ? t("New Password")
         : mode === "invite"
           ? isPortalReset
-            ? "Password Reset"
-            : "Player Portal"
-          : "Sign In";
+            ? t("Password Reset")
+            : t("Player Portal")
+          : t("Sign In");
 
   const heading =
     mode === "forgot"
-      ? "Forgot password"
+      ? t("Forgot password")
       : mode === "reset"
-        ? "Reset password"
+        ? t("Reset password")
         : mode === "invite"
           ? isPortalReset
-            ? "Choose a new password"
-            : "Set your password"
-          : "Welcome back";
+            ? t("Choose a new password")
+            : t("Set your password")
+          : t("Welcome back");
 
   const lead =
     mode === "forgot"
-      ? "Enter your email and we will send a reset link."
+      ? t("Enter your email and we will send a reset link.")
       : mode === "reset"
-        ? "Choose a new password for Clarity Golf Booking."
+        ? t("Choose a new password for Clarity Golf Booking.")
         : mode === "invite"
           ? inviteEmail
-            ? `Choose a ${isPortalReset ? "new " : ""}password for ${inviteEmail}.`
-            : `Choose a ${isPortalReset ? "new " : ""}password for your player portal.`
-          : "Sign in to your Clarity Golf account.";
+            ? isPortalReset
+              ? t("Choose a new password for {email}.", { email: inviteEmail })
+              : t("Choose a password for {email}.", { email: inviteEmail })
+            : isPortalReset
+              ? t("Choose a new password for your player portal.")
+              : t("Choose a password for your player portal.")
+          : t("Sign in to your Clarity Golf account.");
 
   const onSubmit =
     mode === "forgot"
@@ -300,32 +305,32 @@ export default function LoginScreen({ onSignedIn, onCancel }: LoginScreenProps) 
 
   const submitLabel = busy
     ? mode === "forgot"
-      ? "Sending"
+      ? t("Sending")
       : mode === "login"
-        ? "Signing In"
-        : "Saving"
+        ? t("Signing In")
+        : t("Saving")
     : mode === "forgot"
       ? forgotSent
-        ? "Sent"
-        : "Send Reset Link"
+        ? t("Sent")
+        : t("Send Reset Link")
       : mode === "reset"
-        ? "Save New Password"
+        ? t("Save New Password")
         : mode === "invite"
           ? isPortalReset
-            ? "Save Password And Sign In"
-            : "Set Password And Sign In"
-          : "Sign In";
+            ? t("Save Password And Sign In")
+            : t("Set Password And Sign In")
+          : t("Sign In");
 
   return (
     <main className={`login-shell theme-${themeMode}`} style={brandStyle}>
       <form className="login-card" onSubmit={onSubmit}>
         <div className="brand">
           <div className="brand-mark">
-            <img src="/assets/clarity-golf-logo-208.png" alt="Clarity Golf" />
+            <img src="/assets/clarity-golf-logo-208.png" alt={t("Clarity Golf")} />
           </div>
           <div>
-            <strong>Clarity Golf</strong>
-            <span>Booking System</span>
+            <strong>{t("Clarity Golf")}</strong>
+            <span>{t("Booking System")}</span>
           </div>
         </div>
         <div>
@@ -337,7 +342,7 @@ export default function LoginScreen({ onSignedIn, onCancel }: LoginScreenProps) 
         {mode === "login" && (
           <>
             <label>
-              <span>Email</span>
+              <span>{t("Email")}</span>
               <input
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
@@ -346,7 +351,7 @@ export default function LoginScreen({ onSignedIn, onCancel }: LoginScreenProps) 
               />
             </label>
             <label>
-              <span>Password</span>
+              <span>{t("Password")}</span>
               <input
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
@@ -360,14 +365,14 @@ export default function LoginScreen({ onSignedIn, onCancel }: LoginScreenProps) 
                 onChange={(event) => setShowPassword(event.target.checked)}
                 type="checkbox"
               />
-              <span>Show password</span>
+              <span>{t("Show password")}</span>
             </label>
           </>
         )}
 
         {mode === "forgot" && (
           <label>
-            <span>Email</span>
+            <span>{t("Email")}</span>
             <input
               value={forgotEmail}
               onChange={(event) => {
@@ -385,7 +390,7 @@ export default function LoginScreen({ onSignedIn, onCancel }: LoginScreenProps) 
         {(mode === "reset" || (mode === "invite" && inviteState === "valid")) && (
           <>
             <label>
-              <span>New password</span>
+              <span>{t("New password")}</span>
               <input
                 value={newPassword}
                 onChange={(event) => setNewPassword(event.target.value)}
@@ -394,7 +399,7 @@ export default function LoginScreen({ onSignedIn, onCancel }: LoginScreenProps) 
               />
             </label>
             <label>
-              <span>Confirm password</span>
+              <span>{t("Confirm password")}</span>
               <input
                 value={confirmPassword}
                 onChange={(event) => setConfirmPassword(event.target.value)}
@@ -408,7 +413,7 @@ export default function LoginScreen({ onSignedIn, onCancel }: LoginScreenProps) 
                 onChange={(event) => setShowPassword(event.target.checked)}
                 type="checkbox"
               />
-              <span>Show password</span>
+              <span>{t("Show password")}</span>
             </label>
           </>
         )}
@@ -431,9 +436,7 @@ export default function LoginScreen({ onSignedIn, onCancel }: LoginScreenProps) 
               setForgotEmail(email);
               setError("");
             }}
-          >
-            Forgot password?
-          </button>
+          >{t("Forgot password?")}</button>
         ) : (
           <button
             className="text-button"
@@ -443,22 +446,18 @@ export default function LoginScreen({ onSignedIn, onCancel }: LoginScreenProps) 
               setError("");
               setNotice("");
             }}
-          >
-            Back to sign in
-          </button>
+          >{t("Back to sign in")}</button>
         )}
 
         {mode === "login" && onCancel && (
-          <button className="text-button" type="button" onClick={onCancel}>
-            Continue without signing in
-          </button>
+          <button className="text-button" type="button" onClick={onCancel}>{t("Continue without signing in")}</button>
         )}
 
-        <nav className="login-legal" aria-label="Legal and support">
-          <a href="/">About</a>
-          <a href="/privacy">Privacy</a>
-          <a href="/terms">Terms</a>
-          <a href="/support">Support</a>
+        <nav className="login-legal" aria-label={t("Legal and support")}>
+          <a href="/">{t("About")}</a>
+          <a href="/privacy">{t("Privacy")}</a>
+          <a href="/terms">{t("Terms")}</a>
+          <a href="/support">{t("Support")}</a>
         </nav>
       </form>
     </main>

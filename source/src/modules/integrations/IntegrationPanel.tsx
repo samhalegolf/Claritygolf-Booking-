@@ -9,6 +9,7 @@ import {
   ClaritySecurity,
   type IconComponent,
 } from "../shared/ClarityIcons";
+import { t } from "../../lib/i18n";
 
 /**
  * The Developer tab's connection screen.
@@ -111,7 +112,7 @@ const newProfile = (number = 1, resourceIds: string[] = []): ResourceProfile => 
 });
 
 function formatAmount(row: { amount_cents: number | null; currency: string | null }) {
-  if (row.amount_cents == null) return "Amount unknown";
+  if (row.amount_cents == null) return t("Amount unknown");
   const amount = (row.amount_cents / 100).toFixed(2);
   // A sale event may carry no currency, so a bare amount is normal rather than
   // missing.
@@ -132,22 +133,22 @@ function formatQuantity(quantity: number | string | null) {
  * as a fault rather than a fact about the payload.
  */
 function clientLabel(row: PassPurchase) {
-  if (row.person_id) return "Linked";
-  if (row.member_email) return "Not matched";
-  return "No email in payload";
+  if (row.person_id) return t("Linked");
+  if (row.member_email) return t("Not matched");
+  return t("No email in payload");
 }
 
 function safeJson(value: unknown) {
-  try { return JSON.stringify(value ?? {}, null, 2); } catch { return "Unable to display payload."; }
+  try { return JSON.stringify(value ?? {}, null, 2); } catch { return t("Unable to display payload."); }
 }
 
 function since(iso: string | null) {
-  if (!iso) return "never";
+  if (!iso) return t("never");
   const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
-  if (days > 1) return `${days} days ago`;
+  if (days > 1) return t("{days} days ago", { days });
   const hours = Math.floor((Date.now() - new Date(iso).getTime()) / 3_600_000);
-  if (hours >= 1) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
-  return "just now";
+  if (hours >= 1) return hours === 1 ? t("1 hour ago") : t("{hours} hours ago", { hours });
+  return t("just now");
 }
 
 /**
@@ -172,7 +173,7 @@ function CopyField({ label, value, help }: { label: string; value: string; help?
           }}
           type="button"
         >
-          {copied ? "Copied" : "Copy"}
+          {copied ? t("Copied") : t("Copy")}
         </button>
       </span>
       <input readOnly value={value} />
@@ -200,18 +201,18 @@ function OAuthConnect({ label, help, path }: { label: string; help: string; path
         headers: { Accept: "application/json" },
       });
       const data = (await response.json().catch(() => ({}))) as { authUrl?: string; message?: string };
-      if (!response.ok || !data.authUrl) throw new Error(data.message || "Sign-in is not available right now.");
+      if (!response.ok || !data.authUrl) throw new Error(data.message || t("Sign-in is not available right now."));
       window.location.assign(data.authUrl);
     } catch (err) {
       setBusy(false);
-      setError(err instanceof Error ? err.message : "Could not start the sign-in.");
+      setError(err instanceof Error ? err.message : t("Could not start the sign-in."));
     }
   }
   return (
     <div className="integration-oauth">
       <span className="credential-label">{label}</span>
       <button className="primary-button small" disabled={busy} onClick={() => void connect()} type="button">
-        {busy ? "Opening sign-in…" : "Connect"}
+        {busy ? t("Opening sign-in…") : t("Connect")}
       </button>
       {error ? <strong className="credential-warning">{error}</strong> : <small>{help}</small>}
     </div>
@@ -232,15 +233,17 @@ function CredentialField({ credential, onSave }: { credential: Field; onSave?: S
   const editable = Boolean(credential.editable && onSave);
   const status = credential.set
     ? credential.type === "secret"
-      ? `Set · ${credential.length} chars · ${credential.fingerprint}${credential.source === "environment" ? " · from the site's environment" : ""}`
+      ? credential.source === "environment"
+        ? t("Set · {length} chars · {fingerprint} · from the site's environment", { length: credential.length, fingerprint: credential.fingerprint })
+        : t("Set · {length} chars · {fingerprint}", { length: credential.length, fingerprint: credential.fingerprint })
       : credential.value
     : credential.required === true
-      ? "Not set — required"
+      ? t("Not set — required")
       : credential.required === "one-of"
         // Not "required", because a partner field may already satisfy it, and
         // marking both red when one is set is how a working setup reads broken.
-        ? "Not set — or use the field beside it"
-        : "Not set";
+        ? t("Not set — or use the field beside it")
+        : t("Not set");
   return (
     <label className={`integration-credential${credential.set ? "" : credential.required === true ? " missing" : " optional"}`}>
       <span className="credential-label">
@@ -263,7 +266,7 @@ function CredentialField({ credential, onSave }: { credential: Field; onSave?: S
         >
           {credential.type === "choice" && credential.choices.length ? (
             <select value={draft} onChange={(event) => setDraft(event.target.value)} aria-label={credential.label}>
-              <option value="">Choose…</option>
+              <option value="">{t("Choose…")}</option>
               {credential.choices.map((choice) => (
                 <option key={choice.value} value={choice.value}>{choice.label}</option>
               ))}
@@ -273,14 +276,14 @@ function CredentialField({ credential, onSave }: { credential: Field; onSave?: S
               aria-label={credential.label}
               autoComplete="off"
               onChange={(event) => setDraft(event.target.value)}
-              placeholder={credential.set ? "Paste a new value to replace it" : `Paste your ${credential.label.toLowerCase()}`}
+              placeholder={credential.set ? t("Paste a new value to replace it") : t("Paste your {label}", { label: credential.label.toLowerCase() })}
               spellCheck={false}
               type={credential.type === "secret" ? "password" : "text"}
               value={draft}
             />
           )}
           <button className="credential-copy" disabled={saving || !draft.trim()} type="submit">
-            {saving ? "Saving…" : "Save"}
+            {saving ? t("Saving…") : t("Save")}
           </button>
           {credential.set && credential.source === "saved" ? (
             <button
@@ -293,20 +296,16 @@ function CredentialField({ credential, onSave }: { credential: Field; onSave?: S
                 setError(failure || "");
               }}
               type="button"
-            >
-              Clear
-            </button>
+            >{t("Clear")}</button>
           ) : null}
         </form>
       ) : null}
       {error ? <strong className="credential-warning">{error}</strong> : null}
       {credential.hasSurroundingWhitespace ? (
-        <strong className="credential-warning">
-          This value has a space or newline around it. That is enough on its own to make every request fail — re-paste it.
-        </strong>
+        <strong className="credential-warning">{t("This value has a space or newline around it. That is enough on its own to make every request fail — re-paste it.")}</strong>
       ) : null}
       <small>{credential.help}</small>
-      {!credential.set && credential.defaultValue ? <small>Default if left unset: <code>{credential.defaultValue}</code></small> : null}
+      {!credential.set && credential.defaultValue ? <small>{t("Default if left unset:")}{" "}<code>{credential.defaultValue}</code></small> : null}
     </label>
   );
 }
@@ -315,20 +314,13 @@ function CredentialField({ credential, onSave }: { credential: Field; onSave?: S
 function CredentialsNote({ editable }: { editable: boolean }) {
   return editable ? (
     <div className="integration-note">
-      <strong>Saved to this business</strong>
-      <span>
-        What you paste here belongs to this business alone and is stored encrypted. No other business
-        on Clarity can use it or see it, and a secret is never shown back — only its length and a
-        short fingerprint, so you can tell two apart.
-      </span>
+      <strong>{t("Saved to this business")}</strong>
+      <span>{t("What you paste here belongs to this business alone and is stored encrypted. No other business on Clarity can use it or see it, and a secret is never shown back — only its length and a short fingerprint, so you can tell two apart.")}</span>
     </div>
   ) : (
     <div className="integration-note">
-      <strong>Part of Clarity itself</strong>
-      <span>
-        These are set where the site is deployed rather than here. This screen reports what is set
-        and what is missing; it deliberately never shows a secret back to you.
-      </span>
+      <strong>{t("Part of Clarity itself")}</strong>
+      <span>{t("These are set where the site is deployed rather than here. This screen reports what is set and what is missing; it deliberately never shows a secret back to you.")}</span>
     </div>
   );
 }
@@ -362,11 +354,11 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
     try {
       const response = await fetch(`/api/integration-setup?id=${encodeURIComponent(integrationId)}`, { credentials: "same-origin", cache: "no-store" });
       const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload?.message || payload?.error || `Setup returned ${response.status}.`);
+      if (!response.ok) throw new Error(payload?.message || payload?.error || t("Setup returned {status}.", { status: response.status }));
       setSetup(payload);
       setSetupError("");
     } catch (error) {
-      setSetupError(error instanceof Error ? error.message : "Connection details could not load.");
+      setSetupError(error instanceof Error ? error.message : t("Connection details could not load."));
     }
   }, [integrationId]);
 
@@ -380,11 +372,11 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
         body: JSON.stringify({ values }),
       });
       const payload = await response.json().catch(() => ({}));
-      if (!response.ok) return payload?.message || payload?.error || "That could not be saved.";
+      if (!response.ok) return payload?.message || payload?.error || t("That could not be saved.");
       setSetup(payload);
       return null;
     } catch {
-      return "That could not be saved. Check your connection and try again.";
+      return t("That could not be saved. Check your connection and try again.");
     }
   }, [integrationId]);
 
@@ -392,7 +384,7 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
     try {
       const response = await fetch("/api/external-bookings", { credentials: "same-origin", cache: "no-store" });
       const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload?.message || payload?.error || `Feed returned ${response.status}.`);
+      if (!response.ok) throw new Error(payload?.message || payload?.error || t("Feed returned {status}.", { status: response.status }));
       setIntegration(payload);
       setIntegrationError("");
       const mapping = payload.mappings?.[0] || {};
@@ -403,7 +395,7 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
         emailBehaviour: mapping.email_behaviour || "none",
       });
     } catch (error) {
-      setIntegrationError(error instanceof Error ? error.message : "The event feed could not load.");
+      setIntegrationError(error instanceof Error ? error.message : t("The event feed could not load."));
     }
   }, []);
 
@@ -415,13 +407,13 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
       ]);
       const payload = await response.json().catch(() => ({}));
       const servicesPayload = await servicesResponse.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload?.message || payload?.error || `Resource settings returned ${response.status}.`);
+      if (!response.ok) throw new Error(payload?.message || payload?.error || t("Resource settings returned {status}.", { status: response.status }));
       if (servicesResponse.ok && Array.isArray(servicesPayload?.services)) setResourceServices(servicesPayload.services);
       setResourceConfig(payload.config || {});
       setProfiles(Array.isArray(payload.profiles) && payload.profiles.length ? payload.profiles : [newProfile()]);
       setResourceError("");
     } catch (error) {
-      setResourceError(error instanceof Error ? error.message : "Resource settings could not load.");
+      setResourceError(error instanceof Error ? error.message : t("Resource settings could not load."));
       setProfiles((current) => current.length ? current : [newProfile()]);
     }
   }, []);
@@ -542,7 +534,7 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
     const payload = await response.json().catch(() => ({}));
     setBusy("");
     if (!response.ok) {
-      return setIntegrationError(payload?.message || payload?.error || "That change could not be saved.");
+      return setIntegrationError(payload?.message || payload?.error || t("That change could not be saved."));
     }
     setIntegration(payload.state);
     setIntegrationError("");
@@ -562,12 +554,12 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
     setProfiles(nextProfiles);
     setResourceConfig(nextConfig);
     if (nextProfiles.some((profile) => !profile.resourceIds.length)) {
-      return setResourceError(`Every profile needs at least one ${resourceWord}.`);
+      return setResourceError(t("Every profile needs at least one {resourceWord}.", { resourceWord }));
     }
     const assigned = new Set<string>();
     for (const profile of nextProfiles) for (const serviceId of profile.serviceIds) {
       const key = `${profile.handedness}:${serviceId}`;
-      if (assigned.has(key)) return setResourceError("A lesson type can only use one profile for each handedness.");
+      if (assigned.has(key)) return setResourceError(t("A lesson type can only use one profile for each handedness."));
       assigned.add(key);
     }
     const config = Object.fromEntries(services.map((service) => {
@@ -589,7 +581,7 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
     const payload = await response.json().catch(() => ({}));
     setBusy("");
     if (!response.ok) {
-      return setResourceError(payload?.message || payload?.error || "That change could not be saved.");
+      return setResourceError(payload?.message || payload?.error || t("That change could not be saved."));
     }
     setProfiles(payload.profiles || nextProfiles);
     setResourceConfig(payload.config || config);
@@ -605,7 +597,7 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
       body: JSON.stringify({ action: "process-pending", since: sinceIso }),
     });
     const payload = await response.json().catch(() => ({})); setReplaying(false);
-    if (!response.ok) return setIntegrationError(payload?.message || payload?.error || "Pending events could not be processed.");
+    if (!response.ok) return setIntegrationError(payload?.message || payload?.error || t("Pending events could not be processed."));
     setIntegration(payload.state); setIntegrationError("");
     const summary = Object.entries(payload.summary || {}).map(([key, value]) => `${key} ${value}`).join(" · ");
     setReplayResult(`Processed ${payload.attempted || 0} event${payload.attempted === 1 ? "" : "s"}${summary ? ` — ${summary}` : ""}.`);
@@ -617,16 +609,16 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
       body: JSON.stringify({ action: "retry", eventKey }),
     });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) return setIntegrationError(payload?.message || payload?.error || "Event retry failed.");
+    if (!response.ok) return setIntegrationError(payload?.message || payload?.error || t("Event retry failed."));
     setIntegration(payload.state); setIntegrationError("");
   }
 
   const TAB_LABELS: Record<Tab, string> = {
-    webhooks: "Webhooks",
+    webhooks: t("Webhooks"),
     api: "API",
-    mapping: "Mapping",
-    activity: "Activity",
-    health: "Health",
+    mapping: t("Mapping"),
+    activity: t("Activity"),
+    health: t("Health"),
   };
   const TAB_ICONS: Record<Tab, IconComponent> = {
     webhooks: ClarityNotifications,
@@ -636,11 +628,11 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
     health: ClaritySecurity,
   };
   const TAB_HINTS: Record<Tab, string> = {
-    webhooks: `What ${providerLabel} sends us`,
-    api: `What we send ${providerLabel}`,
-    mapping: "Their words, in yours",
-    activity: "Everything that moved",
-    health: "Can I use this right now",
+    webhooks: t("What {providerLabel} sends us", { providerLabel }),
+    api: t("What we send {providerLabel}", { providerLabel }),
+    mapping: t("Their words, in yours"),
+    activity: t("Everything that moved"),
+    health: t("Can I use this right now"),
   };
   // Only the panes this integration actually has. Resend has no webhook and
   // Akahu receives nothing, so showing them five tabs would be three empty
@@ -656,11 +648,11 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
     <article className="data-card settings-section settings-developer integration-panel">
       <header className="integration-header">
         <div>
-          <span>Connection</span>
-          <h2>{setup?.integration?.label || "Not connected"}</h2>
+          <span>{t("Connection")}</span>
+          <h2>{setup?.integration?.label || t("Not connected")}</h2>
           <p>{TAB_HINTS[tab]}</p>
         </div>
-        <strong className={attention ? "needs-attention" : ""}>{attention ? "Needs attention" : "Ready"}</strong>
+        <strong className={attention ? "needs-attention" : ""}>{attention ? t("Needs attention") : t("Ready")}</strong>
       </header>
 
       <div className="integration-tabs" role="tablist" aria-label={`${providerLabel} connection`}>
@@ -682,31 +674,28 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
       </div>
 
       <div className="integration-body">
-        {setupError ? <div className="integration-error"><strong>Connection details are unavailable</strong>{setupError}</div> : null}
+        {setupError ? <div className="integration-error"><strong>{t("Connection details are unavailable")}</strong>{setupError}</div> : null}
 
         {/* ---------------- Webhooks: what they send us ------------------- */}
         {tab === "webhooks" ? (
           inbound ? (
             <>
               <div className="integration-note">
-                <strong>Inbound</strong>
-                <span>
-                  {providerLabel} posts to Clarity. Copy the two things on the left into {providerLabel};
-                  paste the two on the right back here. Nothing works until both directions are done.
-                </span>
+                <strong>{t("Inbound")}</strong>
+                <span>{t("{providerLabel} posts to Clarity. Copy the two things on the left into {providerLabel2}; paste the two on the right back here. Nothing works until both directions are done.", { providerLabel, providerLabel2: providerLabel })}</span>
               </div>
               <div className="integration-directions">
                 <section>
-                  <h3>Give these to {providerLabel}</h3>
+                  <h3>{t("Give these to {providerLabel}", { providerLabel })}</h3>
                   <CopyField
-                    label="Webhook URL"
+                    label={t("Webhook URL")}
                     value={inbound.fields.find((field) => field.type === "copy" && field.label.includes("URL"))?.value || ""}
-                    help={`Paste into ${providerLabel}'s webhook settings. This is the only address Clarity listens on.`}
+                    help={t("Paste into {providerLabel}'s webhook settings. This is the only address Clarity listens on.", { providerLabel })}
                   />
                   <CopyField
-                    label="Events to subscribe to"
+                    label={t("Events to subscribe to")}
                     value={inbound.events.map((event) => event.id).join("\n")}
-                    help="Nothing else is read. Anything not on this list is stored and ignored."
+                    help={t("Nothing else is read. Anything not on this list is stored and ignored.")}
                   />
                   <ul className="integration-events">
                     {inbound.events.map((event) => (
@@ -719,23 +708,20 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
                   </ul>
                 </section>
                 <section>
-                  <h3>Paste these from {providerLabel}</h3>
+                  <h3>{t("Paste these from {providerLabel}", { providerLabel })}</h3>
                   {inbound.fields.filter((field) => field.type !== "copy").map((field) => <CredentialField credential={field} key={field.key} onSave={saveCredentials} />)}
                   {inbound.signatureRecipe ? (
                     <label className="integration-credential">
-                      <span className="credential-label">Signature recipe</span>
+                      <span className="credential-label">{t("Signature recipe")}</span>
                       <input readOnly value={inbound.signatureRecipe} />
-                      <small>
-                        How every delivery is signed. Shown because this is what silently fails when a secret
-                        is pasted with a stray space — a 401 should be readable from here rather than from the source.
-                      </small>
+                      <small>{t("How every delivery is signed. Shown because this is what silently fails when a secret is pasted with a stray space — a 401 should be readable from here rather than from the source.")}</small>
                     </label>
                   ) : null}
                 </section>
               </div>
               <CredentialsNote editable={Boolean(setup?.integration.editable)} />
             </>
-          ) : <div className="integration-empty">{providerLabel} does not send Clarity anything.</div>
+          ) : <div className="integration-empty">{t("{providerLabel} does not send Clarity anything.", { providerLabel })}</div>
         ) : null}
 
         {/* ---------------- API: what we send them ------------------------ */}
@@ -743,14 +729,14 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
           outbound ? (
             <>
               <div className="integration-note">
-                <strong>Outbound</strong>
+                <strong>{t("Outbound")}</strong>
                 <span>
                   {outbound.summary} {outbound.transport ? `Over ${outbound.transport === "graphql" ? "GraphQL" : "REST"}.` : ""}
                 </span>
               </div>
               <div className="integration-directions single">
                 <section>
-                  <h3>{outbound.kind === "oauth2" ? `Sign in to ${providerLabel}` : `Paste these from ${providerLabel}`}</h3>
+                  <h3>{outbound.kind === "oauth2" ? t("Sign in to {providerLabel}", { providerLabel }) : t("Paste these from {providerLabel}", { providerLabel })}</h3>
                   {outbound.fields.filter((field) => field.type === "copy").map((field) => (
                     <CopyField help={field.help} key={field.key} label={field.label} value={field.value} />
                   ))}
@@ -763,7 +749,7 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
                 </section>
               </div>
               <div className="integration-note">
-                <strong>What Clarity asks for</strong>
+                <strong>{t("What Clarity asks for")}</strong>
                 <ul className="integration-events">
                   {outbound.operations.map((operation) => (
                     <li key={operation.id}><code>{operation.id}</code><span>{operation.label}</span></li>
@@ -772,59 +758,49 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
               </div>
               {setup?.integration.capabilities?.writeBlockedReason ? (
                 <div className="integration-note">
-                  <strong>What Clarity cannot do</strong>
+                  <strong>{t("What Clarity cannot do")}</strong>
                   <span>{setup.integration.capabilities?.writeBlockedReason}</span>
                 </div>
               ) : null}
             </>
-          ) : <div className="integration-empty">Clarity only receives from {providerLabel}; it never calls out.</div>
+          ) : <div className="integration-empty">{t("Clarity only receives from {providerLabel}; it never calls out.", { providerLabel })}</div>
         ) : null}
 
         {/* ---------------- Mapping: their words, in ours ----------------- */}
         {tab === "mapping" ? (
           <>
-            {integrationError ? <div className="integration-error"><strong>Mapping data is unavailable</strong>{integrationError}</div> : null}
+            {integrationError ? <div className="integration-error"><strong>{t("Mapping data is unavailable")}</strong>{integrationError}</div> : null}
             <div className="integration-note">
-              <strong>Inbound lessons</strong>
+              <strong>{t("Inbound lessons")}</strong>
               <span>
                 {mapping
-                  ? `${capitalise(words.workspace)} ${mapping.workspace_id}${workspaceName(String(mapping.workspace_id)) !== String(mapping.workspace_id) ? ` (${workspaceName(String(mapping.workspace_id))})` : ""} is recognised; every other ${words.workspace} is ignored.`
-                  : `No ${words.workspace} is mapped yet, so nothing is imported.`}
-                {" "}Every booking files under the reserved External Booking lesson type — its time comes from
-                {" "}{providerLabel}, their label goes in the lesson note, and the customer lands in the external
-                booking clients list unless their email matches an existing client.
-              </span>
+                  ? workspaceName(String(mapping.workspace_id)) !== String(mapping.workspace_id)
+                    ? t("{Workspace} {id} ({name}) is recognised; every other {workspace} is ignored.", { Workspace: capitalise(words.workspace), id: String(mapping.workspace_id), name: workspaceName(String(mapping.workspace_id)), workspace: words.workspace })
+                    : t("{Workspace} {id} is recognised; every other {workspace} is ignored.", { Workspace: capitalise(words.workspace), id: String(mapping.workspace_id), workspace: words.workspace })
+                  : t("No {workspace} is mapped yet, so nothing is imported.", { workspace: words.workspace })}{" "}{t("Every booking files under the reserved External Booking lesson type — its time comes from {providerLabel}, their label goes in the lesson note, and the customer lands in the external booking clients list unless their email matches an existing client.", { providerLabel })}</span>
             </div>
             <div className="integration-grid">
               <label className="toggle">
-                <input checked={mappingDraft.enabled} onChange={(event) => void commitMapping({ enabled: event.target.checked })} type="checkbox" />
-                {" "}Enable appointment creation
-              </label>
+                <input checked={mappingDraft.enabled} onChange={(event) => void commitMapping({ enabled: event.target.checked })} type="checkbox" />{" "}{t("Enable appointment creation")}</label>
               <label>
                 {capitalise(words.workspace)}
                 <input readOnly value={mapping ? `${mapping.workspace_id}${workspaceName(String(mapping.workspace_id)) !== String(mapping.workspace_id) ? ` · ${workspaceName(String(mapping.workspace_id))}` : ""}` : "Not mapped"} />
               </label>
-              <label>Lesson type<input readOnly value="External Booking (automatic)" /></label>
-              <label>
-                Clarity location
-                <select disabled={!integration} value={mappingDraft.locationId} onChange={(event) => void commitMapping({ locationId: event.target.value })}>
-                  <option value="">Select location</option>
+              <label>{t("Lesson type")}<input readOnly value="External Booking (automatic)" /></label>
+              <label>{t("Clarity location")}<select disabled={!integration} value={mappingDraft.locationId} onChange={(event) => void commitMapping({ locationId: event.target.value })}>
+                  <option value="">{t("Select location")}</option>
                   {(integration?.catalog?.locations || []).map((location) => <option key={location.id} value={location.id}>{location.name || location.id}</option>)}
                 </select>
               </label>
-              <label>
-                Coach for these lessons
-                <select disabled={!integration} value={mappingDraft.defaultCoachId} onChange={(event) => void commitMapping({ defaultCoachId: event.target.value })}>
-                  <option value="">Choose a coach</option>
+              <label>{t("Coach for these lessons")}<select disabled={!integration} value={mappingDraft.defaultCoachId} onChange={(event) => void commitMapping({ defaultCoachId: event.target.value })}>
+                  <option value="">{t("Choose a coach")}</option>
                   {(integration?.catalog?.coaches || []).map((coach) => <option key={coach.id} value={coach.id}>{coach.displayName || coach.name || coach.id}</option>)}
                 </select>
               </label>
-              <label>
-                Customer email
-                <select value={mappingDraft.emailBehaviour} onChange={(event) => void commitMapping({ emailBehaviour: event.target.value })}>
-                  <option value="none">No Clarity email</option>
-                  <option value="immediate">Send immediately</option>
-                  <option value="after_bay">Send after {resourceWord} booking</option>
+              <label>{t("Customer email")}<select value={mappingDraft.emailBehaviour} onChange={(event) => void commitMapping({ emailBehaviour: event.target.value })}>
+                  <option value="none">{t("No Clarity email")}</option>
+                  <option value="immediate">{t("Send immediately")}</option>
+                  <option value="after_bay">{t("Send after {resourceWord} booking", { resourceWord })}</option>
                 </select>
               </label>
             </div>
@@ -834,43 +810,40 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
               <AutoSaved savedAt={savedAt.mapping} busy={busy === "mapping"} />
             </div>
 
-            {resourceError ? <div className="integration-error"><strong>Resource settings need attention</strong>{resourceError}</div> : null}
+            {resourceError ? <div className="integration-error"><strong>{t("Resource settings need attention")}</strong>{resourceError}</div> : null}
             <div className="integration-resource-heading">
               <div>
-                <h3>{capitalise(resourceWord)} profiles</h3>
-                <p>
-                  Which {resourceWord}s a lesson type may use, in the order Clarity should try them.
-                  {" "}The list comes from {words.workspace}s {providerLabel} has actually sent — {resourceWorkspaces.length} so far.
-                </p>
+                <h3>{t("{resourceWord} profiles", { resourceWord: capitalise(resourceWord) })}</h3>
+                <p>{t("Which {resourceWord}s a lesson type may use, in the order Clarity should try them. The list comes from {workspace}s {providerLabel} has actually sent — {length} so far.", { resourceWord, workspace: words.workspace, providerLabel, length: resourceWorkspaces.length })}</p>
               </div>
-              <button onClick={() => void commitResources([...profiles, newProfile(profiles.length + 1, resourceWorkspaces.map((workspace) => workspace.id))])} type="button">+ New profile</button>
+              <button onClick={() => void commitResources([...profiles, newProfile(profiles.length + 1, resourceWorkspaces.map((workspace) => workspace.id))])} type="button">{t("+ New profile")}</button>
             </div>
             {profiles.map((profile) => (
               <section className="integration-resource-profile" key={profile.id}>
                 <div className="profile-title">
                   <InlineEditRow
-                    label="Profile name"
+                    label={t("Profile name")}
                     value={profile.name}
                     width="name"
                     onSave={(name) => patchProfile(profile.id, { name: String(name) })}
                   />
-                  <select aria-label="Player handedness" value={profile.handedness} onChange={(event) => patchProfile(profile.id, { handedness: event.target.value === "left" ? "left" : "standard" })}>
-                    <option value="standard">Standard / any player</option>
-                    <option value="left">Left-handed players</option>
+                  <select aria-label={t("Player handedness")} value={profile.handedness} onChange={(event) => patchProfile(profile.id, { handedness: event.target.value === "left" ? "left" : "standard" })}>
+                    <option value="standard">{t("Standard / any player")}</option>
+                    <option value="left">{t("Left-handed players")}</option>
                   </select>
-                  <button className="text-button danger" disabled={profiles.length === 1} onClick={() => void commitResources(profiles.filter((candidate) => candidate.id !== profile.id))} type="button">Delete</button>
+                  <button className="text-button danger" disabled={profiles.length === 1} onClick={() => void commitResources(profiles.filter((candidate) => candidate.id !== profile.id))} type="button">{t("Delete")}</button>
                 </div>
                 <div className="profile-columns">
                   <div>
-                    <h4>Priority</h4>
+                    <h4>{t("Priority")}</h4>
                     <div className="resource-list">
                     {profile.resourceIds.map((id, index) => (
                       <div className="resource-row" key={id}>
                         <span>{index + 1}</span>
                         <strong>{workspaceName(id)}</strong>
-                        <button aria-label={`Move ${workspaceName(id)} up`} disabled={index === 0} onClick={() => moveResource(profile, index, -1)} type="button">↑</button>
-                        <button aria-label={`Move ${workspaceName(id)} down`} disabled={index === profile.resourceIds.length - 1} onClick={() => moveResource(profile, index, 1)} type="button">↓</button>
-                        <button onClick={() => patchProfile(profile.id, { resourceIds: profile.resourceIds.filter((candidate) => candidate !== id) })} type="button">Remove</button>
+                        <button aria-label={t("Move {id} up", { id: workspaceName(id) })} disabled={index === 0} onClick={() => moveResource(profile, index, -1)} type="button">↑</button>
+                        <button aria-label={t("Move {id} down", { id: workspaceName(id) })} disabled={index === profile.resourceIds.length - 1} onClick={() => moveResource(profile, index, 1)} type="button">↓</button>
+                        <button onClick={() => patchProfile(profile.id, { resourceIds: profile.resourceIds.filter((candidate) => candidate !== id) })} type="button">{t("Remove")}</button>
                       </div>
                     ))}
                     </div>
@@ -881,12 +854,12 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
                         </button>
                       ))}
                       {resourceWorkspaces.length ? null : (
-                        <em>Nothing seen yet. A {resourceWord} appears here the first time {providerLabel} sends a booking for it.</em>
+                        <em>{t("Nothing seen yet. A {resourceWord} appears here the first time {providerLabel} sends a booking for it.", { resourceWord, providerLabel })}</em>
                       )}
                     </div>
                   </div>
                   <div>
-                    <h4>Lesson types</h4>
+                    <h4>{t("Lesson types")}</h4>
                     <div className="resource-services">
                       {services.length ? services.map((service) => (
                         <label key={service.id}>
@@ -897,7 +870,7 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
                           />
                           {service.name || service.id}
                         </label>
-                      )) : <p>Lesson types will appear when the settings endpoint is available.</p>}
+                      )) : <p>{t("Lesson types will appear when the settings endpoint is available.")}</p>}
                     </div>
                   </div>
                 </div>
@@ -906,16 +879,9 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
             <section className="integration-resource-profile">
               <div className="integration-resource-heading">
                 <div>
-                  <h3>Auto-book {resourceWord}s</h3>
-                  <p>
-                    Ticked lesson types get a {resourceWord} booked automatically once the booking lands on the
-                    calendar — whether a client booked it themselves or you added it to the calendar. Needs a profile
-                    above; if none is free the booking still goes ahead and the card shows no {resourceWord}.
-                  </p>
-                  <p>
-                    Rescheduling moves the {resourceWord} too: the booking is moved in Optix where it can be, and
-                    only released and rebooked in another {resourceWord} when that one is taken at the new time.
-                  </p>
+                  <h3>{t("Auto-book {resourceWord}s", { resourceWord })}</h3>
+                  <p>{t("Ticked lesson types get a {resourceWord} booked automatically once the booking lands on the calendar — whether a client booked it themselves or you added it to the calendar. Needs a profile above; if none is free the booking still goes ahead and the card shows no {resourceWord2}.", { resourceWord, resourceWord2: resourceWord })}</p>
+                  <p>{t("Rescheduling moves the {resourceWord} too: the booking is moved in Optix where it can be, and only released and rebooked in another {resourceWord2} when that one is taken at the new time.", { resourceWord, resourceWord2: resourceWord })}</p>
                 </div>
               </div>
               <div className="resource-services">
@@ -950,64 +916,58 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
         {/* ---------------- Activity: one log, both shapes ---------------- */}
         {tab === "activity" ? (
           <>
-            {integrationError ? <div className="integration-error"><strong>The feed is unavailable</strong>{integrationError}</div> : null}
+            {integrationError ? <div className="integration-error"><strong>{t("The feed is unavailable")}</strong>{integrationError}</div> : null}
             <div className="integration-feed-toolbar">
               <div>
-                <h3>Received from {providerLabel}</h3>
-                <p>Raw deliveries, newest first.</p>
+                <h3>{t("Received from {providerLabel}", { providerLabel })}</h3>
+                <p>{t("Raw deliveries, newest first.")}</p>
               </div>
-              <label>
-                Show
-                <select value={activityFilter} onChange={(event) => setActivityFilter(event.target.value as ActivityFilter)}>
-                  <option value="all">Everything</option>
-                  <option value="bookings">Bookings</option>
-                  <option value="purchases">Purchases</option>
-                  <option value="problems">Problems only</option>
+              <label>{t("Show")}<select value={activityFilter} onChange={(event) => setActivityFilter(event.target.value as ActivityFilter)}>
+                  <option value="all">{t("Everything")}</option>
+                  <option value="bookings">{t("Bookings")}</option>
+                  <option value="purchases">{t("Purchases")}</option>
+                  <option value="problems">{t("Problems only")}</option>
                 </select>
               </label>
-              <button onClick={() => void loadIntegration()} type="button">Refresh</button>
+              <button onClick={() => void loadIntegration()} type="button">{t("Refresh")}</button>
             </div>
 
             {pending.count ? (
               <div className={`integration-pending-bar${queueStuck ? " stuck" : ""}`}>
                 <div>
-                  <strong>{pending.count} event{pending.count === 1 ? "" : "s"} waiting</strong>
-                  <span>
-                    Oldest {pending.oldest ? since(pending.oldest) : "—"}. Bookings do not reach the calendar until these are processed.
-                  </span>
+                  <strong>{t("{count} event", { count: pending.count })}{pending.count === 1 ? "" : "s"}{" "}{t("waiting")}</strong>
+                  <span>{t("Oldest")}{" "}{pending.oldest ? since(pending.oldest) : "—"}{t(". Bookings do not reach the calendar until these are processed.")}</span>
                 </div>
-                <label>
-                  Replay the last
-                  <select value={replayDays} onChange={(event) => setReplayDays(Number(event.target.value))}>
-                    <option value={1}>24 hours</option>
-                    <option value={7}>7 days</option>
-                    <option value={30}>30 days</option>
-                    <option value={365}>everything</option>
+                <label>{t("Replay the last")}<select value={replayDays} onChange={(event) => setReplayDays(Number(event.target.value))}>
+                    <option value={1}>{t("24 hours")}</option>
+                    <option value={7}>{t("7 days")}</option>
+                    <option value={30}>{t("30 days")}</option>
+                    <option value={365}>{t("everything")}</option>
                   </select>
                 </label>
-                <button disabled={replaying} onClick={() => void processPending()} type="button">{replaying ? "Processing…" : "Process pending"}</button>
+                <button disabled={replaying} onClick={() => void processPending()} type="button">{replaying ? t("Processing…") : t("Process pending")}</button>
               </div>
             ) : null}
-            {replayResult ? <div className="integration-note"><strong>Replay finished</strong><span>{replayResult}</span></div> : null}
+            {replayResult ? <div className="integration-note"><strong>{t("Replay finished")}</strong><span>{replayResult}</span></div> : null}
 
             {showPurchases && purchaseRows.length ? (
               <>
-                <h4 className="integration-feed-group">Purchases</h4>
+                <h4 className="integration-feed-group">{t("Purchases")}</h4>
                 {purchaseRows.map((row) => (
                   <details className="integration-event" key={row.id}>
                     <summary>
-                      <strong>{formatQuantity(row.quantity)}{row.item_name || "Purchase"}</strong>
-                      <span>{row.member_name || row.member_email || "No customer"}</span>
+                      <strong>{formatQuantity(row.quantity)}{row.item_name || t("Purchase")}</strong>
+                      <span>{row.member_name || row.member_email || t("No customer")}</span>
                       <time>{new Date(row.purchased_at).toLocaleString()}</time>
                       <em>{formatAmount(row)}</em>
                     </summary>
                     <div className="event-facts">
-                      <span>Event <b>{row.event_type}</b></span>
-                      <span>Classified <b>{row.classification}</b></span>
-                      <span>Purchase ID <b>{row.external_purchase_id || "—"}</b></span>
-                      <span>Sale # <b>{row.sale_number || "—"}</b></span>
-                      <span>Paid <b>{row.paid_at ? new Date(row.paid_at).toLocaleString() : "—"}</b></span>
-                      <span>Client <b>{clientLabel(row)}</b></span>
+                      <span>{t("Event")}{" "}<b>{row.event_type}</b></span>
+                      <span>{t("Classified")}{" "}<b>{row.classification}</b></span>
+                      <span>{t("Purchase ID")}{" "}<b>{row.external_purchase_id || "—"}</b></span>
+                      <span>{t("Sale #")}{" "}<b>{row.sale_number || "—"}</b></span>
+                      <span>{t("Paid")}{" "}<b>{row.paid_at ? new Date(row.paid_at).toLocaleString() : "—"}</b></span>
+                      <span>{t("Client")}{" "}<b>{clientLabel(row)}</b></span>
                     </div>
                     <pre>{safeJson(row.rawPayload)}</pre>
                   </details>
@@ -1017,7 +977,7 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
 
             {showEvents ? (
               <>
-                {showPurchases && purchaseRows.length ? <h4 className="integration-feed-group">Bookings</h4> : null}
+                {showPurchases && purchaseRows.length ? <h4 className="integration-feed-group">{t("Bookings")}</h4> : null}
                 {/* Every row closed, failed ones included. A failure says so on
                     its summary line, which is enough to find it — a list that
                     unfolds three payloads on arrival is harder to scan, not
@@ -1025,26 +985,26 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
                 {eventRows.length ? eventRows.map((event) => (
                   <details className="integration-event" key={event.event_key}>
                     <summary>
-                      <strong>{event.event_type || "Unknown event"}</strong>
-                      <span>{event.customer || "No customer"}</span>
+                      <strong>{event.event_type || t("Unknown event")}</strong>
+                      <span>{event.customer || t("No customer")}</span>
                       <time>{event.received_at ? new Date(event.received_at).toLocaleString() : ""}</time>
                       <em>{event.processing_status}</em>
                     </summary>
                     <div className="event-facts">
                       <span>{capitalise(words.workspace)} <b>{event.workspaceId || "—"}</b></span>
-                      <span>Booking ID <b>{event.external_booking_id || "—"}</b></span>
-                      <span>Appointment <b>{event.clarity_item_id || "Not created"}</b></span>
-                      <span>{capitalise(resourceWord)} <b>{event.outboundBayBookingId || "Not booked"}</b></span>
+                      <span>{t("Booking ID")}{" "}<b>{event.external_booking_id || "—"}</b></span>
+                      <span>{t("Appointment")}{" "}<b>{event.clarity_item_id || t("Not created")}</b></span>
+                      <span>{capitalise(resourceWord)} <b>{event.outboundBayBookingId || t("Not booked")}</b></span>
                     </div>
-                    {event.error_message ? <div className="integration-error"><strong>{event.failure_code || "Processing error"}</strong>{event.error_message}</div> : null}
+                    {event.error_message ? <div className="integration-error"><strong>{event.failure_code || t("Processing error")}</strong>{event.error_message}</div> : null}
                     <pre>{safeJson(event.rawPayload)}</pre>
                     {UNPROCESSED.includes(event.processing_status) ? (
                       <button onClick={() => void retryEvent(event.event_key)} type="button">
-                        {event.processing_status === "failed" ? "Retry this event" : "Process this event"}
+                        {event.processing_status === "failed" ? t("Retry this event") : t("Process this event")}
                       </button>
                     ) : null}
                   </details>
-                )) : <div className="integration-empty">Nothing to show for this filter.</div>}
+                )) : <div className="integration-empty">{t("Nothing to show for this filter.")}</div>}
               </>
             ) : null}
           </>
@@ -1054,35 +1014,35 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
         {tab === "health" ? (
           <>
             <div className="integration-stat-grid">
-              <div><span>Received</span><strong>{events.length}</strong></div>
-              <div><span>Processed</span><strong>{events.filter((event) => event.processing_status === "processed").length}</strong></div>
-              <div><span>Ignored</span><strong>{events.filter((event) => event.processing_status === "ignored").length}</strong></div>
-              <div><span>Failed</span><strong>{failedCount}</strong></div>
+              <div><span>{t("Received")}</span><strong>{events.length}</strong></div>
+              <div><span>{t("Processed")}</span><strong>{events.filter((event) => event.processing_status === "processed").length}</strong></div>
+              <div><span>{t("Ignored")}</span><strong>{events.filter((event) => event.processing_status === "ignored").length}</strong></div>
+              <div><span>{t("Failed")}</span><strong>{failedCount}</strong></div>
             </div>
             <div className="integration-checks">
               <Check
                 ok={Boolean(lastDelivery)}
-                label="Deliveries arriving"
-                detail={lastDelivery ? `Last one ${since(lastDelivery)}.` : `Nothing has ever arrived. Check the webhook URL is saved in ${providerLabel}.`}
+                label={t("Deliveries arriving")}
+                detail={lastDelivery ? t("Last one {lastDelivery}.", { lastDelivery: since(lastDelivery) }) : t("Nothing has ever arrived. Check the webhook URL is saved in {providerLabel}.", { providerLabel })}
               />
               <Check
                 ok={!missingRequired.length && !whitespaceProblems.length}
-                label="Credentials"
+                label={t("Credentials")}
                 detail={
                   whitespaceProblems.length
-                    ? `${whitespaceProblems.map((credential) => credential.key).join(", ")} has whitespace around it. That alone rejects every request.`
+                    ? t("{value} has whitespace around it. That alone rejects every request.", { value: whitespaceProblems.map((credential) => credential.key).join(", ") })
                     : missingRequired.length
-                      ? `Missing: ${missingRequired.map((credential) => credential.key).join(", ")}.`
-                      : "Everything required is set."
+                      ? t("Missing: {value}.", { value: missingRequired.map((credential) => credential.key).join(", ") })
+                      : t("Everything required is set.")
                 }
               />
               <Check
                 ok={Boolean(mapping?.enabled && mapping?.location_id)}
                 label={`${capitalise(words.workspace)} mapping`}
                 detail={
-                  !mapping ? `No ${words.workspace} mapped.`
-                    : !mapping.enabled ? "Mapped but disabled — nothing will be imported."
-                      : !mapping.location_id ? "Mapped but no Clarity location chosen."
+                  !mapping ? t("No {workspace} mapped.", { workspace: words.workspace })
+                    : !mapping.enabled ? t("Mapped but disabled — nothing will be imported.")
+                      : !mapping.location_id ? t("Mapped but no Clarity location chosen.")
                         : `${mapping.workspace_id} → ${mapping.account_id}, enabled.`
                 }
               />
@@ -1091,30 +1051,30 @@ export default function IntegrationPanel({ integrationId }: { integrationId: str
                 label={`${capitalise(resourceWord)} list`}
                 detail={
                   resourceWorkspaces.length
-                    ? `${resourceWorkspaces.length} discovered from traffic. A new one appears the first time it is booked.`
-                    : `None seen yet. They appear as ${providerLabel} sends bookings for them.`
+                    ? t("{length} discovered from traffic. A new one appears the first time it is booked.", { length: resourceWorkspaces.length })
+                    : t("None seen yet. They appear as {providerLabel} sends bookings for them.", { providerLabel })
                 }
               />
               <Check
                 ok={!queueStuck}
-                label="Unprocessed queue"
+                label={t("Unprocessed queue")}
                 detail={
-                  !pending.count ? "Nothing waiting."
+                  !pending.count ? t("Nothing waiting.")
                     : queueStuck
-                      ? `${pending.count} waiting, oldest ${since(pending.oldest)}. Bookings do not reach the calendar until processed.`
-                      : `${pending.count} waiting, all from the last day.`
+                      ? t("{count} waiting, oldest {oldest}. Bookings do not reach the calendar until processed.", { count: pending.count, oldest: since(pending.oldest) })
+                      : t("{count} waiting, all from the last day.", { count: pending.count })
                 }
-                action={pending.count ? { label: "Go to Activity", run: () => setTab("activity") } : undefined}
+                action={pending.count ? { label: t("Go to Activity"), run: () => setTab("activity") } : undefined}
               />
               <Check
                 ok={failedCount === 0}
-                label="Processing failures"
-                detail={failedCount ? `${failedCount} event${failedCount === 1 ? "" : "s"} failed and can be retried from Activity.` : "None."}
+                label={t("Processing failures")}
+                detail={failedCount ? t("{failedCount} event{value} failed and can be retried from Activity.", { failedCount, value: failedCount === 1 ? "" : "s" }) : t("None.")}
               />
             </div>
             {setup?.integration?.docsUrl ? (
               <div className="integration-note">
-                <strong>{providerLabel} documentation</strong>
+                <strong>{t("{providerLabel} documentation", { providerLabel })}</strong>
                 <span><a href={setup.integration.docsUrl} rel="noreferrer" target="_blank">{setup.integration.docsUrl}</a></span>
               </div>
             ) : null}

@@ -1,4 +1,5 @@
 import React from "react";
+import { t } from "../../../lib/i18n";
 
 interface StatusBarProps {
   playback: {
@@ -32,36 +33,36 @@ export function StatusBar({
     <div className="status-panel">
       <div className="status-grid">
         <div>
-          <span>Current time</span>
+          <span>{t("Current time")}</span>
           <b>{playback.time.toFixed(3)}s</b>
         </div>
         <div>
-          <span>Frame</span>
+          <span>{t("Frame")}</span>
           <b>{frame}</b>
         </div>
         <div>
-          <span>fps</span>
+          <span>{t("fps")}</span>
           <b>{playback.fps.toFixed(1)}</b>
         </div>
         <div>
-          <span>Duration</span>
+          <span>{t("Duration")}</span>
           <b>{playback.duration.toFixed(2)}s</b>
         </div>
         <div>
-          <span>Playback</span>
+          <span>{t("Playback")}</span>
           <b>{playback.isPlaying ? "playing" : "paused"}</b>
         </div>
         <div>
-          <span>Draw</span>
+          <span>{t("Draw")}</span>
           <b>{drawing.objectCount} • {drawing.selectedTool}</b>
         </div>
         <div>
-          <span>Marker hover</span>
+          <span>{t("Marker hover")}</span>
           <b>{timeline.hover || "none"}</b>
         </div>
         <div>
-          <span>Timeline</span>
-          <b>zoom {timeline.zoom.toFixed(1)} • {timeline.scrub ? "scrubbing" : "idle"}</b>
+          <span>{t("Timeline")}</span>
+          <b>{t("zoom {zoom} •", { zoom: timeline.zoom.toFixed(1) })}{" "}{timeline.scrub ? "scrubbing" : "idle"}</b>
         </div>
       </div>
     </div>

@@ -1,4 +1,5 @@
 import { DrawingObject } from "../models/Drawing";
+import { t } from "../../../lib/i18n";
 
 // Recording the analysis view means redrawing what the coach sees onto a
 // canvas: the current video frame, then the drawing objects on top. We redraw
@@ -161,17 +162,17 @@ export class AnalysisViewRecorder {
 
   async start(): Promise<void> {
     if (this.recorder) {
-      throw new Error("A recording is already running.");
+      throw new Error(t("A recording is already running."));
     }
     if (typeof MediaRecorder === "undefined") {
-      throw new Error("Recording is not supported in this browser.");
+      throw new Error(t("Recording is not supported in this browser."));
     }
     const { video } = this.getFrame();
     if (!video) {
-      throw new Error("Load a video before recording.");
+      throw new Error(t("Load a video before recording."));
     }
     if (!navigator.mediaDevices?.getUserMedia) {
-      throw new Error("Microphone access is not available in this browser.");
+      throw new Error(t("Microphone access is not available in this browser."));
     }
 
     const sourceWidth = video.videoWidth || video.clientWidth || 1280;
@@ -186,14 +187,14 @@ export class AnalysisViewRecorder {
     canvas.height = height;
     const ctx = canvas.getContext("2d");
     if (!ctx) {
-      throw new Error("Could not prepare the recording canvas.");
+      throw new Error(t("Could not prepare the recording canvas."));
     }
 
     let micStream: MediaStream;
     try {
       micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch {
-      throw new Error("Microphone permission is needed to record commentary.");
+      throw new Error(t("Microphone permission is needed to record commentary."));
     }
 
     try {
@@ -219,7 +220,7 @@ export class AnalysisViewRecorder {
         };
         recorder.onerror = () => {
           this.teardown();
-          reject(new Error("Recording failed."));
+          reject(new Error(t("Recording failed.")));
         };
         recorder.onstop = () => {
           const durationMs = Date.now() - this.startedAt;
@@ -228,7 +229,7 @@ export class AnalysisViewRecorder {
           const blob = new Blob(this.chunks, { type: blobType });
           this.teardown();
           if (!blob.size) {
-            reject(new Error("Recording did not capture any video."));
+            reject(new Error(t("Recording did not capture any video.")));
             return;
           }
           resolve({ blob, mimeType: blob.type || blobType, durationMs, width, height });
@@ -241,7 +242,7 @@ export class AnalysisViewRecorder {
     } catch (error) {
       micStream.getTracks().forEach((track) => track.stop());
       this.teardown();
-      throw error instanceof Error ? error : new Error("Could not start recording.");
+      throw error instanceof Error ? error : new Error(t("Could not start recording."));
     }
   }
 
@@ -249,7 +250,7 @@ export class AnalysisViewRecorder {
     const recorder = this.recorder;
     const pending = this.pending;
     if (!recorder || !pending) {
-      return Promise.reject(new Error("No recording is running."));
+      return Promise.reject(new Error(t("No recording is running.")));
     }
     if (recorder.state !== "inactive") {
       recorder.stop();

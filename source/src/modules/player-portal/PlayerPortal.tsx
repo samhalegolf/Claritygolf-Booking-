@@ -24,6 +24,7 @@ import {
 } from "../shared/ClarityIcons";
 import { apiFetch } from "../auth/apiFetch";
 import { signOut, type Session } from "../auth/session";
+import { LanguageSelect } from "../settings/LanguageSettings";
 import { hasGuestToken, NATIVE } from "../auth/apiFetch";
 import { isPlayerBookingMode, slotDate } from "../shared/bookingHandoff";
 import { useBackNavigation } from "../shared/backNavigation";
@@ -87,6 +88,7 @@ import type {
 } from "../video-analysis/VideoWorkspace";
 import { deleteGuestNote, listGuestNotes, saveGuestNote, type GuestNote } from "./guestNotesStore";
 import { terminologyFor, type BusinessTerminology } from "../../../netlify/functions/_shared/business-terminology.mts";
+import { t } from "../../lib/i18n";
 
 // The player's own app. It is chosen by the entry point from the session role,
 // not by hostname any more, and it never renders a login form of its own --
@@ -160,11 +162,11 @@ type PracticeItem = {
 
 /** Where an activity row goes, in the words on the bar. */
 const ACTIVITY_TAB_LABELS: Record<string, string> = {
-  reviews: "Reviews",
-  practice: "Practice",
-  notes: "Notes",
-  videos: "Videos",
-  passes: "Passes",
+  reviews: t("Reviews"),
+  practice: t("Practice"),
+  notes: t("Notes"),
+  videos: t("Videos"),
+  passes: t("Passes"),
 };
 
 /* What the big number on a pass says.
@@ -175,10 +177,10 @@ const ACTIVITY_TAB_LABELS: Record<string, string> = {
  * technically true and useless -- a player wants to know whether to book or to
  * buy, and those are different answers. */
 function passBalanceLabel(pass: PlayerPass) {
-  if (pass.status === "scheduled") return "Not started";
-  if (pass.status === "expired") return "Expired";
-  if (pass.status === "exhausted" || pass.creditsAvailable < 1) return "All used";
-  return `${pass.creditsAvailable} left`;
+  if (pass.status === "scheduled") return t("Not started");
+  if (pass.status === "expired") return t("Expired");
+  if (pass.status === "exhausted" || pass.creditsAvailable < 1) return t("All used");
+  return t("{count} left", { count: pass.creditsAvailable });
 }
 
 /** A pass, as playerPassViews() hands it over. Deliberately not the coach's
@@ -219,10 +221,10 @@ type CaddyAccess = {
 
 // Caddy's own words for what a player has. "free" is an account with no pass.
 function caddyAccessLabel(caddy: CaddyAccess) {
-  if (!caddy.connected) return "Not set up yet";
-  if (!caddy.active || caddy.access === "free" || caddy.access === "none") return "Free";
-  if (caddy.access === "month_pass") return "Month Pass active";
-  if (caddy.access === "member") return "Member";
+  if (!caddy.connected) return t("Not set up yet");
+  if (!caddy.active || caddy.access === "free" || caddy.access === "none") return t("Free");
+  if (caddy.access === "month_pass") return t("Month Pass active");
+  if (caddy.access === "member") return t("Member");
   return caddy.access.replaceAll("_", " ");
 }
 
@@ -248,7 +250,7 @@ function formatBookingWhen(booking: Booking) {
   // A review's slot is the day the coach owes it back. Printing the hour it
   // happens to sit on would read as an appointment to attend, which is the one
   // thing it is not.
-  if (isReviewBooking(booking)) return `Back with you by ${dateLabel}`;
+  if (isReviewBooking(booking)) return t("Back with you by {dateLabel}", { dateLabel });
   return `${dateLabel} · ${formatMinutes(booking.start)}–${formatMinutes(booking.start + booking.duration)}`;
 }
 
@@ -431,7 +433,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
         bookingEmbed?: PlayerBookingEmbedConfig;
         terminology?: BusinessTerminology;
       };
-      if (!res.ok) throw new Error(data?.message || "We couldn't load your profile.");
+      if (!res.ok) throw new Error(data?.message || t("We couldn't load your profile."));
       setBookings(Array.isArray(data.bookings) ? data.bookings : []);
       setNotes(Array.isArray(data.notes) ? data.notes : []);
       setPractice(Array.isArray(data.practice) ? data.practice : []);
@@ -461,7 +463,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
       if (data.player?.phone) setPlayerPhone(data.player.phone);
       if (data.player?.id) setPlayerId(data.player.id);
     } catch (error) {
-      setProfileError(error instanceof Error ? error.message : "We couldn't load your profile.");
+      setProfileError(error instanceof Error ? error.message : t("We couldn't load your profile."));
     } finally {
       setProfileLoading(false);
     }
@@ -504,7 +506,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
           onSignedOut();
           return;
         }
-        if (!res.ok) throw new Error("Could not mark that complete.");
+        if (!res.ok) throw new Error(t("Could not mark that complete."));
         const data = (await res.json().catch(() => ({}))) as { block?: PracticeItem };
         setPractice((current) =>
           current.map((block) => (block.id === id && data.block ? { ...block, ...data.block } : block)),
@@ -556,7 +558,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
     try {
       setSavedVideos(await savedVideoLibrary.listItems());
     } catch (error) {
-      setVideoError(error instanceof Error ? error.message : "Could not read your saved videos.");
+      setVideoError(error instanceof Error ? error.message : t("Could not read your saved videos."));
     }
   }, [savedVideoLibrary]);
 
@@ -626,7 +628,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
         await refreshCloudVideos();
       } catch (error) {
         setVideoError(
-          error instanceof Error ? error.message : "Could not download that video. Try again.",
+          error instanceof Error ? error.message : t("Could not download that video. Try again."),
         );
       } finally {
         setDownloadingIds((current) => {
@@ -647,8 +649,9 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   const requestAccountDeletion = useCallback(async () => {
     if (isGuest || deletionBusy) return;
     const confirmed = window.confirm(
-      "Request deletion of your Clarity Player account and associated personal data? " +
-        "Some booking or payment records may be retained where legally required. We will email you when the review is complete.",
+      t(
+        "Request deletion of your Clarity Player account and associated personal data? Some booking or payment records may be retained where legally required. We will email you when the review is complete.",
+      ),
     );
     if (!confirmed) return;
 
@@ -666,13 +669,13 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
         onSignedOut();
         return;
       }
-      if (!response.ok) throw new Error(data.message || "Could not submit the deletion request.");
+      if (!response.ok) throw new Error(data.message || t("Could not submit the deletion request."));
       setDeletionMessage(
-        `Request received. We will review it and email you within ${data.expectedCompletionDays || 7} days.`,
+        t("Request received. We will review it and email you within {value} days.", { value: data.expectedCompletionDays || 7 }),
       );
     } catch (error) {
       setDeletionError(
-        error instanceof Error ? error.message : "Could not submit the deletion request.",
+        error instanceof Error ? error.message : t("Could not submit the deletion request."),
       );
     } finally {
       setDeletionBusy(false);
@@ -709,23 +712,23 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
         flexibleValueCents?: number;
       };
       if (!response.ok) {
-        throw new Error(data?.message || "Could not start that purchase.");
+        throw new Error(data?.message || t("Could not start that purchase."));
       }
       if (data.paid && Array.isArray(data.passes)) {
         setPasses(data.passes);
         setFlexibleValueCents(Math.max(0, Math.round(Number(data.flexibleValueCents) || 0)));
-        setPurchaseNote("Paid with Clarity credit. It is on your account now.");
+        setPurchaseNote(t("Paid with Clarity credit. It is on your account now."));
         setBuyingId("");
         setTab("passes");
         return;
       }
-      if (!data.url) throw new Error(data?.message || "Could not start that purchase.");
+      if (!data.url) throw new Error(data?.message || t("Could not start that purchase."));
       // Stripe owns the next screen. Replacing rather than opening a tab keeps
       // the back button meaningful on a phone.
       window.location.assign(data.url);
     } catch (error) {
       setPurchaseNote(
-        error instanceof Error ? error.message : "Could not start that purchase.",
+        error instanceof Error ? error.message : t("Could not start that purchase."),
       );
       setBuyingId("");
     }
@@ -748,7 +751,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
 
     window.history.replaceState(window.history.state, "", window.location.pathname);
     if (purchase === "cancelled") {
-      setPurchaseNote("Purchase cancelled — nothing was charged.");
+      setPurchaseNote(t("Purchase cancelled — nothing was charged."));
       if (reservation) {
         void apiFetch("/api/player/checkout/cancel", {
           method: "POST",
@@ -761,7 +764,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
 
     let cancelled = false;
     void (async () => {
-      setPurchaseNote("Finishing your purchase…");
+      setPurchaseNote(t("Finishing your purchase…"));
       try {
         const response = await apiFetch("/api/player/checkout/confirm", {
           method: "POST",
@@ -782,7 +785,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
           // costs the typing and nothing else.
           const draft = takeReviewDraft();
           if (draft) {
-            setPurchaseNote("Paid. Sending your review…");
+            setPurchaseNote(t("Paid. Sending your review…"));
             await loadProfile();
             await submitReview(
               { notes: draft.notes, savedVideoId: draft.savedVideoId },
@@ -790,19 +793,19 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
             );
             return;
           }
-          setPurchaseNote("Paid. It is on your account now.");
+          setPurchaseNote(t("Paid. It is on your account now."));
           setTab("passes");
           return;
         }
         setPurchaseNote(
           data.message ||
             (data.status === "pending"
-              ? "Your payment is still going through. Give it a moment and refresh."
-              : "We could not confirm that purchase. Your coach can sort it out."),
+              ? t("Your payment is still going through. Give it a moment and refresh.")
+              : t("We could not confirm that purchase. Your coach can sort it out.")),
         );
       } catch {
         if (!cancelled) {
-          setPurchaseNote("We could not confirm that purchase. Your coach can sort it out.");
+          setPurchaseNote(t("We could not confirm that purchase. Your coach can sort it out."));
         }
       }
     })();
@@ -855,7 +858,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   const [liveRecordRequested, setLiveRecordRequested] = useState(false);
   // Say what the tap actually does, which is not the same on both.
   const recordCardSub = useMemo(
-    () => (shouldUseDevicePicker() ? "Record one or pick an existing one" : "Opens your camera"),
+    () => (shouldUseDevicePicker() ? t("Record one or pick an existing one") : t("Opens your camera")),
     [],
   );
 
@@ -916,7 +919,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
         setVideoError(
           error instanceof Error
             ? error.message
-            : "Could not send that video. Your copy is still saved on this device.",
+            : t("Could not send that video. Your copy is still saved on this device."),
         );
       } finally {
         setSendingIds((current) => {
@@ -962,7 +965,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
         setVideoError(
           error instanceof Error
             ? error.message
-            : "Could not send that video. Your copy is still saved on this device.",
+            : t("Could not send that video. Your copy is still saved on this device."),
         );
       } finally {
         setSendingIds((current) => {
@@ -990,7 +993,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
         if (videoId) await sendAsGuest(videoId);
         void refreshGuestStatus();
       } catch (error) {
-        setGuestError(error instanceof Error ? error.message : "Could not set that up.");
+        setGuestError(error instanceof Error ? error.message : t("Could not set that up."));
       } finally {
         setGuestBusy(false);
       }
@@ -1061,7 +1064,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
         await savedVideoLibrary.deleteItem(savedVideoId);
       } catch (error) {
         setVideoError(
-          error instanceof Error ? error.message : "Could not delete that video. Try again.",
+          error instanceof Error ? error.message : t("Could not delete that video. Try again."),
         );
       } finally {
         await refreshSavedVideos();
@@ -1132,7 +1135,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
           lessonId?: string;
         };
         if (!response.ok || !data.ok) {
-          throw new Error(data?.message || "Could not send that review.");
+          throw new Error(data?.message || t("Could not send that review."));
         }
 
         if (draft.savedVideoId && savedVideoLibrary && data.lessonId) {
@@ -1150,12 +1153,12 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
         }
 
         setReviewFlowOpen(false);
-        setPurchaseNote("Sent. Your coach has it.");
+        setPurchaseNote(t("Sent. Your coach has it."));
         await loadProfile();
         setTab("reviews");
       } catch (error) {
         setReviewError(
-          error instanceof Error ? error.message : "Could not send that review.",
+          error instanceof Error ? error.message : t("Could not send that review."),
         );
       } finally {
         setReviewBusy(false);
@@ -1528,11 +1531,11 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   if (recording || openVideoId) {
     return (
       <div className="player-terminal" data-portal-theme={portalThemeAttribute(theme)}>
-        {renderNav(null, { label: "Videos", onBack: () => closeWorkspace() })}
+        {renderNav(null, { label: t("Videos"), onBack: () => closeWorkspace() })}
         <div
           className={`player-portal player-portal-video-host${leavingWorkspace ? " is-leaving" : ""}`}
         >
-          <Suspense fallback={<Loading size="panel" what="video" className="player-portal-card" />}>
+          <Suspense fallback={<Loading size="panel" what={t("video")} className="player-portal-card" />}>
             <VideoAnalysisPage
               variant="player"
               playerId={playerId || playerEmail}
@@ -1555,7 +1558,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   const renderBooking = (booking: Booking) => (
     <li className="player-portal-booking" key={booking.id}>
       <div className="player-portal-booking-main">
-        <strong>{booking.serviceName || "Lesson"}</strong>
+        <strong>{booking.serviceName || t("Lesson")}</strong>
         <span>{formatBookingWhen(booking)}</span>
       </div>
       {booking.location?.name && <span className="player-portal-booking-loc">{booking.location.name}</span>}
@@ -1581,7 +1584,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
             tab === "home" && !isGuest && !reviewFlowOpen ? " is-wide" : ""
           }`}
         >
-          <h1>{isGuest ? "Welcome" : playerName ? `Hi, ${playerName.split(/\s+/)[0]}` : "Your profile"}</h1>
+          <h1>{isGuest ? t("Welcome") : playerName ? t("Hi, {value}", { value: playerName.split(/\s+/)[0] }) : t("Your profile")}</h1>
           {playerEmail && <p className="player-portal-lead">{playerEmail}</p>}
 
           {isGuest && (
@@ -1589,15 +1592,11 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
               {guestStatus?.connected ? (
                 // The coach has acted. Say so -- but the screen stays exactly
                 // as it is: they are still a guest until they finish the invite.
-                <p>
-                  {guestStatus.coachName} has added you — check your email to set a password.
-                </p>
+                <p>{t("{coachName} has added you — check your email to set a password.", { coachName: guestStatus.coachName })}</p>
               ) : (
-                <p>Browsing as a guest -- your videos stay on this device until you sign in.</p>
+                <p>{t("Browsing as a guest -- your videos stay on this device until you sign in.")}</p>
               )}
-              <button className="player-portal-primary" type="button" onClick={() => onRequestSignIn?.()}>
-                Sign in
-              </button>
+              <button className="player-portal-primary" type="button" onClick={() => onRequestSignIn?.()}>{t("Sign in")}</button>
             </div>
           )}
 
@@ -1626,9 +1625,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
               <p className="player-portal-error-line" role="alert">
                 {profileError}
               </p>
-              <button className="player-portal-ghost" type="button" onClick={() => void loadProfile()}>
-                Try again
-              </button>
+              <button className="player-portal-ghost" type="button" onClick={() => void loadProfile()}>{t("Try again")}</button>
             </div>
           ) : (
             <>
@@ -1652,20 +1649,20 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                         onClick={() => navigateTerminal("lessons")}
                       >
                         <span className="player-portal-next-up-main">
-                          <span className="player-portal-dash-label">Next up</span>
+                          <span className="player-portal-dash-label">{t("Next up")}</span>
                           <strong>
                             {profileLoading && !bookings.length
-                              ? "Loading…"
+                              ? t("Loading…")
                               : nextLesson
-                                ? nextLesson.serviceName || "Lesson"
-                                : "Nothing booked"}
+                                ? nextLesson.serviceName || t("Lesson")
+                                : t("Nothing booked")}
                           </strong>
                         </span>
                         <span className="player-portal-next-up-when">
                           <span>
                             {nextLesson
                               ? formatBookingWhen(nextLesson)
-                              : `Book a ${terms.serviceSingular.toLowerCase()} or a swing review`}
+                              : t("Book a {serviceSingular} or a swing review", { serviceSingular: terms.serviceSingular.toLowerCase() })}
                           </span>
                           {nextLesson?.location?.name && <em>{nextLesson.location.name}</em>}
                         </span>
@@ -1675,11 +1672,11 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                         <div className="player-portal-panel-column">
                           <section className="player-portal-panel">
                             <div className="player-portal-panel-head">
-                              <h2>Practice</h2>
+                              <h2>{t("Practice")}</h2>
                               <span>
                                 {activePractice.length
                                   ? `${activePractice.length} to work on`
-                                  : "Nothing set"}
+                                  : t("Nothing set")}
                               </span>
                             </div>
                             {practice.length ? (
@@ -1691,22 +1688,18 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                                 emptyNote=""
                               />
                             ) : (
-                              <p className="player-portal-empty">
-                                Your {terms.staffSingular.toLowerCase()} adds these after a {terms.serviceSingular.toLowerCase()}.
-                              </p>
+                              <p className="player-portal-empty">{t("Your {staffSingular} adds these after a {serviceSingular}.", { staffSingular: terms.staffSingular.toLowerCase(), serviceSingular: terms.serviceSingular.toLowerCase() })}</p>
                             )}
                             <button
                               className="player-portal-panel-more"
                               type="button"
                               onClick={() => navigateTerminal("practice")}
-                            >
-                              Open Practice
-                            </button>
+                            >{t("Open Practice")}</button>
                           </section>
 
                           <section className="player-portal-panel">
                             <div className="player-portal-panel-head">
-                              <h2>Videos</h2>
+                              <h2>{t("Videos")}</h2>
                               <span>
                                 {[
                                   savedVideos.length
@@ -1717,7 +1710,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                                     : "",
                                 ]
                                   .filter(Boolean)
-                                  .join(" · ") || "Nothing yet"}
+                                  .join(" · ") || t("Nothing yet")}
                               </span>
                             </div>
                             {savedVideos.length || missingCloudVideos.length ? (
@@ -1747,29 +1740,27 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                                     onClick={() => navigateTerminal("videos")}
                                   >
                                     <span className="player-portal-video-preview-media is-cloud" />
-                                    <strong>{transfer.savedVideo?.title || "From your coach"}</strong>
-                                    <small>Tap to download</small>
+                                    <strong>{transfer.savedVideo?.title || t("From your coach")}</strong>
+                                    <small>{t("Tap to download")}</small>
                                   </button>
                                 ))}
                               </div>
                             ) : (
-                              <p className="player-portal-empty">Film a swing to get started.</p>
+                              <p className="player-portal-empty">{t("Film a swing to get started.")}</p>
                             )}
                             <button
                               className="player-portal-panel-more"
                               type="button"
                               onClick={() => navigateTerminal("videos")}
-                            >
-                              Open Videos
-                            </button>
+                            >{t("Open Videos")}</button>
                           </section>
                         </div>
 
                         <section className="player-portal-panel">
                           <div className="player-portal-panel-head">
-                            <h2>Recent activity</h2>
+                            <h2>{t("Recent activity")}</h2>
                             <span>
-                              {unseenReturnCount ? `${unseenReturnCount} new` : "Up to date"}
+                              {unseenReturnCount ? `${unseenReturnCount} new` : t("Up to date")}
                             </span>
                           </div>
                           {activityFeed.length ? (
@@ -1795,9 +1786,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                               ))}
                             </div>
                           ) : (
-                            <p className="player-portal-empty">
-                              Nothing yet. Send your coach a swing and it will show up here.
-                            </p>
+                            <p className="player-portal-empty">{t("Nothing yet. Send your coach a swing and it will show up here.")}</p>
                           )}
                         </section>
                       </div>
@@ -1812,17 +1801,17 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                           className="player-portal-home-card"
                           onClick={() => navigateTerminal("notes")}
                         >
-                          <span className="player-portal-home-card-title"><ClarityBookingPages size={18} />Notes</span>
-                          <span className="player-portal-home-card-sub">Quick notes for yourself</span>
+                          <span className="player-portal-home-card-title"><ClarityBookingPages size={18} />{t("Notes")}</span>
+                          <span className="player-portal-home-card-sub">{t("Quick notes for yourself")}</span>
                         </button>
                         <button
                           type="button"
                           className="player-portal-home-card"
                           onClick={() => navigateTerminal("videos")}
                         >
-                          <span className="player-portal-home-card-title"><ClarityVideoAnalysis size={18} />Videos</span>
+                          <span className="player-portal-home-card-title"><ClarityVideoAnalysis size={18} />{t("Videos")}</span>
                           <span className="player-portal-home-card-sub">
-                            {savedVideos.length ? `${savedVideos.length} saved` : "Saved on this device"}
+                            {savedVideos.length ? `${savedVideos.length} saved` : t("Saved on this device")}
                           </span>
                         </button>
                         <button
@@ -1830,7 +1819,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                           className="player-portal-home-card player-portal-home-card-wide"
                           onClick={startRecording}
                         >
-                          <span className="player-portal-home-card-title"><ClarityVideoAnalysis size={18} />Record a video</span>
+                          <span className="player-portal-home-card-title"><ClarityVideoAnalysis size={18} />{t("Record a video")}</span>
                           <span className="player-portal-home-card-sub">{recordCardSub}</span>
                         </button>
                       </>
@@ -1841,13 +1830,13 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                           className="player-portal-home-card"
                           onClick={() => navigateTerminal("lessons")}
                         >
-                          <span className="player-portal-home-card-title"><ClarityCalendar size={18} />Next {terms.serviceSingular.toLowerCase()}</span>
+                          <span className="player-portal-home-card-title"><ClarityCalendar size={18} />{t("Next {serviceSingular}", { serviceSingular: terms.serviceSingular.toLowerCase() })}</span>
                           <span className="player-portal-home-card-sub">
                             {profileLoading && !bookings.length
-                              ? "Loading…"
+                              ? t("Loading…")
                               : nextLesson
                                 ? formatBookingWhen(nextLesson)
-                                : `No upcoming ${terms.servicePlural.toLowerCase()}`}
+                                : t("No upcoming {servicePlural}", { servicePlural: terms.servicePlural.toLowerCase() })}
                           </span>
                         </button>
                         {/* Only for a player who actually holds one. A card
@@ -1860,11 +1849,11 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                             className="player-portal-home-card"
                             onClick={() => navigateTerminal("lessons")}
                           >
-                            <span className="player-portal-home-card-title"><ClarityPassesCredits size={18} />Your passes</span>
+                            <span className="player-portal-home-card-title"><ClarityPassesCredits size={18} />{t("Your passes")}</span>
                             <span className="player-portal-home-card-sub">
                               {spendableCredits
                                 ? `${spendableCredits} lesson${spendableCredits === 1 ? "" : "s"} left`
-                                : "None left to use"}
+                                : t("None left to use")}
                             </span>
                           </button>
                         )}
@@ -1873,17 +1862,17 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                           className="player-portal-home-card"
                           onClick={() => navigateTerminal("reviews")}
                         >
-                          <span className="player-portal-home-card-title"><ClarityAssessments size={18} />Swing reviews</span>
+                          <span className="player-portal-home-card-title"><ClarityAssessments size={18} />{t("Swing reviews")}</span>
                           <span className="player-portal-home-card-sub">
                             {(profileLoading || cloudLoading) && !swingReviews.length
-                              ? "Loading\u2026"
+                              ? t("Loading…")
                               : unseenReviewCount
                                 ? `${unseenReviewCount} new from your coach`
                                 : swingReviews.length
                                   ? formatDate(swingReviews[0].at)
-                                    ? `Last one ${formatDate(swingReviews[0].at)}`
+                                    ? t("Last one {at}", { at: formatDate(swingReviews[0].at) })
                                     : `${swingReviews.length} review${swingReviews.length === 1 ? "" : "s"}`
-                                  : "Nothing reviewed yet"}
+                                  : t("Nothing reviewed yet")}
                           </span>
                         </button>
                         <button
@@ -1891,13 +1880,15 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                           className="player-portal-home-card"
                           onClick={() => navigateTerminal("practice")}
                         >
-                          <span className="player-portal-home-card-title"><ClarityLessonsProgrammes size={18} />Practice</span>
+                          <span className="player-portal-home-card-title"><ClarityLessonsProgrammes size={18} />{t("Practice")}</span>
                           <span className="player-portal-home-card-sub">
                             {profileLoading && !practice.length
-                              ? "Loading…"
+                              ? t("Loading…")
                               : activePractice.length
-                                ? `${activePractice.length} thing${activePractice.length === 1 ? "" : "s"} to work on`
-                                : "Nothing set yet"}
+                                ? activePractice.length === 1
+                                  ? t("1 thing to work on")
+                                  : t("{count} things to work on", { count: activePractice.length })
+                                : t("Nothing set yet")}
                           </span>
                         </button>
                         <button
@@ -1905,7 +1896,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                           className="player-portal-home-card"
                           onClick={() => navigateTerminal("notes")}
                         >
-                          <span className="player-portal-home-card-title"><ClarityBookingPages size={18} />Notes</span>
+                          <span className="player-portal-home-card-title"><ClarityBookingPages size={18} />{t("Notes")}</span>
                           <span className="player-portal-home-card-sub">
                             {sortedNotes.length
                               ? `${sortedNotes.length} ${terms.serviceSingular.toLowerCase()} note${sortedNotes.length === 1 ? "" : "s"}`
@@ -1917,15 +1908,15 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                           className="player-portal-home-card"
                           onClick={() => navigateTerminal("videos")}
                         >
-                          <span className="player-portal-home-card-title"><ClarityVideoAnalysis size={18} />Videos</span>
+                          <span className="player-portal-home-card-title"><ClarityVideoAnalysis size={18} />{t("Videos")}</span>
                           <span className="player-portal-home-card-sub">
                             {unseenReturnCount
                               ? `${unseenReturnCount} new from your coach`
                               : missingCloudVideos.length
                                 ? `${missingCloudVideos.length} to download`
                                 : mostRecentVideo
-                                  ? `Last saved ${formatDate(mostRecentVideo.capturedAt || mostRecentVideo.createdAt)}`
-                                  : "No videos yet"}
+                                  ? t("Last saved {value}", { value: formatDate(mostRecentVideo.capturedAt || mostRecentVideo.createdAt) })
+                                  : t("No videos yet")}
                           </span>
                         </button>
                         <button
@@ -1933,7 +1924,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                           className="player-portal-home-card player-portal-home-card-wide"
                           onClick={startRecording}
                         >
-                          <span className="player-portal-home-card-title"><ClarityVideoAnalysis size={18} />Record a video</span>
+                          <span className="player-portal-home-card-title"><ClarityVideoAnalysis size={18} />{t("Record a video")}</span>
                           <span className="player-portal-home-card-sub">{recordCardSub}</span>
                         </button>
                       </>
@@ -1948,17 +1939,17 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                       it gets its own place above the list rather than being the
                       first row of it. */}
                   <section className="player-portal-section">
-                    <h2>Next {terms.serviceSingular.toLowerCase()}</h2>
+                    <h2>{t("Next {serviceSingular}", { serviceSingular: terms.serviceSingular.toLowerCase() })}</h2>
                     {profileLoading && !bookings.length ? (
-                      <Loading what={`your ${terms.servicePlural.toLowerCase()}`} className="player-portal-empty" />
+                      <Loading what={t("your {services}", { services: terms.servicePlural.toLowerCase() })} className="player-portal-empty" />
                     ) : nextLesson ? (
                       <div className="player-portal-next">
-                        <strong>{nextLesson.serviceName || "Lesson"}</strong>
+                        <strong>{nextLesson.serviceName || t("Lesson")}</strong>
                         <span>{formatBookingWhen(nextLesson)}</span>
                         {nextLesson.location?.name && <em>{nextLesson.location.name}</em>}
                       </div>
                     ) : (
-                      <p className="player-portal-empty">No upcoming {terms.servicePlural.toLowerCase()} booked.</p>
+                      <p className="player-portal-empty">{t("No upcoming {servicePlural} booked.", { servicePlural: terms.servicePlural.toLowerCase() })}</p>
                     )}
                   </section>
 
@@ -1968,13 +1959,13 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                       "which lesson shall I book". */}
                   {upcomingReviews.length > 0 && (
                     <section className="player-portal-section">
-                      <h2>Video reviews</h2>
+                      <h2>{t("Video reviews")}</h2>
                       <ul className="player-portal-list">
                         {upcomingReviews.map((review) => (
                           <li key={review.id}>
-                            <strong>{review.serviceName || "Video review"}</strong>
+                            <strong>{review.serviceName || t("Video review")}</strong>
                             <span>{formatBookingWhen(review)}</span>
-                            <em>Send your swing from Videos if you have not already.</em>
+                            <em>{t("Send your swing from Videos if you have not already.")}</em>
                           </li>
                         ))}
                       </ul>
@@ -1989,9 +1980,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                       className={lessonsSubtab === "book" ? "active" : ""}
                       onClick={() => setLessonsSubtab("book")}
                     >
-                      <ClarityNewBooking size={14} />
-                      Book now
-                    </button>
+                      <ClarityNewBooking size={14} />{t("Book now")}</button>
                     <button
                       type="button"
                       role="tab"
@@ -1999,9 +1988,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                       className={lessonsSubtab === "upcoming" ? "active" : ""}
                       onClick={() => setLessonsSubtab("upcoming")}
                     >
-                      <ClarityCalendar size={14} />
-                      Past bookings
-                    </button>
+                      <ClarityCalendar size={14} />{t("Past bookings")}</button>
                   </div>
 
                   {lessonsSubtab === "book" ? (
@@ -2015,7 +2002,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                         <div
                           className="player-portal-pill-toggle is-inner"
                           role="tablist"
-                          aria-label="What to book"
+                          aria-label={t("What to book")}
                         >
                           <button
                             type="button"
@@ -2024,9 +2011,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                             className={bookMode === "in-person" ? "active" : ""}
                             onClick={() => setBookMode("in-person")}
                           >
-                            <ClarityLocations size={14} />
-                            In person
-                          </button>
+                            <ClarityLocations size={14} />{t("In person")}</button>
                           <button
                             type="button"
                             role="tab"
@@ -2034,19 +2019,14 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                             className={bookMode === "review" ? "active" : ""}
                             onClick={() => setBookMode("review")}
                           >
-                            <ClarityVideoAnalysis size={14} />
-                            Swing review
-                          </button>
+                            <ClarityVideoAnalysis size={14} />{t("Swing review")}</button>
                         </div>
                       )}
 
                       {bookMode === "review" && reviewOffer ? (
                         <section className="player-portal-section player-portal-review-hero">
-                          <h2>Swing review</h2>
-                          <p className="player-portal-lead">
-                            Send a swing or a question — no time to turn up to. Back with you
-                            within {reviewOffer.turnaroundDays} day
-                            {reviewOffer.turnaroundDays === 1 ? "" : "s"}.
+                          <h2>{t("Swing review")}</h2>
+                          <p className="player-portal-lead">{t("Send a swing or a question — no time to turn up to. Back with you within {turnaroundDays} day", { turnaroundDays: reviewOffer.turnaroundDays })}{reviewOffer.turnaroundDays === 1 ? "" : "s"}.
                           </p>
                           <button
                             className="player-portal-primary"
@@ -2055,13 +2035,11 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                               setReviewError("");
                               setReviewFlowOpen(true);
                             }}
-                          >
-                            Start a swing review
-                          </button>
+                          >{t("Start a swing review")}</button>
                         </section>
                       ) : (
                         <div className="player-portal-inline-booking">
-                          <Suspense fallback={<Loading what="booking" className="player-portal-empty" />}>
+                          <Suspense fallback={<Loading what={t("booking")} className="player-portal-empty" />}>
                             <BookingWidget
                               customer={{ name: playerName, email: playerEmail, phone: playerPhone }}
                               onBookingComplete={() => void loadProfile()}
@@ -2074,7 +2052,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                     <>
                       {laterLessons.length > 0 && (
                         <section className="player-portal-section">
-                          <h2>Still to come</h2>
+                          <h2>{t("Still to come")}</h2>
                           <ul className="player-portal-list">{laterLessons.map(renderBooking)}</ul>
                         </section>
                       )}
@@ -2085,7 +2063,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                           a lesson was; the detail is already here. */}
                       {pastBookings.length > 0 && (
                         <section className="player-portal-section">
-                          <h2>Past bookings</h2>
+                          <h2>{t("Past bookings")}</h2>
                           <ul className="player-portal-list">
                             {pastBookings.map((booking) => {
                               const open = booking.id === openBookingId;
@@ -2102,7 +2080,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                                     onClick={() => setOpenBookingId(open ? "" : booking.id)}
                                   >
                                     <span className="player-portal-history-head">
-                                      <strong>{booking.serviceName || "Lesson"}</strong>
+                                      <strong>{booking.serviceName || t("Lesson")}</strong>
                                       <span>{formatBookingWhen(booking)}</span>
                                     </span>
                                     <span aria-hidden="true">{open ? "\u2013" : "+"}</span>
@@ -2110,9 +2088,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                                   {open && (
                                     <div className="player-portal-history-body">
                                       {review && (
-                                        <span className="player-portal-history-fact">
-                                          Swing review — no time to turn up to
-                                        </span>
+                                        <span className="player-portal-history-fact">{t("Swing review — no time to turn up to")}</span>
                                       )}
                                       {booking.location?.name && (
                                         <span className="player-portal-history-fact">
@@ -2120,9 +2096,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                                         </span>
                                       )}
                                       {booking.client && (
-                                        <span className="player-portal-history-fact">
-                                          Booked as {booking.client}
-                                        </span>
+                                        <span className="player-portal-history-fact">{t("Booked as {client}", { client: booking.client })}</span>
                                       )}
                                       {/* Notes taken against this booking.
                                           Matched on the id the note carries,
@@ -2133,7 +2107,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                                         .filter((note) => note.calendarItemId === booking.id)
                                         .map((note) => (
                                           <div className="player-portal-history-note" key={note.id}>
-                                            <strong>{note.title || "Lesson note"}</strong>
+                                            <strong>{note.title || t("Lesson note")}</strong>
                                             {note.body && <p>{note.body}</p>}
                                           </div>
                                         ))}
@@ -2147,7 +2121,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                       )}
 
                       {!laterLessons.length && !pastBookings.length && !profileLoading && (
-                        <p className="player-portal-empty">No bookings yet.</p>
+                        <p className="player-portal-empty">{t("No bookings yet.")}</p>
                       )}
                     </>
                   )}
@@ -2157,12 +2131,10 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                       nothing more, and only from the Lessons tab. */}
                   {caddy?.appUrl && (
                     <section className="player-portal-section player-portal-caddy">
-                      <h2>Clarity Caddy</h2>
+                      <h2>{t("Clarity Caddy")}</h2>
                       <div className="player-portal-caddy-row">
                         <span className="player-portal-caddy-access">{caddyAccessLabel(caddy)}</span>
-                        <button className="player-portal-ghost" type="button" onClick={openCaddy}>
-                          Open Clarity Caddy ↗
-                        </button>
+                        <button className="player-portal-ghost" type="button" onClick={openCaddy}>{t("Open Clarity Caddy ↗")}</button>
                       </div>
                     </section>
                   )}
@@ -2173,45 +2145,39 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
 
               {tab === "notes" && isGuest && (
                 <section className="player-portal-section">
-                  <h2>Notes</h2>
-                  <p className="player-portal-lead">Quick notes for yourself. Saved on this device.</p>
+                  <h2>{t("Notes")}</h2>
+                  <p className="player-portal-lead">{t("Quick notes for yourself. Saved on this device.")}</p>
 
                   {addingNote ? (
                     <form className="player-portal-note-form" onSubmit={handleSaveGuestNote}>
                       <label className="player-portal-field">
-                        <span>Title</span>
+                        <span>{t("Title")}</span>
                         <input
                           value={noteDraftTitle}
                           onChange={(event) => setNoteDraftTitle(event.target.value)}
-                          placeholder="Title"
+                          placeholder={t("Title")}
                         />
                       </label>
                       <label className="player-portal-field">
-                        <span>Note</span>
+                        <span>{t("Note")}</span>
                         <textarea
                           value={noteDraftBody}
                           onChange={(event) => setNoteDraftBody(event.target.value)}
                           rows={4}
-                          placeholder="Write a note…"
+                          placeholder={t("Write a note…")}
                         />
                       </label>
                       <div className="player-portal-note-form-actions">
-                        <button className="player-portal-ghost" type="button" onClick={cancelGuestNoteDraft}>
-                          Cancel
-                        </button>
+                        <button className="player-portal-ghost" type="button" onClick={cancelGuestNoteDraft}>{t("Cancel")}</button>
                         <button
                           className="player-portal-primary"
                           type="submit"
                           disabled={!noteDraftTitle.trim() && !noteDraftBody.trim()}
-                        >
-                          Save
-                        </button>
+                        >{t("Save")}</button>
                       </div>
                     </form>
                   ) : (
-                    <button className="player-portal-primary" type="button" onClick={startGuestNoteDraft}>
-                      Add a note
-                    </button>
+                    <button className="player-portal-primary" type="button" onClick={startGuestNoteDraft}>{t("Add a note")}</button>
                   )}
 
                   {guestNotes.length ? (
@@ -2219,7 +2185,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                       {guestNotes.map((note) => (
                         <li className="player-portal-note" key={note.id}>
                           <div className="player-portal-note-head">
-                            <strong>{note.title || "Note"}</strong>
+                            <strong>{note.title || t("Note")}</strong>
                             {formatDate(note.updatedAt) && <span>{formatDate(note.updatedAt)}</span>}
                           </div>
                           {note.body && <p>{note.body}</p>}
@@ -2228,22 +2194,18 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                               className="player-portal-ghost"
                               type="button"
                               onClick={() => editGuestNoteDraft(note)}
-                            >
-                              Edit
-                            </button>
+                            >{t("Edit")}</button>
                             <button
                               className="player-portal-ghost"
                               type="button"
                               onClick={() => handleDeleteGuestNote(note.id)}
-                            >
-                              Delete
-                            </button>
+                            >{t("Delete")}</button>
                           </div>
                         </li>
                       ))}
                     </ul>
                   ) : (
-                    !addingNote && <p className="player-portal-empty">No notes yet.</p>
+                    !addingNote && <p className="player-portal-empty">{t("No notes yet.")}</p>
                   )}
                 </section>
               )}
@@ -2256,11 +2218,8 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                       history sits underneath rather than in front. */}
                   {reviewOffer && (
                     <section className="player-portal-section player-portal-review-hero">
-                      <h2>New swing review</h2>
-                      <p className="player-portal-lead">
-                        Send a swing or a question. Back with you within{" "}
-                        {reviewOffer.turnaroundDays} day
-                        {reviewOffer.turnaroundDays === 1 ? "" : "s"}.
+                      <h2>{t("New swing review")}</h2>
+                      <p className="player-portal-lead">{t("Send a swing or a question. Back with you within {turnaroundDays} day", { turnaroundDays: reviewOffer.turnaroundDays })}{reviewOffer.turnaroundDays === 1 ? "" : "s"}.
                       </p>
                       <button
                         className="player-portal-primary"
@@ -2269,23 +2228,25 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                           setReviewError("");
                           setReviewFlowOpen(true);
                         }}
-                      >
-                        Start a swing review
-                      </button>
+                      >{t("Start a swing review")}</button>
                       <p className="player-portal-empty">
                         {reviewOffer.passOptions.length
-                          ? `${reviewOffer.passOptions[0].creditsAvailable} credit${
-                              reviewOffer.passOptions[0].creditsAvailable === 1 ? "" : "s"
-                            } ready to use`
+                          ? reviewOffer.passOptions[0].creditsAvailable === 1
+                            ? t("1 credit ready to use")
+                            : t("{count} credits ready to use", {
+                                count: reviewOffer.passOptions[0].creditsAvailable,
+                              })
                           : !__CLARITY_NATIVE__ && reviewOffer.canBuy
-                            ? `${reviewOffer.currency} ${reviewOffer.price.toFixed(2)} each`
-                            : "No review credit available"}
+                            ? t("{price} each", {
+                                price: `${reviewOffer.currency} ${reviewOffer.price.toFixed(2)}`,
+                              })
+                            : t("No review credit available")}
                       </p>
                     </section>
                   )}
 
                 <section className="player-portal-section">
-                  <h2>Past reviews</h2>
+                  <h2>{t("Past reviews")}</h2>
                   {/* One sitting with the coach, kept whole: the videos they
                       worked on, the screenshots they marked up, what they wrote
                       and what they set you to practise. The same pieces are
@@ -2293,12 +2254,12 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                       they are back together. */}
                   <p className="player-portal-lead">
                     {swingReviews.length
-                      ? "Everything from one sitting with your coach, kept together."
-                      : "When your coach reviews your swing, the whole sitting lands here."}
+                      ? t("Everything from one sitting with your coach, kept together.")
+                      : t("When your coach reviews your swing, the whole sitting lands here.")}
                   </p>
 
                   {(profileLoading || cloudLoading) && !swingReviews.length ? (
-                    <Loading what="your swing reviews" className="player-portal-empty" />
+                    <Loading what={t("your swing reviews")} className="player-portal-empty" />
                   ) : swingReviews.length ? (
                     <ul className="player-portal-list">
                       {swingReviews.map((review) => {
@@ -2317,12 +2278,10 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                               onClick={() => setOpenReviewId(expanded ? "" : review.id)}
                             >
                               <span className="player-portal-review-head">
-                                <strong>
-                                  Swing review
-                                  {review.unseen && (
+                                <strong>{t("Swing review")}{review.unseen && (
                                     <span
                                       className="player-portal-review-dot"
-                                      aria-label="Not opened yet"
+                                      aria-label={t("Not opened yet")}
                                     />
                                   )}
                                 </strong>
@@ -2360,7 +2319,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                                     )}
                                     <span>
                                       <strong>{video.title}</strong>
-                                      <small>Watch</small>
+                                      <small>{t("Watch")}</small>
                                     </span>
                                   </button>
                                 ))}
@@ -2378,11 +2337,11 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                                   >
                                     <span className="player-portal-review-video-blank" />
                                     <span>
-                                      <strong>{transfer.savedVideo?.title || "Video"}</strong>
+                                      <strong>{transfer.savedVideo?.title || t("Video")}</strong>
                                       <small>
                                         {downloadingIds.has(transfer.savedVideoId)
-                                          ? "Downloading\u2026"
-                                          : "Download to watch"}
+                                          ? t("Downloading…")
+                                          : t("Download to watch")}
                                       </small>
                                     </span>
                                   </button>
@@ -2401,7 +2360,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                                           type="button"
                                           className="player-portal-review-shot"
                                           onClick={() => setFrameViewKey(`${shot.savedVideoId}-${shot.id}`)}
-                                          aria-label={`Show ${shot.title} in the video`}
+                                          aria-label={t("Show {title} in the video", { title: shot.title })}
                                         >
                                           {shot.imageDataUrl ? (
                                             <img src={shot.imageDataUrl} alt="" />
@@ -2413,9 +2372,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                                           <div>
                                             <strong>{shot.title}</strong>
                                             {shot.note && <p>{shot.note}</p>}
-                                            <span className="player-portal-review-shot-link">
-                                              View in video ›
-                                            </span>
+                                            <span className="player-portal-review-shot-link">{t("View in video ›")}</span>
                                           </div>
                                         </button>
                                       </li>
@@ -2452,7 +2409,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
 
                                 {review.notes.map((note) => (
                                   <div className="player-portal-review-note" key={note.id}>
-                                    <strong>{note.title || "Lesson note"}</strong>
+                                    <strong>{note.title || t("Lesson note")}</strong>
                                     {note.body && <p>{note.body}</p>}
                                   </div>
                                 ))}
@@ -2472,14 +2429,12 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                                     }}
                                   >
                                     <strong>{block.title}</strong>
-                                    <small>Open on your practice wall</small>
+                                    <small>{t("Open on your practice wall")}</small>
                                   </button>
                                 ))}
 
                                 {review.itemCount === 0 && (
-                                  <p className="player-portal-empty">
-                                    Your coach has started this one. Nothing in it yet.
-                                  </p>
+                                  <p className="player-portal-empty">{t("Your coach has started this one. Nothing in it yet.")}</p>
                                 )}
                               </div>
                             )}
@@ -2488,7 +2443,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                       })}
                     </ul>
                   ) : (
-                    <p className="player-portal-empty">No swing reviews yet.</p>
+                    <p className="player-portal-empty">{t("No swing reviews yet.")}</p>
                   )}
                 </section>
                 </>
@@ -2510,19 +2465,17 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                       to the coach. */}
                   {(passes.length > 0 || flexibleValueCents > 0) && (
                     <section className="player-portal-section">
-                      <h2>Your passes</h2>
+                      <h2>{t("Your passes")}</h2>
                       {flexibleValueCents > 0 && (
-                        <p className="player-portal-lead">
-                          +{passCurrency} {(flexibleValueCents / 100).toFixed(2)} Clarity credit
-                        </p>
+                        <p className="player-portal-lead">{t("+{passCurrency} {value} Clarity credit", { passCurrency, value: (flexibleValueCents / 100).toFixed(2) })}</p>
                       )}
                       {spendableCredits > 0 && (
                         <p className="player-portal-lead">
                           {spendableCredits === 1
-                            ? `1 ${terms.serviceSingular.toLowerCase()} paid for and ready to book.`
-                            : `${spendableCredits} ${terms.servicePlural.toLowerCase()} paid for and ready to book.`}
+                            ? t("1 {serviceSingular} paid for and ready to book.", { serviceSingular: terms.serviceSingular.toLowerCase() })
+                            : t("{spendableCredits} {servicePlural} paid for and ready to book.", { spendableCredits, servicePlural: terms.servicePlural.toLowerCase() })}
                           {nextPassExpiry && formatDate(nextPassExpiry)
-                            ? ` Use them by ${formatDate(nextPassExpiry)}.`
+                            ? t(" Use them by {nextPassExpiry}.", { nextPassExpiry: formatDate(nextPassExpiry) })
                             : ""}
                         </p>
                       )}
@@ -2548,16 +2501,19 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                               <span className="player-portal-pass-meta">
                                 {[
                                   pass.creditsAllocated
-                                    ? `${pass.creditsRedeemed} of ${pass.creditsAllocated} used`
+                                    ? t("{used} of {total} used", {
+                                        used: pass.creditsRedeemed,
+                                        total: pass.creditsAllocated,
+                                      })
                                     : "",
-                                  pass.covers.length ? `Covers ${pass.covers.join(", ")}` : "",
+                                  pass.covers.length ? t("Covers {services}", { services: pass.covers.join(", ") }) : "",
                                 ]
                                   .filter(Boolean)
                                   .join(" · ")}
                               </span>
                               {pass.expiresAt && formatDate(pass.expiresAt) && (
                                 <span className="player-portal-pass-meta">
-                                  {pass.status === "expired" ? "Expired" : "Expires"}{" "}
+                                  {pass.status === "expired" ? t("Expired") : t("Expires")}{" "}
                                   {formatDate(pass.expiresAt)}
                                 </span>
                               )}
@@ -2566,14 +2522,11 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                                   have, and "used on these days" is enough to
                                   settle a disagreement about the balance. */}
                               {pass.history.length > 0 && (
-                                <span className="player-portal-pass-meta">
-                                  Used{" "}
-                                  {pass.history
+                                <span className="player-portal-pass-meta">{t("Used {value}", { value: pass.history
                                     .map((entry) => formatDate(entry.redeemedAt))
                                     .filter(Boolean)
                                     .slice(0, 4)
-                                    .join(", ")}
-                                  {pass.history.length > 4 ? "…" : ""}
+                                    .join(", ") })}{pass.history.length > 4 ? "…" : ""}
                                 </span>
                               )}
                             </li>
@@ -2593,10 +2546,8 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                       button that cannot take money is worse than no button. */}
                   {!__CLARITY_NATIVE__ && shop.length > 0 && (
                     <section className="player-portal-section">
-                      <h2>{passes.length ? "Buy more" : `Buy ${terms.servicePlural.toLowerCase()} or a review`}</h2>
-                      <p className="player-portal-lead">
-                        Paid for here, straight onto your account. Book it whenever you like.
-                      </p>
+                      <h2>{passes.length ? t("Buy more") : t("Buy {servicePlural} or a review", { servicePlural: terms.servicePlural.toLowerCase() })}</h2>
+                      <p className="player-portal-lead">{t("Paid for here, straight onto your account. Book it whenever you like.")}</p>
                       <ul className="player-portal-list">
                         {shop.map((item) => (
                           <li className="player-portal-shop-item" key={item.serviceId}>
@@ -2604,7 +2555,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                               <strong>{item.name}</strong>
                               <span>
                                 {item.credits === 1
-                                  ? "1 credit"
+                                  ? t("1 credit")
                                   : `${item.credits} credits`}
                                 {item.description ? ` · ${item.description}` : ""}
                               </span>
@@ -2616,7 +2567,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                               onClick={() => void buyShopItem(item.serviceId)}
                             >
                               {buyingId === item.serviceId
-                                ? "Opening…"
+                                ? t("Opening…")
                                 : `${item.currency} ${item.price.toFixed(2)}`}
                             </button>
                           </li>
@@ -2626,26 +2577,24 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                   )}
 
                   {!passes.length && !shop.length && (
-                    <p className="player-portal-empty">
-                      Nothing here yet. Passes added to your account show up on this screen.
-                    </p>
+                    <p className="player-portal-empty">{t("Nothing here yet. Passes added to your account show up on this screen.")}</p>
                   )}
                 </>
               )}
 
               {tab === "practice" && !isGuest && (
                 <section className="player-portal-section">
-                  <h2>Practice</h2>
+                  <h2>{t("Practice")}</h2>
                   {/* The wall, not a list. Every block the coach has ever set,
                       oldest at the bottom -- so what a player sees first is how
                       much they have built, and only then what is outstanding. */}
                   <p className="player-portal-lead">
                     {activePractice.length
-                      ? `${activePractice.length} thing${activePractice.length === 1 ? "" : "s"} to work on. Tap a block to read it.`
-                      : "Everything your coach has set you. Tap a block to read it."}
+                      ? t("{length} thing{value} to work on. Tap a block to read it.", { length: activePractice.length, value: activePractice.length === 1 ? "" : "s" })
+                      : t("Everything your coach has set you. Tap a block to read it.")}
                   </p>
                   {profileLoading && !practice.length ? (
-                    <Loading what="your practice" className="player-portal-empty" />
+                    <Loading what={t("your practice")} className="player-portal-empty" />
                   ) : (
                     <>
                       <PracticeWall
@@ -2653,7 +2602,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                         types={practiceTypes}
                         openId={expandedPracticeId}
                         onOpen={(id) => setExpandedPracticeId(expandedPracticeId === id ? null : id)}
-                        emptyNote="Nothing to practise yet. Your coach will put it here after your next lesson."
+                        emptyNote={t("Nothing to practise yet. Your coach will put it here after your next lesson.")}
                       />
 
                       {openPracticeBlock && (
@@ -2679,8 +2628,8 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                             <button
                               type="button"
                               className="practice-detail-close"
-                              title="Close"
-                              aria-label="Close"
+                              title={t("Close")}
+                              aria-label={t("Close")}
                               onClick={() => setExpandedPracticeId(null)}
                             >
                               ×
@@ -2701,14 +2650,16 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                                 onClick={() => setOpenVideoId(openPracticeBlock.linkedVideoId as string)}
                               >
                                 {practiceVideos.find(
-                                  (t) => t.savedVideo?.savedVideoId === openPracticeBlock.linkedVideoId,
+                                  (transfer) => transfer.savedVideo?.savedVideoId === openPracticeBlock.linkedVideoId,
                                 )?.savedVideo?.title
-                                  ? `Watch: ${
-                                      practiceVideos.find(
-                                        (t) => t.savedVideo?.savedVideoId === openPracticeBlock.linkedVideoId,
-                                      )?.savedVideo?.title
-                                    }`
-                                  : "Watch linked video"}
+                                  ? t("Watch: {title}", {
+                                      title:
+                                        practiceVideos.find(
+                                          (transfer) =>
+                                            transfer.savedVideo?.savedVideoId === openPracticeBlock.linkedVideoId,
+                                        )?.savedVideo?.title ?? "",
+                                    })
+                                  : t("Watch linked video")}
                               </button>
                             )}
                             {openPracticeBlock.status === "active" ? (
@@ -2718,7 +2669,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                                 disabled={completingPracticeId === openPracticeBlock.id}
                                 onClick={() => void markPracticeComplete(openPracticeBlock.id)}
                               >
-                                {completingPracticeId === openPracticeBlock.id ? "Marking complete…" : "Mark Complete"}
+                                {completingPracticeId === openPracticeBlock.id ? t("Marking complete…") : t("Mark Complete")}
                               </button>
                             ) : (
                               <span
@@ -2726,9 +2677,9 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                               >
                                 {openPracticeBlock.status === "completed"
                                   ? openPracticeBlock.completedAt
-                                    ? `Completed ${formatDate(openPracticeBlock.completedAt)}`
-                                    : "Completed"
-                                  : "Expired"}
+                                    ? t("Completed {completedAt}", { completedAt: formatDate(openPracticeBlock.completedAt) })
+                                    : t("Completed")
+                                  : t("Expired")}
                               </span>
                             )}
                           </div>
@@ -2741,15 +2692,15 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
 
               {tab === "notes" && !isGuest && (
                 <section className="player-portal-section">
-                  <h2>{terms.serviceSingular} notes</h2>
+                  <h2>{t("{serviceSingular} notes", { serviceSingular: terms.serviceSingular })}</h2>
                   {profileLoading && !notes.length ? (
-                    <Loading what={`your ${terms.serviceSingular.toLowerCase()} notes`} className="player-portal-empty" />
+                    <Loading what={t("your {serviceSingular} notes", { serviceSingular: terms.serviceSingular.toLowerCase() })} className="player-portal-empty" />
                   ) : sortedNotes.length ? (
                     <ul className="player-portal-list">
                       {sortedNotes.map((note) => (
                         <li className="player-portal-note" key={note.id}>
                           <div className="player-portal-note-head">
-                            <strong>{note.title || "Lesson note"}</strong>
+                            <strong>{note.title || t("Lesson note")}</strong>
                             {formatDate(note.updatedAt || note.createdAt) && (
                               <span>{formatDate(note.updatedAt || note.createdAt)}</span>
                             )}
@@ -2759,58 +2710,53 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                       ))}
                     </ul>
                   ) : (
-                    <p className="player-portal-empty">No {terms.serviceSingular.toLowerCase()} notes yet.</p>
+                    <p className="player-portal-empty">{t("No {serviceSingular} notes yet.", { serviceSingular: terms.serviceSingular.toLowerCase() })}</p>
                   )}
                 </section>
               )}
 
               {tab === "videos" && (
                 <section className="player-portal-section">
-                  <h2>Your videos</h2>
+                  <h2>{t("Your videos")}</h2>
                   <p className="player-portal-lead">
                     {isGuest
-                      ? "Videos are saved on this device. Send one to your coach when you want them to see it."
-                      : "Videos are saved on this device. Anything in the cloud shows a download arrow — tap it to bring that video onto this device."}
+                      ? t("Videos are saved on this device. Send one to your coach when you want them to see it.")
+                      : t("Videos are saved on this device. Anything in the cloud shows a download arrow — tap it to bring that video onto this device.")}
                   </p>
 
                   {isGuest && guestStatus && guestStatus.sent.limit > 0 && !guestStatus.connected && (
-                    <p className="player-portal-lead">
-                      {guestStatus.sent.count} of {guestStatus.sent.limit} sent. Videos you send are
-                      kept for {guestStatus.retentionDays} days until your coach adds you.
-                    </p>
+                    <p className="player-portal-lead">{t("{count} of {limit} sent. Videos you send are kept for {retentionDays} days until your coach adds you.", { count: guestStatus.sent.count, limit: guestStatus.sent.limit, retentionDays: guestStatus.retentionDays })}</p>
                   )}
 
                   {guestSheetVideoId && (
                     <form className="player-portal-note-form" onSubmit={submitGuestIdentity}>
-                      <p className="player-portal-lead">
-                        Your coach needs to know who this is from. No account needed.
-                      </p>
+                      <p className="player-portal-lead">{t("Your coach needs to know who this is from. No account needed.")}</p>
                       <label className="player-portal-field">
-                        <span>Your name</span>
+                        <span>{t("Your name")}</span>
                         <input
                           value={guestName}
                           onChange={(event) => setGuestName(event.target.value)}
                           autoComplete="name"
-                          placeholder="Your name"
+                          placeholder={t("Your name")}
                         />
                       </label>
                       <label className="player-portal-field">
-                        <span>Your email</span>
+                        <span>{t("Your email")}</span>
                         <input
                           value={guestEmail}
                           onChange={(event) => setGuestEmail(event.target.value)}
                           type="email"
                           autoComplete="email"
-                          placeholder="you@example.com"
+                          placeholder={t("you@example.com")}
                         />
                       </label>
                       <label className="player-portal-field">
-                        <span>Note for your coach (optional)</span>
+                        <span>{t("Note for your coach (optional)")}</span>
                         <textarea
                           value={guestNote}
                           onChange={(event) => setGuestNote(event.target.value)}
                           rows={3}
-                          placeholder="Anything you want them to look at?"
+                          placeholder={t("Anything you want them to look at?")}
                         />
                       </label>
                       {guestError && (
@@ -2823,33 +2769,27 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                           className="player-portal-ghost"
                           type="button"
                           onClick={() => setGuestSheetVideoId("")}
-                        >
-                          Cancel
-                        </button>
+                        >{t("Cancel")}</button>
                         <button
                           className="player-portal-primary"
                           type="submit"
                           disabled={guestBusy || !guestName.trim() || !guestEmail.trim()}
                         >
-                          {guestBusy ? "Sending…" : "Send to coach"}
+                          {guestBusy ? t("Sending…") : t("Send to coach")}
                         </button>
                       </div>
                     </form>
                   )}
 
                   {!savedVideoLibrary ? (
-                    <p className="player-portal-empty">
-                      This browser cannot store videos. Try Chrome or Safari on your phone or laptop.
-                    </p>
+                    <p className="player-portal-empty">{t("This browser cannot store videos. Try Chrome or Safari on your phone or laptop.")}</p>
                   ) : (
                     <>
                       <button
                         className="player-portal-primary"
                         type="button"
                         onClick={startRecording}
-                      >
-                        Record a video
-                      </button>
+                      >{t("Record a video")}</button>
 
                       {videoError && (
                         <p className="player-portal-error-line" role="alert">
@@ -2879,10 +2819,10 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
           )}
 
           <footer className="player-portal-legal">
-            <nav aria-label="Legal and support">
-              <a href={PRIVACY_URL} target="_blank" rel="noreferrer noopener">Privacy Policy</a>
-              <a href={SUPPORT_URL} target="_blank" rel="noreferrer noopener">Support</a>
-              <a href={TERMS_URL} target="_blank" rel="noreferrer noopener">Terms</a>
+            <nav aria-label={t("Legal and support")}>
+              <a href={PRIVACY_URL} target="_blank" rel="noreferrer noopener">{t("Privacy Policy")}</a>
+              <a href={SUPPORT_URL} target="_blank" rel="noreferrer noopener">{t("Support")}</a>
+              <a href={TERMS_URL} target="_blank" rel="noreferrer noopener">{t("Terms")}</a>
               {!isGuest && (
                 <button
                   type="button"
@@ -2891,20 +2831,16 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                     setDeletionError("");
                   }}
                   aria-expanded={deletionOpen}
-                >
-                  Delete account
-                </button>
+                >{t("Delete account")}</button>
               )}
             </nav>
 
+            <LanguageSelect />
+
             {!isGuest && deletionOpen && (
-              <section className="player-account-deletion" aria-label="Delete account">
-                <strong>Delete your account</strong>
-                <p>
-                  This requests deletion of your player login and associated personal data. We review
-                  booking and payment records before removal because some records may need to be retained
-                  by law. Your Clarity Caddy login may use the same identity and will be included in that review.
-                </p>
+              <section className="player-account-deletion" aria-label={t("Delete account")}>
+                <strong>{t("Delete your account")}</strong>
+                <p>{t("This requests deletion of your player login and associated personal data. We review booking and payment records before removal because some records may need to be retained by law. Your Clarity Caddy login may use the same identity and will be included in that review.")}</p>
                 {deletionMessage ? (
                   <p className="player-account-deletion-success" role="status">{deletionMessage}</p>
                 ) : (
@@ -2914,7 +2850,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                     disabled={deletionBusy}
                     onClick={() => void requestAccountDeletion()}
                   >
-                    {deletionBusy ? "Submitting…" : "Request account deletion"}
+                    {deletionBusy ? t("Submitting…") : t("Request account deletion")}
                   </button>
                 )}
                 {deletionError && <p className="player-portal-error-line" role="alert">{deletionError}</p>}

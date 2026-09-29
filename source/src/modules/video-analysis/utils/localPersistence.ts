@@ -5,6 +5,7 @@ import {
   createIndexedDbVideoStore,
 } from "./videoBlobStore";
 import { openIndexedDbDatabase } from "./videoAnalysisDatabase";
+import { t } from "../../../lib/i18n";
 
 const ANALYSIS_PREFIX = "clarity.video.analysis";
 const WORKSPACE_PREFIX = "clarity.video.workspace";
@@ -148,7 +149,7 @@ export const browserStorageAdapter: PersistenceAdapter = {
         // crashing an effect. Snapshots embed base64 images and fill the ~5MB
         // localStorage budget quickly.
         throw new PersistenceQuotaError(
-          "Local storage is full; recent changes could not be saved.",
+          t("Local storage is full; recent changes could not be saved."),
           error
         );
       }
@@ -185,7 +186,7 @@ const openIndexedDb = () => {
 const requestResult = <T>(request: IDBRequest<T>): Promise<T> =>
   new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error || new Error("IndexedDB request failed."));
+    request.onerror = () => reject(request.error || new Error(t("IndexedDB request failed.")));
   });
 
 const runIndexedDbStore = async <T>(
@@ -382,5 +383,5 @@ export const saveVideoAnalysisArtifactToDevice = (
 };
 
 export const saveVideoAnalysisArtifactToCloud = async () => {
-  throw new Error("Cloud video transfer is disabled until the saved-video Drive adapter is implemented.");
+  throw new Error(t("Cloud video transfer is disabled until the saved-video Drive adapter is implemented."));
 };

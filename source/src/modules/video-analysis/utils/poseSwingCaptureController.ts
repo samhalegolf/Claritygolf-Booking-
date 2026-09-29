@@ -5,6 +5,7 @@ import {
   type PoseSwingEvent,
   type PoseSwingSample,
 } from "./poseSwingDetector";
+import { t } from "../../../lib/i18n";
 
 export interface PoseSwingCaptureControllerOptions {
   analysisFps?: number;
@@ -74,7 +75,7 @@ export class PoseSwingCaptureController {
         }
       } catch (error) {
         this.options.onError?.(
-          error instanceof Error ? error : new Error("Pose detection failed")
+          error instanceof Error ? error : new Error(t("Pose detection failed"))
         );
       }
     }

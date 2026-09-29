@@ -6,6 +6,7 @@ import {
   getSavedVideoCloudCatalogueState,
   getSavedVideoDeviceState,
 } from "./modules/video-analysis/utils/savedVideoLibrary";
+import { t } from "./lib/i18n";
 
 export type GoogleDriveTransferState =
   | "not_connected"
@@ -47,34 +48,34 @@ export type LocalStorageAction =
 export type LocalStorageHealth =
   | {
       state: "ready";
-      statusLabel: "Ready";
+      statusLabel: string;
       message: string;
       detail: string;
     }
   | {
       state: "needs-folder";
-      statusLabel: "Needs folder access";
+      statusLabel: string;
       message: string;
       detail: string;
       action: "choose-folder";
     }
   | {
       state: "reconnect-required";
-      statusLabel: "Reconnect required";
+      statusLabel: string;
       message: string;
       detail: string;
       action: "reconnect-folder";
     }
   | {
       state: "library-missing";
-      statusLabel: "Library not found";
+      statusLabel: string;
       message: string;
       detail: string;
       action: "locate-library";
     }
   | {
       state: "cache-only";
-      statusLabel: "Using browser backup";
+      statusLabel: string;
       message: string;
       detail: string;
       action?: "reconnect-folder";
@@ -82,13 +83,13 @@ export type LocalStorageHealth =
     }
   | {
       state: "unsupported";
-      statusLabel: "Browser-only storage";
+      statusLabel: string;
       message: string;
       detail: string;
     }
   | {
       state: "error";
-      statusLabel: "Needs attention";
+      statusLabel: string;
       message: string;
       detail: string;
       safeErrorCode?: string;
@@ -107,14 +108,14 @@ export type ClarityCloudProviderId = "google-drive";
 export type ClarityCloudHealth =
   | {
       state: "ready";
-      statusLabel: "Ready";
+      statusLabel: string;
       message: string;
       provider: ClarityCloudProviderId;
       providerLabel: string;
     }
   | {
       state: "not-connected";
-      statusLabel: "Not connected";
+      statusLabel: string;
       message: string;
       provider: ClarityCloudProviderId;
       providerLabel: string;
@@ -122,7 +123,7 @@ export type ClarityCloudHealth =
     }
   | {
       state: "permission-required";
-      statusLabel: "Permission required";
+      statusLabel: string;
       message: string;
       provider: ClarityCloudProviderId;
       providerLabel: string;
@@ -130,7 +131,7 @@ export type ClarityCloudHealth =
     }
   | {
       state: "reconnect-required";
-      statusLabel: "Reconnect required";
+      statusLabel: string;
       message: string;
       provider: ClarityCloudProviderId;
       providerLabel: string;
@@ -138,7 +139,7 @@ export type ClarityCloudHealth =
     }
   | {
       state: "setup-incomplete";
-      statusLabel: "Setup incomplete";
+      statusLabel: string;
       message: string;
       provider: ClarityCloudProviderId;
       providerLabel: string;
@@ -147,7 +148,7 @@ export type ClarityCloudHealth =
     }
   | {
       state: "temporarily-unavailable";
-      statusLabel: "Temporarily unavailable";
+      statusLabel: string;
       message: string;
       provider: ClarityCloudProviderId;
       providerLabel: string;
@@ -156,14 +157,14 @@ export type ClarityCloudHealth =
     }
   | {
       state: "beta";
-      statusLabel: "Beta";
+      statusLabel: string;
       message: string;
       provider: ClarityCloudProviderId;
       providerLabel: string;
     }
   | {
       state: "error";
-      statusLabel: "Needs attention";
+      statusLabel: string;
       message: string;
       provider: ClarityCloudProviderId;
       providerLabel: string;
@@ -196,18 +197,18 @@ export function getLocalStorageHealth(status: ManagedLocalVideoLibraryStatus): L
   if (!status.supported || status.health === "unsupported") {
     return {
       state: "unsupported",
-      statusLabel: "Browser-only storage",
-      message: "This browser cannot use a managed computer folder. Videos stay in browser storage on this device.",
-      detail: "Browser IndexedDB cache and recovery",
+      statusLabel: t("Browser-only storage"),
+      message: t("This browser cannot use a managed computer folder. Videos stay in browser storage on this device."),
+      detail: t("Browser IndexedDB cache and recovery"),
     };
   }
 
   if (!status.configured || status.health === "not-configured") {
     return {
       state: "needs-folder",
-      statusLabel: "Needs folder access",
-      message: "Choose where Clarity should keep videos permanently on this computer.",
-      detail: "My Library",
+      statusLabel: t("Needs folder access"),
+      message: t("Choose where Clarity should keep videos permanently on this computer."),
+      detail: t("My Library"),
       action: "choose-folder",
     };
   }
@@ -215,18 +216,18 @@ export function getLocalStorageHealth(status: ManagedLocalVideoLibraryStatus): L
   if (status.health === "healthy") {
     return {
       state: "ready",
-      statusLabel: "Ready",
-      message: "My Library can keep permanent copies on this computer.",
-      detail: "My Library",
+      statusLabel: t("Ready"),
+      message: t("My Library can keep permanent copies on this computer."),
+      detail: t("My Library"),
     };
   }
 
   if (status.health === "permission-lost" || status.health === "read-only") {
     return {
       state: "reconnect-required",
-      statusLabel: "Reconnect required",
-      message: "Clarity no longer has access to My Library.",
-      detail: "My Library",
+      statusLabel: t("Reconnect required"),
+      message: t("Clarity no longer has access to My Library."),
+      detail: t("My Library"),
       action: "reconnect-folder",
     };
   }
@@ -234,9 +235,9 @@ export function getLocalStorageHealth(status: ManagedLocalVideoLibraryStatus): L
   if (status.health === "missing" || status.health === "moved") {
     return {
       state: "library-missing",
-      statusLabel: "Library not found",
-      message: "My Library may have been moved or renamed.",
-      detail: "My Library",
+      statusLabel: t("Library not found"),
+      message: t("My Library may have been moved or renamed."),
+      detail: t("My Library"),
       action: "locate-library",
     };
   }
@@ -244,9 +245,9 @@ export function getLocalStorageHealth(status: ManagedLocalVideoLibraryStatus): L
   if (status.health === "repair-required") {
     return {
       state: "cache-only",
-      statusLabel: "Using browser backup",
-      message: "Videos are protected on this device, but My Library needs attention.",
-      detail: "Browser IndexedDB cache and recovery",
+      statusLabel: t("Using browser backup"),
+      message: t("Videos are protected on this device, but My Library needs attention."),
+      detail: t("Browser IndexedDB cache and recovery"),
       action: "reconnect-folder",
       safeErrorCode: "LOCAL_LIBRARY_REPAIR_REQUIRED",
     };
@@ -254,17 +255,17 @@ export function getLocalStorageHealth(status: ManagedLocalVideoLibraryStatus): L
 
   return {
     state: "error",
-    statusLabel: "Needs attention",
-    message: "My Library needs attention before it can keep permanent local copies.",
-    detail: "Browser IndexedDB cache and recovery",
+    statusLabel: t("Needs attention"),
+    message: t("My Library needs attention before it can keep permanent local copies."),
+    detail: t("Browser IndexedDB cache and recovery"),
     safeErrorCode: safeCode(status.health, "LOCAL_STORAGE_UNAVAILABLE"),
   };
 }
 
 export function getLocalStorageActionLabel(action?: LocalStorageAction) {
-  if (action === "choose-folder") return "Choose folder";
-  if (action === "reconnect-folder") return "Reconnect folder";
-  if (action === "locate-library") return "Locate library";
+  if (action === "choose-folder") return t("Choose folder");
+  if (action === "reconnect-folder") return t("Reconnect folder");
+  if (action === "locate-library") return t("Locate library");
   return "";
 }
 
@@ -273,8 +274,8 @@ export function getClarityCloudHealth(status: GoogleDriveTransferStatus): Clarit
     return {
       ...cloudBase,
       state: "setup-incomplete",
-      statusLabel: "Setup incomplete",
-      message: "Clarity Cloud is not configured for this environment.",
+      statusLabel: t("Setup incomplete"),
+      message: t("Clarity Cloud is not configured for this environment."),
       action: "open-setup-details",
       safeErrorCode: "CLOUD_OAUTH_NOT_CONFIGURED",
     };
@@ -284,8 +285,8 @@ export function getClarityCloudHealth(status: GoogleDriveTransferStatus): Clarit
     return {
       ...cloudBase,
       state: "reconnect-required",
-      statusLabel: "Reconnect required",
-      message: "Your cloud connection needs to be refreshed.",
+      statusLabel: t("Reconnect required"),
+      message: t("Your cloud connection needs to be refreshed."),
       action: "reconnect",
     };
   }
@@ -294,8 +295,8 @@ export function getClarityCloudHealth(status: GoogleDriveTransferStatus): Clarit
     return {
       ...cloudBase,
       state: "not-connected",
-      statusLabel: "Not connected",
-      message: "Connect Clarity Cloud to transfer saved videos between your devices.",
+      statusLabel: t("Not connected"),
+      message: t("Connect Clarity Cloud to transfer saved videos between your devices."),
       action: "connect",
     };
   }
@@ -304,8 +305,8 @@ export function getClarityCloudHealth(status: GoogleDriveTransferStatus): Clarit
     return {
       ...cloudBase,
       state: "setup-incomplete",
-      statusLabel: "Setup incomplete",
-      message: "Secure provider storage is unavailable.",
+      statusLabel: t("Setup incomplete"),
+      message: t("Secure provider storage is unavailable."),
       action: "open-setup-details",
       safeErrorCode: safeCode(status.safeErrorCode || status.blocker, "PROVIDER_STORAGE_UNAVAILABLE"),
     };
@@ -315,8 +316,8 @@ export function getClarityCloudHealth(status: GoogleDriveTransferStatus): Clarit
     return {
       ...cloudBase,
       state: "permission-required",
-      statusLabel: "Permission required",
-      message: "Clarity needs permission to transfer saved videos.",
+      statusLabel: t("Permission required"),
+      message: t("Clarity needs permission to transfer saved videos."),
       action: "grant-permission",
     };
   }
@@ -325,8 +326,8 @@ export function getClarityCloudHealth(status: GoogleDriveTransferStatus): Clarit
     return {
       ...cloudBase,
       state: "setup-incomplete",
-      statusLabel: "Setup incomplete",
-      message: "Cloud storage is connected, but transfer setup is not complete.",
+      statusLabel: t("Setup incomplete"),
+      message: t("Cloud storage is connected, but transfer setup is not complete."),
       action: "open-setup-details",
       safeErrorCode: safeCode(status.safeErrorCode || status.blocker || status.message, "CLARITY_CLOUD_SETUP_INCOMPLETE"),
     };
@@ -336,8 +337,8 @@ export function getClarityCloudHealth(status: GoogleDriveTransferStatus): Clarit
     return {
       ...cloudBase,
       state: "temporarily-unavailable",
-      statusLabel: "Temporarily unavailable",
-      message: "Clarity Cloud could not be reached. Your local videos are still safe.",
+      statusLabel: t("Temporarily unavailable"),
+      message: t("Clarity Cloud could not be reached. Your local videos are still safe."),
       action: "retry",
       safeErrorCode: safeCode(status.blocker || status.message, "CLARITY_CLOUD_UNAVAILABLE"),
     };
@@ -347,8 +348,8 @@ export function getClarityCloudHealth(status: GoogleDriveTransferStatus): Clarit
     return {
       ...cloudBase,
       state: "setup-incomplete",
-      statusLabel: "Setup incomplete",
-      message: "Transfer folder could not be prepared.",
+      statusLabel: t("Setup incomplete"),
+      message: t("Transfer folder could not be prepared."),
       action: "retry-setup",
       safeErrorCode: "TRANSFER_FOLDER_UNAVAILABLE",
     };
@@ -358,8 +359,8 @@ export function getClarityCloudHealth(status: GoogleDriveTransferStatus): Clarit
     return {
       ...cloudBase,
       state: "temporarily-unavailable",
-      statusLabel: "Temporarily unavailable",
-      message: "Your local video is safe. The cloud transfer service could not be reached.",
+      statusLabel: t("Temporarily unavailable"),
+      message: t("Your local video is safe. The cloud transfer service could not be reached."),
       action: "retry",
       safeErrorCode: safeCode(status.safeErrorCode, "CHUNK_UPLOAD_UNAVAILABLE"),
     };
@@ -369,8 +370,8 @@ export function getClarityCloudHealth(status: GoogleDriveTransferStatus): Clarit
     return {
       ...cloudBase,
       state: "temporarily-unavailable",
-      statusLabel: "Temporarily unavailable",
-      message: "Your local video is safe. The cloud transfer service could not be reached.",
+      statusLabel: t("Temporarily unavailable"),
+      message: t("Your local video is safe. The cloud transfer service could not be reached."),
       action: "retry",
       safeErrorCode: safeCode(status.safeErrorCode, "CLARITY_CLOUD_IMPORT_LIST_UNAVAILABLE"),
     };
@@ -379,8 +380,8 @@ export function getClarityCloudHealth(status: GoogleDriveTransferStatus): Clarit
   return {
     ...cloudBase,
     state: "ready",
-    statusLabel: "Ready",
-    message: "Transfer saved videos between your devices.",
+    statusLabel: t("Ready"),
+    message: t("Transfer saved videos between your devices."),
   };
 }
 
@@ -391,23 +392,23 @@ export const googleDriveClarityCloudProvider: ClarityCloudProvider = {
 };
 
 export function getClarityCloudActionLabel(action?: ClarityCloudAction) {
-  if (action === "connect") return "Connect Clarity Cloud";
-  if (action === "grant-permission") return "Grant permission";
-  if (action === "reconnect") return "Reconnect Clarity Cloud";
-  if (action === "open-setup-details") return "Open setup details";
-  if (action === "retry-setup") return "Retry setup";
-  if (action === "retry") return "Retry";
+  if (action === "connect") return t("Connect Clarity Cloud");
+  if (action === "grant-permission") return t("Grant permission");
+  if (action === "reconnect") return t("Reconnect Clarity Cloud");
+  if (action === "open-setup-details") return t("Open setup details");
+  if (action === "retry-setup") return t("Retry setup");
+  if (action === "retry") return t("Retry");
   return "";
 }
 
 export function getSavedVideoDeviceStatusLabel(video: SavedVideoItem) {
   const device = getSavedVideoDeviceState(video);
-  if (device.status === "permanent") return "My Library • Saved permanently";
-  if (device.status === "cached") return "Device • Available on this device";
-  if (device.status === "recovery-only") return "Device • Recovery copy safe";
-  if (device.status === "downloading") return "Device • Downloading";
-  if (device.status === "download-failed") return "Device • Download failed";
-  return "Device • Not downloaded";
+  if (device.status === "permanent") return t("My Library • Saved permanently");
+  if (device.status === "cached") return t("Device • Available on this device");
+  if (device.status === "recovery-only") return t("Device • Recovery copy safe");
+  if (device.status === "downloading") return t("Device • Downloading");
+  if (device.status === "download-failed") return t("Device • Download failed");
+  return t("Device • Not downloaded");
 }
 
 export const getSavedVideoLocalStatusLabel = getSavedVideoDeviceStatusLabel;
@@ -422,17 +423,17 @@ export function getSavedVideoCloudStatusLabel(
   }
 ) {
   const catalogueState = getSavedVideoCloudCatalogueState(video);
-  if (catalogueState === "ready") return "Cloud • Available";
-  if (catalogueState === "paused") return "Cloud • Upload paused";
-  if (catalogueState === "verifying") return "Cloud • Verifying";
-  if (catalogueState === "preparing") return "Cloud • Preparing Clarity Cloud";
+  if (catalogueState === "ready") return t("Cloud • Available");
+  if (catalogueState === "paused") return t("Cloud • Upload paused");
+  if (catalogueState === "verifying") return t("Cloud • Verifying");
+  if (catalogueState === "preparing") return t("Cloud • Preparing Clarity Cloud");
   if (options.isUploading) {
     const progress = Math.max(0, Math.min(100, Math.round(video.cloud?.progress || 0)));
-    return `Cloud • Uploading ${progress}%`;
+    return t("Cloud • Uploading {progress}%", { progress });
   }
   if (catalogueState === "uploading") {
     const progress = Math.max(0, Math.min(100, Math.round(video.cloud?.progress || 0)));
-    return `Cloud • Uploading ${progress}%`;
+    return t("Cloud • Uploading {progress}%", { progress });
   }
   if (catalogueState === "failed") {
     const setupBlocked =
@@ -441,7 +442,7 @@ export function getSavedVideoCloudStatusLabel(
       video.cloud?.lastUploadErrorCode === "DRIVE_NOT_CONNECTED" ||
       video.cloud?.lastUploadErrorCode === "DRIVE_SCOPE_MISSING" ||
       video.cloud?.lastUploadErrorCode === "GOOGLE_RECONNECT_REQUIRED";
-    return setupBlocked ? "Cloud • Waiting to upload" : "Cloud • Upload failed - Retry";
+    return setupBlocked ? t("Cloud • Waiting to upload") : t("Cloud • Upload failed - Retry");
   }
   if (
     options.cloudHealth?.state === "setup-incomplete" ||
@@ -455,8 +456,8 @@ export function getSavedVideoCloudStatusLabel(
     options.cloudState === "error" ||
     options.cloudState === "reconnect_required"
   ) {
-    return "Cloud • Waiting to upload";
+    return t("Cloud • Waiting to upload");
   }
-  if (catalogueState === "archived-locally") return "Cloud • Waiting to upload";
-  return "Cloud • Waiting to upload";
+  if (catalogueState === "archived-locally") return t("Cloud • Waiting to upload");
+  return t("Cloud • Waiting to upload");
 }

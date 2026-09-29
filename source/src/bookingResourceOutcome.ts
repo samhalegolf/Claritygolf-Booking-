@@ -1,3 +1,4 @@
+import { t } from "./lib/i18n";
 /**
  * What the Resources section on a booking card should say.
  *
@@ -26,7 +27,7 @@ export type ResourceTone = "ok" | "idle" | "warn" | "error";
 export type ResourceSystem = { provider: "optix" | "webhook"; name: string };
 
 export const OPTIX_SYSTEM: ResourceSystem = { provider: "optix", name: "Optix" };
-export const WEBHOOK_SYSTEM: ResourceSystem = { provider: "webhook", name: "your booking system" };
+export const WEBHOOK_SYSTEM: ResourceSystem = { provider: "webhook", name: t("your booking system") };
 
 export function resourceSystemFor(provider: string | null | undefined): ResourceSystem {
   return provider === "optix" ? OPTIX_SYSTEM : WEBHOOK_SYSTEM;
@@ -97,48 +98,48 @@ function failures(system: ResourceSystem): Record<string, { title: string; line:
   const Name = cap(name);
   const setUp =
     system.provider === "optix"
-      ? "Give this lesson type a resource profile in Integrations, then book the bay."
-      : "Connect it in Settings › Booking › Bay & room system, then book the bay.";
+      ? t("Give this lesson type a resource profile in Integrations, then book the bay.")
+      : t("Connect it in Settings › Booking › Bay & room system, then book the bay.");
   return {
     resource_conflict: {
-      title: "No bay free",
-      line: "Every bay set for this lesson type is already booked at this time.",
+      title: t("No bay free"),
+      line: t("Every bay set for this lesson type is already booked at this time."),
     },
     resource_unavailable: {
-      title: "No bay free",
-      line: `${Name} has no bay free at this time.`,
+      title: t("No bay free"),
+      line: t("{Name} has no bay free at this time.", { Name }),
     },
     token_expired: {
-      title: `${Name} login expired`,
-      line: `Clarity's ${name} access token is no longer valid. The details name which one to replace.`,
+      title: t("{Name} login expired", { Name }),
+      line: t("Clarity's {name} access token is no longer valid. The details name which one to replace.", { name }),
     },
     unauthorized: {
-      title: `${Name} refused access`,
-      line: `The ${name} account Clarity books with is not allowed to make this booking.`,
+      title: t("{Name} refused access", { Name }),
+      line: t("The {name} account Clarity books with is not allowed to make this booking.", { name }),
     },
     validation_failed: {
-      title: `${Name} rejected the details`,
-      line: `${Name} would not accept this booking's times or fields.`,
+      title: t("{Name} rejected the details", { Name }),
+      line: t("{Name} would not accept this booking's times or fields.", { Name }),
     },
     timeout: {
-      title: `${Name} did not answer`,
-      line: `The result is unknown — ${name} may still have taken the bay. Check ${name} before booking again.`,
+      title: t("{Name} did not answer", { Name }),
+      line: t("The result is unknown — {name} may still have taken the bay. Check {name} before booking again.", { name }),
     },
     network_error: {
-      title: `Could not reach ${name}`,
-      line: `Clarity could not connect to ${name}. Check the address in Settings, then try again.`,
+      title: t("Could not reach {name}", { name }),
+      line: t("Clarity could not connect to {name}. Check the address in Settings, then try again.", { name }),
     },
     invalid_reply: {
-      title: `${Name} answered oddly`,
-      line: `${Name} replied, but not in the shape Clarity expects. The details say what was wrong.`,
+      title: t("{Name} answered oddly", { Name }),
+      line: t("{Name} replied, but not in the shape Clarity expects. The details say what was wrong.", { Name }),
     },
     not_configured: {
-      title: system.provider === "optix" ? "No bays for this lesson type" : `${Name} isn't connected`,
+      title: system.provider === "optix" ? t("No bays for this lesson type") : t("{Name} isn't connected", { Name }),
       line: setUp,
     },
     remote_error: {
-      title: `${Name} returned an error`,
-      line: `${Name} refused the request. Its own words are in the details.`,
+      title: t("{Name} returned an error", { Name }),
+      line: t("{Name} refused the request. Its own words are in the details.", { Name }),
     },
   };
 }
@@ -150,7 +151,7 @@ export function bayLabel(record: ResourceStatusRecord | null | undefined): strin
   const id = String(record.resourceId || "").trim();
   // Naming the id beats "Resource booked": it is what you type into the other
   // system to find the thing Clarity is talking about.
-  return id ? `Resource ${id}` : "";
+  return id ? t("Resource {id}", { id }) : "";
 }
 
 /**
@@ -164,11 +165,11 @@ export function buildDetails(
 ): string {
   if (!record) return "";
   const rows: Array<[string, string]> = [
-    ["Error code", String(record.errorCode || "")],
-    [`${cap(system.name)} said`, String(record.errorMessage || "")],
-    ["Booking ID", String(record.optixBookingId || "")],
-    ["Session ID", String(record.optixBookingSessionId || "")],
-    ["Bay tried", String(record.resourceId || "")],
+    [t("Error code"), String(record.errorCode || "")],
+    [t("{name} said", { name: cap(system.name) }), String(record.errorMessage || "")],
+    [t("Booking ID"), String(record.optixBookingId || "")],
+    [t("Session ID"), String(record.optixBookingSessionId || "")],
+    [t("Bay tried"), String(record.resourceId || "")],
   ];
   return rows
     .filter(([, value]) => value.trim())
@@ -186,8 +187,8 @@ function failure(
   const known = failures(system)[code.startsWith("http_") ? "remote_error" : code];
   return {
     tone: "error",
-    title: known?.title || (system.provider === "optix" ? "Optix booking failed" : "Bay booking failed"),
-    line: known?.line || `The attempt did not complete. The details carry what ${system.name} returned.`,
+    title: known?.title || (system.provider === "optix" ? t("Optix booking failed") : t("Bay booking failed")),
+    line: known?.line || t("The attempt did not complete. The details carry what {name} returned.", { name: system.name }),
     details: buildDetails(record, system),
     canRetry: true,
     needsSystemCheckFirst: code === "timeout",
@@ -209,8 +210,8 @@ export function describeStatusRecord(
 ): ResourceOutcome {
   const base: ResourceOutcome = {
     tone: "idle",
-    title: "No bay booked",
-    line: "No bay has been held for this lesson yet.",
+    title: t("No bay booked"),
+    line: t("No bay has been held for this lesson yet."),
     details: "",
     canRetry: true,
     needsSystemCheckFirst: false,
@@ -229,10 +230,10 @@ export function describeStatusRecord(
     return {
       ...base,
       tone: "ok",
-      title: label || "Bay held",
+      title: label || t("Bay held"),
       line: label
-        ? `${label} is held in ${system.name} for this lesson.`
-        : `A bay is held in ${system.name} for this lesson.`,
+        ? t("{label} is held in {name} for this lesson.", { label, name: system.name })
+        : t("A bay is held in {name} for this lesson.", { name: system.name }),
       canRetry: false,
     };
   }
@@ -243,8 +244,8 @@ export function describeStatusRecord(
     // The button stays: pressing it books the bay now and settles the row.
     return {
       ...base,
-      title: "Bay booking queued",
-      line: "Clarity is booking a bay for this lesson in the background. Book bay does it right now instead.",
+      title: t("Bay booking queued"),
+      line: t("Clarity is booking a bay for this lesson in the background. Book bay does it right now instead."),
     };
   }
 
@@ -256,18 +257,18 @@ export function describeStatusRecord(
     if (code === "optix_disabled") {
       return {
         ...base,
-        title: "Bays are off for this lesson type",
+        title: t("Bays are off for this lesson type"),
         line:
           system.provider === "optix"
-            ? "Turn them on in Integrations → resource profiles if this lesson should hold a bay."
-            : "Tick “Holds one of the location's resources” on the lesson type if it should hold a bay.",
+            ? t("Turn them on in Integrations → resource profiles if this lesson should hold a bay.")
+            : t("Tick “Holds one of the location's resources” on the lesson type if it should hold a bay."),
         canRetry: false,
       };
     }
     return {
       ...base,
-      title: "No bay held",
-      line: "The bay for this lesson was released. Book bay holds a new one.",
+      title: t("No bay held"),
+      line: t("The bay for this lesson was released. Book bay holds a new one."),
     };
   }
 
@@ -292,8 +293,8 @@ export function describeBookAttempt(attempt: BookAttempt, system: ResourceSystem
   if (attempt.kind === "unreachable") {
     return {
       tone: "error",
-      title: "Could not reach Clarity",
-      line: "The request never got an answer. Check your connection, then press Book bay again.",
+      title: t("Could not reach Clarity"),
+      line: t("The request never got an answer. Check your connection, then press Book bay again."),
       details: attempt.error instanceof Error ? attempt.error.message : "",
       canRetry: true,
       needsSystemCheckFirst: false,
@@ -308,8 +309,8 @@ export function describeBookAttempt(attempt: BookAttempt, system: ResourceSystem
   if (status === 401) {
     return {
       tone: "error",
-      title: "Signed out",
-      line: "Your admin session expired. Sign in again, then book the bay.",
+      title: t("Signed out"),
+      line: t("Your admin session expired. Sign in again, then book the bay."),
       details: "",
       canRetry: false,
       needsSystemCheckFirst: false,
@@ -320,8 +321,8 @@ export function describeBookAttempt(attempt: BookAttempt, system: ResourceSystem
   if (status === 403) {
     return {
       tone: "error",
-      title: "Not allowed",
-      line: "This login cannot book bays for this business.",
+      title: t("Not allowed"),
+      line: t("This login cannot book bays for this business."),
       details: serverMessage,
       canRetry: false,
       needsSystemCheckFirst: false,
@@ -332,8 +333,8 @@ export function describeBookAttempt(attempt: BookAttempt, system: ResourceSystem
   if (status === 400) {
     return {
       tone: "error",
-      title: "Clarity sent a bad request",
-      line: `${cap(system.name)} was never asked. This is a Clarity bug, not a problem with ${system.name}.`,
+      title: t("Clarity sent a bad request"),
+      line: t("{Name} was never asked. This is a Clarity bug, not a problem with {name}.", { Name: cap(system.name), name: system.name }),
       details: serverMessage || String(payload?.error || ""),
       canRetry: false,
       needsSystemCheckFirst: false,
@@ -347,8 +348,8 @@ export function describeBookAttempt(attempt: BookAttempt, system: ResourceSystem
   if (status === 503) {
     return {
       tone: "error",
-      title: `${cap(system.name)} isn't set up`,
-      line: serverMessage || `Clarity has no connection to ${system.name} yet.`,
+      title: t("{name} isn't set up", { name: cap(system.name) }),
+      line: serverMessage || t("Clarity has no connection to {name} yet.", { name: system.name }),
       details: "",
       canRetry: false,
       needsSystemCheckFirst: false,
@@ -361,8 +362,8 @@ export function describeBookAttempt(attempt: BookAttempt, system: ResourceSystem
     if (payload?.alreadyBooked === true) {
       return {
         tone: "ok",
-        title: "Already booked",
-        line: label ? `This lesson already holds ${label}.` : "This lesson already holds a bay.",
+        title: t("Already booked"),
+        line: label ? t("This lesson already holds {label}.", { label }) : t("This lesson already holds a bay."),
         details: "",
         canRetry: false,
         needsSystemCheckFirst: false,
@@ -371,8 +372,8 @@ export function describeBookAttempt(attempt: BookAttempt, system: ResourceSystem
     }
     return {
       tone: "ok",
-      title: label || "Bay held",
-      line: label ? `${label} is now held in ${system.name}.` : `The bay is now held in ${system.name}.`,
+      title: label || t("Bay held"),
+      line: label ? t("{label} is now held in {name}.", { label, name: system.name }) : t("The bay is now held in {name}.", { name: system.name }),
       details: "",
       canRetry: false,
       needsSystemCheckFirst: false,
@@ -390,8 +391,8 @@ export function describeBookAttempt(attempt: BookAttempt, system: ResourceSystem
   if (status === 404 || String(payload?.error || "") === "appointment_not_found") {
     return {
       tone: "error",
-      title: "Lesson not found",
-      line: "Clarity could not find this lesson to book a bay against. Reload the calendar.",
+      title: t("Lesson not found"),
+      line: t("Clarity could not find this lesson to book a bay against. Reload the calendar."),
       details: serverMessage,
       canRetry: false,
       needsSystemCheckFirst: false,

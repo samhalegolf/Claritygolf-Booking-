@@ -11,6 +11,7 @@ import {
   type ResourceStatusRecord,
   type ResourceSystem,
 } from "./bookingResourceOutcome";
+import { t } from "./lib/i18n";
 
 /**
  * Resources — the bay this lesson holds in the business's booking system, and
@@ -58,7 +59,7 @@ function formatTime(value: string | null | undefined) {
 
 /** The one-line state on the summary row, readable without opening the section. */
 function summaryLabel(outcome: ResourceOutcome, busy: boolean) {
-  if (busy) return "Booking…";
+  if (busy) return t("Booking…");
   return outcome.title;
 }
 
@@ -66,8 +67,8 @@ function loadOutcome(load: LoadState, system: ResourceSystem): ResourceOutcome {
   if (load.kind === "loading") {
     return {
       tone: "idle",
-      title: "Checking…",
-      line: "Reading this lesson's bay booking.",
+      title: t("Checking…"),
+      line: t("Reading this lesson's bay booking."),
       details: "",
       canRetry: false,
       needsSystemCheckFirst: false,
@@ -77,8 +78,8 @@ function loadOutcome(load: LoadState, system: ResourceSystem): ResourceOutcome {
   if (load.kind === "signedOut") {
     return {
       tone: "error",
-      title: "Signed out",
-      line: "Your admin session expired. Sign in again to see this lesson's bay.",
+      title: t("Signed out"),
+      line: t("Your admin session expired. Sign in again to see this lesson's bay."),
       details: "",
       canRetry: false,
       needsSystemCheckFirst: false,
@@ -91,8 +92,8 @@ function loadOutcome(load: LoadState, system: ResourceSystem): ResourceOutcome {
     // not a bay that does not exist.
     return {
       tone: "error",
-      title: "Could not read bay status",
-      line: "Clarity could not load this lesson's bay booking. Reload status to try again.",
+      title: t("Could not read bay status"),
+      line: t("Clarity could not load this lesson's bay booking. Reload status to try again."),
       details: load.detail,
       canRetry: false,
       needsSystemCheckFirst: false,
@@ -130,14 +131,14 @@ export default function BookingResourcesPanel({ calendarItemId, onBooked }: Prop
       );
       if (shownId.current !== id) return;
       if (response.status === 401 || response.status === 403) return setLoad({ kind: "signedOut" });
-      if (!response.ok) return setLoad({ kind: "unreadable", detail: `Status request failed (HTTP ${response.status}).` });
+      if (!response.ok) return setLoad({ kind: "unreadable", detail: t("Status request failed (HTTP {status}).", { status: response.status }) });
       const payload = await response.json().catch(() => null);
       if (shownId.current !== id) return;
-      if (!payload) return setLoad({ kind: "unreadable", detail: "The status response could not be read." });
+      if (!payload) return setLoad({ kind: "unreadable", detail: t("The status response could not be read.") });
       // found:false is a real answer — this is not an appointment on this
       // account — and is shown as such rather than as "no bay yet".
       if (payload.found === false) {
-        return setLoad({ kind: "unreadable", detail: "Clarity has no appointment with this id on your account." });
+        return setLoad({ kind: "unreadable", detail: t("Clarity has no appointment with this id on your account.") });
       }
       const system = payload.system && typeof payload.system === "object" ? (payload.system as SystemState) : null;
       if (system) rememberedSystem = system;
@@ -146,7 +147,7 @@ export default function BookingResourcesPanel({ calendarItemId, onBooked }: Prop
       if (shownId.current !== id) return;
       setLoad({
         kind: "unreadable",
-        detail: error instanceof Error ? error.message : "The status request never got an answer.",
+        detail: error instanceof Error ? error.message : t("The status request never got an answer."),
       });
     }
   }, []);
@@ -209,11 +210,11 @@ export default function BookingResourcesPanel({ calendarItemId, onBooked }: Prop
     void readStatus(id);
   }
 
-  const metaLabel = record?.syncStatus === "synced" ? "Last confirmed" : record?.hasSyncRow ? "Last attempt" : "";
+  const metaLabel = record?.syncStatus === "synced" ? t("Last confirmed") : record?.hasSyncRow ? t("Last attempt") : "";
   const metaTime = formatTime(
     record?.syncStatus === "synced" ? record?.lastSyncedAt || record?.updatedAt : record?.lastAttemptedAt || record?.updatedAt,
   );
-  const bookLabel = outcome.needsSystemCheckFirst ? `I've checked ${system.name} — book anyway` : "Book bay";
+  const bookLabel = outcome.needsSystemCheckFirst ? t("I've checked {name} — book anyway", { name: system.name }) : t("Book bay");
 
   // Nothing connected and nothing held: there is no bay to talk about.
   if (knownSystem && !knownSystem.connected && !holdsSomething(record) && !busy && !attempt) return null;
@@ -225,22 +226,22 @@ export default function BookingResourcesPanel({ calendarItemId, onBooked }: Prop
     <details className="booking-records-tab">
       <summary className="booking-records-summary">
         <ClarityFacilitiesRooms size={16} />
-        <span>Resources</span>
+        <span>{t("Resources")}</span>
         <em>{summaryLabel(outcome, busy)}</em>
       </summary>
       <div className="booking-records-body">
         <div className={`resource-state resource-state--${busy ? "busy" : outcome.tone}`}>
-          <strong>{busy ? "Booking bay…" : outcome.title}</strong>
+          <strong>{busy ? t("Booking bay…") : outcome.title}</strong>
           {busy ? (
             <p className="resource-state-line">
               <span className="resource-spinner" aria-hidden="true" />
               {slow
-                ? `Still waiting on ${system.name}. Clarity gives it 25 seconds before it gives up.`
-                : `Asking ${system.name} to hold a bay for this lesson.`}
+                ? t("Still waiting on {name}. Clarity gives it 25 seconds before it gives up.", { name: system.name })
+                : t("Asking {name} to hold a bay for this lesson.", { name: system.name })}
             </p>
           ) : (
             <p className="resource-state-line">
-              {outcome.staleAttemptAt ? `Earlier attempt on ${formatTime(outcome.staleAttemptAt)} — ` : ""}
+              {outcome.staleAttemptAt ? t("Earlier attempt on {staleAttemptAt} — ", { staleAttemptAt: formatTime(outcome.staleAttemptAt) }) : ""}
               {outcome.line}
             </p>
           )}
@@ -248,7 +249,7 @@ export default function BookingResourcesPanel({ calendarItemId, onBooked }: Prop
 
         {!busy && outcome.details ? (
           <details className="resource-details">
-            <summary>Details</summary>
+            <summary>{t("Details")}</summary>
             <pre>{outcome.details}</pre>
           </details>
         ) : null}
@@ -256,7 +257,7 @@ export default function BookingResourcesPanel({ calendarItemId, onBooked }: Prop
         {metaLabel && metaTime ? (
           <p className="resource-meta">
             {metaLabel}: {metaTime}
-            {record?.resourceId && record?.syncStatus !== "synced" ? ` · last bay tried ${bayLabel(record)}` : ""}
+            {record?.resourceId && record?.syncStatus !== "synced" ? t(" · last bay tried {record}", { record: bayLabel(record) }) : ""}
           </p>
         ) : null}
 
@@ -269,13 +270,11 @@ export default function BookingResourcesPanel({ calendarItemId, onBooked }: Prop
               disabled={busy}
               aria-busy={busy}
             >
-              {busy ? "Booking bay…" : bookLabel}
+              {busy ? t("Booking bay…") : bookLabel}
             </button>
           ) : null}
           <button className="outline-button" type="button" onClick={() => void readStatus(calendarItemId)} disabled={busy}>
-            <RefreshCw size={16} />
-            Reload status
-          </button>
+            <RefreshCw size={16} />{t("Reload status")}</button>
         </div>
       </div>
     </details>

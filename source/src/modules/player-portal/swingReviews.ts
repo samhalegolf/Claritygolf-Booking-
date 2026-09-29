@@ -25,6 +25,7 @@
  * been filtered to this player by the server or by their own device.
  */
 
+import { t } from "../../lib/i18n";
 import type {
   ClarityCloudImportTransfer,
   SavedVideoItem,
@@ -215,7 +216,7 @@ export function groupSwingReviews<
           (cloudSnapshots[transfer.savedVideoId] || []).map((snapshot) => ({
             ...snapshot,
             savedVideoId: transfer.savedVideoId,
-            videoTitle: transfer.savedVideo?.title || "Video",
+            videoTitle: transfer.savedVideo?.title || t("Video"),
           })),
         ),
       ];

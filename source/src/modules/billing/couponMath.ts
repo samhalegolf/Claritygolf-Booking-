@@ -5,6 +5,8 @@
 // balance is money owed to whoever holds the code. That is why nothing here
 // ever rounds a balance up, and why applying one is capped three ways.
 
+import { t } from "../../lib/i18n";
+
 export type CouponStatus = "active" | "redeemed" | "void";
 
 export type CouponSummary = {
@@ -58,9 +60,9 @@ export function couponSpendable(coupon: CouponSummary, now = new Date()) {
 
 /** Why a coupon can't be used, in words a customer can be told. */
 export function couponBlockedReason(coupon: CouponSummary, now = new Date()) {
-  if (coupon.status === "void") return "This coupon has been cancelled.";
-  if (isCouponExpired(coupon, now)) return "This coupon has expired.";
-  if (coupon.status === "redeemed" || coupon.remainingValue <= 0) return "This coupon has already been used up.";
+  if (coupon.status === "void") return t("This coupon has been cancelled.");
+  if (isCouponExpired(coupon, now)) return t("This coupon has expired.");
+  if (coupon.status === "redeemed" || coupon.remainingValue <= 0) return t("This coupon has already been used up.");
   return "";
 }
 

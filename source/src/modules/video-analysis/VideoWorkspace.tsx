@@ -96,6 +96,7 @@ import {
 import { PlayerVideo } from "./models/Video";
 import { DrawingTool } from "./models/Drawing";
 import { TimelineMarker } from "./models/Timeline";
+import { t } from "../../lib/i18n";
 
 /**
  * Give a freshly opened camera a moment to produce its first frame.
@@ -121,7 +122,7 @@ const LEFT_ANALYSIS_SLOT = "comparison-left-slot";
 const RIGHT_ANALYSIS_SLOT = "comparison-right-slot";
 
 function getSideTitle(side: ComparisonSide) {
-  return side === "left" ? "Left" : "Right";
+  return side === "left" ? t("Left") : t("Right");
 }
 
 function getSideLabel(side: ComparisonSide) {
@@ -200,8 +201,17 @@ type CloudUploadFailureStage =
   | "Uploading"
   | "Verifying";
 
+const CLOUD_FAILURE_STAGE_LABELS: Record<CloudUploadFailureStage, string> = {
+  Configuration: t("Configuration"),
+  Connection: t("Connection"),
+  "Preparing storage": t("Preparing storage"),
+  "Starting upload": t("Starting upload"),
+  Uploading: t("Uploading"),
+  Verifying: t("Verifying"),
+};
+
 interface CloudUploadFailureFeedback {
-  title: "Cloud upload could not start";
+  title: string;
   reason: string;
   stage: CloudUploadFailureStage;
   safeErrorCode: string;
@@ -370,10 +380,10 @@ const buildCloudUploadFailureFeedback = (error: unknown): CloudUploadFailureFeed
   const reason =
     error instanceof Error && error.message.trim()
       ? error.message.trim()
-      : "Your local video is safe. The cloud transfer service could not be reached.";
+      : t("Your local video is safe. The cloud transfer service could not be reached.");
 
   return {
-    title: "Cloud upload could not start",
+    title: t("Cloud upload could not start"),
     reason,
     stage,
     safeErrorCode,
@@ -667,7 +677,7 @@ export function VideoWorkspace({
   const [workspaceHydrated, setWorkspaceHydrated] = useState(false);
   const [currentSavedVideoIds, setCurrentSavedVideoIds] = useState<Partial<Record<ComparisonSide, string>>>({});
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
-  const [saveMessage, setSaveMessage] = useState("Nothing to save yet.");
+  const [saveMessage, setSaveMessage] = useState(t("Nothing to save yet."));
   const [dragTargetSide, setDragTargetSide] = useState<ComparisonSide | null>(null);
   const [intakeError, setIntakeError] = useState("");
   const [liveRecording, setLiveRecording] = useState<LiveRecordingSession | null>(null);
@@ -916,7 +926,7 @@ export function VideoWorkspace({
   useEffect(() => {
     if (!canManualSave && saveStatus === "saved") {
       setSaveStatus("idle");
-      setSaveMessage("Nothing to save yet.");
+      setSaveMessage(t("Nothing to save yet."));
     }
   }, [canManualSave, saveStatus]);
 
@@ -1277,7 +1287,7 @@ export function VideoWorkspace({
       await loadClipFileForSide(side, file);
       setIntakeError("");
       setSaveStatus("idle");
-      setSaveMessage("Clip ready to save.");
+      setSaveMessage(t("Clip ready to save."));
     },
     [loadClipFileForSide]
   );
@@ -1294,7 +1304,7 @@ export function VideoWorkspace({
         ) ?? null;
 
       if (!file) {
-        setIntakeError("Drop a video file to upload.");
+        setIntakeError(t("Drop a video file to upload."));
         return;
       }
 
@@ -1302,11 +1312,11 @@ export function VideoWorkspace({
         await loadClipFileForSide(side, file);
         setIntakeError("");
         setSaveStatus("idle");
-        setSaveMessage("Clip ready to save.");
+        setSaveMessage(t("Clip ready to save."));
       } catch (error) {
-        setIntakeError("Upload failed. Try a different video file.");
+        setIntakeError(t("Upload failed. Try a different video file."));
         setSaveStatus("error");
-        setSaveMessage("Upload failed. Try a different video file.");
+        setSaveMessage(t("Upload failed. Try a different video file."));
         // eslint-disable-next-line no-console
         console.error("Dropped video upload failed", error);
       }
@@ -1329,7 +1339,7 @@ export function VideoWorkspace({
       if (!savedVideoStore) {
         throw new SavedVideoLibraryError(
           "SAVED_VIDEO_LOAD_FAILED",
-          "Saved video library is unavailable in this browser."
+          t("Saved video library is unavailable in this browser.")
         );
       }
 
@@ -1337,14 +1347,14 @@ export function VideoWorkspace({
       if (!item) {
         throw new SavedVideoLibraryError(
           "SAVED_VIDEO_METADATA_MISSING",
-          "Saved video metadata could not be found."
+          t("Saved video metadata could not be found.")
         );
       }
 
       let blob = await savedVideoStore.getBlob(targetSavedVideoId);
       if (!blob && (item.cloud?.status === "ready" || item.cloud?.status === "imported")) {
         setSaveStatus("downloading");
-        setSaveMessage("Downloading from Clarity Cloud...");
+        setSaveMessage(t("Downloading from Clarity Cloud..."));
         item = await importSavedVideoFromClarityCloud(targetSavedVideoId, savedVideoStore, {
           // The player variant runs on a player session, which cannot reach
           // the admin routes at all in the native app.
@@ -1355,7 +1365,7 @@ export function VideoWorkspace({
       }
       if (!blob) {
         setSaveStatus("error");
-        setSaveMessage("Device copy unavailable. Saved card was kept for recovery.");
+        setSaveMessage(t("Device copy unavailable. Saved card was kept for recovery."));
         return;
       }
 
@@ -1422,7 +1432,7 @@ export function VideoWorkspace({
         });
 
       setSaveStatus("idle");
-      setSaveMessage("Saved video loaded.");
+      setSaveMessage(t("Saved video loaded."));
     },
     [
       isPlayerVariant,
@@ -1446,7 +1456,7 @@ export function VideoWorkspace({
       setSaveMessage(
         error instanceof SavedVideoLibraryError
           ? error.message
-          : "Saved video could not be loaded."
+          : t("Saved video could not be loaded.")
       );
       // eslint-disable-next-line no-console
       console.error("Saved video load failed", error);
@@ -1486,7 +1496,7 @@ export function VideoWorkspace({
         setLiveRecording({
           side,
           status: "error",
-          error: "Live recording is not available in this browser.",
+          error: t("Live recording is not available in this browser."),
           startedAt: null,
         });
         return null;
@@ -1495,7 +1505,7 @@ export function VideoWorkspace({
         setLiveRecording({
           side,
           status: "error",
-          error: "Choose a recording camera in Video Settings.",
+          error: t("Choose a recording camera in Video Settings."),
           startedAt: null,
         });
         return null;
@@ -1519,8 +1529,8 @@ export function VideoWorkspace({
           side,
           status: "error",
           error: blocked
-            ? "Camera access was blocked for this site."
-            : `${describePreferredCamera(preferredCamera)} is not connected.`,
+            ? t("Camera access was blocked for this site.")
+            : t("{camera} is not connected.", { camera: describePreferredCamera(preferredCamera) }),
           startedAt: null,
         });
         return null;
@@ -1569,7 +1579,7 @@ export function VideoWorkspace({
         setLiveRecording({
           side: recordingSide,
           status: "error",
-          error: "Recording is not available in this browser.",
+          error: t("Recording is not available in this browser."),
           startedAt: null,
         });
         return;
@@ -1592,7 +1602,7 @@ export function VideoWorkspace({
               ? {
                   ...current,
                   status: "error",
-                  error: "Recording failed.",
+                  error: t("Recording failed."),
                   startedAt: null,
                 }
               : current
@@ -1612,7 +1622,7 @@ export function VideoWorkspace({
                   ? {
                       ...current,
                       status: "error",
-                      error: "Recording did not capture any video.",
+                      error: t("Recording did not capture any video."),
                       startedAt: null,
                     }
                   : current
@@ -1627,7 +1637,7 @@ export function VideoWorkspace({
             );
             await loadClipFileForSide(recordingSide, file);
             setSaveStatus("idle");
-            setSaveMessage("Recording ready to save.");
+            setSaveMessage(t("Recording ready to save."));
             // The loaded file now owns this side's normal VideoCanvas. Releasing
             // the stream and session lets playback replace the preview in place.
             stopLiveStream(stream);
@@ -1647,7 +1657,7 @@ export function VideoWorkspace({
         setLiveRecording({
           side: recordingSide,
           status: "error",
-          error: error instanceof Error ? error.message : "Could not start recording.",
+          error: error instanceof Error ? error.message : t("Could not start recording."),
           startedAt: null,
         });
       }
@@ -2448,7 +2458,7 @@ export function VideoWorkspace({
       if (!target) {
         return;
       }
-      const nextTitle = window.prompt("Rename snapshot", target.title);
+      const nextTitle = window.prompt(t("Rename snapshot"), target.title);
       if (!nextTitle || !nextTitle.trim()) {
         return;
       }
@@ -2476,7 +2486,9 @@ export function VideoWorkspace({
     if (!focusSnapshotStats.total) {
       return;
     }
-    const message = `Clear all ${focusSnapshotStats.total} screenshot notes? This cannot be undone.`;
+    const message = t("Clear all {count} screenshot notes? This cannot be undone.", {
+      count: focusSnapshotStats.total,
+    });
     if (!window.confirm(message)) {
       return;
     }
@@ -2517,7 +2529,7 @@ export function VideoWorkspace({
       const sourceOverlay = isLeft ? leftOverlayDimensions : rightOverlayDimensions;
 
       if (!sourceVideo || !sourceVideoElement) {
-        return { ok: false, error: "Source video is not available." };
+        return { ok: false, error: t("Source video is not available.") };
       }
 
       let imageDataUrl = "";
@@ -2567,7 +2579,7 @@ export function VideoWorkspace({
         sourceCanvas.height = sourceCrop.sourceCropRect.height;
         const context = sourceCanvas.getContext("2d");
         if (!context) {
-          throw new Error("Could not create a source canvas.");
+          throw new Error(t("Could not create a source canvas."));
         }
         context.drawImage(
           sourceVideoElement,
@@ -2618,7 +2630,7 @@ export function VideoWorkspace({
       }
 
       if (!isDataUrl(imageDataUrl)) {
-        return { ok: false, error: "Crop image data is not available." };
+        return { ok: false, error: t("Crop image data is not available.") };
       }
 
       const safeTime = Number.isFinite(activePlayback.currentTime)
@@ -2631,7 +2643,7 @@ export function VideoWorkspace({
         id: createId(`focus-${captureSide}`),
         playerId: resolvedPlayerId,
         analysisId: activeStore.analysis.id,
-        title: "Focus snapshot",
+        title: t("Focus snapshot"),
         note: "",
         captureKind: "area",
         side: captureSide,
@@ -2696,7 +2708,7 @@ export function VideoWorkspace({
       id: createId(`frame-${side}`),
       playerId: resolvedPlayerId,
       analysisId: store.analysis.id,
-      title: "Frame capture",
+      title: t("Frame capture"),
       note: "",
       captureKind: "frame",
       side,
@@ -2912,19 +2924,19 @@ export function VideoWorkspace({
   ) => {
     if (!canManualSave) {
       setSaveStatus("error");
-      setSaveMessage("Add or record a clip before saving.");
+      setSaveMessage(t("Add or record a clip before saving."));
       return null;
     }
 
     if (!saveableSides.length) {
       setSaveStatus("error");
-      setSaveMessage("Save needs an uploaded or recorded video.");
+      setSaveMessage(t("Save needs an uploaded or recorded video."));
       return null;
     }
 
     if (!savedVideoStore || !persistenceLayer.videoStore) {
       setSaveStatus("error");
-      setSaveMessage("Device video storage is unavailable in this browser.");
+      setSaveMessage(t("Device video storage is unavailable in this browser."));
       return null;
     }
 
@@ -2935,19 +2947,19 @@ export function VideoWorkspace({
     if (!owner) {
       if (!onChoosePlayerForSave) {
         setSaveStatus("error");
-        setSaveMessage("Open this video from a player profile to save it.");
+        setSaveMessage(t("Open this video from a player profile to save it."));
         return null;
       }
       owner = await onChoosePlayerForSave();
       if (!owner) {
         setSaveStatus("idle");
-        setSaveMessage("Save cancelled. Pick a player to save this video.");
+        setSaveMessage(t("Save cancelled. Pick a player to save this video."));
         return null;
       }
     }
 
     setSaveStatus("saving");
-    setSaveMessage(options.archiveToMyLibrary ? "Saving permanently to My Library..." : "Saving...");
+    setSaveMessage(options.archiveToMyLibrary ? t("Saving permanently to My Library...") : t("Saving..."));
     setCloudUploadFailure(null);
 
     try {
@@ -2957,7 +2969,7 @@ export function VideoWorkspace({
       ]);
 
       if (!leftSaved || !rightSaved) {
-        throw new Error("One side could not be saved.");
+        throw new Error(t("One side could not be saved."));
       }
 
       let nextSavedVideoIds = { ...currentSavedVideoIds };
@@ -2974,7 +2986,7 @@ export function VideoWorkspace({
         if (!transient?.blob) {
           throw new SavedVideoLibraryError(
             "TRANSIENT_VIDEO_NOT_FOUND",
-            `${getSideTitle(side)} video source is missing from recovery storage.`
+            t("{side} video source is missing from recovery storage.", { side: getSideTitle(side) })
           );
         }
 
@@ -3001,7 +3013,7 @@ export function VideoWorkspace({
       if (!savedItems.length) {
         throw new SavedVideoLibraryError(
           "SAVED_VIDEO_WRITE_FAILED",
-          "No active video was available to save."
+          t("No active video was available to save.")
         );
       }
 
@@ -3016,13 +3028,13 @@ export function VideoWorkspace({
       setSaveMessage(
         options.archiveToMyLibrary && managedCount === savedItems.length
           ? savedItems.length === 1
-            ? "Saved permanently to My Library."
-            : `Saved ${savedItems.length} videos permanently to My Library.`
+            ? t("Saved permanently to My Library.")
+            : t("Saved {length} videos permanently to My Library.", { length: savedItems.length })
           : options.archiveToMyLibrary
-            ? "Saved safely on this device. Reconnect My Library when available."
+            ? t("Saved safely on this device. Reconnect My Library when available.")
           : savedItems.length === 1
-            ? "Saved safely on this device. Preparing Clarity Cloud."
-            : `Saved ${savedItems.length} videos safely on this device. Preparing Clarity Cloud.`
+            ? t("Saved safely on this device. Preparing Clarity Cloud.")
+            : t("Saved {length} videos safely on this device. Preparing Clarity Cloud.", { length: savedItems.length })
       );
       setSaveStatus("saved");
       const navigation = buildNavigationContext(reason);
@@ -3040,7 +3052,7 @@ export function VideoWorkspace({
       const message =
         error instanceof SavedVideoLibraryError
           ? error.message
-          : "Device save failed. Workspace was kept intact.";
+          : t("Device save failed. Workspace was kept intact.");
       setSaveMessage(message);
       // eslint-disable-next-line no-console
       console.error("Manual video analysis save failed", error);
@@ -3091,15 +3103,15 @@ export function VideoWorkspace({
     await completeSuccessfulSave(
       result,
       isPlayerVariant
-        ? "Saved to this device. Find it under Your videos."
-        : "Saved safely. Returning to Player Profile."
+        ? t("Saved to this device. Find it under Your videos.")
+        : t("Saved safely. Returning to Player Profile.")
     );
   }, [completeSuccessfulSave, isPlayerVariant, performDurableSave]);
 
   const handleMyLibrarySave = useCallback(async () => {
     const result = await performDurableSave("my-library-save", { archiveToMyLibrary: true });
     if (!result) return;
-    await completeSuccessfulSave(result, "Saved permanently to My Library.");
+    await completeSuccessfulSave(result, t("Saved permanently to My Library."));
   }, [completeSuccessfulSave, performDurableSave]);
 
   const handleSaveAndSend = useCallback(async () => {
@@ -3108,9 +3120,9 @@ export function VideoWorkspace({
 
     if (!onSaveAndSend) {
       setSaveStatus("error");
-      setSaveMessage("Transfer service unavailable.");
+      setSaveMessage(t("Transfer service unavailable."));
       setCloudUploadFailure(buildCloudUploadFailureFeedback(
-        Object.assign(new Error("Transfer service unavailable."), {
+        Object.assign(new Error(t("Transfer service unavailable.")), {
           code: "CLARITY_CLOUD_PROVIDER_FAILED",
         })
       ));
@@ -3119,7 +3131,7 @@ export function VideoWorkspace({
 
     setSaveStatus("sending");
     setSaveMessage(
-      isPlayerVariant ? "Sending to your coach..." : "Preparing Clarity Cloud transfer..."
+      isPlayerVariant ? t("Sending to your coach...") : t("Preparing Clarity Cloud transfer...")
     );
     setCloudUploadFailure(null);
     try {
@@ -3127,14 +3139,16 @@ export function VideoWorkspace({
       setCloudUploadFailure(null);
       await completeSuccessfulSave(
         result,
-        isPlayerVariant ? "Sending to your coach. Track it under Your videos." : "Uploading 0% in Player Profile."
+        isPlayerVariant
+          ? t("Sending to your coach. Track it under Your videos.")
+          : t("Uploading 0% in Player Profile.")
       );
     } catch (error) {
       setSaveStatus("error");
       const cloudFailure = buildCloudUploadFailureFeedback(error);
       const safeMessage =
         cloudFailure.stage === "Uploading"
-          ? "Cloud upload paused. Your local video is safe."
+          ? t("Cloud upload paused. Your local video is safe.")
           : cloudFailure.title;
       setCloudUploadFailure(cloudFailure);
       setSaveMessage(safeMessage);
@@ -3162,7 +3176,7 @@ export function VideoWorkspace({
   const saveScreenRecording = useCallback(
     async (recording: AnalysisRecording) => {
       if (!savedVideoStore) {
-        throw new Error("Device video storage is unavailable in this browser.");
+        throw new Error(t("Device video storage is unavailable in this browser."));
       }
       const side = effectiveActiveSide;
       const analysisStore = side === "left" ? leftStore : rightStore;
@@ -3192,7 +3206,7 @@ export function VideoWorkspace({
       });
       onSavedVideoLibraryChange?.();
       setScreenRecordingStatus("idle");
-      setScreenRecordingMessage(`Saved "${item.title || title}" as a new video.`);
+      setScreenRecordingMessage(t("Saved \"{value}\" as a new video.", { value: item.title || title }));
     },
     [
       buildWorkspaceState,
@@ -3216,11 +3230,11 @@ export function VideoWorkspace({
       await recorder.start();
       analysisRecorderRef.current = recorder;
       setScreenRecordingStatus("recording");
-      setScreenRecordingMessage("Recording this view with your commentary.");
+      setScreenRecordingMessage(t("Recording this view with your commentary."));
     } catch (error) {
       setScreenRecordingStatus("error");
       setScreenRecordingMessage(
-        error instanceof Error ? error.message : "Could not start recording."
+        error instanceof Error ? error.message : t("Could not start recording.")
       );
     }
   }, []);
@@ -3229,7 +3243,7 @@ export function VideoWorkspace({
     const recorder = analysisRecorderRef.current;
     if (!recorder) return;
     setScreenRecordingStatus("saving");
-    setScreenRecordingMessage("Saving recording...");
+    setScreenRecordingMessage(t("Saving recording..."));
     try {
       const recording = await recorder.stop();
       analysisRecorderRef.current = null;
@@ -3238,7 +3252,7 @@ export function VideoWorkspace({
       analysisRecorderRef.current = null;
       setScreenRecordingStatus("error");
       setScreenRecordingMessage(
-        error instanceof Error ? error.message : "Could not save the recording."
+        error instanceof Error ? error.message : t("Could not save the recording.")
       );
     }
   }, [saveScreenRecording]);
@@ -3302,15 +3316,15 @@ export function VideoWorkspace({
         className={`snapshot-composer ${anchor ? "is-beside" : "is-corner"}`}
         style={anchor ? toComposerAnchorStyle(anchor) : undefined}
         role="group"
-        aria-label="New screenshot note"
+        aria-label={t("New screenshot note")}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <button
           type="button"
           className="snapshot-composer-dismiss"
           onClick={discardSnapshotDraft}
-          aria-label="Discard this capture"
-          title="Discard this capture"
+          aria-label={t("Discard this capture")}
+          title={t("Discard this capture")}
         >
           ×
         </button>
@@ -3318,7 +3332,7 @@ export function VideoWorkspace({
           ref={composerThumbRef}
           className="snapshot-composer-thumb"
           src={snapshot.imageDataUrl}
-          alt={`Capture at ${toFixedTime(snapshot.currentTime)}`}
+          alt={t("Capture at {currentTime}", { currentTime: toFixedTime(snapshot.currentTime) })}
           style={{ width: thumbWidth, height: thumbHeight }}
         />
         <div className="snapshot-composer-meta">
@@ -3330,8 +3344,8 @@ export function VideoWorkspace({
           className="snapshot-composer-note"
           value={note}
           rows={3}
-          placeholder="What are you looking at here?"
-          aria-label="Note for this capture"
+          placeholder={t("What are you looking at here?")}
+          aria-label={t("Note for this capture")}
           onChange={(event) => {
             const nextNote = event.target.value;
             setSnapshotDraft((current) => (current ? { ...current, note: nextNote } : current));
@@ -3352,9 +3366,7 @@ export function VideoWorkspace({
             }
           }}
         />
-        <button type="button" className="snapshot-composer-save" onClick={commitSnapshotDraft}>
-          Save
-        </button>
+        <button type="button" className="snapshot-composer-save" onClick={commitSnapshotDraft}>{t("Save")}</button>
       </div>
     );
   };
@@ -3446,15 +3458,15 @@ export function VideoWorkspace({
           setDragTargetSide((current) => (current === side ? null : current));
         }}
         onDrop={(event) => void handleDropUpload(side, event)}
-        aria-label={`Upload ${sideTitle.toLowerCase()} clip`}
+        aria-label={t("Upload {sideTitle} clip", { sideTitle: sideTitle.toLowerCase() })}
       >
         <span className="video-upload-icon" aria-hidden="true">
           <IconUpload />
         </span>
         <span className="video-upload-title">
-          {primary ? "Upload a video" : `Upload ${sideTitle.toLowerCase()} clip`}
+          {primary ? t("Upload a video") : t("Upload {sideTitle} clip", { sideTitle: sideTitle.toLowerCase() })}
         </span>
-        <span className="video-upload-copy">Drag and drop or click to choose a file</span>
+        <span className="video-upload-copy">{t("Drag and drop or click to choose a file")}</span>
         {intakeError ? (
           <span className="video-upload-error" role="alert">
             {intakeError}
@@ -3497,12 +3509,12 @@ export function VideoWorkspace({
       const isWarning =
         !isConnecting && !isPending && (cameraMissing || Boolean(attemptError));
       const message = needsSetup
-        ? "Choose a recording camera in Video Settings"
+        ? t("Choose a recording camera in Video Settings")
         : isConnecting
-          ? "Connecting…"
+          ? t("Connecting…")
           : isPending
-            ? "Processing…"
-            : attemptError || (cameraMissing ? "Camera not connected" : "Ready to record");
+            ? t("Processing…")
+            : attemptError || (cameraMissing ? t("Camera not connected") : t("Ready to record"));
 
       return (
         <div
@@ -3549,9 +3561,7 @@ export function VideoWorkspace({
               }}
               disabled={!canConnect}
             >
-              <IconCamera />
-              Connect
-            </button>
+              <IconCamera />{t("Connect")}</button>
             <button
               type="button"
               className="upload-button video-record-button"
@@ -3561,9 +3571,7 @@ export function VideoWorkspace({
               }}
               disabled={!canRecord}
             >
-              <IconRecord />
-              Record
-            </button>
+              <IconRecord />{t("Record")}</button>
             {/* Importing a clip is a different job from recording one, and it
                 still has to work: the stage takes a drop, this takes a click. */}
             <button
@@ -3574,9 +3582,7 @@ export function VideoWorkspace({
                 openUpload(side);
               }}
             >
-              <IconUpload />
-              Upload a video
-            </button>
+              <IconUpload />{t("Upload a video")}</button>
             {/* The only route into Video Settings while the workspace is
                 empty -- the action bar's gear arrives with a clip. It is one
                 link, not a wizard: changing camera is a deliberate trip to
@@ -3589,9 +3595,7 @@ export function VideoWorkspace({
                 setSettingsOpen(true);
               }}
             >
-              <IconSettings />
-              Video Settings
-            </button>
+              <IconSettings />{t("Video Settings")}</button>
             {status ? (
               <button
                 type="button"
@@ -3600,9 +3604,7 @@ export function VideoWorkspace({
                   event.stopPropagation();
                   closeLiveRecording();
                 }}
-              >
-                Cancel
-              </button>
+              >{t("Cancel")}</button>
             ) : null}
           </div>
         </div>
@@ -3648,9 +3650,7 @@ export function VideoWorkspace({
                   type="button"
                   className="upload-button video-record-stop"
                   onClick={stopLiveRecording}
-                >
-                  Stop
-                </button>
+                >{t("Stop")}</button>
               ) : (
                 <button
                   type="button"
@@ -3658,24 +3658,20 @@ export function VideoWorkspace({
                   onClick={() => void startLiveRecording(side)}
                   disabled={liveRecording.status === "processing"}
                 >
-                  <IconRecord />
-                  Record
-                </button>
+                  <IconRecord />{t("Record")}</button>
               )}
               <span className={`live-recording-status is-${liveRecording.status}`}>
                 {liveRecording.status === "recording"
-                  ? "Recording"
+                  ? t("Recording")
                   : liveRecording.status === "processing"
-                    ? "Processing"
-                    : liveRecording.error || "Ready to record"}
+                    ? t("Processing")
+                    : liveRecording.error || t("Ready to record")}
               </span>
               {/* The preview shows the stream as it really is, so when the
                   camera hands back the other orientation the coach is told
                   rather than shown a portrait crop the file will not have. */}
               {orientationMismatch && liveRecording.status !== "processing" ? (
-                <span className="live-recording-status is-error">
-                  This camera is only offering{" "}
-                  {recordingOrientation === "portrait" ? "landscape" : "portrait"}.
+                <span className="live-recording-status is-error">{t("This camera is only offering")}{" "}{recordingOrientation === "portrait" ? "landscape" : "portrait"}.
                 </span>
               ) : null}
               <button
@@ -3683,10 +3679,8 @@ export function VideoWorkspace({
                 className="video-tool-btn is-subtle"
                 onClick={closeLiveRecording}
                 disabled={isBusy}
-                aria-label="Close live recording"
-              >
-                Close
-              </button>
+                aria-label={t("Close live recording")}
+              >{t("Close")}</button>
             </div>
           </div>
         </div>
@@ -3824,7 +3818,7 @@ export function VideoWorkspace({
             }
             onCapture={isPlayerVariant ? undefined : captureSnapshot}
             captureTooltip={
-              captureBox ? "Screenshot the box (Space)" : "Screenshot the frame (Space)"
+              captureBox ? t("Screenshot the box (Space)") : t("Screenshot the frame (Space)")
             }
           />
           {showAnalysisRail ? (
@@ -3899,13 +3893,13 @@ export function VideoWorkspace({
     setMotionLabError(null);
     try {
       const response = await fetch(clip.sourceUrl);
-      if (!response.ok) throw new Error(`The clip could not be read (${response.status}).`);
+      if (!response.ok) throw new Error(t("The clip could not be read ({status}).", { status: response.status }));
       const blob = await response.blob();
-      setMotionLabSwing({ blob, name: clip.title || `${getSideTitle(side)} clip` });
+      setMotionLabSwing({ blob, name: clip.title || t("{side} clip", { side: getSideTitle(side) }) });
       setMotionLabOpen(true);
     } catch (error) {
       setMotionLabError(
-        error instanceof Error ? error.message : "The clip could not be read."
+        error instanceof Error ? error.message : t("The clip could not be read.")
       );
     }
   }, [effectiveActiveSide, playerVideoLeft, playerVideoRight]);
@@ -3931,8 +3925,8 @@ export function VideoWorkspace({
         <div className="video-analysis-header is-compact">
           <ToolButton
             icon={<IconBack />}
-            label="Back"
-            tooltip="Back"
+            label={t("Back")}
+            tooltip={t("Back")}
             className="is-subtle video-header-back"
             disabled={!canGoBack}
             onClick={handleBackAction}
@@ -3943,18 +3937,20 @@ export function VideoWorkspace({
         <div className="video-analysis-header">
           <ToolButton
             icon={<IconBack />}
-            label="Back"
-            tooltip="Back"
+            label={t("Back")}
+            tooltip={t("Back")}
             className="is-subtle video-header-back"
             disabled={!canGoBack}
             onClick={handleBackAction}
           />
           <div className="video-analysis-header-titles">
-            <h1>{playerName ? `${playerName} Video Analysis` : "Clarity Golf Video Analysis"}</h1>
+            <h1>{playerName ? t("{playerName} Video Analysis", { playerName }) : t("Clarity Golf Video Analysis")}</h1>
             <p className="subtitle">
               {resolvedPlayerName
-                ? `${resolvedPlayerName} • ${lessonTitle || "Unlinked"} lesson context`
-                : "Premium, protected, and reusable workspace foundation."}
+                ? lessonTitle
+                  ? t("{player} • {lesson} lesson context", { player: resolvedPlayerName, lesson: lessonTitle })
+                  : t("{player} • Unlinked lesson context", { player: resolvedPlayerName })
+                : t("Premium, protected, and reusable workspace foundation.")}
             </p>
           </div>
         </div>
@@ -3976,14 +3972,12 @@ export function VideoWorkspace({
       />
 
       {motionLabError ? (
-        <div className="focus-artifacts-warning" role="alert">
-          3D motion could not open: {motionLabError}
-        </div>
+        <div className="focus-artifacts-warning" role="alert">{t("3D motion could not open: {motionLabError}", { motionLabError })}</div>
       ) : null}
 
       {motionLabOpen ? (
-        <div className="va-motion-lab" role="dialog" aria-label="3D motion">
-          <Suspense fallback={<div className="va-motion-lab-loading">Loading 3D motion…</div>}>
+        <div className="va-motion-lab" role="dialog" aria-label={t("3D motion")}>
+          <Suspense fallback={<div className="va-motion-lab-loading">{t("Loading 3D motion…")}</div>}>
             <MotionLabView
               swing={motionLabSwing}
               title={playerName || undefined}
@@ -3997,7 +3991,9 @@ export function VideoWorkspace({
       {cloudUploadFailure ? (
         <section className="cloud-upload-failure-row" role="alert" aria-live="assertive">
           <div className="cloud-upload-failure-copy">
-            <span className="cloud-upload-failure-stage">{cloudUploadFailure.stage}</span>
+            <span className="cloud-upload-failure-stage">
+              {CLOUD_FAILURE_STAGE_LABELS[cloudUploadFailure.stage]}
+            </span>
             <strong>{cloudUploadFailure.title}</strong>
             <span>{cloudUploadFailure.reason}</span>
           </div>
@@ -4007,38 +4003,34 @@ export function VideoWorkspace({
               className="upload-button"
               onClick={() => void handleSaveAndSend()}
               disabled={saveBusy}
-            >
-              Retry
-            </button>
+            >{t("Retry")}</button>
             {cloudUploadFailure.actionRequired && onOpenCloudSettings ? (
               <button
                 type="button"
                 className="upload-button"
                 onClick={onOpenCloudSettings}
-              >
-                Cloud settings
-              </button>
+              >{t("Cloud settings")}</button>
             ) : null}
             <details className="cloud-upload-failure-diagnostics">
-              <summary>Advanced diagnostic</summary>
+              <summary>{t("Advanced diagnostic")}</summary>
               <dl>
                 <div>
-                  <dt>Safe error code</dt>
+                  <dt>{t("Safe error code")}</dt>
                   <dd>{cloudUploadFailure.safeErrorCode}</dd>
                 </div>
                 <div>
-                  <dt>Failed stage</dt>
-                  <dd>{cloudUploadFailure.stage}</dd>
+                  <dt>{t("Failed stage")}</dt>
+                  <dd>{CLOUD_FAILURE_STAGE_LABELS[cloudUploadFailure.stage]}</dd>
                 </div>
                 {typeof cloudUploadFailure.retryable === "boolean" ? (
                   <div>
-                    <dt>Retryable</dt>
+                    <dt>{t("Retryable")}</dt>
                     <dd>{cloudUploadFailure.retryable ? "true" : "false"}</dd>
                   </div>
                 ) : null}
                 {cloudUploadFailure.httpStatus ? (
                   <div>
-                    <dt>HTTP status</dt>
+                    <dt>{t("HTTP status")}</dt>
                     <dd>{cloudUploadFailure.httpStatus}</dd>
                   </div>
                 ) : null}
@@ -4059,7 +4051,7 @@ export function VideoWorkspace({
           and Upload are inside the card -- there is no second row of buttons
           under it, because the card grew the ones it needs. */}
       {!workspaceHasVideo && !liveRecording ? (
-        <section className="video-intake-panel" aria-label="Add video">
+        <section className="video-intake-panel" aria-label={t("Add video")}>
           {renderVideoCard(
             "left",
             leftOverlayDimensions,
@@ -4070,9 +4062,7 @@ export function VideoWorkspace({
 
       {workspaceHasVideo && (leftStore.persistenceError || rightStore.persistenceError) ? (
         <div className="focus-artifacts-warning" role="alert">
-          {leftStore.persistenceError || rightStore.persistenceError} Download and
-          clear older Focus snapshots to free space.
-        </div>
+          {leftStore.persistenceError || rightStore.persistenceError}{" "}{t("Download and clear older Focus snapshots to free space.")}</div>
       ) : null}
 
       {workspaceHasVideo && needsCompareRotation ? (
@@ -4086,11 +4076,9 @@ export function VideoWorkspace({
               <path d="M20.6 11.8l-.2-3.4-3.2 1.2" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </span>
-          <h2>Rotate your phone</h2>
-          <p>Split View puts two swings side by side. Turn your phone sideways to compare them.</p>
-          <button type="button" className="upload-button" onClick={() => updateMode("single")}>
-            Back to one video
-          </button>
+          <h2>{t("Rotate your phone")}</h2>
+          <p>{t("Split View puts two swings side by side. Turn your phone sideways to compare them.")}</p>
+          <button type="button" className="upload-button" onClick={() => updateMode("single")}>{t("Back to one video")}</button>
         </section>
       ) : null}
 
@@ -4188,11 +4176,11 @@ export function VideoWorkspace({
       ) : null}
 
       {workspaceHasVideo && onSaveNote ? (
-        <section className="video-note-panel" aria-label="Lesson note">
-          <h2>Lesson note</h2>
+        <section className="video-note-panel" aria-label={t("Lesson note")}>
+          <h2>{t("Lesson note")}</h2>
           <ClarityVoiceTextPanel
-            fieldLabel="Lesson note"
-            placeholder="Type or dictate a note about this swing."
+            fieldLabel={t("Lesson note")}
+            placeholder={t("Type or dictate a note about this swing.")}
             onCommit={handleWorkspaceNoteCommit}
           />
         </section>
@@ -4211,7 +4199,7 @@ export function VideoWorkspace({
           onScreenshot={(previewDataUrl) =>
             focusAreaRect
               ? captureAreaSnapshot(focusWindowSide, focusAreaRect, previewDataUrl)
-              : { ok: false, error: "No valid focus crop selected." }
+              : { ok: false, error: t("No valid focus crop selected.") }
           }
           sourceVideo={focusWindowSide === "left" ? leftVideoRef.current : rightVideoRef.current}
           sourceDimensions={
@@ -4245,26 +4233,18 @@ export function VideoWorkspace({
       {workspaceHasVideo && !isPlayerVariant ? (
         <div className="focus-artifacts">
           <div className="focus-artifacts-title">
-            <span className="focus-artifacts-title-text">
-              Screenshot notes
-              <span>{focusSnapshotStats.total}</span>
+            <span className="focus-artifacts-title-text">{t("Screenshot notes")}<span>{focusSnapshotStats.total}</span>
             </span>
             {focusSnapshotStats.total ? (
               <button
                 type="button"
                 className="focus-artifacts-clear"
                 onClick={clearAllFocusSnapshots}
-              >
-                Clear all
-              </button>
+              >{t("Clear all")}</button>
             ) : null}
           </div>
           {focusSnapshotStats.shouldWarn ? (
-            <div className="focus-artifacts-warning">
-              You have {focusSnapshotStats.total} snapshots (~
-              {focusSnapshotStats.estimatedMB.toFixed(1)} MB of local snapshot data). Consider downloading and
-              clearing older shots.
-            </div>
+            <div className="focus-artifacts-warning">{t("You have {total} snapshots (~{estimatedMB} MB of local snapshot data). Consider downloading and clearing older shots.", { total: focusSnapshotStats.total, estimatedMB: focusSnapshotStats.estimatedMB.toFixed(1) })}</div>
           ) : null}
           <div className="focus-artifacts-strip">
           {allFocusSnapshots.length ? (
@@ -4303,12 +4283,12 @@ export function VideoWorkspace({
                     width: SNAPSHOT_PREVIEW_WIDTH,
                     height: SNAPSHOT_PREVIEW_HEIGHT,
                   }}
-                  aria-label={`Toggle preview for ${snapshot.title}`}
+                  aria-label={t("Toggle preview for {title}", { title: snapshot.title })}
                 >
                   <img
                     src={snapshot.imageDataUrl}
                     className="focus-artifact-thumb"
-                    alt={`Focus snapshot ${snapshot.side.toUpperCase()}`}
+                    alt={t("Focus snapshot {side}", { side: snapshot.side.toUpperCase() })}
                   />
                 </button>
                 <div className="focus-artifact-body">
@@ -4322,10 +4302,10 @@ export function VideoWorkspace({
                       textareas looks like a form nobody has finished. */}
                   {focusArtifactEditingId === snapshot.id ? (
                     <label className="focus-artifact-note">
-                      <span>Notes</span>
+                      <span>{t("Notes")}</span>
                       <textarea
                         value={snapshot.note || ""}
-                        placeholder="Add a note about this position…"
+                        placeholder={t("Add a note about this position…")}
                         rows={2}
                         autoFocus
                         onChange={(event) =>
@@ -4345,7 +4325,7 @@ export function VideoWorkspace({
                         snapshot.note ? "" : "is-empty"
                       }`}
                     >
-                      {snapshot.note || "No note"}
+                      {snapshot.note || t("No note")}
                     </p>
                   )}
                 </div>
@@ -4356,9 +4336,7 @@ export function VideoWorkspace({
                         type="button"
                         className="focus-artifact-action"
                         onClick={() => setFocusArtifactEditingId(null)}
-                      >
-                        Done
-                      </button>
+                      >{t("Done")}</button>
                       <a
                         className="focus-artifact-action"
                         href={snapshot.imageDataUrl}
@@ -4367,35 +4345,29 @@ export function VideoWorkspace({
                           event.preventDefault();
                           downloadFocusSnapshot(snapshot);
                         }}
-                      >
-                        Download
-                      </a>
+                      >{t("Download")}</a>
                       <button
                         type="button"
                         className="focus-artifact-action"
                         onClick={() => renameFocusSnapshot(snapshot.side, snapshot.id)}
-                        aria-label={`Rename focus snapshot ${snapshot.title}`}
-                        title="Rename snapshot"
-                      >
-                        Rename
-                      </button>
+                        aria-label={t("Rename focus snapshot {title}", { title: snapshot.title })}
+                        title={t("Rename snapshot")}
+                      >{t("Rename")}</button>
                       <button
                         type="button"
                         className="focus-artifact-action focus-artifact-action--danger"
                         onClick={() => removeFocusSnapshot(snapshot.side, snapshot.id)}
-                        aria-label={`Delete focus snapshot ${snapshot.title}`}
-                        title="Delete snapshot"
-                      >
-                        Delete
-                      </button>
+                        aria-label={t("Delete focus snapshot {title}", { title: snapshot.title })}
+                        title={t("Delete snapshot")}
+                      >{t("Delete")}</button>
                     </>
                   ) : (
                     <button
                       type="button"
                       className="focus-artifact-edit"
                       onClick={() => setFocusArtifactEditingId(snapshot.id)}
-                      aria-label={`Edit note for ${snapshot.title}`}
-                      title="Edit note"
+                      aria-label={t("Edit note for {title}", { title: snapshot.title })}
+                      title={t("Edit note")}
                     >
                       <IconEdit className="focus-artifact-edit-icon" />
                     </button>
@@ -4404,7 +4376,7 @@ export function VideoWorkspace({
               </article>
             ))
           ) : (
-            <div className="focus-artifacts-empty">Use the rail camera buttons or press Enter to capture.</div>
+            <div className="focus-artifacts-empty">{t("Use the rail camera buttons or press Enter to capture.")}</div>
           )}
         </div>
       </div>

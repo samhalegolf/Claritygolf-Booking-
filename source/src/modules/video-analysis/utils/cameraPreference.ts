@@ -13,6 +13,8 @@
  * wrong thing, and they would not find out until they played it back.
  */
 
+import { t } from "../../../lib/i18n";
+
 /** The shape we persist. `MediaDeviceInfo` satisfies it structurally. */
 export interface CameraDevice {
   deviceId: string;
@@ -154,7 +156,7 @@ export const isPreferredCamera = (
 /** What to call the saved camera in the UI when it is not currently present. */
 export const describePreferredCamera = (preferred: PreferredCamera | null): string => {
   if (!preferred) return "";
-  return preferred.label || "Saved camera";
+  return preferred.label || t("Saved camera");
 };
 
 

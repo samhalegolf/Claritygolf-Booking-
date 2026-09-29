@@ -32,6 +32,7 @@ import {
   writePracticeDraft,
   type PracticeDraft,
 } from "./practiceStore";
+import { t } from "../../lib/i18n";
 
 /* The coach's end of Practice. Owns its own loading, its own writes. The
  * console only tells it which player is open.
@@ -56,10 +57,10 @@ export type PracticeBlockPanelProps = {
 };
 
 const STATUS_LABEL: Record<PracticeBlock["status"], string> = {
-  active: "Active",
-  completed: "Completed",
-  expired: "Expired",
-  archived: "Archived",
+  active: t("Active"),
+  completed: t("Completed"),
+  expired: t("Expired"),
+  archived: t("Archived"),
 };
 
 export function PracticeBlockPanel({ player, onUnauthorized, onToast }: PracticeBlockPanelProps) {
@@ -118,7 +119,7 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
       const response = await apiFetch(path, init);
       if (response.status === 401) {
         handlers.current.onUnauthorized();
-        throw new Error("Admin login required");
+        throw new Error(t("Admin login required"));
       }
       const data = (await response.json().catch(() => ({}))) as {
         message?: string;
@@ -129,7 +130,7 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
         suggestions?: PracticeSuggestion[];
         warning?: string;
       };
-      if (!response.ok) throw new Error(data?.message || "Practice request failed.");
+      if (!response.ok) throw new Error(data?.message || t("Practice request failed."));
       return data;
     },
     [],
@@ -158,7 +159,7 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
     } catch (caught) {
       if (token !== readToken.current) return;
       if ((caught as { code?: string })?.code === "unauthorized") handlers.current.onUnauthorized();
-      else setError(caught instanceof Error ? caught.message : "Could not load practice.");
+      else setError(caught instanceof Error ? caught.message : t("Could not load practice."));
     } finally {
       setFirstLoad(false);
     }
@@ -218,7 +219,7 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
       const content = practiceDraftContent(candidate);
       const title = candidate.title.trim() || practiceTypeMeta(types, candidate.blockType).titleHint;
       if (!content) {
-        setError("Write at least one step before saving.");
+        setError(t("Write at least one step before saving."));
         return null;
       }
       if (
@@ -226,7 +227,7 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
         !candidate.expiryDate &&
         practiceTypeHasField(practiceTypeMeta(types, candidate.blockType), "expiry")
       ) {
-        setError("Pick a date for this block's expiry.");
+        setError(t("Pick a date for this block's expiry."));
         return null;
       }
       setBusy(true);
@@ -271,20 +272,20 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
               body: JSON.stringify({ title, content, blockType: candidate.blockType, dose: candidate.dose.trim() }),
             });
           } catch {
-            handlers.current.onToast(`Assigned, but "${title}" could not be saved to favourites.`);
+            handlers.current.onToast(t("Assigned, but \"{title}\" could not be saved to favourites.", { title }));
           }
         }
 
         if (data.warning === "no_upcoming_booking") {
-          setWarning(`${playerName} has no upcoming lesson. Saved with no expiry instead.`);
+          setWarning(t("{playerName} has no upcoming lesson. Saved with no expiry instead.", { playerName }));
         }
         setDraft(emptyPracticeDraft(candidate.blockType));
         setVideoPickerOpen(false);
         await reload();
-        handlers.current.onToast(candidate.id ? "Practice block updated." : `Practice block assigned to ${playerName}.`);
+        handlers.current.onToast(candidate.id ? t("Practice block updated.") : t("Practice block assigned to {playerName}.", { playerName }));
         return candidate.id ? null : data.block?.id || null;
       } catch (caught) {
-        setError(caught instanceof Error ? caught.message : "Could not save that block.");
+        setError(caught instanceof Error ? caught.message : t("Could not save that block."));
         return null;
       } finally {
         setBusy(false);
@@ -296,7 +297,7 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
   const archive = useCallback(
     async (blockId: string) => {
       const block = blocks.find((item) => item.id === blockId);
-      if (block && !window.confirm(`Remove "${block.title}" from ${playerName}'s wall?`)) return;
+      if (block && !window.confirm(t("Remove \"{title}\" from {playerName}'s wall?", { title: block.title, playerName }))) return;
       setBusy(true);
       setError("");
       try {
@@ -304,7 +305,7 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
         setOpenBrickId((current) => (current === blockId ? null : current));
         await reload();
       } catch (caught) {
-        setError(caught instanceof Error ? caught.message : "Could not remove that block.");
+        setError(caught instanceof Error ? caught.message : t("Could not remove that block."));
       } finally {
         setBusy(false);
       }
@@ -325,9 +326,9 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
           body: JSON.stringify(favourite),
         });
         await reload();
-        handlers.current.onToast(replacing ? `Favourite "${favourite.title}" updated.` : `Saved "${favourite.title}" to favourites.`);
+        handlers.current.onToast(replacing ? t("Favourite \"{title}\" updated.", { title: favourite.title }) : t("Saved \"{title}\" to favourites.", { title: favourite.title }));
       } catch (caught) {
-        setError(caught instanceof Error ? caught.message : "Could not save that favourite.");
+        setError(caught instanceof Error ? caught.message : t("Could not save that favourite."));
       } finally {
         setBusy(false);
       }
@@ -347,7 +348,7 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
           body: JSON.stringify({ id: preset.id, title }),
         });
       } catch (caught) {
-        setError(caught instanceof Error ? caught.message : "Could not rename that favourite.");
+        setError(caught instanceof Error ? caught.message : t("Could not rename that favourite."));
       }
       await reload();
     },
@@ -357,7 +358,7 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
   const removePreset = useCallback(
     async (preset: PracticePreset) => {
       if (busy) return;
-      if (!window.confirm(`Remove "${preset.title}" from favourites? Blocks already assigned from it stay as they are.`)) {
+      if (!window.confirm(t("Remove \"{title}\" from favourites? Blocks already assigned from it stay as they are.", { title: preset.title }))) {
         return;
       }
       setBusy(true);
@@ -366,7 +367,7 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
         await request(`/api/practice-block-presets?id=${encodeURIComponent(preset.id)}`, { method: "DELETE" });
         await reload();
       } catch (caught) {
-        setError(caught instanceof Error ? caught.message : "Could not remove that favourite.");
+        setError(caught instanceof Error ? caught.message : t("Could not remove that favourite."));
       } finally {
         setBusy(false);
       }
@@ -397,7 +398,7 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
           body: JSON.stringify({ order: next.map((preset) => preset.id) }),
         });
       } catch (caught) {
-        setError(caught instanceof Error ? caught.message : "Could not save that order.");
+        setError(caught instanceof Error ? caught.message : t("Could not save that order."));
         await reload();
       }
     },
@@ -423,7 +424,7 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
 
   const editBlock = useCallback(
     (block: PracticeBlock) => {
-      if (practiceDraftIsWritten(draft) && !window.confirm("Replace what you've written with this block?")) return;
+      if (practiceDraftIsWritten(draft) && !window.confirm(t("Replace what you've written with this block?"))) return;
       setDraft(practiceDraftFromBlock(block));
       setWarning("");
       setVideoPickerOpen(false);
@@ -445,24 +446,20 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
     <div className="practice-video-field">
       {draft.linkedVideoId ? (
         <span className="practice-video-selected">
-          <span>{selectedVideoTitle || "Linked video"}</span>
+          <span>{selectedVideoTitle || t("Linked video")}</span>
           <button
             type="button"
             className="practice-video-cancel"
             onClick={() => setDraft({ ...draft, linkedVideoId: "" })}
-          >
-            Remove
-          </button>
+          >{t("Remove")}</button>
         </span>
       ) : (
-        <button type="button" className="practice-clear" onClick={() => void openVideoPicker()}>
-          Link a video
-        </button>
+        <button type="button" className="practice-clear" onClick={() => void openVideoPicker()}>{t("Link a video")}</button>
       )}
       {videoPickerOpen && !draft.linkedVideoId && (
         <div className="practice-video-picker">
           {videoLoading ? (
-            <Loading what={`${playerName}'s videos`} className="practice-video-empty" />
+            <Loading what={t("{playerName}'s videos", { playerName })} className="practice-video-empty" />
           ) : videoOptions.length ? (
             <ul className="practice-video-options">
               {videoOptions.map((transfer) => (
@@ -475,17 +472,15 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
                       setVideoPickerOpen(false);
                     }}
                   >
-                    {transfer.savedVideo?.title || "Saved video"}
+                    {transfer.savedVideo?.title || t("Saved video")}
                   </button>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="practice-video-empty">No videos for {playerName} yet.</p>
+            <p className="practice-video-empty">{t("No videos for {playerName} yet.", { playerName })}</p>
           )}
-          <button type="button" className="practice-video-cancel" onClick={() => setVideoPickerOpen(false)}>
-            Cancel
-          </button>
+          <button type="button" className="practice-video-cancel" onClick={() => setVideoPickerOpen(false)}>{t("Cancel")}</button>
         </div>
       )}
     </div>
@@ -534,8 +529,8 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
         onRemove={(id) => void archive(id)}
         emptyNote={
           firstLoad
-            ? loadingLabel("the wall")
-            : `Nothing assigned to ${playerName} yet. The first block you save starts the wall.`
+            ? loadingLabel(t("the wall"))
+            : t("Nothing assigned to {playerName} yet. The first block you save starts the wall.", { playerName })
         }
       />
 
@@ -556,8 +551,8 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
             <button
               type="button"
               className="practice-detail-close"
-              title="Close"
-              aria-label="Close"
+              title={t("Close")}
+              aria-label={t("Close")}
               onClick={() => setOpenBrickId(null)}
             >
               ×
@@ -575,9 +570,7 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
               {STATUS_LABEL[openBlock.status]}
             </span>
             {openBlock.status === "active" && (
-              <button type="button" className="outline-button" disabled={busy} onClick={() => editBlock(openBlock)}>
-                Edit
-              </button>
+              <button type="button" className="outline-button" disabled={busy} onClick={() => editBlock(openBlock)}>{t("Edit")}</button>
             )}
             <button
               type="button"
@@ -591,12 +584,8 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
                   dose: openBlock.dose,
                 })
               }
-            >
-              ★ Favourite
-            </button>
-            <button type="button" className="outline-button" disabled={busy} onClick={() => void archive(openBlock.id)}>
-              Remove
-            </button>
+            >{t("★ Favourite")}</button>
+            <button type="button" className="outline-button" disabled={busy} onClick={() => void archive(openBlock.id)}>{t("Remove")}</button>
           </div>
         </div>
       )}

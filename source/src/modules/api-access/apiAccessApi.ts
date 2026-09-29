@@ -2,6 +2,7 @@
 // /api/api-access with the coach's own session; the server decides everything.
 
 import { apiFetch } from "../auth/apiFetch";
+import { t } from "../../lib/i18n";
 
 export type ApiKeyRecord = {
   id: string;
@@ -56,7 +57,7 @@ export type TestResult = { ok: boolean; status: number; error: string; excerpt: 
 async function readJson<T>(response: Response): Promise<T> {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error((data as { message?: string })?.message || "That did not work. Try again in a moment.");
+    throw new Error((data as { message?: string })?.message || t("That did not work. Try again in a moment."));
   }
   return data as T;
 }

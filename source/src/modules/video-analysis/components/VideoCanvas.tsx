@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { DrawingObject } from "../models/Drawing";
 import { Dimensions } from "../engines/DrawingEngine";
 import { DrawingPoint } from "../models/Drawing";
+import { t } from "../../../lib/i18n";
 
 export interface VideoCanvasProps {
   sourceUrl: string | null;
@@ -345,7 +346,7 @@ export function VideoCanvas({
             }}
             aria-hidden="true"
           >
-            <span className="capture-box-hint">Space</span>
+            <span className="capture-box-hint">{t("Space")}</span>
           </div>
         ) : null}
         <svg

@@ -21,6 +21,7 @@ import {
   ClarityVideoAnalysis,
   type IconComponent,
 } from "../shared/ClarityIcons";
+import { t } from "../../lib/i18n";
 
 export type PlayerTerminalDestination =
   | "home"
@@ -51,13 +52,13 @@ type NavLink = {
 // configured an outside booking widget, and it is named by that business
 // rather than by us, so it is appended from `externalBooking` below.
 const NAV_LINKS: NavLink[] = [
-  { id: "home", label: "Home", Icon: ClarityDashboardHome },
-  { id: "lessons", label: "Lessons", Icon: ClarityCalendar },
-  { id: "reviews", label: "Reviews", Icon: ClarityAssessments },
-  { id: "passes", label: "Passes", Icon: ClarityPassesCredits },
-  { id: "practice", label: "Practice", Icon: ClarityLessonsProgrammes },
-  { id: "notes", label: "Notes", Icon: ClarityBookingPages },
-  { id: "videos", label: "Videos", Icon: ClarityVideoAnalysis },
+  { id: "home", label: t("Home"), Icon: ClarityDashboardHome },
+  { id: "lessons", label: t("Lessons"), Icon: ClarityCalendar },
+  { id: "reviews", label: t("Reviews"), Icon: ClarityAssessments },
+  { id: "passes", label: t("Passes"), Icon: ClarityPassesCredits },
+  { id: "practice", label: t("Practice"), Icon: ClarityLessonsProgrammes },
+  { id: "notes", label: t("Notes"), Icon: ClarityBookingPages },
+  { id: "videos", label: t("Videos"), Icon: ClarityVideoAnalysis },
 ];
 
 // Lessons -- and booking with it -- doesn't exist for a guest at all, and
@@ -143,13 +144,13 @@ export function PlayerTerminalNav({
             </button>
           ) : (
             <div className="player-portal-brand">
-              <strong>Clarity Golf</strong>
-              <span>Player Portal</span>
+              <strong>{t("Clarity Golf")}</strong>
+              <span>{t("Player Portal")}</span>
             </div>
           )}
         </div>
 
-        <nav className="player-terminal-nav-links" aria-label="Player Terminal">
+        <nav className="player-terminal-nav-links" aria-label={t("Player Terminal")}>
           {visibleLinks.map((link) => (
             <button
               key={link.id}
@@ -169,12 +170,11 @@ export function PlayerTerminalNav({
             <button
               type="button"
               className="player-terminal-nav-balance"
-              title="Your passes"
+              title={t("Your passes")}
               onClick={onOpenBalance}
             >
-              <span>Balance</span>
-              <strong>
-                {balance.credits} credit{balance.credits === 1 ? "" : "s"}
+              <span>{t("Balance")}</span>
+              <strong>{t("{credits} credit", { credits: balance.credits })}{balance.credits === 1 ? "" : "s"}
               </strong>
             </button>
           )}
@@ -184,8 +184,8 @@ export function PlayerTerminalNav({
           <button
             type="button"
             className="player-terminal-nav-theme"
-            aria-label={theme === "dark" ? "Switch to light" : "Switch to dark"}
-            title={theme === "dark" ? "Switch to light" : "Switch to dark"}
+            aria-label={theme === "dark" ? t("Switch to light") : t("Switch to dark")}
+            title={theme === "dark" ? t("Switch to light") : t("Switch to dark")}
             onClick={onToggleTheme}
           >
             <span aria-hidden="true">{theme === "dark" ? "\u2600" : "\u263D"}</span>
@@ -194,21 +194,17 @@ export function PlayerTerminalNav({
             <button
               type="button"
               className="player-terminal-nav-record"
-              aria-label="Record a video"
-              title="Record a video"
+              aria-label={t("Record a video")}
+              title={t("Record a video")}
               onClick={onRecord}
             >
               <span className="player-terminal-nav-record-dot" aria-hidden="true" />
             </button>
           )}
           {guest ? (
-            <button className="player-portal-ghost" type="button" onClick={onSignIn}>
-              Sign in
-            </button>
+            <button className="player-portal-ghost" type="button" onClick={onSignIn}>{t("Sign in")}</button>
           ) : (
-            <button className="player-portal-ghost" type="button" onClick={onSignOut}>
-              Sign out
-            </button>
+            <button className="player-portal-ghost" type="button" onClick={onSignOut}>{t("Sign out")}</button>
           )}
         </div>
       </div>

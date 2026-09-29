@@ -21,6 +21,7 @@ import {
   type TapState,
   type TerminalStatus,
 } from "./terminal";
+import { t } from "../../lib/i18n";
 
 const RECONCILE_INTERVAL_MS = 2000;
 
@@ -106,7 +107,7 @@ export function TerminalPayment({
   const run = useCallback(async () => {
     const plugin = nativeTerminal();
     if (!plugin) {
-      setState({ kind: "failed", message: "Tap to Pay isn't available on this device." });
+      setState({ kind: "failed", message: t("Tap to Pay isn't available on this device.") });
       return;
     }
     setState({ kind: "connecting" });
@@ -117,7 +118,7 @@ export function TerminalPayment({
       started = await terminalApi.start(transactionId, locationId);
     } catch (error) {
       // Nothing has been tapped yet, so nothing can have been charged.
-      setState({ kind: "failed", message: error instanceof Error ? error.message : "Tap to Pay could not start." });
+      setState({ kind: "failed", message: error instanceof Error ? error.message : t("Tap to Pay could not start.") });
       return;
     }
     if (started.state === "succeeded") {
@@ -129,7 +130,7 @@ export function TerminalPayment({
       return;
     }
     if (started.state !== "open" || !started.clientSecret) {
-      setState({ kind: "failed", message: "Tap to Pay could not start." });
+      setState({ kind: "failed", message: t("Tap to Pay could not start.") });
       return;
     }
     setState({ kind: "ready_to_tap" });
@@ -138,7 +139,7 @@ export function TerminalPayment({
       .catch((error: unknown) => ({
         outcome: "failed" as const,
         stage: "collect" as const,
-        message: error instanceof Error ? error.message : "The card could not be read.",
+        message: error instanceof Error ? error.message : t("The card could not be read."),
       }));
     const next = stateAfterCollect(outcome);
     if (next.kind === "processing") await reconcile();
@@ -194,9 +195,9 @@ export function TerminalPayment({
       <div className="pos-tap" aria-live="polite">
         <Loader2 className="pos-tap-spin" size={28} aria-hidden="true" />
         <strong className="pos-tap-amount">{money}</strong>
-        <p className="pos-tap-title">Checking payment…</p>
-        <p className="field-help">Do not charge again yet. This updates on its own.</p>
-        {state.kind === "unknown" && <p className="field-help">Waiting for a connection to Clarity.</p>}
+        <p className="pos-tap-title">{t("Checking payment…")}</p>
+        <p className="field-help">{t("Do not charge again yet. This updates on its own.")}</p>
+        {state.kind === "unknown" && <p className="field-help">{t("Waiting for a connection to Clarity.")}</p>}
       </div>
     );
   }
@@ -209,19 +210,19 @@ export function TerminalPayment({
   if (canRetry(state)) {
     const message =
       state.kind === "cancelled"
-        ? "Tap to Pay was cancelled. Nothing was charged."
+        ? t("Tap to Pay was cancelled. Nothing was charged.")
         : state.message;
     return (
       <div className="pos-tap" aria-live="polite">
         <AlertTriangle size={26} aria-hidden="true" />
         <strong className="pos-tap-amount">{money}</strong>
         <p className="pos-tap-title">
-          {state.kind === "declined" ? "Card declined" : state.kind === "cancelled" ? "Not charged" : "Couldn't use Tap to Pay"}
+          {state.kind === "declined" ? t("Card declined") : state.kind === "cancelled" ? t("Not charged") : t("Couldn't use Tap to Pay")}
         </p>
         <p className="field-help">{message}</p>
         {status.locations.length > 1 && (
           <label className="pos-tap-location">
-            <span>Taking payments at</span>
+            <span>{t("Taking payments at")}</span>
             <select
               value={locationId}
               onChange={(event) => {
@@ -239,14 +240,10 @@ export function TerminalPayment({
         )}
         <div className="pos-tap-actions">
           <button className="primary-button" onClick={tryAgain} type="button">
-            <RotateCcw size={15} /> Try again
-          </button>
+            <RotateCcw size={15} />{" "}{t("Try again")}</button>
           <button className="outline-button" onClick={showQr} type="button">
-            <QrCode size={15} /> Show payment QR
-          </button>
-          <button className="text-button" onClick={onCancelSale} type="button">
-            Cancel sale
-          </button>
+            <QrCode size={15} />{" "}{t("Show payment QR")}</button>
+          <button className="text-button" onClick={onCancelSale} type="button">{t("Cancel sale")}</button>
         </div>
       </div>
     );
@@ -259,30 +256,28 @@ export function TerminalPayment({
       <strong className="pos-tap-amount">{money}</strong>
       {state.kind === "connecting" && (
         <>
-          <p className="pos-tap-title">Getting Tap to Pay ready…</p>
+          <p className="pos-tap-title">{t("Getting Tap to Pay ready…")}</p>
           {typeof state.progress === "number" && state.progress < 1 && (
-            <p className="field-help">Setting up this iPhone the first time ({Math.round(state.progress * 100)}%).</p>
+            <p className="field-help">{t("Setting up this iPhone the first time ({value}%).", { value: Math.round(state.progress * 100) })}</p>
           )}
         </>
       )}
       {state.kind === "ready_to_tap" && (
         <>
-          <p className="pos-tap-title">Ready to tap</p>
-          <p className="field-help">Hold card or phone near the top of this iPhone.</p>
+          <p className="pos-tap-title">{t("Ready to tap")}</p>
+          <p className="field-help">{t("Hold card or phone near the top of this iPhone.")}</p>
         </>
       )}
       {state.kind === "reading" && <p className="pos-tap-title">{state.message}</p>}
-      {status.testMode && <p className="pos-tap-test">Test mode – no real money moves.</p>}
+      {status.testMode && <p className="pos-tap-test">{t("Test mode – no real money moves.")}</p>}
       <div className="pos-tap-actions">
         {state.kind !== "reading" && (
           <button className="outline-button" onClick={showQr} type="button">
-            <QrCode size={15} /> Pay on customer phone
-          </button>
+            <QrCode size={15} />{" "}{t("Pay on customer phone")}</button>
         )}
         {state.kind === "ready_to_tap" && (
           <button className="text-button" onClick={stopWaiting} type="button">
-            <X size={15} /> Stop
-          </button>
+            <X size={15} />{" "}{t("Stop")}</button>
         )}
       </div>
     </div>

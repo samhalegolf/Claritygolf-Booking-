@@ -7,6 +7,7 @@ import {
   type PracticeBlockType,
   type PracticeTypeMeta,
 } from "./practiceModel";
+import { t } from "../../lib/i18n";
 
 /* The wall.
  *
@@ -65,7 +66,7 @@ export function PracticeWall({
   openId,
   onOpen,
   onRemove,
-  emptyNote = "No practice blocks yet.",
+  emptyNote = t("No practice blocks yet."),
 }: PracticeWallProps) {
   const wallRef = useRef<HTMLDivElement | null>(null);
   const [perCourse, setPerCourse] = useState(BRICKS_PER_COURSE);
@@ -121,7 +122,7 @@ export function PracticeWall({
                 data-brick={block.id}
                 aria-expanded={openId === block.id}
                 aria-current={openId === block.id ? "true" : undefined}
-                title={`${block.title} — ${block.status}, assigned ${practiceShortDate(block.assignedAt)}`}
+                title={t("{title} — {status}, assigned {assignedAt}", { title: block.title, status: block.status, assignedAt: practiceShortDate(block.assignedAt) })}
                 onClick={() => onOpen(block.id)}
               >
                 <strong>{block.title}</strong>
@@ -130,8 +131,8 @@ export function PracticeWall({
                 <button
                   type="button"
                   className="practice-brick-remove"
-                  title={`Remove "${block.title}"`}
-                  aria-label={`Remove ${block.title}`}
+                  title={t("Remove \"{title}\"", { title: block.title })}
+                  aria-label={t("Remove {title}", { title: block.title })}
                   onClick={(event) => {
                     event.stopPropagation();
                     onRemove(block.id);

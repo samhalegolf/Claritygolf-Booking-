@@ -43,6 +43,7 @@ import {
   ClarityVideoAnalysis,
   type IconComponent,
 } from "../shared/ClarityIcons";
+import { t } from "../../lib/i18n";
 
 /** Where a card sends you. The profile owns no forms of its own. */
 export type ProfileTarget =
@@ -97,14 +98,14 @@ export function OwnerIdentityCard({
       </span>
       <div className="bh-identity-main">
         <div className="bh-identity-name">
-          <strong>{identity.coachName || "Your name"}</strong>
+          <strong>{identity.coachName || t("Your name")}</strong>
           <span className="bh-role">{identity.roleLabel}</span>
         </div>
         <div className="bh-identity-facts">
           {(
             [
-              ["Email", identity.email, ClarityEmail],
-              ["Phone", identity.phone, Phone],
+              [t("Email"), identity.email, ClarityEmail],
+              [t("Phone"), identity.phone, Phone],
             ] as Array<[string, string, IconComponent]>
           ).map(([key, value, Icon]) => (
             <div key={key}>
@@ -112,12 +113,12 @@ export function OwnerIdentityCard({
                 <Icon size={14} />
                 {key}
               </span>
-              <strong>{value || "Not set"}</strong>
+              <strong>{value || t("Not set")}</strong>
             </div>
           ))}
         </div>
       </div>
-      <button className="bh-gear" onClick={onOpenCoaches} title="Settings › Business › Coaches" type="button">
+      <button className="bh-gear" onClick={onOpenCoaches} title={t("Settings › Business › Coaches")} type="button">
         <ClaritySettings size={16} />
       </button>
     </article>
@@ -130,14 +131,14 @@ export function OwnerIdentityCard({
  * vocabulary as IntegrationsPanel's CATEGORY_LABEL.
  */
 const JOB_BY_CATEGORY: Record<string, string> = {
-  calendar: "Calendar",
-  "resource-booking": "Resource booking",
-  accounting: "Bank feed",
-  payments: "Payments",
-  storage: "Cloud storage",
-  email: "Email delivery",
-  billing: "Billing account",
-  "clarity-apps": "Clarity apps",
+  calendar: t("Calendar"),
+  "resource-booking": t("Resource booking"),
+  accounting: t("Bank feed"),
+  payments: t("Payments"),
+  storage: t("Cloud storage"),
+  email: t("Email delivery"),
+  billing: t("Billing account"),
+  "clarity-apps": t("Clarity apps"),
 };
 
 /** Which section of the page a connection files under. */
@@ -162,6 +163,16 @@ const SECTION_ORDER = [
   "Player portal",
 ];
 
+/** The section names as they read on screen. The keys above stay English. */
+const SECTION_LABELS: Record<string, string> = {
+  Calendar: t("Calendar"),
+  "Resource booking": t("Resource booking"),
+  Storage: t("Storage"),
+  Accounting: t("Accounting"),
+  "Customer experience": t("Customer experience"),
+  "Player portal": t("Player portal"),
+};
+
 const SECTION_ICONS: Record<string, IconComponent> = {
   Calendar: ClarityCalendar,
   "Resource booking": ClarityResources,
@@ -176,7 +187,7 @@ function SectionTitle({ name }: { name: string }) {
   return (
     <h3>
       {Icon ? <Icon size={14} /> : null}
-      {name}
+      {SECTION_LABELS[name] || name}
     </h3>
   );
 }
@@ -199,10 +210,10 @@ const INTERNAL_JOB_ICONS: Record<string, IconComponent> = {
 };
 
 const EXTERNAL_SECTION_JOBS: Record<string, string> = {
-  Calendar: "Calendar",
-  "Resource booking": "Resource booking",
-  Storage: "Cloud storage",
-  Accounting: "Payments & accounting",
+  Calendar: t("Calendar"),
+  "Resource booking": t("Resource booking"),
+  Storage: t("Cloud storage"),
+  Accounting: t("Payments & accounting"),
 };
 
 /** Where a connection is set up. One destination: Settings › Integrations. */
@@ -283,7 +294,7 @@ export function BusinessHubPanel({ profile, internalJobs, onOpen, hiddenIntegrat
         onClick={() => setOpenDetail(open ? "" : id)}
         disabled={!hasFacts}
         aria-expanded={open}
-        title={hasFacts ? (open ? "Hide detail" : "Show detail") : "Nothing to show yet"}
+        title={hasFacts ? (open ? t("Hide detail") : t("Show detail")) : t("Nothing to show yet")}
         type="button"
       >
         {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
@@ -315,11 +326,9 @@ export function BusinessHubPanel({ profile, internalJobs, onOpen, hiddenIntegrat
 
       {error && (
         <div className="bh-error" role="alert">
-          <strong>Your connections are unavailable</strong>
+          <strong>{t("Your connections are unavailable")}</strong>
           {error}
-          <button className="text-button" onClick={() => void store.load().catch(() => undefined)} type="button">
-            Try again
-          </button>
+          <button className="text-button" onClick={() => void store.load().catch(() => undefined)} type="button">{t("Try again")}</button>
         </div>
       )}
 
@@ -334,25 +343,25 @@ export function BusinessHubPanel({ profile, internalJobs, onOpen, hiddenIntegrat
                   <span className="bh-mark is-placeholder">…</span>
                   <span className="bh-cell-title">
                     <strong>{EXTERNAL_SECTION_JOBS[section.name]}</strong>
-                    <span className="bh-external" title="External connection">
+                    <span className="bh-external" title={t("External connection")}>
                       <ClarityIntegrations size={14} />
                     </span>
                   </span>
                 </div>
-                <p className="bh-cell-summary">Checking connection…</p>
+                <p className="bh-cell-summary">{t("Checking connection…")}</p>
               </article>
             ) : null}
 
             {section.external.map((card) => {
               const state = stateOf(card);
               const connected = state !== "unset";
-              const job = JOB_BY_CATEGORY[card.category] || section.name;
+              const job = JOB_BY_CATEGORY[card.category] || SECTION_LABELS[section.name] || section.name;
               // Before it exists the card is the job; once it exists the
               // provider's own name is the more useful label.
               const title = connected ? card.label : job;
               const detail: Array<[string, string]> = [
-                ["Provider", card.label],
-                ["Status", card.connectedAs ? `Connected · ${card.connectedAs}` : connected ? "Ready" : "Not set up"],
+                [t("Provider"), card.label],
+                [t("Status"), card.connectedAs ? t("Connected · {connectedAs}", { connectedAs: card.connectedAs }) : connected ? t("Ready") : t("Not set up")],
               ];
               return (
                 <article className="bh-cell" key={card.id}>
@@ -373,19 +382,19 @@ export function BusinessHubPanel({ profile, internalJobs, onOpen, hiddenIntegrat
                     )}
                     <span className="bh-cell-title">
                       <strong>{title}</strong>
-                      <span className="bh-external" title="An outside account, connected to Clarity">
+                      <span className="bh-external" title={t("An outside account, connected to Clarity")}>
                         <ClarityIntegrations size={14} />
                       </span>
                     </span>
                     <span className="bh-cell-actions">
                       {connected && detailToggle(card.id, true)}
                       {state === "ok" && (
-                        <span className="bh-chip is-ok" title="Connected and healthy">
+                        <span className="bh-chip is-ok" title={t("Connected and healthy")}>
                           <ClarityIntegrations size={15} />
                         </span>
                       )}
                       {state === "bad" && (
-                        <span className="bh-chip is-bad" title="Needs attention">
+                        <span className="bh-chip is-bad" title={t("Needs attention")}>
                           <AlertCircle size={15} />
                         </span>
                       )}
@@ -393,7 +402,7 @@ export function BusinessHubPanel({ profile, internalJobs, onOpen, hiddenIntegrat
                         <button
                           className="bh-gear"
                           onClick={() => onOpen(INTEGRATION_TARGET, card.label)}
-                          title={`Manage — Settings › Integrations › ${card.label}`}
+                          title={t("Manage — Settings › Integrations › {label}", { label: card.label })}
                           type="button"
                         >
                           <ClaritySettings size={16} />
@@ -402,7 +411,7 @@ export function BusinessHubPanel({ profile, internalJobs, onOpen, hiddenIntegrat
                         <button
                           className="bh-setup"
                           onClick={() => onOpen(INTEGRATION_TARGET, job)}
-                          title={`Set up ${job}`}
+                          title={t("Set up {job}", { job })}
                           type="button"
                         >
                           <Plus size={16} />
@@ -414,7 +423,7 @@ export function BusinessHubPanel({ profile, internalJobs, onOpen, hiddenIntegrat
                   {/* The point of the failing state is the sentence, not the
                       colour: what actually broke, in the coach's words. */}
                   {state === "bad" && <p className="bh-cell-error">{card.connectionError}</p>}
-                  {facts(card.id, detail, "Settings › Integrations")}
+                  {facts(card.id, detail, t("Settings › Integrations"))}
                 </article>
               );
             })}
@@ -435,7 +444,7 @@ export function BusinessHubPanel({ profile, internalJobs, onOpen, hiddenIntegrat
                   </span>
                   <span className="bh-cell-actions">
                     {detailToggle(job.id, job.facts.length > 0)}
-                    <button className="bh-gear" onClick={() => onOpen(job.target, job.label)} title={`Manage — ${job.path}`} type="button">
+                    <button className="bh-gear" onClick={() => onOpen(job.target, job.label)} title={t("Manage — {path}", { path: job.path })} type="button">
                       <ClaritySettings size={16} />
                     </button>
                   </span>

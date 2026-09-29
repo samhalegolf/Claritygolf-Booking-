@@ -6,6 +6,7 @@
 // by the entry point for a returning coach, one request shared by everyone
 // who asks while it is in flight.
 
+import { t } from "../../lib/i18n";
 import { createRemoteListStore, isUnauthorizedError, type RemoteListStatus } from "../shared/remoteListStore";
 import { cleanLessonNotes, type LessonNote } from "./lessonNotesModel";
 
@@ -22,7 +23,7 @@ const store = createRemoteListStore<LessonNote>({
   path: "/api/notes",
   rows: (data) => data.notes as unknown[],
   clean: (rows) => cleanLessonNotes(rows),
-  failure: "Could not load lesson notes.",
+  failure: t("Could not load lesson notes."),
 });
 
 let cached: LessonNotesState | null = null;

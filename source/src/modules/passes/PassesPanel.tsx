@@ -12,6 +12,7 @@ import { ClarityBookingPages, ClarityPassesCredits } from "../shared/ClarityIcon
 
 import { Loading } from "../shared/Loading";
 import { invoicedSessions, lineWord, sessionWord } from "./invoicedSessions";
+import { t } from "../../lib/i18n";
 
 export type PassAllocation = {
   id: string;
@@ -126,10 +127,10 @@ export type PassesPanelProps = {
 };
 
 const EXPIRY_CHOICES = [
-  { months: 6, label: "6 months" },
-  { months: 12, label: "12 months" },
-  { months: 24, label: "24 months" },
-  { months: 0, label: "No expiry" },
+  { months: 6, label: t("6 months") },
+  { months: 12, label: t("12 months") },
+  { months: 24, label: t("24 months") },
+  { months: 0, label: t("No expiry") },
 ];
 
 function dateLabel(value: string | null) {
@@ -140,20 +141,20 @@ function dateLabel(value: string | null) {
 }
 
 function statusLabel(pass: Pass) {
-  if (pass.status === "void") return "Voided";
-  if (pass.status === "expired") return "Expired";
-  if (pass.status === "scheduled") return "Not started yet";
-  if (pass.status === "exhausted") return "All used";
-  return `${pass.creditsAvailable} of ${pass.creditsAllocated} left`;
+  if (pass.status === "void") return t("Voided");
+  if (pass.status === "expired") return t("Expired");
+  if (pass.status === "scheduled") return t("Not started yet");
+  if (pass.status === "exhausted") return t("All used");
+  return t("{available} of {allocated} left", { available: pass.creditsAvailable, allocated: pass.creditsAllocated });
 }
 
-function creditWord(count: number) {
-  return count === 1 ? "credit" : "credits";
+function creditCount(count: number) {
+  return count === 1 ? t("1 credit") : t("{count} credits", { count });
 }
 
 function allocationValueLabel(allocation: PassAllocation) {
-  if (allocation.totalValueCents === null || !allocation.currency) return "native only";
-  return `${allocation.currency} ${(allocation.totalValueCents / 100).toFixed(2)} purchase value`;
+  if (allocation.totalValueCents === null || !allocation.currency) return t("native only");
+  return t("{amount} purchase value", { amount: `${allocation.currency} ${(allocation.totalValueCents / 100).toFixed(2)}` });
 }
 
 /**
@@ -174,9 +175,9 @@ function ledgerLines(pass: Pass) {
       // voiding the pass is for. Only a spend has an undo here.
       returnable: false,
       text:
-        `+${allocation.credits} ${creditWord(allocation.credits)} · ${allocation.source}` +
+        `+${creditCount(allocation.credits)} · ${allocation.source}` +
         ` · ${allocationValueLabel(allocation)}` +
-        (allocation.expiresAt && !allocation.isLive ? " · expired" : "") +
+        (allocation.expiresAt && !allocation.isLive ? t(" · expired") : "") +
         ` · ${dateLabel(allocation.createdAt)}`,
     })),
     ...pass.redemptions.map((redemption) => ({
@@ -189,11 +190,13 @@ function ledgerLines(pass: Pass) {
       // nothing on either record admitting it.
       returnable: redemption.manual && !redemption.reversedAt,
       text:
-        `−${redemption.credits} ${creditWord(redemption.credits)} · ${dateLabel(redemption.redeemedAt)}` +
-        (redemption.manual ? " · by hand" : "") +
+        `−${creditCount(redemption.credits)} · ${dateLabel(redemption.redeemedAt)}` +
+        (redemption.manual ? t(" · by hand") : "") +
         (redemption.note ? ` · ${redemption.note}` : "") +
         (redemption.reversedAt
-          ? ` · returned${redemption.reversalReason ? ` (${redemption.reversalReason})` : ""}`
+          ? redemption.reversalReason
+            ? t(" · returned ({reason})", { reason: redemption.reversalReason })
+            : t(" · returned")
           : ""),
     })),
   ];
@@ -212,9 +215,9 @@ function moneyLabel(cents: number, currency: string) {
  * the right list, and "these three are certain and this fourth is a guess" is
  * the difference between a count they can act on and one they cannot. */
 function strengthNote(strength: InvoicedLesson["strength"]) {
-  if (strength === "exact") return "name matches";
-  if (strength === "close") return "close match";
-  return "loose match — check this is the same thing";
+  if (strength === "exact") return t("name matches");
+  if (strength === "close") return t("close match");
+  return t("loose match — check this is the same thing");
 }
 
 /* Where the invoice came from, when it is not simply theirs.
@@ -225,8 +228,8 @@ function strengthNote(strength: InvoicedLesson["strength"]) {
  * contains one of this person's lessons. Both are worth saying: a coach
  * checking a total needs to know which rows are inferences. */
 function relationNote(relation: string) {
-  if (relation === "matched") return "matched on email";
-  if (relation === "included") return "on someone else's invoice";
+  if (relation === "matched") return t("matched on email");
+  if (relation === "included") return t("on someone else's invoice");
   return "";
 }
 
@@ -366,21 +369,19 @@ export function PassesPanel({
       {!formOpen && (
         <div className="pass-panel-actions">
           <button className="outline-button" type="button" onClick={() => setFormOpen(true)}>
-            <Plus size={16} />
-            Give pass
-          </button>
+            <Plus size={16} />{t("Give pass")}</button>
         </div>
       )}
 
       {formOpen && (
         <div className="pass-grant-form">
           <label className="pass-field">
-            <span>Pass</span>
+            <span>{t("Pass")}</span>
             <select value={templateId} onChange={(event) => chooseTemplate(event.target.value)}>
-              <option value="">Something else</option>
+              <option value="">{t("Something else")}</option>
               {templates.map((entry) => (
                 <option key={entry.serviceId} value={entry.serviceId}>
-                  {entry.name} · {entry.credits} {creditWord(entry.credits)}
+                  {entry.name} · {creditCount(entry.credits)}
                 </option>
               ))}
             </select>
@@ -388,18 +389,18 @@ export function PassesPanel({
 
           {!templateId && (
             <label className="pass-field">
-              <span>Name</span>
+              <span>{t("Name")}</span>
               <input
                 value={name}
                 onChange={(event) => setName(event.target.value)}
-                placeholder="Goodwill credit"
+                placeholder={t("Goodwill credit")}
               />
             </label>
           )}
 
           {!templateId && (
             <div className="pass-field pass-field-wide">
-              <span>Use for</span>
+              <span>{t("Use for")}</span>
               <div className="pass-coverage">
                 {coverableServices.length ? (
                   coverableServices.map((service) => (
@@ -419,14 +420,14 @@ export function PassesPanel({
                     </label>
                   ))
                 ) : (
-                  <span className="pass-coverage-empty">No services to cover yet.</span>
+                  <span className="pass-coverage-empty">{t("No services to cover yet.")}</span>
                 )}
               </div>
             </div>
           )}
 
           <label className="pass-field">
-            <span>Credits</span>
+            <span>{t("Credits")}</span>
             <input
               type="number"
               min={1}
@@ -437,7 +438,7 @@ export function PassesPanel({
           </label>
 
           <label className="pass-field">
-            <span>Expires</span>
+            <span>{t("Expires")}</span>
             <select
               value={String(expiryMonths)}
               onChange={(event) => setExpiryMonths(Number(event.target.value))}
@@ -451,33 +452,27 @@ export function PassesPanel({
           </label>
 
           <label className="pass-field pass-field-wide">
-            <span>Reason</span>
+            <span>{t("Reason")}</span>
             <input
               value={note}
               onChange={(event) => setNote(event.target.value)}
-              placeholder="Comped after the rained-out session"
+              placeholder={t("Comped after the rained-out session")}
             />
           </label>
 
           <div className="pass-panel-actions">
             <button className="primary-button" type="button" onClick={submit} disabled={!canSubmit}>
-              {granting ? "Giving" : "Give pass"}
+              {granting ? t("Giving") : t("Give pass")}
             </button>
-            <button className="outline-button" type="button" onClick={resetForm}>
-              Cancel
-            </button>
+            <button className="outline-button" type="button" onClick={resetForm}>{t("Cancel")}</button>
           </div>
         </div>
       )}
 
       {loadState === "loading" ? (
-        <Loading what="passes" />
+        <Loading what={t("passes")} />
       ) : loadState === "error" ? (
-        <p>
-          Could not load passes.{" "}
-          <button className="link-button" type="button" onClick={onRetry}>
-            Retry
-          </button>
+        <p>{t("Could not load passes.")}{" "}<button className="link-button" type="button" onClick={onRetry}>{t("Retry")}</button>
         </p>
       ) : passes.length ? (
         passes.map((pass) => {
@@ -491,9 +486,9 @@ export function PassesPanel({
                   <ClarityPassesCredits size={15} /> {pass.name}
                 </strong>
                 <span>
-                  {covers ? `Covers ${covers}` : "No covered service set"}
-                  {pass.crossRedeemable ? " · Cross redeemable" : " · Native use only"}
-                  {pass.expiresAt ? ` · Valid until ${dateLabel(pass.expiresAt)}` : " · No expiry"}
+                  {covers ? t("Covers {covers}", { covers }) : t("No covered service set")}
+                  {pass.crossRedeemable ? t(" · Cross redeemable") : t(" · Native use only")}
+                  {pass.expiresAt ? t(" · Valid until {expiresAt}", { expiresAt: dateLabel(pass.expiresAt) }) : t(" · No expiry")}
                 </span>
                 {pass.note ? <span>{pass.note}</span> : null}
 
@@ -509,9 +504,7 @@ export function PassesPanel({
                           className="link-button"
                           type="button"
                           onClick={() => onReturnCredit(line.id)}
-                        >
-                          Put it back
-                        </button>
+                        >{t("Put it back")}</button>
                       )}
                     </li>
                   ))}
@@ -525,7 +518,7 @@ export function PassesPanel({
                   (redeemingPassId === pass.id ? (
                     <div className="pass-redeem-form">
                       <label className="pass-field">
-                        <span>Credits</span>
+                        <span>{t("Credits")}</span>
                         <input
                           type="number"
                           min={1}
@@ -535,11 +528,11 @@ export function PassesPanel({
                         />
                       </label>
                       <label className="pass-field pass-field-wide">
-                        <span>What for</span>
+                        <span>{t("What for")}</span>
                         <input
                           value={redeemNote}
                           onChange={(event) => setRedeemNote(event.target.value)}
-                          placeholder="Lesson on the 4th, never booked in"
+                          placeholder={t("Lesson on the 4th, never booked in")}
                         />
                       </label>
                       <div className="pass-panel-actions">
@@ -548,12 +541,8 @@ export function PassesPanel({
                           type="button"
                           disabled={!redeemNote.trim()}
                           onClick={() => submitRedeem(pass.id)}
-                        >
-                          Use credit
-                        </button>
-                        <button className="outline-button" type="button" onClick={closeRedeem}>
-                          Cancel
-                        </button>
+                        >{t("Use credit")}</button>
+                        <button className="outline-button" type="button" onClick={closeRedeem}>{t("Cancel")}</button>
                       </div>
                     </div>
                   ) : (
@@ -566,8 +555,7 @@ export function PassesPanel({
                         setRedeemCredits("1");
                       }}
                     >
-                      <MinusCircle size={14} /> Use a credit without a booking
-                    </button>
+                      <MinusCircle size={14} />{" "}{t("Use a credit without a booking")}</button>
                   ))}
 
                 {/* What they were billed for, beside what they hold.
@@ -586,10 +574,7 @@ export function PassesPanel({
                       onClick={() => toggleInvoiced(pass.id)}
                     >
                       <ClarityBookingPages size={14} />
-                      <span>
-                        Invoiced for {passInvoiced.sessions}{" "}
-                        {sessionWord(passInvoiced.sessions)} that look like this
-                      </span>
+                      <span>{t("Invoiced for {sessions} {sessions2} that look like this", { sessions: passInvoiced.sessions, sessions2: sessionWord(passInvoiced.sessions) })}</span>
                       {passInvoiced.open ? (
                         <ChevronDown className="pass-invoiced-chevron" size={15} />
                       ) : (
@@ -602,10 +587,7 @@ export function PassesPanel({
                             one case where "3 sessions" and a list of 2 rows
                             would read as a mistake. */}
                         {passInvoiced.sessions !== passInvoiced.lines.length && (
-                          <p className="pass-invoiced-caption">
-                            Across {passInvoiced.lines.length}{" "}
-                            {lineWord(passInvoiced.lines.length)}
-                          </p>
+                          <p className="pass-invoiced-caption">{t("Across {length} {length2}", { length: passInvoiced.lines.length, length2: lineWord(passInvoiced.lines.length) })}</p>
                         )}
                         <ul>
                           {passInvoiced.lines.map((line) => (
@@ -616,7 +598,7 @@ export function PassesPanel({
                                   line.quantity > 1 ? `×${line.quantity}` : "",
                                   moneyLabel(line.amountCents, line.currency),
                                   dateLabel(line.when),
-                                  line.invoiceNumber ? `Invoice ${line.invoiceNumber}` : "",
+                                  line.invoiceNumber ? t("Invoice {number}", { number: line.invoiceNumber }) : "",
                                   relationNote(line.relation),
                                   strengthNote(line.strength),
                                 ]
@@ -634,16 +616,14 @@ export function PassesPanel({
               <em>
                 {statusLabel(pass)}
                 {spendable || pass.status === "exhausted" ? (
-                  <button className="link-button" type="button" onClick={() => onVoid(pass)}>
-                    Void pass
-                  </button>
+                  <button className="link-button" type="button" onClick={() => onVoid(pass)}>{t("Void pass")}</button>
                 ) : null}
               </em>
             </div>
           );
         })
       ) : (
-        <p>No passes yet.</p>
+        <p>{t("No passes yet.")}</p>
       )}
 
       {/* Billed for, and matching no pass they hold. Shut by default because
@@ -657,10 +637,7 @@ export function PassesPanel({
             aria-expanded={showUnmatched}
             onClick={() => setShowUnmatched((current) => !current)}
           >
-            {showUnmatched ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-            {unmatchedSessions} other invoiced {sessionWord(unmatchedSessions)} matching no
-            pass
-          </button>
+            {showUnmatched ? <ChevronDown size={15} /> : <ChevronRight size={15} />}{t("{unmatchedSessions} other invoiced {unmatchedSessions2} matching no pass", { unmatchedSessions, unmatchedSessions2: sessionWord(unmatchedSessions) })}</button>
           {showUnmatched && (
             <ul className="pass-invoiced-list">
               {unmatchedInvoicedLines.map((line) => (
@@ -671,7 +648,7 @@ export function PassesPanel({
                       line.quantity > 1 ? `×${line.quantity}` : "",
                       moneyLabel(line.amountCents, line.currency),
                       dateLabel(line.when),
-                      line.invoiceNumber ? `Invoice ${line.invoiceNumber}` : "",
+                      line.invoiceNumber ? t("Invoice {number}", { number: line.invoiceNumber }) : "",
                       relationNote(line.relation),
                     ]
                       .filter(Boolean)

@@ -9,6 +9,7 @@ import { Fragment, useMemo, useState } from "react";
 import { AlertTriangle, ChevronDown, ChevronRight, Copy, Download, Plus, Search, X } from "lucide-react";
 import { ClarityPassesCredits } from "../shared/ClarityIcons";
 import type { BillingCoupon, CouponImportCandidate, CouponRedemption, VoucherAmountRule } from "./types";
+import { t } from "../../lib/i18n";
 
 /** What a scan came back with. `scannedCount` is how many charges were read,
  *  so "nothing found" can be told apart from "nothing looked at". */
@@ -59,8 +60,8 @@ export type VoucherRepairResult = {
 
 const SOURCE_LABELS: Record<BillingCoupon["source"], string> = {
   stripe: "Stripe",
-  pos: "Sold at the till",
-  manual: "Issued by hand",
+  pos: t("Sold at the till"),
+  manual: t("Issued by hand"),
 };
 
 function emptyIssueForm() {
@@ -269,11 +270,13 @@ export function CouponsPanel({
       const result = await onRepairOwners(false, addBuyers);
       if (result) {
         setRepairDone(
-          `Filed ${result.linked || 0} voucher${result.linked === 1 ? "" : "s"}` +
+          (result.linked === 1 ? t("Filed 1 voucher") : t("Filed {count} vouchers", { count: result.linked || 0 })) +
             (result.clientsAdded
-              ? `, ${result.clientsAdded} client${result.clientsAdded === 1 ? "" : "s"} added`
+              ? result.clientsAdded === 1
+                ? t(", 1 client added")
+                : t(", {count} clients added", { count: result.clientsAdded })
               : "") +
-            (result.failures ? `, ${result.failures} could not be filed` : "") +
+            (result.failures ? t(", {count} could not be filed", { count: result.failures }) : "") +
             ".",
         );
         setRepairPreview(null);
@@ -298,9 +301,9 @@ export function CouponsPanel({
     );
     try {
       await navigator.clipboard.writeText(lines.join("\n"));
-      setCopied(`Copied ${lines.length} order${lines.length === 1 ? "" : "s"}.`);
+      setCopied(lines.length === 1 ? t("Copied 1 order.") : t("Copied {count} orders.", { count: lines.length }));
     } catch {
-      setCopied("Could not reach the clipboard — select the list by hand.");
+      setCopied(t("Could not reach the clipboard — select the list by hand."));
     }
   }
 
@@ -328,8 +331,10 @@ export function CouponsPanel({
     revealIfFolded(matched);
     setCopied(
       matched.length
-        ? `Ticked ${matched.length} of ${wanted.size} order number${wanted.size === 1 ? "" : "s"}.`
-        : "None of those order numbers is in this list.",
+        ? wanted.size === 1
+          ? t("Ticked {matched} of 1 order number.", { matched: matched.length })
+          : t("Ticked {matched} of {wanted} order numbers.", { matched: matched.length, wanted: wanted.size })
+        : t("None of those order numbers is in this list."),
     );
   }
 
@@ -380,28 +385,25 @@ export function CouponsPanel({
       <article className="data-card">
         <div className="data-card-header">
           <div>
-            <span>Gift vouchers</span>
-            <h2>{formatMoney(outstanding, currency)} outstanding</h2>
+            <span>{t("Gift vouchers")}</span>
+            <h2>{t("{outstanding} outstanding", { outstanding: formatMoney(outstanding, currency) })}</h2>
           </div>
           <ClarityPassesCredits size={24} />
         </div>
-        <p className="field-help">
-          Vouchers people have paid for and not yet spent. That total is money you owe in lessons and gear, not takings -
-          it lands in the till on the day the voucher is redeemed, not the day it was bought.
-        </p>
+        <p className="field-help">{t("Vouchers people have paid for and not yet spent. That total is money you owe in lessons and gear, not takings - it lands in the till on the day the voucher is redeemed, not the day it was bought.")}</p>
         <div className="settings-field-row product-search-row">
           <div className="settings-field product-search-field">
-            <label htmlFor="coupon-search">Search</label>
+            <label htmlFor="coupon-search">{t("Search")}</label>
             <div className="product-search-input">
               <Search size={15} />
               <input
                 id="coupon-search"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Code, name or email"
+                placeholder={t("Code, name or email")}
               />
               {Boolean(search) && (
-                <button className="icon-button small" onClick={() => setSearch("")} type="button" aria-label="Clear search">
+                <button className="icon-button small" onClick={() => setSearch("")} type="button" aria-label={t("Clear search")}>
                   <X size={14} />
                 </button>
               )}
@@ -409,28 +411,21 @@ export function CouponsPanel({
           </div>
           <label className="settings-field pos-settles-toggle">
             <input checked={showSpent} onChange={(event) => setShowSpent(event.target.checked)} type="checkbox" />
-            <span>Show used and cancelled</span>
+            <span>{t("Show used and cancelled")}</span>
           </label>
-          <button className="outline-button" onClick={onReload} type="button">
-            Refresh
-          </button>
+          <button className="outline-button" onClick={onReload} type="button">{t("Refresh")}</button>
         </div>
       </article>
 
       <article className="data-card wide">
         <div className="data-card-header">
           <div>
-            <span>From Stripe</span>
-            <h2>Vouchers bought online</h2>
+            <span>{t("From Stripe")}</span>
+            <h2>{t("Vouchers bought online")}</h2>
           </div>
           <Download size={24} />
         </div>
-        <p className="field-help">
-          Reads your Stripe payments directly and looks for gift vouchers among them — in the
-          payment's own wording, and failing that in what was actually in the basket. It has to go
-          to Stripe rather than the synced invoice list because Stripe labels every one of these
-          "Charge for &lt;email&gt;", so the product name is not in your records at all.
-        </p>
+        <p className="field-help">{t("Reads your Stripe payments directly and looks for gift vouchers among them — in the payment's own wording, and failing that in what was actually in the basket. It has to go to Stripe rather than the synced invoice list because Stripe labels every one of these \"Charge for <email>\", so the product name is not in your records at all.")}</p>
         {/* Vouchers imported before they could be filed under anyone.
          *
          * Not shown unless there are some: a repair for a problem the account
@@ -438,43 +433,37 @@ export function CouponsPanel({
         <div className="coupon-repair">
           {!repairPreview && !repairDone && (
             <button className="link-button" type="button" disabled={repairing} onClick={() => void previewRepair()}>
-              {repairing ? "Checking…" : "Check for vouchers that belong to nobody"}
+              {repairing ? t("Checking…") : t("Check for vouchers that belong to nobody")}
             </button>
           )}
           {repairPreview && (repairPreview.unowned || 0) > 0 && (
             <div className="coupon-repair-preview">
               <p className="field-help">
-                {repairPreview.unowned} voucher{repairPreview.unowned === 1 ? "" : "s"} belong
-                {repairPreview.unowned === 1 ? "s" : ""} to nobody.{" "}
-                {repairPreview.alreadyKnown
-                  ? `${repairPreview.alreadyKnown} of them match a client you already have. `
-                  : "None of them matches a client you already have — which is normal for gifts. "}
+                {repairPreview.unowned === 1 ? t("1 voucher belongs to nobody.") : t("{count} vouchers belong to nobody.", { count: repairPreview.unowned ?? 0 })}{" "}{repairPreview.alreadyKnown
+                  ? t("{alreadyKnown} of them match a client you already have. ", { alreadyKnown: repairPreview.alreadyKnown })
+                  : t("None of them matches a client you already have — which is normal for gifts. ")}
                 {addBuyers
-                  ? `Filing them adds ${repairPreview.clientsToAdd} client${
-                      repairPreview.clientsToAdd === 1 ? "" : "s"
-                    }.`
-                  : "Only the ones matching an existing client will be filed."}
+                  ? repairPreview.clientsToAdd === 1
+                    ? t("Filing them adds 1 client.")
+                    : t("Filing them adds {count} clients.", { count: repairPreview.clientsToAdd ?? 0 })
+                  : t("Only the ones matching an existing client will be filed.")}
               </p>
               <div className="panel-actions">
                 <button className="primary-button" type="button" disabled={repairing} onClick={() => void runRepair()}>
-                  {repairing ? "Filing…" : "File them"}
+                  {repairing ? t("Filing…") : t("File them")}
                 </button>
-                <button className="outline-button" type="button" onClick={() => setRepairPreview(null)}>
-                  Not now
-                </button>
+                <button className="outline-button" type="button" onClick={() => setRepairPreview(null)}>{t("Not now")}</button>
                 <label className="coupon-add-buyers">
                   <input
                     type="checkbox"
                     checked={addBuyers}
                     onChange={(event) => setAddBuyers(event.target.checked)}
-                  />
-                  Add buyers to the client list
-                </label>
+                  />{t("Add buyers to the client list")}</label>
               </div>
             </div>
           )}
           {repairPreview && !repairPreview.unowned && (
-            <p className="field-help">Every voucher already belongs to somebody.</p>
+            <p className="field-help">{t("Every voucher already belongs to somebody.")}</p>
           )}
           {repairDone && <p className="field-help">{repairDone}</p>}
         </div>
@@ -497,17 +486,14 @@ export function CouponsPanel({
           >
             {showRules ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
             {rules.length
-              ? `${rules.length} price rule${rules.length === 1 ? "" : "s"} for naming a payment`
-              : "No price rules yet — add one to name payments Stripe cannot"}
+              ? rules.length === 1
+                ? t("1 price rule for naming a payment")
+                : t("{count} price rules for naming a payment", { count: rules.length })
+              : t("No price rules yet — add one to name payments Stripe cannot")}
           </button>
           {showRules && (
             <>
-              <p className="field-help">
-                Squarespace tells Stripe an order number and nothing about the product, so a price
-                is the only clue left. A rule is used only when the payment itself says nothing.
-                Changed your price? Add a second rule with the same name — the old one keeps naming
-                the older sales correctly.
-              </p>
+              <p className="field-help">{t("Squarespace tells Stripe an order number and nothing about the product, so a price is the only clue left. A rule is used only when the payment itself says nothing. Changed your price? Add a second rule with the same name — the old one keeps naming the older sales correctly.")}</p>
               {rules.length > 0 && (
                 <ul className="coupon-rules-list">
                   {rules.map((rule) => (
@@ -527,16 +513,14 @@ export function CouponsPanel({
                         type="button"
                         disabled={savingRules}
                         onClick={() => void removeRule(rule.id)}
-                      >
-                        Remove
-                      </button>
+                      >{t("Remove")}</button>
                     </li>
                   ))}
                 </ul>
               )}
               <div className="coupon-rule-form">
                 <label className="settings-field">
-                  <span>Amount ({currency})</span>
+                  <span>{t("Amount ({currency})", { currency })}</span>
                   <input
                     type="number"
                     min="0"
@@ -548,17 +532,17 @@ export function CouponsPanel({
                   />
                 </label>
                 <label className="settings-field">
-                  <span>Is this product</span>
+                  <span>{t("Is this product")}</span>
                   <input
                     value={ruleDraft.label}
-                    placeholder="Lesson Gift Voucher"
+                    placeholder={t("Lesson Gift Voucher")}
                     onChange={(event) =>
                       setRuleDraft((current) => ({ ...current, label: event.target.value }))
                     }
                   />
                 </label>
                 <label className="settings-field">
-                  <span>From (optional)</span>
+                  <span>{t("From (optional)")}</span>
                   <input
                     type="date"
                     value={ruleDraft.from}
@@ -568,7 +552,7 @@ export function CouponsPanel({
                   />
                 </label>
                 <label className="settings-field">
-                  <span>Until (optional)</span>
+                  <span>{t("Until (optional)")}</span>
                   <input
                     type="date"
                     value={ruleDraft.until}
@@ -583,7 +567,7 @@ export function CouponsPanel({
                   disabled={savingRules || !ruleDraft.label.trim() || !Number(ruleDraft.amount)}
                   onClick={() => void addRule()}
                 >
-                  {savingRules ? "Saving…" : "Add rule"}
+                  {savingRules ? t("Saving…") : t("Add rule")}
                 </button>
               </div>
             </>
@@ -592,11 +576,11 @@ export function CouponsPanel({
 
         <div className="panel-actions coupon-import-actions">
           <button className="outline-button" disabled={scanning} onClick={() => void runScan()} type="button">
-            {scanning ? "Looking…" : "Find voucher purchases"}
+            {scanning ? t("Looking…") : t("Find voucher purchases")}
           </button>
           {chosenCount > 0 && (
             <button className="primary-button" disabled={importing} onClick={() => void runImport()} type="button">
-              {importing ? "Issuing…" : `Issue ${chosenCount} code${chosenCount === 1 ? "" : "s"}`}
+              {importing ? t("Issuing…") : t("Issue {chosenCount} code{value}", { chosenCount, value: chosenCount === 1 ? "" : "s" })}
             </button>
           )}
           {chosenCount > 0 && (
@@ -605,9 +589,7 @@ export function CouponsPanel({
                 type="checkbox"
                 checked={addBuyers}
                 onChange={(event) => setAddBuyers(event.target.checked)}
-              />
-              Add buyers to the client list
-            </label>
+              />{t("Add buyers to the client list")}</label>
           )}
         </div>
 
@@ -616,12 +598,9 @@ export function CouponsPanel({
             {/* Said plainly, because the old version of this screen could not:
                 "nothing found" and "nothing looked at" rendered identically and
                 the difference was the entire bug. */}
-            <p className="field-help">
-              Read {scan.scannedCount} payment{scan.scannedCount === 1 ? "" : "s"} from the last{" "}
-              {scan.sinceDays} days.{" "}
-              {scan.candidates.length
-                ? `${scan.candidates.length} look${scan.candidates.length === 1 ? "s" : ""} like a voucher.`
-                : "None of them is named like a voucher."}
+            <p className="field-help">{t("Read {scannedCount} payment", { scannedCount: scan.scannedCount })}{scan.scannedCount === 1 ? "" : "s"}{" "}{t("from the last {sinceDays} days.", { sinceDays: scan.sinceDays })}{" "}{scan.candidates.length
+                ? t("{length} look{value} like a voucher.", { length: scan.candidates.length, value: scan.candidates.length === 1 ? "s" : "" })
+                : t("None of them is named like a voucher.")}
             </p>
 
             {/* Selecting in bulk.
@@ -634,7 +613,7 @@ export function CouponsPanel({
             {allCandidates.length > 0 && (
               <div className="coupon-bulk">
                 <div className="coupon-bulk-amounts">
-                  <span className="coupon-bulk-label">Select every payment of</span>
+                  <span className="coupon-bulk-label">{t("Select every payment of")}</span>
                   {amountGroups.map((group) => {
                     const allOn = group.ids.every((id) => chosen[id]);
                     const someOn = !allOn && group.ids.some((id) => chosen[id]);
@@ -654,30 +633,25 @@ export function CouponsPanel({
                 </div>
                 <div className="panel-actions coupon-import-actions">
                   <button className="outline-button" type="button" onClick={() => void copyOrderNumbers()}>
-                    <Copy size={15} /> Copy {allCandidates.length} order numbers
-                  </button>
+                    <Copy size={15} />{" "}{t("Copy {length} order numbers", { length: allCandidates.length })}</button>
                   <button
                     className="outline-button"
                     type="button"
                     aria-expanded={showPaste}
                     onClick={() => setShowPaste((current) => !current)}
-                  >
-                    Paste order numbers to tick
-                  </button>
+                  >{t("Paste order numbers to tick")}</button>
                   {chosenCount > 0 && (
-                    <button className="link-button" type="button" onClick={() => setChosen({})}>
-                      Clear {chosenCount} selected
-                    </button>
+                    <button className="link-button" type="button" onClick={() => setChosen({})}>{t("Clear {chosenCount} selected", { chosenCount })}</button>
                   )}
                 </div>
                 {showPaste && (
                   <div className="coupon-paste">
                     <label className="settings-field">
-                      <span>Order numbers</span>
+                      <span>{t("Order numbers")}</span>
                       <textarea
                         rows={3}
                         value={orderPaste}
-                        placeholder="272, 266, ORD-261 — any format, one line or many"
+                        placeholder={t("272, 266, ORD-261 — any format, one line or many")}
                         onChange={(event) => setOrderPaste(event.target.value)}
                       />
                     </label>
@@ -686,9 +660,7 @@ export function CouponsPanel({
                       type="button"
                       disabled={!orderPaste.trim()}
                       onClick={selectPastedOrders}
-                    >
-                      Tick those
-                    </button>
+                    >{t("Tick those")}</button>
                   </div>
                 )}
                 {copied && <p className="field-help">{copied}</p>}
@@ -711,10 +683,10 @@ export function CouponsPanel({
                         }
                       />
                       <span className="coupon-candidate-main">
-                        <strong>{candidate.label || "Unnamed purchase"}</strong>
+                        <strong>{candidate.label || t("Unnamed purchase")}</strong>
                         <em>
                           {[
-                            candidate.buyerName || candidate.buyerEmail || "Unknown buyer",
+                            candidate.buyerName || candidate.buyerEmail || t("Unknown buyer"),
                             formatMoney(candidate.valueCents / 100, candidate.currency || currency),
                             candidate.when ? new Date(candidate.when).toLocaleDateString() : "",
                             candidate.orderNumber,
@@ -728,9 +700,7 @@ export function CouponsPanel({
                         </em>
                         {candidate.partlyRefunded && (
                           <em className="coupon-candidate-warning">
-                            <AlertTriangle size={12} /> Partly refunded — the value above is what is
-                            left
-                          </em>
+                            <AlertTriangle size={12} />{" "}{t("Partly refunded — the value above is what is left")}</em>
                         )}
                       </span>
                     </label>
@@ -752,11 +722,7 @@ export function CouponsPanel({
                   aria-expanded={showOthers}
                   onClick={() => setShowOthers((current) => !current)}
                 >
-                  {showOthers ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-                  {scan.otherCharges.length} other payment
-                  {scan.otherCharges.length === 1 ? "" : "s"} with no coupon — tick any that were
-                  vouchers
-                </button>
+                  {showOthers ? <ChevronDown size={15} /> : <ChevronRight size={15} />}{t("{length} other payment", { length: scan.otherCharges.length })}{scan.otherCharges.length === 1 ? "" : "s"}{" "}{t("with no coupon — tick any that were vouchers")}</button>
                 {showOthers && (
                   <ul className="coupon-candidates">
                     {scan.otherCharges.map((candidate) => (
@@ -773,10 +739,10 @@ export function CouponsPanel({
                             }
                           />
                           <span className="coupon-candidate-main">
-                            <strong>{candidate.label || "Unnamed purchase"}</strong>
+                            <strong>{candidate.label || t("Unnamed purchase")}</strong>
                             <em>
                               {[
-                                candidate.buyerName || candidate.buyerEmail || "Unknown buyer",
+                                candidate.buyerName || candidate.buyerEmail || t("Unknown buyer"),
                                 formatMoney(candidate.valueCents / 100, candidate.currency || currency),
                                 candidate.when ? new Date(candidate.when).toLocaleDateString() : "",
                                 candidate.orderNumber,
@@ -799,14 +765,14 @@ export function CouponsPanel({
       <article className="data-card wide">
         <div className="data-card-header">
           <div>
-            <span>Issue</span>
-            <h2>New coupon</h2>
+            <span>{t("Issue")}</span>
+            <h2>{t("New coupon")}</h2>
           </div>
           <Plus size={24} />
         </div>
         <div className="billing-catalog-editor product-editor">
           <label className="settings-field">
-            <span>Value ({currency})</span>
+            <span>{t("Value ({currency})", { currency })}</span>
             <input
               type="number"
               min="0"
@@ -816,32 +782,32 @@ export function CouponsPanel({
             />
           </label>
           <label className="settings-field">
-            <span>Code</span>
+            <span>{t("Code")}</span>
             <input
               value={form.code}
               onChange={(event) => setForm((current) => ({ ...current, code: event.target.value }))}
-              placeholder="Leave blank to generate one"
+              placeholder={t("Leave blank to generate one")}
             />
           </label>
           <label className="settings-field">
-            <span>For</span>
+            <span>{t("For")}</span>
             <input
               value={form.issuedToName}
               onChange={(event) => setForm((current) => ({ ...current, issuedToName: event.target.value }))}
-              placeholder="Optional"
+              placeholder={t("Optional")}
             />
           </label>
           <label className="settings-field">
-            <span>Email</span>
+            <span>{t("Email")}</span>
             <input
               type="email"
               value={form.issuedToEmail}
               onChange={(event) => setForm((current) => ({ ...current, issuedToEmail: event.target.value }))}
-              placeholder="Optional"
+              placeholder={t("Optional")}
             />
           </label>
           <label className="settings-field">
-            <span>Expires</span>
+            <span>{t("Expires")}</span>
             <input
               type="date"
               value={form.expiresAt}
@@ -849,17 +815,15 @@ export function CouponsPanel({
             />
           </label>
           <label className="settings-field product-notes-field">
-            <span>Note</span>
+            <span>{t("Note")}</span>
             <input
               value={form.note}
               onChange={(event) => setForm((current) => ({ ...current, note: event.target.value }))}
-              placeholder="Optional - why it was issued"
+              placeholder={t("Optional - why it was issued")}
             />
           </label>
         </div>
-        <p className="field-help">
-          Leave the expiry blank unless you mean it. Someone has already paid for this.
-        </p>
+        <p className="field-help">{t("Leave the expiry blank unless you mean it. Someone has already paid for this.")}</p>
         <div className="panel-actions">
           <button
             className="primary-button"
@@ -867,7 +831,7 @@ export function CouponsPanel({
             onClick={() => void submitIssue()}
             type="button"
           >
-            {issuing ? "Issuing..." : "Issue Coupon"}
+            {issuing ? t("Issuing...") : t("Issue Coupon")}
           </button>
         </div>
       </article>
@@ -875,32 +839,28 @@ export function CouponsPanel({
       <article className="data-card wide recent-invoices-card">
         <div className="data-card-header">
           <div>
-            <span>Coupons</span>
-            <h2>{visible.length} shown</h2>
+            <span>{t("Coupons")}</span>
+            <h2>{t("{length} shown", { length: visible.length })}</h2>
           </div>
           <ClarityPassesCredits size={24} />
         </div>
-        {loadState === "loading" && <Loading what="coupons" />}
+        {loadState === "loading" && <Loading what={t("coupons")} />}
         {loadState === "error" && (
-          <p>
-            Could not load coupons.{" "}
-            <button className="link-button" onClick={onReload} type="button">
-              Retry
-            </button>
+          <p>{t("Could not load coupons.")}{" "}<button className="link-button" onClick={onReload} type="button">{t("Retry")}</button>
           </p>
         )}
         {loadState !== "loading" && !visible.length && (
-          <p>{coupons.length ? "Nothing matches that." : "No coupons yet."}</p>
+          <p>{coupons.length ? t("Nothing matches that.") : t("No coupons yet.")}</p>
         )}
         {visible.length > 0 && (
           <table className="recent-invoices-table product-table">
             <thead>
               <tr>
-                <th>Code</th>
-                <th>For</th>
-                <th>Remaining</th>
-                <th>Value</th>
-                <th>Source</th>
+                <th>{t("Code")}</th>
+                <th>{t("For")}</th>
+                <th>{t("Remaining")}</th>
+                <th>{t("Value")}</th>
+                <th>{t("Source")}</th>
                 <th />
               </tr>
             </thead>
@@ -931,14 +891,14 @@ export function CouponsPanel({
                       <td>{SOURCE_LABELS[coupon.source] || coupon.source}</td>
                       <td className="product-row-actions">
                         <button className="link-button" onClick={() => void toggleCoupon(coupon)} type="button">
-                          {open ? "Close" : "History"}
+                          {open ? t("Close") : t("History")}
                         </button>
                         <button
                           className="text-link-button"
                           onClick={() => void onSetVoid(coupon, coupon.status !== "void")}
                           type="button"
                         >
-                          {coupon.status === "void" ? "Restore" : "Cancel"}
+                          {coupon.status === "void" ? t("Restore") : t("Cancel")}
                         </button>
                       </td>
                     </tr>
@@ -946,9 +906,9 @@ export function CouponsPanel({
                       <tr className="product-stock-row">
                         <td colSpan={6}>
                           <div className="product-movement-list">
-                            {redemptionsLoading && <Loading what="history" className="field-help" />}
+                            {redemptionsLoading && <Loading what={t("history")} className="field-help" />}
                             {!redemptionsLoading && !redemptions.length && (
-                              <p className="field-help">Not used yet.</p>
+                              <p className="field-help">{t("Not used yet.")}</p>
                             )}
                             {!redemptionsLoading &&
                               redemptions.map((entry) => (
@@ -956,7 +916,7 @@ export function CouponsPanel({
                                   <strong className={entry.amount > 0 ? "negative" : "positive"}>
                                     {entry.amount > 0 ? `-${entry.amount}` : `+${Math.abs(entry.amount)}`}
                                   </strong>
-                                  <span>{entry.note || (entry.amount > 0 ? "Redeemed" : "Put back")}</span>
+                                  <span>{entry.note || (entry.amount > 0 ? t("Redeemed") : t("Put back"))}</span>
                                   <em>
                                     {entry.createdAt ? new Date(entry.createdAt).toLocaleString() : ""}
                                     {entry.resultingBalance === null ? "" : ` - left ${entry.resultingBalance}`}

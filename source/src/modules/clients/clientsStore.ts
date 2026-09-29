@@ -7,6 +7,7 @@
 // while it is loading. The machinery is modules/shared/remoteListStore; lesson
 // notes use the same one.
 
+import { t } from "../../lib/i18n";
 import { createRemoteListStore, isUnauthorizedError, type RemoteListStatus } from "../shared/remoteListStore";
 import { cleanPeople, type Person } from "./clientsModel";
 
@@ -23,7 +24,7 @@ const store = createRemoteListStore<Person>({
   path: "/api/people",
   rows: (data) => data.people as unknown[],
   clean: (rows) => cleanPeople(rows),
-  failure: "Could not load clients.",
+  failure: t("Could not load clients."),
 });
 
 function toClientsState(): ClientsState {

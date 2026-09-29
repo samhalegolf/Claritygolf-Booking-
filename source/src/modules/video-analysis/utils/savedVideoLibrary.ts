@@ -8,6 +8,7 @@ import {
   isIndexedDbFactoryAvailable,
   openVideoAnalysisDatabase,
 } from "./videoAnalysisDatabase";
+import { t } from "../../../lib/i18n";
 
 const SAVED_ITEMS_STORE = VIDEO_ANALYSIS_DB_STORES.savedVideoItems;
 const SAVED_BLOBS_STORE = VIDEO_ANALYSIS_DB_STORES.savedVideoBlobs;
@@ -567,8 +568,8 @@ const runStoreRequest = async <T>(
     const store = transaction.objectStore(storeName);
     const request = operate(store);
     request.onsuccess = () => resolve(request.result as T);
-    request.onerror = () => reject(request.error || new Error("Saved video library request failed."));
-    transaction.onerror = () => reject(transaction.error || new Error("Saved video library transaction failed."));
+    request.onerror = () => reject(request.error || new Error(t("Saved video library request failed.")));
+    transaction.onerror = () => reject(transaction.error || new Error(t("Saved video library transaction failed.")));
     transaction.oncomplete = () => db.close();
   });
 };
@@ -580,7 +581,7 @@ const buildItem = async (
   if (!input.sourceBlob || blobSize(input.sourceBlob) === 0) {
     throw new SavedVideoLibraryError(
       "TRANSIENT_VIDEO_NOT_FOUND",
-      "The active video source could not be found for saving."
+      t("The active video source could not be found for saving.")
     );
   }
 
@@ -673,7 +674,7 @@ const safeJson = async <T>(
     const detail = safePreview ? `: ${safePreview}` : "";
     throw new SavedVideoCloudError(
       errorCode,
-      `${fallbackMessage} (HTTP ${response.status}, ${typeLabel})${detail}`,
+      t("{fallbackMessage} (HTTP {status}, {typeLabel}){detail}", { fallbackMessage, status: response.status, typeLabel, detail }),
       response.status
     );
   }
@@ -894,7 +895,7 @@ export const registerGuestSender = async (input: {
     message?: string;
   };
   if (!response.ok || !data?.token || !data?.guest) {
-    throw new Error(data?.message || "Could not set that up. Try again in a moment.");
+    throw new Error(data?.message || t("Could not set that up. Try again in a moment."));
   }
   await setGuestToken(data.token);
   return data.guest;
@@ -1092,7 +1093,7 @@ const loadImage = (src: string) =>
   new Promise<HTMLImageElement>((resolve, reject) => {
     const image = new Image();
     image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("Screenshot image could not be decoded."));
+    image.onerror = () => reject(new Error(t("Screenshot image could not be decoded.")));
     image.src = src;
   });
 
@@ -1103,7 +1104,7 @@ const snapshotUploadBlob = async (dataUrl: string): Promise<Blob> => {
   canvas.width = Math.max(1, Math.round((image.naturalWidth || 1) * scale));
   canvas.height = Math.max(1, Math.round((image.naturalHeight || 1) * scale));
   const context = canvas.getContext("2d");
-  if (!context) throw new Error("Could not prepare the screenshot for upload.");
+  if (!context) throw new Error(t("Could not prepare the screenshot for upload."));
   // JPEG has no alpha; a transparent corner would otherwise come out black.
   context.fillStyle = "#fff";
   context.fillRect(0, 0, canvas.width, canvas.height);
@@ -1111,7 +1112,7 @@ const snapshotUploadBlob = async (dataUrl: string): Promise<Blob> => {
   const blob = await new Promise<Blob | null>((resolve) =>
     canvas.toBlob(resolve, "image/jpeg", SNAPSHOT_UPLOAD_QUALITY)
   );
-  if (!blob) throw new Error("Could not prepare the screenshot for upload.");
+  if (!blob) throw new Error(t("Could not prepare the screenshot for upload."));
   return blob;
 };
 
@@ -1119,7 +1120,7 @@ const blobToDataUrl = (blob: Blob) =>
   new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(reader.error || new Error("Could not read the screenshot."));
+    reader.onerror = () => reject(reader.error || new Error(t("Could not read the screenshot.")));
     reader.readAsDataURL(blob);
   });
 
@@ -1221,7 +1222,7 @@ export const fetchCloudSnapshotImage = async (
   if (!response.ok) {
     throw new SavedVideoCloudError(
       "CLARITY_CLOUD_IMPORT_FAILED",
-      `Screenshot download failed with HTTP ${response.status}.`,
+      t("Screenshot download failed with HTTP {status}.", { status: response.status }),
       response.status
     );
   }
@@ -1343,11 +1344,11 @@ export const saveSavedVideoToCloud = async (
   const scope: VideoTransferScope = options.scope || "coach";
   const item = await store.getItem(savedVideoId);
   if (!item) {
-    throw new SavedVideoLibraryError("SAVED_VIDEO_METADATA_MISSING", "Saved video metadata was not found.");
+    throw new SavedVideoLibraryError("SAVED_VIDEO_METADATA_MISSING", t("Saved video metadata was not found."));
   }
   const blob = await store.getBlob(savedVideoId);
   if (!blob) {
-    throw new SavedVideoCloudError("SAVED_VIDEO_SOURCE_MISSING", "Saved video source was not found.");
+    throw new SavedVideoCloudError("SAVED_VIDEO_SOURCE_MISSING", t("Saved video source was not found."));
   }
   // Already in the cloud means there is nothing to upload -- but a return is
   // not an upload, it is an act of addressing. The server turns the existing
@@ -1359,7 +1360,7 @@ export const saveSavedVideoToCloud = async (
   if (!checksumSha256) {
     throw new SavedVideoCloudError(
       "DRIVE_UPLOAD_VERIFY_FAILED",
-      "Could not calculate a checksum for this saved video. Try again before sending it."
+      t("Could not calculate a checksum for this saved video. Try again before sending it.")
     );
   }
 
@@ -1463,7 +1464,7 @@ export const saveSavedVideoToCloud = async (
     if (!session.driveVideoFileId && working.cloud?.driveVideoFileId) {
       session = { ...session, driveVideoFileId: working.cloud.driveVideoFileId };
     }
-    if (!session.driveVideoFileId) throw new SavedVideoCloudError("DRIVE_UPLOAD_VERIFY_FAILED", "Clarity could not verify the uploaded video.");
+    if (!session.driveVideoFileId) throw new SavedVideoCloudError("DRIVE_UPLOAD_VERIFY_FAILED", t("Clarity could not verify the uploaded video."));
 
     working = await patchCloudState(store, working, {
       ...working.cloud,
@@ -1530,7 +1531,7 @@ export const saveSavedVideoToCloud = async (
     const cloudError =
       error instanceof SavedVideoCloudError
         ? error
-        : new SavedVideoCloudError("DRIVE_FINALIZE_FAILED", error instanceof Error ? error.message : "Google Drive upload failed.");
+        : new SavedVideoCloudError("DRIVE_FINALIZE_FAILED", error instanceof Error ? error.message : t("Google Drive upload failed."));
     const setupBlocked = isCloudSetupError(cloudError.code);
     await patchCloudState(store, working, {
       ...(setupBlocked ? {} : working.cloud),
@@ -1558,7 +1559,7 @@ export const pauseSavedVideoCloudUpload = async (
   scope: VideoTransferScope = "coach"
 ): Promise<SavedVideoItem> => {
   const item = await store.getItem(savedVideoId);
-  if (!item) throw new SavedVideoLibraryError("SAVED_VIDEO_METADATA_MISSING", "Saved video metadata was not found.");
+  if (!item) throw new SavedVideoLibraryError("SAVED_VIDEO_METADATA_MISSING", t("Saved video metadata was not found."));
   try {
     const response = await apiFetch(transferUrl(scope, savedVideoId, "pause"), {
       method: "POST",
@@ -1569,7 +1570,7 @@ export const pauseSavedVideoCloudUpload = async (
     return patchCloudState(store, item, applyTransferSessionToCloud(item.cloud, sessionFromResponse(data)));
   } catch (error) {
     if (error instanceof SavedVideoCloudError) throw error;
-    throw new SavedVideoCloudError("DRIVE_UPLOAD_INTERRUPTED", error instanceof Error ? error.message : "Could not pause transfer.");
+    throw new SavedVideoCloudError("DRIVE_UPLOAD_INTERRUPTED", error instanceof Error ? error.message : t("Could not pause transfer."));
   }
 };
 
@@ -1579,7 +1580,7 @@ export const cancelSavedVideoCloudUpload = async (
   scope: VideoTransferScope = "coach"
 ): Promise<SavedVideoItem> => {
   const item = await store.getItem(savedVideoId);
-  if (!item) throw new SavedVideoLibraryError("SAVED_VIDEO_METADATA_MISSING", "Saved video metadata was not found.");
+  if (!item) throw new SavedVideoLibraryError("SAVED_VIDEO_METADATA_MISSING", t("Saved video metadata was not found."));
   try {
     await apiFetch(transferUrl(scope, savedVideoId, "session"), {
       method: "DELETE",
@@ -1604,7 +1605,7 @@ export const removeSavedVideoCloudTransfer = async (
   scope: VideoTransferScope = "coach"
 ): Promise<SavedVideoItem> => {
   const item = await store.getItem(savedVideoId);
-  if (!item) throw new SavedVideoLibraryError("SAVED_VIDEO_METADATA_MISSING", "Saved video metadata was not found.");
+  if (!item) throw new SavedVideoLibraryError("SAVED_VIDEO_METADATA_MISSING", t("Saved video metadata was not found."));
   if (item.cloud?.transferId) {
     try {
       await apiFetch(transferUrl(scope, savedVideoId, "session"), {
@@ -1804,7 +1805,7 @@ export const importSavedVideoFromClarityCloud = async (
     throw apiFailure(importPackage, "CLARITY_CLOUD_IMPORT_FAILED");
   }
   if (!importPackage.savedVideo || !importPackage.video) {
-    throw new SavedVideoCloudError("CLARITY_CLOUD_IMPORT_FAILED", "Clarity Cloud import metadata was incomplete.");
+    throw new SavedVideoCloudError("CLARITY_CLOUD_IMPORT_FAILED", t("Clarity Cloud import metadata was incomplete."));
   }
 
   const existing = await store.getItem(savedVideoId);
@@ -1830,7 +1831,7 @@ export const importSavedVideoFromClarityCloud = async (
   if (!downloadResponse.ok) {
     throw new SavedVideoCloudError(
       "CLARITY_CLOUD_IMPORT_FAILED",
-      `Clarity Cloud video download failed with HTTP ${downloadResponse.status}.`,
+      t("Clarity Cloud video download failed with HTTP {status}.", { status: downloadResponse.status }),
       downloadResponse.status
     );
   }
@@ -1839,7 +1840,7 @@ export const importSavedVideoFromClarityCloud = async (
   if (!checksumSha256 || checksumSha256 !== importPackage.video.checksumSha256 || blob.size !== importPackage.video.sizeBytes) {
     throw new SavedVideoCloudError(
       "CLARITY_CLOUD_IMPORT_VERIFY_FAILED",
-      "Downloaded video did not match the Clarity Cloud transfer catalogue."
+      t("Downloaded video did not match the Clarity Cloud transfer catalogue.")
     );
   }
 
@@ -2010,22 +2011,22 @@ const managedHealthFromError = (error: unknown): ManagedLocalLibraryHealth => {
 const managedStatusMessage = (health: ManagedLocalLibraryHealth) => {
   switch (health) {
     case "healthy":
-      return "Healthy";
+      return t("Healthy");
     case "missing":
-      return "Missing file";
+      return t("Missing file");
     case "moved":
-      return "Moved";
+      return t("Moved");
     case "read-only":
-      return "Read only";
+      return t("Read only");
     case "permission-lost":
-      return "Permission lost";
+      return t("Permission lost");
     case "repair-required":
-      return "Repair required";
+      return t("Repair required");
     case "unsupported":
-      return "File System Access is unavailable. Working from device cache.";
+      return t("File System Access is unavailable. Working from device cache.");
     case "not-configured":
     default:
-      return "Choose My Library";
+      return t("Choose My Library");
   }
 };
 
@@ -2067,7 +2068,7 @@ export const getManagedLocalVideoLibraryStatus = async (): Promise<ManagedLocalV
       await writeFile(cache, testFileName, "ok");
       const testFile = await cache.getFileHandle(testFileName).then((fileHandle) => fileHandle.getFile());
       if ((await testFile.text()) !== "ok") {
-        throw new Error("Local library verification read-back failed.");
+        throw new Error(t("Local library verification read-back failed."));
       }
     } finally {
       await cache.removeEntry?.(testFileName).catch(() => undefined);
@@ -2142,7 +2143,7 @@ const writeManagedSavedVideo = async (
   const root = await getStoredManagedRootHandle();
   if (!root) return item;
   const permission = await getManagedPermission(root, true);
-  if (permission !== "granted") throw new Error("Permission lost");
+  if (permission !== "granted") throw new Error(t("Permission lost"));
   const libraryManifest = await ensureManagedRootManifest(root);
   await ensureManagedSystemFolders(root);
   const directory = await getManagedSavedVideoDirectory(root, item.playerId, item.savedVideoId, true);
@@ -2188,7 +2189,7 @@ const writeManagedSavedVideo = async (
   if (thumb) await writeFile(snapshots, "thumbnail.jpg", thumb);
   const verified = await directory.getFileHandle(MANAGED_LIBRARY_VIDEO_FILE).then((handle) => handle.getFile());
   if (verified.size !== blobRecord.sizeBytes) {
-    throw new SavedVideoLibraryError("SAVED_VIDEO_VERIFY_FAILED", "Managed library video did not match metadata.");
+    throw new SavedVideoLibraryError("SAVED_VIDEO_VERIFY_FAILED", t("Managed library video did not match metadata."));
   }
   return withSavedVideoArchitectureState({
     ...item,
@@ -2233,9 +2234,9 @@ const removeManagedSavedVideoDirectory = async (item: SavedVideoItem) => {
 const verifyManagedSavedVideo = async (item: SavedVideoItem): Promise<SavedVideoItem> => {
   try {
     const blob = await readManagedSavedVideoBlob(item);
-    if (!blob) throw new SavedVideoLibraryError("SAVED_VIDEO_BLOB_MISSING", "Managed library file is missing.");
+    if (!blob) throw new SavedVideoLibraryError("SAVED_VIDEO_BLOB_MISSING", t("Managed library file is missing."));
     if (blobSize(blob) !== item.source.sizeBytes) {
-      throw new SavedVideoLibraryError("SAVED_VIDEO_VERIFY_FAILED", "Managed library file size does not match metadata.");
+      throw new SavedVideoLibraryError("SAVED_VIDEO_VERIFY_FAILED", t("Managed library file size does not match metadata."));
     }
     return withSavedVideoArchitectureState({
       ...item,
@@ -2407,7 +2408,7 @@ export const createIndexedDbSavedVideoLibrary = (): SavedVideoLibraryStore | nul
         if (error instanceof SavedVideoLibraryError) throw error;
         throw new SavedVideoLibraryError(
           "SAVED_VIDEO_WRITE_FAILED",
-          "Saved video could not be written.",
+          t("Saved video could not be written."),
           error
         );
       }
@@ -2436,7 +2437,7 @@ export const createIndexedDbSavedVideoLibrary = (): SavedVideoLibraryStore | nul
         try {
           const managedBlob = await readManagedSavedVideoBlob(item);
           if (managedBlob) return managedBlob;
-          await store.putItem(markManagedFailure(item, new Error("Managed library file is missing.")));
+          await store.putItem(markManagedFailure(item, new Error(t("Managed library file is missing."))));
         } catch (error) {
           await store.putItem(markManagedFailure(item, error));
         }
@@ -2479,7 +2480,7 @@ export const createIndexedDbSavedVideoLibrary = (): SavedVideoLibraryStore | nul
       } catch (error) {
         throw new SavedVideoLibraryError(
           "SAVED_VIDEO_DELETE_FAILED",
-          "Saved video could not be deleted.",
+          t("Saved video could not be deleted."),
           error
         );
       }
@@ -2488,7 +2489,7 @@ export const createIndexedDbSavedVideoLibrary = (): SavedVideoLibraryStore | nul
     async removeDeviceCopy(savedVideoId) {
       const item = await getItem(savedVideoId);
       if (!item) {
-        throw new SavedVideoLibraryError("SAVED_VIDEO_METADATA_MISSING", "Saved video metadata was not found.");
+        throw new SavedVideoLibraryError("SAVED_VIDEO_METADATA_MISSING", t("Saved video metadata was not found."));
       }
       await removeManagedSavedVideoDirectory(item);
       await runStoreRequest(SAVED_BLOBS_STORE, "readwrite", (objectStore) =>
@@ -2512,7 +2513,7 @@ export const createIndexedDbSavedVideoLibrary = (): SavedVideoLibraryStore | nul
       if (!item) {
         throw new SavedVideoLibraryError(
           "SAVED_VIDEO_METADATA_MISSING",
-          "Saved video metadata was not found after saving."
+          t("Saved video metadata was not found after saving.")
         );
       }
       let currentItem = item;
@@ -2528,7 +2529,7 @@ export const createIndexedDbSavedVideoLibrary = (): SavedVideoLibraryStore | nul
       if (!blobRecord?.blob && currentItem.local.managed?.status !== "healthy") {
         throw new SavedVideoLibraryError(
           "SAVED_VIDEO_BLOB_MISSING",
-          "Saved video blob was not found after saving."
+          t("Saved video blob was not found after saving.")
         );
       }
       if (
@@ -2537,7 +2538,7 @@ export const createIndexedDbSavedVideoLibrary = (): SavedVideoLibraryStore | nul
       ) {
         throw new SavedVideoLibraryError(
           "SAVED_VIDEO_VERIFY_FAILED",
-          "Saved video blob size did not match metadata."
+          t("Saved video blob size did not match metadata.")
         );
       }
       const verified = withSavedVideoArchitectureState(currentItem);
@@ -2607,7 +2608,7 @@ export const createMemorySavedVideoLibraryStore = (): SavedVideoLibraryStore => 
     async removeDeviceCopy(savedVideoId) {
       const item = items.get(savedVideoId);
       if (!item) {
-        throw new SavedVideoLibraryError("SAVED_VIDEO_METADATA_MISSING", "Saved video metadata is missing.");
+        throw new SavedVideoLibraryError("SAVED_VIDEO_METADATA_MISSING", t("Saved video metadata is missing."));
       }
       blobs.delete(savedVideoId);
       const next = withSavedVideoArchitectureState({
@@ -2626,20 +2627,20 @@ export const createMemorySavedVideoLibraryStore = (): SavedVideoLibraryStore => 
       if (!item) {
         throw new SavedVideoLibraryError(
           "SAVED_VIDEO_METADATA_MISSING",
-          "Saved video metadata is missing."
+          t("Saved video metadata is missing.")
         );
       }
       const blobRecord = blobs.get(savedVideoId);
       if (!blobRecord?.blob) {
         throw new SavedVideoLibraryError(
           "SAVED_VIDEO_BLOB_MISSING",
-          "Saved video blob is missing."
+          t("Saved video blob is missing.")
         );
       }
       if (blobRecord.sizeBytes !== item.source.sizeBytes || blobSize(blobRecord.blob) !== item.source.sizeBytes) {
         throw new SavedVideoLibraryError(
           "SAVED_VIDEO_VERIFY_FAILED",
-          "Saved video blob size did not match metadata."
+          t("Saved video blob size did not match metadata.")
         );
       }
       const verified = withSavedVideoArchitectureState(item);

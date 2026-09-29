@@ -33,6 +33,7 @@ import { ChevronDown, ChevronRight, Inbox, Undo2 } from "lucide-react";
 import { ClarityAddClient, ClarityPassesCredits } from "../shared/ClarityIcons";
 
 import { Loading } from "../shared/Loading";
+import { t } from "../../lib/i18n";
 
 /** What a sale looks like it is. "unknown" is a real answer, not a failure. */
 export type PassInboxKind = "pass" | "unknown";
@@ -156,10 +157,10 @@ function providerLabel(provider: string) {
  * lessons should be able to see that the only thing tying this purchase to
  * this person is that the names agreed. */
 function linkNote(purchase: PassInboxPurchase) {
-  if (!purchase.personId) return "No client matched — this will be issued unassigned";
-  if (purchase.personLinkSource === "email") return "Matched on email";
-  if (purchase.personLinkSource === "name") return "Matched on name only — check this is them";
-  if (purchase.personLinkSource === "new") return "New client created from this sale";
+  if (!purchase.personId) return t("No client matched — this will be issued unassigned");
+  if (purchase.personLinkSource === "email") return t("Matched on email");
+  if (purchase.personLinkSource === "name") return t("Matched on name only — check this is them");
+  if (purchase.personLinkSource === "new") return t("New client created from this sale");
   return "";
 }
 
@@ -221,15 +222,13 @@ export function PassInboxPanel({
   const templateFor = (purchase: PassInboxPurchase) =>
     chosenTemplate[purchase.id] ?? purchase.suggestedTemplateServiceId;
 
-  if (loadState === "loading") return <Loading what="the pass inbox" />;
+  if (loadState === "loading") return <Loading what={t("the pass inbox")} />;
 
   if (loadState === "error") {
     return (
       <div className="pass-inbox-empty">
-        <p>The pass inbox could not be loaded.</p>
-        <button className="outline-button" type="button" onClick={onRetry}>
-          Try again
-        </button>
+        <p>{t("The pass inbox could not be loaded.")}</p>
+        <button className="outline-button" type="button" onClick={onRetry}>{t("Try again")}</button>
       </div>
     );
   }
@@ -257,12 +256,12 @@ export function PassInboxPanel({
         key={purchase.id}
       >
         <div className="pass-inbox-row-main">
-          <strong>{purchase.itemName || "Unnamed product"}</strong>
+          <strong>{purchase.itemName || t("Unnamed product")}</strong>
           <span>
             {[
               providerLabel(purchase.provider),
-              purchase.buyerName || "Unknown buyer",
-              purchase.saleNumber ? `Sale ${purchase.saleNumber}` : "",
+              purchase.buyerName || t("Unknown buyer"),
+              purchase.saleNumber ? t("Sale {number}", { number: purchase.saleNumber }) : "",
               formatAmount(purchase.amountCents, purchase.currency),
               formatWhen(purchase.purchasedAt),
               purchase.quantity > 1 ? `×${purchase.quantity}` : "",
@@ -278,26 +277,22 @@ export function PassInboxPanel({
               be judged, not because anything thinks it is a pass -- which is
               how a wrong guess gets corrected without a code change. */}
           {purchase.kind === "unknown" && (
-            <em className="pass-inbox-row-caution">
-              Not recognised as a lesson pass — is it one?
-            </em>
+            <em className="pass-inbox-row-caution">{t("Not recognised as a lesson pass — is it one?")}</em>
           )}
         </div>
 
         <div className="pass-inbox-row-actions">
           <label className="pass-inbox-field">
-            <span>Package</span>
+            <span>{t("Package")}</span>
               <select
                 value={selected}
                 onChange={(event) =>
                   setChosenTemplate((current) => ({ ...current, [purchase.id]: event.target.value }))
                 }
               >
-                <option value="">Pick a package…</option>
+                <option value="">{t("Pick a package…")}</option>
                 {templates.map((template) => (
-                  <option key={template.serviceId} value={template.serviceId}>
-                    {template.name} · {template.credits} credit
-                    {template.credits === 1 ? "" : "s"}
+                  <option key={template.serviceId} value={template.serviceId}>{t("{name} · {credits} credit", { name: template.name, credits: template.credits })}{template.credits === 1 ? "" : "s"}
                   </option>
                 ))}
             </select>
@@ -308,7 +303,7 @@ export function PassInboxPanel({
               package's own price stands in, and stays editable because a
               comped or discounted one is a real thing. */}
           <label className="pass-inbox-field">
-            <span>Value</span>
+            <span>{t("Value")}</span>
             <input
               type="number"
               min={0}
@@ -326,9 +321,7 @@ export function PassInboxPanel({
           </label>
 
           {suggested !== null && (purchase.amountCents === null || purchase.amountCents <= 0) && (
-            <span className="pass-inbox-suggestion">
-              The sale came through at 0 — this is the package's price.
-            </span>
+            <span className="pass-inbox-suggestion">{t("The sale came through at 0 — this is the package's price.")}</span>
           )}
           {/* Only ever shown for a suggestion that is actually in the box.
               Leaving it up after a coach overrides the guess would describe a
@@ -337,8 +330,8 @@ export function PassInboxPanel({
             selected === purchase.suggestedTemplateServiceId && (
               <span className="pass-inbox-suggestion">
                 {purchase.suggestionConfidence === "exact"
-                  ? "Name matched your catalogue"
-                  : "Closest match — worth a look"}
+                  ? t("Name matched your catalogue")
+                  : t("Closest match — worth a look")}
               </span>
             )}
 
@@ -350,11 +343,9 @@ export function PassInboxPanel({
               className="outline-button"
               type="button"
               disabled={busy}
-              title={`Stop showing anything sold as “${purchase.itemName}”`}
+              title={t("Stop showing anything sold as “{itemName}”", { itemName: purchase.itemName })}
               onClick={() => onDismissType(purchase.itemName)}
-            >
-              Never a pass
-            </button>
+            >{t("Never a pass")}</button>
             {/* The single-sale correction as well: it writes back to the
                 classifier's own output, which is the record that was actually
                 wrong. Worth keeping beside the product-level one because a
@@ -364,11 +355,9 @@ export function PassInboxPanel({
               className="outline-button"
               type="button"
               disabled={busy}
-              title="Just this sale"
+              title={t("Just this sale")}
               onClick={() => onDismiss(purchase.id)}
-            >
-              Just this one
-            </button>
+            >{t("Just this one")}</button>
             <button
               className="primary-button"
               type="button"
@@ -376,7 +365,7 @@ export function PassInboxPanel({
               onClick={() => onIssue(purchase.id, selected, typed)}
             >
               <ClarityPassesCredits size={15} />
-              {busy ? "Issuing…" : "Issue pass"}
+              {busy ? t("Issuing…") : t("Issue pass")}
             </button>
           </div>
         </div>
@@ -393,11 +382,8 @@ export function PassInboxPanel({
     return (
       <div className="pass-inbox-empty">
         <Inbox size={22} />
-        <p>Nothing waiting.</p>
-        <span>
-          Purchases that need a package, and passes that need an owner, land here. An empty inbox
-          means every pass sold has reached somebody.
-        </span>
+        <p>{t("Nothing waiting.")}</p>
+        <span>{t("Purchases that need a package, and passes that need an owner, land here. An empty inbox means every pass sold has reached somebody.")}</span>
       </div>
     );
   }
@@ -407,21 +393,14 @@ export function PassInboxPanel({
       {(likely.length > 0 || unlikely.length > 0) && (
         <section className="pass-inbox-section">
           <header>
-            <h3>Waiting to be issued</h3>
-            <p>
-              Somebody paid for these and holds nothing yet. The sale names a product, not a number
-              of credits — pick the package it was and the credits follow from your catalogue. A
-              gift voucher gets a code and a balance instead, because nobody knows yet who will
-              spend it.
-            </p>
+            <h3>{t("Waiting to be issued")}</h3>
+            <p>{t("Somebody paid for these and holds nothing yet. The sale names a product, not a number of credits — pick the package it was and the credits follow from your catalogue. A gift voucher gets a code and a balance instead, because nobody knows yet who will spend it.")}</p>
           </header>
 
           {likely.map((purchase) => renderPurchase(purchase, false))}
 
           {likely.length === 0 && unlikely.length > 0 && (
-            <p className="pass-inbox-suggestion">
-              Nothing here looks like a pass or a voucher.
-            </p>
+            <p className="pass-inbox-suggestion">{t("Nothing here looks like a pass or a voucher.")}</p>
           )}
 
           {/* The fold. Counted on the button rather than hidden behind it: the
@@ -434,10 +413,7 @@ export function PassInboxPanel({
                 aria-expanded={showUnlikely}
                 onClick={() => setShowUnlikely((current) => !current)}
               >
-                {showUnlikely ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-                {unlikely.length} other sale{unlikely.length === 1 ? "" : "s"} that probably
-                {unlikely.length === 1 ? " is not" : " are not"} passes
-              </button>
+                {showUnlikely ? <ChevronDown size={15} /> : <ChevronRight size={15} />}{t("{length} other sale", { length: unlikely.length })}{unlikely.length === 1 ? "" : "s"}{" "}{t("that probably")}{unlikely.length === 1 ? t(" is not") : t(" are not")}{" "}{t("passes")}</button>
               {showUnlikely && unlikely.map((purchase) => renderPurchase(purchase, true))}
             </div>
           )}
@@ -447,11 +423,8 @@ export function PassInboxPanel({
       {unassigned.length > 0 && (
         <section className="pass-inbox-section">
           <header>
-            <h3>Waiting for an owner</h3>
-            <p>
-              These exist and are spendable, but belong to nobody. A pass with no owner is honest;
-              one attached to the wrong person is found out at the counter.
-            </p>
+            <h3>{t("Waiting for an owner")}</h3>
+            <p>{t("These exist and are spendable, but belong to nobody. A pass with no owner is honest; one attached to the wrong person is found out at the counter.")}</p>
           </header>
 
           {unassigned.map((pass) => {
@@ -463,10 +436,10 @@ export function PassInboxPanel({
                   <strong>{pass.name}</strong>
                   <span>
                     {[
-                      `${pass.creditsAvailable} of ${pass.creditsAllocated} left`,
-                      pass.source ? `From ${pass.source.replace(/_/g, " ")}` : "",
+                      t("{available} of {allocated} left", { available: pass.creditsAvailable, allocated: pass.creditsAllocated }),
+                      pass.source ? t("From {source}", { source: pass.source.replace(/_/g, " ") }) : "",
                       formatWhen(pass.issuedAt),
-                      pass.expiresAt ? `Expires ${formatWhen(pass.expiresAt)}` : "",
+                      pass.expiresAt ? t("Expires {date}", { date: formatWhen(pass.expiresAt) }) : "",
                     ]
                       .filter(Boolean)
                       .join(" · ")}
@@ -476,14 +449,14 @@ export function PassInboxPanel({
 
                 <div className="pass-inbox-row-actions">
                   <label className="pass-inbox-field">
-                    <span>Client</span>
+                    <span>{t("Client")}</span>
                     <select
                       value={person}
                       onChange={(event) =>
                         setChosenPerson((current) => ({ ...current, [pass.id]: event.target.value }))
                       }
                     >
-                      <option value="">Pick a client…</option>
+                      <option value="">{t("Pick a client…")}</option>
                       {sortedPeople.map((entry) => (
                         <option key={entry.id} value={entry.id}>
                           {entry.name}
@@ -499,7 +472,7 @@ export function PassInboxPanel({
                       onClick={() => onAttach(pass.id, person)}
                     >
                       <ClarityAddClient size={15} />
-                      {busy ? "Attaching…" : "Attach"}
+                      {busy ? t("Attaching…") : t("Attach")}
                     </button>
                   </div>
                 </div>
@@ -521,10 +494,7 @@ export function PassInboxPanel({
             aria-expanded={showDismissed}
             onClick={() => setShowDismissed((current) => !current)}
           >
-            {showDismissed ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-            {dismissedTypes.length} product{dismissedTypes.length === 1 ? "" : "s"} you have said
-            {dismissedTypes.length === 1 ? " is" : " are"} never a pass
-          </button>
+            {showDismissed ? <ChevronDown size={15} /> : <ChevronRight size={15} />}{t("{length} product", { length: dismissedTypes.length })}{dismissedTypes.length === 1 ? "" : "s"}{" "}{t("you have said")}{dismissedTypes.length === 1 ? t(" is") : t(" are")}{" "}{t("never a pass")}</button>
           {showDismissed && (
             <ul className="pass-inbox-dismissed">
               {dismissedTypes.map((entry) => (
@@ -536,9 +506,7 @@ export function PassInboxPanel({
                     disabled={busyId === entry.type}
                     onClick={() => onRestoreType(entry.type)}
                   >
-                    <Undo2 size={14} />
-                    Show again
-                  </button>
+                    <Undo2 size={14} />{t("Show again")}</button>
                 </li>
               ))}
             </ul>

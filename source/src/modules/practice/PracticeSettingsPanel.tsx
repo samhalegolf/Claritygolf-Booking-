@@ -14,6 +14,7 @@ import {
   type PracticeTypeMeta,
 } from "./practiceModel";
 import { invalidateAllPractice } from "./practiceStore";
+import { t } from "../../lib/i18n";
 
 /* Practice settings: the kinds of block a coach can assign, and the
  * favourites rail behind them.
@@ -61,7 +62,7 @@ export function PracticeSettingsPanel({ onToast }: PracticeSettingsPanelProps) {
         blockTypes?: PracticeTypeMeta[];
         message?: string;
       };
-      if (!typesResponse.ok) throw new Error(typesData?.message || "Could not load block types.");
+      if (!typesResponse.ok) throw new Error(typesData?.message || t("Could not load block types."));
       // An empty list is a workspace that has never edited them, not a
       // workspace with none -- the defaults are what it is actually running.
       const next = toRows(practiceTypeList(typesData.blockTypes));
@@ -71,7 +72,7 @@ export function PracticeSettingsPanel({ onToast }: PracticeSettingsPanelProps) {
       const favouritesData = (await favouritesResponse.json().catch(() => ({}))) as { presets?: PracticePreset[] };
       if (favouritesResponse.ok) setFavourites(Array.isArray(favouritesData.presets) ? favouritesData.presets : []);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not load practice settings.");
+      setError(caught instanceof Error ? caught.message : t("Could not load practice settings."));
     } finally {
       setLoading(false);
     }
@@ -103,7 +104,7 @@ export function PracticeSettingsPanel({ onToast }: PracticeSettingsPanelProps) {
       const id = practiceTypeId("New type", current.map((row) => row.id));
       const row: Row = {
         id,
-        label: "New type",
+        label: t("New type"),
         hint: "",
         tone: "#3f6b52",
         titleHint: "",
@@ -133,16 +134,16 @@ export function PracticeSettingsPanel({ onToast }: PracticeSettingsPanelProps) {
         body: JSON.stringify({ blockTypes: rows.map(({ fresh: _fresh, ...type }) => type) }),
       });
       const data = (await response.json().catch(() => ({}))) as { blockTypes?: PracticeTypeMeta[]; message?: string };
-      if (!response.ok) throw new Error(data?.message || "Could not save block types.");
+      if (!response.ok) throw new Error(data?.message || t("Could not save block types."));
       const next = toRows(practiceTypeList(data.blockTypes));
       setRows(next);
       setSaved(next);
       // Every player's practice is now painted with the wrong names or
       // colours until it is re-read.
       invalidateAllPractice();
-      onToast("Block types saved.");
+      onToast(t("Block types saved."));
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not save block types.");
+      setError(caught instanceof Error ? caught.message : t("Could not save block types."));
     } finally {
       setBusy(false);
     }
@@ -151,7 +152,7 @@ export function PracticeSettingsPanel({ onToast }: PracticeSettingsPanelProps) {
   const removeFavourite = useCallback(
     async (preset: PracticePreset) => {
       if (busy) return;
-      if (!window.confirm(`Remove "${preset.title}" from favourites? Blocks already assigned from it stay as they are.`)) {
+      if (!window.confirm(t("Remove \"{title}\" from favourites? Blocks already assigned from it stay as they are.", { title: preset.title }))) {
         return;
       }
       setBusy(true);
@@ -160,7 +161,7 @@ export function PracticeSettingsPanel({ onToast }: PracticeSettingsPanelProps) {
         setFavourites((current) => current.filter((item) => item.id !== preset.id));
         invalidateAllPractice();
       } catch {
-        setError("Could not remove that favourite.");
+        setError(t("Could not remove that favourite."));
       } finally {
         setBusy(false);
       }
@@ -168,22 +169,17 @@ export function PracticeSettingsPanel({ onToast }: PracticeSettingsPanelProps) {
     [busy],
   );
 
-  if (loading) return <Loading what="practice settings" />;
+  if (loading) return <Loading what={t("practice settings")} />;
 
   return (
     <div className="practice-settings">
       <section className="practice-settings-section">
         <div className="practice-settings-head">
           <div>
-            <h4>Block types</h4>
-            <p>
-              The tabs across the top of the composer. A type is a name, a colour and which fields it asks
-              for — it never changes what a block does, so renaming or recolouring one is safe at any time.
-            </p>
+            <h4>{t("Block types")}</h4>
+            <p>{t("The tabs across the top of the composer. A type is a name, a colour and which fields it asks for — it never changes what a block does, so renaming or recolouring one is safe at any time.")}</p>
           </div>
-          <button type="button" className="outline-button" onClick={addType}>
-            + Add type
-          </button>
+          <button type="button" className="outline-button" onClick={addType}>{t("+ Add type")}</button>
         </div>
 
         <ul className="practice-type-rows">
@@ -203,10 +199,10 @@ export function PracticeSettingsPanel({ onToast }: PracticeSettingsPanelProps) {
                     aria-expanded={open}
                     onClick={() => setOpenId(open ? null : row.id)}
                   >
-                    <strong>{row.label || "Untitled"}</strong>
+                    <strong>{row.label || t("Untitled")}</strong>
                     <span>
                       {row.archived
-                        ? "Retired"
+                        ? t("Retired")
                         : PRACTICE_FIELDS.filter((field) => row.fields[field.key] !== false)
                             .map((field) => field.label.toLowerCase())
                             .join(" · ") || "title only"}
@@ -215,8 +211,8 @@ export function PracticeSettingsPanel({ onToast }: PracticeSettingsPanelProps) {
                   <div className="practice-type-row-tools">
                     <button
                       type="button"
-                      title="Move up"
-                      aria-label={`Move ${row.label} up`}
+                      title={t("Move up")}
+                      aria-label={t("Move {label} up", { label: row.label })}
                       disabled={index === 0}
                       onClick={() => move(row.id, -1)}
                     >
@@ -224,8 +220,8 @@ export function PracticeSettingsPanel({ onToast }: PracticeSettingsPanelProps) {
                     </button>
                     <button
                       type="button"
-                      title="Move down"
-                      aria-label={`Move ${row.label} down`}
+                      title={t("Move down")}
+                      aria-label={t("Move {label} down", { label: row.label })}
                       disabled={index === rows.length - 1}
                       onClick={() => move(row.id, 1)}
                     >
@@ -238,7 +234,7 @@ export function PracticeSettingsPanel({ onToast }: PracticeSettingsPanelProps) {
                   <div className="practice-type-editor">
                     <div className="practice-type-editor-grid">
                       <label className="settings-field">
-                        <span>Name</span>
+                        <span>{t("Name")}</span>
                         <input
                           value={row.label}
                           maxLength={60}
@@ -246,39 +242,39 @@ export function PracticeSettingsPanel({ onToast }: PracticeSettingsPanelProps) {
                         />
                       </label>
                       <label className="settings-field practice-type-colour">
-                        <span>Colour</span>
+                        <span>{t("Colour")}</span>
                         <input
                           type="color"
                           value={row.tone}
-                          aria-label={`Colour for ${row.label}`}
+                          aria-label={t("Colour for {label}", { label: row.label })}
                           onChange={(event) => patch(row.id, { tone: event.target.value })}
                         />
                       </label>
                       <label className="settings-field">
-                        <span>What it's for</span>
+                        <span>{t("What it's for")}</span>
                         <input
                           value={row.hint}
                           maxLength={80}
-                          placeholder="one thing, reps"
+                          placeholder={t("one thing, reps")}
                           onChange={(event) => patch(row.id, { hint: event.target.value })}
                         />
                       </label>
                       <label className="settings-field">
-                        <span>Example title</span>
+                        <span>{t("Example title")}</span>
                         <input
                           value={row.titleHint}
                           maxLength={80}
-                          placeholder="Gate Drill"
+                          placeholder={t("Gate Drill")}
                           onChange={(event) => patch(row.id, { titleHint: event.target.value })}
                         />
                       </label>
                       {row.fields.dose !== false && (
                         <label className="settings-field">
-                          <span>Example dose</span>
+                          <span>{t("Example dose")}</span>
                           <input
                             value={row.doseHint}
                             maxLength={40}
-                            placeholder="20 balls"
+                            placeholder={t("20 balls")}
                             onChange={(event) => patch(row.id, { doseHint: event.target.value })}
                           />
                         </label>
@@ -286,7 +282,7 @@ export function PracticeSettingsPanel({ onToast }: PracticeSettingsPanelProps) {
                     </div>
 
                     <fieldset className="practice-type-fields">
-                      <legend>Fields this type asks for</legend>
+                      <legend>{t("Fields this type asks for")}</legend>
                       {PRACTICE_FIELDS.map((field) => (
                         <label key={field.key} title={field.hint}>
                           <input
@@ -315,17 +311,13 @@ export function PracticeSettingsPanel({ onToast }: PracticeSettingsPanelProps) {
                           type="checkbox"
                           checked={row.archived}
                           onChange={(event) => patch(row.id, { archived: event.target.checked })}
-                        />
-                        Retire this type — blocks already assigned keep it
-                      </label>
+                        />{t("Retire this type — blocks already assigned keep it")}</label>
                       {row.fresh && (
                         <button
                           type="button"
                           className="practice-clear"
                           onClick={() => setRows((current) => current.filter((item) => item.id !== row.id))}
-                        >
-                          Discard
-                        </button>
+                        >{t("Discard")}</button>
                       )}
                     </div>
                   </div>
@@ -343,17 +335,15 @@ export function PracticeSettingsPanel({ onToast }: PracticeSettingsPanelProps) {
 
         <div className="practice-settings-actions">
           <button type="button" className="primary-button" disabled={!dirty || busy} onClick={() => void save()}>
-            {busy ? "Saving…" : "Save block types"}
+            {busy ? t("Saving…") : t("Save block types")}
           </button>
-          <button type="button" className="outline-button" disabled={!dirty || busy} onClick={() => setRows(saved)}>
-            Discard changes
-          </button>
+          <button type="button" className="outline-button" disabled={!dirty || busy} onClick={() => setRows(saved)}>{t("Discard changes")}</button>
           <button
             type="button"
             className="practice-clear"
             disabled={busy}
             onClick={() => {
-              if (!window.confirm("Put the five starting types back? Anything you have added stays.")) return;
+              if (!window.confirm(t("Put the five starting types back? Anything you have added stays."))) return;
               setRows((current) => {
                 const byId = new Map(current.map((row) => [row.id, row]));
                 const restored = toRows(DEFAULT_PRACTICE_TYPES);
@@ -361,20 +351,15 @@ export function PracticeSettingsPanel({ onToast }: PracticeSettingsPanelProps) {
                 return [...restored.map((base) => ({ ...base, archived: byId.get(base.id)?.archived ?? false })), ...extras];
               });
             }}
-          >
-            Reset to defaults
-          </button>
+          >{t("Reset to defaults")}</button>
         </div>
       </section>
 
       <section className="practice-settings-section">
         <div className="practice-settings-head">
           <div>
-            <h4>Favourites</h4>
-            <p>
-              The Saved rail beside the composer. These are added with ★ while assigning, and reordered by
-              dragging them there — this is where you clear out the ones you have stopped using.
-            </p>
+            <h4>{t("Favourites")}</h4>
+            <p>{t("The Saved rail beside the composer. These are added with ★ while assigning, and reordered by dragging them there — this is where you clear out the ones you have stopped using.")}</p>
           </div>
         </div>
 
@@ -391,18 +376,14 @@ export function PracticeSettingsPanel({ onToast }: PracticeSettingsPanelProps) {
                 />
                 <div>
                   <strong>{preset.title}</strong>
-                  <span>{preset.content.split("\n").filter(Boolean).length} steps{preset.dose ? ` · ${preset.dose}` : ""}</span>
+                  <span>{t("{length} steps", { length: preset.content.split("\n").filter(Boolean).length })}{preset.dose ? ` · ${preset.dose}` : ""}</span>
                 </div>
-                <button type="button" className="outline-button" disabled={busy} onClick={() => void removeFavourite(preset)}>
-                  Remove
-                </button>
+                <button type="button" className="outline-button" disabled={busy} onClick={() => void removeFavourite(preset)}>{t("Remove")}</button>
               </li>
             ))}
           </ul>
         ) : (
-          <p className="practice-settings-empty">
-            Nothing saved yet. Press ★ beside Save while assigning a block to keep it here.
-          </p>
+          <p className="practice-settings-empty">{t("Nothing saved yet. Press ★ beside Save while assigning a block to keep it here.")}</p>
         )}
       </section>
     </div>

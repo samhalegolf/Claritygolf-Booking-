@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { SnapshotFrameViewer, type FrameViewerShot } from "../shared/SnapshotFrameViewer";
 
 import { reviewShareToken } from "../shared/bookingHandoff";
+import { t } from "../../lib/i18n";
 
 // The player's view of a swing review their coach sent them.
 //
@@ -165,7 +166,7 @@ export default function SwingReviewSharePage() {
     };
   }, [token]);
 
-  if (state === "loading") return <Loading size="screen" what="your review" />;
+  if (state === "loading") return <Loading size="screen" what={t("your review")} />;
 
   // One message for expired, revoked, wrong and never-existed alike -- the
   // server does not distinguish them either, and neither should this.
@@ -173,14 +174,9 @@ export default function SwingReviewSharePage() {
     return (
       <main className="login-shell">
         <div className="login-card">
-          <h1>This link has expired</h1>
-          <p>
-            Review links are good for a limited time. Your player portal keeps every review for
-            good — sign in there, or ask your coach to send it again.
-          </p>
-          <a className="primary-button" href="/" style={linkButtonStyle}>
-            Go to your portal
-          </a>
+          <h1>{t("This link has expired")}</h1>
+          <p>{t("Review links are good for a limited time. Your player portal keeps every review for good — sign in there, or ask your coach to send it again.")}</p>
+          <a className="primary-button" href="/" style={linkButtonStyle}>{t("Go to your portal")}</a>
         </div>
       </main>
     );
@@ -205,17 +201,17 @@ export default function SwingReviewSharePage() {
     <main className="login-shell">
       <div className="login-card" style={{ display: "grid", gap: 18, maxWidth: 640 }}>
         <div>
-          <p className="eyebrow">Swing review</p>
-          <h1>{review.playerName ? `${review.playerName}'s swing review` : "Your swing review"}</h1>
+          <p className="eyebrow">{t("Swing review")}</p>
+          <h1>{review.playerName ? t("{playerName}'s swing review", { playerName: review.playerName }) : t("Your swing review")}</h1>
           <p>
-            {sentBy ? `From ${sentBy}.` : ""}
+            {sentBy ? t("From {sentBy}.", { sentBy }) : ""}
             {formatDate(review.reviewAt) ? ` ${formatDate(review.reviewAt)}.` : ""}
           </p>
         </div>
 
         {review.coachMessage && (
           <div style={cardStyle}>
-            <strong>A note from your coach</strong>
+            <strong>{t("A note from your coach")}</strong>
             <p style={{ margin: 0 }}>{review.coachMessage}</p>
           </div>
         )}
@@ -275,7 +271,7 @@ export default function SwingReviewSharePage() {
                         key={moment.key}
                         onClick={() => setFrameViewKey(moment.shotKey)}
                         style={shotButtonStyle}
-                        aria-label={`Show ${moment.title} in the video`}
+                        aria-label={t("Show {title} in the video", { title: moment.title })}
                       >
                         {moment.image ? (
                           <img src={moment.image} alt="" style={shotImageStyle} loading="lazy" />
@@ -285,7 +281,7 @@ export default function SwingReviewSharePage() {
                           <span>
                             <strong>{moment.title}</strong>
                             {moment.text ? ` — ${moment.text}` : ""}
-                            <span style={shotLinkStyle}>View in video ›</span>
+                            <span style={shotLinkStyle}>{t("View in video ›")}</span>
                           </span>
                         </span>
                       </button>
@@ -311,7 +307,7 @@ export default function SwingReviewSharePage() {
 
         {review.practice.length > 0 && (
           <section style={cardStyle}>
-            <strong>Practice from this review</strong>
+            <strong>{t("Practice from this review")}</strong>
             {review.practice.map((block) => (
               <div key={block.id}>
                 <strong>{block.title}</strong>
@@ -332,13 +328,8 @@ export default function SwingReviewSharePage() {
         ) : null}
 
         <div>
-          <a className="primary-button" href="/" style={linkButtonStyle}>
-            Sign in to your player portal
-          </a>
-          <p style={{ marginTop: 10 }}>
-            Your portal keeps every review, video and practice block for good, and it is where you
-            send your own swings in.
-            {formatDate(review.expiresAt) ? ` This link stops working on ${formatDate(review.expiresAt)}.` : ""}
+          <a className="primary-button" href="/" style={linkButtonStyle}>{t("Sign in to your player portal")}</a>
+          <p style={{ marginTop: 10 }}>{t("Your portal keeps every review, video and practice block for good, and it is where you send your own swings in.")}{formatDate(review.expiresAt) ? t(" This link stops working on {expiresAt}.", { expiresAt: formatDate(review.expiresAt) }) : ""}
           </p>
         </div>
       </div>

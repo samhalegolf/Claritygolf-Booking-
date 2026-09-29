@@ -1,3 +1,4 @@
+import { t } from "../../lib/i18n";
 /**
  * "What happened since I last looked."
  *
@@ -48,8 +49,8 @@ export function recentActivityList(sources: Sources, limit = 5): ActivityItem[] 
       tab: "videos",
       label:
         sources.unseenReturns === 1
-          ? "Your coach sent a video back"
-          : `Your coach sent ${sources.unseenReturns} videos back`,
+          ? t("Your coach sent a video back")
+          : t("Your coach sent {unseenReturns} videos back", { unseenReturns: sources.unseenReturns }),
       at: at(sources.newestReturnAt),
       unseen: true,
     });
@@ -63,7 +64,7 @@ export function recentActivityList(sources: Sources, limit = 5): ActivityItem[] 
   if (practice) {
     candidates.push({
       tab: "practice",
-      label: `New practice: ${practice.title}`,
+      label: t("New practice: {title}", { title: practice.title }),
       at: at(practice.assignedAt),
       unseen: false,
     });
@@ -75,7 +76,7 @@ export function recentActivityList(sources: Sources, limit = 5): ActivityItem[] 
   if (note) {
     candidates.push({
       tab: "notes",
-      label: note.title ? `Note: ${note.title}` : "Your coach left a note",
+      label: note.title ? t("Note: {title}", { title: note.title }) : t("Your coach left a note"),
       at: at(note.updatedAt || note.createdAt),
       unseen: false,
     });
@@ -87,7 +88,7 @@ export function recentActivityList(sources: Sources, limit = 5): ActivityItem[] 
   if (pass) {
     candidates.push({
       tab: "passes",
-      label: `${pass.name} — ${pass.creditsAvailable} left`,
+      label: t("{name} — {creditsAvailable} left", { name: pass.name, creditsAvailable: pass.creditsAvailable }),
       at: at(pass.issuedAt),
       unseen: false,
     });

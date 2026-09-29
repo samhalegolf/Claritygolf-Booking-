@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Check, Copy, RefreshCw, Send } from "lucide-react";
+import { t } from "../../lib/i18n";
 
 /**
  * Settings › Booking › Bay & room system.
@@ -31,13 +32,13 @@ type ResourceSystemState = {
 
 type SampleKey = "hold" | "move" | "release";
 
-const SAMPLE_LABELS: Record<SampleKey, string> = { hold: "Hold", move: "Move", release: "Release" };
+const SAMPLE_LABELS: Record<SampleKey, string> = { hold: t("Hold"), move: t("Move"), release: t("Release") };
 
 function pretty(value: unknown) {
   return JSON.stringify(value, null, 2);
 }
 
-function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
+function CopyButton({ text, label = t("Copy") }: { text: string; label?: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <button
@@ -51,7 +52,7 @@ function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) 
       type="button"
     >
       {copied ? <Check size={14} /> : <Copy size={14} />}
-      {copied ? "Copied" : label}
+      {copied ? t("Copied") : label}
     </button>
   );
 }
@@ -83,11 +84,11 @@ export function ResourceSystemPanel({ canEdit }: { canEdit: boolean }) {
     fetch("/api/resource-webhook-settings", { credentials: "same-origin", cache: "no-store" })
       .then(async (response) => {
         const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data?.message || "Could not load the bay system settings.");
+        if (!response.ok) throw new Error(data?.message || t("Could not load the bay system settings."));
         if (!cancelled) apply(data as ResourceSystemState);
       })
       .catch((error) => {
-        if (!cancelled) setLoadError(error instanceof Error ? error.message : "Could not load.");
+        if (!cancelled) setLoadError(error instanceof Error ? error.message : t("Could not load."));
       });
     return () => {
       cancelled = true;
@@ -102,7 +103,7 @@ export function ResourceSystemPanel({ canEdit }: { canEdit: boolean }) {
       body: JSON.stringify(body),
     });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data?.message || "That didn't save.");
+    if (!response.ok) throw new Error(data?.message || t("That didn't save."));
     return data;
   }
 
@@ -115,18 +116,18 @@ export function ResourceSystemPanel({ canEdit }: { canEdit: boolean }) {
       window.setTimeout(() => setSaveState("idle"), 1600);
     } catch (error) {
       setSaveState("error");
-      setMessage(error instanceof Error ? error.message : "That didn't save.");
+      setMessage(error instanceof Error ? error.message : t("That didn't save."));
     }
   }
 
   async function rotate() {
-    if (state?.hasSecret && !window.confirm("Make a new secret? Your system must switch to it, or Clarity's requests will fail its check.")) {
+    if (state?.hasSecret && !window.confirm(t("Make a new secret? Your system must switch to it, or Clarity's requests will fail its check."))) {
       return;
     }
     try {
       apply(await send("POST", { action: "rotate-secret" }));
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not make a new secret.");
+      setMessage(error instanceof Error ? error.message : t("Could not make a new secret."));
     }
   }
 
@@ -140,14 +141,14 @@ export function ResourceSystemPanel({ canEdit }: { canEdit: boolean }) {
         body: JSON.stringify({ action: "test" }),
       });
       const data = await response.json().catch(() => ({}));
-      setTest({ state: "done", ok: data?.ok === true, message: data?.message || "No answer." });
+      setTest({ state: "done", ok: data?.ok === true, message: data?.message || t("No answer.") });
     } catch {
-      setTest({ state: "done", ok: false, message: "Could not reach Clarity." });
+      setTest({ state: "done", ok: false, message: t("Could not reach Clarity.") });
     }
   }
 
   if (loadError) return <p className="workspace-save-error">{loadError}</p>;
-  if (!state) return <p className="field-help">Loading…</p>;
+  if (!state) return <p className="field-help">{t("Loading…")}</p>;
 
   const usingOptix = provider === "optix";
   const connected = usingOptix || (state.enabled && Boolean(state.url) && state.hasSecret);
@@ -158,24 +159,24 @@ export function ResourceSystemPanel({ canEdit }: { canEdit: boolean }) {
         <span className={`resource-system-dot ${connected ? "is-on" : ""}`} aria-hidden="true" />
         <strong>
           {usingOptix
-            ? "Using Optix"
+            ? t("Using Optix")
             : connected
-              ? "Connected to your booking system"
-              : "Not connected"}
+              ? t("Connected to your booking system")
+              : t("Not connected")}
         </strong>
         <small>
           {usingOptix
-            ? "Bays are held in Optix, set up per lesson type under Integrations."
-            : "Clarity asks your system to hold, move and release a bay for each lesson that needs one."}
+            ? t("Bays are held in Optix, set up per lesson type under Integrations.")
+            : t("Clarity asks your system to hold, move and release a bay for each lesson that needs one.")}
         </small>
       </div>
 
       {state.optixAvailable ? (
-        <div className="resource-system-choice" role="radiogroup" aria-label="Which system keeps your bays">
+        <div className="resource-system-choice" role="radiogroup" aria-label={t("Which system keeps your bays")}>
           {(
             [
-              ["optix", "Optix", "Ready-made connection. Already set up for this business."],
-              ["webhook", "Your own system", "Any software that can answer a web request."],
+              ["optix", "Optix", t("Ready-made connection. Already set up for this business.")],
+              ["webhook", t("Your own system"), t("Any software that can answer a web request.")],
             ] as const
           ).map(([value, label, hint]) => (
             <button
@@ -197,19 +198,17 @@ export function ResourceSystemPanel({ canEdit }: { canEdit: boolean }) {
       {!usingOptix ? (
         <ol className="resource-system-steps">
           <li>
-            <strong>Choose which bookings need a bay</strong>
-            <p>
-              In Locations, set <em>Who keeps track of them</em> to <em>Another booking system</em>. Then, on each
-              lesson type that uses a bay there, tick <em>Holds one of the location's resources</em>.
+            <strong>{t("Choose which bookings need a bay")}</strong>
+            <p>{t("In Locations, set")}{" "}<em>{t("Who keeps track of them")}</em>{" "}{t("to")}{" "}<em>{t("Another booking system")}</em>{t(". Then, on each lesson type that uses a bay there, tick")}{" "}<em>{t("Holds one of the location's resources")}</em>.
             </p>
           </li>
 
           <li>
-            <strong>Your system's address</strong>
-            <p>Clarity sends a signed POST here every time a lesson needs a bay, moves or is cancelled.</p>
+            <strong>{t("Your system's address")}</strong>
+            <p>{t("Clarity sends a signed POST here every time a lesson needs a bay, moves or is cancelled.")}</p>
             <div className="resource-system-row">
               <input
-                aria-label="Your system's webhook address"
+                aria-label={t("Your system's webhook address")}
                 placeholder="https://your-system.example.com/clarity"
                 value={url}
                 onChange={(event) => setUrl(event.target.value)}
@@ -223,45 +222,37 @@ export function ResourceSystemPanel({ canEdit }: { canEdit: boolean }) {
                   type="checkbox"
                   disabled={!canEdit}
                 />
-                <span>On</span>
+                <span>{t("On")}</span>
               </label>
             </div>
           </li>
 
           <li>
-            <strong>Check it's really Clarity</strong>
-            <p>
-              Every request carries <code>X-Clarity-Signature: t=&lt;time&gt;,v1=&lt;signature&gt;</code>. The
-              signature is HMAC-SHA256 of <code>&lt;time&gt;.&lt;body&gt;</code> using this secret. Refuse requests
-              that don't match or are more than five minutes old.
-            </p>
+            <strong>{t("Check it's really Clarity")}</strong>
+            <p>{t("Every request carries")}{" "}<code>X-Clarity-Signature: t=&lt;time&gt;,v1=&lt;signature&gt;</code>{t(". The signature is HMAC-SHA256 of")}{" "}<code>&lt;time&gt;.&lt;body&gt;</code>{" "}{t("using this secret. Refuse requests that don't match or are more than five minutes old.")}</p>
             {freshSecret ? (
               <div className="resource-system-secret">
                 <code>{freshSecret}</code>
                 <CopyButton text={freshSecret} />
-                <small>Shown once. Copy it into your system now.</small>
+                <small>{t("Shown once. Copy it into your system now.")}</small>
               </div>
             ) : (
               <div className="resource-system-row">
                 <span className="field-help">
-                  {state.hasSecret ? `Secret ending ${state.secretHint}` : "A secret is made when you first save an address."}
+                  {state.hasSecret ? t("Secret ending {secretHint}", { secretHint: state.secretHint }) : t("A secret is made when you first save an address.")}
                 </span>
                 {canEdit && state.hasSecret ? (
                   <button className="outline-button compact-button" onClick={() => void rotate()} type="button">
-                    <RefreshCw size={14} />
-                    New secret
-                  </button>
+                    <RefreshCw size={14} />{t("New secret")}</button>
                 ) : null}
               </div>
             )}
           </li>
 
           <li>
-            <strong>What Clarity sends</strong>
-            <p>
-              The event is in the body and in <code>X-Clarity-Event</code>. Times include the location's offset.
-            </p>
-            <div className="resource-system-tabs" role="tablist" aria-label="Example request">
+            <strong>{t("What Clarity sends")}</strong>
+            <p>{t("The event is in the body and in")}{" "}<code>X-Clarity-Event</code>{t(". Times include the location's offset.")}</p>
+            <div className="resource-system-tabs" role="tablist" aria-label={t("Example request")}>
               {(Object.keys(SAMPLE_LABELS) as SampleKey[]).map((key) => (
                 <button
                   key={key}
@@ -279,21 +270,17 @@ export function ResourceSystemPanel({ canEdit }: { canEdit: boolean }) {
           </li>
 
           <li>
-            <strong>What to reply</strong>
-            <p>
-              Reply within {state.timeoutSeconds} seconds. For a hold or a move, say which bay you held:
-            </p>
+            <strong>{t("What to reply")}</strong>
+            <p>{t("Reply within {timeoutSeconds} seconds. For a hold or a move, say which bay you held:", { timeoutSeconds: state.timeoutSeconds })}</p>
             <pre className="resource-system-code">{pretty(state.replies.hold)}</pre>
-            <p>or that none is free (the lesson then shows no bay, and the coach sees why):</p>
+            <p>{t("or that none is free (the lesson then shows no bay, and the coach sees why):")}</p>
             <pre className="resource-system-code">{pretty(state.replies.unavailable)}</pre>
-            <p>For a release, any 2xx reply is enough.</p>
+            <p>{t("For a release, any 2xx reply is enough.")}</p>
           </li>
 
           <li>
-            <strong>Changes on your side (optional)</strong>
-            <p>
-              If a bay is freed or swapped in your system, tell Clarity. Sign the request the same way and send
-              <code> resource.released</code> or <code>resource.updated</code> with the Clarity <code>booking.id</code>.
+            <strong>{t("Changes on your side (optional)")}</strong>
+            <p>{t("If a bay is freed or swapped in your system, tell Clarity. Sign the request the same way and send")}<code> resource.released</code>{" "}{t("or")}{" "}<code>resource.updated</code>{" "}{t("with the Clarity")}{" "}<code>booking.id</code>.
             </p>
             <div className="resource-system-row">
               <code className="resource-system-url">{state.inboundUrl}</code>
@@ -312,7 +299,7 @@ export function ResourceSystemPanel({ canEdit }: { canEdit: boolean }) {
       {canEdit ? (
         <div className="resource-system-actions">
           <button className="primary-button" disabled={saveState === "saving"} onClick={() => void save()} type="button">
-            {saveState === "saving" ? "Saving" : saveState === "saved" ? "Saved" : "Save"}
+            {saveState === "saving" ? t("Saving") : saveState === "saved" ? t("Saved") : t("Save")}
           </button>
           {!usingOptix ? (
             <button
@@ -322,7 +309,7 @@ export function ResourceSystemPanel({ canEdit }: { canEdit: boolean }) {
               type="button"
             >
               <Send size={15} />
-              {test.state === "sending" ? "Sending…" : "Send a test"}
+              {test.state === "sending" ? t("Sending…") : t("Send a test")}
             </button>
           ) : null}
           {test.state === "done" ? (
@@ -332,7 +319,7 @@ export function ResourceSystemPanel({ canEdit }: { canEdit: boolean }) {
           ) : null}
         </div>
       ) : (
-        <p className="field-help">Only an owner or admin can change this.</p>
+        <p className="field-help">{t("Only an owner or admin can change this.")}</p>
       )}
     </div>
   );

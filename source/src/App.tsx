@@ -167,6 +167,7 @@ import {
 import { BusinessHubPanel, OwnerIdentityCard } from "./modules/business-hub/BusinessHubPanel";
 import { CoachAvatar, CoachProfilePanel, type CoachWeekDay, type CoachWeekEntry } from "./modules/business-hub/CoachProfilePanel";
 import { RegionSettings, TimeZoneSelect, type RegionValues } from "./modules/settings/RegionSettings";
+import { LanguageSelect } from "./modules/settings/LanguageSettings";
 import type { ProfileInternalJob, ProfileTarget } from "./modules/business-hub/BusinessHubPanel";
 import {
   cleanNotificationTemplates,
@@ -334,6 +335,7 @@ import type {
   ReactNode,
   TouchEvent as ReactTouchEvent,
 } from "react";
+import { t } from "./lib/i18n";
 
 // Video analysis and voice notes are heavy, coach-only features (together well
 // over a third of the client bundle). They never render on the public booking
@@ -565,7 +567,7 @@ function useEditableBlock<T>({
       setState({
         status: "error",
         dirty: true,
-        errorMessage: error instanceof Error ? error.message : "Could not save these settings.",
+        errorMessage: error instanceof Error ? error.message : t("Could not save these settings."),
       });
       return false;
     }
@@ -616,29 +618,23 @@ function EditableSettingsBlock({
       <div className="editable-settings-block-header">
         <div>
           <span>{title}</span>
-          {dirty ? <em>Unsaved changes</em> : status === "saved" ? <em aria-live="polite">Saved</em> : null}
+          {dirty ? <em>{t("Unsaved changes")}</em> : status === "saved" ? <em aria-live="polite">{t("Saved")}</em> : null}
         </div>
         <div className="editable-settings-block-actions">
           {status === "idle" || status === "saved" ? (
             <button className="outline-button" onClick={onEdit} type="button">
-              <Pencil size={15} />
-              Edit
-            </button>
+              <Pencil size={15} />{t("Edit")}</button>
           ) : (
             <>
-              <button className="outline-button" disabled={isSaving} onClick={onCancel} type="button">
-                Cancel
-              </button>
+              <button className="outline-button" disabled={isSaving} onClick={onCancel} type="button">{t("Cancel")}</button>
               <button className="primary-button" disabled={!dirty || isSaving} onClick={onSave} type="button">
-                {isSaving ? "Saving..." : isError ? "Try Again" : "Save"}
+                {isSaving ? t("Saving...") : isError ? t("Try Again") : t("Save")}
               </button>
             </>
           )}
           {status === "saved" ? (
             <span className="editable-settings-saved" aria-live="polite">
-              <Check size={15} />
-              Saved
-            </span>
+              <Check size={15} />{t("Saved")}</span>
           ) : null}
         </div>
       </div>
@@ -784,13 +780,13 @@ function isExternallyOwned(item: Pick<CalendarItem, "origin" | "externalProvider
 
 function externalProviderLabel(item: Pick<CalendarItem, "origin" | "externalProvider">) {
   const provider = (item.externalProvider || item.origin || "").trim();
-  if (!provider) return "the booking system it came from";
+  if (!provider) return t("the booking system it came from");
   return provider.toLowerCase() === "optix" ? "Optix" : provider;
 }
 
 function externalRescheduleMessage(item: Pick<CalendarItem, "origin" | "externalProvider">) {
   const provider = externalProviderLabel(item);
-  return `${provider} owns this lesson, so move it there — changing it only in Clarity would leave the two out of step. You can also remove it from Clarity from the booking card.`;
+  return t("{provider} owns this lesson, so move it there — changing it only in Clarity would leave the two out of step. You can also remove it from Clarity from the booking card.", { provider });
 }
 
 type Location = {
@@ -941,11 +937,11 @@ function serviceEditorFormat(service?: Partial<Service> | null): ServiceEditorFo
 
 function serviceFormatLabel(service?: Partial<Service> | null) {
   const format = serviceEditorFormat(service);
-  if (format === "package") return "Package";
-  if (format === "video-review") return "Video review";
-  if (format === "custom-group") return "Custom group";
-  if (format === "group") return "Group";
-  return "Private";
+  if (format === "package") return t("Package");
+  if (format === "video-review") return t("Video review");
+  if (format === "custom-group") return t("Custom group");
+  if (format === "group") return t("Group");
+  return t("Private");
 }
 
 function customGroupBaseParticipants(service?: Partial<Service> | null) {
@@ -984,10 +980,10 @@ function calculateCustomGroupPrice(service: Partial<Service> | null | undefined,
 }
 
 function customGroupStatusLabel(status: CustomGroupAttendeeStatus) {
-  if (status === "booker") return "Booked";
-  if (status === "manual") return "Manual";
-  if (status === "confirmed") return "Confirmed";
-  return "Invited";
+  if (status === "booker") return t("Booked");
+  if (status === "manual") return t("Manual");
+  if (status === "confirmed") return t("Confirmed");
+  return t("Invited");
 }
 
 // Calendar item ids must be globally unique: two items created in the same millisecond used
@@ -1218,16 +1214,16 @@ const PROFILE_LINKED_VIEWS: View[] = ["calendar", "clients", "players", "sell", 
 // The Billing sections named once, so the tab bar and the topbar's subtitle
 // cannot drift into two different words for the same place.
 const BILLING_SECTION_LABELS: Record<Exclude<BillingSection, "none">, string> = {
-  dashboard: "Dashboard",
-  "new-invoice": "New Invoice",
-  invoices: "Invoices",
-  expenses: "Expenses",
-  products: "Products",
-  coupons: "Coupons",
-  reports: "Reports",
-  transactions: "Transaction History",
-  passes: "Passes",
-  settings: "Settings",
+  dashboard: t("Dashboard"),
+  "new-invoice": t("New Invoice"),
+  invoices: t("Invoices"),
+  expenses: t("Expenses"),
+  products: t("Products"),
+  coupons: t("Coupons"),
+  reports: t("Reports"),
+  transactions: t("Transaction History"),
+  passes: t("Passes"),
+  settings: t("Settings"),
 };
 
 // Which completed bookings the "ready to pull" lists show.
@@ -1450,10 +1446,10 @@ function WorkspaceSurface({
       <div className="workspace-overlay-panel">
         <header className="workspace-overlay-head">
           <div>
-            <span>Settings</span>
+            <span>{t("Settings")}</span>
             <strong>{title}</strong>
           </div>
-          <button className="icon-button" onClick={onClose} type="button" aria-label="Close settings">
+          <button className="icon-button" onClick={onClose} type="button" aria-label={t("Close settings")}>
             <X size={18} />
           </button>
         </header>
@@ -1530,34 +1526,34 @@ const SETTINGS_SECTIONS: Array<{
   /** Platform staff only. Not a business owner, however senior. */
   platformOnly?: boolean;
 }> = [
-  { key: "business", label: "Business", icon: ClarityFacilitiesRooms, adminOnly: true },
-  { key: "booking", label: "Booking", icon: ClarityCalendar },
-  { key: "services", label: "Lesson types", icon: ClarityServices },
-  { key: "practice", label: "Practice", icon: ClarityLessonsProgrammes },
+  { key: "business", label: t("Business"), icon: ClarityFacilitiesRooms, adminOnly: true },
+  { key: "booking", label: t("Booking"), icon: ClarityCalendar },
+  { key: "services", label: t("Lesson types"), icon: ClarityServices },
+  { key: "practice", label: t("Practice"), icon: ClarityLessonsProgrammes },
   // Two questions, two sections. Notifications is "what do we say" — the
   // wording of every client-facing message, in one place. Email / SMS is "how
   // do we send it" — addresses, provider wiring and send rules. They used to be
   // one tab holding four cards, two of which were both called a template.
-  { key: "notifications", label: "Notifications", icon: ClarityNotifications, adminOnly: true },
-  { key: "email-sms", label: "Email / SMS", icon: ClarityEmail, adminOnly: true },
-  { key: "account", label: "Account", icon: ClarityProfile, adminOnly: true },
+  { key: "notifications", label: t("Notifications"), icon: ClarityNotifications, adminOnly: true },
+  { key: "email-sms", label: t("Email / SMS"), icon: ClarityEmail, adminOnly: true },
+  { key: "account", label: t("Account"), icon: ClarityProfile, adminOnly: true },
   // Two lists, two questions. Integrations is "what have I plugged in" — the
   // coach's own accounts. Admin is "what is this software made of" — the
   // services Clarity runs on, which a coach never picks.
-  { key: "developer", label: "Integrations", icon: ClarityIntegrations, adminOnly: true },
+  { key: "developer", label: t("Integrations"), icon: ClarityIntegrations, adminOnly: true },
   // The other direction: not what this business has plugged in, but what may
   // plug into it -- API keys and webhooks for other software.
-  { key: "api", label: "API & webhooks", icon: Webhook, adminOnly: true },
+  { key: "api", label: t("API & webhooks"), icon: Webhook, adminOnly: true },
   // Platform-only, not account-admin. Its own description says these are "the
   // services Clarity itself runs on, not things a coach picks" -- shared
   // infrastructure whose state belongs to the platform, not to any one
   // business. Gated on adminOnly it was visible to every business owner, so a
   // brand new workspace could see the platform's Resend, Drive and Stripe
   // wiring and read another business's Google connection as its own.
-  { key: "admin", label: "Admin", icon: ClarityAdmin, platformOnly: true },
+  { key: "admin", label: t("Admin"), icon: ClarityAdmin, platformOnly: true },
   // Last on purpose. It is the one section that is not about configuring this
   // business -- it is about standing up a second, disposable copy of it.
-  { key: "sandbox", label: "Sandbox", icon: FlaskConical, adminOnly: true },
+  { key: "sandbox", label: t("Sandbox"), icon: FlaskConical, adminOnly: true },
 ];
 
 type SettingsTab =
@@ -1709,18 +1705,18 @@ type PlayerPracticeSummary = {
  * five behind the toggle -- SECONDARY_PLAYER_TOOLS below is derived from the
  * second list so the two can never drift apart. */
 const PRIMARY_PLAYER_TOOL_TABS = [
-  { id: "bookings", label: "Bookings", Icon: ClarityCalendar },
-  { id: "reviews", label: "Swing reviews", Icon: ImagePlus },
-  { id: "videos", label: "Videos", Icon: ClarityVideoAnalysis },
-  { id: "practice", label: "Practice", Icon: ClarityLessonsProgrammes },
+  { id: "bookings", label: t("Bookings"), Icon: ClarityCalendar },
+  { id: "reviews", label: t("Swing reviews"), Icon: ImagePlus },
+  { id: "videos", label: t("Videos"), Icon: ClarityVideoAnalysis },
+  { id: "practice", label: t("Practice"), Icon: ClarityLessonsProgrammes },
 ] as const satisfies ReadonlyArray<{ id: PlayerProfileTool; label: string; Icon: IconComponent }>;
 
 const SECONDARY_PLAYER_TOOL_TABS = [
-  { id: "notes", label: "Notes", Icon: ClarityBookingPages },
-  { id: "emails", label: "Emails", Icon: ClarityEmail },
-  { id: "transactions", label: "Transactions", Icon: ClarityPayments },
-  { id: "passes", label: "Passes", Icon: ClarityPassesCredits },
-  { id: "portals", label: "Portals", Icon: ClarityIntegrations },
+  { id: "notes", label: t("Notes"), Icon: ClarityBookingPages },
+  { id: "emails", label: t("Emails"), Icon: ClarityEmail },
+  { id: "transactions", label: t("Transactions"), Icon: ClarityPayments },
+  { id: "passes", label: t("Passes"), Icon: ClarityPassesCredits },
+  { id: "portals", label: t("Portals"), Icon: ClarityIntegrations },
 ] as const satisfies ReadonlyArray<{ id: PlayerProfileTool; label: string; Icon: IconComponent }>;
 
 /** The five that only appear once the tab bar is opened out. */
@@ -2310,9 +2306,9 @@ type BookingScreenDefinition = {
   path: string;
 };
 const BOOKING_SCREENS = [
-  { id: "main", label: "Main booking screen" },
-  { id: "group-lessons", label: "Group Lessons" },
-  { id: "private-lessons", label: "Private Lessons" },
+  { id: "main", label: t("Main booking screen") },
+  { id: "group-lessons", label: t("Group Lessons") },
+  { id: "private-lessons", label: t("Private Lessons") },
 ] as const;
 // A screen's public path is /<business>/<screen>, so it is worked out per
 // account -- see publicBookingPath. It used to be a constant, which is how the
@@ -2326,15 +2322,15 @@ const BRAND_STORAGE_KEY = "clarity-booking-brand";
 const COACH_ACCOUNT_STORAGE_KEY = "clarity-booking-coach-account";
 const RESCHEDULE_LOGIN_STORAGE_KEY = "clarity-booking-reschedule-login";
 const PAST_ADMIN_LESSON_WARNING =
-  "This lesson is in the past. It will be saved for records only and no emails will be sent.";
+  t("This lesson is in the past. It will be saved for records only and no emails will be sent.");
 // A completed card is a record, and a click that drifts into a drag should not
 // rewrite it. One completed lesson was nudged a row and back in September 2026
 // and Optix received two booking changes for a bay used a week earlier.
 const COMPLETED_LESSON_MOVE_WARNING =
-  "This lesson is already marked completed. Move it anyway? Its bay booking will stay where it was.";
+  t("This lesson is already marked completed. Move it anyway? Its bay booking will stay where it was.");
 
-const baseWeekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const fullDayNames = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const baseWeekDays = [t("Mon"), t("Tue"), t("Wed"), t("Thu"), t("Fri"), t("Sat"), t("Sun")];
+const fullDayNames = [t("Monday"), t("Tuesday"), t("Wednesday"), t("Thursday"), t("Friday"), t("Saturday"), t("Sunday")];
 // Shared with the player portal -- see modules/shared/bookingHandoff.
 const baseWeekStart = BASE_WEEK_START;
 
@@ -2523,20 +2519,20 @@ function reminderLeadLabel(minutes: number) {
   const days = Math.floor(minutes / 1440);
   const hours = Math.round((minutes % 1440) / 60);
   const parts = [
-    days ? `${days} day${days === 1 ? "" : "s"}` : "",
-    hours ? `${hours} hour${hours === 1 ? "" : "s"}` : "",
+    days ? (days === 1 ? t("1 day") : t("{days} days", { days })) : "",
+    hours ? (hours === 1 ? t("1 hour") : t("{hours} hours", { hours })) : "",
   ].filter(Boolean);
-  return parts.join(" ") || "1 hour";
+  return parts.join(" ") || t("1 hour");
 }
 
 function formatBookingNoticeLabel(minutes: number) {
   const normalized = cleanMinBookingNoticeMinutes(minutes);
-  if (normalized <= 0) return "No buffer";
+  if (normalized <= 0) return t("No buffer");
   if (normalized % 60 === 0) {
     const hours = normalized / 60;
-    return `${hours} hour${hours === 1 ? "" : "s"}`;
+    return hours === 1 ? t("1 hour") : t("{hours} hours", { hours });
   }
-  return `${normalized} minutes`;
+  return t("{normalized} minutes", { normalized });
 }
 
 function formatTime(minutes: number) {
@@ -2743,7 +2739,7 @@ function buildWeekDays(week: number): WeekDay[] {
     const month = date.toLocaleString(activeLocale(), { month: "short" });
     return {
       short,
-      label: `${fullDayNames[index]}, ${month} ${date.getDate()}`,
+      label: t("{day}, {month} {date}", { day: fullDayNames[index], month, date: date.getDate() }),
       date: date.getDate(),
       isToday: isSameCalendarDay(date, today),
     };
@@ -2780,7 +2776,7 @@ function formatWeekTitle(week: number) {
   const date = new Date(baseWeekStart);
   date.setDate(baseWeekStart.getDate() + week * 7);
   const month = date.toLocaleString(activeLocale(), { month: "long" });
-  return `Week of ${month} ${date.getDate()}, ${date.getFullYear()}`;
+  return t("Week of {month} {date}, {year}", { month, date: date.getDate(), year: date.getFullYear() });
 }
 
 function sectionTitle(view: View, terms: BusinessTerminology = terminologyFor()) {
@@ -2788,21 +2784,22 @@ function sectionTitle(view: View, terms: BusinessTerminology = terminologyFor())
     case "clients":
       return terms.customerPlural;
     case "booking":
-      return "Booking Page";
+      return t("Booking Page");
     case "sell":
-      return "Sell";
+      return t("Sell");
     case "billing":
-      return "Billing";
+      return t("Billing");
     case "settings":
-      return "Settings";
+      return t("Settings");
     case "video":
-      return "Video Analysis";
+      return t("Video Analysis");
     case "players":
-      return `${terms.customerSingular} Profiles`;
+      return t("{customerSingular} Profiles", { customerSingular: terms.customerSingular });
     case "profile":
-      return "Business Hub";
+      return t("Business Hub");
     default:
-      return "Calendar";
+      return t("Calendar");
+
   }
 }
 
@@ -3347,7 +3344,7 @@ function importErrorMessages(result: PeopleImportResult) {
     ? result.errors
         .map((error) =>
           [
-            error.rowNumber !== undefined ? `Row ${error.rowNumber}` : error.name,
+            error.rowNumber !== undefined ? t("Row {rowNumber}", { rowNumber: error.rowNumber }) : error.name,
             error.message || error.reason,
           ].filter(Boolean).join(": "),
         )
@@ -3396,8 +3393,8 @@ const defaultCalendarColors: CalendarColorSettings = {
 };
 
 const calendarColorFields: { key: keyof CalendarColorSettings; label: string; hint: string }[] = [
-  { key: "statusCompleted", label: "Completed", hint: "Card border" },
-  { key: "statusBayBooked", label: "Bay booked", hint: "Outer ring" },
+  { key: "statusCompleted", label: t("Completed"), hint: t("Card border") },
+  { key: "statusBayBooked", label: t("Bay booked"), hint: t("Outer ring") },
 ];
 
 const defaultBrandSettings: BrandSettings = {
@@ -3576,35 +3573,35 @@ const accountFeatureKeys: AccountFeatureKey[] = [
 // follow the business's own terminology, so a physio clinic never reads "Coach".
 function accountFeatureLabel(feature: AccountFeatureKey, terms: BusinessTerminology) {
   const labels: Record<AccountFeatureKey, string> = {
-    publicBooking: "Online booking page",
-    coachCalendar: `${terms.staffSingular} calendar`,
-    locationCalendar: "Location calendar",
-    multiCoach: `Multiple ${terms.staffPlural.toLowerCase()}`,
-    multiLocation: "Multiple locations",
-    services: `${terms.serviceSingular} types`,
-    groupLessons: `Group ${terms.servicePlural.toLowerCase()}`,
-    packages: "Packages",
-    clients: `${terms.customerSingular} records`,
-    notifications: "Email and SMS notifications",
-    googleCalendarSync: "Google Calendar sync",
-    invoicing: "Invoicing",
-    checkout: "Online checkout",
-    customBranding: "Custom branding",
-    customDomains: "Custom domains",
-    staffUsers: "Team logins",
-    advancedPermissions: "Advanced permissions",
+    publicBooking: t("Online booking page"),
+    coachCalendar: t("{staffSingular} calendar", { staffSingular: terms.staffSingular }),
+    locationCalendar: t("Location calendar"),
+    multiCoach: t("Multiple {staffPlural}", { staffPlural: terms.staffPlural.toLowerCase() }),
+    multiLocation: t("Multiple locations"),
+    services: t("{serviceSingular} types", { serviceSingular: terms.serviceSingular }),
+    groupLessons: t("Group {servicePlural}", { servicePlural: terms.servicePlural.toLowerCase() }),
+    packages: t("Packages"),
+    clients: t("{customerSingular} records", { customerSingular: terms.customerSingular }),
+    notifications: t("Email and SMS notifications"),
+    googleCalendarSync: t("Google Calendar sync"),
+    invoicing: t("Invoicing"),
+    checkout: t("Online checkout"),
+    customBranding: t("Custom branding"),
+    customDomains: t("Custom domains"),
+    staffUsers: t("Team logins"),
+    advancedPermissions: t("Advanced permissions"),
   };
   return labels[feature];
 }
 
 const SUBSCRIPTION_STATUS_LABEL: Record<SubscriptionStatus, string> = {
-  trialing: "Trial",
-  active: "Active",
-  past_due: "Payment overdue",
-  paused: "Paused",
-  cancelled: "Cancelled",
-  comped: "Complimentary",
-  internal: "Internal",
+  trialing: t("Trial"),
+  active: t("Active"),
+  past_due: t("Payment overdue"),
+  paused: t("Paused"),
+  cancelled: t("Cancelled"),
+  comped: t("Complimentary"),
+  internal: t("Internal"),
 };
 
 // Plans at or above this are sold as unlimited; the catalogue stores 999
@@ -3820,11 +3817,12 @@ function canCreateWithinLimit(account: WorkspaceAccount, currentUsage: number, l
 }
 
 function featureUnavailableMessage(feature: AccountFeatureKey) {
-  return `${feature} is not included in this workspace plan.`;
+  return t("{feature} is not included in this workspace plan.", { feature });
 }
 
 function limitReachedMessage(limitName: keyof AccountLimits, limit: number) {
-  return `This workspace plan allows ${limit} ${limitName.replace(/^max/, "").toLowerCase()}.`;
+  return t("This workspace plan allows {limit} {limitName}.", { limit, limitName: limitName.replace(/^max/, "").toLowerCase() });
+
 }
 
 function defaultLocationFromCoachAccount(account: Partial<CoachAccount> = defaultCoachAccount): Location {
@@ -4578,41 +4576,41 @@ function mergeCalendarItemsAfterConflict(
 }
 
 function servicePriceLabel(service?: (Pick<Service, "price" | "priceMode"> & Partial<Service>) | null) {
-  if (!service) return "No charge";
+  if (!service) return t("No charge");
   if (isCustomGroupService(service)) {
-    return `${formatMoney(customGroupBasePrice(service))} up to ${customGroupBaseParticipants(service)}`;
+    return t("{price} up to {count}", { price: formatMoney(customGroupBasePrice(service)), count: customGroupBaseParticipants(service) });
   }
-  return `${formatMoney(service.price)}${service.priceMode === "per-person" ? " pp" : ""}`;
+  return service.priceMode === "per-person" ? t("{price} pp", { price: formatMoney(service.price) }) : formatMoney(service.price);
 }
 
 function serviceCapacityLabel(service: Pick<Service, "capacity" | "lessonFormat" | "minParticipants">) {
-  if (service.lessonFormat === "package") return "Package";
-  if (isCustomGroupService(service)) return `${service.minParticipants}-${service.capacity} clients`;
-  if (service.lessonFormat === "group") return `${service.minParticipants}-${service.capacity} clients`;
-  return `${service.capacity} client${service.capacity === 1 ? "" : "s"}`;
+  if (service.lessonFormat === "package") return t("Package");
+  if (isCustomGroupService(service)) return t("{min}-{max} clients", { min: service.minParticipants, max: service.capacity });
+  if (service.lessonFormat === "group") return t("{min}-{max} clients", { min: service.minParticipants, max: service.capacity });
+  return service.capacity === 1 ? t("1 client") : t("{capacity} clients", { capacity: service.capacity });
 }
 
 function notificationKindLabel(kind = "") {
-  if (kind.includes("coach")) return "Coach notification";
-  if (kind.includes("admin")) return "Admin notification";
-  if (kind.includes("client")) return "Client email";
-  if (kind.includes("reschedule")) return "Reschedule email";
-  if (kind.includes("test")) return "Test email";
-  return "Email receipt";
+  if (kind.includes("coach")) return t("Coach notification");
+  if (kind.includes("admin")) return t("Admin notification");
+  if (kind.includes("client")) return t("Client email");
+  if (kind.includes("reschedule")) return t("Reschedule email");
+  if (kind.includes("test")) return t("Test email");
+  return t("Email receipt");
 }
 
 function notificationStatusLabel(notification: Pick<NotificationRecord, "status" | "error">) {
-  if (notification.status === "delivered") return "Delivered";
-  if (notification.status === "opened") return "Opened";
-  if (notification.status === "clicked") return "Clicked";
-  if (notification.status === "sent") return "Sent to provider";
-  if (notification.status === "delayed") return notification.error ? `Delayed · ${notification.error.replaceAll("_", " ")}` : "Delayed";
-  if (notification.status === "bounced") return notification.error ? `Bounced · ${notification.error.replaceAll("_", " ")}` : "Bounced";
-  if (notification.status === "suppressed") return notification.error ? `Suppressed · ${notification.error.replaceAll("_", " ")}` : "Suppressed";
-  if (notification.status === "complained") return notification.error ? `Complained · ${notification.error.replaceAll("_", " ")}` : "Complained";
-  if (notification.status === "skipped") return notification.error ? `Skipped · ${notification.error.replaceAll("_", " ")}` : "Skipped";
-  if (notification.status === "failed") return notification.error ? `Failed · ${notification.error.replaceAll("_", " ")}` : "Failed";
-  return notification.status || "Pending";
+  if (notification.status === "delivered") return t("Delivered");
+  if (notification.status === "opened") return t("Opened");
+  if (notification.status === "clicked") return t("Clicked");
+  if (notification.status === "sent") return t("Sent to provider");
+  if (notification.status === "delayed") return notification.error ? t("Delayed · {error}", { error: notification.error.replaceAll("_", " ") }) : t("Delayed");
+  if (notification.status === "bounced") return notification.error ? t("Bounced · {error}", { error: notification.error.replaceAll("_", " ") }) : t("Bounced");
+  if (notification.status === "suppressed") return notification.error ? t("Suppressed · {error}", { error: notification.error.replaceAll("_", " ") }) : t("Suppressed");
+  if (notification.status === "complained") return notification.error ? t("Complained · {error}", { error: notification.error.replaceAll("_", " ") }) : t("Complained");
+  if (notification.status === "skipped") return notification.error ? t("Skipped · {error}", { error: notification.error.replaceAll("_", " ") }) : t("Skipped");
+  if (notification.status === "failed") return notification.error ? t("Failed · {error}", { error: notification.error.replaceAll("_", " ") }) : t("Failed");
+  return notification.status || t("Pending");
 }
 
 function notificationTone(status = "") {
@@ -4634,7 +4632,7 @@ function profileRecordDateLabel(createdAt = "") {
   if (!createdAt) return "";
   const time = new Date(createdAt);
   if (Number.isNaN(time.getTime())) return "";
-  return new Intl.DateTimeFormat("en-AU", {
+  return new Intl.DateTimeFormat(activeLocale(), {
     day: "2-digit",
     month: "short",
     year: "2-digit",
@@ -4648,13 +4646,13 @@ function profileRecordDateLabel(createdAt = "") {
 }
 
 function profileRecordTitle(playerName = "", createdAt = "") {
-  const name = safeText(playerName).trim() || "Player";
+  const name = safeText(playerName).trim() || t("Player");
   const date = profileRecordDateLabel(createdAt);
   return date ? `${name} - ${date}` : name;
 }
 
 function formatVideoDurationLabel(seconds?: number) {
-  if (!Number.isFinite(seconds ?? NaN) || !seconds) return "Duration unknown";
+  if (!Number.isFinite(seconds ?? NaN) || !seconds) return t("Duration unknown");
   const totalSeconds = Math.max(0, Math.round(seconds));
   const minutes = Math.floor(totalSeconds / 60);
   const remainder = totalSeconds % 60;
@@ -4664,50 +4662,50 @@ function formatVideoDurationLabel(seconds?: number) {
 function savedVideoCloudErrorLabel(code?: string, fallback?: string) {
   switch (code) {
     case "CLOUD_OAUTH_NOT_CONFIGURED":
-      return "Clarity Cloud is not configured for this environment.";
+      return t("Clarity Cloud is not configured for this environment.");
     case "PROVIDER_STORAGE_UNAVAILABLE":
-      return "Clarity Cloud setup is incomplete.";
+      return t("Clarity Cloud setup is incomplete.");
     case "DRIVE_API_DISABLED":
-      return "Clarity Cloud is not enabled for this connection.";
+      return t("Clarity Cloud is not enabled for this connection.");
     case "DRIVE_UPLOAD_PROXY_FAILED":
-      return "Clarity Cloud could not complete the upload.";
+      return t("Clarity Cloud could not complete the upload.");
     case "DRIVE_UPLOAD_TOO_LARGE":
-      return "This transfer chunk was too large.";
+      return t("This transfer chunk was too large.");
     case "DRIVE_SCOPE_MISSING":
-      return "Clarity Cloud permission is required.";
+      return t("Clarity Cloud permission is required.");
     case "GOOGLE_RECONNECT_REQUIRED":
-      return "Reconnect Clarity Cloud to continue.";
+      return t("Reconnect Clarity Cloud to continue.");
     case "GOOGLE_TOKEN_REFRESH_FAILED":
-      return "Clarity Cloud could not refresh the Google connection.";
+      return t("Clarity Cloud could not refresh the Google connection.");
     case "DRIVE_TRANSFER_FOLDER_FAILED":
     case "DRIVE_FOLDER_PROVISION_FAILED":
-      return "Clarity Cloud could not prepare the transfer folder.";
+      return t("Clarity Cloud could not prepare the transfer folder.");
     case "DRIVE_UPLOAD_SESSION_EXPIRED":
-      return "Start a new upload session before retrying.";
+      return t("Start a new upload session before retrying.");
     case "DRIVE_UPLOAD_SESSION_FAILED":
-      return "Clarity Cloud could not start the video upload.";
+      return t("Clarity Cloud could not start the video upload.");
     case "DRIVE_TRANSFER_STATE_FAILED":
-      return "Clarity Cloud could not store the upload session.";
+      return t("Clarity Cloud could not store the upload session.");
     case "DRIVE_UPLOAD_VERIFY_FAILED":
-      return "Clarity Cloud could not verify the uploaded video.";
+      return t("Clarity Cloud could not verify the uploaded video.");
     case "DRIVE_UPLOAD_INTERRUPTED":
-      return "Video upload was interrupted.";
+      return t("Video upload was interrupted.");
     case "SAVED_VIDEO_SOURCE_MISSING":
-      return "Source unavailable.";
+      return t("Source unavailable.");
     case "CLARITY_CLOUD_IMPORT_NOT_READY":
-      return "This video is not ready to download from Clarity Cloud.";
+      return t("This video is not ready to download from Clarity Cloud.");
     case "CLARITY_CLOUD_IMPORT_VERIFY_FAILED":
-      return "Imported video did not match the Clarity Cloud catalogue.";
+      return t("Imported video did not match the Clarity Cloud catalogue.");
     case "CLARITY_CLOUD_IMPORT_RECEIPT_FAILED":
-      return "Local import was verified, but the receipt could not be recorded.";
+      return t("Local import was verified, but the receipt could not be recorded.");
     case "CLARITY_CLOUD_PROVIDER_FAILED":
-      return "Your local video is safe. The cloud transfer service could not be reached.";
+      return t("Your local video is safe. The cloud transfer service could not be reached.");
     case "TRANSFER_PAUSED":
-      return "Transfer paused.";
+      return t("Transfer paused.");
     default:
       return fallback && !/[{}<>]|https?:\/\//i.test(fallback) && fallback.length < 140
         ? fallback
-        : "Clarity Cloud could not complete the upload.";
+        : t("Clarity Cloud could not complete the upload.");
   }
 }
 
@@ -4720,18 +4718,18 @@ function mergeSavedVideoItems(current: SavedVideoItem[], incoming: SavedVideoIte
 }
 
 function clarityCloudTransferBlockReason(health: ClarityCloudHealth) {
-  if (health.state === "not-connected") return "Connect Clarity Cloud";
-  if (health.state === "reconnect-required") return "Reconnect Clarity Cloud";
-  if (health.state === "permission-required") return "Permission required";
+  if (health.state === "not-connected") return t("Connect Clarity Cloud");
+  if (health.state === "reconnect-required") return t("Reconnect Clarity Cloud");
+  if (health.state === "permission-required") return t("Permission required");
   if (health.state === "setup-incomplete") {
     return "safeErrorCode" in health && health.safeErrorCode === "CLOUD_OAUTH_NOT_CONFIGURED"
-      ? "Clarity Cloud is not configured for this environment."
-      : "Setup incomplete";
+      ? t("Clarity Cloud is not configured for this environment.")
+      : t("Setup incomplete");
   }
   if (health.state === "temporarily-unavailable" || health.state === "error") {
-    return "Your local video is safe. The cloud transfer service could not be reached.";
+    return t("Your local video is safe. The cloud transfer service could not be reached.");
   }
-  if (health.state === "beta") return "Primary computer not configured";
+  if (health.state === "beta") return t("Primary computer not configured");
   return "";
 }
 
@@ -4762,7 +4760,7 @@ const defaultManagedLocalLibraryStatus: ManagedLocalVideoLibraryStatus = {
   supported: false,
   configured: false,
   health: "unsupported",
-  message: "File System Access is unavailable. Working from device cache.",
+  message: t("File System Access is unavailable. Working from device cache."),
 };
 
 function createDefaultVideoWorkspaceState(side: ComparisonSide): ComparisonWorkspaceState {
@@ -4813,50 +4811,50 @@ async function readJsonResponse<T>(response: Response, fallbackMessage: string):
 }
 
 function googleSyncTimeLabel(createdAt = "") {
-  if (!createdAt) return "Not synced yet";
+  if (!createdAt) return t("Not synced yet");
   const time = new Date(createdAt);
-  return Number.isNaN(time.getTime()) ? "Not synced yet" : time.toLocaleString();
+  return Number.isNaN(time.getTime()) ? t("Not synced yet") : time.toLocaleString();
 }
 
 // Human labels for the Google Calendar debug window. The trigger codes are the
 // literals each server-side sync call site passes as its trigger.
 const googleCalendarTriggerLabels: Record<string, string> = {
-  manual_sync_now: "Sync now (coach profile)",
+  manual_sync_now: t("Sync now (coach profile)"),
   api_google_calendar_sync_post: "Sync via /api/google-calendar-sync",
-  admin_calendar_save: "Calendar saved (admin)",
-  admin_item_upsert: "Booking edited / moved (admin)",
-  admin_calendar_delete: "Booking deleted (admin)",
-  public_booking_created: "Public booking created",
-  public_booking_state_write: "Public booking state write",
-  public_booking_cancelled: "Public booking cancelled",
-  auto_sync: "Automatic sync",
-  availability_save: "Availability saved",
-  scheduled_reconcile: "Nightly check",
+  admin_calendar_save: t("Calendar saved (admin)"),
+  admin_item_upsert: t("Booking edited / moved (admin)"),
+  admin_calendar_delete: t("Booking deleted (admin)"),
+  public_booking_created: t("Public booking created"),
+  public_booking_state_write: t("Public booking state write"),
+  public_booking_cancelled: t("Public booking cancelled"),
+  auto_sync: t("Automatic sync"),
+  availability_save: t("Availability saved"),
+  scheduled_reconcile: t("Nightly check"),
 };
 
 const googleCalendarSkipReasonLabels: Record<string, string> = {
-  auto_sync_disabled: "Auto-sync is switched off, so nothing was sent.",
-  manual_sync_only: "Build is pinned to manual-sync-only, so nothing was sent.",
-  google_oauth_not_configured: "GOOGLE_CALENDAR_CLIENT_ID / _SECRET are missing from the environment.",
-  google_calendar_not_connected: "No connected Google account with calendar scope.",
-  no_google_relevant_changes: "The save touched nothing Google Calendar cares about, so no request was sent.",
-  unchanged: "Every targeted booking already matched Google, so no request was needed.",
+  auto_sync_disabled: t("Auto-sync is switched off, so nothing was sent."),
+  manual_sync_only: t("Build is pinned to manual-sync-only, so nothing was sent."),
+  google_oauth_not_configured: t("GOOGLE_CALENDAR_CLIENT_ID / _SECRET are missing from the environment."),
+  google_calendar_not_connected: t("No connected Google account with calendar scope."),
+  no_google_relevant_changes: t("The save touched nothing Google Calendar cares about, so no request was sent."),
+  unchanged: t("Every targeted booking already matched Google, so no request was needed."),
 };
 
 const googleCalendarStageLabels: Record<string, string> = {
-  preflight: "Before any request",
-  access_token: "Refreshing access token",
-  changes: "Resolving changed bookings",
-  upsert: "Writing events",
+  preflight: t("Before any request"),
+  access_token: t("Refreshing access token"),
+  changes: t("Resolving changed bookings"),
+  upsert: t("Writing events"),
   upsert_update: "PUT event (update)",
   create_insert: "POST event (insert)",
   create_replace: "PUT event (409 recovery)",
-  delete: "Deleting event",
-  complete: "Finished",
+  delete: t("Deleting event"),
+  complete: t("Finished"),
 };
 
 function googleCalendarTriggerLabel(trigger: string) {
-  return googleCalendarTriggerLabels[trigger] || trigger || "Unknown trigger";
+  return googleCalendarTriggerLabels[trigger] || trigger || t("Unknown trigger");
 }
 
 function googleCalendarStageLabel(stage: string) {
@@ -4873,10 +4871,10 @@ function relativeTimeLabel(value: string) {
   const time = new Date(value || "");
   if (Number.isNaN(time.getTime())) return "";
   const seconds = Math.round((Date.now() - time.getTime()) / 1000);
-  if (seconds < 60) return "just now";
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-  return `${Math.floor(seconds / 86400)}d ago`;
+  if (seconds < 60) return t("just now");
+  if (seconds < 3600) return t("{n}m ago", { n: Math.floor(seconds / 60) });
+  if (seconds < 86400) return t("{n}h ago", { n: Math.floor(seconds / 3600) });
+  return t("{n}d ago", { n: Math.floor(seconds / 86400) });
 }
 
 /**
@@ -4893,26 +4891,27 @@ function googleCalendarFailureCode(error: GoogleCalendarDebugError | null) {
     error.googleReason,
     !error.httpStatus && !error.googleStatus ? error.providerCode : "",
   ].filter(Boolean);
-  return parts.join(" · ") || error.providerCode || "Unknown failure";
+  return parts.join(" · ") || error.providerCode || t("Unknown failure");
 }
 
 /** Plain-English follow-up for the Google failures that have a known cause. */
 function googleCalendarFailureHint(error: GoogleCalendarDebugError | null) {
   if (!error) return "";
   if (error.googleReason === "rateLimitExceeded" || error.googleReason === "userRateLimitExceeded") {
-    return "Google throttled the write burst. Clarity now retries these with backoff and skips bookings Google already matches, so a repeat sync should send far fewer requests. If it keeps happening, the calendar is being written to faster than Google allows.";
+    return t("Google throttled the write burst. Clarity now retries these with backoff and skips bookings Google already matches, so a repeat sync should send far fewer requests. If it keeps happening, the calendar is being written to faster than Google allows.");
   }
   if (error.googleReason === "quotaExceeded") {
-    return "The daily Google Calendar quota is spent. Retrying will not help until it resets.";
+    return t("The daily Google Calendar quota is spent. Retrying will not help until it resets.");
   }
   if (error.googleStatus === "PERMISSION_DENIED" || error.httpStatus === 403) {
-    return "The connected Google account is not allowed to write to this calendar. Check the calendar ID and reconnect if the account changed.";
+    return t("The connected Google account is not allowed to write to this calendar. Check the calendar ID and reconnect if the account changed.");
   }
   if (error.httpStatus === 401 || error.providerCode === "GOOGLE_TOKEN_REFRESH_FAILED") {
-    return "Google rejected the stored credentials. Disconnect and reconnect the Google account.";
+    return t("Google rejected the stored credentials. Disconnect and reconnect the Google account.");
   }
   if (error.providerCode === "GOOGLE_SCOPE_MISSING") {
-    return "The connection is missing the calendar scope. Reconnect and accept the calendar permission.";
+    return t("The connection is missing the calendar scope. Reconnect and accept the calendar permission.");
+
   }
   return "";
 }
@@ -5326,7 +5325,7 @@ function loadImage(url: string) {
   return new Promise<HTMLImageElement>((resolve, reject) => {
     const image = new Image();
     image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("Could not read that logo image."));
+    image.onerror = () => reject(new Error(t("Could not read that logo image.")));
     image.src = url;
   });
 }
@@ -5384,7 +5383,7 @@ async function analyzeLogoFile(file: File): Promise<BrandSettings> {
     sampleCanvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
     sampleCanvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
     const sampleContext = sampleCanvas.getContext("2d", { willReadFrequently: true });
-    if (!sampleContext) throw new Error("Logo colour extraction is not available in this browser.");
+    if (!sampleContext) throw new Error(t("Logo colour extraction is not available in this browser."));
     sampleContext.drawImage(image, 0, 0, sampleCanvas.width, sampleCanvas.height);
 
     const buckets = new Map<
@@ -5501,7 +5500,7 @@ async function analyzeLogoFile(file: File): Promise<BrandSettings> {
     previewCanvas.width = Math.max(1, Math.round(image.naturalWidth * previewScale));
     previewCanvas.height = Math.max(1, Math.round(image.naturalHeight * previewScale));
     const previewContext = previewCanvas.getContext("2d");
-    if (!previewContext) throw new Error("Logo preview is not available in this browser.");
+    if (!previewContext) throw new Error(t("Logo preview is not available in this browser."));
     previewContext.drawImage(image, 0, 0, previewCanvas.width, previewCanvas.height);
 
     return cleanBrandSettings({
@@ -5659,7 +5658,7 @@ const defaultGoogleDriveTransferStatus: GoogleDriveTransferStatus = {
   tokenEncryptionConfigured: false,
   providerStorageConfigured: false,
   blocker: "",
-  message: "Clarity Cloud status has not loaded.",
+  message: t("Clarity Cloud status has not loaded."),
   uploadRouteReady: true,
   chunkedTransportReady: true,
   incomingImportReady: false,
@@ -6521,22 +6520,22 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     value: bookingScreenNames,
     onSave: async (draft) => {
       setBookingScreenNames(draft);
-      setToast({ message: "Booking screen names saved for this browser." });
+      setToast({ message: t("Booking screen names saved for this browser.") });
       return draft;
     },
   });
   const editableBlocks = useMemo(
     () => [
-      { id: "region", title: "Country & region", editor: regionEditor },
-      { id: "business-name", title: "Business name", editor: businessNameEditor },
-      { id: "terminology", title: "Terminology", editor: terminologyEditor },
-      { id: "billing-settings", title: "Billing Settings", editor: billingSettingsEditor },
-      { id: "email-notifications", title: "Email", editor: emailNotificationsEditor },
+      { id: "region", title: t("Country & region"), editor: regionEditor },
+      { id: "business-name", title: t("Business name"), editor: businessNameEditor },
+      { id: "terminology", title: t("Terminology"), editor: terminologyEditor },
+      { id: "billing-settings", title: t("Billing Settings"), editor: billingSettingsEditor },
+      { id: "email-notifications", title: t("Email"), editor: emailNotificationsEditor },
       { id: "text-machine", title: "SMS", editor: textMachineEditor },
-      { id: "message-templates", title: "Templates", editor: messageTemplatesEditor },
-      { id: "booking-page-notice", title: "Booking Page notice", editor: bookingNoticeEditor },
-      { id: "booking-screen-name", title: "Booking Page screen name", editor: bookingScreenNameEditor },
-      { id: "player-booking-embed", title: "Player portal booking widget", editor: playerBookingEmbedEditor },
+      { id: "message-templates", title: t("Templates"), editor: messageTemplatesEditor },
+      { id: "booking-page-notice", title: t("Booking Page notice"), editor: bookingNoticeEditor },
+      { id: "booking-screen-name", title: t("Booking Page screen name"), editor: bookingScreenNameEditor },
+      { id: "player-booking-embed", title: t("Player portal booking widget"), editor: playerBookingEmbedEditor },
     ],
     [
       regionEditor,
@@ -6567,7 +6566,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const dirtyEditableBlock = editableBlocks.find((block) => block.editor.dirty) ?? null;
 
   function confirmDiscardEditableBlock(blockTitle: string) {
-    return window.confirm(`You have unsaved changes in ${blockTitle}.\n\nDiscard changes and continue?`);
+    return window.confirm(t("You have unsaved changes in {blockTitle}.\n\nDiscard changes and continue?", { blockTitle }));
   }
 
   function startEditableBlock(id: string) {
@@ -6798,7 +6797,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     } catch (error) {
       // saveNotificationSettings has already toasted; this is the message that
       // stays on the row that failed, so the switch is not left looking saved.
-      setSendingRuleError(error instanceof Error ? error.message : "Could not save this setting.");
+      setSendingRuleError(error instanceof Error ? error.message : t("Could not save this setting."));
     } finally {
       // Cleared either way: on success the server's answer is already in
       // notificationSettings, and on failure the switch must go back to telling
@@ -6836,13 +6835,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
   /** The inline "Saving…/Saved" that stands in for this card's missing Save button. */
   function sendingRuleStatus(field: keyof NotificationSettings) {
-    if (sendingRuleSaving === field) return <em className="sending-rule-state">Saving…</em>;
+    if (sendingRuleSaving === field) return <em className="sending-rule-state">{t("Saving…")}</em>;
     if (sendingRuleSaved === field)
       return (
         <em className="sending-rule-state is-saved" aria-live="polite">
-          <Check size={13} />
-          Saved
-        </em>
+          <Check size={13} />{t("Saved")}</em>
       );
     return null;
   }
@@ -7354,7 +7351,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   };
   const availabilityLocationLabel = (locationId?: string) => {
     const location = availabilityLocations.find((entry) => entry.id === locationId);
-    return location ? location.shortName || location.name : "Any location";
+    return location ? location.shortName || location.name : t("Any location");
   };
   // Where a window on the calendar is. Hours saved before locations existed
   // carry no locationId; they still belong to the one place the coach is
@@ -7407,7 +7404,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       ...coachWindows.map((window) => window.locationId || "").filter(Boolean),
     ];
     const tabs = [...new Set(ids)].map((id) => ({ id, label: availabilityLocationLabel(id) }));
-    if (coachWindows.some((window) => !window.locationId)) tabs.push({ id: "", label: "Any location" });
+    if (coachWindows.some((window) => !window.locationId)) tabs.push({ id: "", label: t("Any location") });
     return tabs;
   }, [accountAvailability, activeCoachId, availabilityEditorCoachId, availabilityEditorLocations, hasMultipleAvailabilityLocations]);
   // null means "every window the coach has": the single-location case.
@@ -7471,7 +7468,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         return {
           start: fullCalendarStartMinutes,
           end: Math.min(DAY_END_MINUTES, fullCalendarStartMinutes + 60),
-          emptyMessage: "No morning hours are available in this view.",
+          emptyMessage: t("No morning hours are available in this view."),
         };
       }
       return {
@@ -7486,7 +7483,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       return {
         start: Math.max(DAY_START_MINUTES, fullCalendarEndMinutes - 60),
         end: fullCalendarEndMinutes,
-        emptyMessage: "No afternoon or evening hours are available in this view.",
+        emptyMessage: t("No afternoon or evening hours are available in this view."),
       };
     }
     return {
@@ -7499,7 +7496,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const calendarEndMinutes = calendarViewBounds.end;
   const calendarViewEmptyMessage = calendarViewBounds.emptyMessage;
   const calendarViewButtonLabel =
-    calendarViewMode === "full" ? "View: Full" : calendarViewMode === "am" ? "View: AM" : "View: PM";
+    calendarViewMode === "full" ? t("View: Full") : calendarViewMode === "am" ? t("View: AM") : t("View: PM");
   const calendarHourMarks = useMemo(() => {
     const marks: number[] = [];
     for (let minutes = calendarStartMinutes; minutes <= calendarEndMinutes; minutes += 60) {
@@ -7716,7 +7713,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         locationById(locations, selectedCalendarLocationId)?.name ||
         defaultLocation.shortName ||
         defaultLocation.name
-      : selectedCalendarCoach?.displayName || selectedCalendarCoach?.name || "No coach";
+      : selectedCalendarCoach?.displayName || selectedCalendarCoach?.name || t("No coach");
   const isEmailLinkReschedule = Boolean(
     bookingMode === "reschedule" &&
       initialRescheduleLoginRef.current?.appointmentId &&
@@ -7933,18 +7930,18 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const openedInvoiceStateLabel =
     openedInvoiceStatus === "sent"
       ? openedInvoiceSentAt
-        ? "Sent"
-        : "Published"
+        ? t("Sent")
+        : t("Published")
       : openedInvoiceStatus === "paid"
-        ? "Paid"
+        ? t("Paid")
         : openedInvoiceStatus === "overdue"
-          ? "Overdue"
+          ? t("Overdue")
           : openedInvoiceStatus === "void"
-            ? "Void"
-            : "Draft";
+            ? t("Void")
+            : t("Draft");
   // "The Range 20%" for a percentage discount, the plain name for a fixed one.
   const invoiceDiscountLabel = [
-    invoiceDraft.discountLabel.trim() || "Discount",
+    invoiceDraft.discountLabel.trim() || t("Discount"),
     invoiceDraft.discountPercent ? `${invoiceDraft.discountPercent}%` : "",
   ]
     .filter(Boolean)
@@ -8020,9 +8017,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     // reads as a message rather than a sentence with holes in it.
     coachFirstName: (coachAccount.coachName || coachAccount.businessName || "your coach").split(/\s+/)[0],
     location: coachAccount.venueShortName || coachAccount.venueName || "your venue",
-    mapUrl: "[map link]",
-    bookingUrl: "[booking page]",
-    rescheduleUrl: "[reschedule link]",
+    mapUrl: t("[map link]"),
+    bookingUrl: t("[booking page]"),
+    rescheduleUrl: t("[reschedule link]"),
+
     packageAllowance: "6",
   };
   const emailSubjectTemplatePreview = notificationSettings.notificationSubjectLine.trim()
@@ -8246,7 +8244,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     const noticeKey = `${bookingConfirmation.kind}:${bookingConfirmation.appointmentId}`;
     if (emailNoticeToastKeyRef.current === noticeKey) return;
     emailNoticeToastKeyRef.current = noticeKey;
-    setToast({ message: "Email Sent" });
+    setToast({ message: t("Email Sent") });
   }, [bookingConfirmation?.appointmentId, bookingConfirmation?.kind, emailNoticeVisible, isEmbedMode]);
 
   useEffect(() => {
@@ -8345,12 +8343,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           finishDiagnosticTimer(sessionTimer, sessionResponse.ok ? "success" : "failed", {
             httpStatus: sessionResponse.status,
             errorCode: sessionResponse.ok ? undefined : "AUTH_SESSION_MISSING",
-            humanMessage: sessionResponse.ok ? undefined : "Admin session could not be loaded.",
+            humanMessage: sessionResponse.ok ? undefined : t("Admin session could not be loaded."),
           });
         } finally {
           window.clearTimeout(sessionTimeout);
         }
-        if (!sessionResponse.ok) throw new Error("Session API unavailable");
+        if (!sessionResponse.ok) throw new Error(t("Session API unavailable"));
         const session = (await sessionResponse.json()) as { authenticated?: boolean; email?: string };
         if (cancelled) return;
 
@@ -8362,7 +8360,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             status: "warning",
             route: "GET /api/auth/session",
             errorCode: "AUTH_SESSION_MISSING",
-            humanMessage: "No authenticated admin session.",
+            humanMessage: t("No authenticated admin session."),
           });
           setAuthStatus("guest");
           setCalendarFeedStatus("offline");
@@ -8383,7 +8381,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             route: "GET /api/auth/session",
             functionName: "loadInitialState",
             errorCode: "AUTH_SESSION_MISSING",
-            humanMessage: "Admin session load failed.",
+            humanMessage: t("Admin session load failed."),
           });
           hasLoadedCalendarApiRef.current = false;
           setCalendarFeedStatus("offline");
@@ -8547,7 +8545,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             lastError = error;
           }
         }
-        throw lastError instanceof Error ? lastError : new Error("Calendar save failed.");
+        throw lastError instanceof Error ? lastError : new Error(t("Calendar save failed."));
       };
 
       void (async () => {
@@ -8581,14 +8579,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           if (liveResponse.status === 401) {
             sessionExpired = true;
             setAuthStatus("guest");
-            throw new Error(latestData.message || "Admin login expired. Sign in again before editing the calendar.");
+            throw new Error(latestData.message || t("Admin login expired. Sign in again before editing the calendar."));
           }
           if (!liveResponse.ok || !Array.isArray(latestData.items)) {
-            throw new Error(data.message || data.error || "Calendar save failed because the live calendar could not be reloaded.");
+            throw new Error(data.message || data.error || t("Calendar save failed because the live calendar could not be reloaded."));
           }
           const mergedItems = mergeCalendarItemsAfterConflict(latestData.items, baselineItems, desiredItems);
           if (!mergedItems) {
-            throw new Error(data.message || "Calendar changed elsewhere. Reload before saving so you do not overwrite live bookings.");
+            throw new Error(data.message || t("Calendar changed elsewhere. Reload before saving so you do not overwrite live bookings."));
           }
           recoveredFromConflict = true;
           submittedItems = mergedItems;
@@ -8611,9 +8609,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         if (response.status === 401) {
           sessionExpired = true;
           setAuthStatus("guest");
-          throw new Error(data.message || "Admin login expired. Sign in again before editing the calendar.");
+          throw new Error(data.message || t("Admin login expired. Sign in again before editing the calendar."));
         }
-        if (!response.ok) throw new Error(data.message || data.error || "Calendar save failed.");
+        if (!response.ok) throw new Error(data.message || data.error || t("Calendar save failed."));
         saveReachedServer = true;
         setCalendarFeedStatus("connected");
         setCalendarSaveStatus("saved");
@@ -8657,7 +8655,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           },
         });
         if (data.googleCalendarSync && data.googleCalendarSync.ok === false && data.googleCalendarSync.error) {
-          setToast({ message: `Saved booking calendar, but Google Calendar did not sync: ${data.googleCalendarSync.error}` });
+          setToast({ message: t("Saved booking calendar, but Google Calendar did not sync: {error}", { error: data.googleCalendarSync.error }) });
         }
         window.setTimeout(() => {
           if (calendarSaveVersionRef.current === saveVersion) setCalendarSaveStatus("idle");
@@ -8667,24 +8665,24 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         scheduleAdminNotificationDebounceFlush();
       })().catch((error) => {
         if (calendarSaveVersionRef.current === saveVersion) {
-          const message = error instanceof Error ? error.message : "Calendar save failed.";
+          const message = error instanceof Error ? error.message : t("Calendar save failed.");
           if (saveReachedServer) {
             setCalendarFeedStatus("connected");
             setCalendarSaveStatus("saved");
             setCalendarSaveError("");
             finishDiagnosticTimer(timer, "warning", {
               errorCode: "BOOKING_UPDATE_VERIFY_MISSING",
-              humanMessage: `Calendar saved, but refresh details failed: ${message}`,
+              humanMessage: t("Calendar saved, but refresh details failed: {message}", { message }),
             });
-            setToast({ message: `Calendar saved, but the page could not refresh all save details: ${message}` });
+            setToast({ message: t("Calendar saved, but the page could not refresh all save details: {message}", { message }) });
             window.setTimeout(() => {
               if (calendarSaveVersionRef.current === saveVersion) setCalendarSaveStatus("idle");
             }, 1800);
             return;
           }
           const calmMessage = sessionExpired
-            ? message || "Admin login expired. Sign in again before editing the calendar."
-            : message || "Your latest calendar change was not saved. Please try again.";
+            ? message || t("Admin login expired. Sign in again before editing the calendar.")
+            : message || t("Your latest calendar change was not saved. Please try again.");
           setCalendarFeedStatus(sessionExpired ? "offline" : "connected");
           setCalendarSaveStatus("failed");
           setCalendarSaveFailureKind("change");
@@ -8841,8 +8839,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         return {
           message:
             response.status === 504 || response.status === 502
-              ? "The server took too long to answer, so it is not clear whether this saved. Reload the page to see what stuck."
-              : "The server returned an error page instead of a result.",
+              ? t("The server took too long to answer, so it is not clear whether this saved. Reload the page to see what stuck.")
+              : t("The server returned an error page instead of a result."),
           statusText,
         };
       }
@@ -8999,7 +8997,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           routeLabel,
           missingStage,
           diagnostic,
-          `${expected.name} (${expected.id}) was missing from the response.`,
+          t("{name} ({id}) was missing from the response.", { name: expected.name, id: expected.id }),
         );
       }
       if (match.accountId !== diagnostic.activeAccountId) {
@@ -9039,9 +9037,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       const response = await fetch("/api/database-health", { headers: { Accept: "application/json" } });
       if (!response.ok) return "";
       const data = (await response.json()) as { ok?: boolean; failed?: Array<{ name?: string; message?: string }> };
-      if (data.ok) return "Database health passed, but calendar state still failed.";
+      if (data.ok) return t("Database health passed, but calendar state still failed.");
       const firstFailed = Array.isArray(data.failed) && data.failed[0] ? data.failed[0] : null;
-      return firstFailed ? `Database health failed at ${firstFailed.name}: ${firstFailed.message}` : "Database health failed.";
+      return firstFailed ? t("Database health failed at {name}: {message}", { name: firstFailed.name ?? "", message: firstFailed.message ?? "" }) : t("Database health failed.");
     } catch {
       return "";
     }
@@ -9049,7 +9047,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
   function adminWorkspaceLoadMessage(error: unknown) {
     if (error instanceof Error && error.message) return error.message;
-    return "Calendar bookings could not be loaded.";
+    return t("Calendar bookings could not be loaded.");
   }
 
   async function startAdminWorkspaceHydration() {
@@ -9193,22 +9191,23 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     } catch {
       finishDiagnosticTimer(timer, "failed", {
         errorCode: "SUPABASE_READ_FAILED",
-        humanMessage: "Calendar API unavailable.",
+        humanMessage: t("Calendar API unavailable."),
       });
       const healthMessage = await fetchDatabaseHealthSummary();
       if (!isCurrentRun()) return false;
-      throw new Error(["Calendar API unavailable", healthMessage].filter(Boolean).join(" · "));
+      throw new Error([t("Calendar API unavailable"), healthMessage].filter(Boolean).join(" · "));
+
     }
     if (response.status === 401) {
       finishDiagnosticTimer(timer, "failed", {
         httpStatus: response.status,
         errorCode: "AUTH_SESSION_MISSING",
-        humanMessage: "Admin login required.",
+        humanMessage: t("Admin login required."),
       });
-      throw new Error("Admin login required");
+      throw new Error(t("Admin login required"));
     }
     if (!response.ok) {
-      const apiMessage = await readApiFailure(response, "Calendar API unavailable");
+      const apiMessage = await readApiFailure(response, t("Calendar API unavailable"));
       finishDiagnosticTimer(timer, "failed", {
         httpStatus: response.status,
         errorCode: "SUPABASE_READ_FAILED",
@@ -9445,7 +9444,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           finishDiagnosticTimer(timer, "warning", {
             httpStatus: response.status,
             errorCode: "CACHE_REFRESH_FAILED",
-            humanMessage: "Locations background refresh failed.",
+            humanMessage: t("Locations background refresh failed."),
           });
           console.warn("admin_workspace_detail_load_failed", { detail: "locations", status: response.status });
           return;
@@ -9470,7 +9469,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       } catch (error) {
         finishDiagnosticTimer(timer, "warning", {
           errorCode: "CACHE_REFRESH_FAILED",
-          humanMessage: "Locations background refresh failed.",
+          humanMessage: t("Locations background refresh failed."),
         });
         console.warn("admin_workspace_detail_load_failed", { detail: "locations", error });
       }
@@ -9501,7 +9500,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           finishDiagnosticTimer(timer, "warning", {
             httpStatus: response.status,
             errorCode: "CACHE_REFRESH_FAILED",
-            humanMessage: "Coaches background refresh failed.",
+            humanMessage: t("Coaches background refresh failed."),
           });
           console.warn("admin_workspace_detail_load_failed", { detail: "coaches", status: response.status });
           return;
@@ -9526,7 +9525,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       } catch (error) {
         finishDiagnosticTimer(timer, "warning", {
           errorCode: "CACHE_REFRESH_FAILED",
-          humanMessage: "Coaches background refresh failed.",
+          humanMessage: t("Coaches background refresh failed."),
         });
         console.warn("admin_workspace_detail_load_failed", { detail: "coaches", error });
       }
@@ -9559,7 +9558,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           finishDiagnosticTimer(timer, "warning", {
             httpStatus: response.status,
             errorCode: "CACHE_REFRESH_FAILED",
-            humanMessage: "Admin settings background refresh failed.",
+            humanMessage: t("Admin settings background refresh failed."),
           });
           console.warn("admin_workspace_detail_load_failed", { detail: "admin-settings", status: response.status });
           return;
@@ -9581,7 +9580,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       } catch (error) {
         finishDiagnosticTimer(timer, "warning", {
           errorCode: "CACHE_REFRESH_FAILED",
-          humanMessage: "Admin settings background refresh failed.",
+          humanMessage: t("Admin settings background refresh failed."),
         });
         console.warn("admin_workspace_detail_load_failed", { detail: "admin-settings", error });
       }
@@ -9603,9 +9602,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       finishDiagnosticTimer(timer, "failed", {
         httpStatus: response.status,
         errorCode: "BOOKING_PAGE_LOAD_FAILED",
-        humanMessage: "Public booking API unavailable.",
+        humanMessage: t("Public booking API unavailable."),
       });
-      throw new Error("Public booking API unavailable");
+      throw new Error(t("Public booking API unavailable"));
     }
     const data = (await response.json()) as {
       services?: Service[];
@@ -9682,7 +9681,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         cache: "no-store",
         headers: { Accept: "application/json" },
       });
-      if (!response.ok) throw new Error("Public booking slots unavailable");
+      if (!response.ok) throw new Error(t("Public booking slots unavailable"));
       const data = (await response.json()) as {
         slots?: BookingSlot[];
         services?: Record<string, { slots?: BookingSlot[] }>;
@@ -9702,7 +9701,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       console.warn("public_booking_slots_load_failed", error);
       finishDiagnosticTimer(timer, "failed", {
         errorCode: "PUBLIC_BOOKING_SLOT_LOAD_FAILED",
-        humanMessage: error instanceof Error ? error.message : "Public booking slots unavailable.",
+        humanMessage: error instanceof Error ? error.message : t("Public booking slots unavailable."),
       });
       setPublicBookingSlotStatuses((current) => ({ ...current, [key]: "error" }));
     } finally {
@@ -9716,14 +9715,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       hasLoadedCalendarApiRef.current = false;
       setCalendarFeedStatus("offline");
       setAuthStatus("guest");
-      setToast({ message: "Sign in again before editing. The calendar is not connected to the live database." });
+      setToast({ message: t("Sign in again before editing. The calendar is not connected to the live database.") });
       return false;
     }
     if (!hasLoadedCalendarApiRef.current) {
       setCalendarSaveStatus("failed");
       setCalendarSaveFailureKind("change");
-      setCalendarSaveError("Calendar is not connected to the live database.");
-      setToast({ message: `Cannot ${action}: the live database is not connected. Reload and sign in again.` });
+      setCalendarSaveError(t("Calendar is not connected to the live database."));
+      setToast({ message: t("Cannot {action}: the live database is not connected. Reload and sign in again.", { action }) });
       return false;
     }
     if (calendarFeedStatus !== "connected") {
@@ -10322,7 +10321,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       ...playerToolVideos.map((video) => ({
         key: `saved-${video.savedVideoId}`,
         savedVideoId: video.savedVideoId,
-        title: video.title || "Video file",
+        title: video.title || t("Video file"),
         thumbnail: video.thumbnailDataUrl || "",
         duration: video.source?.duration || 0,
         at: video.capturedAt || video.updatedAt || video.createdAt,
@@ -10333,7 +10332,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       ...playerToolCloudVideos.map((transfer) => ({
         key: `cloud-${transfer.savedVideoId || transfer.savedVideo?.savedVideoId || ""}`,
         savedVideoId: transfer.savedVideoId || transfer.savedVideo?.savedVideoId || "",
-        title: transfer.savedVideo?.title || "Player submission",
+        title: transfer.savedVideo?.title || t("Player submission"),
         // The transfer's savedVideo summary is a catalogue record, not the
         // saved video itself: no thumbnail, no duration. The card falls back
         // to its placeholder, same as any clip that has not been thumbed yet.
@@ -10347,7 +10346,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       ...playerToolLegacyVideoRecords.map((record) => ({
         key: `legacy-${record.video.id}`,
         savedVideoId: record.video.id,
-        title: record.video.title || "Recovery record",
+        title: record.video.title || t("Recovery record"),
         thumbnail: "",
         duration: 0,
         at: record.video.createdAt,
@@ -10364,7 +10363,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       const key = valid ? date.toISOString().slice(0, 10) : "undated";
       const label = valid
         ? date.toLocaleDateString(undefined, { day: "numeric", month: "long" })
-        : "No date recorded";
+        : t("No date recorded");
       const group = groups.get(key) || { label, clips: [] };
       group.clips.push(clip);
       groups.set(key, group);
@@ -10385,10 +10384,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const playerVideoSummary = useMemo(() => {
     const inLibrary = playerToolVideos.filter((video) => video.local?.status === "available").length;
     const parts = [
-      inLibrary ? `${inLibrary} in Local Storage` : "",
-      playerToolLegacyVideoRecords.length ? `${playerToolLegacyVideoRecords.length} recovery only` : "",
-      playerToolCloudVideos.length ? `${playerToolCloudVideos.length} from Clarity Cloud` : "",
-      playerUnseenSubmissions ? `${playerUnseenSubmissions} new submission${playerUnseenSubmissions === 1 ? "" : "s"}` : "",
+      inLibrary ? t("{n} in Local Storage", { n: inLibrary }) : "",
+      playerToolLegacyVideoRecords.length ? t("{n} recovery only", { n: playerToolLegacyVideoRecords.length }) : "",
+      playerToolCloudVideos.length ? t("{n} from Clarity Cloud", { n: playerToolCloudVideos.length }) : "",
+      playerUnseenSubmissions ? (playerUnseenSubmissions === 1 ? t("1 new submission") : t("{n} new submissions", { n: playerUnseenSubmissions })) : "",
     ].filter(Boolean);
     return {
       total: playerToolVideos.length + playerToolCloudVideos.length + playerToolLegacyVideoRecords.length,
@@ -10523,15 +10522,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       kind: groupSessionContext ? "group-session" : item.kind === "appointment" ? "appointment" : "blocked",
       client: groupSessionContext ? groupSessionContext.service.name : item.client || item.title,
       service: groupSessionContext
-        ? `Group Session · ${groupSessionContext.bookedCount}/${groupSessionContext.capacity} booked`
-        : service?.name ?? "Golf lesson",
+        ? t("Group Session · {booked}/{capacity} booked", { booked: groupSessionContext.bookedCount, capacity: groupSessionContext.capacity })
+        : service?.name ?? t("Golf lesson"),
       time: `${dateForSlot(itemWeek(item), item.day).toLocaleDateString(activeLocale(), { weekday: "long", month: "short", day: "numeric" })}, ${formatRange(item.start, item.duration)}`,
       venue: bookingLocationShortDisplay(calendarItemLocation(item, service ?? undefined, locations, coachAccount)) || coachAccount.venueShortName || coachAccount.venueName,
       phone: groupSessionContext ? "" : item.phone || "",
       email: groupSessionContext ? "" : item.email || "",
-      clientEmailStatus: latestClientEmail ? notificationStatusLabel(latestClientEmail) : "No client email receipt yet",
-      coachEmailStatus: latestCoachEmail ? notificationStatusLabel(latestCoachEmail) : "No coach receipt yet",
-      adminEmailStatus: latestAdminEmail ? notificationStatusLabel(latestAdminEmail) : "No admin receipt yet",
+      clientEmailStatus: latestClientEmail ? notificationStatusLabel(latestClientEmail) : t("No client email receipt yet"),
+      coachEmailStatus: latestCoachEmail ? notificationStatusLabel(latestCoachEmail) : t("No coach receipt yet"),
+      adminEmailStatus: latestAdminEmail ? notificationStatusLabel(latestAdminEmail) : t("No admin receipt yet"),
     });
   }
 
@@ -10574,12 +10573,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
   function openGroupSessionFromSlot(item: CalendarItem): boolean {
     const failWith = (reason: string) => {
-      setToast({ message: `Unable to open group session: ${reason}` });
+      setToast({ message: t("Unable to open group session: {reason}", { reason }) });
       return false;
     };
 
     const serviceId = item.serviceId;
-    if (!serviceId) return failWith("missing serviceId");
+    if (!serviceId) return failWith(t("missing serviceId"));
 
     const service = services.find((candidate) => candidate.id === serviceId);
     if (!service) return failWith("service not found");
@@ -10598,7 +10597,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         return failWith("slot does not match schedule");
       }
     } else {
-      if (!service.groupSchedule || !service.groupSchedule.active) return failWith("missing groupSchedule");
+      if (!service.groupSchedule || !service.groupSchedule.active) return failWith(t("missing groupSchedule"));
       if (!isGroupServiceSlotMatch(service, slotWeek, slotData.day, slotData.start)) return failWith("slot does not match schedule");
     }
 
@@ -10610,7 +10609,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       duration: slotData.duration || service.duration,
     };
     const sessionService = services.find((candidate) => candidate.id === candidateSession.serviceId);
-    if (!sessionService) return failWith("selectedGroupSessionDetails failed to resolve");
+    if (!sessionService) return failWith(t("selectedGroupSessionDetails failed to resolve"));
 
     setSelectedGroupSession(candidateSession);
     setSelectedId("");
@@ -10659,12 +10658,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     if (!selectedGroupSession || !selectedGroupSessionService) return;
     if (!requireLiveDatabase("cancel group sessions")) return;
     if (selectedGroupSessionBookedCount > 0) {
-      setToast({ message: "This group session has bookings. Cancel or move the bookings before deleting the session." });
+      setToast({ message: t("This group session has bookings. Cancel or move the bookings before deleting the session.") });
       return;
     }
     if (
       !window.confirm(
-        "Cancel this group lesson session? This only removes this date/time, not the whole lesson type.",
+        t("Cancel this group lesson session? This only removes this date/time, not the whole lesson type."),
       )
     ) {
       return;
@@ -10708,7 +10707,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     setItems([...items, cancellationRecord]);
     closeCalendarDetails();
     setToast({
-      message: `${selectedGroupSessionService.name} session cancelled.`,
+      message: t("{name} session cancelled.", { name: selectedGroupSessionService.name }),
       undo: () => setItems(previous),
     });
   }
@@ -10914,9 +10913,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const showCapturedCustomerDetailsSummary =
     isBookingCustomerDetailsComplete && (!isCustomGroupBooking || isBookingInformationComplete || !isDateTimeStepComplete);
   const bookingCustomerSummaryName =
-    [bookingForm.firstName.trim(), bookingForm.lastName.trim()].filter(Boolean).join(" ") || "Information complete";
+    [bookingForm.firstName.trim(), bookingForm.lastName.trim()].filter(Boolean).join(" ") || t("Information complete");
   const bookingCustomerSummaryContact =
-    [bookingForm.phone.trim(), bookingForm.email.trim()].filter(Boolean).join(" · ") || "Customer details captured";
+    [bookingForm.phone.trim(), bookingForm.email.trim()].filter(Boolean).join(" · ") || t("Customer details captured");
 
   const isAppointmentSectionOpen = openPublicBookingSection === "appointment";
   const isDateTimeSectionOpen = openPublicBookingSection === "datetime";
@@ -10925,7 +10924,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
   const appointmentSummaryName = selectedBookingService
     ? selectedBookingService.name
-    : "Choose an appointment type";
+    : t("Choose an appointment type");
   const appointmentSummaryDescription = selectedBookingService?.description?.trim() || "";
   const appointmentSummaryLessonNote = selectedBookingService
     ? (selectedBookingService.lessonNote || selectedBookingService.location || "").trim()
@@ -10934,19 +10933,20 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     ? bookingLocationSnapshotFor(selectedBookingService, locations, coachAccount)
     : bookingLocationSnapshotFor(undefined, locations, coachAccount);
   const appointmentSummaryDuration = selectedBookingService
-    ? `${selectedBookingService.duration} min · ${
-        isCustomGroupService(selectedBookingService)
+    ? t("{duration} min · {price}", {
+        duration: selectedBookingService.duration,
+        price: isCustomGroupService(selectedBookingService)
           ? `${formatMoney(calculateCustomGroupPrice(selectedBookingService, customGroupMinParticipants(selectedBookingService)))}+`
-          : servicePriceLabel(selectedBookingService)
-      }`
-    : "Select a lesson to continue";
+          : servicePriceLabel(selectedBookingService),
+      })
+    : t("Select a lesson to continue");
   const dateTimeSummaryLocation = bookingLocationDisplay(selectedBookingLocation).slice(0, 180);
-  const bookingDaySummary = bookingDaySelected ? weekDays[bookingDay]?.label ?? "" : "No day selected";
+  const bookingDaySummary = bookingDaySelected ? weekDays[bookingDay]?.label ?? "" : t("No day selected");
   const dateTimeSummaryLine = isDateTimeStepComplete
     ? `${bookingDaySummary}, ${formatTime(bookingStart ?? 0)}`
     : bookingDaySelected
       ? bookingDaySummary
-      : "Choose a day";
+      : t("Choose a day");
 
   function slotFromClient(clientX: number, clientY: number) {
     const grid = gridRef.current;
@@ -11129,8 +11129,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         if (record.syncStatus === "failed" || record.syncStatus === "token_expired") {
           setToast({
             message: record.errorMessage
-              ? `The lesson was moved, but its bay was not: ${record.errorMessage}`
-              : "The lesson was moved, but its bay was not. Use Book bay on the booking card.",
+              ? t("The lesson was moved, but its bay was not: {error}", { error: record.errorMessage })
+              : t("The lesson was moved, but its bay was not. Use Book bay on the booking card."),
           });
           return;
         }
@@ -11154,10 +11154,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       const data = await response.json().catch(() => ({}));
       if (response.status === 401) {
         setAuthStatus("guest");
-        throw new Error(data?.message || "Admin login expired. Sign in again before saving calendar changes.");
+        throw new Error(data?.message || t("Admin login expired. Sign in again before saving calendar changes."));
       }
       if (!response.ok || data?.ok === false || !data?.item) {
-        throw new Error(data?.message || "Calendar change could not be saved.");
+        throw new Error(data?.message || t("Calendar change could not be saved."));
       }
       const persistedItem = { ...item, ...data.item } as CalendarItem;
       const persistedItems = optimisticItems.map((candidate) => (candidate.id === item.id ? persistedItem : candidate));
@@ -11186,7 +11186,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       }
     } catch (error) {
       setItems(previousItems);
-      setToast({ message: error instanceof Error ? error.message : "Calendar change could not be saved." });
+      setToast({ message: error instanceof Error ? error.message : t("Calendar change could not be saved.") });
     } finally {
       endAdminSave("upsert_item");
     }
@@ -11209,7 +11209,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         headers: { Accept: "application/json" },
       });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data?.message || "Could not undo that change.");
+      if (!response.ok) throw new Error(data?.message || t("Could not undo that change."));
       const persistedItems: CalendarItem[] = Array.isArray(data.items) ? data.items : previousItems;
       lastPersistedCalendarFingerprintRef.current = calendarStateFingerprint(persistedItems, calendarSyncKey);
       lastPersistedCalendarItemsRef.current = persistedItems;
@@ -11236,7 +11236,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || data?.ok === false || !data?.item) {
-        throw new Error(data?.message || "Could not undo that change.");
+        throw new Error(data?.message || t("Could not undo that change."));
       }
       const persistedItem = { ...item, ...data.item } as CalendarItem;
       const persistedItems = previousItems.map((entry) => (entry.id === item.id ? persistedItem : entry));
@@ -11298,8 +11298,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setFlyingBooking((current) => (current?.id === docked.id ? null : current));
       setToast({
         message: options.fromFlick
-          ? `${docked.client} flew into the dock.`
-          : `${docked.client} is parked on the shelf.`,
+          ? t("{client} flew into the dock.", { client: docked.client })
+          : t("{client} is parked on the shelf.", { client: docked.client }),
         undo: () => {
           setDockBookings((current) => current.filter((booking) => booking.id !== docked.id));
           setShelvedItemIds((current) => current.filter((id) => id !== movedItem.id));
@@ -11685,7 +11685,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             serviceId: groupService.id,
             coachId: serviceCoachFor(groupService),
             locationId: serviceLocation(groupService, locations, coachAccount).id,
-            title: `${groupService.name} (group session)`,
+            title: t("{name} (group session)", { name: groupService.name }),
             syntheticGroupSlot: true,
             readOnly: true,
           } as CalendarItem,
@@ -11775,8 +11775,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     service?: Service,
     choice: { coachId?: string; locationId?: string } = {},
   ) {
-    if (!service) return "That service is no longer available.";
-    if (isGroupSlotFull(candidate, service)) return "Group is full.";
+    if (!service) return t("That service is no longer available.");
+    if (isGroupSlotFull(candidate, service)) return t("Group is full.");
     const { coachIds, locationIds } = calendarBookingChoices(service);
     // Before the coach or place is chosen, the time only has to suit one of them.
     const free = (choice.coachId ? [choice.coachId] : coachIds).some((coachId) =>
@@ -11784,7 +11784,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         isValidAppointmentSlot(candidate, undefined, service, { candidateCoachId: coachId, candidateLocationId: locationId }),
       ),
     );
-    if (!free) return choice.coachId || coachIds.length === 1 ? "That time is already occupied." : "No coach is free then.";
+    if (!free) return choice.coachId || coachIds.length === 1 ? t("That time is already occupied.") : t("No coach is free then.");
+
     return "";
   }
 
@@ -12377,7 +12378,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     }
 
     if (!activeDraft || !activeDraft.valid) {
-      setToast({ message: "That spot is not available. The calendar stayed unchanged." });
+      setToast({ message: t("That spot is not available. The calendar stayed unchanged.") });
       clearGesture();
       return;
     }
@@ -12405,13 +12406,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         location: cleanBookingLocationSnapshot(
           locationSnapshot(locationById(locations, blockLocationId) ?? defaultLocationFromCoachAccount(coachAccount)),
         ),
-        title: blockLocationOnly ? "Location unavailable" : "Busy",
+        title: blockLocationOnly ? t("Location unavailable") : t("Busy"),
         note: blockLocationOnly ? "Location-wide block from calendar drag" : "Blocked from calendar drag",
       };
       setItems([...items, newBlock]);
       closeCalendarDetails();
       setToast({
-        message: `Blocked ${weekDays[activeDraft.day].short}, ${formatRange(activeDraft.start, activeDraft.duration)}.`,
+        message: t("Blocked {short}, {start}.", { short: weekDays[activeDraft.day].short, start: formatRange(activeDraft.start, activeDraft.duration) }),
         undo: () => {
           setItems(previous);
           closeCalendarDetails();
@@ -12725,7 +12726,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     const blockLocationId = quickCreate.locationId || selectedCalendarLocationId || defaultLocationId(locations);
     const candidate = { week: activeWeek, day: quickCreate.day, start: quickCreate.start, duration: 30 };
     if (!isValidBlockSlot(candidate, undefined, { coachId: blockCoachId, locationId: blockLocationId, locationOnly })) {
-      setToast({ message: "That block would overlap with another calendar item." });
+      setToast({ message: t("That block would overlap with another calendar item.") });
       return;
     }
     const previous = items;
@@ -12733,7 +12734,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       id: newCalendarItemId("block"),
       kind: "block",
       accountId: activeAccountId,
-      title: locationOnly ? "Location unavailable" : "Coach unavailable",
+      title: locationOnly ? t("Location unavailable") : t("Coach unavailable"),
       coachId: blockCoachId,
       locationId: blockLocationId,
       coach: blockCoachId ? bookingCoachSnapshotFor(blockCoachId, coachProfiles) : undefined,
@@ -12745,7 +12746,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     closeCalendarDetails();
     setQuickCreate(null);
     setToast({
-      message: `Blocked ${weekDays[item.day].short}, ${formatRange(item.start, item.duration)}.`,
+      message: t("Blocked {short}, {start}.", { short: weekDays[item.day].short, start: formatRange(item.start, item.duration) }),
       undo: () => {
         setItems(previous);
         void reconcileUndoByDelete(item.id, previous);
@@ -12791,7 +12792,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       locationId: selected.locationId,
     });
     if (!option) {
-      setToast({ message: "That lesson would overlap another appointment." });
+      setToast({ message: t("That lesson would overlap another appointment.") });
       return;
     }
     if (!confirmPastAdminLesson(candidate)) return;
@@ -12805,7 +12806,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       id: newCalendarItemId("appt"),
       kind: "appointment",
       accountId: activeAccountId,
-      title: "New client",
+      title: t("New client"),
       client: "New client",
       serviceId,
       coachId,
@@ -12820,7 +12821,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     setItems(carveBusyBlocksForAppointment([...items, item], itemSlot(item)));
     closeCalendarDetails();
     setToast({
-      message: `Added ${service.name} inside blocked time at ${formatTime(item.start)}.`,
+      message: t("Added {name} inside blocked time at {start}.", { name: service.name, start: formatTime(item.start) }),
       undo: () => {
         setItems(previous);
         void reconcileUndoByDelete(item.id, previous);
@@ -12860,7 +12861,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setDockBookings((current) => [...current, booking]);
       setActiveDockBookingId(booking.id);
       setFlyingBooking(null);
-      setToast({ message: `${booking.client}'s next ${service.name} is waiting on the dock.` });
+      setToast({ message: t("{client}'s next {name} is waiting on the dock.", { client: booking.client, name: service.name }) });
     }, 620);
   }
 
@@ -12890,7 +12891,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     setQuickCreate(null);
     const service = services.find((serviceCandidate) => serviceCandidate.id === booking.serviceId);
     if (!service) {
-      setToast({ message: "That parked lesson type is no longer available." });
+      setToast({ message: t("That parked lesson type is no longer available.") });
       return false;
     }
     // A shelved lesson still occupies its own row, so it has to be excluded from
@@ -12915,7 +12916,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           coachId: effectiveCalendarPerspective === "coach" ? selectedCalendarCoachId : undefined,
         });
     if (!option) {
-      setToast({ message: "That spot is not available. The lesson is still on the shelf." });
+      setToast({ message: t("That spot is not available. The lesson is still on the shelf.") });
       return false;
     }
     if (!confirmPastAdminLesson(candidate)) return false;
@@ -12954,7 +12955,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         }, 620);
       }
       setToast({
-        message: `Moved ${booking.client} to ${weekDays[movedItem.day].short} at ${formatTime(movedItem.start)}.`,
+        message: t("Moved {client} to {short} at {start}.", { client: booking.client, short: weekDays[movedItem.day].short, start: formatTime(movedItem.start) }),
       });
       if (isSimpleChangeToItem(previousItems, nextItems, movedItem.id)) {
         void persistUpsertItem(movedItem, previousItems, nextItems);
@@ -13004,7 +13005,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         setPlacementAnimation((current) => (current?.itemId === item.id ? null : current));
       }, 620);
     }
-    setToast({ message: `Placed ${booking.client} on ${weekDays[item.day].short} at ${formatTime(item.start)}.` });
+    setToast({ message: t("Placed {client} on {short} at {start}.", { client: booking.client, short: weekDays[item.day].short, start: formatTime(item.start) }) });
     if (isSimpleChangeToItem(previousItems, nextItems, item.id)) {
       void persistUpsertItem(item, previousItems, nextItems);
     }
@@ -13021,10 +13022,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     const sourceItemId = booking.sourceItemId;
     if (sourceItemId) {
       setShelvedItemIds((current) => current.filter((id) => id !== sourceItemId));
-      setToast({ message: `${booking.client}'s lesson is back where it was.` });
+      setToast({ message: t("{client}'s lesson is back where it was.", { client: booking.client }) });
       return;
     }
-    setToast({ message: `${booking.client}'s parked lesson was removed.` });
+    setToast({ message: t("{client}'s parked lesson was removed.", { client: booking.client }) });
   }
 
   function quickCreatePopoverStyle(): CSSProperties {
@@ -13192,7 +13193,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     const email = safeText(selected.email).trim();
     const phone = safeText(selected.phone).trim();
     if (!name && !email) {
-      setToast({ message: "This booking needs a name or email before a note can be saved." });
+      setToast({ message: t("This booking needs a name or email before a note can be saved.") });
       return null;
     }
     try {
@@ -13205,19 +13206,19 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       });
       if (response.status === 401) {
         setAuthStatus("guest");
-        throw new Error("Admin login required");
+        throw new Error(t("Admin login required"));
       }
       if (!response.ok) {
-        throw new Error(await readApiFailure(response, "Could not add this booking to clients."));
+        throw new Error(await readApiFailure(response, t("Could not add this booking to clients.")));
       }
       const result = (await response.json()) as PeopleUpdateResult;
       if (Array.isArray(result.people)) setPeople(cleanPeople(result.people));
       if (!result.person?.id) return null;
-      setToast({ message: `${result.person.name || "Client"} added to clients.` });
+      setToast({ message: t("{name} added to clients.", { name: result.person.name || t("Client") }) });
       return result.person;
     } catch (error) {
       setToast({
-        message: error instanceof Error ? error.message : "Could not add this booking to clients.",
+        message: error instanceof Error ? error.message : t("Could not add this booking to clients."),
       });
       return null;
     }
@@ -13275,74 +13276,74 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setToast({
         message:
           result.reason === "my-library-save"
-            ? "Saved permanently to My Library. Uploading to Clarity Cloud."
-            : "Saved. Uploading to Clarity Cloud.",
+            ? t("Saved permanently to My Library. Uploading to Clarity Cloud.")
+            : t("Saved. Uploading to Clarity Cloud."),
       });
       return;
     }
-    setToast({ message: "Saved safely on this device. Clarity will upload it when Cloud is available." });
+    setToast({ message: t("Saved safely on this device. Clarity will upload it when Cloud is available.") });
   }
 
   async function renameSavedVideo(item: SavedVideoItem) {
     const store = savedVideoLibraryRef.current;
     if (!store) {
-      setToast({ message: "Saved video library is unavailable in this browser." });
+      setToast({ message: t("Saved video library is unavailable in this browser.") });
       return;
     }
-    const title = window.prompt("Rename saved video", item.title);
+    const title = window.prompt(t("Rename saved video"), item.title);
     if (title === null) return;
     const nextTitle = title.trim();
     if (!nextTitle) {
-      setToast({ message: "Saved video name cannot be blank." });
+      setToast({ message: t("Saved video name cannot be blank.") });
       return;
     }
     try {
       await store.putItem({ ...item, title: nextTitle });
       refreshSavedVideoLibrary();
-      setToast({ message: "Saved video renamed." });
+      setToast({ message: t("Saved video renamed.") });
     } catch {
-      setToast({ message: "Saved video could not be renamed." });
+      setToast({ message: t("Saved video could not be renamed.") });
     }
   }
 
   async function deleteSavedVideo(item: SavedVideoItem) {
     const store = savedVideoLibraryRef.current;
     if (!store) {
-      setToast({ message: "Saved video library is unavailable in this browser." });
+      setToast({ message: t("Saved video library is unavailable in this browser.") });
       return;
     }
     const currentlyOpen = videoContext?.savedVideoId === item.savedVideoId;
     const confirmed = window.confirm(
       currentlyOpen
-        ? "This saved video is currently open in Video Analysis. Delete the saved library item? The active workspace copy will not be cleared."
-        : "Delete this saved video from the Player Profile library?"
+        ? t("This saved video is currently open in Video Analysis. Delete the saved library item? The active workspace copy will not be cleared.")
+        : t("Delete this saved video from the Player Profile library?")
     );
     if (!confirmed) return;
     try {
       await store.deleteItem(item.savedVideoId);
       refreshSavedVideoLibrary();
-      setToast({ message: "Saved video deleted." });
+      setToast({ message: t("Saved video deleted.") });
     } catch {
-      setToast({ message: "Saved video could not be deleted." });
+      setToast({ message: t("Saved video could not be deleted.") });
     }
   }
 
   async function removeSavedVideoFromDevice(item: SavedVideoItem) {
     const store = savedVideoLibraryRef.current;
     if (!store) {
-      setToast({ message: "Saved video library is unavailable in this browser." });
+      setToast({ message: t("Saved video library is unavailable in this browser.") });
       return;
     }
     if (item.cloud?.status !== "ready" && item.cloud?.status !== "imported") {
-      setToast({ message: "Wait until this video is available in Clarity Cloud before removing the device copy." });
+      setToast({ message: t("Wait until this video is available in Clarity Cloud before removing the device copy.") });
       return;
     }
     try {
       await store.removeDeviceCopy(item.savedVideoId);
       refreshSavedVideoLibrary();
-      setToast({ message: "Removed from this device. Clarity Cloud copy kept." });
+      setToast({ message: t("Removed from this device. Clarity Cloud copy kept.") });
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Device copy could not be removed." });
+      setToast({ message: error instanceof Error ? error.message : t("Device copy could not be removed.") });
     }
   }
 
@@ -13352,12 +13353,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   ) {
     const store = savedVideoLibraryRef.current;
     if (!store) {
-      setToast({ message: "Saved video library is unavailable in this browser." });
-      throw new Error("Transfer service unavailable");
+      setToast({ message: t("Saved video library is unavailable in this browser.") });
+      throw new Error(t("Transfer service unavailable"));
     }
     if (!itemsToSend.length) {
-      setToast({ message: "No saved videos are waiting to upload." });
-      throw new Error("No saved videos are waiting to upload.");
+      setToast({ message: t("No saved videos are waiting to upload.") });
+      throw new Error(t("No saved videos are waiting to upload."));
     }
 
     const cloudReason = clarityCloudTransferBlockReason(clarityCloudHealth);
@@ -13386,7 +13387,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       ids.forEach((id) => next.add(id));
       return next;
     });
-    setToast({ message: itemsToSend.length === 1 ? "Preparing Clarity Cloud..." : `Preparing ${itemsToSend.length} Clarity Cloud uploads...` });
+    setToast({ message: itemsToSend.length === 1 ? t("Preparing Clarity Cloud...") : t("Preparing {length} Clarity Cloud uploads...", { length: itemsToSend.length }) });
     refreshSavedVideoLibrary();
 
     void Promise.all(
@@ -13399,7 +13400,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       .then(async () => {
         refreshSavedVideoLibrary();
         await refreshClarityCloudImports();
-        setToast({ message: itemsToSend.length === 1 ? "Available in Clarity Cloud." : "Videos are available in Clarity Cloud." });
+        setToast({ message: itemsToSend.length === 1 ? t("Available in Clarity Cloud.") : t("Videos are available in Clarity Cloud.") });
       })
       .catch((error) => {
         refreshSavedVideoLibrary();
@@ -13409,7 +13410,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           safeErrorCode: code || "CLARITY_CLOUD_TRANSFER_FAILED",
           savedVideoIds: ids,
         });
-        setToast({ message: "Upload failed - Retry from the Player Profile card. Your device copy is safe." });
+        setToast({ message: t("Upload failed - Retry from the Player Profile card. Your device copy is safe.") });
       })
       .finally(() => {
         setUploadingSavedVideoIds((current) => {
@@ -13435,14 +13436,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   async function sendSavedVideoToPlayer(item: SavedVideoItem, personId: string) {
     const store = savedVideoLibraryRef.current;
     if (!store) {
-      setToast({ message: "Saved video library is unavailable in this browser." });
+      setToast({ message: t("Saved video library is unavailable in this browser.") });
       return;
     }
     const portalPlayer = portalPlayers.find(
       (entry) => entry.personId === personId && entry.status !== "disabled",
     );
     if (!portalPlayer) {
-      setToast({ message: "Give this player portal access first — that is where they watch it." });
+      setToast({ message: t("Give this player portal access first — that is where they watch it.") });
       return;
     }
     const cloudReason = clarityCloudTransferBlockReason(clarityCloudHealth);
@@ -13452,11 +13453,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     }
     // null is Cancel, "" is an empty note deliberately sent. They are
     // different answers and only the first one aborts.
-    const note = window.prompt("Send this video to the player. Add a note (optional):", "");
+    const note = window.prompt(t("Send this video to the player. Add a note (optional):"), "");
     if (note === null) return;
 
     setUploadingSavedVideoIds((current) => new Set(current).add(item.savedVideoId));
-    setToast({ message: "Sending to player..." });
+    setToast({ message: t("Sending to player...") });
     try {
       await saveSavedVideoToCloud(item.savedVideoId, store, {
         onProgress: () => refreshSavedVideoLibrary(),
@@ -13466,7 +13467,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       });
       refreshSavedVideoLibrary();
       await refreshClarityCloudImports();
-      setToast({ message: "Sent. They get an email, and it is in their portal Videos." });
+      setToast({ message: t("Sent. They get an email, and it is in their portal Videos.") });
     } catch (error) {
       refreshSavedVideoLibrary();
       const code =
@@ -13482,7 +13483,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         message:
           error instanceof Error && error.message
             ? error.message
-            : "Could not send that video. Your device copy is safe.",
+            : t("Could not send that video. Your device copy is safe."),
       });
     } finally {
       setUploadingSavedVideoIds((current) => {
@@ -13523,14 +13524,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   ) {
     const store = savedVideoLibraryRef.current;
     if (!store) {
-      setToast({ message: "Saved video library is unavailable in this browser." });
+      setToast({ message: t("Saved video library is unavailable in this browser.") });
       return;
     }
     const portalPlayer = portalPlayers.find(
       (entry) => entry.personId === client.id && entry.status !== "disabled",
     );
     if (!portalPlayer) {
-      setToast({ message: "Give this player portal access first — that is where the review is kept." });
+      setToast({ message: t("Give this player portal access first — that is where the review is kept.") });
       return;
     }
     // Only the videos need the cloud. A review that is all notes is worth
@@ -13543,7 +13544,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     // null is Cancel, "" is an empty note deliberately sent. Same distinction
     // sendSavedVideoToPlayer makes, and only the first one aborts.
     const note = window.prompt(
-      `Send this review to ${client.name}. Add a note (optional):`,
+      t("Send this review to {name}. Add a note (optional):", { name: client.name }),
       "",
     );
     if (note === null) return;
@@ -13554,7 +13555,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       let picturesPending = 0;
       let analysisPending = false;
       for (const video of review.videos) {
-        setToast({ message: `Sending ${review.videos.length > 1 ? "videos" : "video"}…` });
+        setToast({ message: review.videos.length > 1 ? t("Sending videos…") : t("Sending video…") });
         const sent = await saveSavedVideoToCloud(video.savedVideoId, store, {
           onProgress: () => refreshSavedVideoLibrary(),
           returnToPlayer: true,
@@ -13572,13 +13573,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       // The videos went; say plainly if some of what goes with them did not.
       const shortfall = [
         picturesPending
-          ? `${picturesPending} screenshot picture${picturesPending === 1 ? "" : "s"} did not upload`
+          ? picturesPending === 1
+            ? t("1 screenshot picture did not upload")
+            : t("{n} screenshot pictures did not upload", { n: picturesPending })
           : "",
-        analysisPending ? "the latest notes did not update" : "",
+        analysisPending ? t("the latest notes did not update") : "",
       ]
         .filter(Boolean)
-        .join(" and ");
-      const shortfallNote = shortfall ? ` But ${shortfall} — send again to retry.` : "";
+        .join(` ${t("and")} `);
+      const shortfallNote = shortfall ? ` ${t("But {shortfall} — send again to retry.", { shortfall })}` : "";
 
       const response = await fetch("/api/video-transfer/review/send", {
         method: "POST",
@@ -13593,14 +13596,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         message?: string;
       };
       if (!response.ok || !result.ok) {
-        throw new Error(result.message || "Could not send this review.");
+        throw new Error(result.message || t("Could not send this review."));
       }
       setSentSwingReviewLink(result.shareUrl ? { id: review.id, url: result.shareUrl } : null);
       setToast({
         message:
           (result.emailed
-            ? `Sent to ${result.recipient || client.name}. It is in their portal too.`
-            : "The review is in their portal, but the email could not be sent. Copy the link instead.") +
+            ? t("Sent to {recipient}. It is in their portal too.", { recipient: result.recipient || client.name })
+            : t("The review is in their portal, but the email could not be sent. Copy the link instead.")) +
           shortfallNote,
       });
     } catch (error) {
@@ -13611,7 +13614,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         message:
           error instanceof Error && error.message
             ? error.message
-            : "Could not send this review. Your device copies are safe.",
+            : t("Could not send this review. Your device copies are safe."),
       });
     } finally {
       setSendingSwingReviewId(null);
@@ -13646,13 +13649,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   async function pauseSavedVideoTransfer(item: SavedVideoItem) {
     const store = savedVideoLibraryRef.current;
     if (!store) {
-      setToast({ message: "Saved video library is unavailable in this browser." });
+      setToast({ message: t("Saved video library is unavailable in this browser.") });
       return;
     }
     try {
       await pauseSavedVideoCloudUpload(item.savedVideoId, store);
       refreshSavedVideoLibrary();
-      setToast({ message: "Transfer paused." });
+      setToast({ message: t("Transfer paused.") });
     } catch (error) {
       const code = typeof error === "object" && error && "code" in error ? String((error as { code?: unknown }).code || "") : "";
       setToast({ message: savedVideoCloudErrorLabel(code, error instanceof Error ? error.message : undefined) });
@@ -13668,16 +13671,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   async function cancelSavedVideoTransfer(item: SavedVideoItem) {
     const store = savedVideoLibraryRef.current;
     if (!store) {
-      setToast({ message: "Saved video library is unavailable in this browser." });
+      setToast({ message: t("Saved video library is unavailable in this browser.") });
       return;
     }
-    if (!window.confirm("Cancel this transfer? The local saved video will stay in your library.")) return;
+    if (!window.confirm(t("Cancel this transfer? The local saved video will stay in your library."))) return;
     try {
       await cancelSavedVideoCloudUpload(item.savedVideoId, store);
       refreshSavedVideoLibrary();
-      setToast({ message: "Transfer cancelled. Local video kept." });
+      setToast({ message: t("Transfer cancelled. Local video kept.") });
     } catch {
-      setToast({ message: "Transfer could not be cancelled." });
+      setToast({ message: t("Transfer could not be cancelled.") });
     } finally {
       setUploadingSavedVideoIds((current) => {
         const next = new Set(current);
@@ -13690,15 +13693,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   async function removeSavedVideoTransfer(item: SavedVideoItem) {
     const store = savedVideoLibraryRef.current;
     if (!store) {
-      setToast({ message: "Saved video library is unavailable in this browser." });
+      setToast({ message: t("Saved video library is unavailable in this browser.") });
       return;
     }
     try {
       await removeSavedVideoCloudTransfer(item.savedVideoId, store);
       refreshSavedVideoLibrary();
-      setToast({ message: "Cloud transfer removed. Local video kept." });
+      setToast({ message: t("Cloud transfer removed. Local video kept.") });
     } catch {
-      setToast({ message: "Cloud transfer could not be removed." });
+      setToast({ message: t("Cloud transfer could not be removed.") });
     } finally {
       setUploadingSavedVideoIds((current) => {
         const next = new Set(current);
@@ -13711,7 +13714,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   async function migrateLegacyVideo(record: StoredVideoRecord) {
     const store = savedVideoLibraryRef.current;
     if (!store) {
-      setToast({ message: "Saved video library is unavailable in this browser." });
+      setToast({ message: t("Saved video library is unavailable in this browser.") });
       return;
     }
     const side = sourceSideFromSlotKey(record.slotKey);
@@ -13723,9 +13726,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         workspaceSnapshot: createDefaultVideoWorkspaceState(side),
       });
       refreshSavedVideoLibrary();
-      setToast({ message: "Moved recovery video to Saved Videos. Original recovery copy was kept." });
+      setToast({ message: t("Moved recovery video to Saved Videos. Original recovery copy was kept.") });
     } catch {
-      setToast({ message: "Recovery video could not be moved to Saved Videos." });
+      setToast({ message: t("Recovery video could not be moved to Saved Videos.") });
     }
   }
 
@@ -13738,30 +13741,30 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         await chooseManagedLocalVideoLibrary();
         if (store) {
           const result = await migrateSavedVideosToManagedLocalLibrary(store);
-          setToast({ message: result.migrated ? `Moved ${result.migrated} saved videos to My Library.` : "My Library connected." });
+          setToast({ message: result.migrated ? t("Moved {migrated} saved videos to My Library.", { migrated: result.migrated }) : t("My Library connected.") });
         } else {
-          setToast({ message: "My Library connected." });
+          setToast({ message: t("My Library connected.") });
         }
       } else if (action === "reconnect") {
         await reconnectManagedLocalVideoLibrary();
-        setToast({ message: "My Library reconnected." });
+        setToast({ message: t("My Library reconnected.") });
       } else if (action === "move") {
-        if (!store) throw new Error("Saved video library is unavailable in this browser.");
+        if (!store) throw new Error(t("Saved video library is unavailable in this browser."));
         await moveManagedLocalVideoLibrary(store);
-        setToast({ message: "My Library moved." });
+        setToast({ message: t("My Library moved.") });
       } else if (action === "verify" || action === "rescan") {
-        if (!store) throw new Error("Saved video library is unavailable in this browser.");
+        if (!store) throw new Error(t("Saved video library is unavailable in this browser."));
         const result = action === "verify"
           ? await verifyManagedLocalVideoLibrary(store)
           : await rescanManagedLocalVideoLibrary(store);
-        setToast({ message: `${action === "verify" ? "Verified" : "Rescanned"} ${result.verified} saved videos.` });
+        setToast({ message: action === "verify" ? t("Verified {n} saved videos.", { n: result.verified }) : t("Rescanned {n} saved videos.", { n: result.verified }) });
       } else if (action === "migrate") {
-        if (!store) throw new Error("Saved video library is unavailable in this browser.");
+        if (!store) throw new Error(t("Saved video library is unavailable in this browser."));
         const result = await migrateSavedVideosToManagedLocalLibrary(store);
-        setToast({ message: result.failed ? `Migrated ${result.migrated}; ${result.failed} need attention.` : `Migrated ${result.migrated} saved videos.` });
+        setToast({ message: result.failed ? t("Migrated {migrated}; {failed} need attention.", { migrated: result.migrated, failed: result.failed }) : t("Migrated {migrated} saved videos.", { migrated: result.migrated }) });
       }
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "My Library action failed." });
+      setToast({ message: error instanceof Error ? error.message : t("My Library action failed.") });
     } finally {
       refreshSavedVideoLibrary();
     }
@@ -13784,7 +13787,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     }
     if (action === "open-setup-details") {
       setStorageDiagnosticsOpen(true);
-      setToast({ message: "Setup details opened." });
+      setToast({ message: t("Setup details opened.") });
       return;
     }
     if (action === "retry-setup") {
@@ -13792,18 +13795,18 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       return;
     }
     await refreshGoogleDriveTransferStatus();
-    setToast({ message: "Clarity Cloud status refreshed." });
+    setToast({ message: t("Clarity Cloud status refreshed.") });
   }
 
   async function importClarityCloudTransfer(transfer: ClarityCloudImportTransfer) {
     const store = savedVideoLibraryRef.current;
     if (!store) {
-      setToast({ message: "Saved video library is unavailable in this browser." });
+      setToast({ message: t("Saved video library is unavailable in this browser.") });
       return;
     }
     const savedVideoId = transfer.savedVideoId || transfer.savedVideo?.savedVideoId;
     if (!savedVideoId) {
-      setToast({ message: "Clarity Cloud transfer metadata is incomplete." });
+      setToast({ message: t("Clarity Cloud transfer metadata is incomplete.") });
       return;
     }
     setClarityCloudImportActionIds((current) => new Set(current).add(savedVideoId));
@@ -13811,9 +13814,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       const imported = await importSavedVideoFromClarityCloud(savedVideoId, store);
       refreshSavedVideoLibrary();
       await refreshClarityCloudImports();
-      setToast({ message: `${imported.title || "Video"} is available on this device.` });
+      setToast({ message: t("{title} is available on this device.", { title: imported.title || t("Video") }) });
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not download from Clarity Cloud." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not download from Clarity Cloud.") });
     } finally {
       setClarityCloudImportActionIds((current) => {
         const next = new Set(current);
@@ -13847,18 +13850,18 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   async function openCloudVideoFromCatalogue(transfer: ClarityCloudImportTransfer, playerName: string) {
     const store = savedVideoLibraryRef.current;
     if (!store) {
-      setToast({ message: "Saved video library is unavailable in this browser." });
+      setToast({ message: t("Saved video library is unavailable in this browser.") });
       return;
     }
     const savedVideoId = transfer.savedVideoId || transfer.savedVideo?.savedVideoId;
     const playerId = transfer.savedVideo?.playerId;
     if (!savedVideoId || !playerId) {
-      setToast({ message: "Clarity Cloud catalogue metadata is incomplete." });
+      setToast({ message: t("Clarity Cloud catalogue metadata is incomplete.") });
       return;
     }
     setClarityCloudImportActionIds((current) => new Set(current).add(savedVideoId));
     try {
-      setToast({ message: "Downloading from Clarity Cloud..." });
+      setToast({ message: t("Downloading from Clarity Cloud...") });
       const imported = await importSavedVideoFromClarityCloud(savedVideoId, store);
       refreshSavedVideoLibrary();
       await refreshClarityCloudImports();
@@ -13868,7 +13871,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         savedVideoId: imported.savedVideoId,
       });
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not download from Clarity Cloud." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not download from Clarity Cloud.") });
     } finally {
       setClarityCloudImportActionIds((current) => {
         const next = new Set(current);
@@ -13881,22 +13884,22 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   async function verifySavedVideoInLibrary(item: SavedVideoItem) {
     const store = savedVideoLibraryRef.current;
     if (!store) {
-      setToast({ message: "Saved video library is unavailable in this browser." });
+      setToast({ message: t("Saved video library is unavailable in this browser.") });
       return;
     }
     try {
       await store.verifyItem(item.savedVideoId);
       refreshSavedVideoLibrary();
-      setToast({ message: "Saved video verified." });
+      setToast({ message: t("Saved video verified.") });
     } catch (error) {
       refreshSavedVideoLibrary();
-      setToast({ message: error instanceof Error ? error.message : "Saved video needs repair." });
+      setToast({ message: error instanceof Error ? error.message : t("Saved video needs repair.") });
     }
   }
 
   async function showSavedVideoInFinder(item: SavedVideoItem) {
     if (item.local.managed?.status === "healthy") {
-      setToast({ message: "Saved video is kept in My Library." });
+      setToast({ message: t("Saved video is kept in My Library.") });
       return;
     }
     if (!managedLocalLibraryStatus.configured) {
@@ -13909,20 +13912,20 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   async function revealSavedVideoFile(item: SavedVideoItem) {
     const store = savedVideoLibraryRef.current;
     if (!store) {
-      setToast({ message: "Saved video library is unavailable in this browser." });
+      setToast({ message: t("Saved video library is unavailable in this browser.") });
       return;
     }
     try {
       const blob = await store.getBlob(item.savedVideoId);
       if (!blob) {
-        setToast({ message: "Saved video file is missing. Reconnect the library or use the cache recovery copy." });
+        setToast({ message: t("Saved video file is missing. Reconnect the library or use the cache recovery copy.") });
         return;
       }
       const url = URL.createObjectURL(blob);
       window.open(url, "_blank", "noopener,noreferrer");
       window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Saved video file could not be opened." });
+      setToast({ message: error instanceof Error ? error.message : t("Saved video file could not be opened.") });
     }
   }
 
@@ -13979,13 +13982,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     setAssigningVideoId(savedVideoId);
     try {
       await reassignSavedVideoPlayer(savedVideoId, choice.playerId, savedVideoLibraryRef.current);
-      setToast({ message: `Video moved to ${choice.playerName}.` });
+      setToast({ message: t("Video moved to {playerName}.", { playerName: choice.playerName }) });
     } catch (error) {
       setToast({
         message:
           error instanceof Error
-            ? `Video could not be fully moved: ${error.message}`
-            : "Video could not be moved.",
+            ? t("Video could not be fully moved: {message}", { message: error.message })
+            : t("Video could not be moved."),
       });
     } finally {
       setAssigningVideoId("");
@@ -13997,14 +14000,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   function promoteExistingPlayer(client: Pick<Person, "id" | "name" | "email" | "phone">) {
     setPlayerProfilesLocal((current) => addManualPlayer(current, client.id));
     closePlayerAddDialog(client);
-    if (!playerAddForVideoSave) setToast({ message: `${client.name} added to player profiles.` });
+    if (!playerAddForVideoSave) setToast({ message: t("{name} added to player profiles.", { name: client.name }) });
   }
 
   async function createNewPlayer() {
     const name = playerAddNew.name.trim();
     const email = playerAddNew.email.trim();
     if (!name && !email) {
-      setToast({ message: "A player needs a name or email." });
+      setToast({ message: t("A player needs a name or email.") });
       return;
     }
     setPlayerAddSaving(true);
@@ -14024,9 +14027,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       });
       if (response.status === 401) {
         setAuthStatus("guest");
-        throw new Error("Admin login required");
+        throw new Error(t("Admin login required"));
       }
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not add player."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not add player.")));
       const result = (await response.json()) as PeopleUpdateResult;
       if (Array.isArray(result.people)) setPeople(cleanPeople(result.people));
       const person = result.person;
@@ -14034,9 +14037,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         setPlayerProfilesLocal((current) => addManualPlayer(current, person.id));
       }
       closePlayerAddDialog(person?.id ? person : null);
-      setToast({ message: name ? `${name} added to player profiles.` : "Player added." });
+      setToast({ message: name ? t("{name} added to player profiles.", { name }) : t("Player added.") });
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not add player." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not add player.") });
     } finally {
       setPlayerAddSaving(false);
     }
@@ -14072,17 +14075,17 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   function addSelectedCustomGroupAttendee() {
     if (!selected || selected.kind !== "appointment" || !selectedService || !isCustomGroupService(selectedService)) return;
     if (selectedCustomGroupAttendeeDraft.email.trim() && !selectedCustomGroupAttendeeDraft.email.includes("@")) {
-      setToast({ message: "Enter a valid attendee email or leave it blank." });
+      setToast({ message: t("Enter a valid attendee email or leave it blank.") });
       return;
     }
     const attendee = adminCustomGroupAttendee(selectedCustomGroupAttendeeDraft.name, selectedCustomGroupAttendeeDraft.email);
     if (!attendee) {
-      setToast({ message: "Add an attendee name first." });
+      setToast({ message: t("Add an attendee name first.") });
       return;
     }
     const attendees = attendeeListWithBooker(selected);
     if (attendees.length + 1 > customGroupMaxParticipants(selectedService)) {
-      setToast({ message: "This custom group is already at maximum size." });
+      setToast({ message: t("This custom group is already at maximum size.") });
       return;
     }
     setItems((current) =>
@@ -14125,15 +14128,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     const name = customGroupAttendeeDraft.name.trim();
     const email = customGroupAttendeeDraft.email.trim().toLowerCase();
     if (!name) {
-      setToast({ message: "Add a name for the attendee." });
+      setToast({ message: t("Add a name for the attendee.") });
       return;
     }
     if (email && !email.includes("@")) {
-      setToast({ message: "Enter a valid attendee email or leave it blank." });
+      setToast({ message: t("Enter a valid attendee email or leave it blank.") });
       return;
     }
     if (customGroupParticipantCount >= customGroupMaxParticipants(bookingTargetService)) {
-      setToast({ message: "This custom group is already at its maximum size." });
+      setToast({ message: t("This custom group is already at its maximum size.") });
       return;
     }
     setCustomGroupAttendees((current) => [
@@ -14296,7 +14299,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     const email = bookingSignIn.email.trim();
     const password = bookingSignIn.password;
     if (!email || !password) {
-      setBookingSignInError("Enter your email and password.");
+      setBookingSignInError(t("Enter your email and password."));
       return;
     }
     setBookingSignInState("checking");
@@ -14313,14 +14316,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         message?: string;
       };
       if (!response.ok || !data.authenticated) {
-        throw new Error(data.message || "Email or password is incorrect.");
+        throw new Error(data.message || t("Email or password is incorrect."));
       }
       setBookingSignIn({ email: "", password: "" });
       window.location.href = playerBookingUrl();
     } catch (error) {
       setBookingSignInState("idle");
       setBookingSignInError(
-        error instanceof Error ? error.message : "Could not reach the sign-in service.",
+        error instanceof Error ? error.message : t("Could not reach the sign-in service."),
       );
     }
   }
@@ -14332,7 +14335,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       appointmentId: credentials.appointmentId,
     };
     if (!lookupCredentials.email || !lookupCredentials.phone) {
-      if (!silent) setToast({ message: "Enter the email and phone number used on the booking." });
+      if (!silent) setToast({ message: t("Enter the email and phone number used on the booking.") });
       return;
     }
     setRescheduleState("checking");
@@ -14346,7 +14349,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       });
       const data = (await response.json()) as { matches?: PublicRescheduleMatch[]; message?: string };
       if (!response.ok) {
-        if (!silent) setToast({ message: data.message || "Could not find that booking." });
+        if (!silent) setToast({ message: data.message || t("Could not find that booking.") });
         setRescheduleMatches([]);
         return;
       }
@@ -14359,7 +14362,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       } else if (matches.length === 1) {
         selectRescheduleMatch(matches[0]);
       }
-      if (!matches.length && !silent) setToast({ message: "No booking matched those details." });
+      if (!matches.length && !silent) setToast({ message: t("No booking matched those details.") });
       if (matches.length && !isPlayerBooking) {
         const nextSaved: SavedRescheduleLogin = {
           email: lookupCredentials.email,
@@ -14369,7 +14372,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         window.localStorage.setItem(RESCHEDULE_LOGIN_STORAGE_KEY, JSON.stringify(nextSaved));
       }
     } catch {
-      if (!silent) setToast({ message: "Could not reach the booking server." });
+      if (!silent) setToast({ message: t("Could not reach the booking server.") });
     } finally {
       setRescheduleState("idle");
     }
@@ -14377,7 +14380,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
   async function confirmPublicReschedule() {
     if (!selectedRescheduleMatch || !bookingTargetService || bookingStart === null) {
-      setToast({ message: "Choose the booking and the new time." });
+      setToast({ message: t("Choose the booking and the new time.") });
       return;
     }
 
@@ -14402,7 +14405,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         notifications?: EmailSendResult[];
       };
       if (!response.ok) {
-        setToast({ message: data.message || "That time is no longer available." });
+        setToast({ message: data.message || t("That time is no longer available.") });
         if (data.state?.items) setItems(data.state.items);
         clearPublicBookingSlotCache();
         setBookingStart(null);
@@ -14434,7 +14437,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setSelectedRescheduleId("");
       setBookingStart(null);
     } catch {
-      setToast({ message: "Could not complete the reschedule. Please try again." });
+      setToast({ message: t("Could not complete the reschedule. Please try again.") });
     } finally {
       setRescheduleState("idle");
     }
@@ -14442,11 +14445,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
   async function confirmPublicCancellation() {
     if (!selectedRescheduleMatch) {
-      setToast({ message: "Choose the booking to cancel." });
+      setToast({ message: t("Choose the booking to cancel.") });
       return;
     }
     const confirmed = window.confirm(
-      `Cancel ${selectedRescheduleMatch.serviceName} for ${selectedRescheduleMatch.client}?`,
+      t("Cancel {serviceName} for {client}?", { serviceName: selectedRescheduleMatch.serviceName, client: selectedRescheduleMatch.client }),
     );
     if (!confirmed) return;
 
@@ -14467,7 +14470,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         notifications?: EmailSendResult[];
       };
       if (!response.ok) {
-        setToast({ message: data.message || "Could not cancel that booking." });
+        setToast({ message: data.message || t("Could not cancel that booking.") });
         return;
       }
 
@@ -14505,7 +14508,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setSelectedRescheduleId("");
       setBookingStart(null);
     } catch {
-      setToast({ message: "Could not cancel that booking. Please try again." });
+      setToast({ message: t("Could not cancel that booking. Please try again.") });
     } finally {
       setRescheduleState("idle");
     }
@@ -14618,7 +14621,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     setLocationEditorError("");
   }
 
-  async function persistLocations(nextLocations: Location[], message = "Locations saved."): Promise<boolean> {
+  async function persistLocations(nextLocations: Location[], message = t("Locations saved.")): Promise<boolean> {
     const saveVersion = ++locationSaveVersionRef.current;
     beginAdminSave("locations");
     const isCurrentSave = () => locationSaveVersionRef.current === saveVersion;
@@ -14657,11 +14660,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         setAuthStatus("guest");
         throwWorkspaceSaveFailure("Location", "PUT /api/locations", "location_put_unauthorized", diagnostic, {
           error: "unauthorized",
-          message: "Admin login required",
+          message: t("Admin login required"),
         });
       }
       if (!response.ok) {
-        const detail = await readApiFailureDetail(response, "Location save failed");
+        const detail = await readApiFailureDetail(response, t("Location save failed"));
         throwWorkspaceSaveFailure("Location", "PUT /api/locations", "location_put_failed", diagnostic, detail);
       }
       failureStage = "location_put_failed";
@@ -14694,11 +14697,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         setAuthStatus("guest");
         throwWorkspaceSaveFailure("Location", "GET /api/locations", "location_get_unauthorized", diagnostic, {
           error: "unauthorized",
-          message: "Admin login required",
+          message: t("Admin login required"),
         });
       }
       if (!locationsResponse.ok) {
-        const detail = await readApiFailureDetail(locationsResponse, "Location save failed");
+        const detail = await readApiFailureDetail(locationsResponse, t("Location save failed"));
         throwWorkspaceSaveFailure("Location", "GET /api/locations", "location_get_failed", diagnostic, detail);
       }
       failureStage = "location_get_failed";
@@ -14732,11 +14735,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         setAuthStatus("guest");
         throwWorkspaceSaveFailure("Location", "GET /api/calendar-state", "location_calendar_state_unauthorized", diagnostic, {
           error: "unauthorized",
-          message: "Admin login required",
+          message: t("Admin login required"),
         });
       }
       if (!calendarStateResponse.ok) {
-        const detail = await readApiFailureDetail(calendarStateResponse, "Location save failed");
+        const detail = await readApiFailureDetail(calendarStateResponse, t("Location save failed"));
         throwWorkspaceSaveFailure("Location", "GET /api/calendar-state", "location_calendar_state_failed", diagnostic, detail);
       }
       failureStage = "location_calendar_state_failed";
@@ -14782,7 +14785,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         failureRoute,
         failureStage,
         diagnostic,
-        "Could not save locations.",
+        t("Could not save locations."),
       );
       finishDiagnosticTimer(timer, "failed", {
         route: failureRoute,
@@ -14801,7 +14804,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
   async function saveEditedLocation() {
     if (!locationEditor.name.trim()) {
-      setToast({ message: "Name the location before saving." });
+      setToast({ message: t("Name the location before saving.") });
       return;
     }
     const clean = cleanLocation(
@@ -14831,7 +14834,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   function archiveLocation(location: Location) {
     const activeCount = activeLocations(locations).length;
     if (location.active && !location.archived && activeCount <= 1) {
-      setToast({ message: "Keep at least one active location." });
+      setToast({ message: t("Keep at least one active location.") });
       return;
     }
     const next = locations.map((candidate) =>
@@ -14849,11 +14852,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
   function makeDefaultLocation(location: Location) {
     if (location.archived || !location.active) {
-      setToast({ message: "Restore the location before making it default." });
+      setToast({ message: t("Restore the location before making it default.") });
       return;
     }
     const next = locations.map((candidate) => ({ ...candidate, isDefault: candidate.id === location.id }));
-    void persistLocations(next, `${location.name} set as default.`);
+    void persistLocations(next, t("{name} set as default.", { name: location.name }));
   }
 
   function startNewCoach() {
@@ -14929,11 +14932,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         setAuthStatus("guest");
         throwWorkspaceSaveFailure("Coach", "PUT /api/coaches", "coach_put_unauthorized", diagnostic, {
           error: "unauthorized",
-          message: "Admin login required",
+          message: t("Admin login required"),
         });
       }
       if (!response.ok) {
-        const detail = await readApiFailureDetail(response, "Coach save failed");
+        const detail = await readApiFailureDetail(response, t("Coach save failed"));
         throwWorkspaceSaveFailure("Coach", "PUT /api/coaches", "coach_put_failed", diagnostic, detail);
       }
       failureStage = "coach_put_failed";
@@ -14966,11 +14969,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         setAuthStatus("guest");
         throwWorkspaceSaveFailure("Coach", "GET /api/coaches", "coach_get_unauthorized", diagnostic, {
           error: "unauthorized",
-          message: "Admin login required",
+          message: t("Admin login required"),
         });
       }
       if (!coachesResponse.ok) {
-        const detail = await readApiFailureDetail(coachesResponse, "Coach save failed");
+        const detail = await readApiFailureDetail(coachesResponse, t("Coach save failed"));
         throwWorkspaceSaveFailure("Coach", "GET /api/coaches", "coach_get_failed", diagnostic, detail);
       }
       failureStage = "coach_get_failed";
@@ -15004,11 +15007,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         setAuthStatus("guest");
         throwWorkspaceSaveFailure("Coach", "GET /api/calendar-state", "coach_calendar_state_unauthorized", diagnostic, {
           error: "unauthorized",
-          message: "Admin login required",
+          message: t("Admin login required"),
         });
       }
       if (!calendarStateResponse.ok) {
-        const detail = await readApiFailureDetail(calendarStateResponse, "Coach save failed");
+        const detail = await readApiFailureDetail(calendarStateResponse, t("Coach save failed"));
         throwWorkspaceSaveFailure("Coach", "GET /api/calendar-state", "coach_calendar_state_failed", diagnostic, detail);
       }
       failureStage = "coach_calendar_state_failed";
@@ -15048,7 +15051,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         failureRoute,
         failureStage,
         diagnostic,
-        "Could not save coaches.",
+        t("Could not save coaches."),
       );
       finishDiagnosticTimer(timer, "failed", {
         route: failureRoute,
@@ -15068,7 +15071,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   // the owner's own profile on the Business Hub.
   async function saveEditedCoach(draft: CoachProfile): Promise<boolean> {
     if (!draft.name.trim()) {
-      setToast({ message: `Give the ${terms.staffSingular.toLowerCase()} a name before saving.` });
+      setToast({ message: t("Give the {staffSingular} a name before saving.", { staffSingular: terms.staffSingular.toLowerCase() }) });
       return false;
     }
     const assignedLocationIds = (draft.assignedLocationIds ?? []).filter(Boolean);
@@ -15125,17 +15128,17 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         return false;
       }
       if (!response.ok) {
-        const detail = await readApiFailureDetail(response, "Profile save failed");
-        throw new Error(detail.message || detail.error || "Profile save failed");
+        const detail = await readApiFailureDetail(response, t("Profile save failed"));
+        throw new Error(detail.message || detail.error || t("Profile save failed"));
       }
       const data = (await response.json()) as { coach?: CoachProfile };
-      if (!data.coach) throw new Error("Profile save failed");
+      if (!data.coach) throw new Error(t("Profile save failed"));
       const saved = cleanCoachProfile(data.coach, blankCoachProfile(activeAccountId));
       setCoachProfiles((current) => current.map((coach) => (coach.id === saved.id ? saved : coach)));
-      setToast({ message: "Profile saved." });
+      setToast({ message: t("Profile saved.") });
       return true;
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not save your profile." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not save your profile.") });
       return false;
     }
   }
@@ -15153,7 +15156,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   // archived coach can be removed for good.
   function deleteCoach(coach: CoachProfile) {
     const name = coach.displayName || coach.name || "this coach";
-    if (!window.confirm(`Delete ${name}? Their past bookings keep their name, but this can't be undone.`)) return;
+    if (!window.confirm(t("Delete {name}? Their past bookings keep their name, but this can't be undone.", { name }))) return;
     void persistCoaches(
       coachProfiles.filter((candidate) => candidate.id !== coach.id),
       `${name} deleted.`,
@@ -15208,7 +15211,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           ...current.invoiceSettings,
           customFields: [
             ...current.invoiceSettings.customFields,
-            { id: `field-${Date.now()}`, label: "Reference", value: "", placement: "header" },
+            { id: `field-${Date.now()}`, label: t("Reference"), value: "", placement: "header" },
           ],
         },
       }),
@@ -15527,7 +15530,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         ? Array.from(new Set([...currentScreens, screenId]))
         : currentScreens.filter((candidate) => candidate !== screenId);
       if (current.visibility === "public" && nextScreens.length === 0) {
-        setToast({ message: "Public lesson types need at least one booking screen." });
+        setToast({ message: t("Public lesson types need at least one booking screen.") });
         return current;
       }
       return { ...current, bookingScreenIds: nextScreens };
@@ -15728,10 +15731,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       const data = await response.json().catch(() => ({}));
       if (response.status === 401) {
         setAuthStatus("guest");
-        throw new Error(data?.message || "Admin login expired. Sign in again before updating bookings.");
+        throw new Error(data?.message || t("Admin login expired. Sign in again before updating bookings."));
       }
       if (!response.ok || data?.ok === false || !data?.item) {
-        throw new Error(data?.message || "Status update could not be saved.");
+        throw new Error(data?.message || t("Status update could not be saved."));
       }
       const persistedItem = { ...optimisticItem, ...data.item } as CalendarItem;
       const persistedItems = optimisticItems.map((item) => (item.id === itemId ? persistedItem : item));
@@ -15742,7 +15745,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         setCalendarStateVersion(data.updatedAt);
       }
       setToast({
-        message: `Lesson marked ${status.replace("_", "-")}.`,
+        message: t("Lesson marked {value}.", { value: status.replace("_", "-") }),
         undo: () => {
           setItems(previousItems);
           void reconcileUndoByUpsert(targetItem, previousItems);
@@ -15752,7 +15755,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     } catch (error) {
       setItems(previousItems);
       setToast({
-        message: error instanceof Error ? error.message : "Status update could not be saved.",
+        message: error instanceof Error ? error.message : t("Status update could not be saved."),
       });
     } finally {
       endAdminSave("upsert_item");
@@ -15785,11 +15788,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
     const nextService = services.find((service) => service.id === nextServiceId);
     if (!nextService) {
-      setToast({ message: "That lesson type is no longer available." });
+      setToast({ message: t("That lesson type is no longer available.") });
       return;
     }
     if (isCustomGroupService(selectedService) || isCustomGroupService(nextService)) {
-      setToast({ message: "Custom group lessons can't be switched here - rebook instead." });
+      setToast({ message: t("Custom group lessons can't be switched here - rebook instead.") });
       return;
     }
 
@@ -15805,8 +15808,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setToast({
         message:
           nextService.duration > targetItem.duration
-            ? `${nextService.name} needs ${nextService.duration} min and something is already in that time.`
-            : `${nextService.name} doesn't fit this slot.`,
+            ? t("{name} needs {duration} min and something is already in that time.", { name: nextService.name, duration: nextService.duration })
+            : t("{name} doesn't fit this slot.", { name: nextService.name }),
       });
       return;
     }
@@ -15837,7 +15840,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     try {
       await persistUpsertItem(nextItem, previous, optimisticItems);
       setToast({
-        message: `Changed to ${nextService.name}.`,
+        message: t("Changed to {name}.", { name: nextService.name }),
         undo: () => {
           setItems(previous);
           void reconcileUndoByUpsert(targetItem, previous);
@@ -15845,7 +15848,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       });
     } catch (error) {
       setItems(previous);
-      setToast({ message: error instanceof Error ? error.message : "Could not change the lesson type." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not change the lesson type.") });
     } finally {
       setLessonTypeChangeState("idle");
     }
@@ -15916,10 +15919,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       const data = await response.json().catch(() => ({}));
       if (response.status === 401) {
         setAuthStatus("guest");
-        throw new Error(data?.message || "Admin login expired. Sign in again before merging clients.");
+        throw new Error(data?.message || t("Admin login expired. Sign in again before merging clients."));
       }
       if (!response.ok || data?.ok === false) {
-        throw new Error(data?.message || "Clients could not be merged.");
+        throw new Error(data?.message || t("Clients could not be merged."));
       }
       if (Array.isArray(data.people)) setPeople(data.people);
       const mergedItemIds: string[] = Array.isArray(data.mergedItemIds) ? data.mergedItemIds : [];
@@ -15933,7 +15936,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setClientMergeSelection([]);
       setClientMergeMode(false);
     } catch (error) {
-      setClientMergeError(error instanceof Error ? error.message : "Clients could not be merged.");
+      setClientMergeError(error instanceof Error ? error.message : t("Clients could not be merged."));
     } finally {
       setClientMergeSaving(false);
     }
@@ -15955,15 +15958,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       const data = await response.json().catch(() => ({}));
       if (response.status === 401) {
         setAuthStatus("guest");
-        throw new Error(data?.message || "Admin login expired. Sign in again before moving clients.");
+        throw new Error(data?.message || t("Admin login expired. Sign in again before moving clients."));
       }
       if (!response.ok || data?.ok === false) {
-        throw new Error(data?.message || "The client could not be moved.");
+        throw new Error(data?.message || t("The client could not be moved."));
       }
       if (Array.isArray(data.people)) setPeople(data.people);
-      setToast({ message: `Moved ${client.name || client.email || "that client"} to your clients.` });
+      setToast({ message: t("Moved {client} to your clients.", { client: client.name || client.email || t("that client") }) });
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "The client could not be moved." });
+      setToast({ message: error instanceof Error ? error.message : t("The client could not be moved.") });
     } finally {
       setClientMoveSavingId("");
     }
@@ -16118,7 +16121,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         expectedStatus: "completed",
         expectedRevision,
         serverStatus: 404,
-        message: "Lesson was not completed because it could not be found. Reload and try again.",
+        message: t("Lesson was not completed because it could not be found. Reload and try again."),
         backendError: "missing_lesson",
       };
       logLessonCompleteDiagnostic("lesson_missing", {
@@ -16160,14 +16163,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       const durationMs = Date.now() - startAt;
       if (response.status === 401) {
         setAuthStatus("guest");
-        throw new Error(data.message || "Admin login expired. Sign in again before completing lessons.");
+        throw new Error(data.message || t("Admin login expired. Sign in again before completing lessons."));
       }
       if (!response.ok) {
         const diagnostic = lessonCompleteDiagnosticFromResponse(
           itemId,
           response.status,
           data,
-          "Lesson completion failed.",
+          t("Lesson completion failed."),
           {
             expectedRevision,
             backendRevision: data.backendUpdatedAt || data.updatedAt || "",
@@ -16195,7 +16198,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           itemId,
           response.status,
           data,
-          data.message || "Lesson completion failed.",
+          data.message || t("Lesson completion failed."),
           {
             expectedRevision,
             backendRevision: data.updatedAt || data.backendUpdatedAt || "",
@@ -16221,7 +16224,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           itemId,
           response.status,
           data,
-          "Lesson completion response was missing the updated item.",
+          t("Lesson completion response was missing the updated item."),
           {
             expectedRevision,
             backendRevision: data.updatedAt || data.backendUpdatedAt || "",
@@ -16266,7 +16269,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           durationMs,
         },
       });
-      setToast({ message: "Lesson marked completed." });
+      setToast({ message: t("Lesson marked completed.") });
       window.setTimeout(() => {
         if (calendarSaveVersionRef.current === completeSaveVersion) {
           setCalendarSaveStatus((current) => (current === "saved" ? "idle" : current));
@@ -16290,7 +16293,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           message:
             error instanceof Error && error.message.includes("Admin login")
               ? error.message
-              : "Lesson was not completed because calendar data changed. Reload and try again.",
+              : t("Lesson was not completed because calendar data changed. Reload and try again."),
         } satisfies LessonCompleteDiagnostic);
       const message = diagnostic.message;
       setItems(previousItems);
@@ -16315,10 +16318,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   }
 
   function cancelGroupSessionAttendee(itemId: string) {
-    if (!window.confirm("Cancel this attendee from the group session?")) return;
+    if (!window.confirm(t("Cancel this attendee from the group session?"))) return;
     const appointment = items.find((item) => item.id === itemId && item.kind === "appointment");
     if (!appointment) {
-      setToast({ message: "Could not find that attendee." });
+      setToast({ message: t("Could not find that attendee.") });
       return;
     }
     void updateAppointmentStatus(appointment.id, "cancelled");
@@ -16373,7 +16376,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     const email = newInvoiceCustomer.email.trim();
     const phone = newInvoiceCustomer.phone.trim();
     if (!name && !email) {
-      setToast({ message: "Add a name or email for the customer." });
+      setToast({ message: t("Add a name or email for the customer.") });
       return;
     }
     setNewInvoiceCustomerSaving(true);
@@ -16386,9 +16389,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       });
       if (response.status === 401) {
         setAuthStatus("guest");
-        throw new Error("Admin login required");
+        throw new Error(t("Admin login required"));
       }
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not add customer."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not add customer.")));
       const result = (await response.json()) as PeopleUpdateResult;
       if (Array.isArray(result.people)) setPeople(cleanPeople(result.people));
       const created = result.person;
@@ -16398,9 +16401,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         email: created?.email || email,
         phone: created?.phone || phone,
       });
-      setToast({ message: `${created?.name || name || "Customer"} added to clients.` });
+      setToast({ message: t("{name} added to clients.", { name: created?.name || name || t("Customer") }) });
+
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not add customer." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not add customer.") });
     } finally {
       setNewInvoiceCustomerSaving(false);
     }
@@ -16568,7 +16572,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         setCatalogLoadState("error");
         return;
       }
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not load products and services."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not load products and services.")));
       const data = (await response.json()) as { products?: BillingCatalogItem[] };
       setCatalogItems(Array.isArray(data.products) ? data.products : []);
       setCatalogLoadState("loaded");
@@ -16623,16 +16627,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       );
       if (response.status === 401) {
         setAuthStatus("guest");
-        throw new Error("Admin login required");
+        throw new Error(t("Admin login required"));
       }
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not save the item."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not save the item.")));
       const data = (await response.json()) as { product?: BillingCatalogItem };
-      if (!data.product) throw new Error("Save response did not return the item.");
+      if (!data.product) throw new Error(t("Save response did not return the item."));
       mergeCatalogItem(data.product);
       setToast({ message: `${data.product.name} ${isUpdate ? "updated" : "added"}.` });
       return true;
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not save the item." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not save the item.") });
       return false;
     }
   }
@@ -16657,12 +16661,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           active,
         }),
       });
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not update the item."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not update the item.")));
       const data = (await response.json()) as { product?: BillingCatalogItem };
       if (data.product) mergeCatalogItem(data.product);
       setToast({ message: `${product.name} ${active ? "restored" : "retired"}.` });
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not update the item." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not update the item.") });
     }
   }
 
@@ -16678,13 +16682,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             : { delta: input.value, note: input.note },
         ),
       });
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not adjust stock."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not adjust stock.")));
       const data = (await response.json()) as { product?: BillingCatalogItem };
       if (data.product) mergeCatalogItem(data.product);
-      setToast({ message: `${product.name} stock is now ${data.product?.stockLevel ?? "updated"}.` });
+      setToast({ message: t("{product} stock is now {stock}.", { product: product.name, stock: data.product?.stockLevel ?? t("updated") }) });
       return true;
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not adjust stock." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not adjust stock.") });
       return false;
     }
   }
@@ -16695,7 +16699,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         credentials: "same-origin",
         cache: "no-store",
       });
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not load stock history."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not load stock history.")));
       const data = (await response.json()) as { movements?: StockMovement[] };
       return Array.isArray(data.movements) ? data.movements : [];
     } catch {
@@ -16711,7 +16715,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setAuthStatus("guest");
       return;
     }
-    if (!response.ok) throw new Error(await readApiFailure(response, "Could not load discount presets."));
+    if (!response.ok) throw new Error(await readApiFailure(response, t("Could not load discount presets.")));
     const data = (await response.json()) as { discounts?: BillingDiscount[] };
     setDiscountPresets(Array.isArray(data.discounts) ? data.discounts : []);
   }
@@ -16722,7 +16726,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setAuthStatus("guest");
       return;
     }
-    if (!response.ok) throw new Error(await readApiFailure(response, "Could not load expense categories."));
+    if (!response.ok) throw new Error(await readApiFailure(response, t("Could not load expense categories.")));
     const data = (await response.json()) as { categories?: BillingExpenseCategory[] };
     setExpenseCategories(Array.isArray(data.categories) ? data.categories : []);
   }
@@ -16739,13 +16743,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         setAuthStatus("guest");
         return;
       }
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not load expenses."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not load expenses.")));
       const data = (await response.json()) as { expenses?: BillingExpense[] };
       setExpenses(Array.isArray(data.expenses) ? data.expenses : []);
       setExpenseLoadState("loaded");
     } catch (error) {
       setExpenseLoadState("error");
-      setToast({ message: error instanceof Error ? error.message : "Could not load expenses." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not load expenses.") });
     }
   }
 
@@ -16765,7 +16769,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         setAuthStatus("guest");
         return null;
       }
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not load the bank feed."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not load the bank feed.")));
       const data = (await response.json()) as { candidates?: BankExpenseCandidate[] };
       const candidates = Array.isArray(data.candidates) ? data.candidates : [];
       setBankCandidates(candidates);
@@ -16803,7 +16807,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         body: JSON.stringify({ action, id: candidate.id }),
       });
       if (!response.ok) {
-        throw new Error(await readApiFailure(response, action === "approve" ? "Could not add the expense." : "Could not dismiss."));
+        throw new Error(await readApiFailure(response, action === "approve" ? t("Could not add the expense.") : t("Could not dismiss.")));
       }
       setBankCandidates((prev) => prev.filter((row) => row.id !== candidate.id));
       if (action === "approve") {
@@ -16811,7 +16815,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         void fetchExpenses();
       }
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Something went wrong." });
+      setToast({ message: error instanceof Error ? error.message : t("Something went wrong.") });
     } finally {
       setBankCandidateBusy(null);
     }
@@ -16835,7 +16839,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         throw new Error(
           await readApiFailure(
             response,
-            action === "approve" ? "Could not add the expenses." : "Could not dismiss the transactions.",
+            action === "approve" ? t("Could not add the expenses.") : t("Could not dismiss the transactions."),
           ),
         );
       }
@@ -16858,16 +16862,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         const added = typeof result.approved === "number" ? result.approved : removeIds.size;
         setToast({
           message: failedIds.size
-            ? `Added ${added} expense${added === 1 ? "" : "s"}; ${failedIds.size} couldn't be added.`
-            : `Added ${added} expense${added === 1 ? "" : "s"}.`,
+            ? t("Added {added} expense{value}; {size} couldn't be added.", { added, value: added === 1 ? "" : "s", size: failedIds.size })
+            : t("Added {added} expense{value}.", { added, value: added === 1 ? "" : "s" }),
         });
         void fetchExpenses();
       } else {
         const dismissed = typeof result.dismissed === "number" ? result.dismissed : removeIds.size;
-        setToast({ message: `Dismissed ${dismissed} transaction${dismissed === 1 ? "" : "s"}.` });
+        setToast({ message: t("Dismissed {dismissed} transaction{value}.", { dismissed, value: dismissed === 1 ? "" : "s" }) });
       }
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Something went wrong." });
+      setToast({ message: error instanceof Error ? error.message : t("Something went wrong.") });
     } finally {
       setBankBulkBusy(false);
     }
@@ -16906,7 +16910,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               ...(endAgo > 0 ? { until: until.toISOString() } : {}),
             }),
           });
-          if (!response.ok) throw new Error(await readApiFailure(response, "Window failed."));
+          if (!response.ok) throw new Error(await readApiFailure(response, t("Window failed.")));
           const data = (await response.json()) as { transactions?: { moneyOut?: number } };
           syncedOut += data.transactions?.moneyOut ?? 0;
         } catch (windowError) {
@@ -16918,16 +16922,20 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       // counted, not hidden below the newest-150 window.
       setBankListLimit(bankListMax);
       const after = await fetchBankCandidates(bankListMax);
-      const parts: string[] = [`Pulled ${syncedOut} money-out transaction${syncedOut === 1 ? "" : "s"} from the bank.`];
+      const parts: string[] = [
+        syncedOut === 1
+          ? t("Pulled 1 money-out transaction from the bank.")
+          : t("Pulled {n} money-out transactions from the bank.", { n: syncedOut }),
+      ];
       if (Array.isArray(after)) {
-        parts.push(`${after.length} now waiting for review.`);
+        parts.push(t("{n} now waiting for review.", { n: after.length }));
       }
       if (skippedWindows) {
-        parts.push("Some older windows are past Akahu's ~12-month history — use CSV import for those.");
+        parts.push(t("Some older windows are past Akahu's ~12-month history — use CSV import for those."));
       }
       setToast({ message: parts.join(" ") });
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not pull older transactions." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not pull older transactions.") });
     } finally {
       setBankBackfillBusy(null);
     }
@@ -16958,7 +16966,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         setAuthStatus("guest");
         return;
       }
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not load bank payments."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not load bank payments.")));
       const data = (await response.json()) as { candidates?: ReconcileCandidate[] };
       setReconcileCandidates(Array.isArray(data.candidates) ? data.candidates : []);
       setReconcileLoadState("ready");
@@ -16977,13 +16985,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         credentials: "same-origin",
         body: JSON.stringify({ action: "apply", id: candidate.id, invoiceId }),
       });
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not reconcile the payment."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not reconcile the payment.")));
       setReconcileCandidates((prev) => prev.filter((row) => row.id !== candidate.id));
-      setToast({ message: `Marked an invoice paid from ${formatMoney(candidate.amount, "NZD")}.` });
+      setToast({ message: t("Marked an invoice paid from {amount}.", { amount: formatMoney(candidate.amount, "NZD") }) });
       void fetchAllInvoices();
       void fetchRecentInvoices();
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Something went wrong." });
+      setToast({ message: error instanceof Error ? error.message : t("Something went wrong.") });
     } finally {
       setReconcileBusy(null);
     }
@@ -16998,10 +17006,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         credentials: "same-origin",
         body: JSON.stringify({ action: "ignore", id: candidate.id }),
       });
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not dismiss."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not dismiss.")));
       setReconcileCandidates((prev) => prev.filter((row) => row.id !== candidate.id));
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Something went wrong." });
+      setToast({ message: error instanceof Error ? error.message : t("Something went wrong.") });
     } finally {
       setReconcileBusy(null);
     }
@@ -17016,13 +17024,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         credentials: "same-origin",
         body: JSON.stringify({ action: "auto" }),
       });
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not auto-match."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not auto-match.")));
       const data = (await response.json()) as { autoApplied?: number };
-      setToast({ message: `Auto-matched ${data.autoApplied ?? 0} payment(s).` });
+      setToast({ message: t("Auto-matched {value} payment(s).", { value: data.autoApplied ?? 0 }) });
       void fetchAllInvoices();
       void fetchRecentInvoices();
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Something went wrong." });
+      setToast({ message: error instanceof Error ? error.message : t("Something went wrong.") });
     } finally {
       void fetchReconcileCandidates();
     }
@@ -17034,7 +17042,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setAuthStatus("guest");
       return;
     }
-    if (!response.ok) throw new Error(await readApiFailure(response, "Could not load invoices."));
+    if (!response.ok) throw new Error(await readApiFailure(response, t("Could not load invoices.")));
     const data = (await response.json()) as { invoices?: BillingInvoiceRecord[] };
     setRecentInvoices(Array.isArray(data.invoices) ? data.invoices : []);
   }
@@ -17050,7 +17058,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         setAuthStatus("guest");
         return;
       }
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not load invoices."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not load invoices.")));
       const data = (await response.json()) as { invoices?: BillingInvoiceRecord[] };
       setAllInvoices(Array.isArray(data.invoices) ? data.invoices : []);
       setAllInvoicesLoadState("ready");
@@ -17093,7 +17101,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         credentials: "same-origin",
         cache: "no-store",
       });
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not check booking payments."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not check booking payments.")));
       const data = (await response.json()) as Record<string, Record<string, T> | undefined>;
       Object.assign(merged, data[key] || {});
     }
@@ -17134,7 +17142,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setAuthStatus("guest");
       return;
     }
-    if (!response.ok) throw new Error(await readApiFailure(response, "Could not load payment methods."));
+    if (!response.ok) throw new Error(await readApiFailure(response, t("Could not load payment methods.")));
     const data = (await response.json()) as {
       paymentMethods?: PosPaymentMethod[];
       clarityPayConfigured?: boolean;
@@ -17163,14 +17171,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         setPosTransactionsLoadState("error");
         return;
       }
-      if (!listResponse.ok) throw new Error(await readApiFailure(listResponse, "Could not load POS transactions."));
+      if (!listResponse.ok) throw new Error(await readApiFailure(listResponse, t("Could not load POS transactions.")));
       const listData = (await listResponse.json()) as { transactions?: PosTransaction[] };
       setPosTransactions(Array.isArray(listData.transactions) ? listData.transactions : []);
       setPosSummary(summaryResponse.ok ? ((await summaryResponse.json()) as PosSummary) : null);
       setPosTransactionsLoadState("loaded");
     } catch (error) {
       setPosTransactionsLoadState("error");
-      setToast({ message: error instanceof Error ? error.message : "Could not load POS transactions." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not load POS transactions.") });
     }
   }
 
@@ -17190,14 +17198,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
    */
   function bookingPaymentBadge(bookingId: string) {
     const paid = posPaidBookings[bookingId];
-    if (paid?.paymentMethodKind === "pass") return { tone: "pass", label: "Paid with a pass" };
+    if (paid?.paymentMethodKind === "pass") return { tone: "pass", label: t("Paid with a pass") };
     if (paid) {
       return {
         tone: "money",
-        label: paid.paymentMethodName ? `Paid · ${paid.paymentMethodName}` : "Paid at the till",
+        label: paid.paymentMethodName ? t("Paid · {paymentMethodName}", { paymentMethodName: paid.paymentMethodName }) : t("Paid at the till"),
       };
     }
-    if (invoicedBookingIds[bookingId]) return { tone: "invoiced", label: "On an invoice" };
+    if (invoicedBookingIds[bookingId]) return { tone: "invoiced", label: t("On an invoice") };
     return null;
   }
 
@@ -17262,19 +17270,19 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),
       });
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not update the transaction."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not update the transaction.")));
       const data = (await response.json()) as { transaction?: PosTransaction };
       if (data.transaction) handlePosSaleChanged(data.transaction);
-      setToast({ message: `${data.transaction?.receiptNumber || "Transaction"} marked ${status}.` });
+      setToast({ message: t("{receipt} marked {status}.", { receipt: data.transaction?.receiptNumber || t("Transaction"), status }) });
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not update the transaction." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not update the transaction.") });
     }
   }
 
   async function savePosPaymentMethod() {
     const name = posMethodEditor.name.trim();
     if (!name) {
-      setToast({ message: "Give the payment method a name." });
+      setToast({ message: t("Give the payment method a name.") });
       return;
     }
     setPosMethodSaveState("saving");
@@ -17289,12 +17297,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           body: JSON.stringify({ name, settlesImmediately: posMethodEditor.settlesImmediately, active: true }),
         },
       );
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not save the payment method."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not save the payment method.")));
       setPosMethodEditor({ id: "", name: "", settlesImmediately: true });
       await fetchPosPaymentMethods();
       setToast({ message: `${name} saved.` });
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not save the payment method." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not save the payment method.") });
     } finally {
       setPosMethodSaveState("idle");
     }
@@ -17313,10 +17321,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           active,
         }),
       });
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not update the payment method."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not update the payment method.")));
       await fetchPosPaymentMethods();
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not update the payment method." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not update the payment method.") });
     }
   }
 
@@ -17334,13 +17342,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         setCouponsLoadState("error");
         return;
       }
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not load coupons."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not load coupons.")));
       const data = (await response.json()) as { coupons?: BillingCoupon[] };
       setCoupons(Array.isArray(data.coupons) ? data.coupons : []);
       setCouponsLoadState("loaded");
     } catch (error) {
       setCouponsLoadState("error");
-      setToast({ message: error instanceof Error ? error.message : "Could not load coupons." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not load coupons.") });
     }
   }
 
@@ -17361,15 +17369,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           note: values.note.trim(),
         }),
       });
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not issue the coupon."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not issue the coupon.")));
       const data = (await response.json()) as { coupon?: BillingCoupon };
       if (data.coupon) {
         setCoupons((current) => [data.coupon as BillingCoupon, ...current]);
-        setToast({ message: `Coupon ${data.coupon.code} issued.` });
+        setToast({ message: t("Coupon {code} issued.", { code: data.coupon.code }) });
       }
       return true;
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not issue the coupon." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not issue the coupon.") });
       return false;
     }
   }
@@ -17382,7 +17390,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: isVoid ? "void" : "active" }),
       });
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not update the coupon."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not update the coupon.")));
       const data = (await response.json()) as { coupon?: BillingCoupon };
       if (data.coupon) {
         const saved = data.coupon;
@@ -17390,7 +17398,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       }
       setToast({ message: `${coupon.code} ${isVoid ? "cancelled" : "restored"}.` });
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not update the coupon." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not update the coupon.") });
     }
   }
 
@@ -17485,11 +17493,17 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         }
       }
       setStripeResyncResult(
-        `Re-read ${invoices} invoice${invoices === 1 ? "" : "s"} and ${charges} card payment${
-          charges === 1 ? "" : "s"
-        }.` +
+        t("Re-read {invoices} and {charges}.", {
+          invoices: invoices === 1 ? t("1 invoice") : t("{n} invoices", { n: invoices }),
+          charges: charges === 1 ? t("1 card payment") : t("{n} card payments", { n: charges }),
+        }) +
+
           (failedWindows
-            ? ` ${failedWindows} period${failedWindows === 1 ? "" : "s"} could not be read — press the button again to retry ${failedWindows === 1 ? "it" : "them"}.`
+            ? ` ${
+                failedWindows === 1
+                  ? t("1 period could not be read — press the button again to retry it.")
+                  : t("{n} periods could not be read — press the button again to retry them.", { n: failedWindows })
+              }`
             : ""),
       );
       // The invoice list is the most visibly wrong thing before this runs, so
@@ -17524,14 +17538,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rules }),
       });
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not save those rules."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not save those rules.")));
       const data = (await response.json()) as { rules?: VoucherAmountRule[] };
       // Taken from the response, not the request: the server drops rules that
       // could never match, and the editor must show what was actually kept.
       setVoucherRules(Array.isArray(data.rules) ? data.rules : []);
       return true;
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not save those rules." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not save those rules.") });
       return false;
     }
   }
@@ -17547,7 +17561,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ preview, addBuyersAsClients }),
       });
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not check those vouchers."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not check those vouchers.")));
       const data = (await response.json()) as VoucherRepairResult;
       if (!preview) {
         await fetchCoupons();
@@ -17557,7 +17571,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       }
       return data;
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not check those vouchers." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not check those vouchers.") });
       return null;
     }
   }
@@ -17568,7 +17582,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         credentials: "same-origin",
         cache: "no-store",
       });
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not look through Stripe payments."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not look through Stripe payments.")));
       const data = (await response.json()) as CouponScanResult;
       const rules = Array.isArray(data.rules) ? data.rules : [];
       // The scan answers with the rules it used, so the editor beside it can
@@ -17582,7 +17596,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         rules,
       };
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not look through Stripe payments." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not look through Stripe payments.") });
       return null;
     }
   }
@@ -17595,7 +17609,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ chargeIds, addBuyersAsClients }),
       });
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not issue those codes."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not issue those codes.")));
       const data = (await response.json()) as {
         issuedCount?: number;
         skipped?: number;
@@ -17609,14 +17623,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       if (added) void refreshPeopleList({ maxAgeMs: 0 });
       setToast({
         message:
-          `${issued} voucher${issued === 1 ? "" : "s"} issued` +
-          (added ? `, ${added} buyer${added === 1 ? "" : "s"} added to clients` : "") +
-          (data.skipped ? `, ${data.skipped} skipped (already had one, or refunded)` : "") +
+          (issued === 1 ? t("1 voucher issued") : t("{n} vouchers issued", { n: issued })) +
+          (added ? (added === 1 ? t(", 1 buyer added to clients") : t(", {n} buyers added to clients", { n: added })) : "") +
+          (data.skipped ? t(", {n} skipped (already had one, or refunded)", { n: data.skipped }) : "") +
           ".",
       });
       return issued;
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not issue those codes." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not issue those codes.") });
       return 0;
     }
   }
@@ -17644,16 +17658,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       });
       if (response.status === 401) {
         setAuthStatus("guest");
-        throw new Error("Admin login required");
+        throw new Error(t("Admin login required"));
       }
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not add the client."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not add the client.")));
       const result = (await response.json()) as PeopleUpdateResult;
       if (Array.isArray(result.people)) setPeople(cleanPeople(result.people));
-      if (!result.person?.id) throw new Error("Could not add the client.");
-      setToast({ message: `${result.person.name} added to clients.` });
+      if (!result.person?.id) throw new Error(t("Could not add the client."));
+      setToast({ message: t("{name} added to clients.", { name: result.person.name }) });
       return { id: result.person.id, name: result.person.name, email: result.person.email || "" };
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not add the client." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not add the client.") });
       return null;
     }
   }
@@ -17665,7 +17679,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setBillingDataLoadState("loaded");
     } catch (error) {
       setBillingDataLoadState("error");
-      setToast({ message: error instanceof Error ? error.message : "Could not load billing data." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not load billing data.") });
     }
   }
 
@@ -17747,13 +17761,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         setAuthStatus("guest");
         return;
       }
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not load revenue."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not load revenue.")));
       const data = (await response.json()) as BillingRevenueReport;
       setRevenueReport(data);
       setRevenueLoadState("loaded");
     } catch (error) {
       setRevenueLoadState("error");
-      setToast({ message: error instanceof Error ? error.message : "Could not load revenue." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not load revenue.") });
     }
   }
 
@@ -17783,12 +17797,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         setAuthStatus("guest");
         return;
       }
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not load reports."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not load reports.")));
       setReportSummary((await response.json()) as BillingReportSummary);
       setReportLoadState("loaded");
     } catch (error) {
       setReportLoadState("error");
-      setToast({ message: error instanceof Error ? error.message : "Could not load reports." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not load reports.") });
     }
   }
 
@@ -18063,7 +18077,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
   function addCompletedBookingLine(item: CalendarItem) {
     if (invoicedBookingIds[item.id]) {
-      setToast({ message: "This booking has already been invoiced." });
+      setToast({ message: t("This booking has already been invoiced.") });
       return;
     }
     // A counter payment deliberately does NOT block this. Paying at the till and
@@ -18108,7 +18122,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   async function addDiscountPreset() {
     const name = discountEditor.name.trim();
     if (!name) {
-      setToast({ message: "Name the discount before saving it." });
+      setToast({ message: t("Name the discount before saving it.") });
       return;
     }
     const payload = {
@@ -18130,17 +18144,17 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       });
       if (response.status === 401) {
         setAuthStatus("guest");
-        throw new Error("Admin login required");
+        throw new Error(t("Admin login required"));
       }
       const data = (await response.json().catch(() => null)) as { discount?: BillingDiscount; error?: string; message?: string } | null;
       if (!response.ok) {
         if (data?.error === "COUPON_CODE_CONFLICT") {
-          throw new Error(data.message || "That coupon code is already in use.");
+          throw new Error(data.message || t("That coupon code is already in use."));
         }
-        throw new Error(data?.message || (await readApiFailure(response, "Could not save discount.")));
+        throw new Error(data?.message || (await readApiFailure(response, t("Could not save discount."))));
       }
       const saved = data?.discount;
-      if (!saved) throw new Error("Save response did not return the discount.");
+      if (!saved) throw new Error(t("Save response did not return the discount."));
       setDiscountPresets((current) =>
         current.some((candidate) => candidate.id === saved.id)
           ? current.map((candidate) => (candidate.id === saved.id ? saved : candidate))
@@ -18149,7 +18163,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setDiscountEditor({ id: "", name: "", discountType: "percentage", value: 10, couponCode: "" });
       setToast({ message: `${saved.name} ${isUpdate ? "updated" : "added"}.` });
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not save discount." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not save discount.") });
     } finally {
       setDiscountSaveState("idle");
     }
@@ -18170,14 +18184,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           active: !discount.active,
         }),
       });
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not update discount."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not update discount.")));
       const data = (await response.json()) as { discount?: BillingDiscount };
       const saved = data.discount;
       if (!saved) return;
       setDiscountPresets((current) => current.map((candidate) => (candidate.id === saved.id ? saved : candidate)));
       if (!saved.active && selectedDiscountPresetId === saved.id) setSelectedDiscountPresetId("");
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not update discount." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not update discount.") });
     }
   }
 
@@ -18210,7 +18224,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   async function addExpenseCategory() {
     const name = expenseCategoryEditor.name.trim();
     if (!name) {
-      setToast({ message: "Name the category before saving it." });
+      setToast({ message: t("Name the category before saving it.") });
       return;
     }
     const isUpdate = Boolean(expenseCategoryEditor.id);
@@ -18228,15 +18242,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       );
       if (response.status === 401) {
         setAuthStatus("guest");
-        throw new Error("Admin login required");
+        throw new Error(t("Admin login required"));
       }
       const data = (await response.json().catch(() => null)) as { category?: BillingExpenseCategory; error?: string; message?: string } | null;
       if (!response.ok) {
-        if (data?.error === "CATEGORY_NAME_CONFLICT") throw new Error(data.message || "That category name is already in use.");
-        throw new Error(data?.message || (await readApiFailure(response, "Could not save category.")));
+        if (data?.error === "CATEGORY_NAME_CONFLICT") throw new Error(data.message || t("That category name is already in use."));
+        throw new Error(data?.message || (await readApiFailure(response, t("Could not save category."))));
       }
       const saved = data?.category;
-      if (!saved) throw new Error("Save response did not return the category.");
+      if (!saved) throw new Error(t("Save response did not return the category."));
       setExpenseCategories((current) =>
         current.some((candidate) => candidate.id === saved.id)
           ? current.map((candidate) => (candidate.id === saved.id ? saved : candidate))
@@ -18245,7 +18259,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setExpenseCategoryEditor({ id: "", name: "" });
       setToast({ message: `${saved.name} ${isUpdate ? "updated" : "added"}.` });
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not save category." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not save category.") });
     } finally {
       setExpenseCategorySaveState("idle");
     }
@@ -18260,13 +18274,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         cache: "no-store",
         body: JSON.stringify({ name: category.name, active: !category.active }),
       });
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not update category."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not update category.")));
       const data = (await response.json()) as { category?: BillingExpenseCategory };
       const saved = data.category;
       if (!saved) return;
       setExpenseCategories((current) => current.map((candidate) => (candidate.id === saved.id ? saved : candidate)));
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not update category." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not update category.") });
     }
   }
 
@@ -18278,10 +18292,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     const text = await file.text();
     const parsedRows = parseExpenseCsv(text);
     if (!parsedRows.length) {
-      setToast({ message: "That file doesn't look like a CSV." });
+      setToast({ message: t("That file doesn't look like a CSV.") });
       return;
     }
-    const headers = expenseImportHasHeader ? parsedRows[0] : parsedRows[0].map((_, index) => `Column ${index + 1}`);
+    const headers = expenseImportHasHeader ? parsedRows[0] : parsedRows[0].map((_, index) => t("Column {n}", { n: index + 1 }));
     const bodyRows = expenseImportHasHeader ? parsedRows.slice(1) : parsedRows;
     const mapping: Record<number, ExpenseCsvField> = {};
     headers.forEach((header, index) => {
@@ -18313,7 +18327,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       reference: candidate.reference || undefined,
     }));
     if (!rows.length) {
-      setToast({ message: "No valid rows to import - check your column mapping." });
+      setToast({ message: t("No valid rows to import - check your column mapping.") });
       return;
     }
     setExpenseImportState("importing");
@@ -18327,13 +18341,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       });
       if (response.status === 401) {
         setAuthStatus("guest");
-        throw new Error("Admin login required");
+        throw new Error(t("Admin login required"));
       }
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not import expenses."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not import expenses.")));
       const data = (await response.json()) as { imported: number; duplicate: number; skipped: number; failed: number };
       setExpenseImportResult(data);
       setToast({
-        message: `${data.imported} imported, ${data.duplicate} already imported${data.failed ? `, ${data.failed} failed` : ""}.`,
+        message: data.failed
+          ? t("{imported} imported, {duplicate} already imported, {failed} failed.", { imported: data.imported, duplicate: data.duplicate, failed: data.failed })
+          : t("{imported} imported, {duplicate} already imported.", { imported: data.imported, duplicate: data.duplicate }),
       });
       await fetchExpenses();
       if (data.imported > 0) {
@@ -18342,7 +18358,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         setExpenseImportFileName("");
       }
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not import expenses." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not import expenses.") });
     } finally {
       setExpenseImportState("idle");
     }
@@ -18351,7 +18367,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   async function saveExpenseDraft() {
     const description = expenseDraft.description.trim();
     if (!description) {
-      setToast({ message: "Describe the expense before saving it." });
+      setToast({ message: t("Describe the expense before saving it.") });
       return;
     }
     const isUpdate = Boolean(expenseDraft.id);
@@ -18373,12 +18389,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       });
       if (response.status === 401) {
         setAuthStatus("guest");
-        throw new Error("Admin login required");
+        throw new Error(t("Admin login required"));
       }
       const data = (await response.json().catch(() => null)) as { expense?: BillingExpense; message?: string } | null;
-      if (!response.ok) throw new Error(data?.message || (await readApiFailure(response, "Could not save expense.")));
+      if (!response.ok) throw new Error(data?.message || (await readApiFailure(response, t("Could not save expense."))));
       const saved = data?.expense;
-      if (!saved) throw new Error("Save response did not return the expense.");
+      if (!saved) throw new Error(t("Save response did not return the expense."));
       setExpenses((current) =>
         current.some((candidate) => candidate.id === saved.id)
           ? current.map((candidate) => (candidate.id === saved.id ? saved : candidate))
@@ -18387,7 +18403,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       resetExpenseDraft();
       setToast({ message: `Expense ${isUpdate ? "updated" : "logged"}.` });
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not save expense." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not save expense.") });
     } finally {
       setExpenseSaveState("idle");
     }
@@ -18422,13 +18438,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           voided: !expense.voided,
         }),
       });
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not update expense."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not update expense.")));
       const data = (await response.json()) as { expense?: BillingExpense };
       const saved = data.expense;
       if (!saved) return;
       setExpenses((current) => current.map((candidate) => (candidate.id === saved.id ? saved : candidate)));
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not update expense." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not update expense.") });
     }
   }
 
@@ -18563,11 +18579,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       });
       if (response.status === 401) {
         setAuthStatus("guest");
-        throw new Error("Admin login required");
+        throw new Error(t("Admin login required"));
       }
       const data = (await response.json().catch(() => null)) as { invoice?: Record<string, unknown> } | null;
       if (!response.ok || !data?.invoice) {
-        throw new Error(await readApiFailure(response, "Could not open invoice."));
+        throw new Error(await readApiFailure(response, t("Could not open invoice.")));
       }
       const invoice = data.invoice as Record<string, unknown>;
       setInvoiceDraft(invoiceRecordToDraft(invoice));
@@ -18591,7 +18607,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setInvoiceEditing(false);
       setBillingSection("new-invoice");
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not open invoice." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not open invoice.") });
     }
   }
 
@@ -18641,9 +18657,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     });
     if (response.status === 401) {
       setAuthStatus("guest");
-      throw new Error("Admin login required");
+      throw new Error(t("Admin login required"));
     }
-    if (!response.ok) throw new Error(await readApiFailure(response, `Could not mark invoice ${status}.`));
+    if (!response.ok) throw new Error(await readApiFailure(response, t("Could not mark invoice {status}.", { status })));
   }
 
   async function sendInvoiceById(id: string) {
@@ -18656,12 +18672,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     });
     if (response.status === 401) {
       setAuthStatus("guest");
-      throw new Error("Admin login required");
+      throw new Error(t("Admin login required"));
     }
     const data = (await response.json().catch(() => null)) as
       | { recipient?: string; message?: string; paymentLinkUrl?: string }
       | null;
-    if (!response.ok) throw new Error(data?.message || (await readApiFailure(response, "Could not send invoice.")));
+    if (!response.ok) throw new Error(data?.message || (await readApiFailure(response, t("Could not send invoice."))));
     // paymentLinkUrl comes back empty when the toggle was off, and also when
     // there was nothing left to pay - the toast says which happened rather than
     // claiming a link went out that didn't.
@@ -18690,7 +18706,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     void fetchInvoicedBookingIds(completedAppointments.map((item) => item.id));
     setConflictRetryMode(mode);
     setBookingConflict({
-      message: String(data.message || "Some of these lessons are already on another invoice."),
+      message: String(data.message || t("Some of these lessons are already on another invoice.")),
       conflicts: (data.conflicts || [])
         .map((conflict) => ({
           bookingId: String(conflict?.bookingId || ""),
@@ -18710,7 +18726,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     }
     const item = items.find((entry) => entry.id === bookingId);
     if (item) return `${item.title}${item.client ? ` - ${item.client}` : ""}`;
-    return "A lesson on this invoice";
+    return t("A lesson on this invoice");
   }
 
   // Save the current invoice. "draft" keeps it a draft; "publish" commits it
@@ -18720,17 +18736,17 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   async function commitInvoice(mode: "draft" | "publish" | "publish-send", { force = false } = {}) {
     const { hasLines, body } = invoiceApiBody();
     if (!hasLines) {
-      setToast({ message: "Add at least one invoice line first." });
+      setToast({ message: t("Add at least one invoice line first.") });
       return;
     }
     // A draft is a work-in-progress, so it saves without a payer. Publishing
     // commits the invoice to someone, so the name is required from there on.
     if (mode !== "draft" && !invoiceDraft.payerName.trim()) {
-      setToast({ message: "Add a customer name before publishing this invoice." });
+      setToast({ message: t("Add a customer name before publishing this invoice.") });
       return;
     }
     if (mode === "publish-send" && !invoiceDraft.payerEmail.trim()) {
-      setToast({ message: "Add a customer email to send the invoice." });
+      setToast({ message: t("Add a customer email to send the invoice.") });
       return;
     }
     setInvoiceIssueState("saving");
@@ -18748,12 +18764,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         });
         if (response.status === 401) {
           setAuthStatus("guest");
-          throw new Error("Admin login required");
+          throw new Error(t("Admin login required"));
         }
         const data = (await response.json().catch(() => null)) as InvoiceSaveFailure | null;
         if (!response.ok) {
           noteBookingConflicts(data, mode);
-          throw new Error(data?.message || (await readApiFailure(response, "Could not save invoice.")));
+          throw new Error(data?.message || (await readApiFailure(response, t("Could not save invoice."))));
         }
       } else {
         number = invoiceNumber;
@@ -18792,14 +18808,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         });
         if (response.status === 401) {
           setAuthStatus("guest");
-          throw new Error("Admin login required");
+          throw new Error(t("Admin login required"));
         }
         const data = (await response.json().catch(() => null)) as
           | (InvoiceSaveFailure & { id?: string; invoiceNumber?: string })
           | null;
         if (!response.ok) {
           noteBookingConflicts(data, mode);
-          throw new Error(data?.message || (await readApiFailure(response, "Could not save invoice.")));
+          throw new Error(data?.message || (await readApiFailure(response, t("Could not save invoice."))));
         }
         id = data?.id || "";
         // The replacement exists from here on, so the original stays void even
@@ -18813,7 +18829,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         if (data?.invoiceNumber) number = String(data.invoiceNumber);
         void refreshSuggestedInvoiceNumber();
       }
-      if (!id) throw new Error("Could not save invoice.");
+      if (!id) throw new Error(t("Could not save invoice."));
 
       if (mode !== "draft") await patchInvoiceStatus(id, "sent");
       let sentAt = "";
@@ -18833,7 +18849,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           // land on the saved invoice either way, or it keeps thinking it holds
           // an unsaved one and the next Publish writes a second copy. The toast
           // carries the failure instead.
-          sendFailure = sendError instanceof Error ? sendError.message : "Could not send invoice.";
+          sendFailure = sendError instanceof Error ? sendError.message : t("Could not send invoice.");
         }
       }
 
@@ -18847,14 +18863,18 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setInvoiceEditing(false);
       setToast({
         message: sendFailure
-          ? `${number} was published, but the email did not send. ${sendFailure}`
+          ? t("{number} was published, but the email did not send. {sendFailure}", { number, sendFailure })
           : mode === "draft"
-            ? `${number} saved as a draft.`
+            ? t("{number} saved as a draft.", { number })
             : mode === "publish"
-              ? `${number} published.`
-              : `${number} published and emailed${recipient ? ` to ${recipient}` : ""}${
-                  paidLink ? " with a payment link" : ""
-                }.`,
+              ? t("{number} published.", { number })
+              : recipient
+                ? paidLink
+                  ? t("{number} published and emailed to {recipient} with a payment link.", { number, recipient })
+                  : t("{number} published and emailed to {recipient}.", { number, recipient })
+                : paidLink
+                  ? t("{number} published and emailed with a payment link.", { number })
+                  : t("{number} published and emailed.", { number }),
       });
       void fetchRecentInvoices();
       void fetchInvoicedBookingIds(completedAppointments.map((item) => item.id));
@@ -18871,7 +18891,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         void fetchRecentInvoices();
         void fetchInvoicedBookingIds(completedAppointments.map((item) => item.id));
       }
-      setToast({ message: error instanceof Error ? error.message : "Could not save invoice." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not save invoice.") });
     } finally {
       setInvoiceIssueState("idle");
     }
@@ -18896,17 +18916,17 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     setOpenedInvoicePaidAt("");
     setOpenedInvoicePayment(null);
     setInvoiceEditing(true);
-    setToast({ message: `Editing as a new invoice (${invoiceNumber}); the original is voided when you save.` });
+    setToast({ message: t("Editing as a new invoice ({invoiceNumber}); the original is voided when you save.", { invoiceNumber }) });
   }
 
   // Email a committed invoice's PDF from the preview.
   async function sendOpenedInvoice() {
     if (!activeInvoiceId) {
-      setToast({ message: "Save the invoice before sending." });
+      setToast({ message: t("Save the invoice before sending.") });
       return;
     }
     if (!invoiceDraft.payerEmail.trim()) {
-      setToast({ message: "Add a customer email before sending." });
+      setToast({ message: t("Add a customer email before sending.") });
       return;
     }
     setInvoiceSendState("sending");
@@ -18921,7 +18941,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       });
       void fetchRecentInvoices();
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not send invoice." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not send invoice.") });
     } finally {
       setInvoiceSendState("idle");
     }
@@ -18931,7 +18951,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   // server creates the session; we open the returned pay page in a new tab.
   async function startClarityPay() {
     if (!activeInvoiceId) {
-      setToast({ message: "Save the invoice before taking a payment." });
+      setToast({ message: t("Save the invoice before taking a payment.") });
       return;
     }
     setClarityPayState("loading");
@@ -18945,16 +18965,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       });
       if (response.status === 401) {
         setAuthStatus("guest");
-        throw new Error("Admin login required");
+        throw new Error(t("Admin login required"));
       }
       const data = (await response.json().catch(() => null)) as { url?: string; message?: string } | null;
       if (!response.ok || !data?.url) {
-        throw new Error(data?.message || (await readApiFailure(response, "Could not start Clarity Pay.")));
+        throw new Error(data?.message || (await readApiFailure(response, t("Could not start Clarity Pay."))));
       }
       window.open(data.url, "_blank", "noopener");
-      setToast({ message: `Clarity Pay opened for ${activeInvoiceNumber}. Mark it paid once payment clears.` });
+      setToast({ message: t("Clarity Pay opened for {activeInvoiceNumber}. Mark it paid once payment clears.", { activeInvoiceNumber }) });
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not start Clarity Pay." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not start Clarity Pay.") });
     } finally {
       setClarityPayState("idle");
     }
@@ -19005,7 +19025,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   // the admin session cookie rides along on the same-origin request).
   function downloadInvoicePdf() {
     if (!activeInvoiceId) {
-      setToast({ message: "Save the invoice before downloading a PDF." });
+      setToast({ message: t("Save the invoice before downloading a PDF.") });
       return;
     }
     window.open(`/api/billing/invoices/${encodeURIComponent(activeInvoiceId)}/pdf`, "_blank", "noopener");
@@ -19023,10 +19043,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       // Marked by hand, so there is no bank credit to point at.
       setOpenedInvoicePaidAt(new Date().toISOString());
       setOpenedInvoicePayment(null);
-      setToast({ message: `${activeInvoiceNumber} marked paid.` });
+      setToast({ message: t("{activeInvoiceNumber} marked paid.", { activeInvoiceNumber }) });
       void fetchRecentInvoices();
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not mark invoice paid." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not mark invoice paid.") });
     }
   }
 
@@ -19040,8 +19060,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       typeof window === "undefined" ||
       window.confirm(
         hardDelete
-          ? `Delete invoice ${label}? This can't be undone.`
-          : `Void invoice ${label}? It stays on record marked void.`,
+          ? t("Delete invoice {label}? This can't be undone.", { label })
+          : t("Void invoice {label}? It stays on record marked void.", { label }),
       );
     if (!confirmed) return;
     try {
@@ -19053,9 +19073,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         });
         if (response.status === 401) {
           setAuthStatus("guest");
-          throw new Error("Admin login required");
+          throw new Error(t("Admin login required"));
         }
-        if (!response.ok) throw new Error(await readApiFailure(response, "Could not delete invoice."));
+        if (!response.ok) throw new Error(await readApiFailure(response, t("Could not delete invoice.")));
         setToast({ message: `${label} deleted.` });
       } else {
         await patchInvoiceStatus(activeInvoiceId, "void");
@@ -19065,13 +19085,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       void fetchRecentInvoices();
       void fetchInvoicedBookingIds(completedAppointments.map((item) => item.id));
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not delete invoice." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not delete invoice.") });
     }
   }
 
   async function persistServices(
     nextServices: Service[],
-    message = `${terms.serviceSingular} types saved.`,
+    message = t("{serviceSingular} types saved.", { serviceSingular: terms.serviceSingular }),
+
     requiredServiceId?: string | null,
   ) {
     const payloadServices = nextServices.map((service) => ({ ...service }));
@@ -19101,7 +19122,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       });
       if (response.status === 401) {
         setAuthStatus("guest");
-        throw new Error("Admin login required");
+        throw new Error(t("Admin login required"));
       }
       const data = (await response.json().catch(() => null)) as {
         services?: Service[];
@@ -19113,15 +19134,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       };
       if (!response.ok) {
         const detail = data?.message || data?.error;
-        throw new Error(detail || `Services save failed (${response.status} ${response.statusText})`);
+        throw new Error(detail || t("Services save failed ({status} {statusText})", { status: response.status, statusText: response.statusText }));
       }
       if (!Array.isArray(data?.services)) {
         finishDiagnosticTimer(timer, "failed", {
           httpStatus: response.status,
           errorCode: "SERVICE_SAVE_VERIFY_MISSING",
-          humanMessage: "Services save response did not return services.",
+          humanMessage: t("Services save response did not return services."),
         });
-        throw new Error("Services save response did not return services.");
+        throw new Error(t("Services save response did not return services."));
       }
       const persistedServices = cleanServices(data.services);
       const expectedServiceId = requiredServiceId === undefined ? payloadServices.at(-1)?.id : requiredServiceId;
@@ -19130,10 +19151,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         finishDiagnosticTimer(timer, "failed", {
           httpStatus: response.status,
           errorCode: "SERVICE_SAVE_VERIFY_MISSING",
-          humanMessage: "Service did not persist. Reload and try again.",
+          humanMessage: t("Service did not persist. Reload and try again."),
           objectId: expectedServiceId,
         });
-        throw new Error("Service did not persist. Reload and try again.");
+        throw new Error(t("Service did not persist. Reload and try again."));
       }
       const expectedService = expectedServiceId
         ? payloadServices.find((service) => service.id === expectedServiceId)
@@ -19145,10 +19166,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         finishDiagnosticTimer(timer, "failed", {
           httpStatus: response.status,
           errorCode: "SERVICE_SAVE_VERIFY_MISSING",
-          humanMessage: "Custom group lesson settings did not persist.",
+          humanMessage: t("Custom group lesson settings did not persist."),
           objectId: expectedServiceId || "",
         });
-        throw new Error("Custom group lesson settings did not persist. Reload and try again.");
+        throw new Error(t("Custom group lesson settings did not persist. Reload and try again."));
       }
       if (serviceSaveVersionRef.current !== saveVersion) return;
       setServices(persistedServices);
@@ -19173,7 +19194,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     } catch (error) {
       if (serviceSaveVersionRef.current !== saveVersion) return;
       setServiceSaveState("error");
-      const reason = error instanceof Error ? error.message : "Could not save lesson types.";
+      const reason = error instanceof Error ? error.message : t("Could not save lesson types.");
       finishDiagnosticTimer(timer, "failed", {
         errorCode: reason.includes("Admin login") ? "AUTH_SESSION_MISSING" : "SERVICE_SAVE_FAILED",
         humanMessage: reason,
@@ -19200,7 +19221,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
   function saveEditedService() {
     if (!serviceEditor.name.trim()) {
-      setToast({ message: "Give the lesson type a name before saving." });
+      setToast({ message: t("Give the lesson type a name before saving.") });
       return;
     }
     const normalizedEditor = applyServiceNumberDrafts(applyGroupDraftInputs());
@@ -19222,25 +19243,25 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             : "",
     };
     if (!editableEditor.coachIds.length) {
-      setToast({ message: "Choose at least one coach for this lesson type." });
+      setToast({ message: t("Choose at least one coach for this lesson type.") });
       return;
     }
     const needsLocation =
       editableEditor.lessonFormat !== "package" && editableEditor.lessonFormat !== "video-review";
     if (needsLocation && activeLocationList.length && !editableEditor.locationIds.length) {
-      setToast({ message: "Choose at least one location for this lesson type." });
+      setToast({ message: t("Choose at least one location for this lesson type.") });
       return;
     }
     const hasPublicScreen = (editableEditor.bookingScreenIds ?? []).length > 0;
     if (editableEditor.visibility === "public" && !hasPublicScreen) {
-      setToast({ message: "Public lesson types must be assigned to at least one booking screen." });
+      setToast({ message: t("Public lesson types must be assigned to at least one booking screen.") });
       return;
     }
     // A package whose credits cover no lesson type cannot be spent on anything,
     // so selling one takes money for nothing. The player shop already refuses to
     // list one; catching it here means it never gets as far as a shelf.
     if (editableEditor.lessonFormat === "package" && !(editableEditor.packageCoversServiceId || "").trim()) {
-      setToast({ message: "Choose which lesson type this package covers before saving it." });
+      setToast({ message: t("Choose which lesson type this package covers before saving it.") });
       return;
     }
     const stableServiceId = editingServiceId || editableEditor.id || generateServiceDraftId();
@@ -19273,7 +19294,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     const hasRealBookings = serviceHasRealBookings(service);
     if (hasRealBookings) {
       setPendingServiceAction(null);
-      setToast({ message: "This lesson type has existing bookings. Remove or reassign those bookings before deleting it." });
+      setToast({ message: t("This lesson type has existing bookings. Remove or reassign those bookings before deleting it.") });
       return;
     }
 
@@ -19469,17 +19490,17 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       });
       if (response.status === 401) {
         setAuthStatus("guest");
-        throw new Error("Admin login required");
+        throw new Error(t("Admin login required"));
       }
-      if (!response.ok) throw new Error(await readApiFailure(response, "Availability save failed"));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Availability save failed")));
       const data = (await response.json()) as { availability?: AvailabilityWindow[][] };
       if (Array.isArray(data.availability)) setAvailability(cleanAvailability(data.availability));
       setAvailabilitySaveState("saved");
-      setToast({ message: "Availability saved." });
+      setToast({ message: t("Availability saved.") });
       window.setTimeout(() => setAvailabilitySaveState("idle"), 1600);
     } catch (error) {
       setAvailabilitySaveState("idle");
-      setToast({ message: error instanceof Error ? error.message : "Could not save availability." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not save availability.") });
     }
   }
 
@@ -19495,19 +19516,19 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       });
       if (response.status === 401) {
         setAuthStatus("guest");
-        throw new Error("Admin login required");
+        throw new Error(t("Admin login required"));
       }
-      if (!response.ok) throw new Error(await readApiFailure(response, "Coach account save failed"));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Coach account save failed")));
       const saved = (await response.json()) as Partial<CoachAccount>;
       applyCoachAccount(saved);
       setCoachAccountSaveState("saved");
-      setToast({ message: "Coach account saved." });
+      setToast({ message: t("Coach account saved.") });
       window.setTimeout(() => setCoachAccountSaveState("idle"), 1600);
       return cleanCoachAccount(saved);
     } catch (error) {
       setCoachAccount(draft);
       setCoachAccountSaveState("idle");
-      const message = error instanceof Error ? error.message : "Could not save coach account.";
+      const message = error instanceof Error ? error.message : t("Could not save coach account.");
       setToast({ message });
       throw new Error(message);
     }
@@ -19526,13 +19547,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   // Shown live under the form and used to enable the button, so the rules are
   // visible before submitting instead of arriving as an error afterwards.
   const passwordRequirements = [
-    { label: "At least 8 characters", met: passwordChangeForm.newPassword.length >= 8 },
+    { label: t("At least 8 characters"), met: passwordChangeForm.newPassword.length >= 8 },
     {
-      label: "Different from your current password",
+      label: t("Different from your current password"),
       met: passwordChangeForm.newPassword.length > 0 && passwordChangeForm.newPassword !== passwordChangeForm.currentPassword,
     },
     {
-      label: "Both new passwords match",
+      label: t("Both new passwords match"),
       met: passwordChangeForm.confirmPassword.length > 0 && passwordChangeForm.newPassword === passwordChangeForm.confirmPassword,
     },
   ];
@@ -19541,15 +19562,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     event.preventDefault();
     setPasswordChangeMessage("");
     if (passwordChangeForm.newPassword.length < 8) {
-      setPasswordChangeMessage("Use at least 8 characters.");
+      setPasswordChangeMessage(t("Use at least 8 characters."));
       return;
     }
     if (passwordChangeForm.newPassword !== passwordChangeForm.confirmPassword) {
-      setPasswordChangeMessage("Those passwords do not match.");
+      setPasswordChangeMessage(t("Those passwords do not match."));
       return;
     }
     if (passwordChangeForm.newPassword === passwordChangeForm.currentPassword) {
-      setPasswordChangeMessage("Choose a password different from your current one.");
+      setPasswordChangeMessage(t("Choose a password different from your current one."));
       return;
     }
 
@@ -19566,21 +19587,21 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       const data = (await response.json()) as { authenticated?: boolean; message?: string; email?: string };
       if (response.status === 401) {
         setAuthStatus("guest");
-        throw new Error(data.message || "Admin login required.");
+        throw new Error(data.message || t("Admin login required."));
       }
       if (!response.ok || !data.authenticated) {
         setPasswordChangeState("idle");
-        setPasswordChangeMessage(data.message || "Could not change password.");
+        setPasswordChangeMessage(data.message || t("Could not change password."));
         return;
       }
       if (data.email) setAdminEmail(data.email);
       setPasswordChangeForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
       setShowPasswordFields(false);
       setPasswordChangeState("saved");
-      setPasswordChangeMessage("Password changed.");
+      setPasswordChangeMessage(t("Password changed."));
     } catch (error) {
       setPasswordChangeState("idle");
-      setPasswordChangeMessage(error instanceof Error ? error.message : "Could not reach the booking server.");
+      setPasswordChangeMessage(error instanceof Error ? error.message : t("Could not reach the booking server."));
     }
   }
 
@@ -19630,21 +19651,21 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       });
       if (response.status === 401) {
         setAuthStatus("guest");
-        throw new Error("Admin login required");
+        throw new Error(t("Admin login required"));
       }
-      if (!response.ok) throw new Error(await readApiFailure(response, "Settings save failed"));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Settings save failed")));
       const settings = (await response.json()) as NotificationSettings;
       if (!isCurrentSave()) return draft;
       applyNotificationSettings(settings);
       setSettingsSaveState("saved");
-      setToast({ message: "Notification and text settings saved." });
+      setToast({ message: t("Notification and text settings saved.") });
       window.setTimeout(() => {
         if (isCurrentSave()) setSettingsSaveState("idle");
       }, 1600);
       return settings;
     } catch (error) {
       if (!isCurrentSave()) return draft;
-      const message = error instanceof Error ? error.message : "Could not save notification settings.";
+      const message = error instanceof Error ? error.message : t("Could not save notification settings.");
       setSettingsSaveState("idle");
       setSettingsSaveError(message);
       setToast({ message });
@@ -19687,9 +19708,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         )) as { message?: string; failure?: GoogleCalendarDebugError } | null;
         const code = googleCalendarFailureCode(detail?.failure ?? null);
         setGoogleCalendarStatusError(
-          `Status check failed (HTTP ${response.status})${code ? ` — ${code}` : ""}${
-            detail?.message ? `: ${detail.message}` : ""
-          }`,
+          t("Status check failed (HTTP {status}){value}{value2}", { status: response.status, value: code ? ` — ${code}` : "", value2: detail?.message ? `: ${detail.message}` : "" }),
         );
         return;
       }
@@ -19701,9 +19720,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       applyGoogleCalendarStatus(status);
     } catch (error) {
       setGoogleCalendarStatusError(
-        `Could not reach the Google Calendar status endpoint${
-          error instanceof Error && error.message ? `: ${error.message}` : "."
-        }`,
+        t("Could not reach the Google Calendar status endpoint{value}", { value: error instanceof Error && error.message ? `: ${error.message}` : "." }),
       );
     }
   }
@@ -19718,7 +19735,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         return;
       }
       const data = (await response.json()) as Partial<GoogleCalendarDebugLog> & { message?: string };
-      if (!response.ok) throw new Error(data.message || "Google Calendar debug log could not be read.");
+      if (!response.ok) throw new Error(data.message || t("Google Calendar debug log could not be read."));
       setGoogleCalendarDebug({
         enabled: data.enabled !== false,
         maxEntries: Number(data.maxEntries) || 30,
@@ -19728,7 +19745,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         entries: Array.isArray(data.entries) ? data.entries : [],
       });
     } catch (error) {
-      setGoogleCalendarDebugError(error instanceof Error ? error.message : "Google Calendar debug log could not be read.");
+      setGoogleCalendarDebugError(error instanceof Error ? error.message : t("Google Calendar debug log could not be read."));
     } finally {
       setGoogleCalendarDebugLoading(false);
     }
@@ -19748,7 +19765,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         return;
       }
       const data = (await response.json()) as Partial<GoogleCalendarDebugLog> & { message?: string };
-      if (!response.ok) throw new Error(data.message || "Google Calendar debug action failed.");
+      if (!response.ok) throw new Error(data.message || t("Google Calendar debug action failed."));
       setGoogleCalendarDebug({
         enabled: data.enabled !== false,
         maxEntries: Number(data.maxEntries) || 30,
@@ -19759,32 +19776,32 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       });
       if (successMessage) setToast({ message: successMessage });
     } catch (error) {
-      setGoogleCalendarDebugError(error instanceof Error ? error.message : "Google Calendar debug action failed.");
+      setGoogleCalendarDebugError(error instanceof Error ? error.message : t("Google Calendar debug action failed."));
     } finally {
       setGoogleCalendarDebugLoading(false);
     }
   }
 
   function clearGoogleCalendarDebugLog() {
-    void postGoogleCalendarDebugAction(googleCalendarApi("debug/clear"), undefined, "Google Calendar debug log cleared.");
+    void postGoogleCalendarDebugAction(googleCalendarApi("debug/clear"), undefined, t("Google Calendar debug log cleared."));
   }
 
   function toggleGoogleCalendarDebugLogging(enabled: boolean) {
     void postGoogleCalendarDebugAction(
       googleCalendarApi("debug/toggle"),
       { enabled },
-      enabled ? "Google Calendar debug logging on." : "Google Calendar debug logging off.",
+      enabled ? t("Google Calendar debug logging on.") : t("Google Calendar debug logging off."),
     );
   }
 
   function copyGoogleCalendarDebugEntry(entry: GoogleCalendarDebugEntry) {
     if (!navigator.clipboard) {
-      setToast({ message: "Copy is not available in this browser. Select the debug JSON manually." });
+      setToast({ message: t("Copy is not available in this browser. Select the debug JSON manually.") });
       return;
     }
     void navigator.clipboard.writeText(JSON.stringify(entry, null, 2)).then(
-      () => setToast({ message: "Debug entry copied as JSON." }),
-      () => setToast({ message: "Copy was blocked by the browser. Select the debug JSON manually." }),
+      () => setToast({ message: t("Debug entry copied as JSON.") }),
+      () => setToast({ message: t("Copy was blocked by the browser. Select the debug JSON manually.") }),
     );
   }
 
@@ -19796,7 +19813,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         return;
       }
       if (!response.ok && response.status !== 409 && response.status !== 412) return;
-      applyGoogleDriveTransferStatus(await readJsonResponse<Partial<GoogleDriveTransferStatus>>(response, "Google Drive status did not return JSON."));
+      applyGoogleDriveTransferStatus(await readJsonResponse<Partial<GoogleDriveTransferStatus>>(response, t("Google Drive status did not return JSON.")));
     } catch {
       // Google Drive transfer is optional; keep the rest of Settings usable.
     }
@@ -19889,23 +19906,23 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         return;
       }
       if (!response.ok || !data.ok) {
-        setToast({ message: data.message || "Could not add that sender as a player." });
+        setToast({ message: data.message || t("Could not add that sender as a player.") });
         return;
       }
       await refreshPortalPlayers();
       await refreshClarityCloudImports();
       void refreshPeopleList();
-      const who = transfer.submittedByName || transfer.submittedByEmail || "They";
+      const who = transfer.submittedByName || transfer.submittedByEmail || t("They");
       if (data.inviteSent) {
-        setToast({ message: `${who} was added and invited. Their videos are now kept for good.` });
+        setToast({ message: t("{who} was added and invited. Their videos are now kept for good.", { who }) });
       } else if (data.inviteUrl) {
         await navigator.clipboard?.writeText(data.inviteUrl).catch(() => {});
-        setToast({ message: "Added. Email is not set up, so the invite link is on your clipboard." });
+        setToast({ message: t("Added. Email is not set up, so the invite link is on your clipboard.") });
       } else {
-        setToast({ message: `${who} was added to your players.` });
+        setToast({ message: t("{who} was added to your players.", { who }) });
       }
     } catch {
-      setToast({ message: "Could not reach the booking server." });
+      setToast({ message: t("Could not reach the booking server.") });
     } finally {
       setPortalPlayerBusyId("");
     }
@@ -19933,7 +19950,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         return;
       }
       if (!response.ok || !data.ok) {
-        setToast({ message: data.message || "Could not set up portal access." });
+        setToast({ message: data.message || t("Could not set up portal access.") });
         return;
       }
       await refreshPortalPlayers();
@@ -19941,22 +19958,26 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       // A Caddy problem never fails the portal invite, so it is reported
       // separately rather than swallowed.
       if (data.caddy?.error) {
-        setToast({ message: `Portal access is on, but Clarity Caddy: ${data.caddy.error}` });
+        setToast({ message: t("Portal access is on, but Clarity Caddy: {error}", { error: data.caddy.error }) });
         return;
       }
       if (data.inviteSent) {
-        const suffix = data.caddy?.passIssued ? " with a Clarity Caddy pass" : "";
-        setToast({ message: `Invite sent to ${person.email || person.name}${suffix}.` });
+        const value = person.email || person.name;
+        setToast({
+          message: data.caddy?.passIssued
+            ? t("Invite sent to {value} with a Clarity Caddy pass.", { value })
+            : t("Invite sent to {value}.", { value }),
+        });
       } else if (data.inviteUrl) {
         // Email is not configured or was refused. The link still works, so
         // hand it over rather than leaving the coach with a dead end.
         await navigator.clipboard?.writeText(data.inviteUrl).catch(() => {});
-        setToast({ message: "Email is not set up. Invite link copied to your clipboard." });
+        setToast({ message: t("Email is not set up. Invite link copied to your clipboard.") });
       } else {
-        setToast({ message: "Portal access is on." });
+        setToast({ message: t("Portal access is on.") });
       }
     } catch {
-      setToast({ message: "Could not reach the booking server." });
+      setToast({ message: t("Could not reach the booking server.") });
     } finally {
       setPortalPlayerBusyId("");
     }
@@ -19977,13 +19998,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       }
       if (!response.ok) {
         const data = (await response.json().catch(() => ({}))) as { message?: string };
-        setToast({ message: data.message || "Could not remove portal access." });
+        setToast({ message: data.message || t("Could not remove portal access.") });
         return;
       }
       await refreshPortalPlayers();
-      setToast({ message: "Portal access removed. They are signed out everywhere." });
+      setToast({ message: t("Portal access removed. They are signed out everywhere.") });
     } catch {
-      setToast({ message: "Could not reach the booking server." });
+      setToast({ message: t("Could not reach the booking server.") });
     } finally {
       setPortalPlayerBusyId("");
     }
@@ -20001,11 +20022,17 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     const hasPortalLogin = portalPlayers.some(
       (entry) => entry.personId === person.id && entry.status !== "disabled",
     );
+    const personLabel = person.name || person.email || t("this client");
     const confirmed = window.confirm(
-      `Permanently delete ${person.name || person.email || "this client"}? This deletes their bookings, ` +
-        `practice blocks, videos and lesson notes` +
-        (hasPortalLogin ? ", and their login (including Clarity Caddy if they use it)" : "") +
-        ". This cannot be undone and no email is sent.",
+      hasPortalLogin
+        ? t(
+            "Permanently delete {person}? This deletes their bookings, practice blocks, videos and lesson notes, and their login (including Clarity Caddy if they use it). This cannot be undone and no email is sent.",
+            { person: personLabel },
+          )
+        : t(
+            "Permanently delete {person}? This deletes their bookings, practice blocks, videos and lesson notes. This cannot be undone and no email is sent.",
+            { person: personLabel },
+          ),
     );
     if (!confirmed) return;
     setPersonDeleteBusyId(person.id);
@@ -20022,7 +20049,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         return;
       }
       if (!response.ok || data?.ok === false) {
-        setToast({ message: data?.message || "That client could not be deleted." });
+        setToast({ message: data?.message || t("That client could not be deleted.") });
         return;
       }
       if (Array.isArray(data.people)) setPeople(cleanPeople(data.people));
@@ -20030,10 +20057,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       if (notesContext?.playerId === person.id) setNotesContext(null);
       await refreshPortalPlayers();
       setToast({
-        message: data.warning || `${person.name || person.email || "The client"} was permanently deleted.`,
+        message: data.warning || t("{person} was permanently deleted.", { person: person.name || person.email || t("The client") }),
+
       });
     } catch {
-      setToast({ message: "Could not reach the booking server." });
+      setToast({ message: t("Could not reach the booking server.") });
     } finally {
       setPersonDeleteBusyId("");
     }
@@ -20069,13 +20097,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       const data = (await response.json()) as { authUrl?: string; message?: string };
       if (response.status === 401) {
         setAuthStatus("guest");
-        throw new Error("Admin login required");
+        throw new Error(t("Admin login required"));
       }
-      if (!response.ok || !data.authUrl) throw new Error(data.message || "Google Calendar connection is not ready.");
+      if (!response.ok || !data.authUrl) throw new Error(data.message || t("Google Calendar connection is not ready."));
       window.location.assign(data.authUrl);
     } catch (error) {
       setGoogleCalendarAction("idle");
-      setToast({ message: error instanceof Error ? error.message : "Could not start Google Calendar connection." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not start Google Calendar connection.") });
     }
   }
 
@@ -20100,16 +20128,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       const data = (await response.json()) as Partial<GoogleCalendarSyncStatus> & { message?: string };
       if (response.status === 401) {
         setAuthStatus("guest");
-        throw new Error("Admin login required");
+        throw new Error(t("Admin login required"));
       }
-      if (!response.ok) throw new Error(data.message || "Google Calendar settings did not save.");
+      if (!response.ok) throw new Error(data.message || t("Google Calendar settings did not save."));
       applyGoogleCalendarStatus(data);
       // The saved rule collapses to its summary; leaving the form open reads as
       // though the save did not take.
       setEditingImportRuleId(null);
-      setToast({ message: "Google Calendar sync settings saved." });
+      setToast({ message: t("Google Calendar sync settings saved.") });
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not save Google Calendar settings." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not save Google Calendar settings.") });
       void refreshGoogleCalendarStatus();
     } finally {
       setGoogleCalendarAction("idle");
@@ -20181,20 +20209,25 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       };
       if (response.status === 401) {
         setAuthStatus("guest");
-        throw new Error("Admin login required");
+        throw new Error(t("Admin login required"));
       }
       if (!response.ok || data.ok === false) {
         // Lead with Google's own identifiers when we have them -- "HTTP 403 ·
         // PERMISSION_DENIED · forbiddenForServiceAccounts" is actionable in a
         // way that the prose message alone is not.
         const failureCode = googleCalendarFailureCode(data.failure ?? null);
-        const detail = data.message || data.lastSyncError || googleCalendarSkipReasonLabels[data.reason || ""] || "Google Calendar sync failed.";
+        const detail = data.message || data.lastSyncError || googleCalendarSkipReasonLabels[data.reason || ""] || t("Google Calendar sync failed.");
         throw new Error(failureCode ? `${failureCode} — ${detail}` : detail);
       }
       applyGoogleCalendarStatus(data);
-      setToast({ message: `Google Calendar synced${typeof data.upserted === "number" ? ` (${data.upserted} upserted, ${data.deleted ?? 0} deleted)` : ""}.` });
+      setToast({
+        message:
+          typeof data.upserted === "number"
+            ? t("Google Calendar synced ({upserted} upserted, {deleted} deleted).", { upserted: data.upserted, deleted: data.deleted ?? 0 })
+            : t("Google Calendar synced."),
+      });
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Google Calendar sync failed." });
+      setToast({ message: error instanceof Error ? error.message : t("Google Calendar sync failed.") });
       void refreshGoogleCalendarStatus();
     } finally {
       setGoogleCalendarAction("idle");
@@ -20217,13 +20250,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       const data = (await response.json()) as Partial<GoogleCalendarSyncStatus> & { message?: string };
       if (response.status === 401) {
         setAuthStatus("guest");
-        throw new Error("Admin login required");
+        throw new Error(t("Admin login required"));
       }
-      if (!response.ok) throw new Error(data.message || "Google Calendar did not disconnect.");
+      if (!response.ok) throw new Error(data.message || t("Google Calendar did not disconnect."));
       applyGoogleCalendarStatus(data);
-      setToast({ message: "Google Calendar disconnected." });
+      setToast({ message: t("Google Calendar disconnected.") });
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not disconnect Google Calendar." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not disconnect Google Calendar.") });
     } finally {
       setGoogleCalendarAction("idle");
     }
@@ -20238,18 +20271,18 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       });
       const data = await readJsonResponse<Partial<GoogleDriveTransferStatus> & { authUrl?: string }>(
         response,
-        "Google Drive connection did not return JSON.",
+        t("Google Drive connection did not return JSON."),
       );
       if (response.status === 401) {
         setAuthStatus("guest");
-        throw new Error("Admin login required");
+        throw new Error(t("Admin login required"));
       }
       applyGoogleDriveTransferStatus(data);
-      if (!response.ok || !data.authUrl) throw new Error(data.message || "Clarity Cloud is not ready to connect.");
+      if (!response.ok || !data.authUrl) throw new Error(data.message || t("Clarity Cloud is not ready to connect."));
       window.location.assign(data.authUrl);
     } catch (error) {
       setGoogleDriveAction("idle");
-      setToast({ message: error instanceof Error ? error.message : "Could not start Clarity Cloud connection." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not start Clarity Cloud connection.") });
     }
   }
 
@@ -20260,16 +20293,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         method: "POST",
         headers: { Accept: "application/json" },
       });
-      const data = await readJsonResponse<Partial<GoogleDriveTransferStatus>>(response, "Google Drive test did not return JSON.");
+      const data = await readJsonResponse<Partial<GoogleDriveTransferStatus>>(response, t("Google Drive test did not return JSON."));
       if (response.status === 401) {
         setAuthStatus("guest");
-        throw new Error("Admin login required");
+        throw new Error(t("Admin login required"));
       }
       applyGoogleDriveTransferStatus(data);
-      if (!response.ok || data.ok === false) throw new Error(data.message || "Clarity Cloud is not connected.");
-      setToast({ message: data.message || "Clarity Cloud tested." });
+      if (!response.ok || data.ok === false) throw new Error(data.message || t("Clarity Cloud is not connected."));
+      setToast({ message: data.message || t("Clarity Cloud tested.") });
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Clarity Cloud test failed." });
+      setToast({ message: error instanceof Error ? error.message : t("Clarity Cloud test failed.") });
     } finally {
       setGoogleDriveAction("idle");
     }
@@ -20282,16 +20315,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         method: "POST",
         headers: { Accept: "application/json" },
       });
-      const data = await readJsonResponse<Partial<GoogleDriveTransferStatus>>(response, "Google Drive disconnect did not return JSON.");
+      const data = await readJsonResponse<Partial<GoogleDriveTransferStatus>>(response, t("Google Drive disconnect did not return JSON."));
       if (response.status === 401) {
         setAuthStatus("guest");
-        throw new Error("Admin login required");
+        throw new Error(t("Admin login required"));
       }
       applyGoogleDriveTransferStatus(data);
-      if (!response.ok || data.ok === false) throw new Error(data.message || "Clarity Cloud did not disconnect.");
-      setToast({ message: "Clarity Cloud disconnected." });
+      if (!response.ok || data.ok === false) throw new Error(data.message || t("Clarity Cloud did not disconnect."));
+      setToast({ message: t("Clarity Cloud disconnected.") });
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not disconnect Clarity Cloud." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not disconnect Clarity Cloud.") });
     } finally {
       setGoogleDriveAction("idle");
     }
@@ -20310,21 +20343,21 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       });
       if (response.status === 401) {
         setAuthStatus("guest");
-        throw new Error("Admin login required");
+        throw new Error(t("Admin login required"));
       }
-      if (!response.ok) throw new Error(await readApiFailure(response, "Brand save failed"));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Brand save failed")));
       const saved = (await response.json()) as Partial<BrandSettings>;
       if (brandSaveVersionRef.current !== saveVersion) return;
       applyBrandSettings(saved);
       setBrandSaveState("saved");
-      if (!options.silent) setToast({ message: "Coach logo colours applied to the booking UI." });
+      if (!options.silent) setToast({ message: t("Coach logo colours applied to the booking UI.") });
       window.setTimeout(() => {
         if (brandSaveVersionRef.current === saveVersion) setBrandSaveState("idle");
       }, 1600);
     } catch (error) {
       if (brandSaveVersionRef.current !== saveVersion) return;
       setBrandSaveState("idle");
-      if (!options.silent) setToast({ message: error instanceof Error ? error.message : "Brand colours applied locally. The backend did not save them yet." });
+      if (!options.silent) setToast({ message: error instanceof Error ? error.message : t("Brand colours applied locally. The backend did not save them yet.") });
     }
   }
 
@@ -20342,14 +20375,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     event.target.value = "";
     if (!file) return;
     if (!file.type.startsWith("image/")) {
-      setToast({ message: "Choose an image file for the coach logo." });
+      setToast({ message: t("Choose an image file for the coach logo.") });
       return;
     }
     try {
       const nextBrand = await analyzeLogoFile(file);
       await saveBrandSettings({ ...brandSettings, ...nextBrand, bookingTheme: brandSettings.bookingTheme });
     } catch {
-      setToast({ message: "Could not read that logo. Try a PNG, JPG, or SVG export." });
+      setToast({ message: t("Could not read that logo. Try a PNG, JPG, or SVG export.") });
     }
   }
 
@@ -20371,7 +20404,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   async function importPeopleFromText() {
     const parsedPeople = parsePeopleImport(peopleImportText);
     if (!parsedPeople.length) {
-      setToast({ message: "Paste at least one person with a name or email." });
+      setToast({ message: t("Paste at least one person with a name or email.") });
       return;
     }
 
@@ -20401,7 +20434,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setPeopleImportDiagnostic(diagnostic);
       if (response.status === 401) {
         setAuthStatus("guest");
-        throw new Error("Admin login required");
+        throw new Error(t("Admin login required"));
       }
       if (!response.ok || result.ok === false) throw new Error(diagnostic.message);
       if (Array.isArray(result.people)) setPeople(cleanPeople(result.people));
@@ -20414,7 +20447,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       window.setTimeout(() => setPeopleImportState("idle"), 1600);
     } catch (error) {
       setPeopleImportState("idle");
-      setToast({ message: error instanceof Error ? error.message : "Could not import people." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not import people.") });
     }
   }
 
@@ -20443,7 +20476,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setAuthStatus("guest");
       throw new Error("unauthorized");
     }
-    if (!response.ok) throw new Error(await readApiFailure(response, "Could not load transactions."));
+    if (!response.ok) throw new Error(await readApiFailure(response, t("Could not load transactions.")));
     const data = (await response.json()) as {
       pos?: PosTransaction[];
       invoices?: BillingInvoiceRecord[];
@@ -20478,7 +20511,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     } catch (error) {
       setClientTransactionsLoadState("error");
       if (error instanceof Error && error.message === "unauthorized") return;
-      setToast({ message: error instanceof Error ? error.message : "Could not load transactions." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not load transactions.") });
     }
   }
 
@@ -20491,7 +20524,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     } catch (error) {
       setPlayerTransactionsLoadState("error");
       if (error instanceof Error && error.message === "unauthorized") return;
-      setToast({ message: error instanceof Error ? error.message : "Could not load transactions." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not load transactions.") });
     }
   }
 
@@ -20520,7 +20553,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         setAuthStatus("guest");
         return;
       }
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not load passes."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not load passes.")));
       const data = (await response.json()) as {
         passes?: Pass[];
         templates?: PassTemplate[];
@@ -20538,7 +20571,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setClientPassesLoadState("loaded");
     } catch (error) {
       setClientPassesLoadState("error");
-      setToast({ message: error instanceof Error ? error.message : "Could not load passes." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not load passes.") });
     }
   }
 
@@ -20573,13 +20606,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         credentials: "same-origin",
         headers: { Accept: "application/json" },
       });
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not start the Stripe sign-in."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not start the Stripe sign-in.")));
       const data = (await response.json()) as { authUrl?: string };
-      if (!data.authUrl) throw new Error("Could not start the Stripe sign-in.");
+      if (!data.authUrl) throw new Error(t("Could not start the Stripe sign-in."));
       window.location.assign(data.authUrl);
     } catch (error) {
       setStripeSaving(false);
-      setToast({ message: error instanceof Error ? error.message : "Could not start the Stripe sign-in." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not start the Stripe sign-in.") });
     }
   }
 
@@ -20591,7 +20624,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         credentials: "same-origin",
         headers: { Accept: "application/json" },
       });
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not start Clarity Pay setup."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not start Clarity Pay setup.")));
       const data = (await response.json()) as { url?: string };
       if (data.url) {
         window.location.assign(data.url);
@@ -20600,10 +20633,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       // Stripe had already approved this account, so it is simply back on.
       setStripeSaving(false);
       await fetchStripeStatus();
-      setToast({ message: "Clarity Pay is on." });
+      setToast({ message: t("Clarity Pay is on.") });
     } catch (error) {
       setStripeSaving(false);
-      setToast({ message: error instanceof Error ? error.message : "Could not start Clarity Pay setup." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not start Clarity Pay setup.") });
     }
   }
 
@@ -20614,12 +20647,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         method: "POST",
         credentials: "same-origin",
       });
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not disconnect Stripe."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not disconnect Stripe.")));
       setStripeStatus((current) => (current ? { ...current, configured: false, account: "", route: "" } : current));
       setClarityPaySetup("none");
-      setToast({ message: "Card payments are off until you set them up again." });
+      setToast({ message: t("Card payments are off until you set them up again.") });
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not disconnect Stripe." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not disconnect Stripe.") });
     } finally {
       setStripeSaving(false);
     }
@@ -20629,7 +20662,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     setIssuedPassesLoadState((current) => (current === "loaded" ? current : "loading"));
     try {
       const response = await fetch("/api/passes/list", { credentials: "same-origin", cache: "no-store" });
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not load passes."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not load passes.")));
       const data = (await response.json()) as { passes?: IssuedPass[] };
       setIssuedPasses(Array.isArray(data.passes) ? data.passes : []);
       setIssuedPassesLoadState("loaded");
@@ -20642,7 +20675,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     setPassInboxLoadState((current) => (current === "loaded" ? current : "loading"));
     try {
       const response = await fetch("/api/passes/inbox", { credentials: "same-origin" });
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not load the pass inbox."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not load the pass inbox.")));
       applyPassInbox(await response.json());
     } catch {
       setPassInboxLoadState("error");
@@ -20705,17 +20738,17 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ ...grant, personId: selectedClientId }),
       });
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not give that pass."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not give that pass.")));
       const data = (await response.json()) as { passes?: Pass[]; merged?: boolean };
       setClientPasses(Array.isArray(data.passes) ? data.passes : []);
       setClientPassesLoadState("loaded");
       setToast({
         message: data.merged
-          ? `Added ${grant.credits} to their existing pass.`
-          : `${grant.name || "Pass"} given.`,
+          ? t("Added {credits} to their existing pass.", { credits: grant.credits })
+          : t("{name} given.", { name: grant.name || t("Pass") }),
       });
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not give that pass." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not give that pass.") });
     } finally {
       setPassGranting(false);
     }
@@ -20740,12 +20773,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ personId: selectedClientId, passId, credits, note }),
       });
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not use that credit."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not use that credit.")));
       const data = (await response.json()) as { passes?: Pass[] };
       setClientPasses(Array.isArray(data.passes) ? data.passes : []);
-      setToast({ message: credits === 1 ? "Credit used." : `${credits} credits used.` });
+      setToast({ message: credits === 1 ? t("Credit used.") : t("{credits} credits used.", { credits }) });
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not use that credit." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not use that credit.") });
     }
   }
 
@@ -20758,28 +20791,28 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ personId: selectedClientId, redemptionId }),
       });
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not put that credit back."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not put that credit back.")));
       const data = (await response.json()) as { passes?: Pass[] };
       setClientPasses(Array.isArray(data.passes) ? data.passes : []);
-      setToast({ message: "Credit put back." });
+      setToast({ message: t("Credit put back.") });
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not put that credit back." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not put that credit back.") });
     }
   }
 
   async function voidClientPass(pass: Pass) {
-    if (!window.confirm(`Void ${pass.name}? Credits already used stay on the record.`)) return;
+    if (!window.confirm(t("Void {name}? Credits already used stay on the record.", { name: pass.name }))) return;
     try {
       const response = await fetch(`/api/passes?id=${encodeURIComponent(pass.id)}`, {
         method: "DELETE",
         credentials: "same-origin",
       });
-      if (!response.ok) throw new Error(await readApiFailure(response, "Could not void that pass."));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not void that pass.")));
       const data = (await response.json()) as { passes?: Pass[] };
       setClientPasses(Array.isArray(data.passes) ? data.passes : []);
       setToast({ message: `${pass.name} voided.` });
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not void that pass." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not void that pass.") });
     }
   }
 
@@ -20824,7 +20857,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               return {
                 id: block.id,
                 title: block.title,
-                typeLabel: meta?.label || block.blockType || "Block",
+                typeLabel: meta?.label || block.blockType || t("Block"),
+
                 tone: meta?.tone || "",
                 dose: block.dose,
                 steps: model.practiceSteps(block.content).length,
@@ -20896,7 +20930,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   async function sendTestEmail() {
     const email = testEmailAddress.trim() || notificationSettings.notificationEmail || coachAccount.contactEmail;
     if (!email) {
-      setToast({ message: "Enter an email address for the test." });
+      setToast({ message: t("Enter an email address for the test.") });
       return;
     }
     setTestEmailState("sending");
@@ -20908,12 +20942,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       });
       const data = (await response.json()) as { message?: string };
       if (!response.ok) {
-        setToast({ message: data.message || "Could not send test email." });
+        setToast({ message: data.message || t("Could not send test email.") });
         setTestEmailState("idle");
         return;
       }
       setTestEmailState("sent");
-      setToast({ message: data.message || "Test email sent." });
+      setToast({ message: data.message || t("Test email sent.") });
       trackDiagnosticEvent({
         system: "reload",
         action: "TARGETED_REFRESH_STARTED",
@@ -20934,7 +20968,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       );
       window.setTimeout(() => setTestEmailState("idle"), 1600);
     } catch {
-      setToast({ message: "Could not reach the email sender." });
+      setToast({ message: t("Could not reach the email sender.") });
       setTestEmailState("idle");
     }
   }
@@ -20942,7 +20976,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   async function resendBookingConfirmation(appointment: CalendarItem) {
     if (appointment.kind !== "appointment") return;
     if (!appointment.email?.trim()) {
-      setToast({ message: "This booking does not have a customer email address." });
+      setToast({ message: t("This booking does not have a customer email address.") });
       return;
     }
     setResendConfirmationState((current) => ({ ...current, [appointment.id]: "sending" }));
@@ -20955,12 +20989,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       const data = (await response.json().catch(() => ({}))) as BookingConfirmationResendResponse;
       if (!response.ok || data.ok === false) {
         setResendConfirmationState((current) => ({ ...current, [appointment.id]: "failed" }));
-        setToast({ message: data.message || "Confirmation email could not be sent." });
+        setToast({ message: data.message || t("Confirmation email could not be sent.") });
         return;
       }
       if (Array.isArray(data.notifications)) setNotifications(cleanNotificationRecords(data.notifications));
       setResendConfirmationState((current) => ({ ...current, [appointment.id]: "sent" }));
-      setToast({ message: "Confirmation email sent." });
+      setToast({ message: t("Confirmation email sent.") });
       void refreshNotificationHistory();
       window.setTimeout(() => {
         setResendConfirmationState((current) => {
@@ -20970,13 +21004,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       }, 1800);
     } catch {
       setResendConfirmationState((current) => ({ ...current, [appointment.id]: "failed" }));
-      setToast({ message: "Could not reach the email sender." });
+      setToast({ message: t("Could not reach the email sender.") });
     }
   }
 
   async function saveClientProfile() {
     if (!clientEditor.name.trim() && !clientEditor.email.trim()) {
-      setToast({ message: "A client needs a name or email." });
+      setToast({ message: t("A client needs a name or email.") });
       return;
     }
     setClientSaveState("saving");
@@ -20988,9 +21022,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       });
       if (response.status === 401) {
         setAuthStatus("guest");
-        throw new Error("Admin login required");
+        throw new Error(t("Admin login required"));
       }
-      if (!response.ok) throw new Error(await readApiFailure(response, "Client save failed"));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Client save failed")));
       const result = (await response.json()) as PeopleUpdateResult;
       if (Array.isArray(result.people)) setPeople(cleanPeople(result.people));
       if (result.person?.id) setSelectedClientId(result.person.id);
@@ -21003,11 +21037,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setIsAddingClient(false);
       setClientEditMode(false);
       setClientSaveState("saved");
-      setToast({ message: "Client profile saved." });
+      setToast({ message: t("Client profile saved.") });
       window.setTimeout(() => setClientSaveState("idle"), 1400);
     } catch (error) {
       setClientSaveState("idle");
-      setToast({ message: error instanceof Error ? error.message : "Could not save client profile." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not save client profile.") });
     }
   }
 
@@ -21032,7 +21066,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             playerId: client.id,
             playerName: client.name,
             lessonId: link.lessonId || "",
-            title: link.title || (source === "voice" ? "Voice lesson note" : "Lesson note"),
+            title: link.title || (source === "voice" ? t("Voice lesson note") : t("Lesson note")),
             body: cleanBody,
             source,
           },
@@ -21040,15 +21074,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       });
       if (response.status === 401) {
         setAuthStatus("guest");
-        throw new Error("Admin login required");
+        throw new Error(t("Admin login required"));
       }
-      if (!response.ok) throw new Error(await readApiFailure(response, "Lesson note save failed"));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Lesson note save failed")));
       const data = (await response.json()) as NotesResult;
       if (Array.isArray(data.notes)) setLessonNotes(cleanLessonNotes(data.notes));
-      setToast({ message: "Lesson note saved." });
+      setToast({ message: t("Lesson note saved.") });
       return true;
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not save lesson note." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not save lesson note.") });
       return false;
     } finally {
       setLessonNoteBusy(false);
@@ -21066,14 +21100,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       });
       if (response.status === 401) {
         setAuthStatus("guest");
-        throw new Error("Admin login required");
+        throw new Error(t("Admin login required"));
       }
-      if (!response.ok) throw new Error(await readApiFailure(response, "Lesson note delete failed"));
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Lesson note delete failed")));
       const data = (await response.json()) as NotesResult;
       if (Array.isArray(data.notes)) setLessonNotes(cleanLessonNotes(data.notes));
-      setToast({ message: "Lesson note deleted." });
+      setToast({ message: t("Lesson note deleted.") });
     } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : "Could not delete lesson note." });
+      setToast({ message: error instanceof Error ? error.message : t("Could not delete lesson note.") });
     } finally {
       setLessonNoteBusy(false);
     }
@@ -21082,7 +21116,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   async function confirmPublicBooking() {
     if (bookingSubmitState === "saving") return;
     if (!bookingTargetService || bookingStart === null) {
-      const message = "Choose a lesson time before confirming.";
+      const message = t("Choose a lesson time before confirming.");
       setBookingSubmitError(message);
       setToast({ message });
       return;
@@ -21097,13 +21131,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     const client = [firstName, lastName].filter(Boolean).join(" ").trim();
 
     if (!firstName || !lastName || !email) {
-      const message = "First name, last name, and email are required.";
+      const message = t("First name, last name, and email are required.");
       setBookingSubmitError(message);
       setToast({ message });
       return;
     }
     if (isCustomGroupBooking && customGroupAttendees.length < customGroupMinParticipants(bookingTargetService) - 1) {
-      const message = "Add at least one other person before confirming.";
+      const message = t("Add at least one other person before confirming.");
       setBookingSubmitError(message);
       setToast({ message });
       return;
@@ -21163,7 +21197,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         candidateLocationId: selectedBooking.location.locationId,
       })
     ) {
-      const message = "That time has just been taken. Pick another slot.";
+      const message = t("That time has just been taken. Pick another slot.");
       setBookingSubmitError(message);
       setOpenPublicBookingSection("information");
       setToast({ message });
@@ -21251,7 +21285,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           finishDiagnosticTimer(timer, "warning", {
             httpStatus: response.status,
             errorCode: "BOOKING_CREATE_FAILED",
-            humanMessage: data.message || data.error || "Public booking used local fallback confirmation.",
+            humanMessage: data.message || data.error || t("Public booking used local fallback confirmation."),
           });
         } else {
           finishDiagnosticTimer(timer, "verified", {
@@ -21273,7 +21307,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         console.warn("public_booking_submit_customer_confirmed_after_fetch_failure", error);
         finishDiagnosticTimer(timer, "warning", {
           errorCode: "BOOKING_CREATE_FAILED",
-          humanMessage: error instanceof Error ? error.message : "Public booking fetch failed; local fallback confirmation shown.",
+          humanMessage: error instanceof Error ? error.message : t("Public booking fetch failed; local fallback confirmation shown."),
         });
         confirmWithLocalFallback();
       } finally {
@@ -21321,32 +21355,32 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     setBookingForm({ firstName: "", lastName: "", phone: "", email: "" });
     setBookingSubmitError("");
     setToast({
-      message: `${client} booked ${selectedBooking.service.name} on ${weekDays[item.day].short} at ${formatTime(item.start)}.`,
+      message: t("{client} booked {name} on {short} at {start}.", { client, name: selectedBooking.service.name, short: weekDays[item.day].short, start: formatTime(item.start) }),
     });
   }
 
   function copyEmbedCode() {
     if (!navigator.clipboard) {
-      setToast({ message: "Copy is not available in this browser. Select the iframe code manually." });
+      setToast({ message: t("Copy is not available in this browser. Select the iframe code manually.") });
       return;
     }
     void navigator.clipboard.writeText(iframeCode).then(() => {
       setCopiedEmbed(true);
-      setToast({ message: "Squarespace iframe code copied." });
+      setToast({ message: t("Squarespace iframe code copied.") });
       window.setTimeout(() => setCopiedEmbed(false), 1600);
     }, () => {
-      setToast({ message: "Copy was blocked by the browser. Select the iframe code manually." });
+      setToast({ message: t("Copy was blocked by the browser. Select the iframe code manually.") });
     });
   }
 
   function copyBookingScreenValue(value: string, kind: "url" | "iframe", screenId: string) {
     if (!navigator.clipboard) {
-      setToast({ message: "Copy is not available in this browser. Select the value manually." });
+      setToast({ message: t("Copy is not available in this browser. Select the value manually.") });
       return;
     }
     const key = `${screenId}-${kind}`;
     void navigator.clipboard.writeText(value).then(() => {
-      const message = kind === "url" ? "Booking page link copied." : "Squarespace iframe code copied.";
+      const message = kind === "url" ? t("Booking page link copied.") : t("Squarespace iframe code copied.");
       setToast({ message });
       if (kind === "url") {
         setCopiedBookingScreenLinkId(key);
@@ -21360,22 +21394,22 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         }, 1600);
       }
     }, () => {
-      setToast({ message: "Copy was blocked by the browser. Select the value manually." });
+      setToast({ message: t("Copy was blocked by the browser. Select the value manually.") });
     });
   }
 
   function copySyncText(kind: "url" | "key") {
     if (!navigator.clipboard) {
-      setToast({ message: "Copy is not available in this browser. Select the sync value manually." });
+      setToast({ message: t("Copy is not available in this browser. Select the sync value manually.") });
       return;
     }
     const text = kind === "url" ? calendarFeedUrl : calendarSyncKey;
     void navigator.clipboard.writeText(text).then(() => {
       setCopiedSync(kind);
-      setToast({ message: kind === "url" ? "Google calendar sync URL copied." : "Private sync key copied." });
+      setToast({ message: kind === "url" ? t("Google calendar sync URL copied.") : t("Private sync key copied.") });
       window.setTimeout(() => setCopiedSync(null), 1600);
     }, () => {
-      setToast({ message: "Copy was blocked by the browser. Select the sync value manually." });
+      setToast({ message: t("Copy was blocked by the browser. Select the sync value manually.") });
     });
   }
 
@@ -21386,7 +21420,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   function regenerateSyncKey() {
     setCalendarSyncKey(generateSyncKey());
     setCopiedSync(null);
-    setToast({ message: "Calendar sync key regenerated. Update Google Calendar with the new URL." });
+    setToast({ message: t("Calendar sync key regenerated. Update Google Calendar with the new URL.") });
   }
 
   async function removeSelected() {
@@ -21398,9 +21432,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     if (isExternallyOwned(selected)) {
       const provider = externalProviderLabel(selected);
       const confirmed = window.confirm(
-        `Remove this lesson and cancel it in ${provider}?\n\n` +
-          `Clarity will ask ${provider} to cancel ${selected.client ?? selected.title}'s booking too. ` +
-          `If ${provider} refuses, the booking stays live there — check the Optix panel after deleting.`,
+        t(
+          "Remove this lesson and cancel it in {provider}?\n\nClarity will ask {provider} to cancel {client}'s booking too. If {provider} refuses, the booking stays live there — check the Optix panel after deleting.",
+          { provider, client: selected.client ?? selected.title },
+        ),
       );
       if (!confirmed) return;
     }
@@ -21429,7 +21464,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     setCalendarSaveError("");
     setItems((current) => current.filter((item) => item.id !== calendarItemId));
     closeCalendarDetails();
-    setToast({ message: `${selectedKind === "block" ? "Block" : "Appointment"} removed.` });
+    setToast({ message: selectedKind === "block" ? t("Block removed.") : t("Appointment removed.") });
     try {
       const response = await fetch(`/api/calendar-state?id=${encodeURIComponent(calendarItemId)}`, {
         method: "DELETE",
@@ -21440,7 +21475,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       const data = (await response.json().catch(() => ({}))) as CalendarStateSaveResponse;
       if (response.status === 401) {
         setAuthStatus("guest");
-        throw Object.assign(new Error(data.message || "Admin login expired. Sign in again before editing the calendar."), {
+        throw Object.assign(new Error(data.message || t("Admin login expired. Sign in again before editing the calendar.")), {
           code: "AUTH_SESSION_MISSING",
           httpStatus: response.status,
           operationOwner: "calendar_delete",
@@ -21449,7 +21484,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       }
       if (!response.ok) {
         throw Object.assign(
-          new Error(data.detail || data.message || data.error || `Delete failed (${response.status} ${response.statusText})`),
+          new Error(data.detail || data.message || data.error || t("Delete failed ({status} {statusText})", { status: response.status, statusText: response.statusText })),
           {
             code: data.error || data.diagnostics?.code || "BOOKING_DELETE_FAILED",
             diagnostics: data.diagnostics,
@@ -21464,7 +21499,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       const verifyData = data;
       const verifyHttpStatus = response.status;
       if (!Array.isArray(verifyData.items)) {
-        throw Object.assign(new Error("Calendar reload did not return booking items for delete verification."), {
+        throw Object.assign(new Error(t("Calendar reload did not return booking items for delete verification.")), {
           code: "BOOKING_DELETE_RELOAD_FAILED",
           httpStatus: verifyHttpStatus,
           operationOwner: "calendar_reload",
@@ -21473,7 +21508,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       }
       const deletedStillReturned = verifyData.items.some((item) => item.id === calendarItemId);
       if (deletedStillReturned) {
-        throw Object.assign(new Error("Deleted booking was returned by the backend refetch."), {
+        throw Object.assign(new Error(t("Deleted booking was returned by the backend refetch.")), {
           code: "BOOKING_DELETE_VERIFY_FAILED",
           httpStatus: verifyHttpStatus,
           operationOwner: "calendar_reload_verify",
@@ -21544,7 +21579,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       });
       scheduleAdminNotificationDebounceFlush();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "The booking could not be deleted.";
+      const message = error instanceof Error ? error.message : t("The booking could not be deleted.");
       const errorDetails = error as {
         code?: string;
         diagnostics?: BookingDeleteDiagnostics;
@@ -21570,12 +21605,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       const email = safeText(errorDetails?.email || diagnostics?.email);
       const deleteFailureMessage =
         operationOwner === "people_patch"
-          ? "Delete attempted an unexpected client save. Check diagnostics before retrying."
+          ? t("Delete attempted an unexpected client save. Check diagnostics before retrying.")
           : code === "BOOKING_DELETE_VERIFY_FAILED"
-            ? "Deleted booking reappeared after backend refetch. Stale cache or persistence verification failed."
+            ? t("Deleted booking reappeared after backend refetch. Stale cache or persistence verification failed.")
             : code === "BOOKING_DELETE_RELOAD_FAILED"
-              ? "The booking delete could not be verified because the calendar reload failed."
-              : "The delete didn't reach the server, so the lesson is back on the calendar. Delete it again to retry.";
+              ? t("The booking delete could not be verified because the calendar reload failed.")
+              : t("The delete didn't reach the server, so the lesson is back on the calendar. Delete it again to retry.");
+
       // Roll the optimistic removal back: the server still has the lesson, so
       // the calendar must show it again. Guarded on the save version so a
       // newer change is never clobbered by this stale snapshot.
@@ -21636,7 +21672,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const customGroupAttendeePanel = isCustomGroupBooking ? (
     <div className="custom-group-panel">
       <div className="custom-group-summary">
-        <span>Attendees</span>
+        <span>{t("Attendees")}</span>
         <strong>
           {customGroupParticipantCount} / {customGroupMaxParticipants(bookingTargetService)}
         </strong>
@@ -21646,14 +21682,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         <input
           value={customGroupAttendeeDraft.name}
           onChange={(event) => updateCustomGroupAttendeeDraft("name", event.target.value)}
-          placeholder="Attendee name"
+          placeholder={t("Attendee name")}
         />
         <input
           value={customGroupAttendeeDraft.email}
           autoComplete="email"
           inputMode="email"
           onChange={(event) => updateCustomGroupAttendeeDraft("email", event.target.value)}
-          placeholder="Email optional"
+          placeholder={t("Email optional")}
           type="email"
         />
       </div>
@@ -21663,14 +21699,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         onClick={addCustomGroupAttendee}
         type="button"
       >
-        <Plus size={16} />
-        Add attendee
-      </button>
+        <Plus size={16} />{t("Add attendee")}</button>
       <div className="custom-group-attendee-list">
         <div className="custom-group-attendee-row">
           <span>
-            <strong>{[bookingForm.firstName, bookingForm.lastName].filter(Boolean).join(" ").trim() || "Booker"}</strong>
-            <em>{bookingForm.email || "Email required"}</em>
+            <strong>{[bookingForm.firstName, bookingForm.lastName].filter(Boolean).join(" ").trim() || t("Booker")}</strong>
+            <em>{bookingForm.email || t("Email required")}</em>
           </span>
           <small>{customGroupStatusLabel("booker")}</small>
         </div>
@@ -21678,13 +21712,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           <div className="custom-group-attendee-row" key={attendee.id}>
             <span>
               <strong>{attendee.name}</strong>
-              <em>{attendee.email || "Manual attendee"}</em>
+              <em>{attendee.email || t("Manual attendee")}</em>
             </span>
             <small>{customGroupStatusLabel(attendee.status)}</small>
             <button
               className="icon-button small"
               onClick={() => removeCustomGroupAttendee(attendee.id)}
-              aria-label={`Remove ${attendee.name}`}
+              aria-label={t("Remove {name}", { name: attendee.name })}
               type="button"
             >
               <X size={15} />
@@ -21693,7 +21727,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         ))}
       </div>
       {customGroupAttendees.length < customGroupMinParticipants(bookingTargetService) - 1 && (
-        <p className="field-help">Add at least one other person before confirming.</p>
+        <p className="field-help">{t("Add at least one other person before confirming.")}</p>
       )}
     </div>
   ) : null;
@@ -21703,21 +21737,19 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       <div className="service-layout">
         <div className="services-topline">
           <div>
-            <span>{terms.serviceSingular} options</span>
-            <h2>{terms.serviceSingular} types</h2>
+            <span>{t("{serviceSingular} options", { serviceSingular: terms.serviceSingular })}</span>
+            <h2>{t("{serviceSingular} types", { serviceSingular: terms.serviceSingular })}</h2>
           </div>
           <button className="outline-button" onClick={startNewService}>
-            <Plus size={16} />
-            New
-          </button>
+            <Plus size={16} />{t("New")}</button>
         </div>
 
         {showServiceEditor && (
           <article className="data-card service-editor">
             <div className="data-card-header">
               <div>
-                <span>{editingServiceId ? `Edit ${terms.serviceSingular} Type` : `New ${terms.serviceSingular} Type`}</span>
-                <h2>{editingServiceId ? serviceEditor.name || `${terms.serviceSingular} details` : `Add ${terms.serviceSingular.toLowerCase()}`}</h2>
+                <span>{editingServiceId ? t("Edit {serviceSingular} Type", { serviceSingular: terms.serviceSingular }) : t("New {serviceSingular} Type", { serviceSingular: terms.serviceSingular })}</span>
+                <h2>{editingServiceId ? serviceEditor.name || `${terms.serviceSingular} details` : t("Add {serviceSingular}", { serviceSingular: terms.serviceSingular.toLowerCase() })}</h2>
               </div>
               <button
                 className="outline-button"
@@ -21728,40 +21760,38 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   setServiceEditor(emptyServiceEditor());
                 }}
               >
-                <X size={16} />
-                Close
-              </button>
+                <X size={16} />{t("Close")}</button>
             </div>
 
             <div className="service-form">
               <div className="service-form-row">
                 <label className="settings-field">
-                  <span>Lesson format</span>
+                  <span>{t("Lesson format")}</span>
                   <select
                     value={serviceEditorFormat(serviceEditor)}
                     onChange={(event) => updateServiceEditorFormat(event.target.value as ServiceEditorFormat)}
                   >
-                    <option value="private">Private lesson</option>
-                    <option value="group">Group lesson</option>
-                    <option value="custom-group">Custom group lesson</option>
-                    <option value="video-review">Video review (no set time)</option>
-                    <option value="package">Package</option>
+                    <option value="private">{t("Private lesson")}</option>
+                    <option value="group">{t("Group lesson")}</option>
+                    <option value="custom-group">{t("Custom group lesson")}</option>
+                    <option value="video-review">{t("Video review (no set time)")}</option>
+                    <option value="package">{t("Package")}</option>
                   </select>
                 </label>
                 <label className="settings-field">
-                  <span>Visibility</span>
+                  <span>{t("Visibility")}</span>
                   <select
                     value={serviceEditor.visibility}
                     onChange={(event) =>
                       updateServiceEditor("visibility", event.target.value === "private" ? "private" : "public")
                     }
                   >
-                    <option value="public">Public booking page</option>
-                    <option value="private">Admin only</option>
+                    <option value="public">{t("Public booking page")}</option>
+                    <option value="private">{t("Admin only")}</option>
                   </select>
                 </label>
                 <label className="settings-field">
-                  <span>Show on booking screens</span>
+                  <span>{t("Show on booking screens")}</span>
                   <div className="service-screen-checkboxes">
                     {BOOKING_SCREENS.map((screen) => (
                       <label className="settings-toggle" key={screen.id}>
@@ -21775,12 +21805,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     ))}
                   </div>
                   {serviceEditor.visibility === "private" && (
-                    <p className="field-help">Admin-only lesson types will not appear publicly until visibility is set to Public.</p>
+                    <p className="field-help">{t("Admin-only lesson types will not appear publicly until visibility is set to Public.")}</p>
                   )}
                 </label>
               </div>
               <label className="settings-field">
-                <span>Name</span>
+                <span>{t("Name")}</span>
                 <input
                   value={serviceEditor.name}
                   onChange={(event) => updateServiceEditor("name", event.target.value)}
@@ -21794,26 +21824,26 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 <input
                   type="color"
                   value={serviceEditor.color || defaultServiceColor(0)}
-                  aria-label="Calendar colour for this lesson type"
+                  aria-label={t("Calendar colour for this lesson type")}
                   onChange={(event) => updateServiceEditor("color", event.target.value)}
                 />
                 <span>
-                  <strong>Calendar colour</strong>
-                  <em>Card fill</em>
+                  <strong>{t("Calendar colour")}</strong>
+                  <em>{t("Card fill")}</em>
                 </span>
                 <code>{serviceEditor.color || defaultServiceColor(0)}</code>
               </label>
               <label className="settings-field">
-                <span>Optional description</span>
+                <span>{t("Optional description")}</span>
                 <input
                   value={serviceEditor.description}
                   onChange={(event) => updateServiceEditor("description", event.target.value)}
-                  placeholder="Short booking note"
+                  placeholder={t("Short booking note")}
                 />
               </label>
               <div className="service-form-row">
                 <label className="settings-field">
-                  <span>Duration</span>
+                  <span>{t("Duration")}</span>
                   <input
                     value={serviceNumberInputValue("duration")}
                     min={15}
@@ -21826,7 +21856,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   />
                 </label>
                 <label className="settings-field">
-                  <span>Price NZD</span>
+                  <span>{t("Price NZD")}</span>
                   <input
                     value={serviceNumberInputValue("price")}
                     min={0}
@@ -21838,7 +21868,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   />
                 </label>
                 <label className="settings-field">
-                  <span>Pricing</span>
+                  <span>{t("Pricing")}</span>
                   <select
                     disabled={serviceEditor.lessonFormat !== "group" || hasCustomGroupFlag(serviceEditor)}
                     value={serviceEditor.priceMode}
@@ -21846,15 +21876,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       updateServiceEditor("priceMode", event.target.value === "per-person" ? "per-person" : "session")
                     }
                   >
-                    <option value="session">Per session</option>
-                    <option value="per-person">Per person</option>
+                    <option value="session">{t("Per session")}</option>
+                    <option value="per-person">{t("Per person")}</option>
                   </select>
                 </label>
               </div>
               {serviceEditor.lessonFormat === "group" && hasCustomGroupFlag(serviceEditor) && (
                 <div className="service-form-row">
                   <label className="settings-field">
-                    <span>Base participants</span>
+                    <span>{t("Base participants")}</span>
                     <input
                       value={serviceNumberInputValue("baseParticipants")}
                       min={serviceEditor.minParticipants}
@@ -21867,7 +21897,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     />
                   </label>
                   <label className="settings-field">
-                    <span>Base price NZD</span>
+                    <span>{t("Base price NZD")}</span>
                     <input
                       value={serviceNumberInputValue("basePrice")}
                       min={0}
@@ -21879,7 +21909,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     />
                   </label>
                   <label className="settings-field">
-                    <span>Extra person NZD</span>
+                    <span>{t("Extra person NZD")}</span>
                     <input
                       value={serviceNumberInputValue("extraPersonPrice")}
                       min={0}
@@ -21895,7 +21925,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               <div className="service-form-row">
                 {serviceEditor.lessonFormat === "group" && !hasCustomGroupFlag(serviceEditor) && (
                   <label className="settings-field">
-                    <span>Day of week</span>
+                    <span>{t("Day of week")}</span>
                     <select
                       value={serviceEditor.groupSchedule?.dayOfWeek ?? 2}
                       onChange={(event) => updateGroupSchedule("dayOfWeek", Number(event.target.value))}
@@ -21910,7 +21940,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 )}
                 {serviceEditor.lessonFormat === "group" && !hasCustomGroupFlag(serviceEditor) && (
                   <label className="settings-field">
-                    <span>Start time</span>
+                    <span>{t("Start time")}</span>
                     <input
                       value={minutesToInputTime(serviceEditor.groupSchedule?.startMinutes ?? timeToMinutes(18, 0))}
                       inputMode="numeric"
@@ -21930,7 +21960,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 )}
                 {serviceEditor.lessonFormat === "group" && !hasCustomGroupFlag(serviceEditor) && (
                   <label className="settings-field">
-                    <span>Generate next</span>
+                    <span>{t("Generate next")}</span>
                     <input
                       value={groupOccurrenceInput}
                       min={1}
@@ -21945,7 +21975,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 )}
                 {serviceEditor.lessonFormat === "group" && (
                   <label className="settings-field">
-                    <span>{hasCustomGroupFlag(serviceEditor) ? "Minimum participants" : "Minimum group"}</span>
+                    <span>{hasCustomGroupFlag(serviceEditor) ? t("Minimum participants") : t("Minimum group")}</span>
                     <input
                       value={groupMinimumInput}
                       min={2}
@@ -21965,17 +21995,17 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       onChange={(event) => updateGroupSchedule("active", event.target.checked)}
                       type="checkbox"
                     />
-                    <span>Enable recurring schedule</span>
+                    <span>{t("Enable recurring schedule")}</span>
                   </label>
                 )}
                 {serviceEditor.lessonFormat !== "package" && (
                   <label className="settings-field">
                     <span>
                       {hasCustomGroupFlag(serviceEditor)
-                        ? "Max participants"
+                        ? t("Max participants")
                         : serviceEditor.lessonFormat === "group"
-                          ? "Maximum group"
-                          : "Capacity"}
+                          ? t("Maximum group")
+                          : t("Capacity")}
                     </span>
                     <input
                       value={groupMaximumInput}
@@ -21994,10 +22024,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     <span>{terms.staffPlural}</span>
                     <small>
                       {isAdminUser
-                        ? "Who teaches it. Customers see every time any of them is free."
-                        : "Who teaches it. An admin can change this."}
+                        ? t("Who teaches it. Customers see every time any of them is free.")
+                        : t("Who teaches it. An admin can change this.")}
                     </small>
-                    <div className="service-resource-choices" aria-label={`${terms.staffPlural} who provide this ${terms.serviceSingular.toLowerCase()} type`}>
+                    <div className="service-resource-choices" aria-label={t("{staffPlural} who provide this {serviceSingular} type", { staffPlural: terms.staffPlural, serviceSingular: terms.serviceSingular.toLowerCase() })}>
                       {activeCoachList.map((coach) => {
                         const chosen = serviceEditor.coachIds.includes(coach.id);
                         return (
@@ -22024,9 +22054,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 )}
                 {serviceEditor.lessonFormat !== "package" && serviceEditor.lessonFormat !== "video-review" && (
                   <div className="service-scope-field">
-                    <span>Locations</span>
-                    <small>Where it runs. Customers see every time it is free at any of them.</small>
-                    <div className="service-resource-choices" aria-label="Locations this lesson type runs at">
+                    <span>{t("Locations")}</span>
+                    <small>{t("Where it runs. Customers see every time it is free at any of them.")}</small>
+                    <div className="service-resource-choices" aria-label={t("Locations this lesson type runs at")}>
                       {activeLocationList.map((location) => {
                         const chosen = serviceEditor.locationIds.includes(location.id);
                         return (
@@ -22054,16 +22084,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 serviceEditor.lessonFormat !== "package" &&
                 serviceEditor.lessonFormat !== "video-review" ? (
                   <div className="service-resource-field">
-                    <span>Resources</span>
+                    <span>{t("Resources")}</span>
                     <label className="settings-toggle">
                       <input
                         checked={serviceEditor.resourceMode === "usable"}
                         onChange={() => setServiceEditorResourceMode("usable")}
                         type="checkbox"
                       />
-                      <span>
-                        Resource usable
-                        <small>Takes a free one when there is one. Still bookable when they are all in use.</small>
+                      <span>{t("Resource usable")}<small>{t("Takes a free one when there is one. Still bookable when they are all in use.")}</small>
                       </span>
                     </label>
                     <label className="settings-toggle">
@@ -22072,9 +22100,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         onChange={() => setServiceEditorResourceMode("required")}
                         type="checkbox"
                       />
-                      <span>
-                        Resource required
-                        <small>Only bookable while one is free.</small>
+                      <span>{t("Resource required")}<small>{t("Only bookable while one is free.")}</small>
                       </span>
                     </label>
                     {serviceEditor.resourceMode && serviceEditor.resourceMode !== "none" ? (
@@ -22084,16 +22110,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             {serviceEditorResourceLocations
                               .filter((location) => location.resourceSource === "external")
                               .map((location) => location.shortName || location.name)
-                              .join(", ")}{" "}
-                            is tracked by another booking system, so Clarity won't limit bookings there.
-                          </small>
+                              .join(", ")}{" "}{t("is tracked by another booking system, so Clarity won't limit bookings there.")}</small>
                         ) : null}
                         {serviceEditorResourceGroups.length > 0 ? (
-                          <div className="service-resource-types" aria-label="Resources this lesson type can use">
+                          <div className="service-resource-types" aria-label={t("Resources this lesson type can use")}>
                             <small>
                               {(serviceEditor.resourceTypes ?? []).length || (serviceEditor.resourceIds ?? []).length
-                                ? "Can use only the ones chosen. Choose a type for all of them, or open it to choose single ones."
-                                : "Nothing chosen, so it can use any of them. Choose a type for all of them, or open it to choose single ones."}
+                                ? t("Can use only the ones chosen. Choose a type for all of them, or open it to choose single ones.")
+                                : t("Nothing chosen, so it can use any of them. Choose a type for all of them, or open it to choose single ones.")}
                             </small>
                             {serviceEditorResourceGroups.map((group) => {
                               const groupKey = group.key || "(no type)";
@@ -22114,13 +22138,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                         type="checkbox"
                                       />
                                       <span>
-                                        {group.type || "No type"}
+                                        {group.type || t("No type")}
                                         <small>
                                           {wholeType
-                                            ? `All ${group.resources.length}`
+                                            ? t("All {length}", { length: group.resources.length })
                                             : chosenCount
-                                              ? `${chosenCount} of ${group.resources.length}`
-                                              : `${group.resources.length} ${group.resources.length === 1 ? "resource" : "resources"}`}
+                                              ? t("{chosen} of {total}", { chosen: chosenCount, total: group.resources.length })
+                                              : group.resources.length === 1
+                                                ? t("1 resource")
+                                                : t("{n} resources", { n: group.resources.length })}
                                         </small>
                                       </span>
                                     </label>
@@ -22128,7 +22154,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                       className="icon-button small"
                                       type="button"
                                       aria-expanded={open}
-                                      aria-label={`${open ? "Hide" : "Show"} ${group.type || "untyped"} resources`}
+                                      aria-label={
+                                        open
+                                          ? t("Hide {type} resources", { type: group.type || t("untyped") })
+                                          : t("Show {type} resources", { type: group.type || t("untyped") })
+                                      }
                                       onClick={() =>
                                         setOpenResourceTypes((current) =>
                                           open ? current.filter((key) => key !== groupKey) : [...current, groupKey],
@@ -22169,21 +22199,21 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   </div>
                 ) : null}
                 <label className="settings-field">
-                  <span>Lesson note</span>
+                  <span>{t("Lesson note")}</span>
                   {/* Optional and free text. The placeholder is a generic hint on
                       purpose -- it used to read "Bay hire included", one
                       business's own wording, which read as a prescribed value. */}
                   <input
                     value={serviceEditor.lessonNote ?? serviceEditor.location ?? ""}
                     onChange={(event) => updateServiceEditor("lessonNote", event.target.value)}
-                    placeholder="Optional"
+                    placeholder={t("Optional")}
                   />
                 </label>
               </div>
               {serviceEditor.lessonFormat === "video-review" && (
                 <div className="service-form-row">
                   <label className="settings-field">
-                    <span>Turnaround (days)</span>
+                    <span>{t("Turnaround (days)")}</span>
                     <input
                       value={serviceNumberInputValue("reviewTurnaroundDays")}
                       min={1}
@@ -22194,18 +22224,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       onBlur={() => commitServiceNumberDraft("reviewTurnaroundDays")}
                       type="number"
                     />
-                    <p className="field-help">
-                      A review has no appointment time. Booking one puts it on your calendar on the day
-                      it is due back, at the end of that day, so it sits with the rest of that day's work.
-                      Duration is how long you expect to spend on it.
-                    </p>
+                    <p className="field-help">{t("A review has no appointment time. Booking one puts it on your calendar on the day it is due back, at the end of that day, so it sits with the rest of that day's work. Duration is how long you expect to spend on it.")}</p>
                   </label>
                 </div>
               )}
               {serviceEditor.lessonFormat === "package" && (
                 <div className="service-form-row">
                   <label className="settings-field">
-                    <span>Allowance</span>
+                    <span>{t("Allowance")}</span>
                     <input
                       value={serviceNumberInputValue("packageAllowance")}
                       min={1}
@@ -22218,7 +22244,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     />
                   </label>
                   <label className="settings-field">
-                    <span>Coverage style</span>
+                    <span>{t("Coverage style")}</span>
                     <select
                       value={serviceEditor.packageCoverageMode ?? "upfront"}
                       onChange={(event) =>
@@ -22228,17 +22254,17 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         )
                       }
                     >
-                      <option value="upfront">Paid upfront</option>
-                      <option value="lesson-by-lesson">Lesson-by-lesson</option>
+                      <option value="upfront">{t("Paid upfront")}</option>
+                      <option value="lesson-by-lesson">{t("Lesson-by-lesson")}</option>
                     </select>
                   </label>
                   <label className="settings-field">
-                    <span>Covers lesson type</span>
+                    <span>{t("Covers lesson type")}</span>
                     <select
                       value={serviceEditor.packageCoversServiceId ?? ""}
                       onChange={(event) => updateServiceEditor("packageCoversServiceId", event.target.value)}
                     >
-                      <option value="">Choose a lesson type</option>
+                      <option value="">{t("Choose a lesson type")}</option>
                       {activeServices
                         .filter((service) => service.lessonFormat !== "package")
                         .map((service) => (
@@ -22247,10 +22273,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           </option>
                         ))}
                     </select>
-                    <p className="field-help">
-                      Credits from this package can only pay for the lesson type you pick here. A package
-                      that covers nothing cannot be sold or spent.
-                    </p>
+                    <p className="field-help">{t("Credits from this package can only pay for the lesson type you pick here. A package that covers nothing cannot be sold or spent.")}</p>
                   </label>
                 </div>
               )}
@@ -22261,7 +22284,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     onChange={(event) => updateServiceEditor("crossRedeemable", event.target.checked)}
                     type="checkbox"
                   />
-                  <span>Cross redeemable by its original purchase value</span>
+                  <span>{t("Cross redeemable by its original purchase value")}</span>
                 </label>
               ) : (
                 <label className="settings-toggle">
@@ -22270,7 +22293,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     onChange={(event) => updateServiceEditor("acceptsCrossRedemption", event.target.checked)}
                     type="checkbox"
                   />
-                  <span>Accept Clarity balance from other eligible passes</span>
+                  <span>{t("Accept Clarity balance from other eligible passes")}</span>
                 </label>
               )}
               <label className="settings-toggle">
@@ -22279,18 +22302,18 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   onChange={(event) => updateServiceEditor("active", event.target.checked)}
                   type="checkbox"
                 />
-                <span>Active and bookable</span>
+                <span>{t("Active and bookable")}</span>
               </label>
             </div>
 
             <button className="primary-button settings-save" onClick={saveEditedService}>
               {serviceSaveState === "saving"
-                ? "Saving"
+                ? t("Saving")
                 : serviceSaveState === "saved"
-                  ? "Saved"
+                  ? t("Saved")
                   : serviceSaveState === "error"
-                    ? "Not saved"
-                    : `Save ${terms.serviceSingular} Type`}
+                    ? t("Not saved")
+                    : t("Save {serviceSingular} Type", { serviceSingular: terms.serviceSingular })}
             </button>
           </article>
         )}
@@ -22299,32 +22322,28 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           <summary className="settings-subsection-title">
             <ClarityServices size={18} />
             <div>
-              <span>{terms.serviceSingular} types</span>
-              <strong>{activeServices.length} active</strong>
+              <span>{t("{serviceSingular} types", { serviceSingular: terms.serviceSingular })}</span>
+              <strong>{t("{length} active", { length: activeServices.length })}</strong>
             </div>
           </summary>
-          <div className="service-list-tabs" role="tablist" aria-label={`${terms.serviceSingular} type status`}>
+          <div className="service-list-tabs" role="tablist" aria-label={t("{serviceSingular} type status", { serviceSingular: terms.serviceSingular })}>
             <button
               className={`pill ${serviceListTab === "active" ? "active-pill" : ""}`}
               onClick={() => setServiceListTab("active")}
               type="button"
-            >
-              Active
-            </button>
+            >{t("Active")}</button>
             <button
               className={`pill ${serviceListTab === "archived" ? "active-pill" : ""}`}
               onClick={() => setServiceListTab("archived")}
               type="button"
-            >
-              Archived
-            </button>
+            >{t("Archived")}</button>
           </div>
-          <div className="service-list" aria-label={`${terms.serviceSingular} types`}>
+          <div className="service-list" aria-label={t("{serviceSingular} types", { serviceSingular: terms.serviceSingular })}>
             {(serviceListTab === "active" ? activeServices : archivedServices).map((service) => (
               <article className={`service-row ${service.active ? "" : "is-archived"}`} key={service.id}>
                 <button className="service-row-main" onClick={() => editService(service)} type="button">
                   <span>
-                    {service.archived ? "Archived" : service.active ? "Active" : "Inactive"} · {service.visibility === "public" ? "Public" : "Admin only"} ·{" "}
+                    {service.archived ? t("Archived") : service.active ? t("Active") : t("Inactive")} · {service.visibility === "public" ? t("Public") : t("Admin only")} ·{" "}
                     {serviceFormatLabel(service)} ·{" "}
                     {formatBookingScreenLabels(service.bookingScreenIds ?? ["main"]).join(", ")}
                   </span>
@@ -22339,11 +22358,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           return coach?.displayName || coach?.name || "";
                         })
                         .filter(Boolean)
-                        .join(", ") || "None"}
+                        .join(", ") || t("None")}
                     </em>
                   )}
                   <em>
-                    {service.locationIds.length > 1 ? "Booking locations" : "Booking location"}:{" "}
+                    {service.locationIds.length > 1 ? t("Booking locations") : t("Booking location")}:{" "}
                     {service.locationIds.length > 1
                       ? service.locationIds
                           .map((id) => locationById(locations, id))
@@ -22352,17 +22371,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           .join(", ")
                       : bookingLocationShortDisplay(bookingLocationSnapshotFor(service, locations, coachAccount))}
                   </em>
-                  {(service.lessonNote || service.location) && <em>{terms.serviceSingular} note: {service.lessonNote || service.location}</em>}
+                  {(service.lessonNote || service.location) && <em>{t("{serviceSingular} note:", { serviceSingular: terms.serviceSingular })}{" "}{service.lessonNote || service.location}</em>}
                   {service.lessonFormat === "package" && (
                     <em>
-                      {service.packageAllowance ?? 5} slots ·{" "}
-                      {service.packageCoverageMode === "lesson-by-lesson" ? "lesson-by-lesson" : "paid upfront"}
+                      {service.packageAllowance ?? 5}{" "}{t("slots ·")}{" "}{service.packageCoverageMode === "lesson-by-lesson" ? "lesson-by-lesson" : "paid upfront"}
                     </em>
                   )}
                 </button>
                 <div className="service-row-meta">
                   <strong>{servicePriceLabel(service)}</strong>
-                  <span>{service.duration} min</span>
+                  <span>{t("{duration} min", { duration: service.duration })}</span>
                 </div>
                 <div className="service-row-actions">
                   {service.archived ? (
@@ -22376,7 +22394,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         type="button"
                       >
                         <RefreshCw size={15} />
-                        <span>Restore</span>
+                        <span>{t("Restore")}</span>
                       </button>
                       {canPermanentlyDeleteService(service) ? (
                         <button
@@ -22388,7 +22406,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           type="button"
                         >
                           <Trash2 size={15} />
-                          <span>Delete</span>
+                          <span>{t("Delete")}</span>
                         </button>
                       ) : null}
                     </>
@@ -22403,7 +22421,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         type="button"
                       >
                         <Pencil size={15} />
-                        <span>Edit</span>
+                        <span>{t("Edit")}</span>
                       </button>
                       <button
                         className="outline-button service-action-button"
@@ -22414,7 +22432,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         type="button"
                       >
                         <Archive size={15} />
-                        <span>Archive</span>
+                        <span>{t("Archive")}</span>
                       </button>
                       {canPermanentlyDeleteService(service) ? (
                         <button
@@ -22426,7 +22444,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           type="button"
                         >
                           <Trash2 size={15} />
-                          <span>Delete</span>
+                          <span>{t("Delete")}</span>
                         </button>
                       ) : null}
                     </>
@@ -22436,7 +22454,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             ))}
             {!(serviceListTab === "active" ? activeServices : archivedServices).length && (
               <p className="service-list-empty">
-                {serviceListTab === "active" ? "No active lesson types yet." : "No archived lesson types yet."}
+                {serviceListTab === "active" ? t("No active lesson types yet.") : t("No archived lesson types yet.")}
               </p>
             )}
           </div>
@@ -22449,61 +22467,59 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     pendingServiceAction ? services.find((service) => service.id === pendingServiceAction.serviceId) ?? null : null;
 
   const locationsSettingsPanel = (
-    <SettingsGroup id="locations" icon={ClarityLocations} section="business" title="Locations">
+    <SettingsGroup id="locations" icon={ClarityLocations} section="business" title={t("Locations")}>
       <div className="data-card wide">
         <div className="data-card-header">
           <div>
-            <h2>{activeLocationList.length} active place{activeLocationList.length === 1 ? "" : "s"}</h2>
+            <h2>{t("{length} active place", { length: activeLocationList.length })}{activeLocationList.length === 1 ? "" : "s"}</h2>
           </div>
           <button className="primary-button" onClick={startNewLocation} type="button">
             <Plus size={16} />
-            <span>Add location</span>
+            <span>{t("Add location")}</span>
           </button>
         </div>
-        <p className="field-help">
-          Locations are real places customers can travel to. Lesson-specific inclusions like "Bay hire included" belong on the lesson type, not here.
-        </p>
+        <p className="field-help">{t("Locations are real places customers can travel to. Lesson-specific inclusions like \"Bay hire included\" belong on the lesson type, not here.")}</p>
 
         {showLocationEditor && (
           <article className="service-editor-card">
             <div className="data-card-header compact">
               <div>
-                <span>{editingLocationId ? "Edit location" : "New location"}</span>
-                <h3>{locationEditor.name || "Location details"}</h3>
+                <span>{editingLocationId ? t("Edit location") : t("New location")}</span>
+                <h3>{locationEditor.name || t("Location details")}</h3>
               </div>
               <button
                 className="icon-button"
                 disabled={locationSaveState === "saving"}
                 onClick={() => setShowLocationEditor(false)}
                 type="button"
-                aria-label="Close location editor"
+                aria-label={t("Close location editor")}
               >
                 <X size={16} />
               </button>
             </div>
             <div className="service-form-grid">
               <label className="settings-field">
-                <span>Location name</span>
+                <span>{t("Location name")}</span>
                 <input value={locationEditor.name} onChange={(event) => updateLocationEditor("name", event.target.value)} />
               </label>
               <label className="settings-field">
-                <span>Short name</span>
+                <span>{t("Short name")}</span>
                 <input value={locationEditor.shortName} onChange={(event) => updateLocationEditor("shortName", event.target.value)} />
               </label>
               {locationEditor.kind !== "online" ? (
                 <>
                   <label className="settings-field">
-                    <span>Address</span>
+                    <span>{t("Address")}</span>
                     <input value={locationEditor.address} onChange={(event) => updateLocationEditor("address", event.target.value)} />
                   </label>
                   <label className="settings-field">
-                    <span>Map URL</span>
+                    <span>{t("Map URL")}</span>
                     <input value={locationEditor.mapUrl ?? ""} onChange={(event) => updateLocationEditor("mapUrl", event.target.value)} />
                   </label>
                 </>
               ) : null}
               <label className="settings-field">
-                <span>Time zone</span>
+                <span>{t("Time zone")}</span>
                 <TimeZoneSelect
                   country={coachAccount.country}
                   value={locationEditor.timezone}
@@ -22511,7 +22527,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 />
               </label>
               <label className="settings-field">
-                <span>Sort order</span>
+                <span>{t("Sort order")}</span>
                 <input
                   value={locationEditor.sortOrder ?? 0}
                   inputMode="numeric"
@@ -22521,11 +22537,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               </label>
             </div>
             <div className="location-facility">
-              <div className="location-facility-kind" role="radiogroup" aria-label="Kind of location">
+              <div className="location-facility-kind" role="radiogroup" aria-label={t("Kind of location")}>
                 {(
                   [
-                    ["physical", "Physical place", "Customers come here. Can have bays or rooms."],
-                    ["online", "Online", "Video calls and remote lessons. No address, no limit."],
+                    ["physical", t("Physical place"), t("Customers come here. Can have bays or rooms.")],
+                    ["online", t("Online"), t("Video calls and remote lessons. No address, no limit.")],
                   ] as const
                 ).map(([kind, label, hint]) => (
                   <button
@@ -22545,34 +22561,27 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 <div className="location-resources">
                   <div className="location-resources-header">
                     <div>
-                      <strong>Resources</strong>
-                      <small>
-                        Hitting bays, rooms or nets. Give each a type so a lesson type can take every one of that
-                        type. A booking takes the first free one in this order, so put the ones you want filled first
-                        at the top. Leave empty if this place has no limit.
-                      </small>
+                      <strong>{t("Resources")}</strong>
+                      <small>{t("Hitting bays, rooms or nets. Give each a type so a lesson type can take every one of that type. A booking takes the first free one in this order, so put the ones you want filled first at the top. Leave empty if this place has no limit.")}</small>
                     </div>
                     <label className="settings-field location-resource-source">
-                      <span>Who keeps track of them</span>
+                      <span>{t("Who keeps track of them")}</span>
                       <select
                         value={locationEditor.resourceSource ?? "clarity"}
                         onChange={(event) => updateLocationEditor("resourceSource", event.target.value as ResourceSource)}
                       >
-                        <option value="clarity">Clarity</option>
-                        <option value="external">Another booking system</option>
+                        <option value="clarity">{t("Clarity")}</option>
+                        <option value="external">{t("Another booking system")}</option>
                       </select>
                     </label>
                   </div>
                   {locationEditor.resourceSource === "external" ? (
-                    <p className="field-help">
-                      Clarity won't limit bookings here. The other system decides which bay or room is free. Connect it
-                      under Settings › Booking › Bay &amp; room system.
-                    </p>
+                    <p className="field-help">{t("Clarity won't limit bookings here. The other system decides which bay or room is free. Connect it under Settings › Booking › Bay & room system.")}</p>
                   ) : null}
                   {(locationEditor.resources ?? []).map((resource, index) => (
                     <div className="location-resource-row" key={index}>
                       <input
-                        aria-label={`Resource ${index + 1} name`}
+                        aria-label={t("Resource {value} name", { value: index + 1 })}
                         value={resource.name}
                         onChange={(event) =>
                           updateLocationResources((resources) =>
@@ -22583,9 +22592,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         }
                       />
                       <input
-                        aria-label={`${resource.name || "Resource"} type`}
+                        aria-label={t("{name} type", { name: resource.name || t("Resource") })}
                         list="location-resource-types"
-                        placeholder="Type, e.g. Hitting bay"
+                        placeholder={t("Type, e.g. Hitting bay")}
                         value={resource.type ?? ""}
                         onChange={(event) =>
                           updateLocationResources((resources) =>
@@ -22596,7 +22605,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         }
                       />
                       <select
-                        aria-label={`${resource.name || "Resource"} set up for`}
+                        aria-label={t("{name} set up for", { name: resource.name || t("Resource") })}
                         value={resource.handedness}
                         onChange={(event) =>
                           updateLocationResources((resources) =>
@@ -22608,9 +22617,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           )
                         }
                       >
-                        <option value="any">Left or right-handed</option>
-                        <option value="right">Right-handed only</option>
-                        <option value="left">Left-handed only</option>
+                        <option value="any">{t("Left or right-handed")}</option>
+                        <option value="right">{t("Right-handed only")}</option>
+                        <option value="left">{t("Left-handed only")}</option>
                       </select>
                       <label className="settings-toggle">
                         <input
@@ -22624,12 +22633,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           }
                           type="checkbox"
                         />
-                        <span>In use</span>
+                        <span>{t("In use")}</span>
                       </label>
                       <div className="location-resource-row-actions">
                         <button
                           className="icon-button small"
-                          aria-label={`Book ${resource.name || "resource"} earlier`}
+                          aria-label={t("Book {name} earlier", { name: resource.name || t("resource") })}
                           disabled={index === 0}
                           onClick={() => moveLocationResource(index, -1)}
                           type="button"
@@ -22638,7 +22647,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         </button>
                         <button
                           className="icon-button small"
-                          aria-label={`Book ${resource.name || "resource"} later`}
+                          aria-label={t("Book {name} later", { name: resource.name || t("resource") })}
                           disabled={index === (locationEditor.resources ?? []).length - 1}
                           onClick={() => moveLocationResource(index, 1)}
                           type="button"
@@ -22647,7 +22656,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         </button>
                         <button
                           className="icon-button small"
-                          aria-label={`Remove ${resource.name || "resource"}`}
+                          aria-label={t("Remove {name}", { name: resource.name || t("resource") })}
                           onClick={() =>
                             updateLocationResources((resources) => resources.filter((_, entryIndex) => entryIndex !== index))
                           }
@@ -22672,14 +22681,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   </datalist>
                   <div className="location-resource-actions">
                     <button className="outline-button compact-button" onClick={() => addLocationResources(1)} type="button">
-                      <Plus size={15} />
-                      Add resource
-                    </button>
+                      <Plus size={15} />{t("Add resource")}</button>
                     {!(locationEditor.resources ?? []).length ? (
                       <button className="outline-button compact-button" onClick={() => addLocationResources(4)} type="button">
-                        <Plus size={15} />
-                        Add 4 bays
-                      </button>
+                        <Plus size={15} />{t("Add 4 bays")}</button>
                     ) : null}
                   </div>
                 </div>
@@ -22687,7 +22692,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             </div>
             <div className="service-form-row">
               <label className="settings-field">
-                <span>Arrival instructions</span>
+                <span>{t("Arrival instructions")}</span>
                 <textarea
                   value={locationEditor.arrivalInstructions ?? ""}
                   onChange={(event) => updateLocationEditor("arrivalInstructions", event.target.value)}
@@ -22695,7 +22700,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 />
               </label>
               <label className="settings-field">
-                <span>Public notes</span>
+                <span>{t("Public notes")}</span>
                 <textarea
                   value={locationEditor.publicNotes ?? ""}
                   onChange={(event) => updateLocationEditor("publicNotes", event.target.value)}
@@ -22713,7 +22718,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   }}
                   type="checkbox"
                 />
-                <span>Active</span>
+                <span>{t("Active")}</span>
               </label>
               <label className="settings-toggle">
                 <input
@@ -22721,7 +22726,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   onChange={(event) => updateLocationEditor("isDefault", event.target.checked)}
                   type="checkbox"
                 />
-                <span>Default location</span>
+                <span>{t("Default location")}</span>
               </label>
             </div>
             {locationSaveState === "error" && locationEditorError && (
@@ -22731,33 +22736,31 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             )}
             <button className="primary-button settings-save" disabled={locationSaveState === "saving"} onClick={saveEditedLocation} type="button">
               {locationSaveState === "saving"
-                ? "Saving"
+                ? t("Saving")
                 : locationSaveState === "saved"
-                  ? "Saved"
+                  ? t("Saved")
                   : locationSaveState === "error"
-                    ? "Not saved"
-                    : "Save Location"}
+                    ? t("Not saved")
+                    : t("Save Location")}
             </button>
           </article>
         )}
 
-        <div className="service-list" aria-label="Locations">
+        <div className="service-list" aria-label={t("Locations")}>
           {[...activeLocationList, ...archivedLocationList].map((location) => (
             <article className={`service-row ${location.active && !location.archived ? "" : "is-archived"}`} key={location.id}>
               <button className="service-row-main" onClick={() => editLocation(location)} type="button">
                 <span>
-                  {location.isDefault ? "Default · " : ""}{location.active && !location.archived ? "Active" : "Archived"}
+                  {location.isDefault ? t("Default · ") : ""}{location.active && !location.archived ? t("Active") : t("Archived")}
                 </span>
                 <strong>{location.name}</strong>
-                {location.kind === "online" ? <em>Online</em> : location.address && <em>{location.address}</em>}
+                {location.kind === "online" ? <em>{t("Online")}</em> : location.address && <em>{location.address}</em>}
                 {location.kind !== "online" && (location.resources ?? []).some((resource) => resource.active) ? (
-                  <em>
-                    {(location.resources ?? []).filter((resource) => resource.active).length} resource
-                    {(location.resources ?? []).filter((resource) => resource.active).length === 1 ? "" : "s"}
-                    {location.resourceSource === "external" ? " · kept by another system" : ""}
+                  <em>{t("{length} resource", { length: (location.resources ?? []).filter((resource) => resource.active).length })}{(location.resources ?? []).filter((resource) => resource.active).length === 1 ? "" : "s"}
+                    {location.resourceSource === "external" ? t(" · kept by another system") : ""}
                   </em>
                 ) : null}
-                <em>Used by {locationUsageCount(location.id)} lesson type{locationUsageCount(location.id) === 1 ? "" : "s"}</em>
+                <em>{t("Used by {id} lesson type", { id: locationUsageCount(location.id) })}{locationUsageCount(location.id) === 1 ? "" : "s"}</em>
               </button>
               <div className="service-row-meta">
                 <strong>{location.shortName}</strong>
@@ -22767,18 +22770,18 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 {!location.isDefault && location.active && !location.archived ? (
                   <button className="outline-button service-action-button" onClick={() => makeDefaultLocation(location)} type="button">
                     <Check size={15} />
-                    <span>Default</span>
+                    <span>{t("Default")}</span>
                   </button>
                 ) : null}
                 {location.archived || !location.active ? (
                   <button className="outline-button service-action-button" onClick={() => restoreLocation(location)} type="button">
                     <RefreshCw size={15} />
-                    <span>Restore</span>
+                    <span>{t("Restore")}</span>
                   </button>
                 ) : (
                   <button className="outline-button service-action-button" onClick={() => archiveLocation(location)} type="button">
                     <Archive size={15} />
-                    <span>Archive</span>
+                    <span>{t("Archive")}</span>
                   </button>
                 )}
               </div>
@@ -22790,10 +22793,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   );
 
   const terminologySettingsPanel = (
-    <SettingsGroup id="terminology" icon={ClarityServices} section="business" title="Terminology">
+    <SettingsGroup id="terminology" icon={ClarityServices} section="business" title={t("Terminology")}>
       <EditableSettingsBlock
         id="terminology-block"
-        title="Terminology"
+        title={t("Terminology")}
         status={terminologyEditor.status}
         dirty={terminologyEditor.dirty}
         errorMessage={terminologyEditor.errorMessage}
@@ -22802,11 +22805,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         onSave={() => void saveEditableBlock("terminology")}
       >
         <div className="data-card wide">
-          <p className="field-help">
-            Choose the words customers see. This does not change booking data, permissions, integrations, or how the calendar works.
-          </p>
+          <p className="field-help">{t("Choose the words customers see. This does not change booking data, permissions, integrations, or how the calendar works.")}</p>
           <label className="settings-field">
-            <span>Preset</span>
+            <span>{t("Preset")}</span>
             <select
               value={matchingTerminologyPreset(terminologyDraft)}
               disabled={terminologyIsLocked}
@@ -22870,7 +22871,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           return {
             id: item.id,
             time: formatTime(item.start),
-            title: lesson ? item.client || item.title : item.title || "Blocked",
+            title: lesson ? item.client || item.title : item.title || t("Blocked"),
             kind: lesson ? "lesson" : "block",
             color: lesson ? calendarLessonColor(itemService(item, services)) : undefined,
           };
@@ -22911,7 +22912,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setRequestedSettingsGroup("availability");
       return;
     }
-    openProfileTarget({ kind: "settings", tab: "booking", group: "availability" }, "Availability");
+    openProfileTarget({ kind: "settings", tab: "booking", group: "availability" }, t("Availability"));
   }
 
   const openCoach = newCoach ?? (openCoachId ? coachProfiles.find((coach) => coach.id === openCoachId) : undefined);
@@ -22926,40 +22927,38 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     <article className="cp-card cp-google-calendar">
       <header className="cp-card-head">
         <h3>
-          <ClarityCalendarSync size={14} />
-          Google Calendar
-        </h3>
+          <ClarityCalendarSync size={14} />{t("Google Calendar")}</h3>
       </header>
       <div className="cp-google-calendar-body">
               <div className={`sync-status ${googleCalendar.connected ? "connected" : googleCalendar.configured ? "checking" : "offline"}`}>
-                <span>Direct Google API</span>
+                <span>{t("Direct Google API")}</span>
                 <strong>
                   {!googleCalendarSyncEnabled
-                    ? "Plan feature unavailable"
+                    ? t("Plan feature unavailable")
                     : googleCalendarStatusError
-                    ? "Status check failed"
+                    ? t("Status check failed")
                     : !googleCalendar.configured
-                    ? "Needs OAuth credentials"
+                    ? t("Needs OAuth credentials")
                     : googleCalendar.connected
                       ? googleCalendar.manualOnly
-                        ? "Manual sync only"
+                        ? t("Manual sync only")
                         : googleCalendar.lastSyncStatus === "failed"
-                        ? "Connected, sync failed"
-                        : "Connected"
-                      : "Ready to connect"}
+                        ? t("Connected, sync failed")
+                        : t("Connected")
+                      : t("Ready to connect")}
                 </strong>
                 <em>
                   {!googleCalendarSyncEnabled
                     ? featureUnavailableMessage("googleCalendarSync")
                     : googleCalendarStatusError
-                    ? `${googleCalendarStatusError} — the settings below are placeholders, not the live configuration.`
+                    ? t("{googleCalendarStatusError} — the settings below are placeholders, not the live configuration.", { googleCalendarStatusError })
                     : googleCalendar.lastSyncError
                     ? googleCalendar.manualOnly
-                      ? `Last sync failed: ${googleCalendar.lastSyncError}`
+                      ? t("Last sync failed: {lastSyncError}", { lastSyncError: googleCalendar.lastSyncError })
                       : googleCalendar.lastSyncError
                     : googleCalendar.connected
-                      ? `${googleCalendar.accountEmail || "Google account"} · ${googleSyncTimeLabel(googleCalendar.lastSyncAt)}`
-                      : googleCalendar.redirectUri || "Add Google OAuth credentials in Netlify."}
+                      ? `${googleCalendar.accountEmail || t("Google account")} · ${googleSyncTimeLabel(googleCalendar.lastSyncAt)}`
+                      : googleCalendar.redirectUri || t("Add Google OAuth credentials in Netlify.")}
                 </em>
               </div>
 
@@ -22967,25 +22966,25 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 <summary className="settings-subsection-title">
                   <ClarityIntegrations size={18} />
                   <div>
-                    <span>Direct API sync</span>
+                    <span>{t("Direct API sync")}</span>
                     <strong>{googleCalendar.calendarId || "primary"}</strong>
                   </div>
                 </summary>
                 <label className="sync-field">
-                  <span>Google calendar ID</span>
+                  <span>{t("Google calendar ID")}</span>
                   <input
                     value={googleCalendar.calendarId}
                     disabled={!googleCalendarSyncEnabled}
                     onChange={(event) => setGoogleCalendar((current) => ({ ...current, calendarId: event.target.value }))}
-                    placeholder="primary or calendar email"
+                    placeholder={t("primary or calendar email")}
                   />
                 </label>
                 <div className="sync-meta">
-                  <span>Sync mode</span>
-                  <strong>{googleCalendar.manualOnly ? "Manual only" : "Automatic after every change"}</strong>
+                  <span>{t("Sync mode")}</span>
+                  <strong>{googleCalendar.manualOnly ? t("Manual only") : t("Automatic after every change")}</strong>
                 </div>
                 <div className="sync-meta">
-                  <span>Redirect URI</span>
+                  <span>{t("Redirect URI")}</span>
                   <code>{googleCalendar.redirectUri || "Set GOOGLE_CALENDAR_REDIRECT_URI or use /api/google-calendar/callback"}</code>
                 </div>
                 <div className="sync-actions">
@@ -22997,7 +22996,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       type="button"
                     >
                       <ExternalLink size={16} />
-                      {googleCalendarAction === "connecting" ? "Opening Google" : "Connect Google"}
+                      {googleCalendarAction === "connecting" ? t("Opening Google") : t("Connect Google")}
                     </button>
                   ) : (
                     <>
@@ -23008,7 +23007,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         type="button"
                       >
                         <RefreshCw size={16} />
-                        {googleCalendarAction === "syncing" ? "Syncing" : "Sync now"}
+                        {googleCalendarAction === "syncing" ? t("Syncing") : t("Sync now")}
                       </button>
                       <button
                         className="outline-button"
@@ -23017,7 +23016,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         type="button"
                       >
                         <Check size={16} />
-                        {googleCalendarAction === "saving" ? "Saving" : "Save settings"}
+                        {googleCalendarAction === "saving" ? t("Saving") : t("Save settings")}
                       </button>
                       <button
                         className="danger-button"
@@ -23026,7 +23025,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         type="button"
                       >
                         <X size={16} />
-                        {googleCalendarAction === "disconnecting" ? "Disconnecting" : "Disconnect"}
+                        {googleCalendarAction === "disconnecting" ? t("Disconnecting") : t("Disconnect")}
                       </button>
                     </>
                   )}
@@ -23037,20 +23036,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 <summary className="settings-subsection-title">
                   <ClarityCalendar size={18} />
                   <div>
-                    <span>Selective external calendar import</span>
+                    <span>{t("Selective external calendar import")}</span>
                     <strong>
                       {googleCalendar.importRules?.length
-                        ? `${googleCalendar.importRules.filter(importRuleIsActive).length} of ${googleCalendar.importRules.length} rule${googleCalendar.importRules.length === 1 ? "" : "s"} active`
-                        : "Name the outside sources Clarity should pull in"}
+                        ? t("{length} of {length2} rule{value} active", { length: googleCalendar.importRules.filter(importRuleIsActive).length, length2: googleCalendar.importRules.length, value: googleCalendar.importRules.length === 1 ? "" : "s" })
+                        : t("Name the outside sources Clarity should pull in")}
                     </strong>
                   </div>
                 </summary>
 
-                <p className="google-calendar-source-intro">
-                  Clarity only imports Google events that match a rule below. Name the source — "Golf HQ Portal" — list the
-                  spellings that identify it, and Clarity will match them against the event's organiser, title, description
-                  and location. Add keywords to narrow it further; leave them blank to take everything from that source.
-                </p>
+                <p className="google-calendar-source-intro">{t("Clarity only imports Google events that match a rule below. Name the source — \"Golf HQ Portal\" — list the spellings that identify it, and Clarity will match them against the event's organiser, title, description and location. Add keywords to narrow it further; leave them blank to take everything from that source.")}</p>
 
                 {googleCalendar.sourceListError ? (
                   <p className="gcal-debug-error" role="alert">
@@ -23059,9 +23054,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 ) : null}
 
                 {!googleCalendar.importRules?.length ? (
-                  <p className="google-calendar-source-empty">
-                    No import rules yet, so nothing from Google appears on the calendar. Add one to start pulling a source in.
-                  </p>
+                  <p className="google-calendar-source-empty">{t("No import rules yet, so nothing from Google appears on the calendar. Add one to start pulling a source in.")}</p>
                 ) : (
                   <div className="gcal-rule-list">
                     {googleCalendar.importRules.map((rule) => {
@@ -23071,17 +23064,17 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           ? rule.calendarIds
                               .map((id) => googleCalendar.sources?.find((source) => source.id === id)?.name || id)
                               .join(", ")
-                          : "All calendars";
+                          : t("All calendars");
                         return (
                           <div className={`gcal-rule-card is-summary ${importRuleIsActive(rule) ? "" : "is-off"}`} key={rule.id}>
                             <div className="gcal-rule-head">
                               <div className="gcal-rule-summary">
-                                <strong>{rule.name.trim() || "Unnamed source"}</strong>
+                                <strong>{rule.name.trim() || t("Unnamed source")}</strong>
                                 <span>
-                                  {rule.aliases.trim() ? `Matches ${rule.aliases.trim()}` : "No aliases yet, so nothing imports"}
+                                  {rule.aliases.trim() ? t("Matches {aliases}", { aliases: rule.aliases.trim() }) : t("No aliases yet, so nothing imports")}
                                 </span>
                                 <span>
-                                  {rule.keywords.trim() ? `Only when it mentions ${rule.keywords.trim()}` : "Everything from this source"}
+                                  {rule.keywords.trim() ? t("Only when it mentions {keywords}", { keywords: rule.keywords.trim() }) : t("Everything from this source")}
                                 </span>
                                 <span>{scope}</span>
                               </div>
@@ -23091,13 +23084,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                   type="button"
                                   disabled={busy}
                                   onClick={() => setEditingImportRuleId(rule.id)}
-                                >
-                                  Edit
-                                </button>
+                                >{t("Edit")}</button>
                                 <button
                                   className="icon-button"
                                   type="button"
-                                  aria-label={`Remove ${rule.name.trim() || "source"}`}
+                                  aria-label={t("Remove {name}", { name: rule.name.trim() || t("source") })}
                                   disabled={busy}
                                   onClick={() => removeGoogleCalendarImportRule(rule.id)}
                                 >
@@ -23106,7 +23097,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                               </div>
                             </div>
                             <label className="google-calendar-source-toggle">
-                              <span>Rule active</span>
+                              <span>{t("Rule active")}</span>
                               <input
                                 type="checkbox"
                                 checked={rule.enabled}
@@ -23124,14 +23115,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                               className="gcal-rule-name"
                               type="text"
                               value={rule.name}
-                              placeholder="Source name, e.g. Golf HQ Portal"
+                              placeholder={t("Source name, e.g. Golf HQ Portal")}
                               disabled={busy}
                               onChange={(event) => updateGoogleCalendarImportRule(rule.id, { name: event.target.value })}
                             />
                             <button
                               className="icon-button"
                               type="button"
-                              aria-label="Remove rule"
+                              aria-label={t("Remove rule")}
                               disabled={busy}
                               onClick={() => removeGoogleCalendarImportRule(rule.id)}
                             >
@@ -23140,36 +23131,36 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           </div>
 
                           <label className="gcal-rule-field">
-                            <span>Aliases</span>
+                            <span>{t("Aliases")}</span>
                             <input
                               type="text"
                               value={rule.aliases}
-                              placeholder="Golf HQ, golfhq.com, bookings@golfhq.co.nz"
+                              placeholder={t("Golf HQ, golfhq.com, bookings@golfhq.co.nz")}
                               disabled={busy}
                               onChange={(event) => updateGoogleCalendarImportRule(rule.id, { aliases: event.target.value })}
                             />
-                            <em>Comma separated. An event must contain one of these to match. No aliases means the rule is off.</em>
+                            <em>{t("Comma separated. An event must contain one of these to match. No aliases means the rule is off.")}</em>
                           </label>
 
                           <label className="gcal-rule-field">
-                            <span>Keywords (optional)</span>
+                            <span>{t("Keywords (optional)")}</span>
                             <input
                               type="text"
                               value={rule.keywords}
-                              placeholder="lesson, fitting"
+                              placeholder={t("lesson, fitting")}
                               disabled={busy}
                               onChange={(event) => updateGoogleCalendarImportRule(rule.id, { keywords: event.target.value })}
                             />
-                            <em>Narrows the source. Leave blank to import everything it puts on the calendar.</em>
+                            <em>{t("Narrows the source. Leave blank to import everything it puts on the calendar.")}</em>
                           </label>
 
                           <div className="gcal-rule-field">
-                            <span>Look in</span>
+                            <span>{t("Look in")}</span>
                             {!googleCalendar.sources?.length ? (
                               <em>
                                 {googleCalendar.connected
-                                  ? "No calendars loaded yet. Reconnect Google and refresh this panel."
-                                  : "Connect Google Calendar to choose calendars."}
+                                  ? t("No calendars loaded yet. Reconnect Google and refresh this panel.")
+                                  : t("Connect Google Calendar to choose calendars.")}
                               </em>
                             ) : (
                               <>
@@ -23185,14 +23176,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                         }
                                       />
                                       <span>{source.name}</span>
-                                      {source.primary ? <em>Primary</em> : null}
+                                      {source.primary ? <em>{t("Primary")}</em> : null}
                                     </label>
                                   ))}
                                 </div>
                                 <em>
                                   {rule.calendarIds.length
-                                    ? `Scanning ${rule.calendarIds.length} calendar${rule.calendarIds.length === 1 ? "" : "s"}.`
-                                    : "Nothing ticked, so every calendar on the account is scanned."}
+                                    ? t("Scanning {length} calendar{value}.", { length: rule.calendarIds.length, value: rule.calendarIds.length === 1 ? "" : "s" })
+                                    : t("Nothing ticked, so every calendar on the account is scanned.")}
                                 </em>
                               </>
                             )}
@@ -23200,7 +23191,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
                           <div className="gcal-rule-toggles">
                             <label className="google-calendar-source-toggle">
-                              <span>Show event title</span>
+                              <span>{t("Show event title")}</span>
                               <input
                                 type="checkbox"
                                 checked={rule.showLabel}
@@ -23209,7 +23200,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                               />
                             </label>
                             <label className="google-calendar-source-toggle">
-                              <span>Rule active</span>
+                              <span>{t("Rule active")}</span>
                               <input
                                 type="checkbox"
                                 checked={rule.enabled}
@@ -23231,9 +23222,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     disabled={!googleCalendarSyncEnabled || googleCalendarAction !== "idle"}
                     onClick={addGoogleCalendarImportRule}
                   >
-                    <Plus size={16} />
-                    Add source
-                  </button>
+                    <Plus size={16} />{t("Add source")}</button>
                   <button
                     className="primary-button"
                     type="button"
@@ -23241,7 +23230,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     onClick={() => void saveGoogleCalendarSettings()}
                   >
                     <Check size={16} />
-                    {googleCalendarAction === "saving" ? "Saving" : "Save rules"}
+                    {googleCalendarAction === "saving" ? t("Saving") : t("Save rules")}
                   </button>
                 </div>
               </details>
@@ -23254,19 +23243,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 <summary className="settings-subsection-title">
                   <ClarityAdmin size={18} />
                   <div>
-                    <span>Sync debug window</span>
+                    <span>{t("Sync debug window")}</span>
                     <strong>
                       {googleCalendarDebug
                         ? `${googleCalendarDebug.entries.length} recent trigger${googleCalendarDebug.entries.length === 1 ? "" : "s"}`
-                        : "Google failure codes, payloads and triggers"}
+                        : t("Google failure codes, payloads and triggers")}
                     </strong>
                   </div>
                 </summary>
 
-                <p className="gcal-debug-intro">
-                  Every Google Calendar sync attempt is recorded here — what triggered it, the exact event payload sent to
-                  the Calendar API, and the failure code Google returned.
-                </p>
+                <p className="gcal-debug-intro">{t("Every Google Calendar sync attempt is recorded here — what triggered it, the exact event payload sent to the Calendar API, and the failure code Google returned.")}</p>
 
                 <div className="gcal-debug-toolbar">
                   <button
@@ -23276,7 +23262,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     type="button"
                   >
                     <RefreshCw size={16} />
-                    {googleCalendarDebugLoading ? loadingLabel() : "Refresh"}
+                    {googleCalendarDebugLoading ? loadingLabel() : t("Refresh")}
                   </button>
                   <button
                     className="outline-button"
@@ -23284,9 +23270,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     onClick={clearGoogleCalendarDebugLog}
                     type="button"
                   >
-                    <Trash2 size={16} />
-                    Clear log
-                  </button>
+                    <Trash2 size={16} />{t("Clear log")}</button>
                   <label className="gcal-debug-toggle">
                     <input
                       type="checkbox"
@@ -23294,7 +23278,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       disabled={googleCalendarDebugLoading || !googleCalendarDebug}
                       onChange={(event) => toggleGoogleCalendarDebugLogging(event.target.checked)}
                     />
-                    <span>Record sync attempts</span>
+                    <span>{t("Record sync attempts")}</span>
                   </label>
                 </div>
 
@@ -23307,25 +23291,22 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 {googleCalendarDebug ? (
                   <div className="gcal-debug-facts">
                     <div>
-                      <span>Auto-sync</span>
-                      <strong>{googleCalendarDebug.manualOnly ? "Manual only" : googleCalendarDebug.autoSync ? "On" : "Off"}</strong>
+                      <span>{t("Auto-sync")}</span>
+                      <strong>{googleCalendarDebug.manualOnly ? t("Manual only") : googleCalendarDebug.autoSync ? t("On") : t("Off")}</strong>
                     </div>
                     <div>
-                      <span>Target calendar</span>
+                      <span>{t("Target calendar")}</span>
                       <strong>{googleCalendarDebug.calendarId || "primary"}</strong>
                     </div>
                     <div>
-                      <span>Log capacity</span>
-                      <strong>Last {googleCalendarDebug.maxEntries} runs</strong>
+                      <span>{t("Log capacity")}</span>
+                      <strong>{t("Last {maxEntries} runs", { maxEntries: googleCalendarDebug.maxEntries })}</strong>
                     </div>
                   </div>
                 ) : null}
 
                 {googleCalendarDebug && !googleCalendarDebug.entries.length ? (
-                  <p className="gcal-debug-empty">
-                    No sync attempts recorded yet. Hit <strong>Sync now</strong> above, or save a booking, then refresh this
-                    panel. If nothing ever appears, the sync is not being triggered at all.
-                  </p>
+                  <p className="gcal-debug-empty">{t("No sync attempts recorded yet. Hit")}{" "}<strong>{t("Sync now")}</strong>{" "}{t("above, or save a booking, then refresh this panel. If nothing ever appears, the sync is not being triggered at all.")}</p>
                 ) : null}
 
                 <ol className="gcal-debug-list">
@@ -23346,7 +23327,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             <em>
                               {googleCalendarDebugTimestamp(entry.startedAt)}
                               {relativeTimeLabel(entry.startedAt) ? ` · ${relativeTimeLabel(entry.startedAt)}` : ""}
-                              {` · ${entry.durationMs}ms`}
+                              {t(" · {durationMs}ms", { durationMs: entry.durationMs })}
                             </em>
                           </span>
                           <span className="gcal-debug-entry-result">
@@ -23364,46 +23345,46 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           <div className="gcal-debug-entry-body">
                             <div className="gcal-debug-grid">
                               <div>
-                                <span>Trigger code</span>
+                                <span>{t("Trigger code")}</span>
                                 <code>{entry.trigger}</code>
                               </div>
                               <div>
-                                <span>Stage reached</span>
+                                <span>{t("Stage reached")}</span>
                                 <code>{googleCalendarStageLabel(entry.stage)}</code>
                               </div>
                               <div>
-                                <span>Calendar</span>
+                                <span>{t("Calendar")}</span>
                                 <code>{entry.calendarId || "primary"}</code>
                               </div>
                               <div>
-                                <span>Google account</span>
+                                <span>{t("Google account")}</span>
                                 <code>{entry.accountEmail || "—"}</code>
                               </div>
                               <div>
-                                <span>Sync mode</span>
-                                <code>{entry.mode === "full" ? "Full rebuild" : "Targeted changes"}</code>
+                                <span>{t("Sync mode")}</span>
+                                <code>{entry.mode === "full" ? t("Full rebuild") : t("Targeted changes")}</code>
                               </div>
                               <div>
-                                <span>{entry.mode === "full" ? "Bookings in run" : "Bookings targeted"}</span>
+                                <span>{entry.mode === "full" ? t("Bookings in run") : t("Bookings targeted")}</span>
                                 <code>{entry.itemCount}</code>
                               </div>
                               <div>
-                                <span>Already up to date</span>
+                                <span>{t("Already up to date")}</span>
                                 <code>{entry.unchanged || 0}</code>
                               </div>
                               <div>
-                                <span>Rate-limit retries</span>
+                                <span>{t("Rate-limit retries")}</span>
                                 <code>{entry.retries || 0}</code>
                               </div>
                               <div>
-                                <span>Finished</span>
+                                <span>{t("Finished")}</span>
                                 <code>{googleCalendarDebugTimestamp(entry.finishedAt)}</code>
                               </div>
                             </div>
 
                             {entry.changes?.length ? (
                               <section className="gcal-debug-block">
-                                <h4>Bookings this run targeted</h4>
+                                <h4>{t("Bookings this run targeted")}</h4>
                                 <pre className="gcal-debug-pre">
                                   {entry.changes.map((change) => `${change.action.toUpperCase()}  ${change.id}`).join("\n")}
                                 </pre>
@@ -23413,40 +23394,43 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             {entry.outcome === "skipped" || (entry.outcome === "success" && entry.reason) ? (
                               <p className="gcal-debug-note">
                                 {googleCalendarSkipReasonLabels[entry.reason] ||
-                                  `${entry.outcome === "skipped" ? "Skipped" : "Nothing sent"}: ${entry.reason || "unknown reason"}`}
+                                  (entry.outcome === "skipped"
+                                    ? t("Skipped: {reason}", { reason: entry.reason || t("unknown reason") })
+                                    : t("Nothing sent: {reason}", { reason: entry.reason || t("unknown reason") }))}
                               </p>
                             ) : null}
 
                             {entry.error ? (
                               <section className="gcal-debug-block is-error">
-                                <h4>Google failure</h4>
+                                <h4>{t("Google failure")}</h4>
                                 <div className="gcal-debug-grid">
                                   <div>
-                                    <span>HTTP status</span>
+                                    <span>{t("HTTP status")}</span>
                                     <code>
                                       {entry.error.httpStatus
                                         ? `${entry.error.httpStatus}${entry.error.httpStatusText ? ` ${entry.error.httpStatusText}` : ""}`
-                                        : "— (failed before the request)"}
+                                        : t("— (failed before the request)")}
+
                                     </code>
                                   </div>
                                   <div>
-                                    <span>error.code</span>
+                                    <span>{t("error.code")}</span>
                                     <code>{entry.error.googleCode || "—"}</code>
                                   </div>
                                   <div>
-                                    <span>error.status</span>
+                                    <span>{t("error.status")}</span>
                                     <code>{entry.error.googleStatus || "—"}</code>
                                   </div>
                                   <div>
-                                    <span>errors[0].reason</span>
+                                    <span>{t("errors[0].reason")}</span>
                                     <code>{entry.error.googleReason || "—"}</code>
                                   </div>
                                   <div>
-                                    <span>errors[0].domain</span>
+                                    <span>{t("errors[0].domain")}</span>
                                     <code>{entry.error.googleDomain || "—"}</code>
                                   </div>
                                   <div>
-                                    <span>Clarity code</span>
+                                    <span>{t("Clarity code")}</span>
                                     <code>{entry.error.providerCode || "—"}</code>
                                   </div>
                                 </div>
@@ -23456,7 +23440,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 ) : null}
                                 {entry.error.rawBody ? (
                                   <>
-                                    <h5>Raw response body</h5>
+                                    <h5>{t("Raw response body")}</h5>
                                     <pre className="gcal-debug-pre">{entry.error.rawBody}</pre>
                                   </>
                                 ) : null}
@@ -23466,48 +23450,44 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             {entry.request ? (
                               <section className="gcal-debug-block">
                                 <h4>
-                                  {entry.requestIsSample ? "Payload sent (sample from this run)" : "Payload that failed"}
+                                  {entry.requestIsSample ? t("Payload sent (sample from this run)") : t("Payload that failed")}
                                 </h4>
                                 <div className="gcal-debug-grid">
                                   <div>
-                                    <span>Method</span>
+                                    <span>{t("Method")}</span>
                                     <code>{entry.request.method}</code>
                                   </div>
                                   <div>
-                                    <span>Booking</span>
+                                    <span>{t("Booking")}</span>
                                     <code>{entry.request.itemLabel || entry.request.itemId || "—"}</code>
                                   </div>
                                   <div>
-                                    <span>Event ID</span>
+                                    <span>{t("Event ID")}</span>
                                     <code>{entry.request.eventId || "—"}</code>
                                   </div>
                                   <div>
-                                    <span>Clarity booking ID</span>
+                                    <span>{t("Clarity booking ID")}</span>
                                     <code>{entry.request.itemId || "—"}</code>
                                   </div>
                                 </div>
-                                <h5>Endpoint</h5>
+                                <h5>{t("Endpoint")}</h5>
                                 <pre className="gcal-debug-pre">{entry.request.url}</pre>
                                 {entry.request.payload ? (
                                   <>
-                                    <h5>Request body</h5>
+                                    <h5>{t("Request body")}</h5>
                                     <pre className="gcal-debug-pre">{formatDebugJson(entry.request.payload)}</pre>
                                   </>
                                 ) : (
-                                  <p className="gcal-debug-note">No request body (DELETE request).</p>
+                                  <p className="gcal-debug-note">{t("No request body (DELETE request).")}</p>
                                 )}
                               </section>
                             ) : entry.outcome !== "skipped" ? (
-                              <p className="gcal-debug-note">
-                                No payload captured — the run failed before building an event, or there were no bookings to send.
-                              </p>
+                              <p className="gcal-debug-note">{t("No payload captured — the run failed before building an event, or there were no bookings to send.")}</p>
                             ) : null}
 
                             <div className="gcal-debug-entry-actions">
                               <button className="outline-button" onClick={() => copyGoogleCalendarDebugEntry(entry)} type="button">
-                                <Copy size={16} />
-                                Copy entry JSON
-                              </button>
+                                <Copy size={16} />{t("Copy entry JSON")}</button>
                             </div>
                           </div>
                         ) : null}
@@ -23543,16 +23523,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       <div className="data-card wide">
         <div className="data-card-header">
           <div>
-              <h2>{activeCoachList.length} active {activeCoachList.length === 1 ? terms.staffSingular.toLowerCase() : terms.staffPlural.toLowerCase()}</h2>
+              <h2>{t("{length} active", { length: activeCoachList.length })}{" "}{activeCoachList.length === 1 ? terms.staffSingular.toLowerCase() : terms.staffPlural.toLowerCase()}</h2>
           </div>
           <button className="primary-button" onClick={startNewCoach} type="button">
             <Plus size={16} />
-            <span>Add {terms.staffSingular.toLowerCase()}</span>
+            <span>{t("Add {staffSingular}", { staffSingular: terms.staffSingular.toLowerCase() })}</span>
           </button>
         </div>
-        <p className="field-help">
-          {terms.staffSingular} profiles are bookable operator identities. Admin users are a permission layer, not the owner of bookings.
-        </p>
+        <p className="field-help">{t("{staffSingular} profiles are bookable operator identities. Admin users are a permission layer, not the owner of bookings.", { staffSingular: terms.staffSingular })}</p>
 
         <div className="service-list" aria-label={terms.staffPlural}>
           {coachProfiles.map((coach) => (
@@ -23560,34 +23538,33 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               <button className="service-row-main" onClick={() => openCoachProfile(coach.id)} type="button">
                 <CoachAvatar name={coach.displayName || coach.name} photoUrl={coach.photoUrl} size={44} />
                 <span className="coach-row-text">
-                  <span>{coach.active && !coach.archived ? "Active" : "Archived"}</span>
+                  <span>{coach.active && !coach.archived ? t("Active") : t("Archived")}</span>
                   <strong>{coach.displayName || coach.name}</strong>
                   {coach.email && <em>{coach.email}</em>}
-                  <em>
-                    Assigned to {(coach.assignedLocationIds ?? []).length || 0} location{(coach.assignedLocationIds ?? []).length === 1 ? "" : "s"}
+                  <em>{t("Assigned to")}{" "}{(coach.assignedLocationIds ?? []).length || 0}{" "}{t("location")}{(coach.assignedLocationIds ?? []).length === 1 ? "" : "s"}
                   </em>
                 </span>
               </button>
               <div className="service-row-meta">
                 <strong>{coach.shortName || coach.name}</strong>
-                <span>{coach.phone || "No phone"}</span>
+                <span>{coach.phone || t("No phone")}</span>
               </div>
               <div className="service-row-actions">
                 {coach.archived || !coach.active ? (
                   <>
                     <button className="outline-button service-action-button" onClick={() => restoreCoach(coach)} type="button">
                       <RefreshCw size={15} />
-                      <span>Restore</span>
+                      <span>{t("Restore")}</span>
                     </button>
                     <button className="outline-button service-action-button" onClick={() => deleteCoach(coach)} type="button">
                       <Trash2 size={15} />
-                      <span>Delete</span>
+                      <span>{t("Delete")}</span>
                     </button>
                   </>
                 ) : (
                   <button className="outline-button service-action-button" onClick={() => archiveCoach(coach)} type="button">
                     <Archive size={15} />
-                    <span>Archive</span>
+                    <span>{t("Archive")}</span>
                   </button>
                 )}
               </div>
@@ -23600,7 +23577,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   );
 
   const availabilitySettingsPanel = (
-    <SettingsGroup id="availability" icon={ClaritySessions} section="booking" title="Availability">
+    <SettingsGroup id="availability" icon={ClaritySessions} section="booking" title={t("Availability")}>
       <div className="availability-layout">
         <div className="data-card wide">
           <div className="data-card-header">
@@ -23610,22 +23587,19 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   availabilityEditorCoaches.find((coach) => coach.id === availabilityEditorCoachId)?.name ||
                   coachAccount.venueName}
               </h2>
-              <p className="availability-coach-hint">
-                Weekly hours this coach can be booked{availabilityEditorLocationTabs.length ? ", one week per location" : ""}.
-                Each location's hours only open bookings there.
-              </p>
+              <p className="availability-coach-hint">{t("Weekly hours this coach can be booked")}{availabilityEditorLocationTabs.length ? t(", one week per location") : ""}{t(". Each location's hours only open bookings there.")}</p>
             </div>
             <button className="primary-button" onClick={() => void saveAvailability()}>
               {availabilitySaveState === "saving"
-                ? "Saving"
+                ? t("Saving")
                 : availabilitySaveState === "saved"
-                ? "Saved"
-                : "Save Availability"}
+                ? t("Saved")
+                : t("Save Availability")}
             </button>
           </div>
           {availabilityEditorCoaches.length > 1 ? (
             <div className="availability-coach-picker">
-              <div className="availability-coach-tabs" role="tablist" aria-label="Coach">
+              <div className="availability-coach-tabs" role="tablist" aria-label={t("Coach")}>
                 {availabilityEditorCoaches.map((coach) => {
                   const weekMinutes = availabilityForCoach(accountAvailability, coach.id, activeCoachId)
                     .flat()
@@ -23644,18 +23618,18 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       }}
                     >
                       <strong>{coach.displayName || coach.name}</strong>
-                      <small>{weekMinutes ? `${formatDurationLabel(weekMinutes)} / week` : "No hours set"}</small>
+                      <small>{weekMinutes ? `${formatDurationLabel(weekMinutes)} / week` : t("No hours set")}</small>
                     </button>
                   );
                 })}
               </div>
               <label className="availability-copy-from">
-                <span>Copy hours from</span>
+                <span>{t("Copy hours from")}</span>
                 <select
                   value=""
                   onChange={(event) => copyAvailabilityFromCoach(event.target.value)}
                 >
-                  <option value="">Choose coach</option>
+                  <option value="">{t("Choose coach")}</option>
                   {availabilityEditorCoaches
                     .filter((coach) => coach.id !== availabilityEditorCoachId)
                     .map((coach) => (
@@ -23668,7 +23642,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             </div>
           ) : null}
           {availabilityEditorLocationTabs.length ? (
-            <div className="availability-location-tabs" role="tablist" aria-label="Location">
+            <div className="availability-location-tabs" role="tablist" aria-label={t("Location")}>
               {availabilityEditorLocationTabs.map((tab) => {
                 const selected = tab.id === availabilityEditorLocationId;
                 const minutes = availabilityForCoach(accountAvailability, availabilityEditorCoachId, activeCoachId)
@@ -23690,7 +23664,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     }}
                   >
                     <strong>{tab.label}</strong>
-                    <small>{minutes ? `${formatDurationLabel(minutes)} / week` : "No hours"}</small>
+                    <small>{minutes ? `${formatDurationLabel(minutes)} / week` : t("No hours")}</small>
                   </button>
                 );
               })}
@@ -23699,29 +23673,20 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           {availabilityConflictList.length ? (
             <div className="availability-conflicts" role="alert">
               <strong>
-                {availabilityConflictList.length === 1 ? "One clash" : `${availabilityConflictList.length} clashes`}: a coach
-                is down at two locations at once
-              </strong>
+                {availabilityConflictList.length === 1 ? t("One clash") : `${availabilityConflictList.length} clashes`}{t(": a coach is down at two locations at once")}</strong>
               <ul>
                 {availabilityConflictList.slice(0, 8).map((conflict, index) => {
                   const coach = availabilityEditorCoaches.find((entry) => entry.id === conflict.coachId);
                   return (
                     <li key={index}>
-                      {coach?.displayName || coach?.name || "Coach"} · {fullDayNames[conflict.day]}{" "}
-                      {formatTime(conflict.start)} – {formatTime(conflict.end)} ·{" "}
-                      {availabilityLocationLabel(conflict.locationIds[0])} and {availabilityLocationLabel(conflict.locationIds[1])}
-                    </li>
+                      {coach?.displayName || coach?.name || t("Coach")}{" "}{t("· {fullDayNames} {start} – {end} · {locationIds} and {locationIds2}", { fullDayNames: fullDayNames[conflict.day], start: formatTime(conflict.start), end: formatTime(conflict.end), locationIds: availabilityLocationLabel(conflict.locationIds[0]), locationIds2: availabilityLocationLabel(conflict.locationIds[1]) })}</li>
                   );
                 })}
               </ul>
-              <p>Clients could book them at both places for the same time. Save anyway if that's intended.</p>
+              <p>{t("Clients could book them at both places for the same time. Save anyway if that's intended.")}</p>
               <div className="availability-conflict-actions">
-                <button className="primary-button" onClick={() => void saveAvailability({ ignoreConflicts: true })} type="button">
-                  Save anyway
-                </button>
-                <button className="outline-button" onClick={() => setAvailabilityConflictList([])} type="button">
-                  Keep editing
-                </button>
+                <button className="primary-button" onClick={() => void saveAvailability({ ignoreConflicts: true })} type="button">{t("Save anyway")}</button>
+                <button className="outline-button" onClick={() => setAvailabilityConflictList([])} type="button">{t("Keep editing")}</button>
               </div>
             </div>
           ) : null}
@@ -23737,13 +23702,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         ? availabilityEditorWeek[dayIndex]
                             .map((window) => `${formatTime(window.start)} - ${formatTime(window.end)}`)
                             .join(", ")
-                        : "Closed"}
+                        : t("Closed")}
                     </strong>
                   </div>
                 </summary>
                 <div className="availability-day-controls">
                   <button className="outline-button compact-button" onClick={() => toggleAvailabilityDay(dayIndex)}>
-                    {availabilityEditorWeek[dayIndex].length ? "Closed" : "Open"}
+                    {availabilityEditorWeek[dayIndex].length ? t("Closed") : t("Open")}
                   </button>
                 </div>
                 <div className="availability-windows">
@@ -23758,7 +23723,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         {isEditingWindow ? (
                           <>
                             <label>
-                              <span>From</span>
+                              <span>{t("From")}</span>
                               <input
                                 value={minutesToInputTime(window.start)}
                                 onChange={(event) =>
@@ -23774,7 +23739,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                               />
                             </label>
                             <label>
-                              <span>To</span>
+                              <span>{t("To")}</span>
                               <input
                                 value={minutesToInputTime(window.end)}
                                 onChange={(event) =>
@@ -23791,7 +23756,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             </label>
                             <button
                               className="icon-button small"
-                              aria-label={`Done editing ${dayName} window`}
+                              aria-label={t("Done editing {dayName} window", { dayName })}
                               onClick={() => setEditingAvailabilityWindow("")}
                             >
                               <Check size={15} />
@@ -23809,7 +23774,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         )}
                         <button
                           className="icon-button small"
-                          aria-label={`Remove ${dayName} window`}
+                          aria-label={t("Remove {dayName} window", { dayName })}
                           onClick={() => removeAvailabilityWindow(dayIndex, windowIndex)}
                         >
                           <X size={15} />
@@ -23818,9 +23783,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     );
                   })}
                   <button className="outline-button compact-button add-time-button" onClick={() => addAvailabilityWindow(dayIndex)}>
-                    <Plus size={15} />
-                    Add time
-                  </button>
+                    <Plus size={15} />{t("Add time")}</button>
                 </div>
               </details>
             ))}
@@ -23840,10 +23803,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
    * no tab.
    */
   const playerBookingEmbedPanel = (
-    <SettingsGroup id="player-booking-embed" icon={ClarityNewBooking} section="booking" title="Player portal booking widget">
+    <SettingsGroup id="player-booking-embed" icon={ClarityNewBooking} section="booking" title={t("Player portal booking widget")}>
       <EditableSettingsBlock
         id="player-booking-embed-block"
-        title="Player portal booking widget"
+        title={t("Player portal booking widget")}
         status={playerBookingEmbedEditor.status}
         dirty={playerBookingEmbedEditor.dirty}
         errorMessage={playerBookingEmbedEditor.errorMessage}
@@ -23855,16 +23818,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           <summary className="settings-subsection-title">
             <ExternalLink size={18} />
             <div>
-              <span>Outside booking page</span>
+              <span>{t("Outside booking page")}</span>
               <strong>
                 {playerBookingEmbedDraft.playerBookingEmbedUrl
-                  ? `Shown as "${playerBookingEmbedDraft.playerBookingEmbedLabel}"`
-                  : "Not set"}
+                  ? t("Shown as \"{playerBookingEmbedLabel}\"", { playerBookingEmbedLabel: playerBookingEmbedDraft.playerBookingEmbedLabel })
+                  : t("Not set")}
               </strong>
             </div>
           </summary>
           <label className="settings-field">
-            <span>Booking page address</span>
+            <span>{t("Booking page address")}</span>
             <input
               type="url"
               inputMode="url"
@@ -23880,13 +23843,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               }
             />
           </label>
-          <p className="field-help">
-            Must start with https. Leave it empty and players see no extra tab. Some providers block
-            being framed — open the tab in the portal to check before telling players about it.
-          </p>
+          <p className="field-help">{t("Must start with https. Leave it empty and players see no extra tab. Some providers block being framed — open the tab in the portal to check before telling players about it.")}</p>
           <div className="service-form-row">
             <label className="settings-field">
-              <span>Tab name</span>
+              <span>{t("Tab name")}</span>
               <input
                 placeholder={PLAYER_BOOKING_EMBED_DEFAULT_LABEL}
                 value={playerBookingEmbedDraft.playerBookingEmbedLabel}
@@ -23901,7 +23861,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               />
             </label>
             <label className="settings-field">
-              <span>Starting height in pixels</span>
+              <span>{t("Starting height in pixels")}</span>
               <input
                 type="number"
                 min={PLAYER_BOOKING_EMBED_MIN_HEIGHT}
@@ -23919,14 +23879,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               />
             </label>
           </div>
-          <p className="field-help">
-            The tab is called "Bay", "Tee times" or whatever your players call it. The height is only
-            a starting point — providers that ask for more room get it.
-          </p>
+          <p className="field-help">{t("The tab is called \"Bay\", \"Tee times\" or whatever your players call it. The height is only a starting point — providers that ask for more room get it.")}</p>
           <label className="settings-field">
-            <span>Line above the widget</span>
+            <span>{t("Line above the widget")}</span>
             <input
-              placeholder="Bays only — lessons are under Lessons."
+              placeholder={t("Bays only — lessons are under Lessons.")}
               value={playerBookingEmbedDraft.playerBookingEmbedIntro}
               readOnly={playerBookingEmbedIsLocked}
               onChange={(event) =>
@@ -23938,22 +23895,20 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               }
             />
           </label>
-          <p className="field-help">
-            Optional. Worth setting if the difference between this and booking a lesson is not obvious.
-          </p>
+          <p className="field-help">{t("Optional. Worth setting if the difference between this and booking a lesson is not obvious.")}</p>
         </details>
       </EditableSettingsBlock>
     </SettingsGroup>
   );
 
   const bookingSettingsPanel = (
-    <SettingsGroup id="booking-page" icon={ClarityBookingPages} section="booking" title="Booking page" className="booking-page-settings">
+    <SettingsGroup id="booking-page" icon={ClarityBookingPages} section="booking" title={t("Booking page")} className="booking-page-settings">
       <details className="settings-subsection">
         <summary className="settings-subsection-title">
           <Eye size={18} />
           <div>
-            <span>Preview</span>
-            <strong>As your device shows it</strong>
+            <span>{t("Preview")}</span>
+            <strong>{t("As your device shows it")}</strong>
           </div>
         </summary>
         <div className={`public-booking booking-theme-${bookingCardScheme}`}>
@@ -23980,10 +23935,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             onClick={() => setPublicBookingSection("appointment")}
             type="button"
           >
-            <span className="booking-progressive-title-label">
-              1. Appointment <span className="booking-required-mark" aria-hidden="true">*</span>
+            <span className="booking-progressive-title-label">{t("1. Appointment")}{" "}<span className="booking-required-mark" aria-hidden="true">*</span>
             </span>
-            <span className="booking-progressive-title-state">{isAppointmentStepComplete ? "Done" : "In progress"}</span>
+            <span className="booking-progressive-title-state">{isAppointmentStepComplete ? t("Done") : t("In progress")}</span>
           </button>
           {isAppointmentSectionOpen ? (
             <div className="booking-progressive-body">
@@ -23997,15 +23951,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       type="button"
                     >
                       <strong>{service.name}</strong>
-                      <em>
-                        {service.duration} minutes @ {servicePriceLabel(service)}
-                      </em>
+                      <em>{t("{duration} minutes @ {service}", { duration: service.duration, service: servicePriceLabel(service) })}</em>
                       {service.description && <small>{service.description}</small>}
                       {(service.lessonNote || service.location) && <small>{service.lessonNote || service.location}</small>}
                     </button>
                   ))
                 ) : (
-                  <p>No public lesson types are active.</p>
+                  <p>{t("No public lesson types are active.")}</p>
                 )}
               </div>
             </div>
@@ -24026,8 +23978,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               onClick={() => setPublicBookingSection("appointment")}
               type="button"
             >
-              <strong>Appointment not selected</strong>
-              <span>Pick a lesson to continue</span>
+              <strong>{t("Appointment not selected")}</strong>
+              <span>{t("Pick a lesson to continue")}</span>
             </button>
           )}
         </section>
@@ -24041,21 +23993,20 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             type="button"
             disabled={!isAppointmentStepComplete}
           >
-            <span className="booking-progressive-title-label">
-              2. Date & Time <span className="booking-required-mark" aria-hidden="true">*</span>
+            <span className="booking-progressive-title-label">{t("2. Date & Time")}{" "}<span className="booking-required-mark" aria-hidden="true">*</span>
             </span>
-            <span className="booking-progressive-title-state">{isDateTimeStepComplete ? "Done" : isAppointmentStepComplete ? "In progress" : "Locked"}</span>
+            <span className="booking-progressive-title-state">{isDateTimeStepComplete ? t("Done") : isAppointmentStepComplete ? t("In progress") : t("Locked")}</span>
           </button>
           {isDateTimeSectionOpen ? (
             <div className="booking-progressive-body">
               <div className="booking-week-controls">
                 <button onClick={() => moveWeek(-1)} type="button">
                   <ArrowLeft size={15} />
-                  <span>Previous week</span>
+                  <span>{t("Previous week")}</span>
                 </button>
                 <strong>{weekTitle}</strong>
                 <button onClick={() => moveWeek(1)} type="button">
-                  <span>Next week</span>
+                  <span>{t("Next week")}</span>
                   <ArrowRight size={15} />
                 </button>
               </div>
@@ -24071,7 +24022,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       >
                         <strong>{day.short}</strong>
                         <em>{day.date}</em>
-                        {day.isToday ? <small className="booking-day-marker">Today</small> : null}
+                        {day.isToday ? <small className="booking-day-marker">{t("Today")}</small> : null}
                       </button>
                     ))}
                   </div>
@@ -24080,7 +24031,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               <div className="time-slots">
                 {selectedBookingService ? (
                   publicBookingSlotsLoading ? (
-                    <Loading what="available times" />
+                    <Loading what={t("available times")} />
                   ) : bookingSlots.length ? (
                     visibleBookingSlots.map((slot) => {
                       const slotLabel = isGroupBookingTimeSelection
@@ -24100,14 +24051,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   ) : (
                     <p>
                       {isGroupBookingTimeSelection
-                        ? "No upcoming group lesson times are available yet."
+                        ? t("No upcoming group lesson times are available yet.")
                         : bookingDaySelected
-                          ? "No public times available for this day."
-                          : "Choose a day first."}
+                          ? t("No public times available for this day.")
+                          : t("Choose a day first.")}
                     </p>
                   )
                 ) : (
-                  <p>Choose an appointment type first.</p>
+                  <p>{t("Choose an appointment type first.")}</p>
                 )}
               </div>
             </div>
@@ -24127,8 +24078,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               type="button"
               disabled={!isAppointmentStepComplete}
             >
-              <strong>{isAppointmentStepComplete ? "Date not selected" : "Select appointment first"}</strong>
-              <span>{isAppointmentStepComplete ? "Choose day and time" : "Complete appointment step"}</span>
+              <strong>{isAppointmentStepComplete ? t("Date not selected") : t("Select appointment first")}</strong>
+              <span>{isAppointmentStepComplete ? t("Choose day and time") : t("Complete appointment step")}</span>
             </button>
           )}
         </section>
@@ -24142,9 +24093,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             type="button"
             disabled={!isDateTimeStepComplete}
           >
-            <span className="booking-progressive-title-label">3. Your Information</span>
+            <span className="booking-progressive-title-label">{t("3. Your Information")}</span>
             <span className="booking-progressive-title-state">
-              {showCapturedCustomerDetailsSummary ? "Done" : isDateTimeStepComplete ? "In progress" : "Locked"}
+              {showCapturedCustomerDetailsSummary ? t("Done") : isDateTimeStepComplete ? t("In progress") : t("Locked")}
             </span>
           </button>
           {isInformationSectionOpen ? (
@@ -24153,12 +24104,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 <label className="booking-required-field w-name">
                   <input
                     value={bookingForm.firstName}
-                    aria-label="First name required"
+                    aria-label={t("First name required")}
                     aria-required="true"
                     autoComplete="given-name"
                     onChange={(event) => updateBookingForm("firstName", event.target.value)}
                     onKeyDown={handleBookingMatchKeyDown}
-                    placeholder="First name"
+                    placeholder={t("First name")}
                     required
                   />
                   <span className="booking-required-mark" aria-hidden="true">*</span>
@@ -24166,12 +24117,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 <label className="booking-required-field w-name">
                   <input
                     value={bookingForm.lastName}
-                    aria-label="Last name required"
+                    aria-label={t("Last name required")}
                     aria-required="true"
                     autoComplete="family-name"
                     onChange={(event) => updateBookingForm("lastName", event.target.value)}
                     onKeyDown={handleBookingMatchKeyDown}
-                    placeholder="Last name"
+                    placeholder={t("Last name")}
                     required
                   />
                   <span className="booking-required-mark" aria-hidden="true">*</span>
@@ -24183,19 +24134,19 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   inputMode="tel"
                   onChange={(event) => updateBookingForm("phone", event.target.value)}
                   onKeyDown={handleBookingMatchKeyDown}
-                  placeholder="Phone"
+                  placeholder={t("Phone")}
                   type="tel"
                 />
                 <label className="booking-required-field w-email">
                   <input
                     value={bookingForm.email}
-                    aria-label="Email required"
+                    aria-label={t("Email required")}
                     aria-required="true"
                     autoComplete="email"
                     inputMode="email"
                     onChange={(event) => updateBookingForm("email", event.target.value)}
                     onKeyDown={handleBookingMatchKeyDown}
-                    placeholder="Email"
+                    placeholder={t("Email")}
                     required
                     type="email"
                   />
@@ -24216,7 +24167,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 </button>
               )}
               {customGroupAttendeePanel}
-              {bookingSubmitState === "saving" && <div className="booking-save-progress" aria-label="Saving booking" />}
+              {bookingSubmitState === "saving" && <div className="booking-save-progress" aria-label={t("Saving booking")} />}
               {bookingSubmitError && (
                 <div className="email-status failed" role="alert">
                   <X size={17} />
@@ -24229,7 +24180,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 onClick={confirmPublicBooking}
                 type="button"
               >
-                {bookingSubmitState === "saving" ? "Confirming..." : "Confirm Appointment"}
+                {bookingSubmitState === "saving" ? t("Confirming...") : t("Confirm Appointment")}
               </button>
             </div>
           ) : showCapturedCustomerDetailsSummary ? (
@@ -24249,8 +24200,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               type="button"
               disabled={!isDateTimeStepComplete}
             >
-              <strong>{isDateTimeStepComplete ? "Customer details missing" : "Complete time step first"}</strong>
-              <span>{isDateTimeStepComplete ? "Enter your details to confirm" : "Lock a time first"}</span>
+              <strong>{isDateTimeStepComplete ? t("Customer details missing") : t("Complete time step first")}</strong>
+              <span>{isDateTimeStepComplete ? t("Enter your details to confirm") : t("Lock a time first")}</span>
             </button>
           )}
         </section>
@@ -24260,7 +24211,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       </details>
       <EditableSettingsBlock
         id="booking-page-notice-block"
-        title="Booking Page notice"
+        title={t("Booking Page notice")}
         status={bookingNoticeEditor.status}
         dirty={bookingNoticeEditor.dirty}
         errorMessage={bookingNoticeEditor.errorMessage}
@@ -24272,12 +24223,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         <summary className="settings-subsection-title">
           <ClaritySessions size={18} />
           <div>
-            <span>Minimum notice before a public booking</span>
+            <span>{t("Minimum notice before a public booking")}</span>
             <strong>{bookingNoticeDraftSummary}</strong>
           </div>
         </summary>
         <label className="settings-field">
-          <span>Minimum notice in hours</span>
+          <span>{t("Minimum notice in hours")}</span>
           <input
             type="number"
             min={0}
@@ -24288,8 +24239,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             onChange={(event) => updateBookingNoticeHours(Math.max(0, Number(event.target.value || 0)))}
           />
         </label>
-        <p className="field-help">Clients can only book or reschedule after that buffer.</p>
-        <div className="minimum-notice-presets" aria-label="Quick notice presets">
+        <p className="field-help">{t("Clients can only book or reschedule after that buffer.")}</p>
+        <div className="minimum-notice-presets" aria-label={t("Quick notice presets")}>
           {MIN_BOOKING_NOTICE_PRESETS_HOURS.map((hours) => (
             <button
               className="outline-button"
@@ -24298,18 +24249,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               onClick={() => updateBookingNoticeHours(hours)}
               type="button"
             >
-              {hours === 0 ? "No buffer" : `${hours} hour${hours === 1 ? "" : "s"}`}
+              {hours === 0 ? t("No buffer") : `${hours} hour${hours === 1 ? "" : "s"}`}
             </button>
           ))}
         </div>
-        <button className="outline-button" disabled={bookingNoticeIsLocked} onClick={() => updateBookingNoticeHours(0)} type="button">
-          Clear buffer
-        </button>
+        <button className="outline-button" disabled={bookingNoticeIsLocked} onClick={() => updateBookingNoticeHours(0)} type="button">{t("Clear buffer")}</button>
       </details>
       </EditableSettingsBlock>
       <EditableSettingsBlock
         id="booking-screen-name-block"
-        title="Booking Page screen name"
+        title={t("Booking Page screen name")}
         status={bookingScreenNameEditor.status}
         dirty={bookingScreenNameEditor.dirty}
         errorMessage={bookingScreenNameEditor.errorMessage}
@@ -24321,18 +24270,18 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 <summary className="settings-subsection-title">
                   <ClarityAdmin size={18} />
                   <div>
-                    <span>Booking screen embeds</span>
-                    <strong>Squarespace iframe</strong>
+                    <span>{t("Booking screen embeds")}</span>
+                    <strong>{t("Squarespace iframe")}</strong>
                   </div>
                 </summary>
               <div className="embed-panel">
-                <div className="booking-screen-tabs" role="tablist" aria-label="Booking screen embeds">
+                <div className="booking-screen-tabs" role="tablist" aria-label={t("Booking screen embeds")}>
                   {bookingScreenEmbeds.map((bookingScreen) => (
                     <button
                       className={`booking-screen-tab ${selectedBookingScreenId === bookingScreen.id ? "active" : ""}`}
                       key={bookingScreen.id}
                       onClick={() => {
-                        if (bookingScreenNameEditor.dirty && !confirmDiscardEditableBlock("Booking Page screen name")) return;
+                        if (bookingScreenNameEditor.dirty && !confirmDiscardEditableBlock(t("Booking Page screen name"))) return;
                         if (bookingScreenNameEditor.dirty) bookingScreenNameEditor.cancel();
                         setSelectedBookingScreenId(bookingScreen.id);
                       }}
@@ -24345,7 +24294,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 {selectedBookingScreen && (
                   <div className="booking-screen-embed-card">
                     <label className="settings-field">
-                      <span>Screen name</span>
+                      <span>{t("Screen name")}</span>
                       <input
                         value={bookingScreenNameDraft[selectedBookingScreen.id] || selectedBookingScreen.label}
                         readOnly={bookingScreenNameIsLocked}
@@ -24359,11 +24308,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       />
                     </label>
                     <div className="settings-field">
-                      <span>Slug</span>
+                      <span>{t("Slug")}</span>
                       <code className="booking-screen-slug">{selectedBookingScreen.path}</code>
                     </div>
                     <div className="settings-field">
-                      <span>Public link</span>
+                      <span>{t("Public link")}</span>
                       <code className="booking-screen-link">{selectedBookingScreen.publicUrl}</code>
                     </div>
                     <div className="embed-actions">
@@ -24373,15 +24322,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         type="button"
                       >
                         {copiedBookingScreenLinkId === `${selectedBookingScreen.id}-url` ? <Check size={16} /> : <Copy size={16} />}
-                        {copiedBookingScreenLinkId === `${selectedBookingScreen.id}-url` ? "Copied link" : "Copy public link"}
+                        {copiedBookingScreenLinkId === `${selectedBookingScreen.id}-url` ? t("Copied link") : t("Copy public link")}
                       </button>
                       <a className="outline-button" href={selectedBookingScreen.publicUrl} target="_blank" rel="noreferrer">
-                        <ExternalLink size={16} />
-                        Open widget
-                      </a>
+                        <ExternalLink size={16} />{t("Open widget")}</a>
                     </div>
                     <div className="settings-field">
-                      <span>Iframe embed</span>
+                      <span>{t("Iframe embed")}</span>
                       <div className="embed-code booking-screen-iframe">
                         <ClarityAdmin size={18} />
                         <code>{selectedBookingScreen.iframeCode}</code>
@@ -24398,12 +24345,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         ) : (
                           <Copy size={16} />
                         )}
-                        {copiedBookingScreenIframeId === `${selectedBookingScreen.id}-iframe` ? "Copied iframe" : "Copy iframe"}
+                        {copiedBookingScreenIframeId === `${selectedBookingScreen.id}-iframe` ? t("Copied iframe") : t("Copy iframe")}
                       </button>
                     </div>
                     <div className="booking-screen-preview">
                       <div className="settings-field">
-                        <span>Preview iframe</span>
+                        <span>{t("Preview iframe")}</span>
                         <iframe
                           src={selectedBookingScreen.publicUrl}
                           title={`${coachAccount.businessName} ${selectedBookingScreen.label} preview`}
@@ -24447,8 +24394,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const selectedAppointmentDetails = selected ? (
     <>
       <div className="panel-header">
-        <span>{selected.kind === "block" ? "Blocked Time" : "Appointment"}</span>
-        <button className="icon-button small" onClick={closeCalendarDetails} aria-label="Close details">
+        <span>{selected.kind === "block" ? t("Blocked Time") : t("Appointment")}</span>
+        <button className="icon-button small" onClick={closeCalendarDetails} aria-label={t("Close details")}>
           <X size={17} />
         </button>
       </div>
@@ -24474,8 +24421,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             <button
               className="icon-button small booking-client-edit-toggle"
               onClick={editSelectedClientProfile}
-              aria-label="Edit client details"
-              title="Edit client details"
+              aria-label={t("Edit client details")}
+              title={t("Edit client details")}
               type="button"
             >
               <Pencil size={13} />
@@ -24489,9 +24436,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         <p className="muted booking-client-notes-preview">{profileNotesText(selectedPerson)}</p>
       )}
       {selected.kind === "appointment" && selectedPerson && selectedPerson.count > 1 && (
-        <p className="muted booking-client-history">
-          {selectedPerson.count} booking{selectedPerson.count === 1 ? "" : "s"} with this client
-        </p>
+        <p className="muted booking-client-history">{t("{count} booking", { count: selectedPerson.count })}{selectedPerson.count === 1 ? "" : "s"}{" "}{t("with this client")}</p>
       )}
       {/* Lesson type is editable in place: picking a different type re-times the
           booking to that type's duration, so a 30 minute lesson becomes an hour
@@ -24500,7 +24445,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       {selected.kind === "appointment" && !selected.readOnly && !isExternallyOwned(selected) ? (
         <div className="booking-lesson-type">
           <select
-            aria-label="Lesson type"
+            aria-label={t("Lesson type")}
             value={selected.serviceId ?? ""}
             disabled={lessonTypeChangeState === "saving"}
             onChange={(event) => void changeSelectedLessonType(event.target.value)}
@@ -24508,12 +24453,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             {/* An archived or deleted type still has to render its own booking,
                 otherwise the select would silently show the wrong lesson. */}
             {!lessonTypeOptions.some((service) => service.id === selected.serviceId) && (
-              <option value={selected.serviceId ?? ""}>{selectedService?.name ?? "Lesson"}</option>
+              <option value={selected.serviceId ?? ""}>{selectedService?.name ?? t("Lesson")}</option>
             )}
             {lessonTypeOptions.map((service) => (
-              <option key={service.id} value={service.id}>
-                {service.name} - {service.duration} min
-              </option>
+              <option key={service.id} value={service.id}>{t("{name} - {duration} min", { name: service.name, duration: service.duration })}</option>
             ))}
           </select>
         </div>
@@ -24551,9 +24494,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         {selectedLocationSnapshot?.mapUrl && (
           <div>
             <ExternalLink size={16} />
-            <a href={selectedLocationSnapshot.mapUrl} target="_blank" rel="noreferrer">
-              Map
-            </a>
+            <a href={selectedLocationSnapshot.mapUrl} target="_blank" rel="noreferrer">{t("Map")}</a>
           </div>
         )}
         {selected.phone && (
@@ -24571,7 +24512,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       </div>
 
       <div className="service-summary">
-        <span>{selectedPosPayment ? "Paid" : "Price"}</span>
+        <span>{selectedPosPayment ? t("Paid") : t("Price")}</span>
         <strong>
           {selectedPosPayment
             ? formatMoney(selectedPosPayment.amount, selectedPosPayment.currency)
@@ -24593,7 +24534,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         <div className="lesson-receipts-panel custom-group-admin-panel">
           <div className="receipt-panel-title">
             <ClarityProfile size={16} />
-            <span>Custom group attendees</span>
+            <span>{t("Custom group attendees")}</span>
             <em>{selectedCustomGroupAttendees.length} / {customGroupMaxParticipants(selectedService)}</em>
           </div>
           {selectedCustomGroupAttendees.map((attendee) => (
@@ -24601,11 +24542,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               <span className={`email-status-dot ${attendee.status === "confirmed" || attendee.status === "booker" || attendee.status === "manual" ? "sent" : "pending"}`} aria-hidden="true" />
               <div>
                 <strong>{attendee.name}</strong>
-                <span>{attendee.email || "Manual attendee"}</span>
+                <span>{attendee.email || t("Manual attendee")}</span>
               </div>
               <em>{customGroupStatusLabel(attendee.status)}</em>
               {(attendee.status === "manual" || attendee.status === "invited") && (
-                <button className="icon-button small" onClick={() => removeSelectedCustomGroupAttendee(attendee.id)} aria-label={`Remove ${attendee.name}`}>
+                <button className="icon-button small" onClick={() => removeSelectedCustomGroupAttendee(attendee.id)} aria-label={t("Remove {name}", { name: attendee.name })}>
                   <X size={14} />
                 </button>
               )}
@@ -24615,12 +24556,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             <input
               value={selectedCustomGroupAttendeeDraft.name}
               onChange={(event) => setSelectedCustomGroupAttendeeDraft((current) => ({ ...current, name: event.target.value }))}
-              placeholder="Attendee name"
+              placeholder={t("Attendee name")}
             />
             <input
               value={selectedCustomGroupAttendeeDraft.email}
               onChange={(event) => setSelectedCustomGroupAttendeeDraft((current) => ({ ...current, email: event.target.value }))}
-              placeholder="Email optional"
+              placeholder={t("Email optional")}
               type="email"
             />
             <button
@@ -24630,7 +24571,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               type="button"
             >
               <Plus size={15} />
-              {selectedCustomGroupAttendeeDraft.email.trim() ? "Send invite" : "Confirm attendee"}
+              {selectedCustomGroupAttendeeDraft.email.trim() ? t("Send invite") : t("Confirm attendee")}
             </button>
           </div>
         </div>
@@ -24638,8 +24579,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
       {selected.kind === "appointment" && (
         <div className="lesson-status-panel">
-          <span>Status</span>
-          <div className="lesson-status-options" role="group" aria-label="Lesson status">
+          <span>{t("Status")}</span>
+          <div className="lesson-status-options" role="group" aria-label={t("Lesson status")}>
             {(["booked", "completed", "cancelled", "no_show"] as BookingStatus[]).map((status) => (
               <button
                 className={(selected.status ?? "booked") === status ? "active" : ""}
@@ -24649,7 +24590,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 type="button"
               >
                 {status === "completed" && pendingLessonCompleteId === selected.id
-                  ? "Saving..."
+                  ? t("Saving...")
                   : status === "no_show"
                     ? "No-show"
                     : status[0].toUpperCase() + status.slice(1)}
@@ -24667,8 +24608,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       {selected.kind === "appointment" && selectedPerson && hasSelectedPersonCaddyProfile && (
         <div className="linked-profile">
           <div>
-            <span>Shared profile</span>
-            <strong>{selectedPerson.caddyProfileId || "Clarity Caddy"}</strong>
+            <span>{t("Shared profile")}</span>
+            <strong>{selectedPerson.caddyProfileId || t("Clarity Caddy")}</strong>
           </div>
           <a
             className="outline-button"
@@ -24676,22 +24617,18 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             target="_blank"
             rel="noreferrer"
           >
-            <ClarityIntegrations size={16} />
-            Caddy
-          </a>
+            <ClarityIntegrations size={16} />{t("Caddy")}</a>
         </div>
       )}
 
       {selected.kind === "appointment" && selectedPerson && !hasSelectedPersonCaddyProfile && (
         <div className="linked-profile">
           <div>
-            <span>Shared profile</span>
-            <strong>Not connected</strong>
+            <span>{t("Shared profile")}</span>
+            <strong>{t("Not connected")}</strong>
           </div>
           <button className="outline-button" type="button">
-            <ClarityIntegrations size={16} />
-            Add Clarity Caddy
-          </button>
+            <ClarityIntegrations size={16} />{t("Add Clarity Caddy")}</button>
         </div>
       )}
 
@@ -24699,11 +24636,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         <details className="booking-records-tab booking-profile-tab">
           <summary className="booking-records-summary">
             <ClarityProfile size={16} />
-            <span>Profile</span>
+            <span>{t("Profile")}</span>
             <em>
               {selectedPerson
                 ? selectedPerson.name
-                : selected.client || selected.title || "Not a client yet"}
+                : selected.client || selected.title || t("Not a client yet")}
             </em>
           </summary>
           <div className="booking-records-body">
@@ -24713,30 +24650,23 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 onClick={() => void startSelectedBookingRecording()}
                 type="button"
               >
-                <ClarityVideoAnalysis size={16} />
-                New recording
-              </button>
+                <ClarityVideoAnalysis size={16} />{t("New recording")}</button>
               {selectedPerson ? (
                 <button
                   className="outline-button"
                   onClick={() => openPlayerProfileVideos(selectedPerson)}
                   type="button"
                 >
-                  <ClarityProfile size={16} />
-                  Player profile
-                </button>
+                  <ClarityProfile size={16} />{t("Player profile")}</button>
               ) : null}
             </div>
             {selectedPerson ? null : (
-              <p className="booking-profile-hint">
-                Saving a note or a recording adds this booking to clients and gives them a
-                player profile.
-              </p>
+              <p className="booking-profile-hint">{t("Saving a note or a recording adds this booking to clients and gives them a player profile.")}</p>
             )}
-            <Suspense fallback={<Loading what="notes" />}>
+            <Suspense fallback={<Loading what={t("notes")} />}>
               <ClarityVoiceTextPanel
-                fieldLabel="Lesson note"
-                placeholder="Type or dictate a note for this lesson."
+                fieldLabel={t("Lesson note")}
+                placeholder={t("Type or dictate a note for this lesson.")}
                 onCommit={(text) => saveSelectedBookingNote(text)}
               />
             </Suspense>
@@ -24767,8 +24697,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         <details className="booking-records-tab">
           <summary className="booking-records-summary">
             <ClarityEmail size={16} />
-            <span>Emails</span>
-            <em>{selectedAppointmentNotifications.length ? `${selectedAppointmentNotifications.length} email records` : "No email records"}</em>
+            <span>{t("Emails")}</span>
+            <em>{selectedAppointmentNotifications.length ? `${selectedAppointmentNotifications.length} email records` : t("No email records")}</em>
           </summary>
           <div className="booking-records-body">
             <button
@@ -24779,20 +24709,20 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             >
               <ClarityEmail size={16} />
               {resendConfirmationState[selected.id] === "sending"
-                ? "Sending"
+                ? t("Sending")
                 : resendConfirmationState[selected.id] === "sent"
-                  ? "Sent"
+                  ? t("Sent")
                   : resendConfirmationState[selected.id] === "failed"
-                    ? "Try again"
-                    : "Resend confirmation"}
+                    ? t("Try again")
+                    : t("Resend confirmation")}
             </button>
             <div className="booking-email-records">
               {selectedAppointmentNotifications.length ? (
                 selectedAppointmentNotifications.map((notification) => (
                   <p className={`booking-email-record ${notificationTone(notification.status)}`} key={notification.id}>
                     <strong>{notificationKindLabel(notification.kind)}</strong>
-                    {" to "}
-                    <span>{notification.recipient || "No recipient"}</span>
+                    {t(" to ")}
+                    <span>{notification.recipient || t("No recipient")}</span>
                     {" - "}
                     <em>
                       {notificationStatusLabel(notification)}
@@ -24801,7 +24731,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   </p>
                 ))
               ) : (
-                <p className="booking-email-record muted">No email receipts recorded for this lesson yet.</p>
+                <p className="booking-email-record muted">{t("No email receipts recorded for this lesson yet.")}</p>
               )}
             </div>
           </div>
@@ -24810,8 +24740,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
       {selected.kind === "block" && (
         <div className="admin-override">
-          <span>Admin override</span>
-          <strong>Add appointment in this blocked time</strong>
+          <span>{t("Admin override")}</span>
+          <strong>{t("Add appointment in this blocked time")}</strong>
           {quickCreateServices.map((service) => (
             <button key={service.id} onClick={() => createAppointmentInsideSelectedBlock(service.id)}>
               <Plus size={16} />
@@ -24839,44 +24769,36 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               className="booking-paid-marker"
               title={`${selectedPosPayment.paymentMethodName} - ${selectedPosPayment.receiptNumber}`}
             >
-              <Check size={16} />
-              Paid {formatMoney(selectedPosPayment.amount, selectedPosPayment.currency)}
-            </span>
+              <Check size={16} />{t("Paid {amount}", { amount: formatMoney(selectedPosPayment.amount, selectedPosPayment.currency) })}</span>
           ) : (
             <button
               className="primary-button booking-checkout-button"
               onClick={() => openPosCheckoutForLesson(selected)}
               type="button"
             >
-              <ClarityPayments size={16} />
-              Checkout
-            </button>
+              <ClarityPayments size={16} />{t("Checkout")}</button>
           )
         )}
         {selected.kind === "appointment" && (
           <button className="primary-button" onClick={bookNextFromSelected}>
-            <Plus size={16} />
-            Book Next
-          </button>
+            <Plus size={16} />{t("Book Next")}</button>
         )}
         {selected.kind === "appointment" && !isExternallyOwned(selected) && (
           <button
             className="primary-button"
             onClick={() => shelveSelectedForMove()}
-            title="Park this lesson on the shelf, then tap its new time"
+            title={t("Park this lesson on the shelf, then tap its new time")}
           >
-            <GripVertical size={16} />
-            Move
-          </button>
+            <GripVertical size={16} />{t("Move")}</button>
         )}
         <button className="danger-button" disabled={deleteInFlightId === selected.id} onClick={removeSelected}>
           {deleteInFlightId === selected.id
-            ? "Removing..."
+            ? t("Removing...")
             : selected.kind !== "appointment"
-              ? "Remove Block"
+              ? t("Remove Block")
               : isExternallyOwned(selected)
-                ? "Remove from Clarity"
-                : "Cancel Lesson"}
+                ? t("Remove from Clarity")
+                : t("Cancel Lesson")}
         </button>
       </div>
     </>
@@ -24885,8 +24807,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const selectedGroupSessionDetails = selectedGroupSession && selectedGroupSessionService ? (
     <>
       <div className="panel-header">
-        <span>Group Session</span>
-        <button className="icon-button small" onClick={closeCalendarDetails} aria-label="Close details">
+        <span>{t("Group Session")}</span>
+        <button className="icon-button small" onClick={closeCalendarDetails} aria-label={t("Close details")}>
           <X size={17} />
         </button>
       </div>
@@ -24910,14 +24832,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           <span>{`${selectedGroupSessionBookedCount} / ${selectedGroupSessionCapacity} booked`}</span>
         </div>
         <div>
-          <span>{`Spaces remaining: ${selectedGroupSessionRemainingSlots}`}</span>
+          <span>{t("Spaces remaining: {selectedGroupSessionRemainingSlots}", { selectedGroupSessionRemainingSlots })}</span>
         </div>
       </div>
 
       <div className="service-summary">
-        <span>Booked people</span>
+        <span>{t("Booked people")}</span>
         {selectedGroupSessionAttendees.length === 0 ? (
-          <p>No one is booked yet.</p>
+          <p>{t("No one is booked yet.")}</p>
         ) : (
           <div className="group-attendee-cards">
             {selectedGroupSessionAttendees.map((appointment) => (
@@ -24949,7 +24871,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         .join(" · ")}
                     </span>
                     {appointment.note ? (
-                      <span style={{ color: "var(--muted)", fontSize: "0.84rem" }}>Note: {appointment.note}</span>
+                      <span style={{ color: "var(--muted)", fontSize: "0.84rem" }}>{t("Note: {note}", { note: appointment.note })}</span>
                     ) : null}
                   </div>
                   <span
@@ -24972,14 +24894,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       type="button"
                       className="small-button"
                       onClick={() => cancelGroupSessionAttendee(appointment.id)}
-                    >
-                      Cancel attendee
-                    </button>
+                    >{t("Cancel attendee")}</button>
                   </div>
                 ) : (
-                  <span className="muted" style={{ fontSize: "0.82rem" }}>
-                    Cancelled attendee retained for history.
-                  </span>
+                  <span className="muted" style={{ fontSize: "0.82rem" }}>{t("Cancelled attendee retained for history.")}</span>
                 )}
               </article>
             ))}
@@ -24999,17 +24917,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           }
           type="button"
         >
-          <Plus size={16} />
-          Add person
-        </button>
+          <Plus size={16} />{t("Add person")}</button>
         <button className="danger-button" onClick={cancelSelectedGroupSession} type="button">
-          <X size={16} />
-          Cancel session
-        </button>
+          <X size={16} />{t("Cancel session")}</button>
         {selectedGroupSessionBookedCount > 0 ? (
-          <p className="muted">Booked group sessions need attendees moved or cancelled before the session can be removed.</p>
+          <p className="muted">{t("Booked group sessions need attendees moved or cancelled before the session can be removed.")}</p>
         ) : null}
-        {selectedGroupSessionIsFull ? <p className="muted">Group is full.</p> : null}
+        {selectedGroupSessionIsFull ? <p className="muted">{t("Group is full.")}</p> : null}
       </div>
     </>
   ) : null;
@@ -25086,14 +25000,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   // shape, never about what they are showing.
   const pullFilterControl = (
     <label className="settings-field pull-filter-field">
-      <span>Show</span>
+      <span>{t("Show")}</span>
       <select
         value={bookingPullFilter}
         onChange={(event) => setBookingPullFilter(event.target.value as BookingPullFilter)}
       >
-        <option value="all">All completed</option>
-        <option value="unpaid">Unpaid only</option>
-        <option value="paid">Already paid</option>
+        <option value="all">{t("All completed")}</option>
+        <option value="unpaid">{t("Unpaid only")}</option>
+        <option value="paid">{t("Already paid")}</option>
       </select>
     </label>
   );
@@ -25106,8 +25020,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const adminWorkspaceFailed =
     !isEmbedMode && authStatus === "authenticated" && adminWorkspaceLoadStatus === "error";
   const calendarSummaryText = adminWorkspaceLoading
-    ? loadingLabel("calendar bookings")
-    : `${appointments} appointments · ${blocks} blocked ${blocks === 1 ? "time" : "times"}`;
+    ? loadingLabel(t("calendar bookings"))
+    : blocks === 1
+      ? t("{appointments} appointments · 1 blocked time", { appointments })
+      : t("{appointments} appointments · {blocks} blocked times", { appointments, blocks });
   /**
    * The app's one page header, decided in one place.
    *
@@ -25142,76 +25058,76 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     const publicServices = live.filter((service) => service.visibility === "public").length;
     const firstFew = <T,>(items: T[], render: (item: T) => [string, string]): Array<[string, string]> => {
       const shown = items.slice(0, 4).map(render);
-      if (items.length > 4) shown.push(["", `+${items.length - 4} more`]);
+      if (items.length > 4) shown.push(["", t("+{n} more", { n: items.length - 4 })]);
       return shown;
     };
     return forThisAccount([
       {
         id: "lesson-types",
         category: "Calendar",
-        label: `${terms.serviceSingular} types`,
-        summary: "What a client can book, and what it costs.",
-        path: `Settings › ${terms.serviceSingular} types`,
+        label: t("{serviceSingular} types", { serviceSingular: terms.serviceSingular }),
+        summary: t("What a client can book, and what it costs."),
+        path: t("Settings › {serviceSingular} types", { serviceSingular: terms.serviceSingular }),
         target: { kind: "settings", tab: "services" },
         facts: firstFew(live, (service) => [
           service.name,
-          `${service.duration} min · ${formatMoney(service.price, invoiceSettings.currency)}`,
+          t("{duration} min · {price}", { duration: service.duration, price: formatMoney(service.price, invoiceSettings.currency) }),
         ]),
       },
       {
         id: "locations",
         category: "Calendar",
-        label: "Locations & availability",
-        summary: "Where you coach, and when.",
-        path: "Settings › Booking › Availability",
+        label: t("Locations & availability"),
+        summary: t("Where you coach, and when."),
+        path: t("Settings › Booking › Availability"),
         target: { kind: "settings", tab: "booking", group: "availability" },
         facts: [
-          ...firstFew(locations, (location) => [location.name, location.address || "No address"]),
-          ["Timezone", coachAccount.timezone || "Not set"],
+          ...firstFew(locations, (location) => [location.name, location.address || t("No address")]),
+          [t("Timezone"), coachAccount.timezone || t("Not set")],
         ],
       },
       {
         id: "booking-page",
         category: "Customer experience",
-        label: "Booking page",
-        summary: "The public page clients book through.",
-        path: "Settings › Booking › Booking page",
+        label: t("Booking page"),
+        summary: t("The public page clients book through."),
+        path: t("Settings › Booking › Booking page"),
         target: { kind: "settings", tab: "booking", group: "booking-page" },
         facts: [
-          ["Address", coachAccount.bookingUrl || coachAccount.calendarSlug || "Not set"],
-          ["Minimum notice", formatBookingNoticeLabel(notificationSettings.minBookingNoticeMinutes)],
-          ["Bookable types", publicServices ? live.filter((s) => s.visibility === "public").map((s) => s.name).join(", ") : "None public yet"],
+          [t("Address"), coachAccount.bookingUrl || coachAccount.calendarSlug || t("Not set")],
+          [t("Minimum notice"), formatBookingNoticeLabel(notificationSettings.minBookingNoticeMinutes)],
+          [t("Bookable types"), publicServices ? live.filter((s) => s.visibility === "public").map((s) => s.name).join(", ") : t("None public yet")],
         ],
       },
       {
         id: "coach-branding",
         category: "Customer experience",
-        label: "Business branding",
-        summary: "Your logo and colours, everywhere a client looks.",
-        path: "Settings › Business › Business branding",
+        label: t("Business branding"),
+        summary: t("Your logo and colours, everywhere a client looks."),
+        path: t("Settings › Business › Business branding"),
         target: { kind: "settings", tab: "business", group: "coach-branding" },
         facts: [
-          ["Logo", brandSettings.logoName || (brandSettings.logoPreview ? "Set" : "Not set")],
-          ["Primary", brandSettings.primary],
-          ["Applied to", "Booking page, emails, portal"],
+          [t("Logo"), brandSettings.logoName || (brandSettings.logoPreview ? t("Set") : t("Not set"))],
+          [t("Primary"), brandSettings.primary],
+          [t("Applied to"), t("Booking page, emails, portal")],
         ],
       },
       {
         id: "email-notifications",
         category: "Customer experience",
         sub: "Email / SMS",
-        label: "Email",
-        summary: "Confirmations, reminders and cancellations.",
-        path: "Settings › Email / SMS › Email",
+        label: t("Email"),
+        summary: t("Confirmations, reminders and cancellations."),
+        path: t("Settings › Email / SMS › Email"),
         target: { kind: "settings", tab: "email-sms", group: "email-notifications" },
         facts: [
-          ["Sends to clients", notificationSettings.sendClientEmail ? "On" : "Off"],
-          ["From address", notificationSettings.configuredSenderEmailAddress || notificationSettings.notificationEmail || "Not set"],
+          [t("Sends to clients"), notificationSettings.sendClientEmail ? t("On") : t("Off")],
+          [t("From address"), notificationSettings.configuredSenderEmailAddress || notificationSettings.notificationEmail || t("Not set")],
           [
-            "Reminder",
+            t("Reminder"),
             notificationSettings.reminderEnabled
-              ? `${Math.round(notificationSettings.reminderLeadMinutes / 60)} hours before`
-              : "Off",
+              ? t("{n} hours before", { n: Math.round(notificationSettings.reminderLeadMinutes / 60) })
+              : t("Off"),
           ],
         ],
       },
@@ -25219,24 +25135,24 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         id: "notification-templates",
         category: "Customer experience",
         sub: "Notifications",
-        label: "Message wording",
-        summary: "What each booking message says, email and text.",
-        path: "Settings › Notifications › Templates",
+        label: t("Message wording"),
+        summary: t("What each booking message says, email and text."),
+        path: t("Settings › Notifications › Templates"),
         target: { kind: "settings", tab: "notifications", group: "message-templates" },
         facts: [
           [
-            "Rewritten",
+            t("Rewritten"),
             (() => {
               const edited = NOTIFICATION_VARIANTS.filter((variant) =>
                 isNotificationTemplateEdited(notificationSettings.notificationTemplates, variant.id),
               ).length;
-              return edited ? `${edited} of ${NOTIFICATION_VARIANTS.length} messages` : "Clarity's wording";
+              return edited ? t("{edited} of {total} messages", { edited, total: NOTIFICATION_VARIANTS.length }) : t("Clarity's wording");
             })(),
           ],
-          ["Channels", "Email and text"],
+          [t("Channels"), t("Email and text")],
           [
-            "Subject override",
-            notificationSettings.notificationSubjectLine.trim() ? "On, wins over every subject" : "Off",
+            t("Subject override"),
+            notificationSettings.notificationSubjectLine.trim() ? t("On, wins over every subject") : t("Off"),
           ],
         ],
       },
@@ -25244,41 +25160,43 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         id: "sms-notifications",
         category: "Customer experience",
         sub: "Email / SMS",
-        label: "Text messages",
-        summary: "Reminders and cancellations by text.",
-        path: "Settings › Email / SMS › SMS",
+        label: t("Text messages"),
+        summary: t("Reminders and cancellations by text."),
+        path: t("Settings › Email / SMS › SMS"),
         target: { kind: "settings", tab: "email-sms", group: "text-machine" },
         facts: [
-          ["Sends to clients", notificationSettings.sendClientSms ? "On" : "Off"],
-          ["Provider", notificationSettings.smsProviderName || "Not set"],
-          ["From", notificationSettings.smsFromNumber || "Not set"],
+          [t("Sends to clients"), notificationSettings.sendClientSms ? t("On") : t("Off")],
+          [t("Provider"), notificationSettings.smsProviderName || t("Not set")],
+          [t("From"), notificationSettings.smsFromNumber || t("Not set")],
         ],
       },
       {
         id: "invoicing",
         category: "Accounting",
-        label: "Invoicing",
-        summary: "Numbering, tax and payment terms.",
-        path: "Billing › Settings",
+        label: t("Invoicing"),
+        summary: t("Numbering, tax and payment terms."),
+        path: t("Billing › Settings"),
         target: { kind: "billing", section: "settings" },
         facts: [
-          ["Next number", `${invoiceSettings.prefix}-${String(invoiceSettings.nextNumber).padStart(4, "0")}`],
-          ["Tax", `${invoiceSettings.taxName} ${invoiceSettings.taxRate}%`],
+          [t("Next number"), `${invoiceSettings.prefix}-${String(invoiceSettings.nextNumber).padStart(4, "0")}`],
+          [t("Tax"), `${invoiceSettings.taxName} ${invoiceSettings.taxRate}%`],
           [
-            "Payment terms",
+            t("Payment terms"),
             invoiceSettings.paymentTermsDays === 0
-              ? "Due on receipt"
-              : `${invoiceSettings.paymentTermsDays} day${invoiceSettings.paymentTermsDays === 1 ? "" : "s"}`,
+              ? t("Due on receipt")
+              : invoiceSettings.paymentTermsDays === 1
+                ? t("1 day")
+                : t("{n} days", { n: invoiceSettings.paymentTermsDays }),
           ],
-          ["Bank account", invoiceSettings.bankAccount || "Not set"],
+          [t("Bank account"), invoiceSettings.bankAccount || t("Not set")],
         ],
       },
       {
         id: "products",
         category: "Accounting",
-        label: "Products & stock",
-        summary: "What you sell at the counter.",
-        path: "Billing › Products",
+        label: t("Products & stock"),
+        summary: t("What you sell at the counter."),
+        path: t("Billing › Products"),
         target: { kind: "billing", section: "products" },
         facts: firstFew(
           catalogItems.filter((item) => item.kind === "product"),
@@ -25288,9 +25206,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       {
         id: "clients",
         category: `${terms.customerSingular} portal`,
-        label: "Client list",
-        summary: "Everyone who has booked with you.",
-        path: "Clients",
+        label: t("Client list"),
+        summary: t("Everyone who has booked with you."),
+        path: t("Clients"),
         target: { kind: "view", view: "clients" },
         // A client list has no settings to show. The card is the way in.
         facts: [],
@@ -25298,27 +25216,27 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       {
         id: "players",
         category: `${terms.customerSingular} portal`,
-        label: `${terms.customerSingular} profiles`,
-        summary: `Notes, videos, practice and passes per ${terms.customerSingular.toLowerCase()}.`,
-        path: `${terms.customerSingular} Profiles`,
+        label: t("{customerSingular} profiles", { customerSingular: terms.customerSingular }),
+        summary: t("Notes, videos, practice and passes per {customerSingular}.", { customerSingular: terms.customerSingular.toLowerCase() }),
+        path: t("{customerSingular} Profiles", { customerSingular: terms.customerSingular }),
         target: { kind: "view", view: "players" },
         facts: [],
       },
       {
         id: "video",
         category: `${terms.customerSingular} portal`,
-        label: "Video",
-        summary: `Saved analysis, and what a ${terms.customerSingular.toLowerCase()} can watch.`,
-        path: "Video",
+        label: t("Video"),
+        summary: t("Saved analysis, and what a {customerSingular} can watch.", { customerSingular: terms.customerSingular.toLowerCase() }),
+        path: t("Video"),
         target: { kind: "view", view: "video" },
         facts: [],
       },
       {
         id: "practice",
         category: `${terms.customerSingular} portal`,
-        label: "Practice",
-        summary: "The kinds of block, and the favourites rail.",
-        path: "Settings › Practice",
+        label: t("Practice"),
+        summary: t("The kinds of block, and the favourites rail."),
+        path: t("Settings › Practice"),
         target: { kind: "settings", tab: "practice", group: "practice-blocks" },
         // Block types and favourites are loaded by the Practice panel itself,
         // so counting them here would mean a request nobody asked for.
@@ -25339,31 +25257,31 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
   // Owners and admins run a business from the hub; a coach-level account's
   // version of the same screen is their own profile.
-  const hubLabel = isAdminUser ? "Business Hub" : `${terms.staffSingular} profile`;
+  const hubLabel = isAdminUser ? t("Business Hub") : t("{staffSingular} profile", { staffSingular: terms.staffSingular });
   const pageHeading: { title: string; subtitle?: string } =
     activeView === "calendar"
       ? {
-          title: "Calendar",
+          title: t("Calendar"),
           subtitle: adminWorkspaceLoading
             ? calendarSummaryText
             : `${calendarScopeName} · ${calendarSummaryText}`,
         }
       : activeView === "billing"
         ? {
-            title: "Billing",
+            title: t("Billing"),
             subtitle: billingSection === "none" ? undefined : BILLING_SECTION_LABELS[billingSection],
           }
         : activeView === "settings"
           ? {
-              title: "Settings",
+              title: t("Settings"),
               subtitle: settingsSections.find((section) => section.key === settingsTab)?.label,
             }
           : activeView === "profile"
             ? {
                 title: hubLabel,
                 subtitle: isAdminUser
-                  ? "Your business, and everything Clarity is plugged into on your behalf"
-                  : "Your profile, your calendar, and the settings that are yours",
+                  ? t("Your business, and everything Clarity is plugged into on your behalf")
+                  : t("Your profile, your calendar, and the settings that are yours"),
               }
             : { title: sectionTitle(activeView, terms) };
   const failedDiagnosticEvents = diagnosticEvents.filter((event) => event.status === "failed");
@@ -25416,15 +25334,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">
-            <img src="/assets/clarity-golf-logo-208.png" alt="Clarity Golf" />
+            <img src="/assets/clarity-golf-logo-208.png" alt={t("Clarity Golf")} />
           </div>
           <div>
-            <strong>Clarity Golf</strong>
-            <span>Booking System</span>
+            <strong>{t("Clarity Golf")}</strong>
+            <span>{t("Booking System")}</span>
           </div>
         </div>
 
-        <nav className="side-nav" aria-label="Admin sections">
+        <nav className="side-nav" aria-label={t("Admin sections")}>
           {/* Home, and first. The workspaces below it — Clients, Player
               Profiles, Video — are whole screens rather than sections, so they
               are the one thing the coach profile cannot open over itself. This
@@ -25438,37 +25356,25 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             {hubLabel}
           </button>
           <button className={activeView === "calendar" ? "active" : ""} onClick={() => switchView("calendar")}>
-            <ClarityCalendar size={18} />
-            Calendar
-          </button>
+            <ClarityCalendar size={18} />{t("Calendar")}</button>
           <button className={activeView === "clients" ? "active" : ""} onClick={() => switchView("clients")}>
             <ClarityClientsPlayers size={18} />
             {terms.customerPlural}
           </button>
           <button className={activeView === "players" ? "active" : ""} onClick={() => switchView("players")}>
-            <ClarityProfile size={18} />
-            {terms.customerSingular} Profiles
-          </button>
+            <ClarityProfile size={18} />{t("{customerSingular} Profiles", { customerSingular: terms.customerSingular })}</button>
           {billingWorkspaceEnabled && (
             <button className={activeView === "sell" ? "active" : ""} onClick={() => switchView("sell")}>
-              <ClarityStore size={18} />
-              Sell
-            </button>
+              <ClarityStore size={18} />{t("Sell")}</button>
           )}
           {billingWorkspaceEnabled && (
             <button className={activeView === "billing" ? "active" : ""} onClick={() => switchView("billing")}>
-              <ClarityInvoices size={18} />
-              Billing
-            </button>
+              <ClarityInvoices size={18} />{t("Billing")}</button>
           )}
           <button className={activeView === "settings" ? "active" : ""} onClick={() => switchView("settings")}>
-            <ClaritySettings size={18} />
-            Settings
-          </button>
+            <ClaritySettings size={18} />{t("Settings")}</button>
           <button className="nav-logout" onClick={handleAdminLogout}>
-            <LogOut size={18} />
-            Logout
-          </button>
+            <LogOut size={18} />{t("Logout")}</button>
         </nav>
       </aside>
       )}
@@ -25485,15 +25391,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           {activeView === "calendar" && (
             <div className="top-actions">
               <button className="outline-button" onClick={() => moveWeek(-1)}>
-                <ArrowLeft size={16} />
-                Prev
-              </button>
-              <button className="outline-button" onClick={goToToday}>
-                Today
-              </button>
-              <button className="outline-button" onClick={() => moveWeek(1)}>
-                Next
-                <ArrowRight size={16} />
+                <ArrowLeft size={16} />{t("Prev")}</button>
+              <button className="outline-button" onClick={goToToday}>{t("Today")}</button>
+              <button className="outline-button" onClick={() => moveWeek(1)}>{t("Next")}<ArrowRight size={16} />
               </button>
             </div>
           )}
@@ -25504,17 +25404,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         <section className="workspace">
           {adminWorkspaceFailed ? (
             <div className="empty-panel compact" role="alert">
-              <h2>Calendar could not load</h2>
-              <p>{adminWorkspaceLoadError || "Calendar bookings could not be loaded."}</p>
-              <button className="outline-button" type="button" onClick={() => void startAdminWorkspaceHydration()}>
-                Retry
-              </button>
+              <h2>{t("Calendar could not load")}</h2>
+              <p>{adminWorkspaceLoadError || t("Calendar bookings could not be loaded.")}</p>
+              <button className="outline-button" type="button" onClick={() => void startAdminWorkspaceHydration()}>{t("Retry")}</button>
             </div>
           ) : (
             <Loading
               size="panel"
-              what="calendar"
-              detail="Bookings are loading first. Client profiles, notifications, and integrations will refresh in the background."
+              what={t("calendar")}
+              detail={t("Bookings are loading first. Client profiles, notifications, and integrations will refresh in the background.")}
             />
           )}
         </section>
@@ -25530,10 +25428,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             type="button"
             onClick={() => setDiagnosticsOpen((current) => !current)}
             aria-expanded={diagnosticsOpen}
-            aria-label={diagnosticsOpen ? "Hide developer diagnostics" : "Show developer diagnostics"}
-            title={`Developer diagnostics — ${
-              calendarFeedStatus === "connected" ? "Supabase connected" : "Supabase not connected"
-            }, ${diagnosticEvents.length} events, ${failedDiagnosticEvents.length} errors`}
+            aria-label={diagnosticsOpen ? t("Hide developer diagnostics") : t("Show developer diagnostics")}
+            title={t("Developer diagnostics — {status}, {events} events, {errors} errors", {
+              status: calendarFeedStatus === "connected" ? t("Supabase connected") : t("Supabase not connected"),
+              events: diagnosticEvents.length,
+              errors: failedDiagnosticEvents.length,
+            })}
           >
             {diagnosticsOpen ? <X size={15} /> : <ClarityAdmin size={15} />}
             {/* The error count is the one thing worth surfacing while closed. */}
@@ -25545,14 +25445,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             <div className="developer-diagnostics-body">
               <div className="developer-diagnostics-readout">
                 <strong>
-                  <ClarityAdmin size={14} />
-                  Developer Diagnostics
-                </strong>
-                <span>{calendarFeedStatus === "connected" ? "Supabase connected" : "Supabase not connected"}</span>
-                <span>{diagnosticEvents.length} events</span>
-                <span>{failedDiagnosticEvents.length} errors</span>
+                  <ClarityAdmin size={14} />{t("Developer Diagnostics")}</strong>
+                <span>{calendarFeedStatus === "connected" ? t("Supabase connected") : t("Supabase not connected")}</span>
+                <span>{t("{length} events", { length: diagnosticEvents.length })}</span>
+                <span>{t("{length} errors", { length: failedDiagnosticEvents.length })}</span>
               </div>
-              <div className="developer-diagnostics-tabs" role="tablist" aria-label="Developer diagnostics views">
+              <div className="developer-diagnostics-tabs" role="tablist" aria-label={t("Developer diagnostics views")}>
                 {(["overview", "database", "calendar", "cache", "errors", "raw"] as DiagnosticTab[]).map((tab) => (
                   <button
                     key={tab}
@@ -25560,7 +25458,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     type="button"
                     onClick={() => setDiagnosticsTab(tab)}
                   >
-                    {tab === "raw" ? "Raw Events" : tab === "cache" ? "Cache / Reloads" : tab[0].toUpperCase() + tab.slice(1)}
+                    {tab === "raw" ? t("Raw Events") : tab === "cache" ? t("Cache / Reloads") : tab[0].toUpperCase() + tab.slice(1)}
                   </button>
                 ))}
               </div>
@@ -25568,39 +25466,39 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               {diagnosticsTab === "overview" ? (
                 <div className="developer-diagnostics-grid">
                   <div>
-                    <span>Connection</span>
-                    <strong>{calendarFeedStatus === "connected" ? "Connected" : "Not connected"}</strong>
+                    <span>{t("Connection")}</span>
+                    <strong>{calendarFeedStatus === "connected" ? t("Connected") : t("Not connected")}</strong>
                   </div>
                   <div>
-                    <span>Last event</span>
-                    <strong>{latestDiagnosticEvent ? `${latestDiagnosticEvent.system}:${latestDiagnosticEvent.action}` : "None yet"}</strong>
+                    <span>{t("Last event")}</span>
+                    <strong>{latestDiagnosticEvent ? `${latestDiagnosticEvent.system}:${latestDiagnosticEvent.action}` : t("None yet")}</strong>
                   </div>
                   <div>
-                    <span>Last error</span>
-                    <strong>{latestDiagnosticError?.errorCode || "None"}</strong>
+                    <span>{t("Last error")}</span>
+                    <strong>{latestDiagnosticError?.errorCode || t("None")}</strong>
                   </div>
                   <div>
-                    <span>Avg duration</span>
+                    <span>{t("Avg duration")}</span>
                     <strong>{averageDiagnosticDuration ? `${averageDiagnosticDuration}ms` : "n/a"}</strong>
                   </div>
                   <div>
-                    <span>Slowest recent action</span>
+                    <span>{t("Slowest recent action")}</span>
                     <strong>
                       {slowestDiagnosticEvent
                         ? `${slowestDiagnosticEvent.action} - ${slowestDiagnosticEvent.durationMs}ms`
-                        : "None"}
+                        : t("None")}
                     </strong>
                   </div>
                   <div>
-                    <span>Last full reload</span>
-                    <strong>{latestReloadEvent ? `${latestReloadEvent.action} ${latestReloadEvent.status}` : "None"}</strong>
+                    <span>{t("Last full reload")}</span>
+                    <strong>{latestReloadEvent ? `${latestReloadEvent.action} ${latestReloadEvent.status}` : t("None")}</strong>
                   </div>
                   <div>
-                    <span>Systems firing</span>
+                    <span>{t("Systems firing")}</span>
                     <strong>{Object.keys(diagnosticsBySystem).length || 0}</strong>
                   </div>
                   <div>
-                    <span>Buffer</span>
+                    <span>{t("Buffer")}</span>
                     <strong>{diagnosticEvents.length}/{DIAGNOSTIC_EVENT_LIMIT}</strong>
                   </div>
                 </div>
@@ -25615,7 +25513,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           <strong>{event.action}</strong>
                           <span>
                             {event.system} · {event.phase} · {event.status}
-                            {typeof event.durationMs === "number" ? ` · ${event.durationMs}ms` : ""}
+                            {typeof event.durationMs === "number" ? t(" · {durationMs}ms", { durationMs: event.durationMs }) : ""}
                             {diagnosticDurationBand(event) ? ` · ${diagnosticDurationBand(event)}` : ""}
                           </span>
                         </div>
@@ -25630,7 +25528,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       </div>
                     ))
                   ) : (
-                    <p className="developer-diagnostics-empty">No events in this view yet.</p>
+                    <p className="developer-diagnostics-empty">{t("No events in this view yet.")}</p>
                   )}
                 </div>
               ) : null}
@@ -25652,7 +25550,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             aria-label={
               activeDockBooking
                 ? `${activeDockBooking.client} is armed on the shelf`
-                : "Appointment shelf"
+                : t("Appointment shelf")
             }
           >
             {flyingBooking && (
@@ -25668,7 +25566,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 <GripVertical size={14} />
                 <span>
                   <strong>{flyingBooking.client}</strong>
-                  <em>{services.find((candidate) => candidate.id === flyingBooking.serviceId)?.name ?? "Lesson"}</em>
+                  <em>{services.find((candidate) => candidate.id === flyingBooking.serviceId)?.name ?? t("Lesson")}</em>
                 </span>
               </div>
             )}
@@ -25695,14 +25593,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     <GripVertical size={14} />
                     <span>
                       <strong>{booking.client}</strong>
-                      <em>{service?.name ?? "Lesson"}</em>
+                      <em>{service?.name ?? t("Lesson")}</em>
                     </span>
                     <button
                       className="dock-remove"
                       aria-label={
                         booking.sourceItemId
-                          ? `Put ${booking.client} back on the calendar`
-                          : `Remove ${booking.client} from dock`
+                          ? t("Put {client} back on the calendar", { client: booking.client })
+                          : t("Remove {client} from dock", { client: booking.client })
                       }
                       onClick={(event) => {
                         event.stopPropagation();
@@ -25729,7 +25627,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               places on the left, people on the right. A coach who isn't an
               admin only ever sees their own, so they get no tabs. */}
           {isAdminUser ? (
-            <div className="calendar-scope-tabs" role="tablist" aria-label="Calendar">
+            <div className="calendar-scope-tabs" role="tablist" aria-label={t("Calendar")}>
               <div className="calendar-scope-tab-group">
                 <button
                   type="button"
@@ -25740,9 +25638,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     calendarPerspectiveChosenRef.current = true;
                     setCalendarPerspective("all");
                   }}
-                >
-                  All
-                </button>
+                >{t("All")}</button>
                 {canUseFeature(activeAccount, "locationCalendar")
                   ? activeLocations(accountLocations).map((location) => {
                       const isActive =
@@ -25805,14 +25701,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               <div className={`calendar-save-pill ${calendarSaveStatus}`}>
                 <strong>
                   {calendarSaveStatus === "saving"
-                    ? "Saving"
+                    ? t("Saving")
                     : calendarSaveStatus === "saved"
-                      ? "Saved"
+                      ? t("Saved")
                       : calendarSaveStatus === "failed"
-                        ? "Not saved"
+                        ? t("Not saved")
                         : calendarFeedStatus === "connected"
-                          ? "Live database"
-                          : "Not connected"}
+                          ? t("Live database")
+                          : t("Not connected")}
                 </strong>
                 {calendarSaveStatus === "failed" && calendarSaveError ? <span>{calendarSaveError}</span> : null}
               </div>
@@ -25820,22 +25716,18 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             {calendarSaveStatus === "failed" && (
               <div className="calendar-save-warning">
                 {calendarSaveFailureKind === "delete"
-                  ? "The delete didn't go through, so the lesson was put back on the calendar. Delete it again to retry."
-                  : "Your latest change was not saved. Please try again; the app will retry when you make another change."}
+                  ? t("The delete didn't go through, so the lesson was put back on the calendar. Delete it again to retry.")
+                  : t("Your latest change was not saved. Please try again; the app will retry when you make another change.")}
               </div>
             )}
             {calendarViewEmptyMessage ? (
               <div className="calendar-save-warning">{calendarViewEmptyMessage}</div>
             ) : null}
             {effectiveCalendarPerspective === "location" && !locationCalendarCoachGroups.length ? (
-              <div className="calendar-save-warning">
-                No active coaches are assigned to this location yet.
-              </div>
+              <div className="calendar-save-warning">{t("No active coaches are assigned to this location yet.")}</div>
             ) : null}
             {effectiveCalendarPerspective === "location" && locationCalendarCoachGroups.length && !locationCalendarHasAppointments ? (
-              <div className="calendar-save-warning">
-                No appointments at this location for the selected week.
-              </div>
+              <div className="calendar-save-warning">{t("No appointments at this location for the selected week.")}</div>
             ) : null}
 
             <div className="calendar-header-row">
@@ -25850,12 +25742,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   aria-pressed={calendarAxisMode === "squash"}
                   title={
                     calendarAxisMode === "squash"
-                      ? "Squash view: quiet stretches collapsed. Switch to the full week."
-                      : "Week view: every hour at full height. Switch to squash."
+                      ? t("Squash view: quiet stretches collapsed. Switch to the full week.")
+                      : t("Week view: every hour at full height. Switch to squash.")
                   }
                 >
                   {calendarAxisMode === "squash" ? <Minimize2 size={16} /> : <ClarityCalendar size={16} />}
-                  <small>{calendarAxisMode === "squash" ? "Squash" : "Week"}</small>
+                  <small>{calendarAxisMode === "squash" ? t("Squash") : t("Week")}</small>
                 </button>
               </div>
               <div
@@ -25888,11 +25780,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             {offset === 0 &&
                             effectiveCalendarPerspective === "location" &&
                             locationCalendarCoachGroups.length ? (
-                              <div className="location-coach-columns" aria-label="Coach columns">
+                              <div className="location-coach-columns" aria-label={t("Coach columns")}>
                                 {locationCalendarCoachGroups.map((coach) => (
                                   <em key={coach.coachId || coach.name}>
                                     <span>{coach.displayName || coach.name}</span>
-                                    <small>{locationCalendarCoachItemCount(coach.coachId)} appt</small>
+                                    <small>{t("{coachId} appt", { coachId: locationCalendarCoachItemCount(coach.coachId) })}</small>
                                   </em>
                                 ))}
                               </div>
@@ -25912,7 +25804,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 {visibleCalendarHourMarks.map(({ hour, top }) => {
                   return (
                     <div className="time-label" key={hour} style={{ top }}>
-                      {hour === 12 * 60 ? "Noon" : formatTime(hour).replace(":00 ", "")}
+                      {hour === 12 * 60 ? t("Noon") : formatTime(hour).replace(":00 ", "")}
                     </div>
                   );
                 })}
@@ -25946,9 +25838,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     time that was skipped is stated rather than just missing. */}
                 {calendarQuietGaps.map((gap) => (
                   <div className="quiet-gap" key={gap.start} style={{ top: gap.top, height: gap.height }}>
-                    <small>
-                      {formatDurationLabel(gap.end - gap.start)} quiet · {formatTime(gap.start)} – {formatTime(gap.end)}
-                    </small>
+                    <small>{t("{value} quiet · {start} – {end}", { value: formatDurationLabel(gap.end - gap.start), start: formatTime(gap.start), end: formatTime(gap.end) })}</small>
                   </div>
                 ))}
 
@@ -26067,14 +25957,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           .join(" · ")
                       : "";
                   const tooltipRows = [
-                    groupSessionContext ? "Group Session" : item.client || item.title,
+                    groupSessionContext ? t("Group Session") : item.client || item.title,
                     groupSessionContext
-                      ? `Booked: ${groupSessionContext.bookedCount}/${groupSessionContext.capacity}`
-                      : service?.name ?? (item.kind === "block" ? "Blocked time" : "Lesson"),
+                      ? t("Booked: {booked}/{capacity}", { booked: groupSessionContext.bookedCount, capacity: groupSessionContext.capacity })
+                      : service?.name ?? (item.kind === "block" ? t("Blocked time") : t("Lesson")),
                     formatRange(item.start, item.duration),
-                    latestClientEmail ? `Client email: ${notificationStatusLabel(latestClientEmail)}` : "",
-                    latestCoachEmail ? `Coach email: ${notificationStatusLabel(latestCoachEmail)}` : "",
-                    latestAdminEmail ? `Admin email: ${notificationStatusLabel(latestAdminEmail)}` : "",
+                    latestClientEmail ? t("Client email: {status}", { status: notificationStatusLabel(latestClientEmail) }) : "",
+                    latestCoachEmail ? t("Coach email: {status}", { status: notificationStatusLabel(latestCoachEmail) }) : "",
+                    latestAdminEmail ? t("Admin email: {status}", { status: notificationStatusLabel(latestAdminEmail) }) : "",
+
                   ].filter(Boolean);
                   return (
                     <article
@@ -26177,24 +26068,22 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                               event.stopPropagation();
                               openGroupSessionFromSlot(item);
                             }}
-                          >
-                            Open session
-                          </button>
+                          >{t("Open session")}</button>
                         ) : null}
                         <div className="item-content">
                         <strong>{groupSessionContext ? groupSessionContext.service.name : item.kind === "appointment" ? item.client || item.title : item.title}</strong>
                         <span>
                           {groupSessionContext
-                            ? "Group Session"
+                            ? t("Group Session")
                             : item.kind === "block" && isLocationOnlyBlock(item)
-                              ? "Location unavailable"
+                              ? t("Location unavailable")
                               : item.kind === "block" && isCoachLocationBlock(item)
-                                ? "Coach unavailable"
-                                : service?.name ?? "Busy"}
+                                ? t("Coach unavailable")
+                                : service?.name ?? t("Busy")}
                         </span>
                         <em>
                           {groupSessionContext
-                            ? `${formatRange(item.start, item.duration)} · ${groupSessionContext.bookedCount}/${groupSessionContext.capacity} booked`
+                            ? t("{start} · {bookedCount}/{capacity} booked", { start: formatRange(item.start, item.duration), bookedCount: groupSessionContext.bookedCount, capacity: groupSessionContext.capacity })
                             : formatRange(item.start, item.duration)}
                         </em>
                         {itemLocationTag ? <small className="item-location-tag">{itemLocationTag}</small> : null}
@@ -26206,7 +26095,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       {item.readOnly ? null : (
                         <button
                           className="resize-handle"
-                          aria-label="Resize calendar item"
+                          aria-label={t("Resize calendar item")}
                           onPointerDown={(event) => beginResize(event, item)}
                         />
                       )}
@@ -26229,8 +26118,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         }}
                       >
                         <div className="item-content">
-                          <strong>Busy</strong>
-                          <span>New blocked time</span>
+                          <strong>{t("Busy")}</strong>
+                          <span>{t("New blocked time")}</span>
                           <em>{formatRange(draft.start, draft.duration)}</em>
                         </div>
                       </div>
@@ -26278,11 +26167,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 className="quick-create"
                 style={quickCreatePopoverStyle()}
               >
-                <button className="popover-close" aria-label="Close quick create" onClick={() => setQuickCreate(null)}>
+                <button className="popover-close" aria-label={t("Close quick create")} onClick={() => setQuickCreate(null)}>
                   <X size={15} />
                 </button>
                 <span>{`${weekDays[quickCreate.day].short}, ${formatTime(quickCreate.start)}`}</span>
-                <strong>Quick create</strong>
+                <strong>{t("Quick create")}</strong>
                 {!quickCreateService ? (
                   <>
                     {quickCreateServices.map((service) => (
@@ -26290,28 +26179,22 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         <Plus size={16} />
                         <span>
                           <strong>{service.name}</strong>
-                          <em>{`${service.duration} min · ${formatMoney(service.price)}`}</em>
+                          <em>{t("{duration} min · {price}", { duration: service.duration, price: formatMoney(service.price) })}</em>
                         </span>
                       </button>
                     ))}
                     {effectiveCalendarPerspective === "location" ? (
                       <>
                         <button onClick={() => createBlockFromQuick("location")}>
-                          <ClaritySessions size={16} />
-                          Block this location
-                        </button>
+                          <ClaritySessions size={16} />{t("Block this location")}</button>
                         {quickCreate.coachId ? (
                           <button onClick={() => createBlockFromQuick("coach-location")}>
-                            <ClaritySessions size={16} />
-                            Block this coach
-                          </button>
+                            <ClaritySessions size={16} />{t("Block this coach")}</button>
                         ) : null}
                       </>
                     ) : (
                       <button onClick={() => createBlockFromQuick("coach-location")}>
-                        <ClaritySessions size={16} />
-                        Block 30 minutes
-                      </button>
+                        <ClaritySessions size={16} />{t("Block 30 minutes")}</button>
                     )}
                   </>
                 ) : (
@@ -26319,20 +26202,18 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     <button className="quick-service-summary" onClick={backToQuickServiceChoice} type="button">
                       <span>
                         <strong>{quickCreateService.name}</strong>
-                        <em>{`${quickCreateService.duration} min · ${formatMoney(quickCreateService.price)}`}</em>
+                        <em>{t("{duration} min · {price}", { duration: quickCreateService.duration, price: formatMoney(quickCreateService.price) })}</em>
                       </span>
                       <ArrowLeft size={14} />
                     </button>
                     {quickCreateChoices && !quickCreateChoices.fixedCoachId ? (
                       <label>
-                        <span>Coach</span>
+                        <span>{t("Coach")}</span>
                         <select
                           value={quickCreate.coachId ?? ""}
                           onChange={(event) => chooseQuickCreateScope("coachId", event.target.value)}
                         >
-                          <option value="" disabled>
-                            Choose a coach
-                          </option>
+                          <option value="" disabled>{t("Choose a coach")}</option>
                           {quickCreateChoices.coachIds.map((coachId) => {
                             const coach = bookingCoachSnapshotFor(coachId, coachProfiles);
                             const free = !quickCreateAvailabilityError(quickCreateCandidate!, quickCreateService, {
@@ -26342,7 +26223,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             return (
                               <option key={coachId} value={coachId}>
                                 {coach?.displayName || coach?.name || coachId}
-                                {free ? "" : " (busy)"}
+                                {free ? "" : t(" (busy)")}
                               </option>
                             );
                           })}
@@ -26351,14 +26232,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     ) : null}
                     {quickCreateChoices && !quickCreateChoices.fixedLocationId ? (
                       <label>
-                        <span>Location</span>
+                        <span>{t("Location")}</span>
                         <select
                           value={quickCreate.locationId ?? ""}
                           onChange={(event) => chooseQuickCreateScope("locationId", event.target.value)}
                         >
-                          <option value="" disabled>
-                            Choose a location
-                          </option>
+                          <option value="" disabled>{t("Choose a location")}</option>
                           {quickCreateChoices.locationIds.map((locationId) => {
                             const location = locationById(locations, locationId);
                             const free = !quickCreateAvailabilityError(quickCreateCandidate!, quickCreateService, {
@@ -26368,7 +26247,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             return (
                               <option key={locationId} value={locationId}>
                                 {location?.shortName || location?.name || locationId}
-                                {free ? "" : " (busy)"}
+                                {free ? "" : t(" (busy)")}
                               </option>
                             );
                           })}
@@ -26376,7 +26255,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       </label>
                     ) : null}
                     <label>
-                      <span>Name</span>
+                      <span>{t("Name")}</span>
                       <div className="quick-match-anchor">
                         <div className="quick-client-search w-name">
                           <Search size={15} />
@@ -26396,14 +26275,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 confirmQuickAppointment();
                               }
                             }}
-                            placeholder="Client name"
+                            placeholder={t("Client name")}
                           />
                         </div>
                         {quickClientMatchButton("name")}
                       </div>
                     </label>
                     <label>
-                      <span>Phone</span>
+                      <span>{t("Phone")}</span>
                       <div className="quick-match-anchor">
                           <input
                             className="w-name"
@@ -26423,7 +26302,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       </div>
                     </label>
                     <label>
-                      <span>Email</span>
+                      <span>{t("Email")}</span>
                       <div className="quick-match-anchor">
                           <input
                             className="w-email"
@@ -26436,26 +26315,26 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             setQuickMatchField("email");
                             updateQuickCreateField("email", event.target.value);
                           }}
-                          placeholder="client@example.com"
+                          placeholder={t("client@example.com")}
                           type="email"
                         />
                         {quickClientMatchButton("email")}
                       </div>
                     </label>
                     <label>
-                      <span>Lesson note</span>
+                      <span>{t("Lesson note")}</span>
                       <textarea
                         className="w-prose"
                         value={quickCreate.note}
                         onChange={(event) => updateQuickCreateField("note", event.target.value)}
-                        placeholder="Optional"
+                        placeholder={t("Optional")}
                       />
                     </label>
                     {quickCreateIsCustomGroup && quickCreateService && (
                       <div className="lesson-receipts-panel custom-group-admin-panel">
                         <div className="receipt-panel-title">
                           <ClarityProfile size={16} />
-                          <span>Custom group attendees</span>
+                          <span>{t("Custom group attendees")}</span>
                           <em>
                             {quickCreateCustomGroupParticipantCount} / {customGroupMaxParticipants(quickCreateService)} · {formatMoney(quickCreateCustomGroupPrice)}
                           </em>
@@ -26463,8 +26342,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         <div className="email-receipt-row">
                           <span className="email-status-dot sent" aria-hidden="true" />
                           <div>
-                            <strong>{quickClientSearch.trim() || "Booker"}</strong>
-                            <span>{quickCreate.email.trim() || "Booker"}</span>
+                            <strong>{quickClientSearch.trim() || t("Booker")}</strong>
+                            <span>{quickCreate.email.trim() || t("Booker")}</span>
                           </div>
                           <em>{customGroupStatusLabel("booker")}</em>
                         </div>
@@ -26473,10 +26352,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             <span className={`email-status-dot ${attendee.status === "manual" ? "sent" : "pending"}`} aria-hidden="true" />
                             <div>
                               <strong>{attendee.name}</strong>
-                              <span>{attendee.email || "Manual attendee"}</span>
+                              <span>{attendee.email || t("Manual attendee")}</span>
                             </div>
                             <em>{customGroupStatusLabel(attendee.status)}</em>
-                            <button className="icon-button small" onClick={() => removeQuickCreateCustomGroupAttendee(attendee.id)} aria-label={`Remove ${attendee.name}`}>
+                            <button className="icon-button small" onClick={() => removeQuickCreateCustomGroupAttendee(attendee.id)} aria-label={t("Remove {name}", { name: attendee.name })}>
                               <X size={14} />
                             </button>
                           </div>
@@ -26485,12 +26364,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           <input
                             value={quickCreate.attendeeName}
                             onChange={(event) => updateQuickCreateAttendeeDraft("attendeeName", event.target.value)}
-                            placeholder="Attendee name"
+                            placeholder={t("Attendee name")}
                           />
                           <input
                             value={quickCreate.attendeeEmail}
                             onChange={(event) => updateQuickCreateAttendeeDraft("attendeeEmail", event.target.value)}
-                            placeholder="Email optional"
+                            placeholder={t("Email optional")}
                             type="email"
                           />
                           <button
@@ -26500,7 +26379,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             type="button"
                           >
                             <Plus size={15} />
-                            {quickCreate.attendeeEmail.trim() ? "Send invite" : "Confirm attendee"}
+                            {quickCreate.attendeeEmail.trim() ? t("Send invite") : t("Confirm attendee")}
                           </button>
                         </div>
                       </div>
@@ -26508,18 +26387,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     {quickCreate.error && <p className="quick-create-error">{quickCreate.error}</p>}
                     <div className="quick-create-actions">
                       <button className="outline-button" onClick={backToQuickServiceChoice} type="button">
-                        <ArrowLeft size={15} />
-                        Back
-                      </button>
+                        <ArrowLeft size={15} />{t("Back")}</button>
                       <button
                         className="primary-button"
                         onClick={confirmQuickAppointment}
                         disabled={!quickClientSearch.trim() || Boolean(quickCreate.error)}
                         type="button"
                       >
-                        <Check size={15} />
-                        Create
-                      </button>
+                        <Check size={15} />{t("Create")}</button>
                     </div>
                   </div>
                 )}
@@ -26547,7 +26422,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             </div>
             <div className="item-content">
               <strong>{floatingItem.title}</strong>
-              <span>{floatingService?.name ?? "Lesson"}</span>
+              <span>{floatingService?.name ?? t("Lesson")}</span>
               <em>{formatRange(floatingItem.start, floatingItem.duration)}</em>
             </div>
           </article>
@@ -26560,7 +26435,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             aria-hidden="true"
           >
             <span className="hover-card-kicker">
-              {calendarHover.kind === "group-session" ? "Group Session" : "Appointment"}
+              {calendarHover.kind === "group-session" ? t("Group Session") : t("Appointment")}
             </span>
             <strong>{calendarHover.client}</strong>
             <em>{calendarHover.service}</em>
@@ -26593,7 +26468,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         )}
 
         {!isEmbedMode && adminWorkspaceReady && activeView === "clients" && (
-          <Suspense fallback={<Loading size="panel" what="clients" />}>
+          <Suspense fallback={<Loading size="panel" what={t("clients")} />}>
             <ClientsPanel
               clients={clients}
               loading={clientsLoadStatus === "idle" || clientsLoadStatus === "loading"}
@@ -26626,15 +26501,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           <section className="module-page player-profiles-page">
             <div className="player-profiles-toolbar">
               <div className="player-profiles-heading">
-                <p>{terms.customerPlural} with {terms.serviceSingular.toLowerCase()} notes or video, plus anyone you add.</p>
+                <p>{t("{customerPlural} with {serviceSingular} notes or video, plus anyone you add.", { customerPlural: terms.customerPlural, serviceSingular: terms.serviceSingular.toLowerCase() })}</p>
               </div>
               <div className="player-profiles-actions">
                 <button
                   type="button"
                   className="icon-button"
                   onClick={openPlayerAddDialog}
-                  title={`Add ${terms.customerSingular.toLowerCase()}`}
-                  aria-label={`Add ${terms.customerSingular.toLowerCase()}`}
+                  title={t("Add {customerSingular}", { customerSingular: terms.customerSingular.toLowerCase() })}
+                  aria-label={t("Add {customerSingular}", { customerSingular: terms.customerSingular.toLowerCase() })}
                 >
                   <Plus size={18} />
                 </button>
@@ -26642,8 +26517,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   type="button"
                   className="icon-button"
                   onClick={() => switchView("video")}
-                  title="Open video analysis"
-                  aria-label="Open video analysis"
+                  title={t("Open video analysis")}
+                  aria-label={t("Open video analysis")}
                 >
                   <ClarityVideoAnalysis size={18} />
                 </button>
@@ -26654,13 +26529,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               <div className="player-unassigned-videos">
                 <p>
                   {unassignedVideos.length === 1
-                    ? "1 video was saved without a player."
-                    : `${unassignedVideos.length} videos were saved without a player.`}
+                    ? t("1 video was saved without a player.")
+                    : t("{length} videos were saved without a player.", { length: unassignedVideos.length })}
                 </p>
                 {unassignedVideos.map((video) => (
                   <div className="player-unassigned-video" key={video.savedVideoId}>
                     <span>
-                      {video.title || "Saved video"}
+                      {video.title || t("Saved video")}
                       <span className="muted"> · {formatTimestampForDisplay(video.createdAt)}</span>
                     </span>
                     <button
@@ -26669,7 +26544,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       disabled={Boolean(assigningVideoId)}
                       onClick={() => void assignUnassignedVideo(video.savedVideoId)}
                     >
-                      {assigningVideoId === video.savedVideoId ? "Moving…" : "Assign to player"}
+                      {assigningVideoId === video.savedVideoId ? t("Moving…") : t("Assign to player")}
                     </button>
                   </div>
                 ))}
@@ -26680,8 +26555,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               <div className="player-profiles-list">
                 {playerProfiles.length === 0 && playerProfilesDataReady ? (
                   <div className="player-profiles-empty">
-                    <h2>No {terms.customerSingular.toLowerCase()} profiles yet</h2>
-                    <p>Add a {terms.serviceSingular.toLowerCase()} note or video to a {terms.customerSingular.toLowerCase()}, or use + to add one.</p>
+                    <h2>{t("No {customerSingular} profiles yet", { customerSingular: terms.customerSingular.toLowerCase() })}</h2>
+                    <p>{t("Add a {serviceSingular} note or video to a {customerSingular}, or use + to add one.", { serviceSingular: terms.serviceSingular.toLowerCase(), customerSingular: terms.customerSingular.toLowerCase() })}</p>
                   </div>
                 ) : (
                   playerProfiles.map((player) => {
@@ -26708,30 +26583,27 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           </div>
                           <div className="player-profile-body">
                             <h3>{player.name}</h3>
-                            <span>{player.email || player.phone || "No contact yet"}</span>
+                            <span>{player.email || player.phone || t("No contact yet")}</span>
                             <div className="player-profile-tags">
                               {hasAnyProfileId(videoPlayerIds, player) && (
                                 <span className="tag">
-                                  <ClarityVideoAnalysis size={12} /> Video
-                                </span>
+                                  <ClarityVideoAnalysis size={12} />{" "}{t("Video")}</span>
                               )}
                               {hasAnyProfileId(lessonNotePlayerIds, player) && (
                                 <span className="tag">
-                                  <ClarityBookingPages size={12} /> Lesson notes
-                                </span>
+                                  <ClarityBookingPages size={12} />{" "}{t("Lesson notes")}</span>
                               )}
                               {unseenSubmissionCounts.get(player.id) ? (
                                 <span className="tag is-unseen-submission">
-                                  <ClarityVideoAnalysis size={12} /> {unseenSubmissionCounts.get(player.id)} new
-                                </span>
+                                  <ClarityVideoAnalysis size={12} /> {unseenSubmissionCounts.get(player.id)}{" "}{t("new")}</span>
                               ) : null}
                             </div>
                           </div>
                           <button
                             type="button"
                             className="icon-button"
-                            title="Show videos"
-                            aria-label={`Show videos for ${player.name}`}
+                            title={t("Show videos")}
+                            aria-label={t("Show videos for {name}", { name: player.name })}
                             onClick={(event) => {
                               event.stopPropagation();
                               selectPlayerProfileTool(
@@ -26748,19 +26620,17 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           <div className={`player-profile-tool-panel${playerToolExpanded ? "" : " collapsed"}`}>
                             <div className="player-tool-header">
                               <div>
-                                <span>Player</span>
+                                <span>{t("Player")}</span>
                                 <h3>{notesWorkspaceClient.name}</h3>
-                                <p>{notesWorkspaceClient.email || notesWorkspaceClient.phone || "No contact yet"}</p>
+                                <p>{notesWorkspaceClient.email || notesWorkspaceClient.phone || t("No contact yet")}</p>
                                 <p
                                   className="player-tool-id"
-                                  title="Copy this player's id"
+                                  title={t("Copy this player's id")}
                                   onClick={() => {
                                     void navigator.clipboard?.writeText(notesWorkspaceClient.id).catch(() => {});
-                                    setToast({ message: "Player id copied." });
+                                    setToast({ message: t("Player id copied.") });
                                   }}
-                                >
-                                  ID: {notesWorkspaceClient.id}
-                                </p>
+                                >{t("ID: {id}", { id: notesWorkspaceClient.id })}</p>
                               </div>
                             </div>
 
@@ -26768,7 +26638,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                               <div
                                 className={`player-tool-tabs${playerToolTabsExpanded ? " is-expanded" : ""}`}
                                 role="tablist"
-                                aria-label="Player profile tools"
+                                aria-label={t("Player profile tools")}
                               >
                                 {PRIMARY_PLAYER_TOOL_TABS.map((tab) => (
                                   <button
@@ -26810,8 +26680,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                   aria-expanded={playerToolTabsExpanded}
                                   title={
                                     playerToolTabsExpanded
-                                      ? "Collapse"
-                                      : "Notes, Emails, Transactions, Passes, Portals"
+                                      ? t("Collapse")
+                                      : t("Notes, Emails, Transactions, Passes, Portals")
                                   }
                                   onClick={() => {
                                     // Closing the bar while one of the five is
@@ -26833,20 +26703,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 <div className="player-tool-card">
                                   <div className="player-tool-card-header">
                                     <div>
-                                      <strong><ClarityCalendar size={16} />Bookings</strong>
-                                      <span>
-                                        {playerToolAppointments.length} booking
-                                        {playerToolAppointments.length === 1 ? "" : "s"}
-                                        {playerToolUpcomingCount ? ` · ${playerToolUpcomingCount} upcoming` : ""}
+                                      <strong><ClarityCalendar size={16} />{t("Bookings")}</strong>
+                                      <span>{t("{length} booking", { length: playerToolAppointments.length })}{playerToolAppointments.length === 1 ? "" : "s"}
+                                        {playerToolUpcomingCount ? t(" · {playerToolUpcomingCount} upcoming", { playerToolUpcomingCount }) : ""}
                                       </span>
                                     </div>
                                     <button
                                       type="button"
                                       className="outline-button"
                                       onClick={() => switchView("calendar")}
-                                    >
-                                      Book a lesson
-                                    </button>
+                                    >{t("Book a lesson")}</button>
                                   </div>
                                   {playerToolAppointments.length ? (
                                     playerToolAppointments.map((appointment) => {
@@ -26863,7 +26729,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                           <div className="player-tool-row-main">
                                             <strong>{service?.name ?? appointment.title}</strong>
                                             <span>
-                                              {upcoming ? "Upcoming" : "Completed"} ·{" "}
+                                              {upcoming ? t("Upcoming") : t("Completed")} ·{" "}
                                               {formatRange(appointment.start, appointment.duration)}
                                               {appointment.note ? ` · ${appointment.note}` : ""}
                                             </span>
@@ -26876,15 +26742,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                                 switchView("calendar");
                                                 setSelectedId(appointment.id);
                                               }}
-                                            >
-                                              Open
-                                            </button>
+                                            >{t("Open")}</button>
                                           </div>
                                         </div>
                                       );
                                     })
                                   ) : (
-                                    <p className="player-tool-card-empty">No bookings yet.</p>
+                                    <p className="player-tool-card-empty">{t("No bookings yet.")}</p>
                                   )}
                                 </div>
                               </div>
@@ -26893,23 +26757,18 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 <div className="player-tool-card">
                                   <div className="player-tool-card-header">
                                     <div>
-                                      <strong><ClarityAssessments size={16} />Swing reviews</strong>
-                                      <span>
-                                        {playerSwingReviewGroups.length} review
-                                        {playerSwingReviewGroups.length === 1 ? "" : "s"} · videos, screenshot notes and practice
-                                      </span>
+                                      <strong><ClarityAssessments size={16} />{t("Swing reviews")}</strong>
+                                      <span>{t("{length} review", { length: playerSwingReviewGroups.length })}{playerSwingReviewGroups.length === 1 ? "" : "s"}{" "}{t("· videos, screenshot notes and practice")}</span>
                                     </div>
                                     <button
                                       type="button"
                                       className="primary-button"
                                       onClick={() => startSwingReviewForClient(notesWorkspaceClient)}
                                     >
-                                      <ImagePlus size={15} />
-                                      New swing review
-                                    </button>
+                                      <ImagePlus size={15} />{t("New swing review")}</button>
                                   </div>
                                   {playerPracticeLoadState === "loading" ? (
-                                    <Loading what="swing reviews" className="player-tool-card-empty" />
+                                    <Loading what={t("swing reviews")} className="player-tool-card-empty" />
                                   ) : playerSwingReviewGroups.length ? (
                                     playerSwingReviewGroups.map((review) => {
                                       const expanded = openSwingReviewId === review.id;
@@ -26929,12 +26788,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                             onClick={() => setOpenSwingReviewId(expanded ? null : review.id)}
                                           >
                                             <span className="player-tool-row-when">
-                                              {profileWhenParts(review.at).day || "Review"}
+                                              {profileWhenParts(review.at).day || t("Review")}
                                               {profileWhenParts(review.at).time ? <><br /><span>{profileWhenParts(review.at).time}</span></> : null}
                                             </span>
                                             <span className="player-tool-row-main">
-                                              <strong>Swing review</strong>
-                                              <span>{totalItems} item{totalItems === 1 ? "" : "s"} in this review file</span>
+                                              <strong>{t("Swing review")}</strong>
+                                              <span>{t("{totalItems} item", { totalItems })}{totalItems === 1 ? "" : "s"}{" "}{t("in this review file")}</span>
                                             </span>
                                             {expanded ? <ChevronUp size={17} /> : <ChevronDown size={17} />}
                                           </button>
@@ -26954,7 +26813,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                                   })}
                                                 >
                                                   {video.thumbnailDataUrl ? <img src={video.thumbnailDataUrl} alt="" /> : <ClarityVideoAnalysis size={22} />}
-                                                  <span><strong>{video.title}</strong><small>Review video</small></span>
+                                                  <span><strong>{video.title}</strong><small>{t("Review video")}</small></span>
                                                 </button>
                                               ))}
                                               {review.cloudVideos.map((video) => (
@@ -26971,7 +26830,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                                   })}
                                                 >
                                                   <Cloud size={22} />
-                                                  <span><strong>{video.savedVideo?.title || "Cloud video"}</strong><small>Clarity Cloud</small></span>
+                                                  <span><strong>{video.savedVideo?.title || t("Cloud video")}</strong><small>{t("Clarity Cloud")}</small></span>
                                                 </button>
                                               ))}
                                               {review.screenshots.length ? (
@@ -26987,17 +26846,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                                             key: `${snapshot.savedVideoId}-${snapshot.id}`,
                                                           })
                                                         }
-                                                        aria-label={`Show ${snapshot.title} in the video`}
+                                                        aria-label={t("Show {title} in the video", { title: snapshot.title })}
                                                       >
                                                         {snapshot.imageDataUrl ? <img src={snapshot.imageDataUrl} alt={snapshot.title} /> : <div className="swing-review-image-missing"><ImagePlus size={20} /></div>}
                                                         <span className="swing-review-screenshot-jump">
-                                                          <ClarityVideoAnalysis size={13} />
-                                                          View in video · {snapshot.currentTime.toFixed(2)}s
-                                                        </span>
+                                                          <ClarityVideoAnalysis size={13} />{t("View in video · {currentTime}s", { currentTime: snapshot.currentTime.toFixed(2) })}</span>
                                                       </button>
                                                       <figcaption>
                                                         <strong>{snapshot.title}</strong>
-                                                        <span>{snapshot.note || `Captured at ${snapshot.currentTime.toFixed(2)}s`}</span>
+                                                        <span>{snapshot.note || t("Captured at {currentTime}s", { currentTime: snapshot.currentTime.toFixed(2) })}</span>
                                                       </figcaption>
                                                     </figure>
                                                   ))}
@@ -27024,7 +26881,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                               {[...review.notes.map((note) => ({ id: note.id, text: note.body, label: note.title })), ...review.analysisNotes.map((note) => ({ id: note.id, text: note.text, label: note.videoTitle }))].map((note) => (
                                                 <div className="swing-review-note" key={note.id}>
                                                   <ClarityBookingPages size={15} />
-                                                  <div><strong>{note.label || "Review note"}</strong><p>{note.text}</p></div>
+                                                  <div><strong>{note.label || t("Review note")}</strong><p>{note.text}</p></div>
                                                 </div>
                                               ))}
                                               {review.practice.map((block) => (
@@ -27048,10 +26905,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                                 >
                                                   <Send size={15} />
                                                   {sendingSwingReviewId === review.id
-                                                    ? "Sending…"
+                                                    ? t("Sending…")
                                                     : sentSwingReviewLink?.id === review.id
-                                                      ? "Send again"
-                                                      : "Send to player"}
+                                                      ? t("Send again")
+                                                      : t("Send to player")}
                                                 </button>
                                                 {/* Only after a send, and only for that review: the
                                                   * raw token exists in the send's response and
@@ -27064,15 +26921,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                                     onClick={() => {
                                                       void navigator.clipboard
                                                         ?.writeText(sentSwingReviewLink.url)
-                                                        .then(() => setToast({ message: "Viewing link copied." }))
+                                                        .then(() => setToast({ message: t("Viewing link copied.") }))
                                                         .catch(() =>
-                                                          setToast({ message: "Could not copy the link." }),
+                                                          setToast({ message: t("Could not copy the link.") }),
                                                         );
                                                     }}
                                                   >
-                                                    <ClarityIntegrations size={15} />
-                                                    Copy viewing link
-                                                  </button>
+                                                    <ClarityIntegrations size={15} />{t("Copy viewing link")}</button>
                                                 ) : null}
                                               </div>
                                             </div>
@@ -27082,8 +26937,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                     })
                                   ) : (
                                     <div className="player-tool-card-empty">
-                                      <p>No swing reviews yet.</p>
-                                      <span>Start one to keep its videos, screenshot notes and practice together.</span>
+                                      <p>{t("No swing reviews yet.")}</p>
+                                      <span>{t("Start one to keep its videos, screenshot notes and practice together.")}</span>
                                     </div>
                                   )}
                                 </div>
@@ -27093,8 +26948,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 <div className="player-tool-card">
                                   <div className="player-tool-card-header">
                                     <div>
-                                      <strong><ClarityEmail size={16} />Emails</strong>
-                                      <span>Everything sent to this person</span>
+                                      <strong><ClarityEmail size={16} />{t("Emails")}</strong>
+                                      <span>{t("Everything sent to this person")}</span>
                                     </div>
                                   </div>
                                   {playerToolNotifications.length ? (
@@ -27115,17 +26970,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                             <strong>
                                               {notification.subject || notificationKindLabel(notification.kind)}
                                             </strong>
-                                            <span>
-                                              {notificationKindLabel(notification.kind)} to {notification.recipient}
-                                              {" · "}
-                                              {notificationStatusLabel(notification)}
-                                            </span>
+                                            <span>{t("{kind} to {recipient} · {notification}", { kind: notificationKindLabel(notification.kind), recipient: notification.recipient, notification: notificationStatusLabel(notification) })}</span>
                                           </div>
                                         </div>
                                       );
                                     })
                                   ) : (
-                                    <p className="player-tool-card-empty">No emails sent to this person yet.</p>
+                                    <p className="player-tool-card-empty">{t("No emails sent to this person yet.")}</p>
                                   )}
                                 </div>
                               </div>
@@ -27134,35 +26985,27 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 <div className="player-tool-card">
                                   <div className="player-tool-card-header">
                                     <div>
-                                      <strong><ClarityPayments size={16} />Transactions</strong>
-                                      <span>Everything billed to this person</span>
+                                      <strong><ClarityPayments size={16} />{t("Transactions")}</strong>
+                                      <span>{t("Everything billed to this person")}</span>
                                     </div>
                                     {billingWorkspaceEnabled && (
                                       <button
                                         type="button"
                                         className="outline-button"
                                         onClick={() => openPosCheckoutForClient(notesWorkspaceClient)}
-                                      >
-                                        New sale
-                                      </button>
+                                      >{t("New sale")}</button>
                                     )}
                                   </div>
                                   {notesWorkspaceClient.id.startsWith("appointment-") ? (
-                                    <p className="player-tool-card-empty">
-                                      Save this booking contact as a client to track their transactions.
-                                    </p>
+                                    <p className="player-tool-card-empty">{t("Save this booking contact as a client to track their transactions.")}</p>
                                   ) : playerTransactionsLoadState === "loading" ? (
-                                    <Loading what="transactions" className="player-tool-card-empty" />
+                                    <Loading what={t("transactions")} className="player-tool-card-empty" />
                                   ) : playerTransactionsLoadState === "error" ? (
-                                    <p className="player-tool-card-empty">
-                                      Could not load transactions.{" "}
-                                      <button
+                                    <p className="player-tool-card-empty">{t("Could not load transactions.")}{" "}<button
                                         className="link-button"
                                         type="button"
                                         onClick={() => void fetchPlayerTransactions(notesWorkspaceClient.id)}
-                                      >
-                                        Retry
-                                      </button>
+                                      >{t("Retry")}</button>
                                     </p>
                                   ) : playerTransactions.length ? (
                                     playerTransactions.map((row) =>
@@ -27173,11 +27016,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                           </span>
                                           <div className="player-tool-row-main">
                                             <strong>{row.coupon.code}</strong>
-                                            <span>
-                                              Gift voucher ·{" "}
-                                              {formatMoney(row.coupon.remainingValue, row.coupon.currency)} left
-                                              {row.coupon.issuedToName
-                                                ? ` · bought by ${row.coupon.issuedToName}`
+                                            <span>{t("Gift voucher · {remainingValue} left", { remainingValue: formatMoney(row.coupon.remainingValue, row.coupon.currency) })}{row.coupon.issuedToName
+                                                ? t(" · bought by {issuedToName}", { issuedToName: row.coupon.issuedToName })
                                                 : ""}
                                             </span>
                                           </div>
@@ -27192,7 +27032,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                             <span>
                                               {formatMoney(row.sale.amount, row.sale.currency)} ·{" "}
                                               {posMethodLabel(row.sale)} · {row.sale.receiptNumber}
-                                              {row.sale.isLessonPass ? " · Lesson pass" : ""}
+                                              {row.sale.isLessonPass ? t(" · Lesson pass") : ""}
                                             </span>
                                           </div>
                                         </div>
@@ -27207,7 +27047,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                               {formatMoney(row.invoice.total, row.invoice.currency)} ·{" "}
                                               {row.invoice.status}
                                               {row.invoice.relation === "included"
-                                                ? ` · billed to ${row.invoice.customerName || "someone else"}`
+                                                ? ` · ${t("billed to {name}", { name: row.invoice.customerName || t("someone else") })}`
                                                 : ""}
                                             </span>
                                           </div>
@@ -27219,15 +27059,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                                 switchView("billing");
                                                 void openInvoiceForEdit(row.invoice);
                                               }}
-                                            >
-                                              Invoice
-                                            </button>
+                                            >{t("Invoice")}</button>
                                           </div>
                                         </div>
                                       ),
                                     )
                                   ) : (
-                                    <p className="player-tool-card-empty">No transactions for this person yet.</p>
+                                    <p className="player-tool-card-empty">{t("No transactions for this person yet.")}</p>
                                   )}
                                 </div>
                               </div>
@@ -27236,8 +27074,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 <div className="player-tool-card">
                                   <div className="player-tool-card-header">
                                     <div>
-                                      <strong><ClarityPassesCredits size={16} />Passes</strong>
-                                      <span>Lesson credits held by this person</span>
+                                      <strong><ClarityPassesCredits size={16} />{t("Passes")}</strong>
+                                      <span>{t("Lesson credits held by this person")}</span>
                                     </div>
                                   </div>
                                   {/* Passes are designed but not built -- see
@@ -27245,10 +27083,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                       record to read, so this says so rather than
                                       showing an empty list that reads as "this
                                       person has none". */}
-                                  <p className="player-tool-card-empty">
-                                    Passes are not built yet. Lesson packages sold through checkout show up under
-                                    Transactions, tagged as a lesson pass.
-                                  </p>
+                                  <p className="player-tool-card-empty">{t("Passes are not built yet. Lesson packages sold through checkout show up under Transactions, tagged as a lesson pass.")}</p>
                                 </div>
                               </div>
                             ) : playerToolExpanded && playerProfileTool === "portals" ? (
@@ -27261,26 +27096,28 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                   return (
                                     <div className="player-portal-access">
                                       <div className="player-portal-access-body">
-                                        <strong>Player portal</strong>
+                                        <strong>{t("Player portal")}</strong>
                                         <span>
                                           {!notesWorkspaceClient.email
-                                            ? "Add an email address to give this player portal access."
+                                            ? t("Add an email address to give this player portal access.")
                                             : !portalPlayer
-                                              ? "No access yet. They can be given a login to see their lessons, notes and videos."
+                                              ? t("No access yet. They can be given a login to see their lessons, notes and videos.")
                                               : portalPlayer.status === "active"
-                                                ? `Active${portalPlayer.lastLoginAt ? ` · last signed in ${formatTimestampForDisplay(portalPlayer.lastLoginAt)}` : ""}`
-                                                : "Invited · waiting for them to set a password"}
+                                                ? portalPlayer.lastLoginAt
+                                                  ? t("Active · last signed in {when}", { when: formatTimestampForDisplay(portalPlayer.lastLoginAt) })
+                                                  : t("Active")
+                                                : t("Invited · waiting for them to set a password")}
                                         </span>
                                       </div>
                                       <div className="player-portal-access-actions">
-                                        <label className="player-caddy-pass-toggle" title="Issues a 30 day Clarity Caddy pass at the same time">
+                                        <label className="player-caddy-pass-toggle" title={t("Issues a 30 day Clarity Caddy pass at the same time")}>
                                           <input
                                             type="checkbox"
                                             checked={includeCaddyPass}
                                             onChange={(event) => setIncludeCaddyPass(event.target.checked)}
                                             disabled={busy || !notesWorkspaceClient.email}
                                           />
-                                          <span>Include Clarity Caddy Pass</span>
+                                          <span>{t("Include Clarity Caddy Pass")}</span>
                                         </label>
                                         <button
                                           type="button"
@@ -27288,7 +27125,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                           disabled={busy || !notesWorkspaceClient.email}
                                           onClick={() => void grantPortalAccess(notesWorkspaceClient)}
                                         >
-                                          {portalPlayer ? "Resend invite" : "Give portal access"}
+                                          {portalPlayer ? t("Resend invite") : t("Give portal access")}
                                         </button>
                                         {portalPlayer && (
                                           <button
@@ -27296,9 +27133,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                             className="outline-button"
                                             disabled={busy}
                                             onClick={() => void revokePortalAccess(portalPlayer.id, notesWorkspaceClient.id)}
-                                          >
-                                            Remove access
-                                          </button>
+                                          >{t("Remove access")}</button>
                                         )}
                                       </div>
                                     </div>
@@ -27316,23 +27151,28 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                   if (!hasPortal) return null;
                                   const status = entry?.status;
                                   const detail = !entry
-                                    ? "Checking…"
+                                    ? t("Checking…")
                                     : status?.unavailable === "unreachable"
-                                      ? "Could not read Caddy status right now."
+                                      ? t("Could not read Caddy status right now.")
                                       : status?.unavailable === "not_configured"
-                                        ? "Clarity Caddy is not connected to this deployment."
+                                        ? t("Clarity Caddy is not connected to this deployment.")
                                         : !status?.connected
-                                          ? "No Clarity Caddy account yet."
-                                          : `Account: Connected · Access: ${
-                                              status.active ? status.access : "Free"
-                                            }${status.expiresAt ? ` until ${formatTimestampForDisplay(status.expiresAt)}` : ""}`;
+                                          ? t("No Clarity Caddy account yet.")
+                                          : status.expiresAt
+                                            ? t("Account: Connected · Access: {access} until {until}", {
+                                                access: status.active ? status.access : t("Free"),
+                                                until: formatTimestampForDisplay(status.expiresAt),
+                                              })
+                                            : t("Account: Connected · Access: {access}", {
+                                                access: status.active ? status.access : t("Free"),
+                                              });
                                   return (
                                     <div className="player-caddy-card">
                                       <div className="player-caddy-card-body">
-                                        <strong>Clarity Caddy</strong>
+                                        <strong>{t("Clarity Caddy")}</strong>
                                         <span>{detail}</span>
                                         {status?.connected && status.coachCount && status.coachCount > 1 ? (
-                                          <span>Also coached by {status.coachCount - 1} other{status.coachCount - 1 === 1 ? "" : "s"}.</span>
+                                          <span>{t("Also coached by")}{" "}{status.coachCount - 1}{" "}{t("other")}{status.coachCount - 1 === 1 ? "" : "s"}.</span>
                                         ) : null}
                                       </div>
                                       <div className="player-caddy-card-actions">
@@ -27341,26 +27181,20 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                             type="button"
                                             className="outline-button"
                                             onClick={() => void refreshCaddyStatus(notesWorkspaceClient.id)}
-                                          >
-                                            Check Caddy
-                                          </button>
+                                          >{t("Check Caddy")}</button>
                                         ) : entry.deepLink ? (
                                           <a
                                             className="outline-button"
                                             href={entry.deepLink}
                                             target="_blank"
                                             rel="noreferrer noopener"
-                                          >
-                                            Open in Clarity Caddy ↗
-                                          </a>
+                                          >{t("Open in Clarity Caddy ↗")}</a>
                                         ) : (
                                           <button
                                             type="button"
                                             className="outline-button"
                                             onClick={() => void refreshCaddyStatus(notesWorkspaceClient.id)}
-                                          >
-                                            Retry
-                                          </button>
+                                          >{t("Retry")}</button>
                                         )}
                                       </div>
                                     </div>
@@ -27370,12 +27204,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 {isAdminUser && (
                                   <div className="player-portal-access">
                                     <div className="player-portal-access-body">
-                                      <strong>Danger zone</strong>
-                                      <span>
-                                        Permanently delete this player: their record, bookings, practice blocks,
-                                        videos, lesson notes and portal login. No email is sent, and this cannot be
-                                        undone.
-                                      </span>
+                                      <strong>{t("Danger zone")}</strong>
+                                      <span>{t("Permanently delete this player: their record, bookings, practice blocks, videos, lesson notes and portal login. No email is sent, and this cannot be undone.")}</span>
                                     </div>
                                     <div className="player-portal-access-actions">
                                       <button
@@ -27386,8 +27216,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                       >
                                         <Trash2 size={16} />
                                         {personDeleteBusyId === notesWorkspaceClient.id
-                                          ? "Deleting…"
-                                          : "Delete permanently"}
+                                          ? t("Deleting…")
+                                          : t("Delete permanently")}
                                       </button>
                                     </div>
                                   </div>
@@ -27395,10 +27225,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                               </div>
                             ) : playerToolExpanded && playerProfileTool === "notes" ? (
                               <div className="player-tool-body">
-                                <Suspense fallback={<Loading what="voice notes" />}>
+                                <Suspense fallback={<Loading what={t("voice notes")} />}>
                                   <ClarityVoiceTextPanel
-                                    fieldLabel="Lesson note"
-                                    placeholder="Type or dictate the coach lesson note."
+                                    fieldLabel={t("Lesson note")}
+                                    placeholder={t("Type or dictate the coach lesson note.")}
                                     onCommit={(text) => saveLessonNoteForClient(notesWorkspaceClient, text, "voice")}
                                   />
                                 </Suspense>
@@ -27409,9 +27239,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                         <div>
                                           <strong>{profileRecordTitle(notesWorkspaceClient.name, note.updatedAt || note.createdAt)}</strong>
                                           <span>
-                                            {note.title || "Lesson note"} · {note.source === "voice" ? "Voice note" : "Typed note"}
+                                            {note.title || t("Lesson note")} · {note.source === "voice" ? t("Voice note") : t("Typed note")}
                                             {note.lessonId && playerToolVideos.some((video) => video.lessonId === note.lessonId)
-                                              ? " · Linked lesson video"
+                                              ? t(" · Linked lesson video")
                                               : ""}
                                           </span>
                                         </div>
@@ -27422,13 +27252,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                           onClick={() => void deleteLessonNote(note.id)}
                                           disabled={lessonNoteBusy}
                                         >
-                                          <Trash2 size={14} />
-                                          Delete
-                                        </button>
+                                          <Trash2 size={14} />{t("Delete")}</button>
                                       </article>
                                     ))
                                   ) : (
-                                    <p className="notes-empty">No lesson notes yet.</p>
+                                    <p className="notes-empty">{t("No lesson notes yet.")}</p>
                                   )}
                                 </div>
                               </div>
@@ -27447,11 +27275,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                         className="outline-button"
                                         onClick={() => setPlayerPracticeComposer(false)}
                                       >
-                                        <ChevronLeft size={15} />
-                                        Back to practice list
-                                      </button>
+                                        <ChevronLeft size={15} />{t("Back to practice list")}</button>
                                     </div>
-                                  <Suspense fallback={<Loading what="practice" />}>
+                                  <Suspense fallback={<Loading what={t("practice")} />}>
                                     <PracticeBlockPanel
                                       // Keyed so switching player remounts rather
                                       // than showing the previous player's blocks
@@ -27467,12 +27293,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                   <div className="player-tool-card">
                                     <div className="player-tool-card-header">
                                       <div>
-                                        <strong><ClarityLessonsProgrammes size={16} />Practice</strong>
-                                        <span>
-                                          {activePlayerPracticeBlocks.length} active block
-                                          {activePlayerPracticeBlocks.length === 1 ? "" : "s"}
+                                        <strong><ClarityLessonsProgrammes size={16} />{t("Practice")}</strong>
+                                        <span>{t("{length} active block", { length: activePlayerPracticeBlocks.length })}{activePlayerPracticeBlocks.length === 1 ? "" : "s"}
                                           {playerPracticeExpiringCount
-                                            ? ` · ${playerPracticeExpiringCount} expiring next lesson`
+                                            ? t(" · {playerPracticeExpiringCount} expiring next lesson", { playerPracticeExpiringCount })
                                             : ""}
                                         </span>
                                       </div>
@@ -27480,14 +27304,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                         type="button"
                                         className="outline-button"
                                         onClick={() => setPlayerPracticeComposer(true)}
-                                      >
-                                        Assign a block
-                                      </button>
+                                      >{t("Assign a block")}</button>
                                     </div>
                                     {playerPracticeLoadState === "loading" ? (
-                                      <Loading what="practice" className="player-tool-card-empty" />
+                                      <Loading what={t("practice")} className="player-tool-card-empty" />
                                     ) : playerPracticeLoadState === "error" ? (
-                                      <p className="player-tool-card-empty">Could not load practice for this player.</p>
+                                      <p className="player-tool-card-empty">{t("Could not load practice for this player.")}</p>
                                     ) : activePlayerPracticeBlocks.length ? (
                                       activePlayerPracticeBlocks.map((block) => (
                                         <div className="player-tool-row is-practice" key={block.id}>
@@ -27523,14 +27345,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                               type="button"
                                               className="outline-button"
                                               onClick={() => setPlayerPracticeComposer(true)}
-                                            >
-                                              Open
-                                            </button>
+                                            >{t("Open")}</button>
                                           </div>
                                         </div>
                                       ))
                                     ) : (
-                                      <p className="player-tool-card-empty">Nothing set to practise yet.</p>
+                                      <p className="player-tool-card-empty">{t("Nothing set to practise yet.")}</p>
                                     )}
                                   </div>
                                 )}
@@ -27539,9 +27359,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                               <div className="player-tool-body">
                                 <div className="player-video-toolbar">
                                   <div className="player-video-toolbar-count">
-                                    <strong>
-                                      {playerVideoSummary.total} saved video
-                                      {playerVideoSummary.total === 1 ? "" : "s"}
+                                    <strong>{t("{total} saved video", { total: playerVideoSummary.total })}{playerVideoSummary.total === 1 ? "" : "s"}
                                     </strong>
                                     <span>{playerVideoSummary.detail}</span>
                                   </div>
@@ -27556,18 +27374,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                         })
                                       }
                                     >
-                                      <ClarityVideoAnalysis size={15} />
-                                      Add video
-                                    </button>
+                                      <ClarityVideoAnalysis size={15} />{t("Add video")}</button>
                                     <div
                                       className="player-video-view-toggle"
                                       role="group"
-                                      aria-label="Video layout"
+                                      aria-label={t("Video layout")}
                                     >
                                       <button
                                         type="button"
-                                        title="Ledger"
-                                        aria-label="Ledger"
+                                        title={t("Ledger")}
+                                        aria-label={t("Ledger")}
                                         aria-pressed={playerVideoView === "ledger"}
                                         className={playerVideoView === "ledger" ? "active" : ""}
                                         onClick={() => setPlayerVideoView("ledger")}
@@ -27576,8 +27392,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                       </button>
                                       <button
                                         type="button"
-                                        title="Shelf"
-                                        aria-label="Shelf"
+                                        title={t("Shelf")}
+                                        aria-label={t("Shelf")}
                                         aria-pressed={playerVideoView === "shelf"}
                                         className={playerVideoView === "shelf" ? "active" : ""}
                                         onClick={() => setPlayerVideoView("shelf")}
@@ -27595,9 +27411,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                         <div key={group.key}>
                                           <div className="player-video-shelf-group">
                                             <strong>{group.label}</strong>
-                                            <span>
-                                              {group.clips.length} clip{group.clips.length === 1 ? "" : "s"}
-                                              {group.unseen ? ` · ${group.unseen} new` : ""}
+                                            <span>{t("{length} clip", { length: group.clips.length })}{group.clips.length === 1 ? "" : "s"}
+                                              {group.unseen ? t(" · {unseen} new", { unseen: group.unseen }) : ""}
                                             </span>
                                           </div>
                                           <div className="player-video-shelf-grid">
@@ -27610,7 +27425,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                                   type="button"
                                                   className="player-video-shelf-thumb"
                                                   disabled={!clip.playable}
-                                                  title={clip.playable ? `Play ${clip.title}` : clip.title}
+                                                  title={clip.playable ? t("Play {title}", { title: clip.title }) : clip.title}
                                                   onClick={() =>
                                                     openVideoAnalysisForClient({
                                                       id: preferredVideoPlayerId(
@@ -27628,7 +27443,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                                     <ClarityVideoAnalysis size={20} />
                                                   )}
                                                   {clip.unseen ? (
-                                                    <span className="player-video-shelf-badge">New</span>
+                                                    <span className="player-video-shelf-badge">{t("New")}</span>
                                                   ) : null}
                                                   {clip.duration ? (
                                                     <span className="player-video-shelf-duration">
@@ -27640,10 +27455,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                                   <strong>{clip.title}</strong>
                                                   <span>
                                                     {clip.kind === "submission"
-                                                      ? "Player submission"
+                                                      ? t("Player submission")
                                                       : clip.kind === "recovery"
-                                                        ? "Recovery only"
-                                                        : "Local Storage"}
+                                                        ? t("Recovery only")
+                                                        : t("Local Storage")}
                                                   </span>
                                                 </div>
                                               </article>
@@ -27652,7 +27467,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                         </div>
                                       ))
                                     ) : (
-                                      <p className="notes-empty">No videos yet.</p>
+                                      <p className="notes-empty">{t("No videos yet.")}</p>
                                     )}
                                     <button
                                       type="button"
@@ -27663,9 +27478,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                           name: notesWorkspaceClient.name,
                                         })
                                       }
-                                    >
-                                      + Add from Video Analysis
-                                    </button>
+                                    >{t("+ Add from Video Analysis")}</button>
                                   </div>
                                 ) : (
                                 <div className="player-video-list">
@@ -27675,8 +27488,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                         <ClarityFilesMedia size={16} />
                                       </div>
                                       <div className="player-video-card-body">
-                                        <strong>My Library not connected</strong>
-                                        <span>Videos stay available through device cache. Connect My Library only for permanent local copies.</span>
+                                        <strong>{t("My Library not connected")}</strong>
+                                        <span>{t("Videos stay available through device cache. Connect My Library only for permanent local copies.")}</span>
                                       </div>
                                       <div className="player-video-card-actions">
                                         <button
@@ -27685,9 +27498,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                           disabled={!managedLocalLibraryStatus.supported}
                                           onClick={() => void runManagedLibraryAction("choose")}
                                         >
-                                          <ClarityFilesMedia size={14} />
-                                          Choose My Library
-                                        </button>
+                                          <ClarityFilesMedia size={14} />{t("Choose My Library")}</button>
                                       </div>
                                     </article>
                                   ) : managedLocalLibraryStatus.health !== "healthy" ? (
@@ -27697,7 +27508,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                       </div>
                                       <div className="player-video-card-body">
                                         <strong>{managedLocalLibraryStatus.message}</strong>
-                                        <span>Working from device cache. Reconnect My Library when available.</span>
+                                        <span>{t("Working from device cache. Reconnect My Library when available.")}</span>
                                       </div>
                                       <div className="player-video-card-actions">
                                         <button
@@ -27705,9 +27516,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                           className="outline-button"
                                           onClick={() => void runManagedLibraryAction("reconnect")}
                                         >
-                                          <RefreshCw size={14} />
-                                          Reconnect folder
-                                        </button>
+                                          <RefreshCw size={14} />{t("Reconnect folder")}</button>
                                       </div>
                                     </article>
                                   ) : null}
@@ -27741,10 +27550,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                           !isUploading;
                                         const sendLabel =
                                           cloudStatus === "failed"
-                                            ? "Retry upload"
+                                            ? t("Retry upload")
                                             : cloudStatus === "paused"
-                                              ? "Resume upload"
-                                              : "Retry upload";
+                                              ? t("Resume upload")
+                                              : t("Retry upload");
                                         const canPause =
                                           cloudOperational &&
                                           cloudStatus === "uploading" &&
@@ -27770,14 +27579,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                               ? "failed"
                                               : "pending";
                                         const cloudBadgeLabel = isUploading
-                                          ? "Uploading to Clarity Cloud"
+                                          ? t("Uploading to Clarity Cloud")
                                           : cloudSaved
-                                            ? "Saved in Clarity Cloud"
+                                            ? t("Saved in Clarity Cloud")
                                             : cloudStatus === "failed"
-                                              ? cloudErrorLabel || "Clarity Cloud upload failed"
+                                              ? cloudErrorLabel || t("Clarity Cloud upload failed")
                                               : !cloudOperational
                                                 ? cloudLabel
-                                                : "Waiting to upload to Clarity Cloud";
+                                                : t("Waiting to upload to Clarity Cloud");
                                         const videoTitle = profileRecordTitle(
                                           notesWorkspaceClient.name,
                                           video.updatedAt || video.createdAt,
@@ -27797,8 +27606,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                               type="button"
                                               className="player-video-thumb-button"
                                               onClick={playVideo}
-                                              title={`Play ${videoTitle}`}
-                                              aria-label={`Play ${videoTitle}`}
+                                              title={t("Play {videoTitle}", { videoTitle })}
+                                              aria-label={t("Play {videoTitle}", { videoTitle })}
                                             >
                                               {video.thumbnailDataUrl ? (
                                                 <img
@@ -27820,7 +27629,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                                 {videoTitle}
                                               </strong>
                                               {linkedLessonVideoIds.has(video.savedVideoId) ? (
-                                                <span>Linked lesson note</span>
+                                                <span>{t("Linked lesson note")}</span>
                                               ) : null}
                                             </div>
                                             <div className="player-video-card-actions">
@@ -27846,8 +27655,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                                   className="icon-button"
                                                   aria-haspopup="menu"
                                                   aria-expanded={menuOpen}
-                                                  aria-label="Video options"
-                                                  title="Video options"
+                                                  aria-label={t("Video options")}
+                                                  title={t("Video options")}
                                                   onClick={() =>
                                                     setOpenSavedVideoMenuId(menuOpen ? null : video.savedVideoId)
                                                   }
@@ -27859,7 +27668,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                                     <button
                                                       type="button"
                                                       className="player-video-menu-scrim"
-                                                      aria-label="Close video options"
+                                                      aria-label={t("Close video options")}
                                                       onClick={closeMenu}
                                                     />
                                                     <div className="player-video-menu-panel" role="menu">
@@ -27871,9 +27680,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                                           playVideo();
                                                         }}
                                                       >
-                                                        <Play size={14} />
-                                                        Play
-                                                      </button>
+                                                        <Play size={14} />{t("Play")}</button>
                                                       {cloudOperational && canRetryCloud ? (
                                                         <button
                                                           type="button"
@@ -27904,9 +27711,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                                             );
                                                           }}
                                                         >
-                                                          <Send size={14} />
-                                                          Send to player
-                                                        </button>
+                                                          <Send size={14} />{t("Send to player")}</button>
                                                       ) : null}
                                                       {canPause ? (
                                                         <button
@@ -27917,9 +27722,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                                             void pauseSavedVideoTransfer(video);
                                                           }}
                                                         >
-                                                          <Pause size={14} />
-                                                          Pause upload
-                                                        </button>
+                                                          <Pause size={14} />{t("Pause upload")}</button>
                                                       ) : null}
                                                       {canCancel ? (
                                                         <button
@@ -27930,9 +27733,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                                             void cancelSavedVideoTransfer(video);
                                                           }}
                                                         >
-                                                          <X size={14} />
-                                                          Cancel upload
-                                                        </button>
+                                                          <X size={14} />{t("Cancel upload")}</button>
                                                       ) : null}
                                                       {canRemoveTransfer ? (
                                                         <button
@@ -27943,9 +27744,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                                             void removeSavedVideoTransfer(video);
                                                           }}
                                                         >
-                                                          <X size={14} />
-                                                          Clear failed upload
-                                                        </button>
+                                                          <X size={14} />{t("Clear failed upload")}</button>
                                                       ) : null}
                                                       {hasDeviceCopy && video.local.managed?.status !== "healthy" ? (
                                                         <button
@@ -27956,9 +27755,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                                             void showSavedVideoInFinder(video);
                                                           }}
                                                         >
-                                                          <ClarityFilesMedia size={14} />
-                                                          Keep a copy in My Library
-                                                        </button>
+                                                          <ClarityFilesMedia size={14} />{t("Keep a copy in My Library")}</button>
                                                       ) : null}
                                                       {hasDeviceCopy ? (
                                                         <button
@@ -27969,9 +27766,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                                             void revealSavedVideoFile(video);
                                                           }}
                                                         >
-                                                          <ExternalLink size={14} />
-                                                          Open stored file
-                                                        </button>
+                                                          <ExternalLink size={14} />{t("Open stored file")}</button>
                                                       ) : null}
                                                       {hasDeviceCopy ? (
                                                         <button
@@ -27982,9 +27777,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                                             void verifySavedVideoInLibrary(video);
                                                           }}
                                                         >
-                                                          <Check size={14} />
-                                                          Verify file
-                                                        </button>
+                                                          <Check size={14} />{t("Verify file")}</button>
                                                       ) : null}
                                                       {canRemoveFromDevice ? (
                                                         <button
@@ -27995,9 +27788,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                                             void removeSavedVideoFromDevice(video);
                                                           }}
                                                         >
-                                                          <X size={14} />
-                                                          Free up space on this device
-                                                        </button>
+                                                          <X size={14} />{t("Free up space on this device")}</button>
                                                       ) : null}
                                                       <button
                                                         type="button"
@@ -28007,9 +27798,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                                           void renameSavedVideo(video);
                                                         }}
                                                       >
-                                                        <Pencil size={14} />
-                                                        Rename
-                                                      </button>
+                                                        <Pencil size={14} />{t("Rename")}</button>
                                                       <button
                                                         type="button"
                                                         role="menuitem"
@@ -28019,9 +27808,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                                           void deleteSavedVideo(video);
                                                         }}
                                                       >
-                                                        <Trash2 size={14} />
-                                                        Delete
-                                                      </button>
+                                                        <Trash2 size={14} />{t("Delete")}</button>
                                                     </div>
                                                   </>
                                                 ) : null}
@@ -28056,8 +27843,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                               type="button"
                                               className="player-video-thumb-button"
                                               disabled={isDownloading}
-                                              title={isDownloading ? "Downloading from Clarity Cloud" : "Play video"}
-                                              aria-label={isDownloading ? "Downloading from Clarity Cloud" : "Play video"}
+                                              title={isDownloading ? t("Downloading from Clarity Cloud") : t("Play video")}
+                                              aria-label={isDownloading ? t("Downloading from Clarity Cloud") : t("Play video")}
                                               onClick={() => void openPlayerSubmissionOrCloudVideo(transfer, notesWorkspaceClient.name)}
                                             >
                                               <div className="player-video-thumb is-empty">
@@ -28073,8 +27860,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                               </strong>
                                               {isSubmission && (
                                                 <span className="player-video-submission-meta">
-                                                  {isUnseen ? "New · " : ""}
-                                                  Sent by {transfer.submittedByName || notesWorkspaceClient.name}
+                                                  {isUnseen ? t("New · ") : ""}{t("Sent by")}{" "}{transfer.submittedByName || notesWorkspaceClient.name}
                                                 </span>
                                               )}
                                               {isSubmission && transfer.playerMessage && (
@@ -28083,9 +27869,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                                 </span>
                                               )}
                                               {isReturn && (
-                                                <span className="player-video-submission-meta">
-                                                  Sent to {notesWorkspaceClient.name} ·{" "}
-                                                  {transfer.playerSeenAt ? "opened" : "not opened yet"}
+                                                <span className="player-video-submission-meta">{t("Sent to {name} ·", { name: notesWorkspaceClient.name })}{" "}{transfer.playerSeenAt ? "opened" : "not opened yet"}
                                                 </span>
                                               )}
                                               {isReturn && transfer.coachMessage && (
@@ -28097,8 +27881,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                             <div className="player-video-card-actions">
                                               <span
                                                 className="player-video-cloud-badge is-saved"
-                                                title="Saved in Clarity Cloud"
-                                                aria-label="Saved in Clarity Cloud"
+                                                title={t("Saved in Clarity Cloud")}
+                                                aria-label={t("Saved in Clarity Cloud")}
                                                 role="img"
                                               >
                                                 <Cloud size={16} />
@@ -28113,10 +27897,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                             <Archive size={16} />
                                           </div>
                                           <div className="player-video-card-body">
-                                            <strong>Recovery copy - {record.video.title || "Video"}</strong>
-                                            <span>
-                                              Safe to remove after saving · {formatVideoDurationLabel(record.video.duration)} · Move to Saved Videos to keep it in the durable library
-                                            </span>
+                                            <strong>{t("Recovery copy -")}{" "}{record.video.title || t("Video")}</strong>
+                                            <span>{t("Safe to remove after saving · {duration} · Move to Saved Videos to keep it in the durable library", { duration: formatVideoDurationLabel(record.video.duration) })}</span>
                                           </div>
                                           <div className="player-video-card-actions">
                                             <button
@@ -28124,15 +27906,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                               className="outline-button"
                                               onClick={() => void migrateLegacyVideo(record)}
                                             >
-                                              <Archive size={14} />
-                                              Move to Saved Videos
-                                            </button>
+                                              <Archive size={14} />{t("Move to Saved Videos")}</button>
                                           </div>
                                         </article>
                                       ))}
                                     </>
                                   ) : (
-                                    <p className="notes-empty">No videos yet.</p>
+                                    <p className="notes-empty">{t("No videos yet.")}</p>
                                   )}
                                 </div>
                                 )}
@@ -28147,9 +27927,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 {!playerProfilesDataReady ? (
                   <div className="player-profiles-progress" role="status" aria-live="polite">
                     <span className="player-profiles-progress-dot" aria-hidden="true" />
-                    <span>
-                      Updating player activity
-                      <small>
+                    <span>{t("Updating player activity")}<small>
                         {[
                           !playerProfilesSourcesReady.people ? "clients" : "",
                           !playerProfilesSourcesReady.notes ? "lesson notes" : "",
@@ -28172,28 +27950,28 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             className="player-add-overlay"
             role="dialog"
             aria-modal="true"
-            aria-label={playerAddForVideoSave ? "Save video to a player" : "Add player profile"}
+            aria-label={playerAddForVideoSave ? t("Save video to a player") : t("Add player profile")}
             onClick={() => closePlayerAddDialog()}
           >
             <div className="player-add-dialog" onClick={(event) => event.stopPropagation()}>
               <div className="player-add-header">
-                <h3>{playerAddForVideoSave ? "Who is this video for?" : "Add player profile"}</h3>
+                <h3>{playerAddForVideoSave ? t("Who is this video for?") : t("Add player profile")}</h3>
                 <button
                   type="button"
                   className="icon-button"
                   onClick={() => closePlayerAddDialog()}
-                  aria-label="Close"
+                  aria-label={t("Close")}
                 >
                   <X size={16} />
                 </button>
               </div>
 
               <div className="player-add-section">
-                <label>{playerAddForVideoSave ? "Pick a player" : "Add an existing client"}</label>
+                <label>{playerAddForVideoSave ? t("Pick a player") : t("Add an existing client")}</label>
                 <input
                   value={playerAddSearch}
                   onChange={(event) => setPlayerAddSearch(event.target.value)}
-                  placeholder={playerAddForVideoSave ? "Search players and clients" : "Search clients"}
+                  placeholder={playerAddForVideoSave ? t("Search players and clients") : t("Search clients")}
                 />
                 <div className="player-add-results">
                   {(playerAddSearch.trim().length > 0
@@ -28227,21 +28005,21 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   onChange={(event) =>
                     setPlayerAddNew((current) => ({ ...current, name: event.target.value }))
                   }
-                  placeholder="Name"
+                  placeholder={t("Name")}
                 />
                 <input
                   value={playerAddNew.email}
                   onChange={(event) =>
                     setPlayerAddNew((current) => ({ ...current, email: event.target.value }))
                   }
-                  placeholder="Email"
+                  placeholder={t("Email")}
                 />
                 <input
                   value={playerAddNew.phone}
                   onChange={(event) =>
                     setPlayerAddNew((current) => ({ ...current, phone: event.target.value }))
                   }
-                  placeholder="Phone"
+                  placeholder={t("Phone")}
                 />
                 <button
                   type="button"
@@ -28250,10 +28028,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   onClick={createNewPlayer}
                 >
                   {playerAddSaving
-                    ? "Adding…"
+                    ? t("Adding…")
                     : playerAddForVideoSave
-                      ? "Create player and save"
-                      : "Add new player"}
+                      ? t("Create player and save")
+                      : t("Add new player")}
                 </button>
               </div>
             </div>
@@ -28262,7 +28040,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
         {!isEmbedMode && adminWorkspaceReady && activeView === "video" && (
           <section className="module-page video-analysis-page-host">
-            <Suspense fallback={<Loading size="panel" what="video analysis" />}>
+            <Suspense fallback={<Loading size="panel" what={t("video analysis")} />}>
               <VideoAnalysisPage
                 playerId={videoContext?.playerId}
                 playerName={videoContext?.playerName}
@@ -28294,7 +28072,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         )}
 
         {!isEmbedMode && adminWorkspaceReady && activeView === "sell" && (
-          <Suspense fallback={<Loading size="panel" what="the till" />}>
+          <Suspense fallback={<Loading size="panel" what={t("the till")} />}>
             <SellScreen
               currency={invoiceSettings.currency}
               taxName={invoiceSettings.taxName}
@@ -28311,7 +28089,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               onOpenClientProfile={(clientId) => {
                 const client = clients.find((entry) => entry.id === clientId);
                 if (client) openClientProfile(client);
-                else setToast({ message: "That client's profile could not be found." });
+                else setToast({ message: t("That client's profile could not be found.") });
               }}
               onClientEmailSaved={handleClientEmailSaved}
             />
@@ -28329,7 +28107,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 sub-nav is not: one section was asked for, so a row of tabs
                 offers a journey nobody started. */}
             {workspaceOverlay?.kind !== "billing" && (
-            <div className="settings-tabs billing-tabs" role="tablist" aria-label="Billing sections">
+            <div className="settings-tabs billing-tabs" role="tablist" aria-label={t("Billing sections")}>
               <button
                 className={billingSection === "dashboard" ? "active" : ""}
                 onClick={() => setBillingSection("dashboard")}
@@ -28337,9 +28115,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 aria-selected={billingSection === "dashboard"}
                 type="button"
               >
-                <ClarityDashboardHome size={16} />
-                Dashboard
-              </button>
+                <ClarityDashboardHome size={16} />{t("Dashboard")}</button>
               <button
                 className={billingSection === "new-invoice" ? "active" : ""}
                 onClick={startNewInvoice}
@@ -28347,9 +28123,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 aria-selected={billingSection === "new-invoice"}
                 type="button"
               >
-                <ClarityBookingPages size={16} />
-                New Invoice
-              </button>
+                <ClarityBookingPages size={16} />{t("New Invoice")}</button>
               <button
                 className={billingSection === "invoices" ? "active" : ""}
                 onClick={() => {
@@ -28361,9 +28135,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 aria-selected={billingSection === "invoices"}
                 type="button"
               >
-                <ClarityInvoices size={16} />
-                Invoices
-              </button>
+                <ClarityInvoices size={16} />{t("Invoices")}</button>
               <button
                 className={billingSection === "expenses" ? "active" : ""}
                 onClick={() => {
@@ -28374,9 +28146,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 aria-selected={billingSection === "expenses"}
                 type="button"
               >
-                <ClarityStore size={16} />
-                Expenses
-              </button>
+                <ClarityStore size={16} />{t("Expenses")}</button>
               <button
                 className={billingSection === "products" ? "active" : ""}
                 onClick={() => {
@@ -28387,9 +28157,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 aria-selected={billingSection === "products"}
                 type="button"
               >
-                <ClarityProducts size={16} />
-                Products
-              </button>
+                <ClarityProducts size={16} />{t("Products")}</button>
               <button
                 className={billingSection === "coupons" ? "active" : ""}
                 onClick={() => {
@@ -28400,9 +28168,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 aria-selected={billingSection === "coupons"}
                 type="button"
               >
-                <ClarityPassesCredits size={16} />
-                Coupons
-              </button>
+                <ClarityPassesCredits size={16} />{t("Coupons")}</button>
               <button
                 className={billingSection === "transactions" ? "active" : ""}
                 onClick={() => {
@@ -28414,9 +28180,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 aria-selected={billingSection === "transactions"}
                 type="button"
               >
-                <ClarityPayments size={16} />
-                Transaction History
-              </button>
+                <ClarityPayments size={16} />{t("Transaction History")}</button>
               <button
                 className={billingSection === "passes" ? "active" : ""}
                 onClick={() => {
@@ -28428,9 +28192,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 aria-selected={billingSection === "passes"}
                 type="button"
               >
-                <ClarityPassesCredits size={16} />
-                Passes
-                {/* The count is what is waiting in the inbox below the list. An
+                <ClarityPassesCredits size={16} />{t("Passes")}{/* The count is what is waiting in the inbox below the list. An
                     inbox you have to open to discover is empty is one nobody
                     opens. */}
                 {passInboxCount > 0 && <span className="tab-count">{passInboxCount}</span>}
@@ -28442,9 +28204,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 aria-selected={billingSection === "reports"}
                 type="button"
               >
-                <ClarityReports size={16} />
-                Reports
-              </button>
+                <ClarityReports size={16} />{t("Reports")}</button>
               <button
                 className={billingSection === "settings" ? "active" : ""}
                 onClick={() => setBillingSection("settings")}
@@ -28452,9 +28212,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 aria-selected={billingSection === "settings"}
                 type="button"
               >
-                <ClaritySettings size={16} />
-                Settings
-              </button>
+                <ClaritySettings size={16} />{t("Settings")}</button>
             </div>
             )}
 
@@ -28464,24 +28222,19 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   <article className={`data-card unpaid-banner unpaid-banner-level-${invoiceSettings.unpaidLoudness}`}>
                     <AlertTriangle size={invoiceSettings.unpaidLoudness === 3 ? 28 : 22} />
                     <div>
-                      <strong>
-                        {overdueInvoiceRecords.length} unpaid invoice{overdueInvoiceRecords.length === 1 ? "" : "s"} overdue
-                        {invoiceSettings.unpaidLoudness === 3 ? " - follow up now" : ""}
+                      <strong>{t("{length} unpaid invoice", { length: overdueInvoiceRecords.length })}{overdueInvoiceRecords.length === 1 ? "" : "s"}{" "}{t("overdue")}{invoiceSettings.unpaidLoudness === 3 ? t(" - follow up now") : ""}
                       </strong>
-                      <span>
-                        {formatMoney(overdueTotalOutstanding, invoiceSettings.currency)} outstanding - oldest is {overdueOldestDays} day
-                        {overdueOldestDays === 1 ? "" : "s"} overdue
-                      </span>
+                      <span>{t("{overdueTotalOutstanding} outstanding - oldest is {overdueOldestDays} day", { overdueTotalOutstanding: formatMoney(overdueTotalOutstanding, invoiceSettings.currency), overdueOldestDays })}{overdueOldestDays === 1 ? "" : "s"}{" "}{t("overdue")}</span>
                     </div>
                   </article>
                 )}
                 <article className="data-card revenue-card">
                   <div className="data-card-header">
                     <div>
-                      <span>Revenue</span>
+                      <span>{t("Revenue")}</span>
                       <h2>{formatMoney(revenueReport?.total ?? 0, revenueReport?.currency ?? invoiceSettings.currency)}</h2>
                     </div>
-                    <div className="revenue-period-toggle" role="tablist" aria-label="Revenue period">
+                    <div className="revenue-period-toggle" role="tablist" aria-label={t("Revenue period")}>
                       {(["week", "month", "year"] as const).map((period) => (
                         <button
                           key={period}
@@ -28491,13 +28244,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           aria-selected={revenuePeriod === period}
                           type="button"
                         >
-                          {period === "week" ? "Weekly" : period === "month" ? "Monthly" : "Yearly"}
+                          {period === "week" ? t("Weekly") : period === "month" ? t("Monthly") : t("Yearly")}
                         </button>
                       ))}
                     </div>
                   </div>
                   {revenueLoadState === "loading" && !revenueReport ? (
-                    <Loading what="revenue" />
+                    <Loading what={t("revenue")} />
                   ) : revenueReport ? (
                     <>
                       <div className="revenue-chart" aria-hidden="true">
@@ -28513,36 +28266,36 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       </div>
                       <p className="revenue-comparison">
                         {revenueReport.previousYearTotal === null
-                          ? "No data from the same period last year yet."
+                          ? t("No data from the same period last year yet.")
                           : revenueYoyDeltaPct === null
-                            ? `Same period last year: ${formatMoney(revenueReport.previousYearTotal, revenueReport.currency)}`
-                            : `${revenueYoyDeltaPct >= 0 ? "Up" : "Down"} ${Math.abs(revenueYoyDeltaPct)}% vs. same period last year (${formatMoney(revenueReport.previousYearTotal, revenueReport.currency)})`}
+                            ? t("Same period last year: {previousYearTotal}", { previousYearTotal: formatMoney(revenueReport.previousYearTotal, revenueReport.currency) })
+                            : revenueYoyDeltaPct >= 0
+                              ? t("Up {pct}% vs. same period last year ({total})", { pct: Math.abs(revenueYoyDeltaPct), total: formatMoney(revenueReport.previousYearTotal, revenueReport.currency) })
+                              : t("Down {pct}% vs. same period last year ({total})", { pct: Math.abs(revenueYoyDeltaPct), total: formatMoney(revenueReport.previousYearTotal, revenueReport.currency) })}
                       </p>
                     </>
                   ) : (
-                    <p>No revenue yet. Issue an invoice to see it here.</p>
+                    <p>{t("No revenue yet. Issue an invoice to see it here.")}</p>
                   )}
                 </article>
                 <div className="billing-dashboard-grid">
                   <article className="data-card">
                     <div className="data-card-header">
                       <div>
-                        <span>Invoices</span>
-                        <h2>Draft workspace</h2>
+                        <span>{t("Invoices")}</span>
+                        <h2>{t("Draft workspace")}</h2>
                       </div>
                       <ClarityBookingPages size={24} />
                     </div>
-                    <p>Manual invoice entry is ready, with lesson type, package, product, and completed-booking line sources.</p>
+                    <p>{t("Manual invoice entry is ready, with lesson type, package, product, and completed-booking line sources.")}</p>
                     <button className="primary-button" onClick={startNewInvoice} type="button">
-                      <Plus size={16} />
-                      New Invoice
-                    </button>
+                      <Plus size={16} />{t("New Invoice")}</button>
                   </article>
                   <article className="data-card ready-to-pull-card">
                     <div className="data-card-header">
                       <div>
-                        <span>Completed Bookings</span>
-                        <h2>Ready to pull</h2>
+                        <span>{t("Completed Bookings")}</span>
+                        <h2>{t("Ready to pull")}</h2>
                       </div>
                       <ClarityCalendar size={24} />
                     </div>
@@ -28550,31 +28303,25 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       {pullRangeEditing ? (
                         <>
                           <label className="settings-field">
-                            <span>From</span>
+                            <span>{t("From")}</span>
                             <input type="date" value={pullRangeFrom} onChange={(event) => setPullRangeFrom(event.target.value)} />
                           </label>
                           <label className="settings-field">
-                            <span>To</span>
+                            <span>{t("To")}</span>
                             <input type="date" value={pullRangeTo} onChange={(event) => setPullRangeTo(event.target.value)} />
                           </label>
                           <div className="pull-range-actions">
-                            <button className="invoice-inline-edit" onClick={resetPullRange} type="button">
-                              Reset to auto
-                            </button>
-                            <button className="invoice-inline-edit" onClick={() => setPullRangeEditing(false)} type="button">
-                              Done
-                            </button>
+                            <button className="invoice-inline-edit" onClick={resetPullRange} type="button">{t("Reset to auto")}</button>
+                            <button className="invoice-inline-edit" onClick={() => setPullRangeEditing(false)} type="button">{t("Done")}</button>
                           </div>
                         </>
                       ) : (
                         <div className="pull-range-summary">
                           <span>
-                            {effectivePullFrom ? formatDateForDisplay(effectivePullFrom) : "Earliest"} → {formatDateForDisplay(effectivePullTo)}
+                            {effectivePullFrom ? formatDateForDisplay(effectivePullFrom) : t("Earliest")} → {formatDateForDisplay(effectivePullTo)}
                           </span>
-                          <button className="invoice-inline-edit" onClick={openPullRangeEdit} type="button" aria-label="Edit pull range">
-                            <Pencil size={13} />
-                            Edit
-                          </button>
+                          <button className="invoice-inline-edit" onClick={openPullRangeEdit} type="button" aria-label={t("Edit pull range")}>
+                            <Pencil size={13} />{t("Edit")}</button>
                         </div>
                       )}
                     </div>
@@ -28601,7 +28348,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                               <span>
                                 <strong>{item.client || item.title}</strong>
                                 <em>
-                                  {service?.name ?? "Lesson"} - {days[item.day].label}, {formatTime(item.start)}
+                                  {service?.name ?? t("Lesson")} - {days[item.day].label}, {formatTime(item.start)}
                                 </em>
                               </span>
                               {alreadyInvoiced ? (
@@ -28612,15 +28359,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 <em
                                   title={
                                     invoiceLink?.invoiceNumber
-                                      ? `Already on invoice ${invoiceLink.invoiceNumber}`
-                                      : "Already on an invoice"
+                                      ? t("Already on invoice {invoiceNumber}", { invoiceNumber: invoiceLink.invoiceNumber })
+                                      : t("Already on an invoice")
                                   }
                                 >
-                                  {invoiceLink?.invoiceNumber ? `Invoiced · ${invoiceLink.invoiceNumber}` : "Already invoiced"}
+                                  {invoiceLink?.invoiceNumber ? t("Invoiced · {invoiceNumber}", { invoiceNumber: invoiceLink.invoiceNumber }) : t("Already invoiced")}
                                 </em>
                               ) : (
                                 <>
-                                  {posPayment && <em className="pull-paid-flag">Paid at POS</em>}
+                                  {posPayment && <em className="pull-paid-flag">{t("Paid at POS")}</em>}
                                   <Plus size={16} />
                                 </>
                               )}
@@ -28628,32 +28375,31 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           );
                         })
                       ) : pullFilteredCompletedAppointments.length ? (
-                        <p>No completed bookings in this date range.</p>
+                        <p>{t("No completed bookings in this date range.")}</p>
                       ) : completedAppointments.length ? (
                         <p>
                           {bookingPullFilter === "paid"
-                            ? "No completed bookings have been paid yet."
-                            : "All completed bookings have already been settled."}
+                            ? t("No completed bookings have been paid yet.")
+                            : t("All completed bookings have already been settled.")}
                         </p>
                       ) : (
-                        <p>No completed bookings yet. Mark a lesson completed from the appointment details panel.</p>
+                        <p>{t("No completed bookings yet. Mark a lesson completed from the appointment details panel.")}</p>
                       )}
                     </div>
                     {pullableCompletedAppointments.length > 6 && (
                       <p className="ready-to-pull-overflow">
-                        +{pullableCompletedAppointments.length - 6} more in this range - open New Invoice to see the rest.
-                      </p>
+                        +{pullableCompletedAppointments.length - 6}{" "}{t("more in this range - open New Invoice to see the rest.")}</p>
                     )}
                   </article>
                   <article className="data-card">
                     <div className="data-card-header">
                       <div>
-                        <span>Products & Services</span>
-                        <h2>{catalogItems.length} items</h2>
+                        <span>{t("Products & Services")}</span>
+                        <h2>{t("{length} items", { length: catalogItems.length })}</h2>
                       </div>
                       <ClarityProducts size={24} />
                     </div>
-                    <p>These live in Billing and do not affect the public booking calendar.</p>
+                    <p>{t("These live in Billing and do not affect the public booking calendar.")}</p>
                     <button
                       className="outline-button"
                       onClick={() => {
@@ -28661,35 +28407,31 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         void fetchBillingProducts();
                       }}
                       type="button"
-                    >
-                      Manage Products
-                    </button>
+                    >{t("Manage Products")}</button>
                   </article>
                 </div>
                 <article className="data-card recent-invoices-card">
                   <div className="data-card-header">
                     <div>
-                      <span>Invoices</span>
-                      <h2>
-                        Recent invoices
-                        {overdueInvoiceRecords.length > 0 && invoiceSettings.unpaidLoudness === 1 && (
-                          <span className="unpaid-count-badge">{overdueInvoiceRecords.length} unpaid</span>
+                      <span>{t("Invoices")}</span>
+                      <h2>{t("Recent invoices")}{overdueInvoiceRecords.length > 0 && invoiceSettings.unpaidLoudness === 1 && (
+                          <span className="unpaid-count-badge">{t("{length} unpaid", { length: overdueInvoiceRecords.length })}</span>
                         )}
                       </h2>
                     </div>
                     <ClarityInvoices size={24} />
                   </div>
                   {billingDataLoadState === "loading" && !recentInvoices.length ? (
-                    <Loading what="invoices" />
+                    <Loading what={t("invoices")} />
                   ) : recentInvoices.length ? (
                     <table className="recent-invoices-table">
                       <thead>
                         <tr>
-                          <th>Invoice</th>
-                          <th>Customer</th>
-                          <th>Date</th>
-                          <th>Amount</th>
-                          <th>Status</th>
+                          <th>{t("Invoice")}</th>
+                          <th>{t("Customer")}</th>
+                          <th>{t("Date")}</th>
+                          <th>{t("Amount")}</th>
+                          <th>{t("Status")}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -28700,7 +28442,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             style={{ cursor: "pointer" }}
                             role="button"
                             tabIndex={0}
-                            title={invoiceRecord.status === "draft" ? "Open draft to edit" : "Open invoice to send or download"}
+                            title={invoiceRecord.status === "draft" ? t("Open draft to edit") : t("Open invoice to send or download")}
                             onClick={() => openInvoiceForEdit(invoiceRecord)}
                             onKeyDown={(event) => {
                               if (event.key === "Enter" || event.key === " ") {
@@ -28710,7 +28452,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             }}
                           >
                             <td>{invoiceRecord.invoiceNumber}</td>
-                            <td>{invoiceRecord.customerName || <em className="muted">No customer yet</em>}</td>
+                            <td>{invoiceRecord.customerName || <em className="muted">{t("No customer yet")}</em>}</td>
                             <td>{invoiceRecord.issueDate}</td>
                             <td>{formatMoney(invoiceRecord.total, invoiceRecord.currency)}</td>
                             <td>
@@ -28722,8 +28464,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 {invoiceRecord.status === "sent" && invoiceRecord.sentAt && <Send size={12} />}
                                 {invoiceRecord.status === "sent"
                                   ? invoiceRecord.sentAt
-                                    ? "Sent"
-                                    : "Published"
+                                    ? t("Sent")
+                                    : t("Published")
                                   : invoiceRecord.status.charAt(0).toUpperCase() + invoiceRecord.status.slice(1)}
                               </span>
                             </td>
@@ -28732,7 +28474,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       </tbody>
                     </table>
                   ) : (
-                    <p>No invoices yet. Issue your first invoice to see it here.</p>
+                    <p>{t("No invoices yet. Issue your first invoice to see it here.")}</p>
                   )}
                 </article>
               </div>
@@ -28743,36 +28485,32 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 <article className="data-card recent-invoices-card">
                   <div className="data-card-header">
                     <div>
-                      <span>Invoices</span>
-                      <h2>All invoices</h2>
+                      <span>{t("Invoices")}</span>
+                      <h2>{t("All invoices")}</h2>
                     </div>
                     <input
                       type="search"
                       className="invoice-search-input w-name"
-                      placeholder="Search number, customer or status…"
+                      placeholder={t("Search number, customer or status…")}
                       value={invoiceSearch}
                       onChange={(event) => setInvoiceSearch(event.target.value)}
-                      aria-label="Search invoices"
+                      aria-label={t("Search invoices")}
                     />
                   </div>
                   {allInvoicesLoadState === "loading" && !allInvoices.length ? (
-                    <Loading what="invoices" />
+                    <Loading what={t("invoices")} />
                   ) : allInvoicesLoadState === "error" ? (
-                    <p>
-                      Could not load invoices.{" "}
-                      <button className="outline-button" type="button" onClick={() => void fetchAllInvoices()}>
-                        Try again
-                      </button>
+                    <p>{t("Could not load invoices.")}{" "}<button className="outline-button" type="button" onClick={() => void fetchAllInvoices()}>{t("Try again")}</button>
                     </p>
                   ) : filteredInvoices.length ? (
                     <table className="recent-invoices-table">
                       <thead>
                         <tr>
-                          <th>Invoice</th>
-                          <th>Customer</th>
-                          <th>Date</th>
-                          <th>Amount</th>
-                          <th>Status</th>
+                          <th>{t("Invoice")}</th>
+                          <th>{t("Customer")}</th>
+                          <th>{t("Date")}</th>
+                          <th>{t("Amount")}</th>
+                          <th>{t("Status")}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -28783,7 +28521,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             style={{ cursor: "pointer" }}
                             role="button"
                             tabIndex={0}
-                            title={invoiceRecord.status === "draft" ? "Open draft to edit" : "Open invoice to send or download"}
+                            title={invoiceRecord.status === "draft" ? t("Open draft to edit") : t("Open invoice to send or download")}
                             onClick={() => openInvoiceForEdit(invoiceRecord)}
                             onKeyDown={(event) => {
                               if (event.key === "Enter" || event.key === " ") {
@@ -28793,7 +28531,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             }}
                           >
                             <td>{invoiceRecord.invoiceNumber}</td>
-                            <td>{invoiceRecord.customerName || <em className="muted">No customer yet</em>}</td>
+                            <td>{invoiceRecord.customerName || <em className="muted">{t("No customer yet")}</em>}</td>
                             <td>{invoiceRecord.issueDate}</td>
                             <td>{formatMoney(invoiceRecord.total, invoiceRecord.currency)}</td>
                             <td>
@@ -28805,8 +28543,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 {invoiceRecord.status === "sent" && invoiceRecord.sentAt && <Send size={12} />}
                                 {invoiceRecord.status === "sent"
                                   ? invoiceRecord.sentAt
-                                    ? "Sent"
-                                    : "Published"
+                                    ? t("Sent")
+                                    : t("Published")
                                   : invoiceRecord.status.charAt(0).toUpperCase() + invoiceRecord.status.slice(1)}
                               </span>
                             </td>
@@ -28815,36 +28553,28 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       </tbody>
                     </table>
                   ) : allInvoices.length ? (
-                    <p>No invoices match "{invoiceSearch}".</p>
+                    <p>{t("No invoices match \"{invoiceSearch}\".", { invoiceSearch })}</p>
                   ) : (
-                    <p>No invoices yet. Issue your first invoice to see it here.</p>
+                    <p>{t("No invoices yet. Issue your first invoice to see it here.")}</p>
                   )}
                 </article>
                 <details className="data-card recent-invoices-card reconcile-card">
                   <summary className="data-card-header reconcile-summary">
                     <div>
-                      <span>Bank payments</span>
-                      <h2>
-                        Reconcile from your bank
-                        {reconcileCandidates.length ? (
+                      <span>{t("Bank payments")}</span>
+                      <h2>{t("Reconcile from your bank")}{reconcileCandidates.length ? (
                           <span className="unpaid-count-badge">{reconcileCandidates.length}</span>
                         ) : null}
                       </h2>
                     </div>
                   </summary>
                   <div className="reconcile-actions-row">
-                    <button className="outline-button" type="button" onClick={() => void autoReconcileAll()}>
-                      Auto-match
-                    </button>
+                    <button className="outline-button" type="button" onClick={() => void autoReconcileAll()}>{t("Auto-match")}</button>
                   </div>
-                  <p className="field-help">
-                    Money-in from your bank, matched to open invoices (by amount and the invoice number in the payment
-                    reference). Confirm a match to mark the invoice paid — this stays in Clarity and never changes
-                    anything in Stripe.
-                  </p>
+                  <p className="field-help">{t("Money-in from your bank, matched to open invoices (by amount and the invoice number in the payment reference). Confirm a match to mark the invoice paid — this stays in Clarity and never changes anything in Stripe.")}</p>
                   {reconcileTypeOptions.length > 1 && (
-                    <div className="reconcile-type-filter" role="group" aria-label="Filter by transaction type">
-                      <span className="field-help">Show:</span>
+                    <div className="reconcile-type-filter" role="group" aria-label={t("Filter by transaction type")}>
+                      <span className="field-help">{t("Show:")}</span>
                       {reconcileTypeOptions.map((label) => {
                         const shown = !reconcileHiddenTypes.has(label);
                         return (
@@ -28862,23 +28592,19 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     </div>
                   )}
                   {reconcileLoadState === "loading" && !reconcileCandidates.length ? (
-                    <Loading what="bank payments" />
+                    <Loading what={t("bank payments")} />
                   ) : reconcileLoadState === "error" ? (
-                    <p>
-                      Couldn't load bank payments.{" "}
-                      <button className="outline-button" type="button" onClick={() => void fetchReconcileCandidates()}>
-                        Try again
-                      </button>
+                    <p>{t("Couldn't load bank payments.")}{" "}<button className="outline-button" type="button" onClick={() => void fetchReconcileCandidates()}>{t("Try again")}</button>
                     </p>
                   ) : visibleReconcileCandidates.length ? (
                     <table className="recent-invoices-table">
                       <thead>
                         <tr>
-                          <th>Date</th>
-                          <th>Payment</th>
-                          <th>Amount</th>
-                          <th>Match</th>
-                          <th aria-label="Actions" />
+                          <th>{t("Date")}</th>
+                          <th>{t("Payment")}</th>
+                          <th>{t("Amount")}</th>
+                          <th>{t("Match")}</th>
+                          <th aria-label={t("Actions")} />
                         </tr>
                       </thead>
                       <tbody>
@@ -28893,7 +28619,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                   <span className="field-help"> · {reconcileTypeLabel(candidate.type)}</span>
                                 ) : null}
                                 {candidate.reference ? (
-                                  <span className="field-help"> · ref: {candidate.reference}</span>
+                                  <span className="field-help">{" "}{t("· ref: {reference}", { reference: candidate.reference })}</span>
                                 ) : null}
                               </td>
                               <td>{formatMoney(candidate.amount, "NZD")}</td>
@@ -28902,11 +28628,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                   <span>
                                     {best.invoiceNumber}
                                     {best.customer ? ` · ${best.customer}` : ""}
-                                    {best.refMatch ? <span className="invoice-status-pill invoice-status-paid"> ref</span> : null}
-                                    {best.amountMatch ? <span className="field-help"> · amount ✓</span> : null}
+                                    {best.refMatch ? <span className="invoice-status-pill invoice-status-paid">{" "}{t("ref")}</span> : null}
+                                    {best.amountMatch ? <span className="field-help">{" "}{t("· amount ✓")}</span> : null}
                                   </span>
                                 ) : (
-                                  <span className="field-help">No match found</span>
+                                  <span className="field-help">{t("No match found")}</span>
                                 )}
                               </td>
                               <td style={{ whiteSpace: "nowrap", textAlign: "right" }}>
@@ -28916,18 +28642,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                     type="button"
                                     disabled={reconcileBusy === candidate.id}
                                     onClick={() => void reconcilePayment(candidate, best.invoiceId)}
-                                  >
-                                    Confirm
-                                  </button>
+                                  >{t("Confirm")}</button>
                                 ) : null}{" "}
                                 <button
                                   className="outline-button"
                                   type="button"
                                   disabled={reconcileBusy === candidate.id}
                                   onClick={() => void dismissReconcile(candidate)}
-                                >
-                                  Dismiss
-                                </button>
+                                >{t("Dismiss")}</button>
                               </td>
                             </tr>
                           );
@@ -28935,9 +28657,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       </tbody>
                     </table>
                   ) : reconcileCandidates.length ? (
-                    <p>All {reconcileCandidates.length} bank payment{reconcileCandidates.length === 1 ? "" : "s"} are hidden by the type filter above.</p>
+                    <p>{t("All {length} bank payment", { length: reconcileCandidates.length })}{reconcileCandidates.length === 1 ? "" : "s"}{" "}{t("are hidden by the type filter above.")}</p>
                   ) : (
-                    <p>No bank payments waiting to reconcile.</p>
+                    <p>{t("No bank payments waiting to reconcile.")}</p>
                   )}
                 </details>
               </div>
@@ -28951,13 +28673,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                  field label. */
               <div className="invoice-paper-layout">
                 <div className="ip-actionbar">
-                  <p>You are typing on the invoice itself. Dashed is editable; everything else comes from your template.</p>
+                  <p>{t("You are typing on the invoice itself. Dashed is editable; everything else comes from your template.")}</p>
                   <div className="ip-actionbar-buttons">
                     {activeInvoiceId && (
                       /* Rule 10: Delete and Void are text, not a filled red
                          button sitting in the same row as Publish & Send. */
                       <button className="text-button danger" onClick={deleteOpenedInvoice} type="button">
-                        {openedInvoiceStatus === "draft" || openedInvoiceStatus === "void" ? "Delete" : "Void"}
+                        {openedInvoiceStatus === "draft" || openedInvoiceStatus === "void" ? t("Delete") : t("Void")}
                       </button>
                     )}
                     {/* Beside the send buttons because that is what it changes:
@@ -28965,7 +28687,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         once the invoice is settled - there is nothing left to
                         pay, and the server would not mint a link anyway. */}
                     {openedInvoiceStatus !== "paid" && openedInvoiceStatus !== "void" && (
-                      <label className="ip-pay-toggle" title="Email a Clarity Pay link with this invoice so the client can pay it online">
+                      <label className="ip-pay-toggle" title={t("Email a Clarity Pay link with this invoice so the client can pay it online")}>
                         <input
                           checked={includePaymentLink}
                           onChange={(event) => {
@@ -28974,7 +28696,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           }}
                           type="checkbox"
                         />
-                        <span>Include payment link</span>
+                        <span>{t("Include payment link")}</span>
                       </label>
                     )}
                     {invoiceEditing ? (
@@ -28982,56 +28704,38 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         <>
                           {activeInvoiceId && (
                             <button className="outline-button" onClick={downloadInvoicePdf} type="button">
-                              <Download size={16} />
-                              Download PDF
-                            </button>
+                              <Download size={16} />{t("Download PDF")}</button>
                           )}
                           <button className="outline-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("draft")} type="button">
-                            {invoiceIssueState === "saving" ? "Saving..." : "Save"}
+                            {invoiceIssueState === "saving" ? t("Saving...") : t("Save")}
                           </button>
                           <button className="primary-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("publish-send")} type="button">
-                            <ClarityEmail size={16} />
-                            Save &amp; email
-                          </button>
+                            <ClarityEmail size={16} />{t("Save & email")}</button>
                         </>
                       ) : (
                         <>
                           <button className="outline-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("draft")} type="button">
-                            {invoiceIssueState === "saving" ? "Saving..." : "Save draft"}
+                            {invoiceIssueState === "saving" ? t("Saving...") : t("Save draft")}
                           </button>
-                          <button className="outline-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("publish")} type="button">
-                            Publish
-                          </button>
+                          <button className="outline-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("publish")} type="button">{t("Publish")}</button>
                           <button className="primary-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("publish-send")} type="button">
-                            <ClarityEmail size={16} />
-                            Publish &amp; email
-                          </button>
+                            <ClarityEmail size={16} />{t("Publish & email")}</button>
                         </>
                       )
                     ) : openedInvoiceStatus === "draft" ? (
                       <>
                         <button className="outline-button" onClick={editOpenedInvoice} type="button">
-                          <Pencil size={16} />
-                          Edit
-                        </button>
-                        <button className="outline-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("publish")} type="button">
-                          Publish
-                        </button>
+                          <Pencil size={16} />{t("Edit")}</button>
+                        <button className="outline-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("publish")} type="button">{t("Publish")}</button>
                         <button className="primary-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("publish-send")} type="button">
-                          <ClarityEmail size={16} />
-                          Publish &amp; email
-                        </button>
+                          <ClarityEmail size={16} />{t("Publish & email")}</button>
                       </>
                     ) : (
                       <>
                         <button className="outline-button" onClick={editOpenedInvoice} type="button">
-                          <Pencil size={16} />
-                          Edit
-                        </button>
+                          <Pencil size={16} />{t("Edit")}</button>
                         <button className="outline-button" onClick={downloadInvoicePdf} type="button">
-                          <Download size={16} />
-                          Download PDF
-                        </button>
+                          <Download size={16} />{t("Download PDF")}</button>
                         {(openedInvoiceStatus === "sent" || openedInvoiceStatus === "overdue") && (
                           <>
                             <button
@@ -29041,11 +28745,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                               type="button"
                             >
                               <ClarityPayments size={16} />
-                              {clarityPayState === "loading" ? "Opening..." : "Clarity Pay"}
+                              {clarityPayState === "loading" ? t("Opening...") : t("Clarity Pay")}
                             </button>
-                            <button className="outline-button" onClick={markActiveInvoicePaid} type="button">
-                              Mark Paid
-                            </button>
+                            <button className="outline-button" onClick={markActiveInvoicePaid} type="button">{t("Mark Paid")}</button>
                           </>
                         )}
                         <button
@@ -29053,10 +28755,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           disabled={invoiceSendState === "sending"}
                           onClick={sendOpenedInvoice}
                           type="button"
-                          title={openedInvoiceSentAt ? "Email this invoice to the customer again" : "Email this invoice to the customer"}
+                          title={openedInvoiceSentAt ? t("Email this invoice to the customer again") : t("Email this invoice to the customer")}
                         >
                           <Send size={16} />
-                          {invoiceSendState === "sending" ? "Sending..." : openedInvoiceSentAt ? "Resend" : "Send"}
+                          {invoiceSendState === "sending" ? t("Sending...") : openedInvoiceSentAt ? t("Resend") : t("Send")}
                         </button>
                       </>
                     )}
@@ -29067,15 +28769,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       hiding behind the badge. */}
                   {openedInvoiceStatus === "paid" && (
                     <div className="ip-payment-source">
-                      <span className="ip-payment-head">
-                        Paid{openedInvoicePaidAt ? ` ${formatDateForDisplay(openedInvoicePaidAt.slice(0, 10))}` : ""}
-                        {openedInvoicePayment ? " · matched to a bank credit" : " · marked paid manually"}
+                      <span className="ip-payment-head">{t("Paid")}{openedInvoicePaidAt ? ` ${formatDateForDisplay(openedInvoicePaidAt.slice(0, 10))}` : ""}
+                        {openedInvoicePayment ? t(" · matched to a bank credit") : t(" · marked paid manually")}
                       </span>
                       {openedInvoicePayment && (
                         <span className="ip-payment-detail">
                           {openedInvoicePayment.date ? `${formatDateForDisplay(openedInvoicePayment.date)} · ` : ""}
                           {formatMoney(openedInvoicePayment.amount, invoiceSettings.currency)} ·{" "}
-                          {openedInvoicePayment.description || "Bank credit"}
+                          {openedInvoicePayment.description || t("Bank credit")}
                           {openedInvoicePayment.reference ? ` · ${openedInvoicePayment.reference}` : ""}
                         </span>
                       )}
@@ -29106,26 +28807,21 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           type="button"
                         >
                           {invoiceIssueState === "saving"
-                            ? "Saving..."
+                            ? t("Saving...")
                             : conflictRetryMode === "draft"
-                              ? "Save anyway"
-                              : "Publish anyway"}
+                              ? t("Save anyway")
+                              : t("Publish anyway")}
                         </button>
-                        <button className="text-button" onClick={() => setBookingConflict(null)} type="button">
-                          Dismiss
-                        </button>
+                        <button className="text-button" onClick={() => setBookingConflict(null)} type="button">{t("Dismiss")}</button>
                       </div>
-                      <p className="ip-conflict-note">
-                        Publishing anyway moves these lessons onto this invoice. Any invoice named above keeps the
-                        line and the total already billed - void it if this is a re-bill.
-                      </p>
+                      <p className="ip-conflict-note">{t("Publishing anyway moves these lessons onto this invoice. Any invoice named above keeps the line and the total already billed - void it if this is a re-bill.")}</p>
                     </div>
                   )}
                 </div>
 
                 <div className="ip-grid">
                   <div className="ip-mat">
-                    <article className="ip-paper" aria-label="Invoice editor">
+                    <article className="ip-paper" aria-label={t("Invoice editor")}>
                       <header className="ip-paper-head">
                         {brandSettings.logoPreview && (
                           <span className="ip-logo">
@@ -29149,24 +28845,22 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                   : openedInvoiceStatus || "draft"
                             }`}
                           >
-                            {invoiceEditing && isNewInvoice ? "Draft" : openedInvoiceStateLabel}
+                            {invoiceEditing && isNewInvoice ? t("Draft") : openedInvoiceStateLabel}
                           </span>
                           <strong>{activeInvoiceNumber}</strong>
                           {invoiceLocked || !datesEditing ? (
                             <>
-                              <span>Issued {formatDateForDisplay(invoiceDraft.invoiceDate)}</span>
-                              <span>Due {formatDateForDisplay(invoiceDraft.dueDate)}</span>
+                              <span>{t("Issued {invoiceDate}", { invoiceDate: formatDateForDisplay(invoiceDraft.invoiceDate) })}</span>
+                              <span>{t("Due {dueDate}", { dueDate: formatDateForDisplay(invoiceDraft.dueDate) })}</span>
                               {!invoiceLocked && (
                                 <button className="invoice-inline-edit" onClick={() => setDatesEditing(true)} type="button">
-                                  <Pencil size={13} />
-                                  Edit dates
-                                </button>
+                                  <Pencil size={13} />{t("Edit dates")}</button>
                               )}
                             </>
                           ) : (
                             <>
                               <label className="ip-date-field">
-                                <span>Issued</span>
+                                <span>{t("Issued")}</span>
                                 <input
                                   className="ip-dash"
                                   value={invoiceDraft.invoiceDate}
@@ -29175,7 +28869,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 />
                               </label>
                               <label className="ip-date-field">
-                                <span>Due</span>
+                                <span>{t("Due")}</span>
                                 <input
                                   className="ip-dash"
                                   value={invoiceDraft.dueDate}
@@ -29183,9 +28877,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                   type="date"
                                 />
                               </label>
-                              <button className="invoice-inline-edit" onClick={() => setDatesEditing(false)} type="button">
-                                Done
-                              </button>
+                              <button className="invoice-inline-edit" onClick={() => setDatesEditing(false)} type="button">{t("Done")}</button>
                             </>
                           )}
                         </div>
@@ -29195,66 +28887,64 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
                       <div className="ip-parties">
                         <div className="ip-party">
-                          <span className="ip-label">Bill to</span>
+                          <span className="ip-label">{t("Bill to")}</span>
                           {hasInvoiceCustomer ? (
                             <button
                               className="ip-payer ip-dash"
                               onClick={invoiceLocked ? undefined : clearInvoiceCustomer}
                               disabled={invoiceLocked}
-                              title="Pick a different client"
+                              title={t("Pick a different client")}
                               type="button"
                             >
                               <span>
                                 <strong>{invoiceDraft.payerName || invoiceDraft.payerEmail}</strong>
-                                <em>{invoiceDraft.payerEmail || invoiceDraft.payerPhone || "No contact saved"}</em>
+                                <em>{invoiceDraft.payerEmail || invoiceDraft.payerPhone || t("No contact saved")}</em>
                               </span>
                               {!invoiceLocked && <ClarityProfile size={13} />}
                             </button>
                           ) : newInvoiceCustomer ? (
                             <div className="ip-new-customer">
                               <label className="settings-field">
-                                <span>Name</span>
+                                <span>{t("Name")}</span>
                                 <input
                                   className="w-name"
                                   value={newInvoiceCustomer.name}
                                   onChange={(event) => updateNewInvoiceCustomer("name", event.target.value)}
-                                  placeholder="Customer name"
+                                  placeholder={t("Customer name")}
                                   autoFocus
                                 />
                               </label>
                               <label className="settings-field">
-                                <span>Email</span>
+                                <span>{t("Email")}</span>
                                 <input
                                   className="w-email"
                                   value={newInvoiceCustomer.email}
                                   onChange={(event) => updateNewInvoiceCustomer("email", event.target.value)}
-                                  placeholder="name@example.com"
+                                  placeholder={t("name@example.com")}
                                   type="email"
                                 />
                               </label>
                               <label className="settings-field">
-                                <span>Phone</span>
+                                <span>{t("Phone")}</span>
                                 <input
                                   className="w-name"
                                   value={newInvoiceCustomer.phone}
                                   onChange={(event) => updateNewInvoiceCustomer("phone", event.target.value)}
-                                  placeholder="Optional"
+                                  placeholder={t("Optional")}
                                 />
                               </label>
                               <div className="ip-new-customer-actions">
                                 {/* Rule 10: Cancel is text. A box around it gives
                                     backing out the same weight as adding the
                                     client, which is what the form is for. */}
-                                <button className="text-button" onClick={() => setNewInvoiceCustomer(null)} type="button">
-                                  Cancel
-                                </button>
+                                <button className="text-button" onClick={() => setNewInvoiceCustomer(null)} type="button">{t("Cancel")}</button>
                                 <button
                                   className="primary-button"
                                   onClick={saveNewInvoiceCustomer}
                                   disabled={newInvoiceCustomerSaving}
                                   type="button"
                                 >
-                                  {newInvoiceCustomerSaving ? "Adding..." : "Add to clients"}
+                                  {newInvoiceCustomerSaving ? t("Adding...") : t("Add to clients")}
                                 </button>
                               </div>
                             </div>
@@ -29264,7 +28954,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 className="ip-dash"
                                 value={invoiceCustomerSearch}
                                 onChange={(event) => setInvoiceCustomerSearch(event.target.value)}
-                                placeholder="Search name, email, or phone"
+                                placeholder={t("Search name, email, or phone")}
                               />
                               {(invoiceCustomerMatches.length > 0 || invoiceCustomerCreateLabel) && (
                                 <div className="ip-payer-results">
@@ -29272,7 +28962,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                     <button key={person.id} onClick={() => selectInvoiceCustomer(person)} type="button">
                                       <span>
                                         <strong>{person.name}</strong>
-                                        <em>{person.email || person.phone || "No contact saved"}</em>
+                                        <em>{person.email || person.phone || t("No contact saved")}</em>
                                       </span>
                                       <Plus size={14} />
                                     </button>
@@ -29280,7 +28970,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                   {invoiceCustomerCreateLabel && (
                                     <button onClick={openNewInvoiceCustomer} type="button">
                                       <span>
-                                        <strong>Create new customer</strong>
+                                        <strong>{t("Create new customer")}</strong>
                                         <em>{invoiceCustomerCreateLabel}</em>
                                       </span>
                                       <Plus size={14} />
@@ -29292,7 +28982,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           )}
                         </div>
                         <div className="ip-party">
-                          <span className="ip-label">Reference</span>
+                          <span className="ip-label">{t("Reference")}</span>
                           {invoiceLocked ? (
                             <p className="settings-static-value">{invoiceDraft.reference || "—"}</p>
                           ) : (
@@ -29300,7 +28990,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                               className="ip-dash"
                               value={invoiceDraft.reference}
                               onChange={(event) => updateInvoiceDraft("reference", event.target.value)}
-                              placeholder="Add a reference"
+                              placeholder={t("Add a reference")}
                             />
                           )}
                         </div>
@@ -29313,7 +29003,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             .map((field) => (
                               <span key={field.id}>
                                 <strong>{field.label}</strong>
-                                {field.value || "Not set"}
+                                {field.value || t("Not set")}
                               </span>
                             ))}
                         </div>
@@ -29321,10 +29011,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
                       <div className="ip-lines">
                         <div className="ip-line-head">
-                          <span>Item</span>
-                          <span>Qty</span>
-                          <span>Unit</span>
-                          <span>Amount</span>
+                          <span>{t("Item")}</span>
+                          <span>{t("Qty")}</span>
+                          <span>{t("Unit")}</span>
+                          <span>{t("Amount")}</span>
                           <span />
                           <span />
                         </div>
@@ -29378,8 +29068,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 className="ip-dash ip-line-desc"
                                 value={line.description}
                                 onChange={(event) => updateInvoiceLine(line.id, "description", event.target.value)}
-                                placeholder="What are you charging for?"
-                                aria-label="Line item"
+                                placeholder={t("What are you charging for?")}
+                                aria-label={t("Line item")}
                               />
                               <input
                                 className="ip-dash ip-line-qty"
@@ -29387,7 +29077,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 inputMode="numeric"
                                 onChange={(event) => updateInvoiceLine(line.id, "quantity", parseQuantityInput(event.target.value))}
                                 type="text"
-                                aria-label="Quantity"
+                                aria-label={t("Quantity")}
                               />
                               <label className="ip-dash ip-line-unit ip-affix">
                                 <span aria-hidden="true">{currencySymbol(invoiceSettings.currency)}</span>
@@ -29396,7 +29086,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                   inputMode="decimal"
                                   onChange={(event) => updateInvoiceLine(line.id, "unitPrice", parseMoneyInput(event.target.value))}
                                   type="text"
-                                  aria-label={`Unit price in ${invoiceSettings.currency}`}
+                                  aria-label={t("Unit price in {currency}", { currency: invoiceSettings.currency })}
                                 />
                               </label>
                               <span className="ip-line-amount">
@@ -29412,8 +29102,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                   if (customDiscountLineId === line.id) setCustomDiscountLineId("");
                                   removeInvoiceLine(line.id);
                                 }}
-                                title="Remove this line"
-                                aria-label="Remove this line"
+                                title={t("Remove this line")}
+                                aria-label={t("Remove this line")}
                                 type="button"
                               >
                                 <X size={14} />
@@ -29424,8 +29114,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                   setOpenInvoiceLineId(drawerOpen ? "" : line.id);
                                   setCustomDiscountLineId("");
                                 }}
-                                title={drawerOpen ? "Close" : "Discount for this line"}
-                                aria-label={drawerOpen ? "Close line options" : "Discount for this line"}
+                                title={drawerOpen ? t("Close") : t("Discount for this line")}
+                                aria-label={drawerOpen ? t("Close line options") : t("Discount for this line")}
                                 aria-expanded={drawerOpen}
                                 type="button"
                               >
@@ -29437,7 +29127,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                   {customDiscountOpen ? (
                                     <>
                                       <label className="ip-drawer-field ip-drawer-money">
-                                        <span>Amount off</span>
+                                        <span>{t("Amount off")}</span>
                                         <div className="ip-dash ip-affix">
                                           <i aria-hidden="true">{currencySymbol(invoiceSettings.currency)}</i>
                                           <input
@@ -29454,7 +29144,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                         </div>
                                       </label>
                                       <label className="ip-drawer-field ip-drawer-percent">
-                                        <span>Percent off</span>
+                                        <span>{t("Percent off")}</span>
                                         <div className="ip-dash ip-affix">
                                           <input
                                             value={line.discountKind === "percent" ? line.discountValue || "" : ""}
@@ -29478,14 +29168,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                             setInvoiceLineDiscount(line.id, "");
                                           }}
                                           type="button"
-                                        >
-                                          Saved discounts
-                                        </button>
+                                        >{t("Saved discounts")}</button>
                                       )}
                                     </>
                                   ) : (
                                     <label className="ip-drawer-field ip-drawer-preset">
-                                      <span>Discount</span>
+                                      <span>{t("Discount")}</span>
                                       <select
                                         className="ip-dash"
                                         value={invoiceLineDiscountSelection(line)}
@@ -29503,7 +29191,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                           setInvoiceLineDiscount(line.id, selection);
                                         }}
                                       >
-                                        <option value="">No discount</option>
+                                        <option value="">{t("No discount")}</option>
                                         {activeDiscountPresets.map((preset) => (
                                           <option key={preset.id} value={`preset:${preset.id}`}>
                                             {preset.name} (
@@ -29513,18 +29201,18 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                             )
                                           </option>
                                         ))}
-                                        <option value="custom">+ Custom</option>
+                                        <option value="custom">{t("+ Custom")}</option>
                                       </select>
                                     </label>
                                   )}
                                   <label className="ip-drawer-field ip-drawer-date">
-                                    <span>Date</span>
+                                    <span>{t("Date")}</span>
                                     <input
                                       className="ip-dash"
                                       value={line.serviceDate}
                                       onChange={(event) => updateInvoiceLine(line.id, "serviceDate", event.target.value)}
                                       type="date"
-                                      aria-label="Date this line was delivered"
+                                      aria-label={t("Date this line was delivered")}
                                     />
                                   </label>
                                   {/* The Tag picker only exists once the coach has
@@ -29532,13 +29220,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                       report this way never sees an empty select. */}
                                   {invoiceLineTagOptions.length > 0 && (
                                     <label className="ip-drawer-field ip-drawer-tag">
-                                      <span>Tag</span>
+                                      <span>{t("Tag")}</span>
                                       <select
                                         className="ip-dash"
                                         value={line.tag}
                                         onChange={(event) => updateInvoiceLine(line.id, "tag", event.target.value)}
                                       >
-                                        <option value="">No tag</option>
+                                        <option value="">{t("No tag")}</option>
                                         {invoiceLineTagOptions.map((tag) => (
                                           <option key={tag.id} value={tag.id}>
                                             {tag.label.trim()}
@@ -29549,20 +29237,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                             or opening the draft would silently
                                             clear it on the next save. */}
                                         {line.tag && !invoiceLineTagOptions.some((tag) => tag.id === line.tag) && (
-                                          <option value={line.tag}>{line.tag} (retired)</option>
+                                          <option value={line.tag}>{t("{tag} (retired)", { tag: line.tag })}</option>
                                         )}
                                       </select>
                                     </label>
                                   )}
                                   {customDiscountOpen && (
-                                    <span className="ip-drawer-note">
-                                      One discount per line — filling one box clears the other. The invoice-wide discount below still applies on top.
-                                    </span>
+                                    <span className="ip-drawer-note">{t("One discount per line — filling one box clears the other. The invoice-wide discount below still applies on top.")}</span>
                                   )}
                                   {invoiceLineTagOptions.length > 0 && (
-                                    <span className="ip-drawer-note">
-                                      Tags are your own list — coach, location, whatever you report on — kept in Billing › Settings.
-                                    </span>
+                                    <span className="ip-drawer-note">{t("Tags are your own list — coach, location, whatever you report on — kept in Billing › Settings.")}</span>
                                   )}
                                 </div>
                               )}
@@ -29571,26 +29255,24 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         })}
 
                         {!invoiceDraft.lines.length && (
-                          <p className="ip-lines-empty">No lines yet. Pull a lesson from the right, or start a blank one.</p>
+                          <p className="ip-lines-empty">{t("No lines yet. Pull a lesson from the right, or start a blank one.")}</p>
                         )}
 
                         {!invoiceLocked && (
                           <button className="ip-add-line" onClick={addManualInvoiceLine} type="button">
-                            <Plus size={14} />
-                            Add a line
-                          </button>
+                            <Plus size={14} />{t("Add a line")}</button>
                         )}
                       </div>
 
                       <div className="ip-totals-wrap">
                         <div className="ip-totals">
                           <div className="ip-total-row">
-                            <span>Subtotal</span>
+                            <span>{t("Subtotal")}</span>
                             <span>{formatMoney(invoiceLineSubtotal, invoiceSettings.currency)}</span>
                           </div>
                           {invoiceLineDiscountTotal > 0 && (
                             <div className="ip-total-row">
-                              <span>Line discounts</span>
+                              <span>{t("Line discounts")}</span>
                               <span>− {formatMoney(invoiceLineDiscountTotal, invoiceSettings.currency)}</span>
                             </div>
                           )}
@@ -29608,7 +29290,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                               <button
                                 className="ip-discount-name"
                                 onClick={() => setDiscountEditing(true)}
-                                title="Change discount"
+                                title={t("Change discount")}
                                 type="button"
                               >
                                 {invoiceDiscountLabel}
@@ -29618,8 +29300,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 <button
                                   className="ip-discount-remove"
                                   onClick={clearInvoiceDiscount}
-                                  aria-label="Remove discount"
-                                  title="Remove discount"
+                                  aria-label={t("Remove discount")}
+                                  title={t("Remove discount")}
                                   type="button"
                                 >
                                   <X size={12} />
@@ -29633,9 +29315,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                   className="ip-dash ip-discount-preset"
                                   value={selectedDiscountPresetId}
                                   onChange={(event) => applyDiscountPreset(event.target.value)}
-                                  aria-label="Preset discount"
+                                  aria-label={t("Preset discount")}
                                 >
-                                  <option value="">Manual</option>
+                                  <option value="">{t("Manual")}</option>
                                   {discountPresets
                                     .filter((preset) => preset.active)
                                     .map((preset) => (
@@ -29653,8 +29335,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 className="ip-dash ip-discount-label"
                                 value={invoiceDraft.discountLabel}
                                 onChange={(event) => updateInvoiceDraft("discountLabel", event.target.value)}
-                                placeholder="Discount name"
-                                aria-label="Invoice discount label"
+                                placeholder={t("Discount name")}
+                                aria-label={t("Invoice discount label")}
                               />
                               <label className="ip-dash ip-discount-amount ip-affix">
                                 <span aria-hidden="true">{currencySymbol(invoiceSettings.currency)}</span>
@@ -29670,46 +29352,40 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                     setInvoiceDraft((current) => ({ ...current, discountAmount: amount, discountPercent: 0 }));
                                   }}
                                   type="text"
-                                  aria-label={`Invoice discount amount in ${invoiceSettings.currency}`}
+                                  aria-label={t("Invoice discount amount in {currency}", { currency: invoiceSettings.currency })}
                                 />
                               </label>
-                              <button className="ip-discount-done" onClick={() => setDiscountEditing(false)} type="button">
-                                Done
-                              </button>
+                              <button className="ip-discount-done" onClick={() => setDiscountEditing(false)} type="button">{t("Done")}</button>
                             </div>
                           ) : (
                             <button className="ip-discount-add" onClick={() => setDiscountEditing(true)} type="button">
-                              <Plus size={12} />
-                              Add discount
-                            </button>
+                              <Plus size={12} />{t("Add discount")}</button>
                           )}
                           <div className="ip-total-row">
-                            <span>Total excl. {invoiceSettings.taxName}</span>
+                            <span>{t("Total excl. {taxName}", { taxName: invoiceSettings.taxName })}</span>
                             <span>{formatMoney(invoiceTotal - invoiceTaxTotal, invoiceSettings.currency)}</span>
                           </div>
                           <div className="ip-total-row">
                             <span>
-                              {invoiceSettings.taxName} {invoiceSettings.taxRate}%{invoiceDraft.taxInclusive ? " (included)" : " (added)"}
+                              {invoiceSettings.taxName} {invoiceSettings.taxRate}%{invoiceDraft.taxInclusive ? t(" (included)") : t(" (added)")}
                             </span>
                             <span>{formatMoney(invoiceTaxTotal, invoiceSettings.currency)}</span>
                           </div>
                           <div className="ip-total-row ip-total-grand">
-                            <span>Total {invoiceDraft.taxInclusive ? `incl. ${invoiceSettings.taxName}` : "due"}</span>
+                            <span>{t("Total")}{" "}{invoiceDraft.taxInclusive ? `incl. ${invoiceSettings.taxName}` : "due"}</span>
                             <span>{formatMoney(invoiceTotal, invoiceSettings.currency)}</span>
                           </div>
                           {!invoiceLocked && (
                             <p className="ip-tax-note">
                               {invoiceDraft.taxInclusive
-                                ? `Prices include ${invoiceSettings.taxName}`
-                                : `${invoiceSettings.taxName} added on top of prices`}{" "}
-                              · set in Billing Settings
-                            </p>
+                                ? t("Prices include {taxName}", { taxName: invoiceSettings.taxName })
+                                : `${invoiceSettings.taxName} added on top of prices`}{" "}{t("· set in Billing Settings")}</p>
                           )}
                         </div>
                       </div>
 
                       <div className="ip-note">
-                        <span className="ip-label">Note to the client</span>
+                        <span className="ip-label">{t("Note to the client")}</span>
                         {invoiceLocked ? (
                           <p className="settings-static-value">{invoiceDraft.message || "—"}</p>
                         ) : (
@@ -29718,7 +29394,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             value={invoiceDraft.message}
                             onChange={(event) => updateInvoiceDraft("message", event.target.value)}
                             rows={2}
-                            placeholder="Anything you want on this one invoice"
+                            placeholder={t("Anything you want on this one invoice")}
                           />
                         )}
                       </div>
@@ -29743,21 +29419,19 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                               .filter((field) => field.placement === "payment")
                               .map((field) => (
                                 <em key={field.id}>
-                                  {field.label}: {field.value || "Not set"}
+                                  {field.label}: {field.value || t("Not set")}
                                 </em>
                               ))}
                           </>
                         ) : !invoiceLocked ? (
                           <button className="invoice-add-detail" onClick={openInvoiceCoachSettings} type="button">
-                            <Plus size={15} />
-                            Add payment details
-                          </button>
+                            <Plus size={15} />{t("Add payment details")}</button>
                         ) : null}
                         {invoiceCustomFieldsToPrint
                           .filter((field) => field.placement === "footer")
                           .map((field) => (
                             <em key={field.id}>
-                              {field.label}: {field.value || "Not set"}
+                              {field.label}: {field.value || t("Not set")}
                             </em>
                           ))}
                         {invoiceSettings.footerText && <em>{invoiceSettings.footerText}</em>}
@@ -29767,16 +29441,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
                   <aside className="ip-rail">
                     <article className="ip-card">
-                      <strong className="ip-card-title">Completed lessons</strong>
+                      <strong className="ip-card-title">{t("Completed lessons")}</strong>
                       {/* Same bookingPullFilter the Dashboard's list reads, so the
                           two can still never disagree about what they are showing -
                           only the control is chips here instead of a select. */}
-                      <div className="ip-chips" role="group" aria-label="Show completed bookings">
+                      <div className="ip-chips" role="group" aria-label={t("Show completed bookings")}>
                         {(
                           [
-                            ["all", "All"],
-                            ["unpaid", "Unpaid"],
-                            ["paid", "Paid"],
+                            ["all", t("All")],
+                            ["unpaid", t("Unpaid")],
+                            ["paid", t("Paid")],
                           ] as [BookingPullFilter, string][]
                         ).map(([value, label]) => (
                           <button
@@ -29792,40 +29466,34 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       </div>
                       <p className="ip-card-note">
                         {bookingPullFilter === "unpaid"
-                          ? "Lessons with nothing taken at the counter."
+                          ? t("Lessons with nothing taken at the counter.")
                           : bookingPullFilter === "paid"
-                            ? "Already settled at the till — invoicing one again is a second transaction."
-                            : "Everything completed. A lesson paid at the counter still shows."}
+                            ? t("Already settled at the till — invoicing one again is a second transaction.")
+                            : t("Everything completed. A lesson paid at the counter still shows.")}
                       </p>
                       <div className="ip-pull-range">
                         {pullRangeEditing ? (
                           <>
                             <label className="settings-field">
-                              <span>From</span>
+                              <span>{t("From")}</span>
                               <input type="date" value={pullRangeFrom} onChange={(event) => setPullRangeFrom(event.target.value)} />
                             </label>
                             <label className="settings-field">
-                              <span>To</span>
+                              <span>{t("To")}</span>
                               <input type="date" value={pullRangeTo} onChange={(event) => setPullRangeTo(event.target.value)} />
                             </label>
                             <div className="pull-range-actions">
-                              <button className="invoice-inline-edit" onClick={resetPullRange} type="button">
-                                Reset to auto
-                              </button>
-                              <button className="invoice-inline-edit" onClick={() => setPullRangeEditing(false)} type="button">
-                                Done
-                              </button>
+                              <button className="invoice-inline-edit" onClick={resetPullRange} type="button">{t("Reset to auto")}</button>
+                              <button className="invoice-inline-edit" onClick={() => setPullRangeEditing(false)} type="button">{t("Done")}</button>
                             </div>
                           </>
                         ) : (
                           <div className="pull-range-summary">
                             <span>
-                              {effectivePullFrom ? formatDateForDisplay(effectivePullFrom) : "Earliest"} → {formatDateForDisplay(effectivePullTo)}
+                              {effectivePullFrom ? formatDateForDisplay(effectivePullFrom) : t("Earliest")} → {formatDateForDisplay(effectivePullTo)}
                             </span>
-                            <button className="invoice-inline-edit" onClick={openPullRangeEdit} type="button" aria-label="Edit pull range">
-                              <Pencil size={13} />
-                              Edit
-                            </button>
+                            <button className="invoice-inline-edit" onClick={openPullRangeEdit} type="button" aria-label={t("Edit pull range")}>
+                              <Pencil size={13} />{t("Edit")}</button>
                           </div>
                         )}
                       </div>
@@ -29852,11 +29520,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 <span className="ip-rail-row-main">
                                   <strong>{item.client || item.title}</strong>
                                   <em>
-                                    {service?.name ?? "Lesson"} · {days[item.day].label}, {formatRange(item.start, item.duration)}
+                                    {service?.name ?? t("Lesson")} · {days[item.day].label}, {formatRange(item.start, item.duration)}
                                   </em>
                                 </span>
                                 <span className="ip-rail-row-side">
-                                  {matchesPayer && <em className="ip-badge">Billing client</em>}
+                                  {matchesPayer && <em className="ip-badge">{t("Billing client")}</em>}
                                   {alreadyInvoiced ? (
                                     // The invoice it is on, by number - it is not
                                     // necessarily the one being edited, and "on an
@@ -29866,40 +29534,38 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                       className="ip-badge"
                                       title={
                                         invoiceLink?.invoiceNumber
-                                          ? `Already on invoice ${invoiceLink.invoiceNumber}`
-                                          : "Already on an invoice"
+                                          ? t("Already on invoice {invoiceNumber}", { invoiceNumber: invoiceLink.invoiceNumber })
+                                          : t("Already on an invoice")
                                       }
                                     >
-                                      {invoiceLink?.invoiceNumber || "Invoiced"}
+                                      {invoiceLink?.invoiceNumber || t("Invoiced")}
                                     </em>
                                   ) : posPayment ? (
-                                    <em className="ip-badge is-paid">
-                                      Paid · {formatMoney(posPayment.amount, posPayment.currency)}
-                                    </em>
+                                    <em className="ip-badge is-paid">{t("Paid · {amount}", { amount: formatMoney(posPayment.amount, posPayment.currency) })}</em>
                                   ) : (
-                                    <em className="ip-badge">Unpaid</em>
+                                    <em className="ip-badge">{t("Unpaid")}</em>
                                   )}
                                 </span>
                               </button>
                             );
                           })
                         ) : completedAppointments.length ? (
-                          <p className="ip-card-note">No completed bookings in this date range.</p>
+                          <p className="ip-card-note">{t("No completed bookings in this date range.")}</p>
                         ) : (
-                          <p className="ip-card-note">Mark bookings completed from the calendar to pull them into invoices.</p>
+                          <p className="ip-card-note">{t("Mark bookings completed from the calendar to pull them into invoices.")}</p>
                         )}
                       </div>
                     </article>
 
                     <article className="ip-card">
-                      <strong className="ip-card-title">Catalog</strong>
+                      <strong className="ip-card-title">{t("Catalog")}</strong>
                       <label className="ip-search">
                         <Search size={14} />
                         <input
                           value={invoiceDraft.lineSearch}
                           onChange={(event) => updateInvoiceDraft("lineSearch", event.target.value)}
-                          placeholder="Search products and packages"
-                          aria-label="Search the catalog"
+                          placeholder={t("Search products and packages")}
+                          aria-label={t("Search the catalog")}
                         />
                       </label>
                       <div className="ip-rail-list">
@@ -29926,21 +29592,17 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           ))
                         ) : (
                           <p className="ip-card-note">
-                            {invoiceDraft.lineSearch.trim() ? "Nothing matches that." : "Add products and services in Billing › Products."}
+                            {invoiceDraft.lineSearch.trim() ? t("Nothing matches that.") : t("Add products and services in Billing › Products.")}
                           </p>
                         )}
                       </div>
                     </article>
 
                     <article className="ip-card">
-                      <strong className="ip-card-title">From your template</strong>
-                      <p className="ip-card-note">
-                        Logo, address, {invoiceSettings.taxName} number, bank account and footer are already on this invoice.
-                      </p>
+                      <strong className="ip-card-title">{t("From your template")}</strong>
+                      <p className="ip-card-note">{t("Logo, address, {taxName} number, bank account and footer are already on this invoice.", { taxName: invoiceSettings.taxName })}</p>
                       <button className="outline-button" onClick={openInvoiceCoachSettings} type="button">
-                        <Pencil size={13} />
-                        Edit the template
-                      </button>
+                        <Pencil size={13} />{t("Edit the template")}</button>
                     </article>
                   </aside>
                 </div>
@@ -29952,22 +29614,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 <article className="data-card recent-invoices-card">
                   <div className="data-card-header">
                     <div>
-                      <span>Bank feed</span>
-                      <h2>
-                        Expenses from your bank
-                        {bankCandidates.length ? <span className="unpaid-count-badge">{bankCandidates.length}</span> : null}
+                      <span>{t("Bank feed")}</span>
+                      <h2>{t("Expenses from your bank")}{bankCandidates.length ? <span className="unpaid-count-badge">{bankCandidates.length}</span> : null}
                       </h2>
                     </div>
-                    <button className="outline-button" type="button" onClick={() => void fetchBankCandidates()}>
-                      Refresh
-                    </button>
+                    <button className="outline-button" type="button" onClick={() => void fetchBankCandidates()}>{t("Refresh")}</button>
                   </div>
-                  <p className="field-help">
-                    Money-out transactions from your connected bank accounts (Akahu). Approve the business ones to add
-                    them to your expenses, or dismiss the rest. Approved items can't be imported twice.
-                  </p>
+                  <p className="field-help">{t("Money-out transactions from your connected bank accounts (Akahu). Approve the business ones to add them to your expenses, or dismiss the rest. Approved items can't be imported twice.")}</p>
                   <div className="bank-backfill-row">
-                    <span className="field-help">Pull older:</span>
+                    <span className="field-help">{t("Pull older:")}</span>
                     {[3, 6, 12].map((months) => (
                       <button
                         key={months}
@@ -29976,22 +29631,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         disabled={bankBackfillBusy !== null}
                         onClick={() => void backfillBankTransactions(months)}
                       >
-                        {bankBackfillBusy === months ? "Pulling…" : `Last ${months} months`}
+                        {bankBackfillBusy === months ? t("Pulling…") : t("Last {months} months", { months })}
                       </button>
                     ))}
                   </div>
-                  <p className="field-help bank-backfill-note">
-                    The bank feed only reaches back ~12 months (Akahu's history limit). For older expenses, use the
-                    CSV import below.
-                  </p>
+                  <p className="field-help bank-backfill-note">{t("The bank feed only reaches back ~12 months (Akahu's history limit). For older expenses, use the CSV import below.")}</p>
                   {bankCandidatesLoadState === "loading" && !bankCandidates.length ? (
-                    <Loading what="bank transactions" />
+                    <Loading what={t("bank transactions")} />
                   ) : bankCandidatesLoadState === "error" ? (
-                    <p>
-                      Couldn't load the bank feed.{" "}
-                      <button className="outline-button" type="button" onClick={() => void fetchBankCandidates()}>
-                        Try again
-                      </button>
+                    <p>{t("Couldn't load the bank feed.")}{" "}<button className="outline-button" type="button" onClick={() => void fetchBankCandidates()}>{t("Try again")}</button>
                     </p>
                   ) : bankCandidates.length ? (
                     <>
@@ -30006,12 +29654,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 setBankSearch(event.target.value);
                                 setSelectedBankIds(new Set());
                               }}
-                              placeholder="Search expenses"
-                              aria-label="Search bank expense approvals"
+                              placeholder={t("Search expenses")}
+                              aria-label={t("Search bank expense approvals")}
                             />
                           </label>
                           <label className="bank-filter">
-                            <span className="field-help">From</span>
+                            <span className="field-help">{t("From")}</span>
                             <input
                               type="date"
                               value={bankDateFromFilter}
@@ -30019,11 +29667,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 setBankDateFromFilter(event.target.value);
                                 setSelectedBankIds(new Set());
                               }}
-                              aria-label="Show bank expenses from this date"
+                              aria-label={t("Show bank expenses from this date")}
                             />
                           </label>
                           <label className="bank-filter">
-                            <span className="field-help">To</span>
+                            <span className="field-help">{t("To")}</span>
                             <input
                               type="date"
                               value={bankDateToFilter}
@@ -30031,12 +29679,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 setBankDateToFilter(event.target.value);
                                 setSelectedBankIds(new Set());
                               }}
-                              aria-label="Show bank expenses up to this date"
+                              aria-label={t("Show bank expenses up to this date")}
                             />
                           </label>
                           {bankCategoryOptions.length > 1 && (
                             <label className="bank-filter">
-                              <span className="field-help">Category</span>
+                              <span className="field-help">{t("Category")}</span>
                               <select
                                 value={bankCategoryFilter}
                                 onChange={(event) => {
@@ -30044,7 +29692,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                   setSelectedBankIds(new Set());
                                 }}
                               >
-                                <option value="">All categories ({bankCandidates.length})</option>
+                                <option value="">{t("All categories ({length})", { length: bankCandidates.length })}</option>
                                 {bankCategoryOptions.map((label) => (
                                   <option key={label} value={label}>
                                     {label} ({bankCategoryCounts[label]})
@@ -30064,21 +29712,19 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 setBankCategoryFilter("");
                                 setSelectedBankIds(new Set());
                               }}
-                            >
-                              Clear
-                            </button>
+                            >{t("Clear")}</button>
                           )}
                         </div>
-                        <div className="bank-bulk-actions" role="group" aria-label="Bulk actions">
+                        <div className="bank-bulk-actions" role="group" aria-label={t("Bulk actions")}>
                           <span className="field-help">
                             {hasBankFilters
-                              ? `${visibleBankCandidates.length} matching transaction${visibleBankCandidates.length === 1 ? "" : "s"} (${bankCandidates.length} loaded)`
+                              ? t("{length} matching transaction{value} ({length2} loaded)", { length: visibleBankCandidates.length, value: visibleBankCandidates.length === 1 ? "" : "s", length2: bankCandidates.length })
                               : selectedVisibleBankCount
                                 ? `${selectedVisibleBankCount} selected`
-                                : "Tick rows to select"}
+                                : t("Tick rows to select")}
                           </span>
                           {hasBankFilters && selectedVisibleBankCount > 0 && (
-                            <span className="field-help">{selectedVisibleBankCount} selected</span>
+                            <span className="field-help">{t("{selectedVisibleBankCount} selected", { selectedVisibleBankCount })}</span>
                           )}
                           <button
                             className="primary-button"
@@ -30086,7 +29732,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             disabled={bankBulkBusy || !selectedVisibleBankCount}
                             onClick={() => void actionBankSelected("approve")}
                           >
-                            {bankBulkBusy ? "Working…" : "Approve selected"}
+                            {bankBulkBusy ? t("Working…") : t("Approve selected")}
                           </button>
                           <button
                             className="outline-button"
@@ -30094,7 +29740,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             disabled={bankBulkBusy || !selectedVisibleBankCount}
                             onClick={() => void actionBankSelected("ignore")}
                           >
-                            {bankBulkBusy ? "Working…" : "Dismiss selected"}
+                            {bankBulkBusy ? t("Working…") : t("Dismiss selected")}
                           </button>
                         </div>
                       </div>
@@ -30105,33 +29751,29 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                               <th className="bank-select-cell">
                                 <input
                                   type="checkbox"
-                                  aria-label="Select all shown"
-                                  title="Select all"
+                                  aria-label={t("Select all shown")}
+                                  title={t("Select all")}
                                   checked={allVisibleBankSelected}
                                   onChange={() => toggleSelectAllVisibleBank()}
                                 />
                               </th>
                               <th aria-sort={bankSortAria("date")}>
-                                <button className="bank-sort-button" type="button" onClick={() => toggleBankSort("date")}>
-                                  Date{bankSortMarker("date")}
+                                <button className="bank-sort-button" type="button" onClick={() => toggleBankSort("date")}>{t("Date")}{bankSortMarker("date")}
                                 </button>
                               </th>
                               <th aria-sort={bankSortAria("account")}>
-                                <button className="bank-sort-button" type="button" onClick={() => toggleBankSort("account")}>
-                                  Account{bankSortMarker("account")}
+                                <button className="bank-sort-button" type="button" onClick={() => toggleBankSort("account")}>{t("Account")}{bankSortMarker("account")}
                                 </button>
                               </th>
                               <th aria-sort={bankSortAria("description")}>
-                                <button className="bank-sort-button" type="button" onClick={() => toggleBankSort("description")}>
-                                  Description{bankSortMarker("description")}
+                                <button className="bank-sort-button" type="button" onClick={() => toggleBankSort("description")}>{t("Description")}{bankSortMarker("description")}
                                 </button>
                               </th>
                               <th aria-sort={bankSortAria("amount")}>
-                                <button className="bank-sort-button" type="button" onClick={() => toggleBankSort("amount")}>
-                                  Amount{bankSortMarker("amount")}
+                                <button className="bank-sort-button" type="button" onClick={() => toggleBankSort("amount")}>{t("Amount")}{bankSortMarker("amount")}
                                 </button>
                               </th>
-                              <th aria-label="Actions" />
+                              <th aria-label={t("Actions")} />
                             </tr>
                           </thead>
                           <tbody>
@@ -30140,7 +29782,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 <td className="bank-select-cell">
                                   <input
                                     type="checkbox"
-                                    aria-label={`Select ${candidate.description || candidate.merchant || "transaction"}`}
+                                    aria-label={t("Select {name}", { name: candidate.description || candidate.merchant || t("transaction") })}
                                     checked={selectedBankIds.has(candidate.id)}
                                     onChange={() => toggleBankSelection(candidate.id)}
                                   />
@@ -30160,26 +29802,20 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                     type="button"
                                     disabled={bankCandidateBusy === candidate.id || bankBulkBusy}
                                     onClick={() => void actionBankCandidate(candidate, "approve")}
-                                  >
-                                    Approve
-                                  </button>{" "}
+                                  >{t("Approve")}</button>{" "}
                                   <button
                                     className="outline-button"
                                     type="button"
                                     disabled={bankCandidateBusy === candidate.id || bankBulkBusy}
                                     onClick={() => void actionBankCandidate(candidate, "ignore")}
-                                  >
-                                    Dismiss
-                                  </button>
+                                  >{t("Dismiss")}</button>
                                 </td>
                               </tr>
                             ))}
                           </tbody>
                         </table>
                       ) : (
-                        <p>
-                          No transactions match those filters.{" "}
-                          <button
+                        <p>{t("No transactions match those filters.")}{" "}<button
                             className="outline-button"
                             type="button"
                             onClick={() => {
@@ -30189,9 +29825,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                               setBankCategoryFilter("");
                               setSelectedBankIds(new Set());
                             }}
-                          >
-                            Clear filters
-                          </button>
+                          >{t("Clear filters")}</button>
                         </p>
                       )}
                       {bankCandidates.length >= bankListLimit && bankListLimit < bankListMax ? (
@@ -30202,39 +29836,29 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             disabled={bankListBusy}
                             onClick={() => void loadMoreBankCandidates()}
                           >
-                            {bankListBusy ? "Loading…" : "Load older"}
+                            {bankListBusy ? t("Loading…") : t("Load older")}
                           </button>
-                          <span className="field-help">Showing the newest {bankCandidates.length}.</span>
+                          <span className="field-help">{t("Showing the newest {length}.", { length: bankCandidates.length })}</span>
                         </div>
                       ) : null}
                     </>
                   ) : (
-                    <p>
-                      No bank transactions waiting for review.{" "}
-                      <button className="outline-button" type="button" onClick={() => void fetchBankCandidates()}>
-                        Check for new
-                      </button>
+                    <p>{t("No bank transactions waiting for review.")}{" "}<button className="outline-button" type="button" onClick={() => void fetchBankCandidates()}>{t("Check for new")}</button>
                     </p>
                   )}
                 </article>
                 <article className="data-card">
                   <div className="data-card-header">
                     <div>
-                      <span>Bank export</span>
-                      <h2>Import from bank CSV</h2>
+                      <span>{t("Bank export")}</span>
+                      <h2>{t("Import from bank CSV")}</h2>
                     </div>
                     <Upload size={24} />
                   </div>
-                  <p className="field-help">
-                    Export transactions from your bank and upload the CSV here. Nothing imports until you confirm
-                    the column mapping below - re-uploading the same file, or an export with overlapping dates,
-                    automatically skips transactions already imported.
-                  </p>
+                  <p className="field-help">{t("Export transactions from your bank and upload the CSV here. Nothing imports until you confirm the column mapping below - re-uploading the same file, or an export with overlapping dates, automatically skips transactions already imported.")}</p>
                   <div className="csv-import-uploader">
                     <label className="outline-button">
-                      <Upload size={16} />
-                      Choose CSV file
-                      <input
+                      <Upload size={16} />{t("Choose CSV file")}<input
                         type="file"
                         accept=".csv,text/csv,text/plain"
                         onChange={(event) => {
@@ -30244,7 +29868,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         }}
                       />
                     </label>
-                    <span>{expenseImportFileName || "No file chosen"}</span>
+                    <span>{expenseImportFileName || t("No file chosen")}</span>
                     <label className="csv-import-header-toggle">
                       <input
                         type="checkbox"
@@ -30253,9 +29877,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           setExpenseImportHasHeader(event.target.checked);
                           if (expenseImportFileName) resetExpenseCsvImport();
                         }}
-                      />
-                      First row is a header
-                    </label>
+                      />{t("First row is a header")}</label>
                   </div>
 
                   {expenseImportHeaders.length > 0 && (
@@ -30263,30 +29885,30 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       <div className="csv-import-mapping-grid">
                         {expenseImportHeaders.map((header, index) => (
                           <label key={index} className="settings-field">
-                            <span>{header || `Column ${index + 1}`}</span>
+                            <span>{header || t("Column {value}", { value: index + 1 })}</span>
                             <select
                               value={expenseImportMapping[index] || ""}
                               onChange={(event) =>
                                 setExpenseImportMapping((current) => ({ ...current, [index]: event.target.value as ExpenseCsvField }))
                               }
                             >
-                              <option value="">Ignore</option>
-                              <option value="date">Date</option>
-                              <option value="description">Description / Payee</option>
-                              <option value="debit">Amount out (debit)</option>
-                              <option value="credit">Amount in (credit)</option>
-                              <option value="reference">Reference / Unique ID</option>
+                              <option value="">{t("Ignore")}</option>
+                              <option value="date">{t("Date")}</option>
+                              <option value="description">{t("Description / Payee")}</option>
+                              <option value="debit">{t("Amount out (debit)")}</option>
+                              <option value="credit">{t("Amount in (credit)")}</option>
+                              <option value="reference">{t("Reference / Unique ID")}</option>
                             </select>
-                            <em>{expenseImportRows.slice(0, 2).map((row) => row[index]).filter(Boolean).join(" / ") || "No sample"}</em>
+                            <em>{expenseImportRows.slice(0, 2).map((row) => row[index]).filter(Boolean).join(" / ") || t("No sample")}</em>
                           </label>
                         ))}
                       </div>
 
                       <div className="service-form-row">
                         <label className="settings-field">
-                          <span>Apply category to all imported rows</span>
+                          <span>{t("Apply category to all imported rows")}</span>
                           <select value={expenseImportCategoryId} onChange={(event) => setExpenseImportCategoryId(event.target.value)}>
-                            <option value="">Uncategorised</option>
+                            <option value="">{t("Uncategorised")}</option>
                             {expenseCategories
                               .filter((category) => category.active)
                               .map((category) => (
@@ -30298,11 +29920,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         </label>
                       </div>
 
-                      <p className="field-help">
-                        {expenseImportSelectedCandidates.length} of {expenseImportCandidates.length} rows will import
-                        ({formatMoney(expenseImportSelectedTotal, invoiceSettings.currency)}). Rows without a valid date,
-                        description, or amount-out are skipped automatically; use the checkboxes below to exclude any others.
-                      </p>
+                      <p className="field-help">{t("{length} of {length2} rows will import ({expenseImportSelectedTotal}). Rows without a valid date, description, or amount-out are skipped automatically; use the checkboxes below to exclude any others.", { length: expenseImportSelectedCandidates.length, length2: expenseImportCandidates.length, expenseImportSelectedTotal: formatMoney(expenseImportSelectedTotal, invoiceSettings.currency) })}</p>
 
                       <div className="csv-import-preview">
                         {expenseImportCandidates.slice(0, 20).map((candidate) => (
@@ -30318,13 +29936,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 setExpenseImportExcluded((current) => ({ ...current, [candidate.index]: !event.target.checked }))
                               }
                             />
-                            <span>{candidate.date || "Invalid date"}</span>
-                            <span>{candidate.description || "Missing description"}</span>
+                            <span>{candidate.date || t("Invalid date")}</span>
+                            <span>{candidate.description || t("Missing description")}</span>
                             <span>{candidate.valid ? formatMoney(candidate.amount, invoiceSettings.currency) : "-"}</span>
                           </label>
                         ))}
                         {expenseImportCandidates.length > 20 && (
-                          <p className="field-help">...and {expenseImportCandidates.length - 20} more rows.</p>
+                          <p className="field-help">{t("...and")}{" "}{expenseImportCandidates.length - 20}{" "}{t("more rows.")}</p>
                         )}
                       </div>
 
@@ -30336,21 +29954,17 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           type="button"
                         >
                           {expenseImportState === "importing"
-                            ? "Importing..."
-                            : `Import ${expenseImportSelectedCandidates.length} transaction${expenseImportSelectedCandidates.length === 1 ? "" : "s"}`}
+                            ? t("Importing...")
+                            : t("Import {length} transaction{value}", { length: expenseImportSelectedCandidates.length, value: expenseImportSelectedCandidates.length === 1 ? "" : "s" })}
                         </button>
-                        <button className="outline-button" onClick={resetExpenseCsvImport} type="button">
-                          Cancel
-                        </button>
+                        <button className="outline-button" onClick={resetExpenseCsvImport} type="button">{t("Cancel")}</button>
                       </div>
                     </>
                   )}
 
                   {expenseImportResult && (
-                    <p className="field-help">
-                      Last import: {expenseImportResult.imported} added, {expenseImportResult.duplicate} already imported
-                      {expenseImportResult.skipped ? `, ${expenseImportResult.skipped} skipped` : ""}
-                      {expenseImportResult.failed ? `, ${expenseImportResult.failed} failed` : ""}.
+                    <p className="field-help">{t("Last import: {imported} added, {duplicate} already imported", { imported: expenseImportResult.imported, duplicate: expenseImportResult.duplicate })}{expenseImportResult.skipped ? t(", {skipped} skipped", { skipped: expenseImportResult.skipped }) : ""}
+                      {expenseImportResult.failed ? t(", {failed} failed", { failed: expenseImportResult.failed }) : ""}.
                     </p>
                   )}
                 </article>
@@ -30358,18 +29972,18 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 <article className="data-card">
                   <div className="data-card-header">
                     <div>
-                      <span>Expenses</span>
+                      <span>{t("Expenses")}</span>
                       <h2>{formatMoney(expenseTotalForRange, invoiceSettings.currency)}</h2>
                     </div>
                     <ClarityInvoices size={24} />
                   </div>
                   <div className="ready-to-pull-range">
                     <label className="settings-field">
-                      <span>From</span>
+                      <span>{t("From")}</span>
                       <input type="date" value={expenseRangeFrom} onChange={(event) => setExpenseRangeFrom(event.target.value)} />
                     </label>
                     <label className="settings-field">
-                      <span>To</span>
+                      <span>{t("To")}</span>
                       <input type="date" value={expenseRangeTo} onChange={(event) => setExpenseRangeTo(event.target.value)} />
                     </label>
                     {(expenseRangeFrom || expenseRangeTo) && (
@@ -30380,38 +29994,35 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           setExpenseRangeTo("");
                         }}
                         type="button"
-                      >
-                        Clear
-                      </button>
+                      >{t("Clear")}</button>
                     )}
                   </div>
-                  <p className="field-help">
-                    {activeExpenses.length} expense{activeExpenses.length === 1 ? "" : "s"}
-                    {expenseRangeFrom || expenseRangeTo ? " in this range" : " (last 200)"}.
+                  <p className="field-help">{t("{length} expense", { length: activeExpenses.length })}{activeExpenses.length === 1 ? "" : "s"}
+                    {expenseRangeFrom || expenseRangeTo ? t(" in this range") : t(" (last 200)")}.
                   </p>
                 </article>
 
                 <article className="data-card">
                   <div className="data-card-header">
                     <div>
-                      <span>{expenseDraft.id ? "Edit" : "Log"}</span>
-                      <h2>{expenseDraft.id ? "Edit expense" : "Log an expense"}</h2>
+                      <span>{expenseDraft.id ? t("Edit") : t("Log")}</span>
+                      <h2>{expenseDraft.id ? t("Edit expense") : t("Log an expense")}</h2>
                     </div>
                     <ClarityInvoices size={24} />
                   </div>
                   <div className="billing-catalog-editor">
                     <label className="settings-field">
-                      <span>Description</span>
+                      <span>{t("Description")}</span>
                       <input
                         className="w-name"
                         value={expenseDraft.description}
                         onChange={(event) => setExpenseDraft((current) => ({ ...current, description: event.target.value }))}
-                        placeholder="What did you pay for?"
+                        placeholder={t("What did you pay for?")}
                       />
                     </label>
                     <div className="service-form-row">
                       <label className="settings-field">
-                        <span>Amount</span>
+                        <span>{t("Amount")}</span>
                         <input
                           className="w-price"
                           value={expenseDraft.amount}
@@ -30421,7 +30032,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         />
                       </label>
                       <label className="settings-field">
-                        <span>Date</span>
+                        <span>{t("Date")}</span>
                         <input
                           className="w-date"
                           type="date"
@@ -30430,12 +30041,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         />
                       </label>
                       <label className="settings-field">
-                        <span>Category</span>
+                        <span>{t("Category")}</span>
                         <select
                           value={expenseDraft.categoryId}
                           onChange={(event) => setExpenseDraft((current) => ({ ...current, categoryId: event.target.value }))}
                         >
-                          <option value="">Uncategorised</option>
+                          <option value="">{t("Uncategorised")}</option>
                           {expenseCategories
                             .filter((category) => category.active || category.id === expenseDraft.categoryId)
                             .map((category) => (
@@ -30447,32 +30058,30 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       </label>
                     </div>
                     <label className="settings-field">
-                      <span>Vendor</span>
+                      <span>{t("Vendor")}</span>
                       <input
                         className="w-name"
                         value={expenseDraft.vendor}
                         onChange={(event) => setExpenseDraft((current) => ({ ...current, vendor: event.target.value }))}
-                        placeholder="Optional"
+                        placeholder={t("Optional")}
                       />
                     </label>
                     <label className="settings-field">
-                      <span>Note</span>
+                      <span>{t("Note")}</span>
                       <textarea
                         className="w-prose"
                         value={expenseDraft.note}
                         onChange={(event) => setExpenseDraft((current) => ({ ...current, note: event.target.value }))}
                         rows={2}
-                        placeholder="Optional"
+                        placeholder={t("Optional")}
                       />
                     </label>
                     <button className="outline-button" disabled={expenseSaveState === "saving"} onClick={saveExpenseDraft} type="button">
                       <Plus size={16} />
-                      {expenseDraft.id ? (expenseSaveState === "saving" ? "Saving..." : "Save Changes") : expenseSaveState === "saving" ? "Saving..." : "Log Expense"}
+                      {expenseDraft.id ? (expenseSaveState === "saving" ? t("Saving...") : t("Save Changes")) : expenseSaveState === "saving" ? t("Saving...") : t("Log Expense")}
                     </button>
                     {Boolean(expenseDraft.id) && (
-                      <button className="text-button" onClick={resetExpenseDraft} type="button">
-                        Cancel Edit
-                      </button>
+                      <button className="text-button" onClick={resetExpenseDraft} type="button">{t("Cancel Edit")}</button>
                     )}
                   </div>
                 </article>
@@ -30480,21 +30089,21 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 <article className="data-card recent-invoices-card">
                   <div className="data-card-header">
                     <div>
-                      <span>History</span>
-                      <h2>Recent expenses</h2>
+                      <span>{t("History")}</span>
+                      <h2>{t("Recent expenses")}</h2>
                     </div>
                     <ClarityReports size={24} />
                   </div>
                   {expenseLoadState === "loading" && !expenses.length ? (
-                    <Loading what="expenses" />
+                    <Loading what={t("expenses")} />
                   ) : expenses.length ? (
                     <table className="recent-invoices-table">
                       <thead>
                         <tr>
-                          <th>Date</th>
-                          <th>Description</th>
-                          <th>Category</th>
-                          <th>Amount</th>
+                          <th>{t("Date")}</th>
+                          <th>{t("Description")}</th>
+                          <th>{t("Category")}</th>
+                          <th>{t("Amount")}</th>
                           <th />
                         </tr>
                       </thead>
@@ -30508,11 +30117,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                               </button>
                               {expense.vendor && <em className="expense-vendor">{expense.vendor}</em>}
                             </td>
-                            <td>{expense.categoryName || "Uncategorised"}</td>
+                            <td>{expense.categoryName || t("Uncategorised")}</td>
                             <td>{formatMoney(expense.amount, invoiceSettings.currency)}</td>
                             <td>
                               <button className="text-link-button" onClick={() => toggleExpenseVoided(expense)} type="button">
-                                {expense.voided ? "Restore" : "Void"}
+                                {expense.voided ? t("Restore") : t("Void")}
                               </button>
                             </td>
                           </tr>
@@ -30520,7 +30129,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       </tbody>
                     </table>
                   ) : (
-                    <p>No expenses logged{expenseRangeFrom || expenseRangeTo ? " in this date range" : " yet"}.</p>
+                    <p>{t("No expenses logged")}{expenseRangeFrom || expenseRangeTo ? t(" in this date range") : t(" yet")}.</p>
                   )}
                 </article>
               </div>
@@ -30531,7 +30140,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 and also appear on an invoice, so combining them would
                 double-count. */}
             {billingSection === "products" && (
-              <Suspense fallback={<Loading what="products" />}>
+              <Suspense fallback={<Loading what={t("products")} />}>
                 <ProductsPanel
                   products={catalogItems}
                   loadState={catalogLoadState}
@@ -30551,7 +30160,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             )}
 
             {billingSection === "coupons" && (
-              <Suspense fallback={<Loading what="coupons" />}>
+              <Suspense fallback={<Loading what={t("coupons")} />}>
                 <CouponsPanel
                   coupons={coupons}
                   loadState={couponsLoadState}
@@ -30575,24 +30184,24 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 <article className="data-card wide">
                   <div className="data-card-header">
                     <div>
-                      <span>Issued passes</span>
+                      <span>{t("Issued passes")}</span>
                       <h2>
                         {(() => {
                           const live = issuedPasses.filter((pass) => pass.status === "active");
                           const left = live.reduce((sum, pass) => sum + pass.creditsAvailable, 0);
                           return live.length === 0
-                            ? "No active passes"
-                            : `${live.length} active · ${left} ${left === 1 ? "credit" : "credits"} left`;
+                            ? t("No active passes")
+                            : left === 1
+                              ? t("{active} active · 1 credit left", { active: live.length })
+                              : t("{active} active · {left} credits left", { active: live.length, left });
+
                         })()}
                       </h2>
                     </div>
                     <ClarityPassesCredits size={24} />
                   </div>
-                  <p className="field-help">
-                    Every pass this business has issued and who holds it. A pass is spent from the
-                    lesson checkout, so a holder with credits left pays with it there.
-                  </p>
-                  <Suspense fallback={<Loading what="passes" />}>
+                  <p className="field-help">{t("Every pass this business has issued and who holds it. A pass is spent from the lesson checkout, so a holder with credits left pays with it there.")}</p>
+                  <Suspense fallback={<Loading what={t("passes")} />}>
                     <IssuedPassesPanel
                       passes={issuedPasses}
                       loadState={issuedPassesLoadState}
@@ -30600,7 +30209,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       onOpenPerson={(personId) => {
                         const linked = clients.find((entry) => entry.id === personId);
                         if (linked) openClientProfile(linked);
-                        else setToast({ message: "That client is not in the list yet. Try again after it loads." });
+                        else setToast({ message: t("That client is not in the list yet. Try again after it loads.") });
                       }}
                       serviceName={(serviceId) =>
                         services.find((service) => service.id === serviceId)?.name || serviceId
@@ -30612,22 +30221,17 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 <article className="data-card wide">
                   <div className="data-card-header">
                     <div>
-                      <span>Pass Inbox</span>
+                      <span>{t("Pass Inbox")}</span>
                       <h2>
                         {passInboxCount === 0
-                          ? "Nothing waiting"
+                          ? t("Nothing waiting")
                           : `${passInboxCount} waiting`}
                       </h2>
                     </div>
                     <Inbox size={24} />
                   </div>
-                  <p className="field-help">
-                    A pass sold outside Clarity arrives as a product name and a buyer, neither of
-                    which says how many credits it is worth or, always, who bought it. Nothing is
-                    issued or attached automatically — a wrong package hands somebody the wrong
-                    number of lessons, and nothing downstream can tell.
-                  </p>
-                  <Suspense fallback={<Loading what="the pass inbox" />}>
+                  <p className="field-help">{t("A pass sold outside Clarity arrives as a product name and a buyer, neither of which says how many credits it is worth or, always, who bought it. Nothing is issued or attached automatically — a wrong package hands somebody the wrong number of lessons, and nothing downstream can tell.")}</p>
+                  <Suspense fallback={<Loading what={t("the pass inbox")} />}>
                     <PassInboxPanel
                       purchases={passInbox.waitingToIssue}
                       unassigned={passInbox.waitingForOwner}
@@ -30646,8 +30250,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             ? { purchaseId, templateServiceId }
                             : { purchaseId, templateServiceId, totalValueCents: valueCents },
                           purchaseId,
-                          "Could not issue that pass.",
-                          "Pass issued.",
+                          t("Could not issue that pass."),
+                          t("Pass issued."),
                         )
                       }
                       onDismiss={(purchaseId) =>
@@ -30655,8 +30259,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           "/api/passes/inbox",
                           { purchaseId, action: "dismiss" },
                           purchaseId,
-                          "Could not update that purchase.",
-                          "Marked as not a pass.",
+                          t("Could not update that purchase."),
+                          t("Marked as not a pass."),
                         )
                       }
                       onDismissType={(itemName) =>
@@ -30664,8 +30268,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           "/api/passes/inbox",
                           { itemName, action: "dismissType" },
                           itemName,
-                          "Could not hide that product.",
-                          "Hidden — sales of that product will not show here again.",
+                          t("Could not hide that product."),
+                          t("Hidden — sales of that product will not show here again."),
                         )
                       }
                       onRestoreType={(itemName) =>
@@ -30673,8 +30277,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           "/api/passes/inbox",
                           { itemName, action: "restoreType" },
                           itemName,
-                          "Could not restore that product.",
-                          "Back in the queue.",
+                          t("Could not restore that product."),
+                          t("Back in the queue."),
                         )
                       }
                       onAttach={(passId, personId) =>
@@ -30682,8 +30286,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           "/api/passes/attach",
                           { passId, personId },
                           passId,
-                          "Could not attach that pass.",
-                          "Pass attached.",
+                          t("Could not attach that pass."),
+                          t("Pass attached."),
                         )
                       }
                       onRetry={() => void fetchPassInbox()}
@@ -30698,19 +30302,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 <article className="data-card">
                   <div className="data-card-header">
                     <div>
-                      <span>Point of sale</span>
+                      <span>{t("Point of sale")}</span>
                       <h2>{formatMoney(posSummary?.paidTotal ?? 0, posSummary?.currency ?? invoiceSettings.currency)}</h2>
                     </div>
                     <ClarityPayments size={24} />
                   </div>
-                  <p className="field-help">
-                    These totals are counter takings plus sales from connected systems only — invoice rows in the list
-                    below belong to invoicing (Revenue and Reports), so they stay out of the tiles to avoid double
-                    counting. Sales from a connected system are read-only — that money was taken there.
-                  </p>
+                  <p className="field-help">{t("These totals are counter takings plus sales from connected systems only — invoice rows in the list below belong to invoicing (Revenue and Reports), so they stay out of the tiles to avoid double counting. Sales from a connected system are read-only — that money was taken there.")}</p>
                   <div className="settings-field-row pos-range-row">
                     <div className="settings-field">
-                      <label htmlFor="pos-range-from">From</label>
+                      <label htmlFor="pos-range-from">{t("From")}</label>
                       <input
                         id="pos-range-from"
                         type="date"
@@ -30719,7 +30319,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       />
                     </div>
                     <div className="settings-field">
-                      <label htmlFor="pos-range-to">To</label>
+                      <label htmlFor="pos-range-to">{t("To")}</label>
                       <input
                         id="pos-range-to"
                         type="date"
@@ -30727,13 +30327,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         onChange={(event) => setPosRangeTo(event.target.value)}
                       />
                     </div>
-                    <button className="outline-button" onClick={() => void fetchPosTransactions()} type="button">
-                      Apply
-                    </button>
+                    <button className="outline-button" onClick={() => void fetchPosTransactions()} type="button">{t("Apply")}</button>
                     <button className="primary-button" onClick={() => switchView("sell")} type="button">
-                      <Plus size={16} />
-                      New Sale
-                    </button>
+                      <Plus size={16} />{t("New Sale")}</button>
                   </div>
                   {posSummary && posSummary.byMethod.length > 0 && (
                     <div className="pos-method-totals">
@@ -30741,8 +30337,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         <div key={entry.paymentMethodName} className="pos-method-total">
                           <span>{entry.paymentMethodName}</span>
                           <strong>{formatMoney(entry.total, posSummary.currency)}</strong>
-                          <em>
-                            {entry.count} sale{entry.count === 1 ? "" : "s"}
+                          <em>{t("{count} sale", { count: entry.count })}{entry.count === 1 ? "" : "s"}
                             {/* A Pass row is $0 and always will be -- the money
                                 came in when the pass was sold. Without this the
                                 tile reads as sales that took nothing; with it,
@@ -30750,7 +30345,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 already banked. Matched on kind, not on the name,
                                 which a coach can edit. */}
                             {entry.kind === "pass" && posSummary.passValue
-                              ? ` · ${formatMoney(posSummary.passValue, posSummary.currency)} delivered`
+                              ? t(" · {passValue} delivered", { passValue: formatMoney(posSummary.passValue, posSummary.currency) })
                               : ""}
                           </em>
                         </div>
@@ -30762,34 +30357,30 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 <article className="data-card wide recent-invoices-card">
                   <div className="data-card-header">
                     <div>
-                      <span>Receipts & invoices</span>
-                      <h2>Transaction History</h2>
+                      <span>{t("Receipts & invoices")}</span>
+                      <h2>{t("Transaction History")}</h2>
                     </div>
                     <ClarityInvoices size={24} />
                   </div>
-                  {posTransactionsLoadState === "loading" && <Loading what="transactions" />}
+                  {posTransactionsLoadState === "loading" && <Loading what={t("transactions")} />}
                   {posTransactionsLoadState === "error" && (
-                    <p>
-                      Could not load transactions.{" "}
-                      <button className="link-button" onClick={() => void fetchPosTransactions()} type="button">
-                        Retry
-                      </button>
+                    <p>{t("Could not load transactions.")}{" "}<button className="link-button" onClick={() => void fetchPosTransactions()} type="button">{t("Retry")}</button>
                     </p>
                   )}
                   {posTransactionsLoadState === "loaded" && !transactionHistoryRows.length && (
-                    <p>No transactions in this range yet.</p>
+                    <p>{t("No transactions in this range yet.")}</p>
                   )}
                   {transactionHistoryRows.length > 0 && (
                     <table className="recent-invoices-table">
                       <thead>
                         <tr>
-                          <th>Ref</th>
-                          <th>Date</th>
-                          <th>Description</th>
-                          <th>Customer</th>
-                          <th>Method</th>
-                          <th>Amount</th>
-                          <th>Status</th>
+                          <th>{t("Ref")}</th>
+                          <th>{t("Date")}</th>
+                          <th>{t("Description")}</th>
+                          <th>{t("Customer")}</th>
+                          <th>{t("Method")}</th>
+                          <th>{t("Amount")}</th>
+                          <th>{t("Status")}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -30806,9 +30397,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 </button>
                               </td>
                               <td>{transactionDateLabel(row.date)}</td>
-                              <td>Invoice</td>
+                              <td>{t("Invoice")}</td>
                               <td>{transactionCustomerLink(row.invoice.customerId, row.invoice.customerName)}</td>
-                              <td>Invoice</td>
+                              <td>{t("Invoice")}</td>
                               <td>{formatMoney(row.invoice.total, row.invoice.currency)}</td>
                               <td>
                                 <span
@@ -30826,12 +30417,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                               <td>{transactionDateLabel(row.date)}</td>
                               <td>
                                 {row.sale.description}
-                                {row.sale.isLessonPass && <span className="pos-lesson-tag">Lesson pass</span>}
+                                {row.sale.isLessonPass && <span className="pos-lesson-tag">{t("Lesson pass")}</span>}
                                 {row.sale.listedAmount !== null &&
                                   Math.abs(row.sale.listedAmount - row.sale.amount) > 0.005 && (
-                                    <em className="pos-adjusted-note">
-                                      listed {formatMoney(row.sale.listedAmount, row.sale.currency)}
-                                    </em>
+                                    <em className="pos-adjusted-note">{t("listed {listedAmount}", { listedAmount: formatMoney(row.sale.listedAmount, row.sale.currency) })}</em>
                                   )}
                               </td>
                               <td>{transactionCustomerLink(row.sale.customerId, row.sale.customerName)}</td>
@@ -30849,18 +30438,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                     className="link-button"
                                     onClick={() => void setPosTransactionStatus(row.sale.id, "paid")}
                                     type="button"
-                                  >
-                                    Mark paid
-                                  </button>
+                                  >{t("Mark paid")}</button>
                                 )}
                                 {row.sale.source !== "optix" && row.sale.status === "paid" && (
                                   <button
                                     className="link-button"
                                     onClick={() => void setPosTransactionStatus(row.sale.id, "refunded")}
                                     type="button"
-                                  >
-                                    Refund
-                                  </button>
+                                  >{t("Refund")}</button>
                                 )}
                               </td>
                             </tr>
@@ -30874,7 +30459,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             )}
 
             {billingSection === "reports" && (
-              <Suspense fallback={<Loading what="reports" />}>
+              <Suspense fallback={<Loading what={t("reports")} />}>
                 <BillingReportsPanel
                   summary={reportSummary}
                   loadState={reportLoadState}
@@ -30903,46 +30488,32 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 <article className="data-card">
                   <div className="data-card-header">
                     <div>
-                      <span>Card payments</span>
+                      <span>{t("Card payments")}</span>
                       <h2>
                         {stripeStatus?.route === "clarity_pay"
-                          ? "Clarity Pay is on"
+                          ? t("Clarity Pay is on")
                           : stripeStatus?.route === "own_stripe"
-                            ? "Your own Stripe account"
-                            : "Not set up"}
+                            ? t("Your own Stripe account")
+                            : t("Not set up")}
                       </h2>
                     </div>
                     <ClarityPayments size={24} />
                   </div>
                   <p className="field-help">
                     {stripeStatus?.route === "clarity_pay" ? (
-                      <>
-                        Card payments at the till, on invoices and in the player portal go straight to
-                        your account ({stripeStatus.account}), and Stripe pays them out to your bank.
-                        Clarity Pay keeps {clarityPayFeeLabel(stripeStatus.fee)} of each payment; Stripe's
-                        own card fee is separate.
-                      </>
+                      <>{t("Card payments at the till, on invoices and in the player portal go straight to your account ({account}), and Stripe pays them out to your bank. Clarity Pay keeps {fee} of each payment; Stripe's own card fee is separate.", { account: stripeStatus.account, fee: clarityPayFeeLabel(stripeStatus.fee) })}</>
                     ) : stripeStatus?.route === "own_stripe" ? (
-                      <>
-                        Invoice payments go straight to your Stripe account ({stripeStatus.account}), with no
-                        Clarity fee. The till and the player portal need Clarity Pay.
-                        {clarityPaySetup === "pending"
-                          ? " Your Clarity Pay setup isn't finished; you'll keep using your own Stripe until it is."
+                      <>{t("Invoice payments go straight to your Stripe account ({account}), with no Clarity fee. The till and the player portal need Clarity Pay.", { account: stripeStatus.account })}{clarityPaySetup === "pending"
+                          ? t(" Your Clarity Pay setup isn't finished; you'll keep using your own Stripe until it is.")
                           : ""}
                       </>
                     ) : (
                       <>
-                        <strong>Clarity Pay</strong> is the easy way: we set up your payment account, Stripe
-                        checks your details, and you can take cards at the till, on invoices and in the
-                        player portal. Payouts go to your bank. Clarity Pay keeps{" "}
-                        {stripeStatus ? clarityPayFeeLabel(stripeStatus.fee) : "a small cut"} of each payment.
-                        {clarityPaySetup === "pending" ? " Your setup isn't finished yet." : ""}
-                        <br />
-                        Already have Stripe? Connect it for invoice payments only, with no Clarity fee.
-                      </>
+                        <strong>{t("Clarity Pay")}</strong>{" "}{t("is the easy way: we set up your payment account, Stripe checks your details, and you can take cards at the till, on invoices and in the player portal. Payouts go to your bank. Clarity Pay keeps")}{" "}{stripeStatus ? clarityPayFeeLabel(stripeStatus.fee) : "a small cut"}{" "}{t("of each payment.")}{clarityPaySetup === "pending" ? t(" Your setup isn't finished yet.") : ""}
+                        <br />{t("Already have Stripe? Connect it for invoice payments only, with no Clarity fee.")}</>
                     )}
-                    {stripeStatus?.account && stripeStatus.testMode ? " This is a test-mode connection, so no real money moves." : ""}
-                    {stripeStatus?.account && !stripeStatus.configured ? " Payments are paused while Clarity's Stripe platform is unavailable." : ""}
+                    {stripeStatus?.account && stripeStatus.testMode ? t(" This is a test-mode connection, so no real money moves.") : ""}
+                    {stripeStatus?.account && !stripeStatus.configured ? t(" Payments are paused while Clarity's Stripe platform is unavailable.") : ""}
                   </p>
                   <div className="settings-field-row">
                     {stripeStatus?.route !== "clarity_pay" && (
@@ -30953,12 +30524,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         onClick={() => void setUpClarityPay()}
                       >
                         {stripeSaving
-                          ? "Opening…"
+                          ? t("Opening…")
                           : clarityPaySetup === "pending"
-                            ? "Finish Clarity Pay setup"
+                            ? t("Finish Clarity Pay setup")
                             : stripeStatus?.route === "own_stripe"
-                              ? "Switch to Clarity Pay"
-                              : "Set up Clarity Pay"}
+                              ? t("Switch to Clarity Pay")
+                              : t("Set up Clarity Pay")}
                       </button>
                     )}
                     {!stripeStatus?.route && (
@@ -30967,9 +30538,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         type="button"
                         disabled={stripeSaving}
                         onClick={() => void connectStripe()}
-                      >
-                        Connect my own Stripe
-                      </button>
+                      >{t("Connect my own Stripe")}</button>
                     )}
                     {stripeStatus?.route && (
                       <button
@@ -30978,7 +30547,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         disabled={stripeSaving}
                         onClick={() => void disconnectStripe()}
                       >
-                        {stripeStatus.route === "clarity_pay" ? "Turn off Clarity Pay" : "Disconnect"}
+                        {stripeStatus.route === "clarity_pay" ? t("Turn off Clarity Pay") : t("Disconnect")}
                       </button>
                     )}
                   </div>
@@ -30989,24 +30558,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 <article className="data-card">
                   <div className="data-card-header">
                     <div>
-                      <span>From Stripe</span>
-                      <h2>Re-read payment history</h2>
+                      <span>{t("From Stripe")}</span>
+                      <h2>{t("Re-read payment history")}</h2>
                     </div>
                     <RefreshCw size={24} />
                   </div>
-                  <p className="field-help">
-                    Pulls every Stripe invoice and card payment again, from the beginning. Safe to
-                    run whenever — each one updates the record it already has rather than adding a
-                    second.
-                  </p>
-                  <p className="field-help">
-                    Worth running once: card payments used to be filed under Stripe's own label for
-                    them, <code>Charge for &lt;email&gt;</code>, so the invoice list and the
-                    lesson-matching on a client's profile saw an email address where the product
-                    name should have been. Payments now keep what was actually bought — read from
-                    the payment, or from the basket behind it. The ones already recorded keep the
-                    old label until they are read again.
-                  </p>
+                  <p className="field-help">{t("Pulls every Stripe invoice and card payment again, from the beginning. Safe to run whenever — each one updates the record it already has rather than adding a second.")}</p>
+                  <p className="field-help">{t("Worth running once: card payments used to be filed under Stripe's own label for them,")}{" "}<code>Charge for &lt;email&gt;</code>{t(", so the invoice list and the lesson-matching on a client's profile saw an email address where the product name should have been. Payments now keep what was actually bought — read from the payment, or from the basket behind it. The ones already recorded keep the old label until they are read again.")}</p>
                   <div className="panel-actions">
                     <button
                       className="outline-button"
@@ -31014,16 +30572,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       disabled={stripeResyncing}
                       onClick={() => void resyncStripeBilling()}
                     >
-                      {stripeResyncing ? "Reading…" : "Re-read everything from Stripe"}
+                      {stripeResyncing ? t("Reading…") : t("Re-read everything from Stripe")}
                     </button>
                   </div>
                   {stripeResyncing && (
                     <p className="field-help">
                       {stripeResyncProgress
-                        ? `Reading period ${stripeResyncProgress.done + 1} of ${stripeResyncProgress.total} — newest first.`
-                        : "Starting…"}{" "}
-                      This takes a minute or two on a few hundred payments. Leave the page open.
-                    </p>
+                        ? t("Reading period {value} of {total} — newest first.", { value: stripeResyncProgress.done + 1, total: stripeResyncProgress.total })
+                        : t("Starting…")}{" "}{t("This takes a minute or two on a few hundred payments. Leave the page open.")}</p>
                   )}
                   {stripeResyncResult && !stripeResyncing && (
                     <p className="field-help">{stripeResyncResult}</p>
@@ -31033,18 +30589,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 <article className="data-card">
                   <div className="data-card-header">
                     <div>
-                      <span>Billing Settings</span>
-                      <h2>Defaults for new invoices</h2>
+                      <span>{t("Billing Settings")}</span>
+                      <h2>{t("Defaults for new invoices")}</h2>
                     </div>
                     <ClaritySettings size={24} />
                   </div>
-                  <p className="field-help">
-                    These defaults are used when creating a new invoice and are saved on your account record.
-                    Current next number: {invoiceNumber}
-                  </p>
+                  <p className="field-help">{t("These defaults are used when creating a new invoice and are saved on your account record. Current next number: {invoiceNumber}", { invoiceNumber })}</p>
                   <EditableSettingsBlock
                     id="billing-settings-block"
-                    title="Billing Settings"
+                    title={t("Billing Settings")}
                     status={billingSettingsEditor.status}
                     dirty={billingSettingsEditor.dirty}
                     errorMessage={billingSettingsEditor.errorMessage}
@@ -31060,19 +30613,17 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     {invoiceSettings.taxInclusive ? "included in prices" : "added on top"} · {coachAccount.timezone}.{" "}
                     <button
                       className="link-button"
-                      onClick={() => openProfileTarget({ kind: "settings", tab: "account", group: "region" }, "Country & region")}
+                      onClick={() => openProfileTarget({ kind: "settings", tab: "account", group: "region" }, t("Country & region"))}
                       type="button"
-                    >
-                      Change in Country &amp; region
-                    </button>
+                    >{t("Change in Country & region")}</button>
                   </p>
                   <div className="service-form-row">
                     <label className="settings-field">
-                      <span>Invoice prefix</span>
+                      <span>{t("Invoice prefix")}</span>
                       <input value={invoiceSettingsDraft.prefix} readOnly={billingSettingsIsLocked} onChange={(event) => updateBillingAccountDraft("prefix", event.target.value)} />
                     </label>
                     <label className="settings-field">
-                      <span>Start / next number</span>
+                      <span>{t("Start / next number")}</span>
                       <input
                         value={invoiceSettingsDraft.nextNumber || ""}
                         inputMode="numeric"
@@ -31083,7 +30634,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       />
                     </label>
                     <label className="settings-field">
-                      <span>Payment terms (days)</span>
+                      <span>{t("Payment terms (days)")}</span>
                       <input
                         value={invoiceSettingsDraft.paymentTermsDays}
                         inputMode="numeric"
@@ -31095,7 +30646,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   </div>
                   <div className="service-form-row">
                     <label className="settings-field">
-                      <span>{invoiceSettingsDraft.taxName} number</span>
+                      <span>{t("{taxName} number", { taxName: invoiceSettingsDraft.taxName })}</span>
                       <input
                         value={invoiceSettingsDraft.taxNumber}
                         readOnly={billingSettingsIsLocked}
@@ -31105,23 +30656,20 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     </label>
                   </div>
                   <label className="settings-field">
-                    <span>Unpaid invoice loudness</span>
+                    <span>{t("Unpaid invoice loudness")}</span>
                     <select
                       value={invoiceSettingsDraft.unpaidLoudness}
                       disabled={billingSettingsIsLocked}
                       onChange={(event) => updateBillingAccountDraft("unpaidLoudness", Number(event.target.value) as 1 | 2 | 3)}
                     >
-                      <option value={1}>Level 1 - Subtle (small count only)</option>
-                      <option value={2}>Level 2 - Noticeable (dashboard banner)</option>
-                      <option value={3}>Level 3 - Urgent (banner + highlighted rows)</option>
+                      <option value={1}>{t("Level 1 - Subtle (small count only)")}</option>
+                      <option value={2}>{t("Level 2 - Noticeable (dashboard banner)")}</option>
+                      <option value={3}>{t("Level 3 - Urgent (banner + highlighted rows)")}</option>
                     </select>
-                    <span className="field-help">
-                      Controls how strongly the Dashboard calls out overdue, unpaid invoices. Doesn't change
-                      invoice status or send anything - display only.
-                    </span>
+                    <span className="field-help">{t("Controls how strongly the Dashboard calls out overdue, unpaid invoices. Doesn't change invoice status or send anything - display only.")}</span>
                   </label>
                   <label className="settings-field">
-                    <span>Default customer note</span>
+                    <span>{t("Default customer note")}</span>
                     <textarea
                       value={invoiceSettingsDraft.defaultCustomerNote}
                       readOnly={billingSettingsIsLocked}
@@ -31130,7 +30678,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     />
                   </label>
                   <label className="settings-field">
-                    <span>Payment instructions</span>
+                    <span>{t("Payment instructions")}</span>
                     <textarea
                       value={invoiceSettingsDraft.paymentInstructions}
                       readOnly={billingSettingsIsLocked}
@@ -31144,23 +30692,20 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 <article className="data-card">
                   <div className="data-card-header">
                     <div>
-                      <span>Point of sale</span>
-                      <h2>Payment Methods</h2>
+                      <span>{t("Point of sale")}</span>
+                      <h2>{t("Payment Methods")}</h2>
                     </div>
                     <ClarityPayments size={24} />
                   </div>
-                  <p className="field-help">
-                    The buttons shown in the checkout modal. Clarity Pay is the Stripe-backed method and is always
-                    available; add your own for Cash, Eftpos, On account and anything else you take.
-                  </p>
+                  <p className="field-help">{t("The buttons shown in the checkout modal. Clarity Pay is the Stripe-backed method and is always available; add your own for Cash, Eftpos, On account and anything else you take.")}</p>
                   <div className="billing-catalog-editor">
                     <label className="settings-field">
-                      <span>Name</span>
+                      <span>{t("Name")}</span>
                       <input
                         className="w-name"
                         value={posMethodEditor.name}
                         onChange={(event) => setPosMethodEditor((current) => ({ ...current, name: event.target.value }))}
-                        placeholder="e.g. Eftpos"
+                        placeholder={t("e.g. Eftpos")}
                       />
                     </label>
                     <label className="settings-field pos-settles-toggle">
@@ -31171,12 +30716,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         }
                         type="checkbox"
                       />
-                      <span>Money is received straight away</span>
+                      <span>{t("Money is received straight away")}</span>
                     </label>
-                    <p className="field-help">
-                      Leave that unticked for methods like On account, where the sale is recorded as owed and marked
-                      paid later.
-                    </p>
+                    <p className="field-help">{t("Leave that unticked for methods like On account, where the sale is recorded as owed and marked paid later.")}</p>
                     <button
                       className="outline-button"
                       disabled={posMethodSaveState === "saving"}
@@ -31185,19 +30727,17 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     >
                       <Plus size={16} />
                       {posMethodSaveState === "saving"
-                        ? "Saving..."
+                        ? t("Saving...")
                         : posMethodEditor.id
-                          ? "Save Changes"
-                          : "Add Payment Method"}
+                          ? t("Save Changes")
+                          : t("Add Payment Method")}
                     </button>
                     {Boolean(posMethodEditor.id) && (
                       <button
                         className="text-button"
                         onClick={() => setPosMethodEditor({ id: "", name: "", settlesImmediately: true })}
                         type="button"
-                      >
-                        Cancel Edit
-                      </button>
+                      >{t("Cancel Edit")}</button>
                     )}
                   </div>
                   <div className="billing-catalog-list">
@@ -31217,9 +30757,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             <span>
                               <strong>{method.name}</strong>
                               <em>
-                                {method.kind === "clarity_pay" ? "Stripe - card, Apple Pay, Google Pay" : "Manual"}
-                                {method.settlesImmediately ? "" : " - recorded as owed"}
-                                {method.active ? "" : " - inactive"}
+                                {method.kind === "clarity_pay" ? t("Stripe - card, Apple Pay, Google Pay") : t("Manual")}
+                                {method.settlesImmediately ? "" : t(" - recorded as owed")}
+                                {method.active ? "" : t(" - inactive")}
                               </em>
                             </span>
                           </button>
@@ -31228,12 +30768,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             onClick={() => void setPosPaymentMethodActive(method, !method.active)}
                             type="button"
                           >
-                            {method.active ? "Deactivate" : "Reactivate"}
+                            {method.active ? t("Deactivate") : t("Reactivate")}
                           </button>
                         </div>
                       ))
                     ) : (
-                      <Loading what="payment methods" />
+                      <Loading what={t("payment methods")} />
                     )}
                   </div>
                 </article>
@@ -31241,29 +30781,25 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 <article className="data-card">
                   <div className="data-card-header">
                     <div>
-                      <span>Presets</span>
-                      <h2>Discount Settings</h2>
+                      <span>{t("Presets")}</span>
+                      <h2>{t("Discount Settings")}</h2>
                     </div>
                     <Percent size={24} />
                   </div>
-                  <p className="field-help">
-                    Optional presets for discounts you use often (a percentage off, a flat amount, a named
-                    discount, or a coupon code). These are picked from the invoice's discount field when
-                    needed - creating an invoice never requires one.
-                  </p>
+                  <p className="field-help">{t("Optional presets for discounts you use often (a percentage off, a flat amount, a named discount, or a coupon code). These are picked from the invoice's discount field when needed - creating an invoice never requires one.")}</p>
                   <div className="billing-catalog-editor">
                     <label className="settings-field">
-                      <span>Name</span>
+                      <span>{t("Name")}</span>
                       <input
                         className="w-name"
                         value={discountEditor.name}
                         onChange={(event) => setDiscountEditor((current) => ({ ...current, name: event.target.value }))}
-                        placeholder="e.g. Member discount"
+                        placeholder={t("e.g. Member discount")}
                       />
                     </label>
                     <div className="service-form-row">
                       <label className="settings-field">
-                        <span>Type</span>
+                        <span>{t("Type")}</span>
                         <select
                           value={discountEditor.discountType}
                           onChange={(event) =>
@@ -31273,12 +30809,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             }))
                           }
                         >
-                          <option value="percentage">Percentage</option>
-                          <option value="fixed">Fixed amount</option>
+                          <option value="percentage">{t("Percentage")}</option>
+                          <option value="fixed">{t("Fixed amount")}</option>
                         </select>
                       </label>
                       <label className="settings-field">
-                        <span>{discountEditor.discountType === "percentage" ? "Percent off" : "Amount off"}</span>
+                        <span>{discountEditor.discountType === "percentage" ? t("Percent off") : t("Amount off")}</span>
                         <input
                           className="w-price"
                           value={discountEditor.value}
@@ -31290,27 +30826,25 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         />
                       </label>
                       <label className="settings-field">
-                        <span>Coupon code (optional)</span>
+                        <span>{t("Coupon code (optional)")}</span>
                         <input
                           className="w-name"
                           value={discountEditor.couponCode}
                           onChange={(event) => setDiscountEditor((current) => ({ ...current, couponCode: event.target.value }))}
-                          placeholder="Optional"
+                          placeholder={t("Optional")}
                         />
                       </label>
                     </div>
                     <button className="outline-button" disabled={discountSaveState === "saving"} onClick={addDiscountPreset} type="button">
                       <Plus size={16} />
-                      {discountEditor.id ? (discountSaveState === "saving" ? "Saving..." : "Save Changes") : discountSaveState === "saving" ? "Saving..." : "Add Discount"}
+                      {discountEditor.id ? (discountSaveState === "saving" ? t("Saving...") : t("Save Changes")) : discountSaveState === "saving" ? t("Saving...") : t("Add Discount")}
                     </button>
                     {Boolean(discountEditor.id) && (
                       <button
                         className="text-button"
                         onClick={() => setDiscountEditor({ id: "", name: "", discountType: "percentage", value: 10, couponCode: "" })}
                         type="button"
-                      >
-                        Cancel Edit
-                      </button>
+                      >{t("Cancel Edit")}</button>
                     )}
                   </div>
                   <div className="billing-catalog-list">
@@ -31321,19 +30855,19 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             <span>
                               <strong>{preset.name}</strong>
                               <em>
-                                {preset.discountType === "percentage" ? `${preset.value}% off` : `${formatMoney(preset.value, invoiceSettings.currency)} off`}
-                                {preset.couponCode ? ` - Code: ${preset.couponCode}` : ""}
-                                {preset.active === false ? " - inactive" : ""}
+                                {preset.discountType === "percentage" ? t("{value}% off", { value: preset.value }) : `${formatMoney(preset.value, invoiceSettings.currency)} off`}
+                                {preset.couponCode ? t(" - Code: {couponCode}", { couponCode: preset.couponCode }) : ""}
+                                {preset.active === false ? t(" - inactive") : ""}
                               </em>
                             </span>
                           </button>
                           <button className="text-link-button" onClick={() => toggleDiscountActive(preset)} type="button">
-                            {preset.active === false ? "Reactivate" : "Deactivate"}
+                            {preset.active === false ? t("Reactivate") : t("Deactivate")}
                           </button>
                         </div>
                       ))
                     ) : (
-                      <p>No discount presets yet.</p>
+                      <p>{t("No discount presets yet.")}</p>
                     )}
                   </div>
                 </article>
@@ -31341,23 +30875,20 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 <article className="data-card">
                   <div className="data-card-header">
                     <div>
-                      <span>Presets</span>
-                      <h2>Expense Categories</h2>
+                      <span>{t("Presets")}</span>
+                      <h2>{t("Expense Categories")}</h2>
                     </div>
                     <ClarityInvoices size={24} />
                   </div>
-                  <p className="field-help">
-                    Optional categories for logging expenses (Range fees, Coaching supplies, Travel, Software,
-                    etc). Every expense can also be left Uncategorised.
-                  </p>
+                  <p className="field-help">{t("Optional categories for logging expenses (Range fees, Coaching supplies, Travel, Software, etc). Every expense can also be left Uncategorised.")}</p>
                   <div className="billing-catalog-editor">
                     <label className="settings-field">
-                      <span>Name</span>
+                      <span>{t("Name")}</span>
                       <input
                         className="w-name"
                         value={expenseCategoryEditor.name}
                         onChange={(event) => setExpenseCategoryEditor((current) => ({ ...current, name: event.target.value }))}
-                        placeholder="e.g. Range fees"
+                        placeholder={t("e.g. Range fees")}
                       />
                     </label>
                     <button
@@ -31369,16 +30900,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       <Plus size={16} />
                       {expenseCategoryEditor.id
                         ? expenseCategorySaveState === "saving"
-                          ? "Saving..."
-                          : "Save Changes"
+                          ? t("Saving...")
+                          : t("Save Changes")
                         : expenseCategorySaveState === "saving"
-                          ? "Saving..."
-                          : "Add Category"}
+                          ? t("Saving...")
+                          : t("Add Category")}
                     </button>
                     {Boolean(expenseCategoryEditor.id) && (
-                      <button className="text-button" onClick={() => setExpenseCategoryEditor({ id: "", name: "" })} type="button">
-                        Cancel Edit
-                      </button>
+                      <button className="text-button" onClick={() => setExpenseCategoryEditor({ id: "", name: "" })} type="button">{t("Cancel Edit")}</button>
                     )}
                   </div>
                   <div className="billing-catalog-list">
@@ -31388,16 +30917,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           <button onClick={() => setExpenseCategoryEditor(category)} type="button">
                             <span>
                               <strong>{category.name}</strong>
-                              {category.active === false && <em>Inactive</em>}
+                              {category.active === false && <em>{t("Inactive")}</em>}
                             </span>
                           </button>
                           <button className="text-link-button" onClick={() => toggleExpenseCategoryActive(category)} type="button">
-                            {category.active === false ? "Reactivate" : "Deactivate"}
+                            {category.active === false ? t("Reactivate") : t("Deactivate")}
                           </button>
                         </div>
                       ))
                     ) : (
-                      <p>No expense categories yet.</p>
+                      <p>{t("No expense categories yet.")}</p>
                     )}
                   </div>
                 </article>
@@ -31412,8 +30941,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 Terminal, and the terminal's own navigation owns the way out. */}
             {isPlayerBooking && playerBookingIdentity && (
               <div className="booking-player-bar">
-                <span className="booking-player-identity">
-                  Booking as <strong>{playerBookingIdentity.name || playerBookingIdentity.email}</strong>
+                <span className="booking-player-identity">{t("Booking as")}{" "}<strong>{playerBookingIdentity.name || playerBookingIdentity.email}</strong>
                 </span>
               </div>
             )}
@@ -31431,14 +30959,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               <em>{coachAccount.venueShortName}</em>
             </div>
 
-            <div className="booking-toolbar" role="tablist" aria-label="Booking action">
+            <div className="booking-toolbar" role="tablist" aria-label={t("Booking action")}>
               <button
                 className={`booking-hero-action ${bookingMode === "book" ? "active" : ""}`}
                 onClick={() => changeBookingMode("book")}
                 type="button"
               >
                 <ClarityCalendar size={16} />
-                <span>Book a lesson</span>
+                <span>{t("Book a lesson")}</span>
               </button>
               {/* A signed-in player is not asked to sign in again: the same
                   button goes straight to their existing bookings. */}
@@ -31448,7 +30976,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 type="button"
               >
                 <ClarityAccessPermissions size={14} />
-                <span>{isPlayerBooking ? "My bookings" : "Sign in"}</span>
+                <span>{isPlayerBooking ? t("My bookings") : t("Sign in")}</span>
               </button>
             </div>
 
@@ -31456,17 +30984,17 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               <div className="booking-confirmed">
                 <span>
                   {bookingConfirmation.kind === "booking"
-                    ? "Appointment Confirmed"
+                    ? t("Appointment Confirmed")
                     : bookingConfirmation.kind === "cancelled"
-                      ? "Booking Cancelled"
-                      : "Appointment Updated"}
+                      ? t("Booking Cancelled")
+                      : t("Appointment Updated")}
                 </span>
                 <h2>
                   {bookingConfirmation.kind === "booking"
-                    ? "Booking confirmed"
+                    ? t("Booking confirmed")
                     : bookingConfirmation.kind === "cancelled"
-                      ? "Cancellation confirmed"
-                      : "Reschedule confirmed"}
+                      ? t("Cancellation confirmed")
+                      : t("Reschedule confirmed")}
                 </h2>
                 <div className="booking-confirmed-summary">
                   <strong>{bookingConfirmation.service}</strong>
@@ -31484,8 +31012,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         return (
                           <div className={`email-status ${tone}`} key={`client-${index}`}>
                             {tone === "sent" ? <Check size={17} /> : tone === "failed" ? <X size={17} /> : <ClarityEmail size={17} />}
-                            <span>
-                              Client email: {tone === "sent" ? "Email Sent" : tone}
+                            <span>{t("Client email:")}{" "}{tone === "sent" ? t("Email Sent") : tone}
                               {result.recipient ? ` to ${result.recipient}` : ""}
                               {result.reason || result.error ? ` · ${(result.reason || result.error || "").replaceAll("_", " ")}` : ""}
                             </span>
@@ -31503,18 +31030,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 {bookingConfirmation.kind !== "cancelled" && (
                   <div className="calendar-add-actions">
                     <a className="outline-button" href={googleCalendarUrl(bookingConfirmation)} target="_blank" rel="noreferrer">
-                      <ClarityCalendar size={16} />
-                      Google Calendar
-                    </a>
+                      <ClarityCalendar size={16} />{t("Google Calendar")}</a>
                     <button className="outline-button" onClick={() => downloadAppleCalendarInvite(bookingConfirmation)} type="button">
-                      <Download size={16} />
-                      Apple Calendar
-                    </button>
+                      <Download size={16} />{t("Apple Calendar")}</button>
                     {bookingLoginUrl && (
                       <a className="outline-button" href={bookingLoginUrl}>
-                        <ClarityAccessPermissions size={16} />
-                        Manage / Reschedule
-                      </a>
+                        <ClarityAccessPermissions size={16} />{t("Manage / Reschedule")}</a>
                     )}
                   </div>
                 )}
@@ -31523,16 +31044,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   onClick={startAnotherPublicBooking}
                   type="button"
                 >
-                  {bookingConfirmation.kind === "cancelled" ? "Back to booking" : "Book another lesson"}
+                  {bookingConfirmation.kind === "cancelled" ? t("Back to booking") : t("Book another lesson")}
                 </button>
               </div>
             ) : !publicBookingStateReady ? (
               <div className="booking-columns booking-progressive-flow">
                 <div className="booking-card reschedule-link-state" role={publicBookingStateStatus === "error" ? "alert" : "status"}>
-                  <span>Booking Calendar</span>
+                  <span>{t("Booking Calendar")}</span>
                   <div className="booking-login-copy">
                     <strong>
-                      {publicBookingStateStatus === "error" ? "Booking unavailable" : loadingLabel()}
+                      {publicBookingStateStatus === "error" ? t("Booking unavailable") : loadingLabel()}
                     </strong>
                   </div>
                 </div>
@@ -31549,10 +31070,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       onClick={() => setPublicBookingSection("appointment")}
                       type="button"
                     >
-                      <span className="booking-progressive-title-label">
-                        1. Appointment <span className="booking-required-mark" aria-hidden="true">*</span>
+                      <span className="booking-progressive-title-label">{t("1. Appointment")}{" "}<span className="booking-required-mark" aria-hidden="true">*</span>
                       </span>
-                      <span className="booking-progressive-title-state">{isAppointmentStepComplete ? "Done" : "In progress"}</span>
+                      <span className="booking-progressive-title-state">{isAppointmentStepComplete ? t("Done") : t("In progress")}</span>
                     </button>
                     {isAppointmentSectionOpen ? (
                       <div className="booking-progressive-body">
@@ -31566,15 +31086,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 type="button"
                               >
                                 <strong>{service.name}</strong>
-                                <em>
-                                  {service.duration} minutes @ {servicePriceLabel(service)}
-                                </em>
+                                <em>{t("{duration} minutes @ {service}", { duration: service.duration, service: servicePriceLabel(service) })}</em>
                                 {service.description && <small>{service.description}</small>}
                                 {(service.lessonNote || service.location) && <small>{service.lessonNote || service.location}</small>}
                               </button>
                             ))
                           ) : (
-                            <p>{publicBookingEnabled ? "No public lesson types are active." : featureUnavailableMessage("publicBooking")}</p>
+                            <p>{publicBookingEnabled ? t("No public lesson types are active.") : featureUnavailableMessage("publicBooking")}</p>
                           )}
                         </div>
                       </div>
@@ -31595,8 +31113,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         onClick={() => setPublicBookingSection("appointment")}
                         type="button"
                       >
-                        <strong>Appointment not selected</strong>
-                        <span>Pick a lesson to continue</span>
+                        <strong>{t("Appointment not selected")}</strong>
+                        <span>{t("Pick a lesson to continue")}</span>
                       </button>
                     )}
                   </section>
@@ -31610,11 +31128,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       type="button"
                       disabled={!isAppointmentStepComplete}
                     >
-                      <span className="booking-progressive-title-label">
-                        2. Date & Time <span className="booking-required-mark" aria-hidden="true">*</span>
+                      <span className="booking-progressive-title-label">{t("2. Date & Time")}{" "}<span className="booking-required-mark" aria-hidden="true">*</span>
                       </span>
                       <span className="booking-progressive-title-state">
-                        {isDateTimeStepComplete ? "Done" : isAppointmentStepComplete ? "In progress" : "Locked"}
+                        {isDateTimeStepComplete ? t("Done") : isAppointmentStepComplete ? t("In progress") : t("Locked")}
                       </span>
                     </button>
                     {isDateTimeSectionOpen ? (
@@ -31622,11 +31139,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         <div className="booking-week-controls">
                           <button onClick={() => moveWeek(-1)} type="button">
                             <ArrowLeft size={15} />
-                            <span>Previous week</span>
+                            <span>{t("Previous week")}</span>
                           </button>
                           <strong>{weekTitle}</strong>
                           <button onClick={() => moveWeek(1)} type="button">
-                            <span>Next week</span>
+                            <span>{t("Next week")}</span>
                             <ArrowRight size={15} />
                           </button>
                         </div>
@@ -31642,7 +31159,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 >
                                   <strong>{day.short}</strong>
                                   <em>{day.date}</em>
-                                  {day.isToday ? <small className="booking-day-marker">Today</small> : null}
+                                  {day.isToday ? <small className="booking-day-marker">{t("Today")}</small> : null}
                                 </button>
                               ))}
                             </div>
@@ -31651,7 +31168,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         <div className="time-slots">
                           {selectedBookingService ? (
                             publicBookingSlotsLoading ? (
-                              <Loading what="available times" />
+                              <Loading what={t("available times")} />
                             ) : bookingSlots.length ? (
                               visibleBookingSlots.map((slot) => {
                                 const slotLabel = isGroupBookingTimeSelection
@@ -31671,14 +31188,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             ) : (
                               <p>
                                 {isGroupBookingTimeSelection
-                                  ? "No upcoming group lesson times are available yet."
+                                  ? t("No upcoming group lesson times are available yet.")
                                   : bookingDaySelected
-                                    ? "No public times available for this day."
-                                    : "Choose a day first."}
+                                    ? t("No public times available for this day.")
+                                    : t("Choose a day first.")}
                               </p>
                             )
                           ) : (
-                            <p>Choose an appointment type first.</p>
+                            <p>{t("Choose an appointment type first.")}</p>
                           )}
                         </div>
                       </div>
@@ -31698,8 +31215,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         type="button"
                         disabled={!isAppointmentStepComplete}
                       >
-                        <strong>{isAppointmentStepComplete ? "Date not selected" : "Select appointment first"}</strong>
-                        <span>{isAppointmentStepComplete ? "Choose day and time" : "Complete appointment step"}</span>
+                        <strong>{isAppointmentStepComplete ? t("Date not selected") : t("Select appointment first")}</strong>
+                        <span>{isAppointmentStepComplete ? t("Choose day and time") : t("Complete appointment step")}</span>
                       </button>
                     )}
                   </section>
@@ -31713,9 +31230,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       type="button"
                       disabled={!isDateTimeStepComplete}
                     >
-                      <span className="booking-progressive-title-label">3. Your Information</span>
+                      <span className="booking-progressive-title-label">{t("3. Your Information")}</span>
                       <span className="booking-progressive-title-state">
-              {showCapturedCustomerDetailsSummary ? "Done" : isDateTimeStepComplete ? "In progress" : "Locked"}
+              {showCapturedCustomerDetailsSummary ? t("Done") : isDateTimeStepComplete ? t("In progress") : t("Locked")}
             </span>
                     </button>
                     {isInformationSectionOpen ? (
@@ -31724,12 +31241,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           <label className="booking-required-field w-name">
                             <input
                               value={bookingForm.firstName}
-                              aria-label="First name required"
+                              aria-label={t("First name required")}
                               aria-required="true"
                               autoComplete="given-name"
                               onChange={(event) => updateBookingForm("firstName", event.target.value)}
                               onKeyDown={handleBookingMatchKeyDown}
-                              placeholder="First name"
+                              placeholder={t("First name")}
                               required
                             />
                             <span className="booking-required-mark" aria-hidden="true">*</span>
@@ -31737,12 +31254,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           <label className="booking-required-field w-name">
                             <input
                               value={bookingForm.lastName}
-                              aria-label="Last name required"
+                              aria-label={t("Last name required")}
                               aria-required="true"
                               autoComplete="family-name"
                               onChange={(event) => updateBookingForm("lastName", event.target.value)}
                               onKeyDown={handleBookingMatchKeyDown}
-                              placeholder="Last name"
+                              placeholder={t("Last name")}
                               required
                             />
                             <span className="booking-required-mark" aria-hidden="true">*</span>
@@ -31754,19 +31271,19 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             inputMode="tel"
                             onChange={(event) => updateBookingForm("phone", event.target.value)}
                             onKeyDown={handleBookingMatchKeyDown}
-                            placeholder="Phone"
+                            placeholder={t("Phone")}
                             type="tel"
                           />
                           <label className="booking-required-field w-email">
                             <input
                               value={bookingForm.email}
-                              aria-label="Email required"
+                              aria-label={t("Email required")}
                               aria-required="true"
                               autoComplete="email"
                               inputMode="email"
                               onChange={(event) => updateBookingForm("email", event.target.value)}
                               onKeyDown={handleBookingMatchKeyDown}
-                              placeholder="Email"
+                              placeholder={t("Email")}
                               required
                               type="email"
                             />
@@ -31787,7 +31304,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           </button>
                         )}
                         {customGroupAttendeePanel}
-                        {bookingSubmitState === "saving" && <div className="booking-save-progress" aria-label="Saving booking" />}
+                        {bookingSubmitState === "saving" && <div className="booking-save-progress" aria-label={t("Saving booking")} />}
                         {bookingSubmitError && (
                           <div className="email-status failed" role="alert">
                             <X size={17} />
@@ -31800,7 +31317,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           onClick={confirmPublicBooking}
                           type="button"
                         >
-                          {bookingSubmitState === "saving" ? "Confirming..." : "Confirm Appointment"}
+                          {bookingSubmitState === "saving" ? t("Confirming...") : t("Confirm Appointment")}
                         </button>
                       </div>
                     ) : showCapturedCustomerDetailsSummary ? (
@@ -31820,8 +31337,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         type="button"
                         disabled={!isDateTimeStepComplete}
                       >
-                        <strong>{isDateTimeStepComplete ? "Customer details missing" : "Complete time step first"}</strong>
-                        <span>{isDateTimeStepComplete ? "Enter your details to confirm" : "Lock a time first"}</span>
+                        <strong>{isDateTimeStepComplete ? t("Customer details missing") : t("Complete time step first")}</strong>
+                        <span>{isDateTimeStepComplete ? t("Enter your details to confirm") : t("Lock a time first")}</span>
                       </button>
                     )}
                   </section>
@@ -31830,15 +31347,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 <>
                   {rescheduleIdentityStep === "bookings" ? (
                   <div className="booking-card">
-                    <span>Your bookings</span>
+                    <span>{t("Your bookings")}</span>
                     {rescheduleState === "checking" && !rescheduleMatches.length ? (
                       <div className="booking-login-copy">
-                        <strong>Loading your bookings…</strong>
+                        <strong>{t("Loading your bookings…")}</strong>
                       </div>
                     ) : rescheduleMatches.length ? (
                       <>
                         <div className="booking-login-copy">
-                          <strong>Choose the booking you want to move.</strong>
+                          <strong>{t("Choose the booking you want to move.")}</strong>
                         </div>
                         <div className="service-picker reschedule-list">
                           {rescheduleMatches.map((match) => (
@@ -31857,17 +31374,17 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       </>
                     ) : (
                       <div className="booking-login-copy">
-                        <strong>Nothing booked to change yet.</strong>
-                        <em>Book a lesson first and it will show up here.</em>
+                        <strong>{t("Nothing booked to change yet.")}</strong>
+                        <em>{t("Book a lesson first and it will show up here.")}</em>
                       </div>
                     )}
                   </div>
                   ) : rescheduleIdentityStep === "sign-in" ? (
                   <div className="booking-card">
-                    <span>Sign In</span>
+                    <span>{t("Sign In")}</span>
                     <div className="booking-login-copy">
-                      <strong>Sign in to see and change your bookings.</strong>
-                      <em>Use the Clarity Golf login your coach set up for you.</em>
+                      <strong>{t("Sign in to see and change your bookings.")}</strong>
+                      <em>{t("Use the Clarity Golf login your coach set up for you.")}</em>
                     </div>
                     <div className="booking-form">
                       <input
@@ -31877,7 +31394,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         onChange={(event) =>
                           setBookingSignIn((current) => ({ ...current, email: event.target.value }))
                         }
-                        placeholder="Email"
+                        placeholder={t("Email")}
                         type="email"
                       />
                       <input
@@ -31889,7 +31406,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         onKeyDown={(event) => {
                           if (event.key === "Enter") void signInFromBooking();
                         }}
-                        placeholder="Password"
+                        placeholder={t("Password")}
                         type="password"
                       />
                     </div>
@@ -31904,44 +31421,42 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       onClick={() => void signInFromBooking()}
                       type="button"
                     >
-                      {bookingSignInState === "checking" ? "Signing in..." : "Sign in"}
+                      {bookingSignInState === "checking" ? t("Signing in...") : t("Sign in")}
                     </button>
                     <div className="booking-login-copy">
-                      <em>
-                        Booked as a guest? Use the manage-booking link in your confirmation email.
-                      </em>
+                      <em>{t("Booked as a guest? Use the manage-booking link in your confirmation email.")}</em>
                     </div>
                   </div>
                   ) : (
                     <div className="booking-card reschedule-link-state">
-                      <span>Manage Booking</span>
+                      <span>{t("Manage Booking")}</span>
                       <div className="booking-login-copy">
                         <strong>
                           {selectedRescheduleMatch
                             ? selectedRescheduleMatch.client
                             : rescheduleState === "checking"
-                            ? "Opening your booking..."
-                            : "Booking link opened"}
+                            ? t("Opening your booking...")
+                            : t("Booking link opened")}
                         </strong>
                         <em>
                           {selectedRescheduleMatch
                             ? describeRescheduleMatch(selectedRescheduleMatch)
-                            : "Choose a new time below."}
+                            : t("Choose a new time below.")}
                         </em>
                       </div>
                     </div>
                   )}
 
                   <div className="booking-card">
-                    <span>New Date & Time</span>
+                    <span>{t("New Date & Time")}</span>
                     <div className="booking-week-controls">
                       <button onClick={() => moveWeek(-1)} type="button">
                         <ArrowLeft size={15} />
-                        <span>Previous week</span>
+                        <span>{t("Previous week")}</span>
                       </button>
                       <strong>{weekTitle}</strong>
                       <button onClick={() => moveWeek(1)} type="button">
-                        <span>Next week</span>
+                        <span>{t("Next week")}</span>
                         <ArrowRight size={15} />
                       </button>
                     </div>
@@ -31964,7 +31479,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     <div className="time-slots">
                       {selectedRescheduleMatch ? (
                         publicBookingSlotsLoading ? (
-                          <Loading what="available times" />
+                          <Loading what={t("available times")} />
                         ) : bookingSlots.length ? (
                           bookingSlots.map((slot) => (
                             <button
@@ -31976,27 +31491,27 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             </button>
                           ))
                         ) : (
-                          <p>No public times available for this day.</p>
+                          <p>{t("No public times available for this day.")}</p>
                         )
                       ) : (
-                        <p>Find your booking first, then choose a new time.</p>
+                        <p>{t("Find your booking first, then choose a new time.")}</p>
                       )}
                     </div>
                   </div>
 
                   <div className="booking-card">
-                    <span>Confirm Change</span>
+                    <span>{t("Confirm Change")}</span>
                     <div className="booking-summary">
-                      <strong>{selectedRescheduleMatch?.serviceName ?? "No booking selected"}</strong>
+                      <strong>{selectedRescheduleMatch?.serviceName ?? t("No booking selected")}</strong>
                       <span>
                         {selectedRescheduleMatch
-                          ? `Current: ${describeRescheduleMatch(selectedRescheduleMatch)}`
-                          : "Use your original email and phone to find the booking."}
+                          ? t("Current: {selectedRescheduleMatch}", { selectedRescheduleMatch: describeRescheduleMatch(selectedRescheduleMatch) })
+                          : t("Use your original email and phone to find the booking.")}
                       </span>
                       <span>
                         {bookingStart === null
-                          ? "Choose a new time"
-                          : `New: ${weekDays[bookingDay].label}, ${formatTime(bookingStart)}`}
+                          ? t("Choose a new time")
+                          : t("New: {label}, {bookingStart}", { label: weekDays[bookingDay].label, bookingStart: formatTime(bookingStart) })}
                       </span>
                     </div>
                     <button
@@ -32005,7 +31520,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       onClick={confirmPublicReschedule}
                       type="button"
                     >
-                      {rescheduleState === "saving" ? "Moving..." : "Confirm Reschedule"}
+                      {rescheduleState === "saving" ? t("Moving...") : t("Confirm Reschedule")}
                     </button>
                     <button
                       className="danger-button public-cancel-booking"
@@ -32013,7 +31528,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       onClick={confirmPublicCancellation}
                       type="button"
                     >
-                      {rescheduleState === "saving" ? "Working..." : "Cancel Booking"}
+                      {rescheduleState === "saving" ? t("Working...") : t("Cancel Booking")}
                     </button>
                   </div>
                 </>
@@ -32025,18 +31540,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               <div className="embed-panel">
                 <div className="embed-copy">
                   <div>
-                    <span>Squarespace Embed</span>
-                    <h2>Booking widget iframe</h2>
+                    <span>{t("Squarespace Embed")}</span>
+                    <h2>{t("Booking widget iframe")}</h2>
                   </div>
                   <div className="embed-actions">
                     <button className="outline-button" onClick={copyEmbedCode}>
                       {copiedEmbed ? <Check size={16} /> : <Copy size={16} />}
-                      {copiedEmbed ? "Copied" : "Copy iframe"}
+                      {copiedEmbed ? t("Copied") : t("Copy iframe")}
                     </button>
                     <a className="outline-button" href={bookingWidgetUrl} target="_blank" rel="noreferrer">
-                      <ExternalLink size={16} />
-                      Open widget
-                    </a>
+                      <ExternalLink size={16} />{t("Open widget")}</a>
                   </div>
                 </div>
 
@@ -32047,8 +31560,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
                 <div className="widget-preview">
                   <div className="preview-bar">
-                    <strong>Widget preview</strong>
-                    <span>Same booking page, iframe mode</span>
+                    <strong>{t("Widget preview")}</strong>
+                    <span>{t("Same booking page, iframe mode")}</span>
                   </div>
                   <iframe src={bookingWidgetUrl} title={`${coachAccount.businessName} booking widget preview`} />
                 </div>
@@ -32082,7 +31595,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   <OwnerIdentityCard
                     identity={{
                       coachName: currentAppUser.name,
-                      roleLabel: isPlatformAdmin ? "Platform admin" : "Admin",
+                      roleLabel: isPlatformAdmin ? t("Platform admin") : t("Admin"),
                       email: currentAppUser.email,
                       phone: "",
                     }}
@@ -32115,7 +31628,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 coach profile, so a column for picking a different category is
                 offering a journey nobody started. */}
             {workspaceOverlay?.kind !== "settings" && (
-            <nav className="settings-subnav" aria-label="Settings sections">
+            <nav className="settings-subnav" aria-label={t("Settings sections")}>
               {settingsSections.filter(
                 (section) =>
                   (section.platformOnly ? isPlatformAdmin : true) &&
@@ -32145,20 +31658,20 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   below: it reads block types and favourites on mount, and
                   those are two requests nobody visiting Booking asked for. */}
               {settingsTab === "practice" ? (
-                <SettingsGroup id="practice-blocks" icon={ClarityLessonsProgrammes} section="practice" title="Practice blocks">
-                  <Suspense fallback={<Loading what="practice settings" />}>
+                <SettingsGroup id="practice-blocks" icon={ClarityLessonsProgrammes} section="practice" title={t("Practice blocks")}>
+                  <Suspense fallback={<Loading what={t("practice settings")} />}>
                     <PracticeSettingsPanel onToast={(message) => setToast({ message })} />
                   </Suspense>
                 </SettingsGroup>
               ) : null}
               {settingsTab === "developer" ? (
-                <Suspense fallback={<Loading what="your connections" />}>
+                <Suspense fallback={<Loading what={t("your connections")} />}>
                   <IntegrationsPanel audience="integration" />
                 </Suspense>
               ) : null}
               {/* Own tab only: it reads keys and webhook endpoints on mount. */}
               {isAdminUser && settingsTab === "api" ? (
-                <Suspense fallback={<Loading what="API access" />}>
+                <Suspense fallback={<Loading what={t("API access")} />}>
                   <ApiAccessPanel />
                 </Suspense>
               ) : null}
@@ -32166,8 +31679,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   server whether a sandbox exists, and that is not a question
                   anyone visiting Booking asked. */}
               {isAdminUser && settingsTab === "sandbox" ? (
-                <SettingsGroup id="sandbox" icon={FlaskConical} section="sandbox" title="Sandbox workspace">
-                  <Suspense fallback={<Loading what="the sandbox" />}>
+                <SettingsGroup id="sandbox" icon={FlaskConical} section="sandbox" title={t("Sandbox workspace")}>
+                  <Suspense fallback={<Loading what={t("the sandbox")} />}>
                     <SandboxPanel />
                   </Suspense>
                 </SettingsGroup>
@@ -32177,7 +31690,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   removing the tab button alone would still let a business owner
                   land on the platform panel. */}
               {settingsTab === "admin" && isPlatformAdmin ? (
-                <Suspense fallback={<Loading what="platform services" />}>
+                <Suspense fallback={<Loading what={t("platform services")} />}>
                   <IntegrationsPanel audience="admin" />
                 </Suspense>
               ) : null}
@@ -32194,7 +31707,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               {isAdminUser ? locationsSettingsPanel : null}
               {availabilitySettingsPanel}
               {isAdminUser ? (
-                <SettingsGroup id="resource-system" icon={ClarityFacilitiesRooms} section="booking" title="Bay & room system">
+                <SettingsGroup id="resource-system" icon={ClarityFacilitiesRooms} section="booking" title={t("Bay & room system")}>
                   <div className="data-card wide">
                     <ResourceSystemPanel canEdit={isAdminUser} />
                   </div>
@@ -32202,12 +31715,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               ) : null}
               {bookingSettingsPanel}
               {isAdminUser ? playerBookingEmbedPanel : null}
+              {/* The coach's own, on this device -- unlike everything below it. */}
+              <SettingsGroup id="language" icon={ClarityProfile} section="account" title={t("Language")} className="notification-card account-card">
+                <LanguageSelect />
+              </SettingsGroup>
               {/* Where the business is. Not the coach's: every coach in the
                   workspace shares its time zone, currency and tax. */}
-              <SettingsGroup id="region" icon={ClarityPublicBooking} section="account" title="Country & region" className="notification-card account-card">
+              <SettingsGroup id="region" icon={ClarityPublicBooking} section="account" title={t("Country & region")} className="notification-card account-card">
                 <EditableSettingsBlock
                   id="region-block"
-                  title="Country & region"
+                  title={t("Country & region")}
                   status={regionEditor.status}
                   dirty={regionEditor.dirty}
                   errorMessage={regionEditor.errorMessage}
@@ -32231,12 +31748,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 </EditableSettingsBlock>
               </SettingsGroup>
 
-              <SettingsGroup id="coach-account" icon={ClarityProfile} section="account" title="Account" className="notification-card account-card">
+              <SettingsGroup id="coach-account" icon={ClarityProfile} section="account" title={t("Account")} className="notification-card account-card">
                 <details className="settings-subsection">
                   <summary className="settings-subsection-title">
                     <ClarityPayments size={18} />
                     <div>
-                      <span>Plan</span>
+                      <span>{t("Plan")}</span>
                       <strong className="account-plan-heading">
                         {activeAccount.planKey.charAt(0).toUpperCase() + activeAccount.planKey.slice(1)}
                         <em className={`account-status-pill ${isAccountActive(activeAccount) ? "is-ok" : "is-bad"}`}>
@@ -32247,11 +31764,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   </summary>
                   <dl className="account-plan-details">
                     <div>
-                      <dt>Workspace</dt>
+                      <dt>{t("Workspace")}</dt>
                       <dd>{activeAccount.name}</dd>
                     </div>
                     <div>
-                      <dt>Workspace ID</dt>
+                      <dt>{t("Workspace ID")}</dt>
                       <dd>{activeAccount.slug}</dd>
                     </div>
                   </dl>
@@ -32259,10 +31776,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     {(
                       [
                         ["maxCoaches", terms.staffPlural],
-                        ["maxLocations", "Locations"],
-                        ["maxUsers", "Team logins"],
-                        ["maxServices", `${terms.serviceSingular} types`],
-                        ["maxBookingScreens", "Booking screens"],
+                        ["maxLocations", t("Locations")],
+                        ["maxUsers", t("Team logins")],
+                        ["maxServices", t("{serviceSingular} types", { serviceSingular: terms.serviceSingular })],
+                        ["maxBookingScreens", t("Booking screens")],
                       ] as Array<[keyof AccountLimits, string]>
                     ).map(([limitName, label]) => {
                       const used = accountUsage[limitName];
@@ -32274,7 +31791,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           <span>{label}</span>
                           <strong>
                             {used}
-                            <small>{unlimited ? " · unlimited" : ` of ${limit}`}</small>
+                            <small>{unlimited ? t(" · unlimited") : ` ${t("of {limit}", { limit })}`}</small>
+
                           </strong>
                           {!unlimited && (
                             <div className={`account-usage-meter${share >= 1 ? " is-full" : ""}`} aria-hidden="true">
@@ -32286,7 +31804,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     })}
                   </div>
                   <div className="account-feature-block">
-                    <span className="account-feature-heading">Included in your plan</span>
+                    <span className="account-feature-heading">{t("Included in your plan")}</span>
                     <ul className="account-feature-list">
                       {enabledAccountFeatures.map((feature) => (
                         <li key={feature}>
@@ -32302,16 +31820,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     <summary className="settings-subsection-title">
                       <ClarityAccessPermissions size={18} />
                       <div>
-                        <span>Security</span>
-                        <strong>Password</strong>
+                        <span>{t("Security")}</span>
+                        <strong>{t("Password")}</strong>
                       </div>
                     </summary>
                     <form className="security-settings-form" onSubmit={handleChangePassword}>
-                      <p className="field-help">
-                        Enter your current password, then choose a new one. You'll stay signed in on this device.
-                      </p>
+                      <p className="field-help">{t("Enter your current password, then choose a new one. You'll stay signed in on this device.")}</p>
                       <label className="settings-field">
-                        <span>Current password</span>
+                        <span>{t("Current password")}</span>
                         <input
                           value={passwordChangeForm.currentPassword}
                           onChange={(event) => updatePasswordChangeForm("currentPassword", event.target.value)}
@@ -32321,7 +31837,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         />
                       </label>
                       <label className="settings-field">
-                        <span>New password</span>
+                        <span>{t("New password")}</span>
                         <input
                           value={passwordChangeForm.newPassword}
                           onChange={(event) => updatePasswordChangeForm("newPassword", event.target.value)}
@@ -32332,7 +31848,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         />
                       </label>
                       <label className="settings-field">
-                        <span>Confirm new password</span>
+                        <span>{t("Confirm new password")}</span>
                         <input
                           value={passwordChangeForm.confirmPassword}
                           onChange={(event) => updatePasswordChangeForm("confirmPassword", event.target.value)}
@@ -32347,7 +31863,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           onChange={(event) => setShowPasswordFields(event.target.checked)}
                           type="checkbox"
                         />
-                        <span>Show passwords</span>
+                        <span>{t("Show passwords")}</span>
                       </label>
                       <ul id="password-requirements" className="password-requirements">
                         {passwordRequirements.map((requirement) => (
@@ -32368,7 +31884,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           disabled={passwordChangeState === "saving" || !passwordRequirements.every((requirement) => requirement.met)}
                           type="submit"
                         >
-                          {passwordChangeState === "saving" ? "Updating…" : "Update password"}
+                          {passwordChangeState === "saving" ? t("Updating…") : t("Update password")}
                         </button>
                       </div>
                     </form>
@@ -32376,7 +31892,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
                   <EditableSettingsBlock
                     id="billing-settings-account-block"
-                    title="Billing Settings"
+                    title={t("Billing Settings")}
                     status={billingSettingsEditor.status}
                     dirty={billingSettingsEditor.dirty}
                     errorMessage={billingSettingsEditor.errorMessage}
@@ -32388,10 +31904,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     <summary className="settings-subsection-title">
                       <ClarityBookingPages size={18} />
                       <div>
-                        <span>Invoicing</span>
-                        <strong>
-                          {invoiceSettings.prefix}-{String(invoiceSettings.nextNumber).padStart(4, "0")} next
-                        </strong>
+                        <span>{t("Invoicing")}</span>
+                        <strong>{t("{prefix}-{value} next", { prefix: invoiceSettings.prefix, value: String(invoiceSettings.nextNumber).padStart(4, "0") })}</strong>
                       </div>
                     </summary>
                     <div className="service-form-row">
@@ -32402,7 +31916,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           onChange={(event) => updateBillingAccountDraft("enabled", event.target.checked)}
                           type="checkbox"
                         />
-                        <span>Enable invoicing</span>
+                        <span>{t("Enable invoicing")}</span>
                       </label>
                       <label className="settings-toggle">
                         <input
@@ -32411,12 +31925,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           onChange={(event) => updateBillingAccountDraft("showBillingWorkspace", event.target.checked)}
                           type="checkbox"
                         />
-                        <span>Show Billing workspace</span>
+                        <span>{t("Show Billing workspace")}</span>
                       </label>
                     </div>
                     <div className="service-form-row">
                       <label className="settings-field">
-                        <span>Invoice prefix</span>
+                        <span>{t("Invoice prefix")}</span>
                         <input
                           value={invoiceSettingsDraft.prefix}
                           readOnly={billingSettingsIsLocked}
@@ -32424,7 +31938,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         />
                       </label>
                       <label className="settings-field">
-                        <span>Start / next number</span>
+                        <span>{t("Start / next number")}</span>
                         <input
                           value={invoiceSettingsDraft.nextNumber}
                           inputMode="numeric"
@@ -32436,7 +31950,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     </div>
                     <div className="service-form-row">
                       <label className="settings-field">
-                        <span>{invoiceSettingsDraft.taxName} number</span>
+                        <span>{t("{taxName} number", { taxName: invoiceSettingsDraft.taxName })}</span>
                         <input
                           value={invoiceSettingsDraft.taxNumber}
                         readOnly={billingSettingsIsLocked}
@@ -32447,7 +31961,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     </div>
                     <div className="service-form-row">
                       <label className="settings-field">
-                        <span>Bank account</span>
+                        <span>{t("Bank account")}</span>
                         <input
                           value={invoiceSettingsDraft.bankAccount}
                           readOnly={billingSettingsIsLocked}
@@ -32455,7 +31969,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         />
                       </label>
                       <label className="settings-field">
-                        <span>Payment terms days</span>
+                        <span>{t("Payment terms days")}</span>
                         <input
                           value={invoiceSettingsDraft.paymentTermsDays}
                           inputMode="numeric"
@@ -32471,7 +31985,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         so they are written on it — see InvoiceTemplatePanel.
                         Numbering, currency, tax rate and terms stay fields:
                         they are settings, not things printed on the page. */}
-                    <Suspense fallback={<Loading what="invoice template" />}>
+                    <Suspense fallback={<Loading what={t("invoice template")} />}>
                       <InvoiceTemplatePanel
                         settings={invoiceSettingsDraft}
                         locked={billingSettingsIsLocked}
@@ -32484,18 +31998,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     <div className="custom-field-list">
                       <div className="services-topline">
                         <div>
-                          <span>Custom fields</span>
-                          <h2>Invoice fields</h2>
+                          <span>{t("Custom fields")}</span>
+                          <h2>{t("Invoice fields")}</h2>
                         </div>
                         <button className="outline-button" disabled={billingSettingsIsLocked} onClick={addBillingCustomFieldDraft} type="button">
-                          <Plus size={16} />
-                          Add Field
-                        </button>
+                          <Plus size={16} />{t("Add Field")}</button>
                       </div>
                       {invoiceSettingsDraft.customFields.map((field) => (
                         <div className="custom-field-row" key={field.id}>
                           <label className="settings-field">
-                            <span>Label</span>
+                            <span>{t("Label")}</span>
                             <input
                               value={field.label}
                               readOnly={billingSettingsIsLocked}
@@ -32503,7 +32015,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             />
                           </label>
                           <label className="settings-field">
-                            <span>Value</span>
+                            <span>{t("Value")}</span>
                             <input
                               value={field.value}
                               readOnly={billingSettingsIsLocked}
@@ -32511,7 +32023,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             />
                           </label>
                           <label className="settings-field">
-                            <span>Placement</span>
+                            <span>{t("Placement")}</span>
                             <select
                               value={field.placement}
                               disabled={billingSettingsIsLocked}
@@ -32519,10 +32031,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 updateBillingCustomFieldDraft(field.id, "placement", event.target.value as InvoiceCustomFieldPlacement)
                               }
                             >
-                              <option value="header">Header</option>
-                              <option value="bill-to">Bill-to block</option>
-                              <option value="payment">Payment block</option>
-                              <option value="footer">Footer</option>
+                              <option value="header">{t("Header")}</option>
+                              <option value="bill-to">{t("Bill-to block")}</option>
+                              <option value="payment">{t("Payment block")}</option>
+                              <option value="footer">{t("Footer")}</option>
                             </select>
                           </label>
                           <button
@@ -32530,7 +32042,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             disabled={billingSettingsIsLocked}
                             onClick={() => removeBillingCustomFieldDraft(field.id)}
                             type="button"
-                            aria-label="Remove custom field"
+                            aria-label={t("Remove custom field")}
                           >
                             <Trash2 size={16} />
                           </button>
@@ -32540,31 +32052,26 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     <div className="custom-field-list">
                       <div className="services-topline">
                         <div>
-                          <span>Line tags</span>
-                          <h2>How you group invoice lines</h2>
+                          <span>{t("Line tags")}</span>
+                          <h2>{t("How you group invoice lines")}</h2>
                         </div>
                         <button className="outline-button" disabled={billingSettingsIsLocked} onClick={addBillingLineTagDraft} type="button">
-                          <Plus size={16} />
-                          Add Tag
-                        </button>
+                          <Plus size={16} />{t("Add Tag")}</button>
                       </div>
                       {/* Not a fixed list: one workspace reports by coach, another
                           by location. The tag never appears on the client's copy -
                           it is only how the coach files the line. */}
-                      <p className="settings-note">
-                        Your own labels for invoice lines — coach, location, whatever you report on. They stay off the
-                        client's invoice. Removing one here leaves it on invoices that already used it.
-                      </p>
+                      <p className="settings-note">{t("Your own labels for invoice lines — coach, location, whatever you report on. They stay off the client's invoice. Removing one here leaves it on invoices that already used it.")}</p>
                       {invoiceSettingsDraft.lineTags.length ? (
                         invoiceSettingsDraft.lineTags.map((tag) => (
                           <div className="custom-field-row" key={tag.id}>
                             <label className="settings-field">
-                              <span>Label</span>
+                              <span>{t("Label")}</span>
                               <input
                                 value={tag.label}
                                 readOnly={billingSettingsIsLocked}
                                 onChange={(event) => updateBillingLineTagDraft(tag.id, event.target.value)}
-                                placeholder="Coach · Jordan Blake"
+                                placeholder={t("Coach · Jordan Blake")}
                               />
                             </label>
                             <button
@@ -32572,14 +32079,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                               disabled={billingSettingsIsLocked}
                               onClick={() => removeBillingLineTagDraft(tag.id)}
                               type="button"
-                              aria-label="Remove line tag"
+                              aria-label={t("Remove line tag")}
                             >
                               <Trash2 size={16} />
                             </button>
                           </div>
                         ))
                       ) : (
-                        <p className="settings-static-value">No tags yet — invoice lines won't show a Tag field.</p>
+                        <p className="settings-static-value">{t("No tags yet — invoice lines won't show a Tag field.")}</p>
                       )}
                     </div>
                   </details>
@@ -32587,13 +32094,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 </div>
               </SettingsGroup>
 
-              <SettingsGroup id="google-calendar" icon={ClarityCalendarSync} section="developer" title="Calendar feed & video storage" className="sync-card">
+              <SettingsGroup id="google-calendar" icon={ClarityCalendarSync} section="developer" title={t("Calendar feed & video storage")} className="sync-card">
 
                 <section className="settings-subsection video-storage-section" aria-labelledby="video-storage-heading">
                   <div className="video-storage-heading">
                     <div>
-                      <span>VIDEO STORAGE</span>
-                      <h3 id="video-storage-heading">My Library and Clarity Cloud</h3>
+                      <span>{t("VIDEO STORAGE")}</span>
+                      <h3 id="video-storage-heading">{t("My Library and Clarity Cloud")}</h3>
                     </div>
                     <ClarityVideoAnalysis size={20} />
                   </div>
@@ -32603,7 +32110,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       <div className="storage-card-header">
                         <ClarityFilesMedia size={18} />
                         <div>
-                          <span>My Library</span>
+                          <span>{t("My Library")}</span>
                           <strong>{localStorageHealth.statusLabel}</strong>
                         </div>
                       </div>
@@ -32626,12 +32133,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       <div className="storage-card-header">
                         <Upload size={18} />
                         <div>
-                          <span>Clarity Cloud</span>
+                          <span>{t("Clarity Cloud")}</span>
                           <strong>{clarityCloudHealth.statusLabel}</strong>
                         </div>
                       </div>
                       <p>{clarityCloudHealth.message}</p>
-                      <span className="storage-provider-line">Powered by {clarityCloudHealth.providerLabel}</span>
+                      <span className="storage-provider-line">{t("Powered by {providerLabel}", { providerLabel: clarityCloudHealth.providerLabel })}</span>
                       {clarityCloudPrimaryAction ? (
                         <button
                           className="primary-button"
@@ -32641,20 +32148,20 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         >
                           <ExternalLink size={16} />
                           {googleDriveAction === "connecting"
-                            ? "Opening provider"
+                            ? t("Opening provider")
                             : googleDriveAction === "testing"
-                              ? "Checking"
+                              ? t("Checking")
                               : getClarityCloudActionLabel(clarityCloudPrimaryAction)}
                         </button>
                       ) : null}
                     </article>
                   </div>
 
-                  <section className="storage-transfer-inbox" aria-label="Clarity Cloud catalogue">
+                  <section className="storage-transfer-inbox" aria-label={t("Clarity Cloud catalogue")}>
                     <div className="storage-transfer-inbox-header">
                       <div>
-                        <span>CLARITY CLOUD CATALOGUE</span>
-                        <h4>Available in Clarity Cloud</h4>
+                        <span>{t("CLARITY CLOUD CATALOGUE")}</span>
+                        <h4>{t("Available in Clarity Cloud")}</h4>
                       </div>
                       <button
                         type="button"
@@ -32662,9 +32169,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         disabled={!googleDriveTransfer.connected || !googleDriveTransfer.incomingImportReady}
                         onClick={() => void refreshClarityCloudImports()}
                       >
-                        <RefreshCw size={16} />
-                        Refresh
-                      </button>
+                        <RefreshCw size={16} />{t("Refresh")}</button>
                     </div>
                     {clarityCloudImports.length ? (
                       <div className="storage-transfer-list">
@@ -32672,12 +32177,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           const savedVideoId = transfer.savedVideoId || transfer.savedVideo?.savedVideoId || transfer.transferId;
                           const statusLabel =
                             transfer.catalogueStatus === "complete"
-                              ? "Available"
+                              ? t("Available")
                               : transfer.catalogueStatus === "imported" || transfer.catalogueStatus === "cleanup_scheduled"
-                                ? "Available on this device"
+                                ? t("Available on this device")
                                 : transfer.catalogueStatus === "repair_required"
-                                  ? "Needs repair"
-                                  : "Available";
+                                  ? t("Needs repair")
+                                  : t("Available");
                           const canImport =
                             (transfer.catalogueStatus === "ready_to_import" ||
                               transfer.catalogueStatus === "complete" ||
@@ -32697,25 +32202,22 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 <Download size={16} />
                               </div>
                               <div className="storage-transfer-copy">
-                                <strong>{transfer.savedVideo?.title || "Saved video"}</strong>
+                                <strong>{transfer.savedVideo?.title || t("Saved video")}</strong>
                                 <span>
                                   {statusLabel}
                                   {transfer.savedVideo?.createdAt ? ` · ${profileRecordDateLabel(transfer.savedVideo.createdAt)}` : ""}
-                                  {transfer.video?.sizeBytes ? ` · ${Math.round(transfer.video.sizeBytes / 1024 / 1024)} MB` : ""}
+                                  {transfer.video?.sizeBytes ? t(" · {value} MB", { value: Math.round(transfer.video.sizeBytes / 1024 / 1024) }) : ""}
                                 </span>
                                 {isGuestSubmission && (
                                   <>
                                     {/* Say plainly that none of this was checked. */}
-                                    <span>
-                                      Sent by {transfer.submittedByName || "someone"}
+                                    <span>{t("Sent by")}{" "}{transfer.submittedByName || "someone"}
                                       {transfer.submittedByEmail ? ` · ${transfer.submittedByEmail}` : ""}
-                                      {guestUnclaimed ? " · no account yet" : ""}
+                                      {guestUnclaimed ? t(" · no account yet") : ""}
                                     </span>
                                     {transfer.playerMessage && <span>“{transfer.playerMessage}”</span>}
                                     {guestUnclaimed && transfer.cleanupAfter && (
-                                      <span>
-                                        Expires {profileRecordDateLabel(transfer.cleanupAfter)} unless you add them.
-                                      </span>
+                                      <span>{t("Expires {cleanupAfter} unless you add them.", { cleanupAfter: profileRecordDateLabel(transfer.cleanupAfter) })}</span>
                                     )}
                                   </>
                                 )}
@@ -32727,7 +32229,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                   disabled={Boolean(portalPlayerBusyId)}
                                   onClick={() => void addGuestAsPlayer(transfer)}
                                 >
-                                  {portalPlayerBusyId === transfer.guestSenderId ? "Adding" : "Add as player"}
+                                  {portalPlayerBusyId === transfer.guestSenderId ? t("Adding") : t("Add as player")}
                                 </button>
                               )}
                               <button
@@ -32737,7 +32239,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 onClick={() => void importClarityCloudTransfer(transfer)}
                               >
                                 <Download size={16} />
-                                {clarityCloudImportActionIds.has(savedVideoId) ? "Downloading" : "Download to this device"}
+                                {clarityCloudImportActionIds.has(savedVideoId) ? t("Downloading") : t("Download to this device")}
                               </button>
                             </article>
                           );
@@ -32746,8 +32248,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     ) : (
                       <p className="storage-transfer-empty">
                         {googleDriveTransfer.connected
-                          ? "No Cloud videos are available yet."
-                          : "Connect Clarity Cloud to see transfers from other devices."}
+                          ? t("No Cloud videos are available yet.")
+                          : t("Connect Clarity Cloud to see transfers from other devices.")}
                       </p>
                     )}
                   </section>
@@ -32760,32 +32262,32 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     <summary className="settings-subsection-title">
                       <ClarityAdmin size={18} />
                       <div>
-                        <span>Advanced storage diagnostics</span>
-                        <strong>Local Storage and Clarity Cloud</strong>
+                        <span>{t("Advanced storage diagnostics")}</span>
+                        <strong>{t("Local Storage and Clarity Cloud")}</strong>
                       </div>
                     </summary>
                     <div className="storage-diagnostics-grid">
                       <div className="storage-diagnostics-group">
-                        <h4>Local Storage</h4>
+                        <h4>{t("Local Storage")}</h4>
                         <div className="sync-meta">
-                          <span>Browser support</span>
-                          <strong>{managedLocalLibraryStatus.supported ? "Supported" : "Browser-only"}</strong>
+                          <span>{t("Browser support")}</span>
+                          <strong>{managedLocalLibraryStatus.supported ? t("Supported") : "Browser-only"}</strong>
                         </div>
                         <div className="sync-meta">
-                          <span>Directory handle</span>
-                          <strong>{managedLocalLibraryStatus.configured ? "Available" : "Not selected"}</strong>
+                          <span>{t("Directory handle")}</span>
+                          <strong>{managedLocalLibraryStatus.configured ? t("Available") : t("Not selected")}</strong>
                         </div>
                         <div className="sync-meta">
-                          <span>Verification</span>
-                          <strong>{managedLocalLibraryStatus.health === "healthy" ? "Write/read passed" : managedLocalLibraryStatus.message}</strong>
+                          <span>{t("Verification")}</span>
+                          <strong>{managedLocalLibraryStatus.health === "healthy" ? t("Write/read passed") : managedLocalLibraryStatus.message}</strong>
                         </div>
                         <div className="sync-meta">
-                          <span>Cache state</span>
-                          <strong>IndexedDB recovery enabled</strong>
+                          <span>{t("Cache state")}</span>
+                          <strong>{t("IndexedDB recovery enabled")}</strong>
                         </div>
                         <div className="sync-meta">
-                          <span>Safe error code</span>
-                          <strong>{"safeErrorCode" in localStorageHealth && localStorageHealth.safeErrorCode ? localStorageHealth.safeErrorCode : "None"}</strong>
+                          <span>{t("Safe error code")}</span>
+                          <strong>{"safeErrorCode" in localStorageHealth && localStorageHealth.safeErrorCode ? localStorageHealth.safeErrorCode : t("None")}</strong>
                         </div>
                         <div className="sync-actions">
                           <button
@@ -32794,94 +32296,82 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             onClick={() => void runManagedLibraryAction("choose")}
                             type="button"
                           >
-                            <ClarityFilesMedia size={16} />
-                            Change folder
-                          </button>
+                            <ClarityFilesMedia size={16} />{t("Change folder")}</button>
                           <button
                             className="outline-button"
                             disabled={!managedLocalLibraryStatus.supported}
                             onClick={() => void runManagedLibraryAction("move")}
                             type="button"
                           >
-                            <ArrowRight size={16} />
-                            Move library
-                          </button>
+                            <ArrowRight size={16} />{t("Move library")}</button>
                           <button
                             className="outline-button"
                             disabled={!managedLocalLibraryStatus.configured}
                             onClick={() => void runManagedLibraryAction("reconnect")}
                             type="button"
                           >
-                            <RefreshCw size={16} />
-                            Reconnect handle
-                          </button>
+                            <RefreshCw size={16} />{t("Reconnect handle")}</button>
                           <button
                             className="outline-button"
                             disabled={!managedLocalLibraryStatus.configured}
                             onClick={() => void runManagedLibraryAction("verify")}
                             type="button"
                           >
-                            <Check size={16} />
-                            Verify library
-                          </button>
+                            <Check size={16} />{t("Verify library")}</button>
                           <button
                             className="outline-button"
                             disabled={!managedLocalLibraryStatus.configured}
                             onClick={() => void runManagedLibraryAction("rescan")}
                             type="button"
                           >
-                            <RefreshCw size={16} />
-                            Rescan library
-                          </button>
+                            <RefreshCw size={16} />{t("Rescan library")}</button>
                           <button
                             className="outline-button"
                             disabled={!managedLocalLibraryStatus.configured}
                             onClick={() => void runManagedLibraryAction("migrate")}
                             type="button"
                           >
-                            <Archive size={16} />
-                            Migrate cache
-                          </button>
+                            <Archive size={16} />{t("Migrate cache")}</button>
                         </div>
                       </div>
 
                       <div className="storage-diagnostics-group">
-                        <h4>Clarity Cloud</h4>
+                        <h4>{t("Clarity Cloud")}</h4>
                         <div className="sync-meta">
-                          <span>Provider</span>
+                          <span>{t("Provider")}</span>
                           <strong>{clarityCloudHealth.providerLabel}</strong>
                         </div>
                         <div className="sync-meta">
-                          <span>OAuth connection</span>
-                          <strong>{googleDriveTransfer.connected ? googleDriveTransfer.accountEmail || "Connected" : "Not connected"}</strong>
+                          <span>{t("OAuth connection")}</span>
+                          <strong>{googleDriveTransfer.connected ? googleDriveTransfer.accountEmail || t("Connected") : t("Not connected")}</strong>
                         </div>
                         <div className="sync-meta">
-                          <span>Permission</span>
-                          <strong>{googleDriveTransfer.driveScopeGranted ? "Granted" : "Required"}</strong>
+                          <span>{t("Permission")}</span>
+                          <strong>{googleDriveTransfer.driveScopeGranted ? t("Granted") : t("Required")}</strong>
                         </div>
                         <div className="sync-meta">
-                          <span>Transfer folder</span>
-                          <strong>{googleDriveTransfer.inboxFolderId ? "Ready" : "Not ready"}</strong>
+                          <span>{t("Transfer folder")}</span>
+                          <strong>{googleDriveTransfer.inboxFolderId ? t("Ready") : t("Not ready")}</strong>
                         </div>
                         <div className="sync-meta">
-                          <span>Upload service</span>
-                          <strong>{googleDriveTransfer.uploadRouteReady === false ? "Unavailable" : "Available"}</strong>
+                          <span>{t("Upload service")}</span>
+                          <strong>{googleDriveTransfer.uploadRouteReady === false ? t("Unavailable") : t("Available")}</strong>
                         </div>
                         <div className="sync-meta">
-                          <span>Chunked transport</span>
-                          <strong>{googleDriveTransfer.chunkedTransportReady === false ? "Unavailable" : "Available"}</strong>
+                          <span>{t("Chunked transport")}</span>
+                          <strong>{googleDriveTransfer.chunkedTransportReady === false ? t("Unavailable") : t("Available")}</strong>
                         </div>
                         <div className="sync-meta">
-                          <span>Incoming import</span>
-                          <strong>{googleDriveTransfer.incomingImportReady ? "Ready" : "Next step"}</strong>
+                          <span>{t("Incoming import")}</span>
+                          <strong>{googleDriveTransfer.incomingImportReady ? t("Ready") : t("Next step")}</strong>
                         </div>
                         <div className="sync-meta">
-                          <span>Safe error code</span>
-                          <strong>{"safeErrorCode" in clarityCloudHealth && clarityCloudHealth.safeErrorCode ? clarityCloudHealth.safeErrorCode : "None"}</strong>
+                          <span>{t("Safe error code")}</span>
+                          <strong>{"safeErrorCode" in clarityCloudHealth && clarityCloudHealth.safeErrorCode ? clarityCloudHealth.safeErrorCode : t("None")}</strong>
                         </div>
                         <div className="sync-meta">
-                          <span>Missing configuration</span>
-                          <strong>{googleDriveTransfer.missingConfiguration?.length ? googleDriveTransfer.missingConfiguration.join(", ") : "None"}</strong>
+                          <span>{t("Missing configuration")}</span>
+                          <strong>{googleDriveTransfer.missingConfiguration?.length ? googleDriveTransfer.missingConfiguration.join(", ") : t("None")}</strong>
                         </div>
                         <div className="sync-actions">
                           <button
@@ -32891,7 +32381,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             type="button"
                           >
                             <ExternalLink size={16} />
-                            {googleDriveTransfer.connected ? "Reconnect provider" : "Connect provider"}
+                            {googleDriveTransfer.connected ? t("Reconnect provider") : t("Connect provider")}
                           </button>
                           <button
                             className="outline-button"
@@ -32900,7 +32390,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             type="button"
                           >
                             <RefreshCw size={16} />
-                            {googleDriveAction === "testing" ? "Testing" : "Test connection"}
+                            {googleDriveAction === "testing" ? t("Testing") : t("Test connection")}
                           </button>
                           <button
                             className="outline-button"
@@ -32913,9 +32403,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             }}
                             type="button"
                           >
-                            <ExternalLink size={16} />
-                            Open transfer inbox
-                          </button>
+                            <ExternalLink size={16} />{t("Open transfer inbox")}</button>
                           <button
                             className="danger-button"
                             disabled={googleDriveAction !== "idle" || !googleDriveTransfer.connected}
@@ -32923,7 +32411,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             type="button"
                           >
                             <X size={16} />
-                            {googleDriveAction === "disconnecting" ? "Disconnecting" : "Disconnect provider"}
+                            {googleDriveAction === "disconnecting" ? t("Disconnecting") : t("Disconnect provider")}
                           </button>
                         </div>
                       </div>
@@ -32932,15 +32420,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 </section>
 
                 <div className={`sync-status ${calendarFeedStatus}`}>
-                  <span>Feed endpoint</span>
+                  <span>{t("Feed endpoint")}</span>
                   <strong>
                     {calendarFeedStatus === "connected"
                       ? calendarSaveStatus === "failed"
-                        ? "Connected — save needs retry"
-                        : "Connected"
+                        ? t("Connected — save needs retry")
+                        : t("Connected")
                       : calendarFeedStatus === "checking"
-                        ? "Checking"
-                        : "Offline"}
+                        ? t("Checking")
+                        : t("Offline")}
                   </strong>
                   <em>{calendarSaveError || calendarFeedUrl}</em>
                 </div>
@@ -32948,15 +32436,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   <summary className="settings-subsection-title">
                     <ClarityAccessPermissions size={18} />
                     <div>
-                      <span>Google Calendar</span>
+                      <span>{t("Google Calendar")}</span>
                       <strong>
-                        {items.filter((item) => item.kind === "appointment").length} appointments,{" "}
-                        {items.filter((item) => item.kind === "block").length} busy blocks
-                      </strong>
+                        {items.filter((item) => item.kind === "appointment").length}{" "}{t("appointments,")}{" "}{items.filter((item) => item.kind === "block").length}{" "}{t("busy blocks")}</strong>
                     </div>
                   </summary>
                   <label className="sync-field">
-                    <span>Live booking app URL</span>
+                    <span>{t("Live booking app URL")}</span>
                     <input
                       value={syncBaseUrl}
                       onChange={(event) => setSyncBaseUrl(event.target.value)}
@@ -32965,32 +32451,28 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   </label>
 
                   <div className="sync-output">
-                    <span>Subscription URL</span>
+                    <span>{t("Subscription URL")}</span>
                     <code>{calendarFeedUrl}</code>
                   </div>
 
                   <div className="sync-actions">
                     <button className="outline-button" onClick={() => copySyncText("url")}>
                       {copiedSync === "url" ? <Check size={16} /> : <Copy size={16} />}
-                      {copiedSync === "url" ? "Copied URL" : "Copy URL"}
+                      {copiedSync === "url" ? t("Copied URL") : t("Copy URL")}
                     </button>
                     <button className="outline-button" onClick={() => copySyncText("key")}>
                       {copiedSync === "key" ? <Check size={16} /> : <ClarityAccessPermissions size={16} />}
-                      {copiedSync === "key" ? "Copied key" : "Copy key"}
+                      {copiedSync === "key" ? t("Copied key") : t("Copy key")}
                     </button>
                     <button className="outline-button" onClick={regenerateSyncKey}>
-                      <RefreshCw size={16} />
-                      Regenerate
-                    </button>
+                      <RefreshCw size={16} />{t("Regenerate")}</button>
                     <a
                       className="outline-button"
                       href="https://calendar.google.com/calendar/u/0/r/settings/addbyurl"
                       target="_blank"
                       rel="noreferrer"
                     >
-                      <ExternalLink size={16} />
-                      Google
-                    </a>
+                      <ExternalLink size={16} />{t("Google")}</a>
                   </div>
                 </details>
               </SettingsGroup>
@@ -33008,10 +32490,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   reminder on, watched reminders go out, and still read "Off"
                   here — a half-written save that the shared header had no way
                   to show. */}
-              <SettingsGroup id="email-notifications" icon={ClarityIntegrations} section="email-sms" title="Sender & delivery" className="notification-card">
+              <SettingsGroup id="email-notifications" icon={ClarityIntegrations} section="email-sms" title={t("Sender & delivery")} className="notification-card">
                 <EditableSettingsBlock
                   id="email-notifications-block"
-                  title="Sender & delivery"
+                  title={t("Sender & delivery")}
                   status={emailNotificationsEditor.status}
                   dirty={emailNotificationsEditor.dirty}
                   errorMessage={emailNotificationsEditor.errorMessage}
@@ -33021,30 +32503,24 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 >
                 <div className="settings-summary-grid">
                   <span>
-                    <strong>{notificationSettings.notificationFromName || "Not set"}</strong>
-                    from
-                  </span>
+                    <strong>{notificationSettings.notificationFromName || t("Not set")}</strong>{t("from")}</span>
                   <span>
-                    <strong>{notificationSettings.replyToEmail || coachAccount.contactEmail || "Not set"}</strong>
-                    reply-to
-                  </span>
+                    <strong>{notificationSettings.replyToEmail || coachAccount.contactEmail || t("Not set")}</strong>{t("reply-to")}</span>
                   <span>
-                    <strong>{notificationSettings.notificationDelaySeconds}s</strong>
-                    delay
-                  </span>
+                    <strong>{notificationSettings.notificationDelaySeconds}s</strong>{t("delay")}</span>
                 </div>
                 <details className="settings-subsection">
                   <summary className="settings-subsection-title">
                     <ClarityEmail size={18} />
                     <div>
-                      <span>Sender identity</span>
+                      <span>{t("Sender identity")}</span>
                       <strong>{notificationSettings.configuredSenderEmailAddress || "Provider-controlled"}</strong>
                     </div>
                   </summary>
                   <label className="settings-field">
-                    <span>Email sender name</span>
+                    <span>{t("Email sender name")}</span>
                     <input
-                      placeholder="Your business name"
+                      placeholder={t("Your business name")}
                       value={emailNotificationsDraft.notificationFromName}
                       readOnly={emailNotificationsIsLocked}
                       maxLength={120}
@@ -33052,20 +32528,20 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         updateNotificationBlockDraft(emailNotificationsEditor, "notificationFromName", event.target.value.slice(0, 120))}
                     />
                   </label>
-                  <p className="field-help">This is the display name clients see in their inbox.</p>
+                  <p className="field-help">{t("This is the display name clients see in their inbox.")}</p>
                   <label className="settings-field">
-                    <span>Sender email address</span>
+                    <span>{t("Sender email address")}</span>
                     <input
                       value={notificationSettings.configuredSenderEmailAddress}
                       type="email"
                       readOnly
                       disabled
-                      placeholder="Sender address controlled by provider"
+                      placeholder={t("Sender address controlled by provider")}
                     />
                   </label>
-                  <p className="field-help">The sender email address is controlled by your configured email provider/domain.</p>
+                  <p className="field-help">{t("The sender email address is controlled by your configured email provider/domain.")}</p>
                   <label className="settings-field">
-                    <span>Reply-to email</span>
+                    <span>{t("Reply-to email")}</span>
                     <input
                       value={emailNotificationsDraft.replyToEmail}
                       readOnly={emailNotificationsIsLocked}
@@ -33078,12 +32554,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   <summary className="settings-subsection-title">
                     <ClarityEmail size={18} />
                     <div>
-                      <span>Delivery</span>
+                      <span>{t("Delivery")}</span>
                       <strong>{notificationSettings.notificationEmail || coachAccount.contactEmail}</strong>
                     </div>
                   </summary>
                   <label className="settings-field">
-                    <span>Admin notification email</span>
+                    <span>{t("Admin notification email")}</span>
                     <input
                       value={emailNotificationsDraft.notificationEmail}
                       readOnly={emailNotificationsIsLocked}
@@ -33092,21 +32568,18 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     />
                   </label>
                   <label className="settings-field">
-                    <span>Coach email (fallback)</span>
+                    <span>{t("Coach email (fallback)")}</span>
                     <input
                       value={emailNotificationsDraft.coachEmail}
                       readOnly={emailNotificationsIsLocked}
                       onChange={(event) => updateNotificationBlockDraft(emailNotificationsEditor, "coachEmail", event.target.value)}
-                      placeholder="coach@example.com"
+                      placeholder={t("coach@example.com")}
                       type="email"
                     />
                   </label>
-                  <p className="field-help">
-                    Coach booking alerts go to the email on the coach profile of whoever is taking the lesson
-                    (Settings → Coaches). This address is only used if that profile has no email.
-                  </p>
+                  <p className="field-help">{t("Coach booking alerts go to the email on the coach profile of whoever is taking the lesson (Settings → Coaches). This address is only used if that profile has no email.")}</p>
                   <label className="settings-field">
-                    <span>Notification delay seconds</span>
+                    <span>{t("Notification delay seconds")}</span>
                     <input
                       value={emailNotificationsDraft.notificationDelaySeconds}
                       readOnly={emailNotificationsIsLocked}
@@ -33128,33 +32601,33 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   <summary className="settings-subsection-title">
                     <ExternalLink size={18} />
                     <div>
-                      <span>Google review link</span>
-                      <strong>{notificationSettings.googleReviewUrl ? "Configured" : "Not set"}</strong>
+                      <span>{t("Google review link")}</span>
+                      <strong>{notificationSettings.googleReviewUrl ? t("Configured") : t("Not set")}</strong>
                     </div>
                   </summary>
                   <label className="settings-field">
-                    <span>Google review URL</span>
+                    <span>{t("Google review URL")}</span>
                     <input
                       type="url"
                       value={emailNotificationsDraft.googleReviewUrl}
                       readOnly={emailNotificationsIsLocked}
                       maxLength={700}
                       onChange={(event) => updateNotificationBlockDraft(emailNotificationsEditor, "googleReviewUrl", event.target.value.slice(0, 700))}
-                      placeholder="direct Google review link"
+                      placeholder={t("direct Google review link")}
                     />
                   </label>
-                  <p className="field-help">Used for optional review buttons in client emails. Leave blank to hide review links.</p>
+                  <p className="field-help">{t("Used for optional review buttons in client emails. Leave blank to hide review links.")}</p>
                 </details>
                 <details className="settings-subsection">
                   <summary className="settings-subsection-title">
                     <ClarityEmail size={18} />
                     <div>
-                      <span>Test send</span>
+                      <span>{t("Test send")}</span>
                       <strong>{testEmailAddress || notificationSettings.notificationEmail || coachAccount.contactEmail}</strong>
                     </div>
                   </summary>
                   <label className="settings-field">
-                    <span>Send test to</span>
+                    <span>{t("Send test to")}</span>
                     <input
                       value={testEmailAddress}
                       onChange={(event) => setTestEmailAddress(event.target.value)}
@@ -33166,13 +32639,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       fixed wording through the provider and does not read the
                       templates or the sender identity above. Say so, rather
                       than letting it look like a way to proof a message. */}
-                  <p className="field-help">
-                    Checks that the email provider is reachable. It sends fixed test wording to this address only — not
-                    your templates, and never a client.
-                  </p>
+                  <p className="field-help">{t("Checks that the email provider is reachable. It sends fixed test wording to this address only — not your templates, and never a client.")}</p>
                   <button className="outline-button" onClick={sendTestEmail} disabled={testEmailState === "sending"} type="button">
                     <ClarityEmail size={16} />
-                    {testEmailState === "sending" ? "Sending..." : testEmailState === "sent" ? "Sent" : "Send Test Email"}
+                    {testEmailState === "sending" ? t("Sending...") : testEmailState === "sent" ? t("Sent") : t("Send Test Email")}
                   </button>
                 </details>
                 </EditableSettingsBlock>
@@ -33184,11 +32654,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   itself and then renders whatever the server sent back, so the
                   card cannot drift from the send path the way the old shared
                   block did. */}
-              <SettingsGroup id="email-sending-rules" icon={ClarityNotifications} section="email-sms" title="What sends" className="notification-card">
+              <SettingsGroup id="email-sending-rules" icon={ClarityNotifications} section="email-sms" title={t("What sends")} className="notification-card">
                 <section className="sending-rules" id="email-sending-rules-block">
                   <div className="sending-rules-head">
-                    <span>What sends</span>
-                    <em>Each switch saves on its own — there is nothing to press.</em>
+                    <span>{t("What sends")}</span>
+                    <em>{t("Each switch saves on its own — there is nothing to press.")}</em>
                   </div>
                   <label className="settings-toggle sending-rule">
                     <input
@@ -33197,7 +32667,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       onChange={(event) => void commitSendingRule("sendClientEmail", { sendClientEmail: event.target.checked })}
                       type="checkbox"
                     />
-                    <span>Send client confirmation email</span>
+                    <span>{t("Send client confirmation email")}</span>
                     {sendingRuleStatus("sendClientEmail")}
                   </label>
                   <label className="settings-toggle sending-rule">
@@ -33207,7 +32677,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       onChange={(event) => void commitSendingRule("sendCoachEmail", { sendCoachEmail: event.target.checked })}
                       type="checkbox"
                     />
-                    <span>Send coach booking alert</span>
+                    <span>{t("Send coach booking alert")}</span>
                     {sendingRuleStatus("sendCoachEmail")}
                   </label>
                   <label className="settings-toggle sending-rule">
@@ -33217,7 +32687,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       onChange={(event) => void commitSendingRule("sendAdminEmail", { sendAdminEmail: event.target.checked })}
                       type="checkbox"
                     />
-                    <span>Send admin booking alert</span>
+                    <span>{t("Send admin booking alert")}</span>
                     {sendingRuleStatus("sendAdminEmail")}
                   </label>
                   <label className="settings-toggle sending-rule">
@@ -33231,13 +32701,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       }
                       type="checkbox"
                     />
-                    <span>Email when a lesson type changes</span>
+                    <span>{t("Email when a lesson type changes")}</span>
                     {sendingRuleStatus("sendLessonTypeChangeEmail")}
                   </label>
-                  <p className="field-help">
-                    Off by default. Switching a booking between lesson types on the lesson card stays silent, so
-                    tidying your own calendar doesn't mail the client. Real reschedules still send either way.
-                  </p>
+                  <p className="field-help">{t("Off by default. Switching a booking between lesson types on the lesson card stays silent, so tidying your own calendar doesn't mail the client. Real reschedules still send either way.")}</p>
 
                   <label className="settings-toggle sending-rule">
                     <input
@@ -33246,14 +32713,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       onChange={(event) => void commitSendingRule("reminderEnabled", { reminderEnabled: event.target.checked })}
                       type="checkbox"
                     />
-                    <span>Send clients a reminder email before their lesson</span>
+                    <span>{t("Send clients a reminder email before their lesson")}</span>
                     {sendingRuleStatus("reminderEnabled")}
                   </label>
                   {notificationSettings.reminderEnabled && (
                     <>
                       <div className="settings-field-row">
                         <label className="settings-field">
-                          <span>Days before</span>
+                          <span>{t("Days before")}</span>
                           <input
                             value={Math.floor(reminderLeadMinutes / 1440)}
                             min={0}
@@ -33272,7 +32739,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           />
                         </label>
                         <label className="settings-field">
-                          <span>Hours before</span>
+                          <span>{t("Hours before")}</span>
                           <input
                             value={Math.round((reminderLeadMinutes % 1440) / 60)}
                             min={0}
@@ -33291,12 +32758,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           />
                         </label>
                       </div>
-                      <p className="field-help">
-                        Currently {reminderLeadLabel(notificationSettings.reminderLeadMinutes)} before the lesson.
-                        Saved when you leave the box. Sent once per lesson, to the client only — a lesson booked
-                        inside the reminder window skips it, because the confirmation they just received already has
-                        the details.
-                      </p>
+                      <p className="field-help">{t("Currently {reminderLeadMinutes} before the lesson. Saved when you leave the box. Sent once per lesson, to the client only — a lesson booked inside the reminder window skips it, because the confirmation they just received already has the details.", { reminderLeadMinutes: reminderLeadLabel(notificationSettings.reminderLeadMinutes) })}</p>
                     </>
                   )}
                   {sendingRuleError ? (
@@ -33310,10 +32772,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               {/* Settings › Email / SMS › SMS. The provider wiring only. The
                   words a text carries are the smsText field of each template,
                   in Notifications › Templates. */}
-              <SettingsGroup id="text-machine" icon={ClarityMessages} section="email-sms" title="SMS" className="notification-card">
+              <SettingsGroup id="text-machine" icon={ClarityMessages} section="email-sms" title={t("SMS")} className="notification-card">
                 <EditableSettingsBlock
                   id="text-machine-block"
-                  title="SMS"
+                  title={t("SMS")}
                   status={textMachineEditor.status}
                   dirty={textMachineEditor.dirty}
                   errorMessage={textMachineEditor.errorMessage}
@@ -33323,37 +32785,31 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 >
                 <div className="settings-summary-grid">
                   <span>
-                    <strong>{notificationSettings.smsProviderName || "Not set"}</strong>
-                    provider
-                  </span>
+                    <strong>{notificationSettings.smsProviderName || t("Not set")}</strong>{t("provider")}</span>
                   <span>
-                    <strong>{notificationSettings.sendClientSms ? "On" : "Off"}</strong>
-                    customer
-                  </span>
+                    <strong>{notificationSettings.sendClientSms ? t("On") : t("Off")}</strong>{t("customer")}</span>
                   <span>
-                    <strong>{notificationSettings.sendAdminSms ? "On" : "Off"}</strong>
-                    admin
-                  </span>
+                    <strong>{notificationSettings.sendAdminSms ? t("On") : t("Off")}</strong>{t("admin")}</span>
                 </div>
                 <details className="settings-subsection">
                   <summary className="settings-subsection-title">
                     <Phone size={18} />
                     <div>
-                      <span>Provider</span>
-                      <strong>{notificationSettings.smsProviderName || "Connect later"}</strong>
+                      <span>{t("Provider")}</span>
+                      <strong>{notificationSettings.smsProviderName || t("Connect later")}</strong>
                     </div>
                   </summary>
                   <label className="settings-field">
-                    <span>Provider name</span>
+                    <span>{t("Provider name")}</span>
                     <input
                       value={textMachineDraft.smsProviderName}
                       readOnly={textMachineIsLocked}
                       onChange={(event) => updateNotificationBlockDraft(textMachineEditor, "smsProviderName", event.target.value)}
-                      placeholder="Twilio, MessageMedia, Zapier..."
+                      placeholder={t("Twilio, MessageMedia, Zapier...")}
                     />
                   </label>
                   <label className="settings-field">
-                    <span>Webhook or API URL</span>
+                    <span>{t("Webhook or API URL")}</span>
                     <input
                       value={textMachineDraft.smsWebhookUrl}
                       readOnly={textMachineIsLocked}
@@ -33362,7 +32818,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     />
                   </label>
                   <label className="settings-field">
-                    <span>Sender or text number</span>
+                    <span>{t("Sender or text number")}</span>
                     <input
                       value={textMachineDraft.smsFromNumber}
                       readOnly={textMachineIsLocked}
@@ -33375,11 +32831,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   <summary className="settings-subsection-title">
                     <Check size={18} />
                     <div>
-                      <span>Send rules</span>
+                      <span>{t("Send rules")}</span>
                       <strong>
-                        {[notificationSettings.sendClientSms && "Customer", notificationSettings.sendAdminSms && "Admin"]
+                        {[notificationSettings.sendClientSms && t("Customer"), notificationSettings.sendAdminSms && t("Admin")]
                           .filter(Boolean)
-                          .join(" and ") || "Off"}
+                          .join(` ${t("and")} `) || t("Off")}
                       </strong>
                     </div>
                   </summary>
@@ -33390,7 +32846,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       onChange={(event) => updateNotificationBlockDraft(textMachineEditor, "sendClientSms", event.target.checked)}
                       type="checkbox"
                     />
-                    <span>Send client text confirmation</span>
+                    <span>{t("Send client text confirmation")}</span>
                   </label>
                   <label className="settings-toggle">
                     <input
@@ -33399,11 +32855,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       onChange={(event) => updateNotificationBlockDraft(textMachineEditor, "sendAdminSms", event.target.checked)}
                       type="checkbox"
                     />
-                    <span>Send admin text alert</span>
+                    <span>{t("Send admin text alert")}</span>
                   </label>
-                  <p className="field-help">
-                    What each text says is written on the message itself, in Notifications › Templates.
-                  </p>
+                  <p className="field-help">{t("What each text says is written on the message itself, in Notifications › Templates.")}</p>
                 </details>
                 </EditableSettingsBlock>
               </SettingsGroup>
@@ -33421,16 +32875,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 id="message-templates"
                 icon={ClarityEmail}
                 section="notifications"
-                title="Templates"
+                title={t("Templates")}
                 className="notification-card message-templates-card"
               >
-                <p className="settings-note">
-                  One message per thing that happens to a booking, and the wording is yours. Anything you leave alone
-                  keeps Clarity&apos;s wording, so a message you never open still reads well.
-                </p>
+                <p className="settings-note">{t("One message per thing that happens to a booking, and the wording is yours. Anything you leave alone keeps Clarity's wording, so a message you never open still reads well.")}</p>
                 <EditableSettingsBlock
                   id="message-templates-block"
-                  title="Templates"
+                  title={t("Templates")}
                   status={messageTemplatesEditor.status}
                   dirty={messageTemplatesEditor.dirty}
                   errorMessage={messageTemplatesEditor.errorMessage}
@@ -33438,7 +32889,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   onCancel={() => cancelEditableBlock("message-templates")}
                   onSave={() => void saveEditableBlock("message-templates")}
                 >
-                  <Suspense fallback={<Loading what="templates" />}>
+                  <Suspense fallback={<Loading what={t("templates")} />}>
                     <MessageTemplatesPanel
                       templates={messageTemplatesDraft.notificationTemplates}
                       mapLinkLabel={messageTemplatesDraft.mapLinkLabel}
@@ -33465,16 +32916,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   <summary className="settings-subsection-title">
                     <ClarityEmail size={18} />
                     <div>
-                      <span>Subject override</span>
+                      <span>{t("Subject override")}</span>
                       <strong>
                         {notificationSettings.notificationSubjectLine.trim()
                           ? renderTemplate(notificationSettings.notificationSubjectLine, emailTemplateVariables)
-                          : "Each message keeps its own"}
+                          : t("Each message keeps its own")}
                       </strong>
                     </div>
                   </summary>
                   <label className="settings-field">
-                    <span>Subject template</span>
+                    <span>{t("Subject template")}</span>
                     <input
                       maxLength={180}
                       placeholder="Use {{client}}, {{service}}, {{date}}, {{time}}, {{action}}"
@@ -33489,21 +32940,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       subject, so a coach who fills it in will not see the six
                       subjects above go out. Say that here rather than let them
                       find out from a client. */}
-                  <p className="field-help">
-                    One subject line for every message, client and admin alike. Filling this in replaces the six
-                    subjects written above. Leave it blank — that is what keeps each message its own.
-                  </p>
-                  <div className="template-token-controls" aria-label="Subject tokens">
+                  <p className="field-help">{t("One subject line for every message, client and admin alike. Filling this in replaces the six subjects written above. Leave it blank — that is what keeps each message its own.")}</p>
+                  <div className="template-token-controls" aria-label={t("Subject tokens")}>
                     {NOTIFICATION_SUBJECT_TOKENS.map((token) => (
                       <button className="template-token-button" key={token} onClick={() => insertNotificationSubjectToken(token)} type="button">
                         {token}
                       </button>
                     ))}
                   </div>
-                  <p className="field-help">
-                    Preview:{" "}
-                    <strong>
-                      {emailSubjectTemplatePreview || "Blank — each message keeps the subject written above."}
+                  <p className="field-help">{t("Preview:")}{" "}<strong>
+                      {emailSubjectTemplatePreview || t("Blank — each message keeps the subject written above.")}
                     </strong>
                   </p>
                   <div className="settings-actions">
@@ -33511,25 +32957,20 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       className="outline-button"
                       type="button"
                       onClick={() => updateNotificationBlockDraft(messageTemplatesEditor, "notificationSubjectLine", "")}
-                    >
-                      Clear override
-                    </button>
+                    >{t("Clear override")}</button>
                   </div>
                 </details>
                 <details className="settings-subsection">
                   <summary className="settings-subsection-title">
                     <ClarityProfile size={18} />
                     <div>
-                      <span>Admin alert</span>
+                      <span>{t("Admin alert")}</span>
                       <strong>{adminAlertExample.subject}</strong>
                     </div>
                   </summary>
-                  <p className="field-help">
-                    The booking alert that lands in your own inbox, not the client&apos;s. It has no per-message
-                    wording — one alert covers every booking.
-                  </p>
+                  <p className="field-help">{t("The booking alert that lands in your own inbox, not the client's. It has no per-message wording — one alert covers every booking.")}</p>
                   <label className="settings-field">
-                    <span>Admin subject</span>
+                    <span>{t("Admin subject")}</span>
                     <input
                       value={messageTemplatesDraft.adminEmailSubject}
                       readOnly={messageTemplatesIsLocked}
@@ -33537,7 +32978,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     />
                   </label>
                   <label className="settings-field">
-                    <span>Admin summary</span>
+                    <span>{t("Admin summary")}</span>
                     <textarea
                       rows={3}
                       value={messageTemplatesDraft.adminEmailIntro}
@@ -33545,17 +32986,17 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       onChange={(event) => updateNotificationBlockDraft(messageTemplatesEditor, "adminEmailIntro", event.target.value)}
                     />
                   </label>
-                  <p className="field-help">Preview: {adminAlertExample.intro}</p>
+                  <p className="field-help">{t("Preview: {intro}", { intro: adminAlertExample.intro })}</p>
                 </details>
                 <details className="settings-subsection token-subsection">
                   <summary className="settings-subsection-title">
                     <ClarityAdmin size={18} />
                     <div>
-                      <span>Tokens</span>
-                      <strong>Template placeholders</strong>
+                      <span>{t("Tokens")}</span>
+                      <strong>{t("Template placeholders")}</strong>
                     </div>
                   </summary>
-                  <div className="template-token-list" aria-label="Message template tokens">
+                  <div className="template-token-list" aria-label={t("Message template tokens")}>
                     <code>{"{{client}}"}</code>
                     <code>{"{{firstName}}"}</code>
                     <code>{"{{service}}"}</code>
@@ -33568,22 +33009,22 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 </EditableSettingsBlock>
               </SettingsGroup>
 
-              <SettingsGroup id="theme" icon={ClarityPreferences} section="business" title="Theme" className="notification-card">
+              <SettingsGroup id="theme" icon={ClarityPreferences} section="business" title={t("Theme")} className="notification-card">
                 <details className="settings-subsection">
                   <summary className="settings-subsection-title">
                     <ClaritySettings size={18} />
                     <div>
-                      <span>Admin workspace</span>
-                      <strong>{themeMode === "dark" ? "Dark workspace" : "Light workspace"}</strong>
+                      <span>{t("Admin workspace")}</span>
+                      <strong>{themeMode === "dark" ? t("Dark workspace") : t("Light workspace")}</strong>
                     </div>
                   </summary>
                   <div className="booking-surface-setting">
                     <div>
-                      <span>Admin theme</span>
-                      <strong>{themeMode === "dark" ? "Dark workspace" : "Light workspace"}</strong>
+                      <span>{t("Admin theme")}</span>
+                      <strong>{themeMode === "dark" ? t("Dark workspace") : t("Light workspace")}</strong>
                     </div>
                     <button
-                      aria-label={`Switch admin theme to ${themeMode === "dark" ? "light" : "dark"}`}
+                      aria-label={themeMode === "dark" ? t("Switch admin theme to light") : t("Switch admin theme to dark")}
                       aria-pressed={themeMode === "dark"}
                       className={`theme-switch theme-toggle ${themeMode === "dark" ? "is-dark" : "is-light"}`}
                       data-testid="admin-theme-switch"
@@ -33603,8 +33044,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   <summary className="settings-subsection-title">
                     <Eye size={18} />
                     <div>
-                      <span>Booking surface</span>
-                      <strong>Follows each visitor's device</strong>
+                      <span>{t("Booking surface")}</span>
+                      <strong>{t("Follows each visitor's device")}</strong>
                     </div>
                   </summary>
                   {/* The dark/light choice used to live here. It was one
@@ -33613,28 +33054,25 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       browser instead. */}
                   <div className="booking-surface-setting">
                     <div>
-                      <span>Booking logo</span>
-                      <strong>{brandSettings.showLogo ? "Logo shown" : "No logo"}</strong>
+                      <span>{t("Booking logo")}</span>
+                      <strong>{brandSettings.showLogo ? t("Logo shown") : t("No logo")}</strong>
                     </div>
                     <button
-                      aria-label={`${brandSettings.showLogo ? "Hide" : "Show"} booking logo`}
+                      aria-label={brandSettings.showLogo ? t("Hide booking logo") : t("Show booking logo")}
+
                       aria-pressed={brandSettings.showLogo}
                       className={`theme-switch logo-toggle ${brandSettings.showLogo ? "is-dark" : "is-light"}`}
                       onClick={() => setBookingLogoVisible(!brandSettings.showLogo)}
                       type="button"
                     >
-                      <span className={!brandSettings.showLogo ? "active" : ""} aria-hidden="true">
-                        Off
-                      </span>
-                      <span className={brandSettings.showLogo ? "active" : ""} aria-hidden="true">
-                        On
-                      </span>
+                      <span className={!brandSettings.showLogo ? "active" : ""} aria-hidden="true">{t("Off")}</span>
+                      <span className={brandSettings.showLogo ? "active" : ""} aria-hidden="true">{t("On")}</span>
                     </button>
                   </div>
                 </details>
               </SettingsGroup>
 
-              <SettingsGroup id="coach-branding" icon={ClarityPlayerPortal} section="business" title="Business branding" className="brand-vein-card">
+              <SettingsGroup id="coach-branding" icon={ClarityPlayerPortal} section="business" title={t("Business branding")} className="brand-vein-card">
 
                 <div className="brand-vein-preview">
                   <div className="brand-vein-logo">
@@ -33645,15 +33083,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     )}
                   </div>
                   <div>
-                    <span>Current business brand</span>
+                    <span>{t("Current business brand")}</span>
                     <strong>{brandSettings.coachName}</strong>
-                    <em>{brandSettings.logoName || "No logo uploaded yet"}</em>
+                    <em>{brandSettings.logoName || t("No logo uploaded yet")}</em>
                   </div>
                 </div>
 
                 <EditableSettingsBlock
                   id="business-name-block"
-                  title="Business name"
+                  title={t("Business name")}
                   status={businessNameEditor.status}
                   dirty={businessNameEditor.dirty}
                   errorMessage={businessNameEditor.errorMessage}
@@ -33662,7 +33100,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   onSave={() => void saveEditableBlock("business-name")}
                 >
                   <label className="settings-field">
-                    <span>Business name</span>
+                    <span>{t("Business name")}</span>
                     <input
                       value={businessNameDraft.businessName}
                       readOnly={businessNameIsLocked}
@@ -33674,19 +33112,19 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       }
                     />
                   </label>
-                  <p className="field-help">Shown on your booking page, invoices and emails.</p>
+                  <p className="field-help">{t("Shown on your booking page, invoices and emails.")}</p>
                 </EditableSettingsBlock>
 
                 <details className="settings-subsection">
                   <summary className="settings-subsection-title">
                     <ImagePlus size={18} />
                     <div>
-                      <span>Logo and colours</span>
-                      <strong>{brandSettings.logoName || "Upload coach logo"}</strong>
+                      <span>{t("Logo and colours")}</span>
+                      <strong>{brandSettings.logoName || t("Upload coach logo")}</strong>
                     </div>
                   </summary>
                   <label className="settings-field">
-                    <span>Brand name</span>
+                    <span>{t("Brand name")}</span>
                     <input
                       value={brandSettings.coachName}
                       maxLength={80}
@@ -33695,37 +33133,33 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       placeholder={coachAccount.businessName}
                     />
                   </label>
-                  <div className="brand-swatches" aria-label="Extracted logo colours">
+                  <div className="brand-swatches" aria-label={t("Extracted logo colours")}>
                     <span style={swatchStyle(brandSettings.neutral)}>
-                      <em>Neutral</em>
+                      <em>{t("Neutral")}</em>
                       {brandSettings.neutral}
                     </span>
                     <span style={swatchStyle(brandSettings.primary)}>
-                      <em>Primary</em>
+                      <em>{t("Primary")}</em>
                       {brandSettings.primary}
                     </span>
                     <span style={swatchStyle(brandSettings.secondary)}>
-                      <em>Secondary</em>
+                      <em>{t("Secondary")}</em>
                       {brandSettings.secondary}
                     </span>
                     <span style={swatchStyle(brandSettings.accent)}>
-                      <em>Ink</em>
+                      <em>{t("Ink")}</em>
                       {brandSettings.accent}
                     </span>
                   </div>
                   <div className="brand-vein-actions">
                     <label className="outline-button logo-upload">
-                      <ImagePlus size={16} />
-                      Upload logo
-                      <input accept="image/*" onChange={handleLogoUpload} type="file" />
+                      <ImagePlus size={16} />{t("Upload logo")}<input accept="image/*" onChange={handleLogoUpload} type="file" />
                     </label>
                     <button className="outline-button" onClick={() => void saveBrandSettings()}>
                       {brandSaveState === "saved" ? <Check size={16} /> : <Sparkles size={16} />}
-                      {brandSaveState === "saving" ? "Saving" : brandSaveState === "saved" ? "Saved" : "Apply"}
+                      {brandSaveState === "saving" ? t("Saving") : brandSaveState === "saved" ? t("Saved") : t("Apply")}
                     </button>
-                    <button className="outline-button" onClick={resetBrandSettings}>
-                      Reset
-                    </button>
+                    <button className="outline-button" onClick={resetBrandSettings}>{t("Reset")}</button>
                   </div>
                 </details>
 
@@ -33733,16 +33167,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   <summary className="settings-subsection-title">
                     <ClarityCalendar size={18} />
                     <div>
-                      <span>Calendar colours</span>
-                      <strong>Booking outlines</strong>
+                      <span>{t("Calendar colours")}</span>
+                      <strong>{t("Booking outlines")}</strong>
                     </div>
                   </summary>
-                  <p className="settings-note">
-                    A booking card is filled with its lesson type's colour, which you set on the lesson type
-                    itself. These two are the outlines it can wear on top: a border once the lesson is done, and a
-                    ring around the card while a bay is held for it. They sit on different edges, so a completed
-                    lesson with a live bay shows both.
-                  </p>
+                  <p className="settings-note">{t("A booking card is filled with its lesson type's colour, which you set on the lesson type itself. These two are the outlines it can wear on top: a border once the lesson is done, and a ring around the card while a bay is held for it. They sit on different edges, so a completed lesson with a live bay shows both.")}</p>
                   <div className="calendar-colour-fields">
                     {calendarColorFields.map(({ key, label, hint }) => (
                       <label className="calendar-colour-field" key={key}>
@@ -33769,27 +33198,25 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   <div className="brand-vein-actions">
                     <button className="outline-button" onClick={() => void saveBrandSettings()}>
                       {brandSaveState === "saved" ? <Check size={16} /> : <Sparkles size={16} />}
-                      {brandSaveState === "saving" ? "Saving" : brandSaveState === "saved" ? "Saved" : "Apply"}
+                      {brandSaveState === "saving" ? t("Saving") : brandSaveState === "saved" ? t("Saved") : t("Apply")}
                     </button>
                     <button
                       className="outline-button"
                       onClick={() =>
                         void saveBrandSettings({ ...brandSettings, calendarColors: defaultCalendarColors })
                       }
-                    >
-                      Reset calendar colours
-                    </button>
+                    >{t("Reset calendar colours")}</button>
                   </div>
                 </details>
               </SettingsGroup>
 
-              <SettingsGroup id="import-clients" icon={ClarityAddClient} section="account" title="Import clients" className="import-card">
+              <SettingsGroup id="import-clients" icon={ClarityAddClient} section="account" title={t("Import clients")} className="import-card">
                 <details className="settings-subsection">
                   <summary className="settings-subsection-title">
                     <Upload size={18} />
                     <div>
-                      <span>CSV paste</span>
-                      <strong>{peopleImportPreview} ready</strong>
+                      <span>{t("CSV paste")}</span>
+                      <strong>{t("{peopleImportPreview} ready", { peopleImportPreview })}</strong>
                     </div>
                   </summary>
 	                  <textarea
@@ -33799,33 +33226,29 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         setPeopleImportDiagnostic(null);
 	                      setPeopleImportText(event.target.value);
 	                    }}
-	                    placeholder="name,email,phone,notes,caddyProfileUrl"
+	                    placeholder={t("name,email,phone,notes,caddyProfileUrl")}
 	                  />
 	                  <div className="import-actions">
                       <div className="import-action-tools">
                         <label className="outline-button import-file-button">
-                          <Upload size={16} />
-                          CSV file
-                          <input accept=".csv,text/csv,text/plain" onChange={handlePeopleImportFile} type="file" />
+                          <Upload size={16} />{t("CSV file")}<input accept=".csv,text/csv,text/plain" onChange={handlePeopleImportFile} type="file" />
                         </label>
-	                      <span>{peopleImportPreview} ready</span>
+	                      <span>{t("{peopleImportPreview} ready", { peopleImportPreview })}</span>
                       </div>
 	                    <button
 	                      className="primary-button"
 	                      onClick={importPeopleFromText}
 	                      disabled={peopleImportState === "importing" || peopleImportPreview === 0}
 	                    >
-	                      {peopleImportState === "importing" ? "Importing" : peopleImportState === "imported" ? "Imported" : "Import"}
+	                      {peopleImportState === "importing" ? t("Importing") : peopleImportState === "imported" ? t("Imported") : t("Import")}
 	                    </button>
 	                  </div>
                     {peopleImportDiagnostic && (
                       <div className={`import-diagnostics${peopleImportDiagnostic.ok ? "" : " error"}`} role={peopleImportDiagnostic.ok ? "status" : "alert"}>
                         <strong>{peopleImportDiagnostic.message}</strong>
-                        <span>Endpoint: {peopleImportDiagnostic.endpoint}</span>
-                        <span>HTTP: {peopleImportDiagnostic.status}</span>
-                        <span>
-                          Imported {peopleImportDiagnostic.imported} · Updated {peopleImportDiagnostic.updated} · Skipped {peopleImportDiagnostic.skipped}
-                          {peopleImportDiagnostic.failed ? ` · Failed ${peopleImportDiagnostic.failed}` : ""}
+                        <span>{t("Endpoint: {endpoint}", { endpoint: peopleImportDiagnostic.endpoint })}</span>
+                        <span>{t("HTTP: {status}", { status: peopleImportDiagnostic.status })}</span>
+                        <span>{t("Imported {imported} · Updated {updated} · Skipped {skipped}", { imported: peopleImportDiagnostic.imported, updated: peopleImportDiagnostic.updated, skipped: peopleImportDiagnostic.skipped })}{peopleImportDiagnostic.failed ? t(" · Failed {failed}", { failed: peopleImportDiagnostic.failed }) : ""}
                         </span>
                         {peopleImportDiagnostic.errors.map((message) => (
                           <em key={message}>{message}</em>
@@ -33871,32 +33294,30 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             onPointerDown={(event) => event.stopPropagation()}
           >
             <div className="panel-header">
-              <span>{pendingServiceAction.mode === "archive" ? "Archive Lesson Type" : "Permanent Delete"}</span>
-              <button className="icon-button small" onClick={closeServiceActionModal} aria-label="Close lesson type action" type="button">
+              <span>{pendingServiceAction.mode === "archive" ? t("Archive Lesson Type") : t("Permanent Delete")}</span>
+              <button className="icon-button small" onClick={closeServiceActionModal} aria-label={t("Close lesson type action")} type="button">
                 <X size={17} />
               </button>
             </div>
             <h2 id="service-action-title">
               {pendingServiceAction.mode === "archive"
-                ? `Archive ${pendingService.name}?`
-                : `Permanently delete ${pendingService.name}?`}
+                ? t("Archive {name}?", { name: pendingService.name })
+                : t("Permanently delete {name}?", { name: pendingService.name })}
             </h2>
             <p>
               {pendingServiceAction.mode === "archive"
-                ? "This will hide the lesson type from active settings and public booking screens, but existing client records and old bookings will keep their lesson name."
-                : "This removes the lesson type completely. Only use this for test or unused lesson types with no client records."}
+                ? t("This will hide the lesson type from active settings and public booking screens, but existing client records and old bookings will keep their lesson name.")
+                : t("This removes the lesson type completely. Only use this for test or unused lesson types with no client records.")}
             </p>
             <div className="service-delete-actions">
-              <button className="outline-button" onClick={closeServiceActionModal} type="button">
-                Cancel
-              </button>
+              <button className="outline-button" onClick={closeServiceActionModal} type="button">{t("Cancel")}</button>
               <button
                 className={pendingServiceAction.mode === "archive" ? "primary-button" : "danger-button"}
                 onClick={confirmServiceAction}
                 type="button"
               >
                 {pendingServiceAction.mode === "archive" ? <Archive size={16} /> : <Trash2 size={16} />}
-                {pendingServiceAction.mode === "archive" ? "Archive lesson type" : "Permanently delete"}
+                {pendingServiceAction.mode === "archive" ? t("Archive lesson type") : t("Permanently delete")}
               </button>
             </div>
           </aside>
@@ -33913,24 +33334,31 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             onPointerDown={(event) => event.stopPropagation()}
           >
             <div className="panel-header">
-              <span id="client-merge-title">Merge clients</span>
-              <button className="icon-button small" onClick={closeClientMergeReview} aria-label="Close merge review" type="button">
+              <span id="client-merge-title">{t("Merge clients")}</span>
+              <button className="icon-button small" onClick={closeClientMergeReview} aria-label={t("Close merge review")} type="button">
                 <X size={17} />
               </button>
             </div>
             <p className="muted">
-              {clientMergeReview.loser.name || clientMergeReview.loser.email || "This client"} will be merged into{" "}
-              {clientMergeReview.survivor.name || clientMergeReview.survivor.email || "this client"} and removed.
+              {t("{loser} will be merged into {survivor} and removed.", {
+                loser: clientMergeReview.loser.name || clientMergeReview.loser.email || t("This client"),
+                survivor: clientMergeReview.survivor.name || clientMergeReview.survivor.email || t("this client"),
+              })}
               {clientMergeReview.loser.count > 0 &&
-                ` ${clientMergeReview.loser.count} booking${clientMergeReview.loser.count === 1 ? "" : "s"} will move over.`}
+                ` ${
+                  clientMergeReview.loser.count === 1
+                    ? t("1 booking will move over.")
+                    : t("{count} bookings will move over.", { count: clientMergeReview.loser.count })
+                }`}
             </p>
             <div className="client-merge-fields">
               {(
                 [
-                  ["name", "Name"],
-                  ["email", "Email"],
-                  ["phone", "Phone"],
-                  ["notes", "Notes"],
+                  ["name", t("Name")],
+                  ["email", t("Email")],
+                  ["phone", t("Phone")],
+                  ["notes", t("Notes")],
+
                 ] as [ClientMergeFieldKey, string][]
               ).map(([field, label]) => {
                 const survivorValue = clientMergeReview.survivor[field] || "";
@@ -33969,11 +33397,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             </div>
             {clientMergeError && <p className="client-merge-error">{clientMergeError}</p>}
             <div className="client-merge-actions">
-              <button className="outline-button" onClick={closeClientMergeReview} type="button" disabled={clientMergeSaving}>
-                Cancel
-              </button>
+              <button className="outline-button" onClick={closeClientMergeReview} type="button" disabled={clientMergeSaving}>{t("Cancel")}</button>
               <button className="primary-button" onClick={confirmClientMerge} type="button" disabled={clientMergeSaving}>
-                {clientMergeSaving ? "Merging…" : "Merge clients"}
+                {clientMergeSaving ? t("Merging…") : t("Merge clients")}
               </button>
             </div>
           </aside>
@@ -33990,8 +33416,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             onPointerDown={(event) => event.stopPropagation()}
           >
             <div className="panel-header">
-              <span>{isAddingClient ? "Add Client" : "Client Profile"}</span>
-              <button className="icon-button small" onClick={closeClientModal} aria-label="Close client profile">
+              <span>{isAddingClient ? t("Add Client") : t("Client Profile")}</span>
+              <button className="icon-button small" onClick={closeClientModal} aria-label={t("Close client profile")}>
                 <X size={17} />
               </button>
             </div>
@@ -33999,7 +33425,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
             {clientEditMode ? (
               <div className="client-editor">
                 <label className="settings-field">
-                  <span>Name</span>
+                  <span>{t("Name")}</span>
                   <input
                     value={clientEditor.name}
                     autoComplete="name"
@@ -34007,7 +33433,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   />
                 </label>
                 <label className="settings-field">
-                  <span>Email</span>
+                  <span>{t("Email")}</span>
                   <input
                     value={clientEditor.email}
                     autoComplete="email"
@@ -34017,7 +33443,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   />
                 </label>
                 <label className="settings-field">
-                  <span>Phone</span>
+                  <span>{t("Phone")}</span>
                   <input
                     value={clientEditor.phone}
                     autoComplete="tel"
@@ -34027,7 +33453,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   />
                 </label>
                 <label className="settings-field">
-                  <span>Caddy profile URL</span>
+                  <span>{t("Caddy profile URL")}</span>
                   <input
                     value={clientEditor.caddyProfileUrl}
                     onChange={(event) =>
@@ -34036,7 +33462,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   />
                 </label>
                 <label className="settings-field">
-                  <span>Profile notes</span>
+                  <span>{t("Profile notes")}</span>
                   <textarea
                     value={clientEditor.notes}
                     onChange={(event) => setClientEditor((current) => ({ ...current, notes: event.target.value }))}
@@ -34049,16 +33475,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 <div className="info-stack client-profile-info">
                   <div>
                     <ClarityEmail size={16} />
-                    <span>{selectedClient?.email || "No email yet"}</span>
+                    <span>{selectedClient?.email || t("No email yet")}</span>
                   </div>
                   <div>
                     <Phone size={16} />
-                    <span>{selectedClient?.phone || "No phone yet"}</span>
+                    <span>{selectedClient?.phone || t("No phone yet")}</span>
                   </div>
                   <div>
                     <ClarityCalendar size={16} />
                     <span>
-                      {selectedClient?.count ?? 0} booking{selectedClient?.count === 1 ? "" : "s"}
+                      {selectedClient?.count ?? 0}{" "}{t("booking")}{selectedClient?.count === 1 ? "" : "s"}
                     </span>
                   </div>
                   {selectedClient && (
@@ -34066,20 +33492,18 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       <ClarityAccessPermissions size={16} />
                       <span
                         className="client-profile-user-id"
-                        title="Copy this client's id"
+                        title={t("Copy this client's id")}
                         onClick={() => {
                           void navigator.clipboard?.writeText(selectedClient.id).catch(() => {});
-                          setToast({ message: "Client id copied." });
+                          setToast({ message: t("Client id copied.") });
                         }}
-                      >
-                        ID: {selectedClient.id}
-                      </span>
+                      >{t("ID: {id}", { id: selectedClient.id })}</span>
                     </div>
                   )}
                 </div>
                 {selectedClient && profileNotesText(selectedClient) && (
                   <div className="client-profile-note-block">
-                    <strong>Profile notes</strong>
+                    <strong>{t("Profile notes")}</strong>
                     <p>{profileNotesText(selectedClient)}</p>
                   </div>
                 )}
@@ -34091,7 +33515,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     onClick={() => void moveExternalClientToMain(selectedClient)}
                   >
                     <GitMerge size={16} />
-                    {clientMoveSavingId === selectedClient.id ? "Moving…" : "Move to clients"}
+                    {clientMoveSavingId === selectedClient.id ? t("Moving…") : t("Move to clients")}
                   </button>
                 )}
                 {selectedClient && (
@@ -34105,16 +33529,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       })
                     }
                   >
-                    <ClarityVideoAnalysis size={16} />
-                    Open Video Analysis
-                  </button>
+                    <ClarityVideoAnalysis size={16} />{t("Open Video Analysis")}</button>
                 )}
               </>
             )}
 
             {!isAddingClient && (
               <div className="client-profile-tabs">
-                <div className="profile-tab-list" role="tablist" aria-label="Client profile sections">
+                <div className="profile-tab-list" role="tablist" aria-label={t("Client profile sections")}>
                   <button
                     className={clientProfileTab === "bookings" ? "active" : ""}
                     onClick={() => setClientProfileTab("bookings")}
@@ -34122,9 +33544,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     type="button"
                     aria-selected={clientProfileTab === "bookings"}
                   >
-                    <ClarityCalendar size={16} />
-                    Booking history
-                  </button>
+                    <ClarityCalendar size={16} />{t("Booking history")}</button>
                   <button
                     className={clientProfileTab === "notes" ? "active" : ""}
                     onClick={() => setClientProfileTab("notes")}
@@ -34132,9 +33552,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     type="button"
                     aria-selected={clientProfileTab === "notes"}
                   >
-                    <ClarityBookingPages size={16} />
-                    Lesson notes
-                  </button>
+                    <ClarityBookingPages size={16} />{t("Lesson notes")}</button>
                   <button
                     className={clientProfileTab === "notifications" ? "active" : ""}
                     onClick={() => setClientProfileTab("notifications")}
@@ -34142,9 +33560,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     type="button"
                     aria-selected={clientProfileTab === "notifications"}
                   >
-                    <ClarityEmail size={16} />
-                    Emails sent
-                  </button>
+                    <ClarityEmail size={16} />{t("Emails sent")}</button>
                   <button
                     className={clientProfileTab === "transactions" ? "active" : ""}
                     onClick={() => setClientProfileTab("transactions")}
@@ -34152,9 +33568,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     type="button"
                     aria-selected={clientProfileTab === "transactions"}
                   >
-                    <ClarityPayments size={16} />
-                    Transactions
-                  </button>
+                    <ClarityPayments size={16} />{t("Transactions")}</button>
                   <button
                     className={clientProfileTab === "passes" ? "active" : ""}
                     onClick={() => setClientProfileTab("passes")}
@@ -34162,9 +33576,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                     type="button"
                     aria-selected={clientProfileTab === "passes"}
                   >
-                    <ClarityPassesCredits size={16} />
-                    Passes
-                  </button>
+                    <ClarityPassesCredits size={16} />{t("Passes")}</button>
                 </div>
 
                 <div className="profile-history-panel">
@@ -34177,7 +33589,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                           <div className="profile-history-row" key={appointment.id}>
                             <div>
                               <strong>{service?.name ?? appointment.title}</strong>
-                              <span>{appointment.kind === "appointment" ? "Booked lesson" : "Blocked time"}</span>
+                              <span>{appointment.kind === "appointment" ? t("Booked lesson") : t("Blocked time")}</span>
                               {appointment.kind === "appointment" &&
                                 appointment.status !== "cancelled" &&
                                 (() => {
@@ -34194,7 +33606,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                   ) : null;
                                 })()}
                               {appointment.note ? (
-                                <span className="booking-note-line">Booking notes: {appointment.note}</span>
+                                <span className="booking-note-line">{t("Booking notes: {note}", { note: appointment.note })}</span>
                               ) : null}
                             </div>
                             <em>{`${appointmentDays[appointment.day].label}, ${formatRange(appointment.start, appointment.duration)}`}</em>
@@ -34202,23 +33614,23 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         );
                       })
                     ) : (
-                      <p>No appointments yet.</p>
+                      <p>{t("No appointments yet.")}</p>
                     )
                   ) : clientProfileTab === "notes" ? (
                     <div className="lesson-notes-panel">
                       {selectedClient && (
                         <div className="lesson-notes-window">
                           <div>
-                            <strong>Lesson Notes</strong>
-                            <span>Start something fresh, or open the player profile for older records.</span>
+                            <strong>{t("Lesson Notes")}</strong>
+                            <span>{t("Start something fresh, or open the player profile for older records.")}</span>
                           </div>
                           <div className="lesson-quick-actions">
                             <button
                               type="button"
                               className="icon-button"
                               onClick={() => openNotesForClient(selectedClient)}
-                              title="Add lesson note"
-                              aria-label="Add lesson note"
+                              title={t("Add lesson note")}
+                              aria-label={t("Add lesson note")}
                             >
                               <Plus size={16} />
                               <ClarityBookingPages size={15} />
@@ -34232,8 +33644,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                   name: selectedClient.name,
                                 })
                               }
-                              title="Add video"
-                              aria-label="Add video"
+                              title={t("Add video")}
+                              aria-label={t("Add video")}
                             >
                               <Plus size={16} />
                               <ClarityVideoAnalysis size={15} />
@@ -34243,18 +33655,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                               className="outline-button"
                               onClick={() => openNotesForClient(selectedClient)}
                             >
-                              <ClarityProfile size={15} />
-                              Player profile
-                            </button>
+                              <ClarityProfile size={15} />{t("Player profile")}</button>
                           </div>
                         </div>
                       )}
                     </div>
                   ) : clientProfileTab === "passes" ? (
                     selectedClient && selectedClient.id.startsWith("appointment-") ? (
-                      <p>Save this booking contact as a client before giving them a pass.</p>
+                      <p>{t("Save this booking contact as a client before giving them a pass.")}</p>
                     ) : (
-                      <Suspense fallback={<Loading what="passes" />}>
+                      <Suspense fallback={<Loading what={t("passes")} />}>
                         <PassesPanel
                           passes={clientPasses}
                           invoicedLines={clientInvoicedLines}
@@ -34282,9 +33692,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         <div className="profile-history-row notification-history-row" key={notification.id}>
                           <div>
                             <strong>{notification.subject || notificationKindLabel(notification.kind)}</strong>
-                            <span>
-                              {notificationKindLabel(notification.kind)} to {notification.recipient}
-                            </span>
+                            <span>{t("{kind} to {recipient}", { kind: notificationKindLabel(notification.kind), recipient: notification.recipient })}</span>
                           </div>
                           <em>
                             {notificationStatusLabel(notification)}
@@ -34293,23 +33701,19 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                         </div>
                       ))
                     ) : (
-                      <p>No email receipts recorded yet.</p>
+                      <p>{t("No email receipts recorded yet.")}</p>
                     )
                   ) : selectedClient && selectedClient.id.startsWith("appointment-") ? (
-                    <p>Save this booking contact as a client to track their transactions.</p>
+                    <p>{t("Save this booking contact as a client to track their transactions.")}</p>
                   ) : clientTransactionsLoadState === "loading" ? (
-                    <Loading what="transactions" />
+                    <Loading what={t("transactions")} />
                   ) : clientTransactionsLoadState === "error" ? (
-                    <p>
-                      Could not load transactions.{" "}
-                      {selectedClient && (
+                    <p>{t("Could not load transactions.")}{" "}{selectedClient && (
                         <button
                           className="link-button"
                           onClick={() => void fetchClientTransactions(selectedClient.id)}
                           type="button"
-                        >
-                          Retry
-                        </button>
+                        >{t("Retry")}</button>
                       )}
                     </p>
                   ) : clientTransactions.length ? (
@@ -34320,9 +33724,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             <strong>
                               <ClarityPassesCredits size={15} /> {row.coupon.code}
                             </strong>
-                            <span>
-                              Gift voucher
-                              {row.coupon.issuedToName ? ` · bought by ${row.coupon.issuedToName}` : ""}
+                            <span>{t("Gift voucher")}{row.coupon.issuedToName ? t(" · bought by {issuedToName}", { issuedToName: row.coupon.issuedToName }) : ""}
                               {row.coupon.note ? ` · ${row.coupon.note}` : ""}
                             </span>
                           </div>
@@ -34332,10 +33734,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                                 is on this", and the original is beside it only
                                 because a half-spent voucher is confusing
                                 without it. */}
-                            {`${formatMoney(row.coupon.remainingValue, row.coupon.currency)} left of ${formatMoney(
+                            {t("{remainingValue} left of {originalValue} · {date}", { remainingValue: formatMoney(row.coupon.remainingValue, row.coupon.currency), originalValue: formatMoney(
                               row.coupon.originalValue,
                               row.coupon.currency,
-                            )} · ${transactionDateLabel(row.date)}`}
+                            ), date: transactionDateLabel(row.date) })}
                           </em>
                         </div>
                       ) : row.kind === "sale" ? (
@@ -34344,7 +33746,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             <strong>{row.sale.description || row.sale.receiptNumber}</strong>
                             <span>
                               {row.sale.receiptNumber} · {posMethodLabel(row.sale)}
-                              {row.sale.isLessonPass ? " · Lesson pass" : ""}
+                              {row.sale.isLessonPass ? t(" · Lesson pass") : ""}
                             </span>
                           </div>
                           <em>{`${formatMoney(row.sale.amount, row.sale.currency)} · ${row.sale.status} · ${transactionDateLabel(row.date)}`}</em>
@@ -34370,8 +33772,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             </strong>
                             <span>
                               {row.invoice.relation === "included"
-                                ? `Included on an invoice billed to ${row.invoice.customerName || "someone else"}`
-                                : "Invoice"}
+                                ? t("Included on an invoice billed to {name}", { name: row.invoice.customerName || t("someone else") })
+
+                                : t("Invoice")}
                             </span>
                           </div>
                           <em>{`${formatMoney(row.invoice.total, row.invoice.currency)} · ${row.invoice.status} · ${transactionDateLabel(row.date)}`}</em>
@@ -34379,7 +33782,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       ),
                     )
                   ) : (
-                    <p>No transactions for this client yet.</p>
+                    <p>{t("No transactions for this client yet.")}</p>
                   )}
                 </div>
               </div>
@@ -34390,7 +33793,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 <>
                   <button className="primary-button" onClick={saveClientProfile} disabled={clientSaveState === "saving"}>
                     <Check size={16} />
-                    {clientSaveState === "saving" ? "Saving" : "Save"}
+                    {clientSaveState === "saving" ? t("Saving") : t("Save")}
                   </button>
                   <button
                     className="outline-button"
@@ -34402,9 +33805,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       setClientEditMode(false);
                       if (selectedClient) setClientEditor(editorFromClient(selectedClient));
                     }}
-                  >
-                    Cancel
-                  </button>
+                  >{t("Cancel")}</button>
                 </>
               ) : (
                 <>
@@ -34414,14 +33815,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       onClick={() => openPosCheckoutForClient(selectedClient)}
                       type="button"
                     >
-                      <ClarityPayments size={16} />
-                      Checkout
-                    </button>
+                      <ClarityPayments size={16} />{t("Checkout")}</button>
                   )}
                   <button className="primary-button" onClick={startClientEdit}>
-                    <ClarityProfile size={16} />
-                    Edit
-                  </button>
+                    <ClarityProfile size={16} />{t("Edit")}</button>
                   {selectedClient && hasSelectedClientCaddyProfile ? (
                     <a
                       className="outline-button"
@@ -34429,14 +33826,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       target="_blank"
                       rel="noreferrer"
                     >
-                      <ExternalLink size={16} />
-                      Caddy
-                    </a>
+                      <ExternalLink size={16} />{t("Caddy")}</a>
                   ) : (
                     <button className="outline-button" type="button">
-                      <ClarityIntegrations size={16} />
-                      Add Clarity Caddy
-                    </button>
+                      <ClarityIntegrations size={16} />{t("Add Clarity Caddy")}</button>
                   )}
                   {selectedClient && isAdminUser && (
                     <button
@@ -34444,10 +33837,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       className="danger-button"
                       disabled={personDeleteBusyId === selectedClient.id}
                       onClick={() => void hardDeletePerson(selectedClient)}
-                      title="Permanently delete this client and their data. No email is sent."
+                      title={t("Permanently delete this client and their data. No email is sent.")}
                     >
                       <Trash2 size={16} />
-                      {personDeleteBusyId === selectedClient.id ? "Deleting…" : "Delete permanently"}
+                      {personDeleteBusyId === selectedClient.id ? t("Deleting…") : t("Delete permanently")}
                     </button>
                   )}
                 </>
@@ -34483,17 +33876,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 undo?.();
               }}
               type="button"
-            >
-              Undo
-            </button>
+            >{t("Undo")}</button>
           )}
-          <button aria-label="Dismiss" className="toast-close" onClick={() => setToast(null)} type="button">
+          <button aria-label={t("Dismiss")} className="toast-close" onClick={() => setToast(null)} type="button">
             <X size={16} />
           </button>
         </div>
       )}
 
-      {edgeCue && <div className={`edge-cue ${edgeCue}`}>{edgeCue === "next" ? "Next week" : "Previous week"}</div>}
+      {edgeCue && <div className={`edge-cue ${edgeCue}`}>{edgeCue === "next" ? t("Next week") : t("Previous week")}</div>}
     </div>
   );
 }

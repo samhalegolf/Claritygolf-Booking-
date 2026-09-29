@@ -6,6 +6,7 @@
 // anything -- naming an id is not the same as being allowed into it.
 
 import { apiFetch } from "../auth/apiFetch";
+import { t } from "../../lib/i18n";
 
 export type SandboxSummary = {
   id: string;
@@ -28,7 +29,7 @@ async function readJson(response: Response) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(
-      (data as { message?: string })?.message || "That did not work. Try again in a moment.",
+      (data as { message?: string })?.message || t("That did not work. Try again in a moment."),
     );
   }
   return data;

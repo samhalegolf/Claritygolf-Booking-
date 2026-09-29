@@ -21,6 +21,7 @@ import { AlertTriangle, ChevronDown, ChevronRight, Lock, Plus, Search, X } from 
 import { ClarityProducts } from "../shared/ClarityIcons";
 import type { BillingCatalogItem, BillingCatalogKind, StockMovement } from "./types";
 import { isLowStock } from "./stockMath";
+import { t } from "../../lib/i18n";
 
 export type ProductFormValues = {
   id: string;
@@ -78,9 +79,9 @@ export type ProductsPanelProps = {
 };
 
 const KIND_PLURALS: Record<BillingCatalogKind, string> = {
-  product: "Products",
-  service: "Services",
-  package: "Packages",
+  product: t("Products"),
+  service: t("Services"),
+  package: t("Packages"),
 };
 
 // Products first: they are the only group you can edit here, and the only one
@@ -88,11 +89,11 @@ const KIND_PLURALS: Record<BillingCatalogKind, string> = {
 const KIND_ORDER: BillingCatalogKind[] = ["product", "package", "service"];
 
 const MOVEMENT_LABELS: Record<StockMovement["kind"], string> = {
-  adjustment: "Adjusted",
-  stocktake: "Stocktake",
-  receipt: "Received",
-  sale: "Sold",
-  sale_reversal: "Returned",
+  adjustment: t("Adjusted"),
+  stocktake: t("Stocktake"),
+  receipt: t("Received"),
+  sale: t("Sold"),
+  sale_reversal: t("Returned"),
 };
 
 function emptyForm(taxRate: number): ProductFormDraft {
@@ -137,7 +138,7 @@ function marginLabel(product: BillingCatalogItem) {
   const cost = Number(product.costPrice) || 0;
   const price = Number(product.price) || 0;
   if (cost <= 0 || price <= 0) return "";
-  return `${Math.round(((price - cost) / price) * 100)}% margin`;
+  return t("{percent}% margin", { percent: Math.round(((price - cost) / price) * 100) });
 }
 
 export function ProductsPanel({
@@ -312,23 +313,23 @@ export function ProductsPanel({
       <article className="data-card wide product-quick-card">
         <div className="data-card-header">
           <div>
-            <span>{editing ? "Editing product" : "Add a product"}</span>
-            <h2>{editing ? form.name || "Product" : "What are you selling?"}</h2>
+            <span>{editing ? t("Editing product") : t("Add a product")}</span>
+            <h2>{editing ? form.name || t("Product") : t("What are you selling?")}</h2>
           </div>
           <Plus size={24} />
         </div>
         <div className="product-quick-row" onKeyDown={onQuickKeyDown}>
           <label className="settings-field product-quick-name">
-            <span>Name</span>
+            <span>{t("Name")}</span>
             <input
               ref={nameRef}
               value={form.name}
               onChange={(event) => updateForm("name", event.target.value)}
-              placeholder="e.g. Titleist Players glove"
+              placeholder={t("e.g. Titleist Players glove")}
             />
           </label>
           <label className="settings-field">
-            <span>Sell price ({currency})</span>
+            <span>{t("Sell price ({currency})", { currency })}</span>
             <input
               type="number"
               inputMode="decimal"
@@ -340,7 +341,7 @@ export function ProductsPanel({
           </label>
           {form.trackStock && !editing && (
             <label className="settings-field product-quick-stock">
-              <span>In stock</span>
+              <span>{t("In stock")}</span>
               <input
                 type="number"
                 step="1"
@@ -356,38 +357,36 @@ export function ProductsPanel({
             onClick={() => void submit()}
             type="button"
           >
-            {saving ? "Saving..." : editing ? "Save" : "Add"}
+            {saving ? t("Saving...") : editing ? t("Save") : t("Add")}
           </button>
           <button className="outline-button" onClick={() => setShowDetail((open) => !open)} type="button">
-            {showDetail ? "Less" : "More"}
+            {showDetail ? t("Less") : t("More")}
           </button>
           {editing && (
-            <button className="text-link-button" onClick={resetForm} type="button">
-              Cancel
-            </button>
+            <button className="text-link-button" onClick={resetForm} type="button">{t("Cancel")}</button>
           )}
         </div>
 
         {showDetail && (
           <div className="billing-catalog-editor product-editor" onKeyDown={onQuickKeyDown}>
             <label className="settings-field">
-              <span>Supplier</span>
+              <span>{t("Supplier")}</span>
               <input
                 value={form.supplier}
                 onChange={(event) => updateForm("supplier", event.target.value)}
-                placeholder="Who you buy it from"
+                placeholder={t("Who you buy it from")}
               />
             </label>
             <label className="settings-field">
-              <span>SKU</span>
+              <span>{t("SKU")}</span>
               <input
                 value={form.sku}
                 onChange={(event) => updateForm("sku", event.target.value)}
-                placeholder="Optional - must be unique"
+                placeholder={t("Optional - must be unique")}
               />
             </label>
             <label className="settings-field">
-              <span>Cost price ({currency})</span>
+              <span>{t("Cost price ({currency})", { currency })}</span>
               <input
                 type="number"
                 inputMode="decimal"
@@ -398,7 +397,7 @@ export function ProductsPanel({
               />
             </label>
             <label className="settings-field">
-              <span>Tax rate %</span>
+              <span>{t("Tax rate %")}</span>
               <input
                 type="number"
                 min="0"
@@ -414,11 +413,11 @@ export function ProductsPanel({
                 onChange={(event) => updateForm("trackStock", event.target.checked)}
                 type="checkbox"
               />
-              <span>Count stock for this item</span>
+              <span>{t("Count stock for this item")}</span>
             </label>
             {form.trackStock && (
               <label className="settings-field">
-                <span>Warn me at</span>
+                <span>{t("Warn me at")}</span>
                 <input
                   type="number"
                   min="0"
@@ -434,69 +433,57 @@ export function ProductsPanel({
                 onChange={(event) => updateForm("isVoucher", event.target.checked)}
                 type="checkbox"
               />
-              <span>This is a gift voucher</span>
+              <span>{t("This is a gift voucher")}</span>
             </label>
             <label className="settings-field product-notes-field">
-              <span>Notes</span>
+              <span>{t("Notes")}</span>
               <textarea
                 value={form.description}
                 onChange={(event) => updateForm("description", event.target.value)}
                 rows={2}
-                placeholder="Optional - shows on the invoice line"
+                placeholder={t("Optional - shows on the invoice line")}
               />
             </label>
           </div>
         )}
 
         {form.isVoucher && (
-          <p className="field-help">
-            Selling this issues a coupon with a code for the amount paid, and it turns up under Billing &gt; Coupons.
-            Tick it on the products people buy on Squarespace so those purchases can be imported too.
-          </p>
+          <p className="field-help">{t("Selling this issues a coupon with a code for the amount paid, and it turns up under Billing > Coupons. Tick it on the products people buy on Squarespace so those purchases can be imported too.")}</p>
         )}
         {showDetail && !form.trackStock && (
-          <p className="field-help">
-            Not counted - use this for something like a fitting fee that you sell but never have on a shelf.
-          </p>
+          <p className="field-help">{t("Not counted - use this for something like a fitting fee that you sell but never have on a shelf.")}</p>
         )}
         {editing && !form.active && (
-          <p className="field-help">
-            This one is retired. Saving leaves it retired - use Restore in the list to bring it back.
-          </p>
+          <p className="field-help">{t("This one is retired. Saving leaves it retired - use Restore in the list to bring it back.")}</p>
         )}
-        {editing && <p className="field-help">Stock is changed from the list below, not here, so a save can't undo a sale.</p>}
+        {editing && <p className="field-help">{t("Stock is changed from the list below, not here, so a save can't undo a sale.")}</p>}
         {!editing && !showDetail && (
-          <p className="field-help">
-            Name and price is enough to start selling it. Press Enter to save. Lessons don't belong here - they come
-            from your lesson types.
-          </p>
+          <p className="field-help">{t("Name and price is enough to start selling it. Press Enter to save. Lessons don't belong here - they come from your lesson types.")}</p>
         )}
       </article>
 
       <article className="data-card wide recent-invoices-card">
         <div className="data-card-header">
           <div>
-            <span>Catalog</span>
-            <h2>
-              {visible.length} shown
-              {lowStockCount > 0 && <span className="unpaid-count-badge">{lowStockCount} low</span>}
+            <span>{t("Catalog")}</span>
+            <h2>{t("{length} shown", { length: visible.length })}{lowStockCount > 0 && <span className="unpaid-count-badge">{t("{lowStockCount} low", { lowStockCount })}</span>}
             </h2>
           </div>
           <ClarityProducts size={24} />
         </div>
         <div className="settings-field-row product-search-row">
           <div className="settings-field product-search-field">
-            <label htmlFor="product-search">Search</label>
+            <label htmlFor="product-search">{t("Search")}</label>
             <div className="product-search-input">
               <Search size={15} />
               <input
                 id="product-search"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Name, SKU or supplier"
+                placeholder={t("Name, SKU or supplier")}
               />
               {Boolean(search) && (
-                <button className="icon-button small" onClick={() => setSearch("")} type="button" aria-label="Clear search">
+                <button className="icon-button small" onClick={() => setSearch("")} type="button" aria-label={t("Clear search")}>
                   <X size={14} />
                 </button>
               )}
@@ -504,27 +491,21 @@ export function ProductsPanel({
           </div>
           <label className="settings-field pos-settles-toggle">
             <input checked={showInactive} onChange={(event) => setShowInactive(event.target.checked)} type="checkbox" />
-            <span>Show retired items</span>
+            <span>{t("Show retired items")}</span>
           </label>
-          <button className="outline-button" onClick={onReload} type="button">
-            Refresh
-          </button>
+          <button className="outline-button" onClick={onReload} type="button">{t("Refresh")}</button>
         </div>
         {stockValueTotal > 0 && (
-          <p className="field-help">Stock on hand is worth about {formatMoney(stockValueTotal, currency)} at cost.</p>
+          <p className="field-help">{t("Stock on hand is worth about {stockValueTotal} at cost.", { stockValueTotal: formatMoney(stockValueTotal, currency) })}</p>
         )}
 
-        {loadState === "loading" && <Loading what="the catalog" />}
+        {loadState === "loading" && <Loading what={t("the catalog")} />}
         {loadState === "error" && (
-          <p>
-            Could not load the catalog.{" "}
-            <button className="link-button" onClick={onReload} type="button">
-              Retry
-            </button>
+          <p>{t("Could not load the catalog.")}{" "}<button className="link-button" onClick={onReload} type="button">{t("Retry")}</button>
           </p>
         )}
         {loadState !== "loading" && !visible.length && (
-          <p>{products.length ? "Nothing matches that search." : "Nothing here yet - add your first product above."}</p>
+          <p>{products.length ? t("Nothing matches that search.") : t("Nothing here yet - add your first product above.")}</p>
         )}
         {groups.map((group) => {
           const stocked = group.kind === "product";
@@ -544,7 +525,7 @@ export function ProductsPanel({
                 {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                 <strong>{KIND_PLURALS[group.kind]}</strong>
                 <em>{group.items.length}</em>
-                {groupLow > 0 && <span className="unpaid-count-badge">{groupLow} low</span>}
+                {groupLow > 0 && <span className="unpaid-count-badge">{t("{groupLow} low", { groupLow })}</span>}
                 {lessons && <Lock className="product-group-lock" size={13} />}
               </button>
               {/* Always rendered, so it has something to slide. Same wrapper,
@@ -552,21 +533,17 @@ export function ProductsPanel({
               <div className={`disclosure-wrap${open ? " is-open" : ""}`} inert={!open}>
                 <div className="disclosure-body product-group-body">
                   {lessons && (
-                    <p className="field-help product-group-note">
-                      Your lesson types, priced where they are booked.{" "}
-                      <button className="link-button" onClick={onEditLessonTypes} type="button">
-                        Edit lesson types
-                      </button>
+                    <p className="field-help product-group-note">{t("Your lesson types, priced where they are booked.")}{" "}<button className="link-button" onClick={onEditLessonTypes} type="button">{t("Edit lesson types")}</button>
                     </p>
                   )}
                   <table className="recent-invoices-table product-table">
                     <thead>
                       <tr>
-                        <th>Name</th>
-                        {stocked && <th>SKU</th>}
-                        {stocked && <th>Supplier</th>}
-                        {stocked && <th>Stock</th>}
-                        <th>Price</th>
+                        <th>{t("Name")}</th>
+                        {stocked && <th>{t("SKU")}</th>}
+                        {stocked && <th>{t("Supplier")}</th>}
+                        {stocked && <th>{t("Stock")}</th>}
+                        <th>{t("Price")}</th>
                         <th />
                       </tr>
                     </thead>
@@ -592,8 +569,8 @@ export function ProductsPanel({
                                   product.description) && (
                                   <em className="product-row-meta">
                                     {[
-                                      product.active === false ? "Retired" : "",
-                                      product.isVoucher ? "Gift voucher" : "",
+                                      product.active === false ? t("Retired") : "",
+                                      product.isVoucher ? t("Gift voucher") : "",
                                       marginLabel(product),
                                       stocked ? "" : product.description,
                                     ]
@@ -612,7 +589,7 @@ export function ProductsPanel({
                                       {product.stockLevel ?? 0}
                                     </span>
                                   ) : (
-                                    <span className="product-stock untracked">not counted</span>
+                                    <span className="product-stock untracked">{t("not counted")}</span>
                                   )}
                                 </td>
                               )}
@@ -620,7 +597,7 @@ export function ProductsPanel({
                               <td className="product-row-actions">
                                 {product.trackStock && (
                                   <button className="link-button" onClick={() => void openStockDrawer(product)} type="button">
-                                    {drawerOpen ? "Close" : "Stock"}
+                                    {drawerOpen ? t("Close") : t("Stock")}
                                   </button>
                                 )}
                                 {!readOnly && (
@@ -629,7 +606,7 @@ export function ProductsPanel({
                                     onClick={() => void onSetActive(product, product.active === false)}
                                     type="button"
                                   >
-                                    {product.active === false ? "Restore" : "Retire"}
+                                    {product.active === false ? t("Restore") : t("Retire")}
                                   </button>
                                 )}
                               </td>
@@ -640,17 +617,17 @@ export function ProductsPanel({
                                   <div className="product-stock-drawer">
                                     <div className="settings-field-row">
                                       <label className="settings-field">
-                                        <span>Change</span>
+                                        <span>{t("Change")}</span>
                                         <select
                                           value={stockMode}
                                           onChange={(event) => setStockMode(event.target.value as "delta" | "setTo")}
                                         >
-                                          <option value="delta">Add / remove</option>
-                                          <option value="setTo">Counted on the shelf</option>
+                                          <option value="delta">{t("Add / remove")}</option>
+                                          <option value="setTo">{t("Counted on the shelf")}</option>
                                         </select>
                                       </label>
                                       <label className="settings-field">
-                                        <span>{stockMode === "delta" ? "Quantity (use -2 to remove)" : "Actual count"}</span>
+                                        <span>{stockMode === "delta" ? t("Quantity (use -2 to remove)") : t("Actual count")}</span>
                                         <input
                                           type="number"
                                           step="1"
@@ -659,11 +636,11 @@ export function ProductsPanel({
                                         />
                                       </label>
                                       <label className="settings-field">
-                                        <span>Reason</span>
+                                        <span>{t("Reason")}</span>
                                         <input
                                           value={stockNote}
                                           onChange={(event) => setStockNote(event.target.value)}
-                                          placeholder="Optional - e.g. delivery, damaged"
+                                          placeholder={t("Optional - e.g. delivery, damaged")}
                                         />
                                       </label>
                                       <button
@@ -672,13 +649,13 @@ export function ProductsPanel({
                                         onClick={() => void submitStock(product)}
                                         type="button"
                                       >
-                                        {stockBusy ? "Saving..." : "Apply"}
+                                        {stockBusy ? t("Saving...") : t("Apply")}
                                       </button>
                                     </div>
                                     <div className="product-movement-list">
-                                      {movementsLoading && <Loading what="history" className="field-help" />}
+                                      {movementsLoading && <Loading what={t("history")} className="field-help" />}
                                       {!movementsLoading && !movements.length && (
-                                        <p className="field-help">No stock movements recorded yet.</p>
+                                        <p className="field-help">{t("No stock movements recorded yet.")}</p>
                                       )}
                                       {!movementsLoading &&
                                         movements.map((movement) => (
@@ -692,7 +669,7 @@ export function ProductsPanel({
                                             </span>
                                             <em>
                                               {movement.createdAt ? new Date(movement.createdAt).toLocaleString() : ""}
-                                              {movement.resultingLevel === null ? "" : ` - left ${movement.resultingLevel}`}
+                                              {movement.resultingLevel === null ? "" : t(" - left {level}", { level: movement.resultingLevel })}
                                             </em>
                                           </div>
                                         ))}

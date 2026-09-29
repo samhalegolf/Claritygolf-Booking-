@@ -20,6 +20,7 @@ import type {
   SessionRole as WireSessionRole,
   WorkspaceBootstrap,
 } from "../../../netlify/functions/_shared/auth-contract.mts";
+import { t } from "../../lib/i18n";
 
 export type SessionRole = WireSessionRole;
 
@@ -97,7 +98,7 @@ export async function login(email: string, password: string): Promise<Session> {
   });
   const data = (await response.json().catch(() => ({}))) as SessionResponse;
   if (!response.ok || !data.authenticated) {
-    throw new Error(data.message || "Email or password is incorrect.");
+    throw new Error(data.message || t("Email or password is incorrect."));
   }
   // Present in the native build only. Storing it is what keeps the player
   // signed in across launches; on the web this is a no-op.

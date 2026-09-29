@@ -6,6 +6,7 @@ import { FriendlyMarkerLabel, TimelineMarker } from "../models/Timeline";
 import { DrawingObject } from "../models/Drawing";
 import type { FocusAreaRect } from "../models/Focus";
 import { PersistenceAdapter, PersistenceQuotaError } from "../utils/localPersistence";
+import { t } from "../../../lib/i18n";
 
 const SAVE_DEBOUNCE_MS = 400;
 
@@ -221,7 +222,7 @@ const sanitizeFocusSnapshot = (raw: unknown): FocusSnapshot | null => {
     title:
       typeof candidate.title === "string" && candidate.title.length > 0
         ? candidate.title
-        : "Focus snapshot",
+        : t("Focus snapshot"),
     side,
     sourceVideoId:
       typeof candidate.sourceVideoId === "string" ? candidate.sourceVideoId : undefined,
@@ -321,7 +322,7 @@ export function useAnalysisStore({
         if (error instanceof PersistenceQuotaError) {
           setPersistenceError(error.message);
         } else {
-          setPersistenceError("Could not save analysis changes.");
+          setPersistenceError(t("Could not save analysis changes."));
           // Unexpected persistence failures should not crash the workspace.
           // eslint-disable-next-line no-console
           console.error("Failed to persist analysis", error);

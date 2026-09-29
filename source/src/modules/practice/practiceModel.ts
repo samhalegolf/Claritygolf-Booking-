@@ -1,3 +1,4 @@
+import { t } from "../../lib/i18n";
 /* Practice blocks: the shapes, and small pure display helpers.
  *
  * Shared by the coach's builder and the player's Practice section, so the two
@@ -25,10 +26,10 @@ export type PracticeBlockType = string;
 export type PracticeFieldKey = "steps" | "dose" | "expiry" | "video";
 
 export const PRACTICE_FIELDS: Array<{ key: PracticeFieldKey; label: string; hint: string }> = [
-  { key: "steps", label: "Multi-step body", hint: "Numbered instructions rather than one box" },
-  { key: "dose", label: "Dose", hint: "The quantity beside step one — “20 balls”" },
-  { key: "expiry", label: "Expiry", hint: "When the block stops mattering" },
-  { key: "video", label: "Link a video", hint: "Attach one of the player’s saved swings" },
+  { key: "steps", label: t("Multi-step body"), hint: t("Numbered instructions rather than one box") },
+  { key: "dose", label: t("Dose"), hint: t("The quantity beside step one — “20 balls”") },
+  { key: "expiry", label: t("Expiry"), hint: t("When the block stops mattering") },
+  { key: "video", label: t("Link a video"), hint: t("Attach one of the player’s saved swings") },
 ];
 
 export type PracticeTypeMeta = {
@@ -64,11 +65,11 @@ const ALL_FIELDS: Record<PracticeFieldKey, boolean> = { steps: true, dose: true,
  * none of them fit.
  */
 export const DEFAULT_PRACTICE_TYPES: PracticeTypeMeta[] = [
-  { id: "drill", label: "Drill", hint: "one thing, reps", tone: "#2f5d3a", titleHint: "Gate Drill", doseHint: "20 balls", fields: { ...ALL_FIELDS }, archived: false },
-  { id: "skill", label: "Skill test", hint: "scored", tone: "#2c4a75", titleHint: "Start Line Test", doseHint: "10 shots", fields: { ...ALL_FIELDS }, archived: false },
-  { id: "game", label: "Game", hint: "pressure", tone: "#8a4a1c", titleHint: "Up & Down 9", doseHint: "9 holes", fields: { ...ALL_FIELDS }, archived: false },
-  { id: "routine", label: "Routine", hint: "every session", tone: "#5a3a63", titleHint: "Warm-up Routine", doseHint: "10 min", fields: { ...ALL_FIELDS }, archived: false },
-  { id: "custom", label: "Custom", hint: "set your own", tone: "#57544d", titleHint: "Name this block", doseHint: "", fields: { ...ALL_FIELDS }, archived: false },
+  { id: "drill", label: t("Drill"), hint: t("one thing, reps"), tone: "#2f5d3a", titleHint: t("Gate Drill"), doseHint: t("20 balls"), fields: { ...ALL_FIELDS }, archived: false },
+  { id: "skill", label: t("Skill test"), hint: "scored", tone: "#2c4a75", titleHint: t("Start Line Test"), doseHint: t("10 shots"), fields: { ...ALL_FIELDS }, archived: false },
+  { id: "game", label: t("Game"), hint: "pressure", tone: "#8a4a1c", titleHint: t("Up & Down 9"), doseHint: t("9 holes"), fields: { ...ALL_FIELDS }, archived: false },
+  { id: "routine", label: t("Routine"), hint: "every session", tone: "#5a3a63", titleHint: t("Warm-up Routine"), doseHint: t("10 min"), fields: { ...ALL_FIELDS }, archived: false },
+  { id: "custom", label: t("Custom"), hint: "set your own", tone: "#57544d", titleHint: t("Name this block"), doseHint: "", fields: { ...ALL_FIELDS }, archived: false },
 ];
 
 /** The stored list, or the defaults when a workspace has never edited them. */
@@ -94,13 +95,13 @@ export function practiceTypeMeta(types: PracticeTypeMeta[], id: string | null | 
   if (found) return found;
   const fallback = types.find((type) => type.id === "custom") || DEFAULT_PRACTICE_TYPES[DEFAULT_PRACTICE_TYPES.length - 1];
   if (!id) return fallback;
-  return { ...fallback, id, label: practiceLabelFromId(id), hint: "no longer offered", tone: "#57544d" };
+  return { ...fallback, id, label: practiceLabelFromId(id), hint: t("no longer offered"), tone: "#57544d" };
 }
 
 /** "pressure-test" -> "Pressure test", for a type whose definition is gone. */
 export function practiceLabelFromId(id: string) {
   const words = String(id).replace(/[-_]+/g, " ").trim();
-  return words ? words[0].toUpperCase() + words.slice(1) : "Block";
+  return words ? words[0].toUpperCase() + words.slice(1) : t("Block");
 }
 
 /** A new type's id, derived from its name and kept unique within the list. */
@@ -216,15 +217,15 @@ export function practiceShortDate(value: string) {
 
 /** "No expiry" / "Expires 31 Aug" / "Expires next lesson" -- read the same on both ends. */
 export function practiceExpiryLabel(block: Pick<PracticeBlock, "expiryType" | "expiryDate">) {
-  if (block.expiryType === "none" || !block.expiryDate) return "No expiry";
-  if (block.expiryType === "next_lesson") return "Expires next lesson";
+  if (block.expiryType === "none" || !block.expiryDate) return t("No expiry");
+  if (block.expiryType === "next_lesson") return t("Expires next lesson");
   const date = shortDate(block.expiryDate);
-  return date ? `Expires ${date}` : "Has an expiry date";
+  return date ? t("Expires {date}", { date }) : t("Has an expiry date");
 }
 
 export function practiceAssignedLabel(block: Pick<PracticeBlock, "assignedAt">) {
   const date = shortDate(block.assignedAt);
-  return date ? `Assigned ${date}` : "";
+  return date ? t("Assigned {date}", { date }) : "";
 }
 
 export function isPracticeBlockActive(block: Pick<PracticeBlock, "status">) {

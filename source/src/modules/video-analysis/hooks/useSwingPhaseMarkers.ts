@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { TimelineMarker } from "../models/Timeline";
 import type { SwingPhases } from "../../../../motion-lab/src/embed/detectSwingPhases";
 import { markersAreUntouched, placeMarkersAtPhases } from "../utils/motionLabMarkers";
+import { t } from "../../../lib/i18n";
 
 // Runs the motion lab's phase detection over a panel's clip and moves that
 // panel's timeline markers onto what it finds.
@@ -80,7 +81,7 @@ export function useSwingPhaseMarkers({ enabled, clip, markers, defaults, apply }
         const [detectSwingPhases, blob] = await Promise.all([
           loadDetector(),
           fetch(target.sourceUrl).then((response) => {
-            if (!response.ok) throw new Error(`The clip could not be read (${response.status}).`);
+            if (!response.ok) throw new Error(t("The clip could not be read ({status}).", { status: response.status }));
             return response.blob();
           }),
         ]);
@@ -102,7 +103,7 @@ export function useSwingPhaseMarkers({ enabled, clip, markers, defaults, apply }
         if (controller.signal.aborted) return;
         setState({
           kind: "failed",
-          message: error instanceof Error ? error.message : "Swing phases could not be found.",
+          message: error instanceof Error ? error.message : t("Swing phases could not be found."),
         });
       }
     },

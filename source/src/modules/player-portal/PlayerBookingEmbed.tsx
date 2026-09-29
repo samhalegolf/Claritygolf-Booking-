@@ -1,5 +1,6 @@
 import { Loading } from "../shared/Loading";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { t } from "../../lib/i18n";
 
 /**
  * A slot in the player portal for a booking widget that isn't ours.
@@ -134,7 +135,7 @@ export function PlayerBookingEmbed({ config }: { config: PlayerBookingEmbedConfi
 
       <div className="player-booking-embed-frame" style={{ height: `${height}px` }}>
         {!loaded && (
-          <Loading what="booking" className="player-portal-empty player-booking-embed-loading" />
+          <Loading what={t("booking")} className="player-portal-empty player-booking-embed-loading" />
         )}
         <iframe
           ref={frameRef}
@@ -154,9 +155,7 @@ export function PlayerBookingEmbed({ config }: { config: PlayerBookingEmbedConfi
           frame then goes blank with no event we can catch. This is always here
           so there is a way through even in that case. */}
       <div className="player-booking-embed-escape">
-        <button className="player-portal-ghost" type="button" onClick={openInTab}>
-          Open booking in a new tab ↗
-        </button>
+        <button className="player-portal-ghost" type="button" onClick={openInTab}>{t("Open booking in a new tab ↗")}</button>
       </div>
     </section>
   );

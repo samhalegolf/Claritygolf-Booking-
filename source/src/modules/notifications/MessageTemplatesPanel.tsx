@@ -26,35 +26,36 @@ import type {
   NotificationTemplates,
   NotificationVariantId,
 } from "../../../netlify/functions/_shared/notification-templates.mts";
+import { t } from "../../lib/i18n";
 
 // The rows Clarity fills in per lesson. Not editable and deliberately shown:
 // they are most of what a client actually reads, and a coach writing the body
 // needs to see what the message already says without them.
 const PREVIEW_ROWS: Record<NotificationVariantId, Array<[string, string]>> = {
   booked: [
-    ["Lesson", "45 min private lesson"],
-    ["When", "Tue 8 Sep, 9:00am"],
+    [t("Lesson"), t("45 min private lesson")],
+    [t("When"), "Tue 8 Sep, 9:00am"],
   ],
   reschedule: [
-    ["Lesson", "45 min private lesson"],
-    ["Previous", "Tue 8 Sep, 9:00am"],
-    ["When", "Thu 10 Sep, 2:30pm"],
+    [t("Lesson"), t("45 min private lesson")],
+    [t("Previous"), "Tue 8 Sep, 9:00am"],
+    [t("When"), "Thu 10 Sep, 2:30pm"],
   ],
   reminder: [
-    ["Lesson", "45 min private lesson"],
-    ["When", "Tomorrow, 9:00am"],
+    [t("Lesson"), t("45 min private lesson")],
+    [t("When"), "Tomorrow, 9:00am"],
   ],
   cancelled: [
-    ["Lesson", "45 min private lesson"],
-    ["Previous", "Tue 8 Sep, 9:00am"],
+    [t("Lesson"), t("45 min private lesson")],
+    [t("Previous"), "Tue 8 Sep, 9:00am"],
   ],
   group: [
-    ["Lesson", "Short game clinic"],
-    ["When", "Sat 12 Sep, 8:00am"],
+    [t("Lesson"), t("Short game clinic")],
+    [t("When"), "Sat 12 Sep, 8:00am"],
   ],
   package: [
-    ["Lesson", "Six lesson block"],
-    ["When", "Book as you go"],
+    [t("Lesson"), t("Six lesson block")],
+    [t("When"), t("Book as you go")],
   ],
 };
 
@@ -157,10 +158,10 @@ export function MessageTemplatesPanel({
               autoFocus
             />
           )}
-          <button className="mt-commit" onClick={commit} type="button" aria-label={`Save ${options.label}`}>
+          <button className="mt-commit" onClick={commit} type="button" aria-label={t("Save {label}", { label: options.label })}>
             <Check size={15} />
           </button>
-          <button className="mt-cancel" onClick={cancelEdit} type="button" aria-label={`Cancel ${options.label}`}>
+          <button className="mt-cancel" onClick={cancelEdit} type="button" aria-label={t("Cancel {label}", { label: options.label })}>
             <X size={15} />
           </button>
         </span>
@@ -171,7 +172,7 @@ export function MessageTemplatesPanel({
         className={`mt-slot ${options.className}`}
         onClick={() => beginEdit(name)}
         disabled={locked}
-        title={locked ? undefined : `Edit the ${options.label.toLowerCase()}`}
+        title={locked ? undefined : t("Edit the {label}", { label: options.label.toLowerCase() })}
         type="button"
       >
         <span className="mt-slot-value">{options.value}</span>
@@ -190,7 +191,7 @@ export function MessageTemplatesPanel({
   return (
     <div className="message-templates">
       <div className="mt-toolbar">
-        <div className="mt-channel" role="group" aria-label="Message channel">
+        <div className="mt-channel" role="group" aria-label={t("Message channel")}>
           <button
             className={isText ? "" : "is-active"}
             onClick={() => {
@@ -200,9 +201,7 @@ export function MessageTemplatesPanel({
             aria-pressed={!isText}
             type="button"
           >
-            <ClarityEmail size={15} />
-            Email
-          </button>
+            <ClarityEmail size={15} />{t("Email")}</button>
           <button
             className={isText ? "is-active" : ""}
             onClick={() => {
@@ -212,25 +211,21 @@ export function MessageTemplatesPanel({
             aria-pressed={isText}
             type="button"
           >
-            <ClarityMessages size={15} />
-            Text
-          </button>
+            <ClarityMessages size={15} />{t("Text")}</button>
         </div>
         {!isText && (
           <button
             className={`mt-width${narrow ? " is-active" : ""}`}
             onClick={() => setNarrow((current) => !current)}
             aria-pressed={narrow}
-            title="Preview at phone width"
+            title={t("Preview at phone width")}
             type="button"
           >
             <Smartphone size={16} />
           </button>
         )}
         <span className="mt-dashed-key">
-          <span className="mt-dashed-swatch" />
-          Dashed is yours to write
-        </span>
+          <span className="mt-dashed-swatch" />{t("Dashed is yours to write")}</span>
         {/* Rule 10: reverting wording is text, not a filled button sitting
             beside the thing it would undo. */}
         <button
@@ -239,12 +234,10 @@ export function MessageTemplatesPanel({
           disabled={locked || !isNotificationTemplateEdited(templates, variant)}
           type="button"
         >
-          <RotateCcw size={14} />
-          Reset {active.label.toLowerCase()}
-        </button>
+          <RotateCcw size={14} />{t("Reset {label}", { label: active.label.toLowerCase() })}</button>
       </div>
 
-      <div className="mt-tabs" role="tablist" aria-label="What happened">
+      <div className="mt-tabs" role="tablist" aria-label={t("What happened")}>
         {NOTIFICATION_VARIANTS.map((entry) => (
           <button
             key={entry.id}
@@ -258,7 +251,7 @@ export function MessageTemplatesPanel({
             type="button"
           >
             {entry.label}
-            {isNotificationTemplateEdited(templates, entry.id) && <em className="mt-tab-dot" aria-label="Edited" />}
+            {isNotificationTemplateEdited(templates, entry.id) && <em className="mt-tab-dot" aria-label={t("Edited")} />}
           </button>
         ))}
       </div>
@@ -275,8 +268,8 @@ export function MessageTemplatesPanel({
                     {logoUrl ? <img src={logoUrl} alt="" /> : <ClarityMessages size={16} />}
                   </span>
                   <div>
-                    <strong>{businessName || "Your business name"}</strong>
-                    <em>Text message</em>
+                    <strong>{businessName || t("Your business name")}</strong>
+                    <em>{t("Text message")}</em>
                   </div>
                 </div>
                 <div className="mt-sms-body">
@@ -284,7 +277,7 @@ export function MessageTemplatesPanel({
                     className: "mt-sms-bubble",
                     multiline: true,
                     rows: 5,
-                    label: "Text message",
+                    label: t("Text message"),
                     value: renderPreview(smsBody),
                   })}
                   <span className="mt-sms-count">{smsSegmentLabel(smsBody)}</span>
@@ -299,28 +292,28 @@ export function MessageTemplatesPanel({
                     </span>
                   )}
                   <div>
-                    <strong>{businessName || "Your business name"}</strong>
-                    <em>{businessName ? "Logo and name, from Settings › Business" : "Set your business name in Settings › Business"}</em>
+                    <strong>{businessName || t("Your business name")}</strong>
+                    <em>{businessName ? t("Logo and name, from Settings › Business") : t("Set your business name in Settings › Business")}</em>
                   </div>
                 </div>
 
                 <div className="mt-subject">
-                  <span className="mt-label">Subject</span>
-                  {field("subject", { className: "mt-subject-slot", label: "Subject line", value: renderPreview(text("subject")) })}
+                  <span className="mt-label">{t("Subject")}</span>
+                  {field("subject", { className: "mt-subject-slot", label: t("Subject line"), value: renderPreview(text("subject")) })}
                 </div>
 
                 <div className="mt-email-body">
-                  {field("heading", { className: "mt-heading", label: "Headline", value: renderPreview(text("heading")) })}
+                  {field("heading", { className: "mt-heading", label: t("Headline"), value: renderPreview(text("heading")) })}
                   {field("body", {
                     className: "mt-body",
                     multiline: true,
                     rows: 4,
-                    label: "Message",
+                    label: t("Message"),
                     value: renderPreview(text("body")),
                   })}
 
                   <div className="mt-rows">
-                    <div className="mt-rows-head">The booking · filled in by Clarity</div>
+                    <div className="mt-rows-head">{t("The booking · filled in by Clarity")}</div>
                     {PREVIEW_ROWS[variant].map(([key, value]) => (
                       <div className="mt-row" key={key}>
                         <span>{key}</span>
@@ -328,10 +321,10 @@ export function MessageTemplatesPanel({
                       </div>
                     ))}
                     <div className="mt-row mt-row-where">
-                      <span>Where</span>
+                      <span>{t("Where")}</span>
                       <span className="mt-where-value">
-                        <em>{venueName || "Your venue"}</em>
-                        {field("mapLink", { className: "mt-maplink", label: "Map link name", value: mapLinkLabel })}
+                        <em>{venueName || t("Your venue")}</em>
+                        {field("mapLink", { className: "mt-maplink", label: t("Map link name"), value: mapLinkLabel })}
                       </span>
                     </div>
                   </div>
@@ -339,17 +332,15 @@ export function MessageTemplatesPanel({
                   <div className="mt-actions">
                     {field("cta", {
                       className: "mt-cta",
-                      label: "Button",
-                      value: ctaLabel || "No button on this message",
+                      label: t("Button"),
+                      value: ctaLabel || t("No button on this message"),
                     })}
-                    <span className="mt-cta-note">Links to the manage / reschedule page. Clear it to drop the button.</span>
+                    <span className="mt-cta-note">{t("Links to the manage / reschedule page. Clear it to drop the button.")}</span>
                   </div>
 
-                  {field("signoff", { className: "mt-signoff", label: "Sign-off", value: renderPreview(text("signoff")) })}
+                  {field("signoff", { className: "mt-signoff", label: t("Sign-off"), value: renderPreview(text("signoff")) })}
 
-                  <p className="mt-footer">
-                    Sent by Clarity on your behalf. Your business name, venue and reply-to address are added here.
-                  </p>
+                  <p className="mt-footer">{t("Sent by Clarity on your behalf. Your business name, venue and reply-to address are added here.")}</p>
                 </div>
               </>
             )}
@@ -358,10 +349,8 @@ export function MessageTemplatesPanel({
 
         <p className="mt-note">
           {isText
-            ? "Links and merge fields are filled in per lesson. What you write is saved against " + active.label + " only."
-            : "The booking table, the button's link and the footer are filled in per lesson and cannot be edited here. What you write is saved against " +
-              active.label +
-              " only."}
+            ? t("Links and merge fields are filled in per lesson. What you write is saved against {label} only.", { label: active.label })
+            : t("The booking table, the button's link and the footer are filled in per lesson and cannot be edited here. What you write is saved against {label} only.", { label: active.label })}
         </p>
       </div>
     </div>

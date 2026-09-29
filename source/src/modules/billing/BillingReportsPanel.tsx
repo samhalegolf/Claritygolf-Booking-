@@ -14,6 +14,7 @@ import {
   type ReportRangePreset,
   type ReportSectionKey,
 } from "./reportsMath";
+import { t } from "../../lib/i18n";
 
 const PRESET_ORDER: ReportRangePreset[] = [
   "this-month",
@@ -25,11 +26,11 @@ const PRESET_ORDER: ReportRangePreset[] = [
 ];
 
 const AGING_BUCKETS: Array<{ key: "current" | "d1_30" | "d31_60" | "d61_90" | "d90plus"; label: string }> = [
-  { key: "current", label: "Current" },
-  { key: "d1_30", label: "1-30 days" },
-  { key: "d31_60", label: "31-60 days" },
-  { key: "d61_90", label: "61-90 days" },
-  { key: "d90plus", label: "90+ days" },
+  { key: "current", label: t("Current") },
+  { key: "d1_30", label: t("1-30 days") },
+  { key: "d31_60", label: t("31-60 days") },
+  { key: "d61_90", label: t("61-90 days") },
+  { key: "d90plus", label: t("90+ days") },
 ];
 
 export type BillingReportsPanelProps = {
@@ -95,19 +96,17 @@ export function BillingReportsPanel({
       <article className="data-card report-controls">
         <div className="data-card-header">
           <div>
-            <span>Reports</span>
-            <h2>Financial summary</h2>
+            <span>{t("Reports")}</span>
+            <h2>{t("Financial summary")}</h2>
           </div>
           <div className="report-actions">
             <button className="outline-button" onClick={onExportCsv} disabled={!summary} type="button">
-              <Download size={16} /> CSV
-            </button>
+              <Download size={16} />{" "}{t("CSV")}</button>
             <button className="outline-button" onClick={onDownloadPdf} disabled={!summary} type="button">
-              <ClarityBookingPages size={16} /> PDF
-            </button>
+              <ClarityBookingPages size={16} />{" "}{t("PDF")}</button>
           </div>
         </div>
-        <div className="revenue-period-toggle report-preset-toggle" role="tablist" aria-label="Report period">
+        <div className="revenue-period-toggle report-preset-toggle" role="tablist" aria-label={t("Report period")}>
           {PRESET_ORDER.map((option) => (
             <button
               key={option}
@@ -117,33 +116,29 @@ export function BillingReportsPanel({
               aria-selected={preset === option}
               type="button"
             >
-              {option === "custom" ? "Custom" : REPORT_PRESET_LABELS[option]}
+              {option === "custom" ? t("Custom") : REPORT_PRESET_LABELS[option]}
             </button>
           ))}
         </div>
         {preset === "custom" && (
           <div className="report-custom-range">
             <label className="settings-field">
-              <span>From</span>
+              <span>{t("From")}</span>
               <input className="w-date" type="date" value={customStart} onChange={(event) => onCustomStartChange(event.target.value)} />
             </label>
             <label className="settings-field">
-              <span>To</span>
+              <span>{t("To")}</span>
               <input className="w-date" type="date" value={customEnd} onChange={(event) => onCustomEndChange(event.target.value)} />
             </label>
-            <button className="outline-button" onClick={onApplyCustom} disabled={!customStart || !customEnd} type="button">
-              Apply
-            </button>
+            <button className="outline-button" onClick={onApplyCustom} disabled={!customStart || !customEnd} type="button">{t("Apply")}</button>
           </div>
         )}
         {summary && (
-          <p className="field-help report-range-caption">
-            {summary.rangeStart} to {summary.rangeEnd}
-          </p>
+          <p className="field-help report-range-caption">{t("{rangeStart} to {rangeEnd}", { rangeStart: summary.rangeStart, rangeEnd: summary.rangeEnd })}</p>
         )}
         {summary && (
-          <div className="report-section-toggle" role="group" aria-label="Include sections">
-            <span className="report-toggle-label">Include:</span>
+          <div className="report-section-toggle" role="group" aria-label={t("Include sections")}>
+            <span className="report-toggle-label">{t("Include:")}</span>
             {REPORT_SECTIONS.map((section) => {
               const on = shown.has(section.key);
               return (
@@ -164,26 +159,20 @@ export function BillingReportsPanel({
 
       {loadState === "error" ? (
         <article className="data-card">
-          <p>Could not load reports.</p>
-          <button className="outline-button" onClick={onRetry} type="button">
-            Try again
-          </button>
+          <p>{t("Could not load reports.")}</p>
+          <button className="outline-button" onClick={onRetry} type="button">{t("Try again")}</button>
         </article>
       ) : loadState === "loading" && !summary ? (
         <article className="data-card">
-          <Loading what="reports" />
+          <Loading what={t("reports")} />
         </article>
       ) : summary ? (
         <>
           {summary.expenses.excludedCategoryNames && summary.expenses.excludedCategoryNames.length > 0 && (
             <div className="report-filter-banner" role="status">
               <span>
-                <strong>Filtered report</strong> — expense figures (total, net profit, {summary.taxName}, chart) exclude:{" "}
-                {summary.expenses.excludedCategoryNames.join(", ")}. Income, top customers and A/R are unaffected.
-              </span>
-              <button className="text-button" type="button" onClick={onClearCategories}>
-                Show all categories
-              </button>
+                <strong>{t("Filtered report")}</strong>{" "}{t("— expense figures (total, net profit, {taxName}, chart) exclude: {excludedCategoryNames}. Income, top customers and A/R are unaffected.", { taxName: summary.taxName, excludedCategoryNames: summary.expenses.excludedCategoryNames.join(", ") })}</span>
+              <button className="text-button" type="button" onClick={onClearCategories}>{t("Show all categories")}</button>
             </div>
           )}
           {showStatGrid && (
@@ -191,25 +180,25 @@ export function BillingReportsPanel({
               {shown.has("pl") && (
                 <>
                   <article className="data-card report-stat">
-                    <span>Income</span>
+                    <span>{t("Income")}</span>
                     <strong>{money(summary.income.total)}</strong>
-                    <small>{summary.income.invoiceCount} invoice{summary.income.invoiceCount === 1 ? "" : "s"}</small>
+                    <small>{t("{invoiceCount} invoice", { invoiceCount: summary.income.invoiceCount })}{summary.income.invoiceCount === 1 ? "" : "s"}</small>
                   </article>
                   <article className="data-card report-stat">
-                    <span>Expenses</span>
+                    <span>{t("Expenses")}</span>
                     <strong>{money(summary.expenses.total)}</strong>
-                    <small>{summary.expenses.count} logged</small>
+                    <small>{t("{count} logged", { count: summary.expenses.count })}</small>
                   </article>
                   <article className="data-card report-stat">
-                    <span>Net profit</span>
+                    <span>{t("Net profit")}</span>
                     <strong className={summary.netProfit < 0 ? "report-negative" : "report-positive"}>{money(summary.netProfit)}</strong>
-                    <small>income minus expenses</small>
+                    <small>{t("income minus expenses")}</small>
                   </article>
                 </>
               )}
               {shown.has("gst") && (
                 <article className="data-card report-stat">
-                  <span>Net {summary.taxName}</span>
+                  <span>{t("Net {taxName}", { taxName: summary.taxName })}</span>
                   <strong>{money(Math.abs(summary.gst.net))}</strong>
                   <small>{summary.gst.net >= 0 ? "payable" : "refund"} · {summary.taxRate}%</small>
                 </article>
@@ -221,18 +210,18 @@ export function BillingReportsPanel({
           <article className="data-card">
             <div className="data-card-header">
               <div>
-                <span>Income vs expenses</span>
-                <h2>{money(summary.netProfit)} net</h2>
+                <span>{t("Income vs expenses")}</span>
+                <h2>{t("{netProfit} net", { netProfit: money(summary.netProfit) })}</h2>
               </div>
               <div className="report-legend">
-                <span className="report-legend-income">Income</span>
-                <span className="report-legend-expense">Expenses</span>
+                <span className="report-legend-income">{t("Income")}</span>
+                <span className="report-legend-expense">{t("Expenses")}</span>
               </div>
             </div>
             {summary.months.length ? (
               <div className="report-chart" aria-hidden="true">
                 {summary.months.map((month) => (
-                  <div key={month.monthStart} className="report-chart-track" title={`${month.label}: ${money(month.income)} in, ${money(month.expenses)} out`}>
+                  <div key={month.monthStart} className="report-chart-track" title={t("{label}: {income} in, {expenses} out", { label: month.label, income: money(month.income), expenses: money(month.expenses) })}>
                     <div className="report-chart-bars">
                       <div className="report-chart-bar report-chart-bar-income" style={{ height: `${Math.max(2, Math.round((month.income / chartMax) * 100))}%` }} />
                       <div className="report-chart-bar report-chart-bar-expense" style={{ height: `${Math.max(2, Math.round((month.expenses / chartMax) * 100))}%` }} />
@@ -242,7 +231,7 @@ export function BillingReportsPanel({
                 ))}
               </div>
             ) : (
-              <p className="field-help">No activity in this range.</p>
+              <p className="field-help">{t("No activity in this range.")}</p>
             )}
           </article>
           )}
@@ -253,15 +242,15 @@ export function BillingReportsPanel({
             <article className="data-card">
               <div className="data-card-header">
                 <div>
-                  <span>Expenses</span>
-                  <h2>By category</h2>
+                  <span>{t("Expenses")}</span>
+                  <h2>{t("By category")}</h2>
                 </div>
               </div>
               {summary.expenses.byCategory.length ? (
                 <>
                   {summary.expenses.byCategory.length > 1 && (
-                    <div className="report-category-toggle" role="group" aria-label="Include expense categories">
-                      <span className="report-toggle-label">Categories:</span>
+                    <div className="report-category-toggle" role="group" aria-label={t("Include expense categories")}>
+                      <span className="report-toggle-label">{t("Categories:")}</span>
                       {summary.expenses.byCategory.map((category) => {
                         const on = !excludedCategorySet.has(category.categoryId);
                         return (
@@ -288,11 +277,11 @@ export function BillingReportsPanel({
                       ))}
                     </ul>
                   ) : (
-                    <p className="field-help">No categories selected.</p>
+                    <p className="field-help">{t("No categories selected.")}</p>
                   )}
                 </>
               ) : (
-                <p className="field-help">No expenses logged in this range.</p>
+                <p className="field-help">{t("No expenses logged in this range.")}</p>
               )}
             </article>
             )}
@@ -301,8 +290,8 @@ export function BillingReportsPanel({
             <article className="data-card">
               <div className="data-card-header">
                 <div>
-                  <span>Income</span>
-                  <h2>Top customers</h2>
+                  <span>{t("Income")}</span>
+                  <h2>{t("Top customers")}</h2>
                 </div>
               </div>
               {summary.topCustomers.length ? (
@@ -311,14 +300,14 @@ export function BillingReportsPanel({
                     <li key={customer.customerName}>
                       <span>
                         {customer.customerName}
-                        <small> · {customer.invoiceCount} invoice{customer.invoiceCount === 1 ? "" : "s"}</small>
+                        <small>{" "}{t("· {invoiceCount} invoice", { invoiceCount: customer.invoiceCount })}{customer.invoiceCount === 1 ? "" : "s"}</small>
                       </span>
                       <strong>{money(customer.total)}</strong>
                     </li>
                   ))}
                 </ul>
               ) : (
-                <p className="field-help">No income in this range.</p>
+                <p className="field-help">{t("No income in this range.")}</p>
               )}
             </article>
             )}
@@ -329,10 +318,10 @@ export function BillingReportsPanel({
           <article className="data-card">
             <div className="data-card-header">
               <div>
-                <span>Accounts receivable</span>
-                <h2>{money(summary.aging.total)} outstanding</h2>
+                <span>{t("Accounts receivable")}</span>
+                <h2>{t("{total} outstanding", { total: money(summary.aging.total) })}</h2>
               </div>
-              <small className="field-help">as of {summary.aging.asOf}</small>
+              <small className="field-help">{t("as of {asOf}", { asOf: summary.aging.asOf })}</small>
             </div>
             <div className="report-aging-grid">
               {AGING_BUCKETS.map((bucket) => (
@@ -346,11 +335,11 @@ export function BillingReportsPanel({
               <table className="report-aging-table">
                 <thead>
                   <tr>
-                    <th>Invoice</th>
-                    <th>Customer</th>
-                    <th>Due</th>
-                    <th className="report-num">Overdue</th>
-                    <th className="report-num">Outstanding</th>
+                    <th>{t("Invoice")}</th>
+                    <th>{t("Customer")}</th>
+                    <th>{t("Due")}</th>
+                    <th className="report-num">{t("Overdue")}</th>
+                    <th className="report-num">{t("Outstanding")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -370,15 +359,15 @@ export function BillingReportsPanel({
           )}
 
           {enabledSections.length === 0 && (
-            <p className="field-help">No sections selected. Use the “Include” buttons above to add sections to the report.</p>
+            <p className="field-help">{t("No sections selected. Use the “Include” buttons above to add sections to the report.")}</p>
           )}
           {!hasActivity && enabledSections.length > 0 && (
-            <p className="field-help">No invoices or expenses fall in this range yet. Pick a wider period or issue an invoice to see figures here.</p>
+            <p className="field-help">{t("No invoices or expenses fall in this range yet. Pick a wider period or issue an invoice to see figures here.")}</p>
           )}
         </>
       ) : (
         <article className="data-card">
-          <p>No report data yet.</p>
+          <p>{t("No report data yet.")}</p>
         </article>
       )}
     </div>

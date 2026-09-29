@@ -15,6 +15,7 @@ import {
   timeZoneOffsetLabel,
   timeZonesForCountry,
 } from "../../../netlify/functions/_shared/region.mts";
+import { activeLanguage, t } from "../../lib/i18n";
 
 export type RegionValues = {
   country: string;
@@ -72,7 +73,7 @@ function currencyOptions(current: string) {
   if (current) codes.add(current);
   let names: Intl.DisplayNames | null = null;
   try {
-    names = new Intl.DisplayNames(["en"], { type: "currency" });
+    names = new Intl.DisplayNames([activeLanguage()], { type: "currency" });
   } catch {
     names = null;
   }
@@ -98,7 +99,7 @@ export function RegionSettings({ values, locked, onChange, parseRate }: RegionSe
     <>
       <div className="service-form-row">
         <label className="settings-field">
-          <span>Country</span>
+          <span>{t("Country")}</span>
           <select
             value={values.country}
             disabled={locked}
@@ -114,7 +115,7 @@ export function RegionSettings({ values, locked, onChange, parseRate }: RegionSe
           </select>
         </label>
         <label className="settings-field">
-          <span>Time zone</span>
+          <span>{t("Time zone")}</span>
           <TimeZoneSelect
             country={values.country}
             value={values.timezone}
@@ -123,7 +124,7 @@ export function RegionSettings({ values, locked, onChange, parseRate }: RegionSe
           />
         </label>
         <label className="settings-field">
-          <span>Currency</span>
+          <span>{t("Currency")}</span>
           <select value={values.currency} disabled={locked} onChange={(event) => onChange({ currency: event.target.value })}>
             {currencies.map((option) => (
               <option key={option.code} value={option.code}>
@@ -135,11 +136,11 @@ export function RegionSettings({ values, locked, onChange, parseRate }: RegionSe
       </div>
       <div className="service-form-row">
         <label className="settings-field">
-          <span>Tax name</span>
+          <span>{t("Tax name")}</span>
           <input value={values.taxName} readOnly={locked} onChange={(event) => onChange({ taxName: event.target.value })} />
         </label>
         <label className="settings-field">
-          <span>Tax rate (%)</span>
+          <span>{t("Tax rate (%)")}</span>
           <input
             value={values.taxRate}
             inputMode="decimal"
@@ -149,21 +150,18 @@ export function RegionSettings({ values, locked, onChange, parseRate }: RegionSe
           />
         </label>
         <label className="settings-field">
-          <span>Prices and {taxLabel}</span>
+          <span>{t("Prices and {taxLabel}", { taxLabel })}</span>
           <select
             value={values.taxInclusive ? "inclusive" : "exclusive"}
             disabled={locked}
             onChange={(event) => onChange({ taxInclusive: event.target.value === "inclusive" })}
           >
-            <option value="inclusive">Prices include {taxLabel}</option>
-            <option value="exclusive">Add {taxLabel} on top</option>
+            <option value="inclusive">{t("Prices include {taxLabel}", { taxLabel })}</option>
+            <option value="exclusive">{t("Add {taxLabel} on top", { taxLabel })}</option>
           </select>
         </label>
       </div>
-      <p className="field-help">
-        Choosing a country fills in its time zone, currency and usual tax. Change any of them if your business
-        is different. The country also sets the dialling code for phone numbers and how dates are written.
-      </p>
+      <p className="field-help">{t("Choosing a country fills in its time zone, currency and usual tax. Change any of them if your business is different. The country also sets the dialling code for phone numbers and how dates are written.")}</p>
     </>
   );
 }

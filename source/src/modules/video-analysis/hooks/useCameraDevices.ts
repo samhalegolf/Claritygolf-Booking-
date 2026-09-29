@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { t } from "../../../lib/i18n";
 
 /**
  * The video input devices this browser can currently see, kept live.
@@ -61,7 +62,7 @@ export function useCameraDevices(enabled = true): CameraDevicesState {
         setError(
           enumerationError instanceof Error
             ? enumerationError.message
-            : "Could not read the camera list."
+            : t("Could not read the camera list.")
         );
       }
       return [];
@@ -79,7 +80,7 @@ export function useCameraDevices(enabled = true): CameraDevicesState {
       setError(
         permissionError instanceof Error
           ? permissionError.message
-          : "Camera access was not granted."
+          : t("Camera access was not granted.")
       );
     }
     await refresh();

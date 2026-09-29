@@ -5,6 +5,7 @@
 // in an idle moment after the calendar has painted, and the panel reads a list
 // that is usually already there. Same machinery as clients and lesson notes.
 
+import { t } from "../../lib/i18n";
 import { createRemoteListStore, type RemoteListStore } from "../shared/remoteListStore";
 
 export type IntegrationAudience = "admin" | "integration";
@@ -34,7 +35,7 @@ function storeFor(audience: IntegrationAudience) {
     path: `/api/integration-setup?audience=${audience}`,
     rows: (data) => data.integrations as unknown[],
     clean: (rows) => rows.filter(isCard),
-    failure: "The list could not load.",
+    failure: t("The list could not load."),
   });
 }
 

@@ -13,6 +13,7 @@
 import { useEffect, useState } from "react";
 import { installConnectionTokenBridge, nativeTerminal, type CollectOutcome } from "../../native/clarityTerminal";
 import type { PosTransaction } from "./types";
+import { t } from "../../lib/i18n";
 
 export type PosTender = {
   kind: string;
@@ -56,7 +57,7 @@ export function stateAfterCollect(outcome: CollectOutcome): TapState {
     if (outcome.outcome === "cancelled") return { kind: "cancelled" };
     // Nothing reached Stripe as a charge: the card was not read, or the
     // intent could not be loaded. Safe to say so and offer the tap again.
-    return { kind: "failed", message: outcome.message || "The card could not be read. Try again." };
+    return { kind: "failed", message: outcome.message || t("The card could not be read. Try again.") };
   }
   // Confirmed or not, a confirm was attempted. Only the server can say.
   return { kind: "processing" };
@@ -85,13 +86,13 @@ export function stateFromServer(answer: TerminalServerState, openCount: number):
         issuedPasses: answer.issuedPasses || [],
       };
     case "declined":
-      return { kind: "declined", message: answer.message || "The card was declined." };
+      return { kind: "declined", message: answer.message || t("The card was declined.") };
     case "cancelled":
     case "none":
       return { kind: "cancelled" };
     case "open":
       return openCount >= OPEN_ANSWERS_BEFORE_FAILED
-        ? { kind: "failed", message: "The payment didn't go through. Nothing was charged." }
+        ? { kind: "failed", message: t("The payment didn't go through. Nothing was charged.") }
         : { kind: "processing" };
     default:
       return { kind: "processing" };
@@ -100,12 +101,12 @@ export function stateFromServer(answer: TerminalServerState, openCount: number):
 
 /** A tender line as the receipt says it: "Clarity Credit", "Visa •••• 4242". */
 export function tenderLabel(tender: PosTender) {
-  if (tender.kind === "gift_value") return "Gift voucher";
+  if (tender.kind === "gift_value") return t("Gift voucher");
   if (tender.kind === "clarity_credit") return "Clarity Credit";
   if (tender.kind === "card") {
     const brand = tender.cardBrand
       ? tender.cardBrand.charAt(0).toUpperCase() + tender.cardBrand.slice(1)
-      : "Card";
+      : t("Card");
     return tender.cardLast4 ? `${brand} •••• ${tender.cardLast4}` : brand;
   }
   return tender.kind;
@@ -121,7 +122,7 @@ async function terminalJson<T>(path: string, init: RequestInit = {}): Promise<T>
     headers: { "Content-Type": "application/json", ...(init.headers || {}) },
   });
   const data = (await response.json().catch(() => null)) as (T & { message?: string }) | null;
-  if (!response.ok) throw new Error(data?.message || "Tap to Pay could not reach Clarity.");
+  if (!response.ok) throw new Error(data?.message || t("Tap to Pay could not reach Clarity."));
   return data as T;
 }
 
@@ -239,7 +240,7 @@ export function useTapToPay(): Availability {
 
 const CHANNEL_LABELS: Record<string, string> = {
   terminal_tap_to_pay: "Tap to Pay",
-  terminal_reader: "Card reader",
+  terminal_reader: t("Card reader"),
   stripe_checkout: "QR",
 };
 

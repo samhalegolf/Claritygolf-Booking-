@@ -11,6 +11,7 @@
 import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { ArrowLeft, Camera, Phone, Trash2 } from "lucide-react";
 import { ClarityCalendar, ClarityEmail, ClarityLocations, ClaritySessions, ClaritySettings } from "../shared/ClarityIcons";
+import { t } from "../../lib/i18n";
 
 /** The coach fields this screen reads and writes. App's CoachProfile satisfies it. */
 export type CoachProfileRecord = {
@@ -173,7 +174,7 @@ export function CoachProfilePanel<T extends CoachProfileRecord>({
     event.target.value = "";
     if (!file) return;
     if (!file.type.startsWith("image/")) {
-      setPhotoError("Choose an image file.");
+      setPhotoError(t("Choose an image file."));
       return;
     }
     try {
@@ -181,7 +182,7 @@ export function CoachProfilePanel<T extends CoachProfileRecord>({
       setPhotoError("");
       update("photoUrl", photoUrl as T["photoUrl"]);
     } catch {
-      setPhotoError("Could not read that photo. Try a JPG or PNG.");
+      setPhotoError(t("Could not read that photo. Try a JPG or PNG."));
     }
   }
 
@@ -214,9 +215,7 @@ export function CoachProfilePanel<T extends CoachProfileRecord>({
     <div className="coach-profile">
       {onBack && (
         <button className="text-button cp-back" onClick={onBack} type="button">
-          <ArrowLeft size={16} />
-          All {staffPlural.toLowerCase()}
-        </button>
+          <ArrowLeft size={16} />{t("All {staffPlural}", { staffPlural: staffPlural.toLowerCase() })}</button>
       )}
 
       <article className="cp-card cp-identity">
@@ -227,14 +226,14 @@ export function CoachProfilePanel<T extends CoachProfileRecord>({
               <input ref={fileInputRef} accept="image/*" hidden onChange={choosePhoto} type="file" />
               <button className="outline-button" onClick={() => fileInputRef.current?.click()} type="button">
                 <Camera size={15} />
-                {shown.photoUrl ? "Change" : "Add photo"}
+                {shown.photoUrl ? t("Change") : t("Add photo")}
               </button>
               {shown.photoUrl && (
                 <button
                   className="icon-button"
                   onClick={() => update("photoUrl", "" as T["photoUrl"])}
-                  title="Remove photo"
-                  aria-label="Remove photo"
+                  title={t("Remove photo")}
+                  aria-label={t("Remove photo")}
                   type="button"
                 >
                   <Trash2 size={15} />
@@ -248,34 +247,28 @@ export function CoachProfilePanel<T extends CoachProfileRecord>({
         {!editing ? (
           <div className="cp-identity-main">
             <div className="cp-name">
-              <strong>{name || `New ${staffWord}`}</strong>
+              <strong>{name || t("New {staffWord}", { staffWord })}</strong>
               <span className="cp-role">{roleLabel}</span>
-              {shown.archived || !shown.active ? <span className="cp-role is-muted">Archived</span> : null}
+              {shown.archived || !shown.active ? <span className="cp-role is-muted">{t("Archived")}</span> : null}
             </div>
             <p className={`cp-bio${shown.bio ? "" : " is-empty"}`}>
-              {shown.bio || (access === "self" ? "Add a short bio — it is what players read before they book you." : "No bio yet.")}
+              {shown.bio || (access === "self" ? t("Add a short bio — it is what players read before they book you.") : t("No bio yet."))}
             </p>
             <div className="cp-facts">
               <div>
                 <span>
-                  <ClarityEmail size={14} />
-                  Email
-                </span>
-                <strong>{shown.email || "Not set"}</strong>
+                  <ClarityEmail size={14} />{t("Email")}</span>
+                <strong>{shown.email || t("Not set")}</strong>
               </div>
               <div>
                 <span>
-                  <Phone size={14} />
-                  Phone
-                </span>
-                <strong>{shown.phone || "Not set"}</strong>
+                  <Phone size={14} />{t("Phone")}</span>
+                <strong>{shown.phone || t("Not set")}</strong>
               </div>
               <div>
                 <span>
-                  <ClarityLocations size={14} />
-                  Locations
-                </span>
-                <strong>{assignedLabels.length ? assignedLabels.join(", ") : "None assigned"}</strong>
+                  <ClarityLocations size={14} />{t("Locations")}</span>
+                <strong>{assignedLabels.length ? assignedLabels.join(", ") : t("None assigned")}</strong>
               </div>
             </div>
           </div>
@@ -284,12 +277,12 @@ export function CoachProfilePanel<T extends CoachProfileRecord>({
             <div className="cp-form-grid">
               {isOwner && (
                 <label className="settings-field">
-                  <span>Name</span>
+                  <span>{t("Name")}</span>
                   <input value={draft.name} maxLength={120} onChange={(event) => update("name", event.target.value)} />
                 </label>
               )}
               <label className="settings-field">
-                <span>Public name</span>
+                <span>{t("Public name")}</span>
                 <input
                   value={draft.displayName}
                   maxLength={120}
@@ -299,7 +292,7 @@ export function CoachProfilePanel<T extends CoachProfileRecord>({
               </label>
               {isOwner && (
                 <label className="settings-field">
-                  <span>Short name</span>
+                  <span>{t("Short name")}</span>
                   <input
                     value={draft.shortName ?? ""}
                     maxLength={60}
@@ -309,7 +302,7 @@ export function CoachProfilePanel<T extends CoachProfileRecord>({
               )}
               {isOwner && (
                 <label className="settings-field">
-                  <span>Sort order</span>
+                  <span>{t("Sort order")}</span>
                   <input
                     value={draft.sortOrder ?? 0}
                     inputMode="numeric"
@@ -320,7 +313,7 @@ export function CoachProfilePanel<T extends CoachProfileRecord>({
               )}
               {isOwner && (
                 <label className="settings-field">
-                  <span>Email</span>
+                  <span>{t("Email")}</span>
                   <input
                     value={draft.email}
                     type="email"
@@ -330,7 +323,7 @@ export function CoachProfilePanel<T extends CoachProfileRecord>({
                 </label>
               )}
               <label className="settings-field">
-                <span>Phone</span>
+                <span>{t("Phone")}</span>
                 <input
                   value={draft.phone ?? ""}
                   type="tel"
@@ -340,12 +333,12 @@ export function CoachProfilePanel<T extends CoachProfileRecord>({
               </label>
             </div>
             <label className="settings-field">
-              <span>Bio</span>
+              <span>{t("Bio")}</span>
               <textarea
                 value={draft.bio ?? ""}
                 maxLength={600}
                 rows={4}
-                placeholder="A few lines about how you coach."
+                placeholder={t("A few lines about how you coach.")}
                 onChange={(event) => update("bio", event.target.value as T["bio"])}
               />
             </label>
@@ -353,7 +346,7 @@ export function CoachProfilePanel<T extends CoachProfileRecord>({
             {isOwner && locations.length > 0 && (
               <div className="cp-form-grid">
                 <div className="settings-field">
-                  <span>Assigned locations</span>
+                  <span>{t("Assigned locations")}</span>
                   <div className="booking-screen-list">
                     {locations.map((location) => (
                       <label key={location.id}>
@@ -376,7 +369,7 @@ export function CoachProfilePanel<T extends CoachProfileRecord>({
                   </div>
                 </div>
                 <label className="settings-field">
-                  <span>Default location</span>
+                  <span>{t("Default location")}</span>
                   <select
                     value={draft.defaultLocationId || locations[0]?.id || ""}
                     onChange={(event) => update("defaultLocationId", event.target.value as T["defaultLocationId"])}
@@ -400,23 +393,21 @@ export function CoachProfilePanel<T extends CoachProfileRecord>({
                   }
                   type="checkbox"
                 />
-                <span>Active — bookable and shown on the calendar</span>
+                <span>{t("Active — bookable and shown on the calendar")}</span>
               </label>
             )}
 
             <div className="cp-form-actions">
-              <button className="outline-button" disabled={saving} onClick={cancel} type="button">
-                Cancel
-              </button>
+              <button className="outline-button" disabled={saving} onClick={cancel} type="button">{t("Cancel")}</button>
               <button className="primary-button" disabled={saving} onClick={() => void save()} type="button">
-                {saving ? "Saving" : isNew ? `Add ${staffWord}` : "Save"}
+                {saving ? t("Saving") : isNew ? t("Add {staffWord}", { staffWord }) : t("Save")}
               </button>
             </div>
           </div>
         )}
 
         {!editing && (
-          <button className="bh-gear cp-edit" onClick={() => setEditing(true)} title="Edit profile" type="button">
+          <button className="bh-gear cp-edit" onClick={() => setEditing(true)} title={t("Edit profile")} type="button">
             <ClaritySettings size={16} />
           </button>
         )}
@@ -426,16 +417,11 @@ export function CoachProfilePanel<T extends CoachProfileRecord>({
         <article className="cp-card cp-week">
           <header className="cp-card-head">
             <h3>
-              <ClarityCalendar size={14} />
-              Next 7 days
-            </h3>
-            <span className="cp-week-count">
-              {weekCount} lesson{weekCount === 1 ? "" : "s"}
+              <ClarityCalendar size={14} />{t("Next 7 days")}</h3>
+            <span className="cp-week-count">{t("{weekCount} lesson", { weekCount })}{weekCount === 1 ? "" : "s"}
             </span>
             {onOpenCalendar && (
-              <button className="text-button" onClick={onOpenCalendar} type="button">
-                Open calendar
-              </button>
+              <button className="text-button" onClick={onOpenCalendar} type="button">{t("Open calendar")}</button>
             )}
           </header>
           <div className="cp-week-grid">
@@ -460,7 +446,7 @@ export function CoachProfilePanel<T extends CoachProfileRecord>({
                     ))}
                   </ul>
                 ) : (
-                  <p className="cp-week-free">Free</p>
+                  <p className="cp-week-free">{t("Free")}</p>
                 )}
               </div>
             ))}
@@ -472,15 +458,13 @@ export function CoachProfilePanel<T extends CoachProfileRecord>({
         <article className="cp-card">
           <header className="cp-card-head">
             <h3>
-              <ClaritySettings size={14} />
-              {staffSingular} settings
-            </h3>
+              <ClaritySettings size={14} />{t("{staffSingular} settings", { staffSingular })}</h3>
           </header>
           <button className="cp-setting-row" onClick={onOpenAvailability} type="button">
             <ClaritySessions size={18} />
             <span>
-              <strong>Availability</strong>
-              <em>Weekly hours {access === "self" ? "you" : "this " + staffWord} can be booked</em>
+              <strong>{t("Availability")}</strong>
+              <em>{t("Weekly hours")}{" "}{access === "self" ? "you" : "this " + staffWord}{" "}{t("can be booked")}</em>
             </span>
             <ClaritySettings size={16} />
           </button>
