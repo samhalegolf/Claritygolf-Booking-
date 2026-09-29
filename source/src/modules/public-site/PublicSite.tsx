@@ -63,6 +63,7 @@ function HomePage() {
           </div>
         </div>
         <div className="public-summary-card" aria-label="Product summary">
+          <img className="public-summary-logo" src="/assets/clarity-golf-logo-with-name.png" alt="Clarity Golf" />
           <span>For coaches and their players</span>
           <strong>One place for the work around the lesson.</strong>
           <p>
