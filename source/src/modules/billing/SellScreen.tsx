@@ -58,6 +58,7 @@ import type { SellLine } from "./stockMath";
 import { postPosJson, renderQrSvg, usePosPaymentPoll } from "./posCheckoutPoll";
 import { TerminalPayment } from "./TerminalPayment";
 import { tenderLabel, useTapToPay, type PosTender, type TapState } from "./terminal";
+import { t, tn } from "../../lib/i18n";
 
 export type SellScreenProps = {
   currency: string;
@@ -91,10 +92,10 @@ export type SellScreenProps = {
 type TabKey = "all" | BillingCatalogKind;
 
 const TABS: Record<TabKey, { label: string; Icon: IconComponent }> = {
-  all: { label: "All", Icon: ClarityStore },
-  product: { label: "Products", Icon: ClarityProducts },
-  service: { label: "Services", Icon: ClarityServices },
-  package: { label: "Packages", Icon: ClarityPassesCredits },
+  all: { label: t("All"), Icon: ClarityStore },
+  product: { label: t("Products"), Icon: ClarityProducts },
+  service: { label: t("Services"), Icon: ClarityServices },
+  package: { label: t("Packages"), Icon: ClarityPassesCredits },
 };
 
 const TAB_ORDER: TabKey[] = ["all", "product", "service", "package"];
@@ -368,7 +369,7 @@ export function SellScreen({
   function addCustom() {
     const amount = Number(customAmount);
     if (!Number.isFinite(amount) || amount <= 0) {
-      onToast("Enter an amount for the custom item.");
+      onToast(t("Enter an amount for the custom item."));
       return;
     }
     setLines((current) => addCustomSellLine(current, customName, amount, defaultTaxRate));
@@ -396,7 +397,7 @@ export function SellScreen({
     setParked(next);
     writeParked(next);
     resetSale();
-    onToast("Sale parked.");
+    onToast(t("Sale parked."));
   }
 
   function resumeSale(entry: ParkedSale) {
@@ -427,7 +428,7 @@ export function SellScreen({
   function openPayment() {
     if (!lines.length) return;
     if (needsCustomerForPackage) {
-      onToast("Add the customer first - a package puts credits on their profile.");
+      onToast(t("Add the customer first - a package puts credits on their profile."));
       return;
     }
     setError("");
@@ -444,7 +445,7 @@ export function SellScreen({
     setError("");
     if (couponCovers) {
       if (!couponMethod) {
-        setError("This account has no Coupon payment method yet. Close this and press Pay again.");
+        setError(t("This account has no Coupon payment method yet. Close this and press Pay again."));
         return;
       }
       setMethodId(couponMethod.id);
@@ -515,7 +516,7 @@ export function SellScreen({
           });
 
       const created = sale || response?.transaction;
-      if (!created) throw new Error("The sale could not be recorded.");
+      if (!created) throw new Error(t("The sale could not be recorded."));
       if (response?.issuedCoupons?.length) setIssuedCoupons(response.issuedCoupons);
       // Selling a package puts credits under the customer's name without anyone
       // asking for it. Saying so is the difference between that feeling
@@ -536,7 +537,7 @@ export function SellScreen({
       }
       await showQr(created);
     } catch (paymentError) {
-      setError(paymentError instanceof Error ? paymentError.message : "The sale could not be recorded.");
+      setError(paymentError instanceof Error ? paymentError.message : t("The sale could not be recorded."));
     } finally {
       setBusy(false);
     }
@@ -549,7 +550,7 @@ export function SellScreen({
       `/api/billing/pos/transactions/${encodeURIComponent(pending.id)}/checkout`,
       {},
     )) as { url?: string };
-    if (!checkout.url) throw new Error("Stripe did not return a checkout link.");
+    if (!checkout.url) throw new Error(t("Stripe did not return a checkout link."));
     setCheckoutUrl(checkout.url);
     setPayStage("qr");
   }
@@ -561,7 +562,7 @@ export function SellScreen({
     try {
       await showQr(sale);
     } catch (qrError) {
-      setError(qrError instanceof Error ? qrError.message : "Could not show the QR.");
+      setError(qrError instanceof Error ? qrError.message : t("Could not show the QR."));
     } finally {
       setBusy(false);
     }
@@ -582,7 +583,7 @@ export function SellScreen({
       setPayStage("done");
       onSaleCompleted(paid);
     },
-    () => setError("Stopped checking for payment. Cancel the sale and start it again."),
+    () => setError(t("Stopped checking for payment. Cancel the sale and start it again.")),
   );
 
   // A Clarity Pay sale that never cleared has to be voided on the way out,
@@ -605,7 +606,7 @@ export function SellScreen({
       if (!response.ok) {
         // Refused because a card is paying for it right now, or just did.
         // Stay on the payment so the coach sees how it ends.
-        setError(data?.message || "Could not cancel the sale.");
+        setError(data?.message || t("Could not cancel the sale."));
         setBusy(false);
         return;
       }
@@ -614,7 +615,7 @@ export function SellScreen({
       // Voiding puts any voucher value back; show the restored balance.
       if (sale.couponId) couponBook.reload();
     } catch {
-      onToast("Could not cancel the sale - check the POS list.");
+      onToast(t("Could not cancel the sale - check the POS list."));
     }
     setBusy(false);
     setSale(null);
@@ -634,7 +635,7 @@ export function SellScreen({
             ref={searchRef}
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search or scan"
+            placeholder={t("Search or scan")}
             // A barcode scanner types the code and presses Enter. One exact SKU
             // match on Enter rings it straight up, which is the whole point of
             // having a scanner at the counter.
@@ -648,27 +649,26 @@ export function SellScreen({
             }}
           />
           {Boolean(search) && (
-            <button className="icon-button small" onClick={() => setSearch("")} type="button" aria-label="Clear search">
+            <button className="icon-button small" onClick={() => setSearch("")} type="button" aria-label={t("Clear search")}>
               <X size={14} />
             </button>
           )}
           <button className="outline-button" onClick={() => setCustomOpen((open) => !open)} type="button">
-            <Plus size={15} /> Custom
-          </button>
+            <Plus size={15} />{" "}{t("Custom")}</button>
         </div>
 
         {customOpen && (
           <div className="sell-custom-panel">
             <label className="settings-field">
-              <span>What is it</span>
+              <span>{t("What is it")}</span>
               <input
                 value={customName}
                 onChange={(event) => setCustomName(event.target.value)}
-                placeholder="e.g. Range balls"
+                placeholder={t("e.g. Range balls")}
               />
             </label>
             <label className="settings-field">
-              <span>Amount ({currency})</span>
+              <span>{t("Amount ({currency})", { currency })}</span>
               <input
                 type="number"
                 min="0"
@@ -677,13 +677,11 @@ export function SellScreen({
                 onChange={(event) => setCustomAmount(event.target.value)}
               />
             </label>
-            <button className="outline-button" onClick={addCustom} type="button">
-              Add to sale
-            </button>
+            <button className="outline-button" onClick={addCustom} type="button">{t("Add to sale")}</button>
           </div>
         )}
 
-        <div className="sell-tabs" role="tablist" aria-label="Catalog categories">
+        <div className="sell-tabs" role="tablist" aria-label={t("Catalog categories")}>
           {TAB_ORDER.filter(
             (key) => key === "all" || catalog.some((item) => item.kind === key && item.active !== false),
           ).map((key) => (
@@ -701,31 +699,26 @@ export function SellScreen({
           ))}
         </div>
 
-        {(catalogState === "loading" || catalogState === "idle") && <Loading what="the catalog" className="field-help" />}
+        {(catalogState === "loading" || catalogState === "idle") && <Loading what={t("the catalog")} className="field-help" />}
         {catalogState === "error" && (
-          <p className="field-help">
-            Could not load the catalog.{" "}
-            <button className="link-button" onClick={onReloadCatalog} type="button">
-              Retry
-            </button>
+          <p className="field-help">{t("Could not load the catalog.")}{" "}<button className="link-button" onClick={onReloadCatalog} type="button">{t("Retry")}</button>
           </p>
         )}
         {catalogState === "loaded" && offTabMatches > 0 && (
           <p className="field-help">
             {offTabMatches === 1
-              ? "1 match from another category is shown below."
-              : `${offTabMatches} matches from other categories are shown below.`}
+              ? t("1 match from another category is shown below.")
+              : t("{offTabMatches} matches from other categories are shown below.", { offTabMatches })}
           </p>
         )}
         {catalogState === "loaded" && !tiles.length && !lessonGroups.length && (
-          <p className="field-help">Nothing here. Try another category, or add items under Billing &gt; Products.</p>
+          <p className="field-help">{t("Nothing here. Try another category, or add items under Billing > Products.")}</p>
         )}
 
         {lessonGroups.length > 0 && (
-          <div className="sell-lessons" aria-label="Unpaid lessons">
+          <div className="sell-lessons" aria-label={t("Unpaid lessons")}>
             <h3>
-              <ClarityCalendar size={14} /> Lessons with no payment recorded
-            </h3>
+              <ClarityCalendar size={14} />{" "}{t("Lessons with no payment recorded")}</h3>
             {lessonGroups.map((group) => {
               const open = !group.collapsed || openLessonGroups.includes(group.key);
               const groupTotal = group.lessons.reduce((sum, lesson) => sum + lesson.price, 0);
@@ -741,17 +734,13 @@ export function SellScreen({
                       >
                         <ChevronDown size={15} className={open ? "open" : ""} />
                         <strong>{group.clientName}</strong>
-                        <em>
-                          {group.lessons.length} lessons - {formatMoney(groupTotal, currency)}
-                        </em>
+                        <em>{t("{length} lessons - {groupTotal}", { length: group.lessons.length, groupTotal: formatMoney(groupTotal, currency) })}</em>
                       </button>
                       <button
                         className="outline-button"
                         onClick={() => group.lessons.forEach((lesson) => addLesson(lesson))}
                         type="button"
-                      >
-                        Add all
-                      </button>
+                      >{t("Add all")}</button>
                     </div>
                   )}
                   {open &&
@@ -768,7 +757,7 @@ export function SellScreen({
                           </strong>
                           <em>
                             {tillLessonWhen(lesson.startsAt)}
-                            {tillLessonIsUpcoming(lesson.startsAt) ? " - upcoming" : ""}
+                            {tillLessonIsUpcoming(lesson.startsAt) ? t(" - upcoming") : ""}
                             {lesson.ownerLabel ? ` - booked in ${lesson.ownerLabel}` : ""}
                           </em>
                         </span>
@@ -791,8 +780,7 @@ export function SellScreen({
                 {item.trackStock && (
                   <span className={`sell-tile-stock${low ? " low" : ""}`}>
                     {low && <AlertTriangle size={11} />}
-                    {item.stockLevel ?? 0} left
-                  </span>
+                    {item.stockLevel ?? 0}{" "}{t("left")}</span>
                 )}
               </button>
             );
@@ -803,11 +791,10 @@ export function SellScreen({
       {/* --- Docket ---------------------------------------------------------- */}
       <div className="sell-docket">
         <div className="sell-docket-head">
-          <h2>Current sale</h2>
+          <h2>{t("Current sale")}</h2>
           {lines.length > 0 && (
             <button className="text-link-button" onClick={resetSale} type="button">
-              <Trash2 size={14} /> Discard
-            </button>
+              <Trash2 size={14} />{" "}{t("Discard")}</button>
           )}
         </div>
 
@@ -819,7 +806,7 @@ export function SellScreen({
                 className="sell-customer-open"
                 onClick={() => onOpenClientProfile(customerId)}
                 type="button"
-                title="Open their profile"
+                title={t("Open their profile")}
               >
                 <strong>{customerName}</strong>
                 {customerEmail && <em>{customerEmail}</em>}
@@ -838,7 +825,7 @@ export function SellScreen({
                 setCustomerEmail("");
               }}
               type="button"
-              aria-label="Remove customer"
+              aria-label={t("Remove customer")}
             >
               <X size={13} />
             </button>
@@ -849,7 +836,7 @@ export function SellScreen({
             <input
               value={customerSearch}
               onChange={(event) => setCustomerSearch(event.target.value)}
-              placeholder="Search customers"
+              placeholder={t("Search customers")}
             />
             {Boolean(customerSearch.trim()) && (
               <div className="sell-customer-results">
@@ -864,7 +851,7 @@ export function SellScreen({
                     <em>{client.email || "no email"}</em>
                   </button>
                 ))}
-                {!clientMatches.length && <p className="field-help">No client by that name.</p>}
+                {!clientMatches.length && <p className="field-help">{t("No client by that name.")}</p>}
                 <button
                   className="sell-customer-add"
                   disabled={customerSaving}
@@ -872,7 +859,7 @@ export function SellScreen({
                   type="button"
                 >
                   <Plus size={14} />
-                  {customerSaving ? "Adding..." : `Add "${customerSearch.trim()}" as a new client`}
+                  {customerSaving ? t("Adding...") : t("Add \"{customerSearch}\" as a new client", { customerSearch: customerSearch.trim() })}
                 </button>
               </div>
             )}
@@ -883,8 +870,8 @@ export function SellScreen({
           {!lines.length && (
             <div className="sell-empty">
               <ClarityProducts size={26} />
-              <p>Nothing on the docket yet.</p>
-              <span>Tap an item on the right, or scan a barcode into the search box.</span>
+              <p>{t("Nothing on the docket yet.")}</p>
+              <span>{t("Tap an item on the right, or scan a barcode into the search box.")}</span>
             </div>
           )}
           {lines.map((line) => (
@@ -907,7 +894,7 @@ export function SellScreen({
                   className="icon-button small"
                   onClick={() => setLines((current) => setSellQuantity(current, line.key, line.quantity - 1))}
                   type="button"
-                  aria-label={`One fewer ${line.name}`}
+                  aria-label={t("One fewer {name}", { name: line.name })}
                 >
                   <Minus size={13} />
                 </button>
@@ -916,7 +903,7 @@ export function SellScreen({
                   className="icon-button small"
                   onClick={() => setLines((current) => setSellQuantity(current, line.key, line.quantity + 1))}
                   type="button"
-                  aria-label={`One more ${line.name}`}
+                  aria-label={t("One more {name}", { name: line.name })}
                 >
                   <Plus size={13} />
                 </button>
@@ -929,14 +916,14 @@ export function SellScreen({
                 step="0.01"
                 value={line.unitPrice}
                 onChange={(event) => setLines((current) => setSellPrice(current, line.key, Number(event.target.value)))}
-                aria-label={`Price for ${line.name}`}
+                aria-label={t("Price for {name}", { name: line.name })}
               />
               <strong className="sell-line-total">{formatMoney(lineTotal(line), currency)}</strong>
               <button
                 className="icon-button small"
                 onClick={() => setLines((current) => setSellQuantity(current, line.key, 0))}
                 type="button"
-                aria-label={`Remove ${line.name}`}
+                aria-label={t("Remove {name}", { name: line.name })}
               >
                 <X size={13} />
               </button>
@@ -947,14 +934,12 @@ export function SellScreen({
         <div className="sell-totals">
           {taxIncluded > 0 && (
             <div className="sell-total-row muted">
-              <span>Includes {taxName || "tax"}</span>
+              <span>{t("Includes")}{" "}{taxName || "tax"}</span>
               <span>{formatMoney(taxIncluded, currency)}</span>
             </div>
           )}
           <div className={`sell-total-row${appliedCoupon > 0 ? "" : " grand"}`}>
-            <span>
-              Total
-              {itemCount > 0 && <em> {itemCount} item{itemCount === 1 ? "" : "s"}</em>}
+            <span>{t("Total")}{itemCount > 0 && <em>{" "}{tn(itemCount, "{count} item", "{count} items")}</em>}
             </span>
             <span>{formatMoney(total, currency)}</span>
           </div>
@@ -962,12 +947,11 @@ export function SellScreen({
             <>
               <div className="sell-total-row coupon">
                 <span>
-                  <ClarityPassesCredits size={13} /> Paid by coupon {coupon.code}
-                </span>
+                  <ClarityPassesCredits size={13} />{" "}{t("Paid by coupon {code}", { code: coupon.code })}</span>
                 <span>-{formatMoney(appliedCoupon, currency)}</span>
               </div>
               <div className="sell-total-row grand">
-                <span>To pay</span>
+                <span>{t("To pay")}</span>
                 <span>{formatMoney(dueNow, currency)}</span>
               </div>
             </>
@@ -991,7 +975,7 @@ export function SellScreen({
           }}
         />
         {needsCustomerForPackage && (
-          <p className="field-help">A package puts credits on a profile - add the customer before taking payment.</p>
+          <p className="field-help">{t("A package puts credits on a profile - add the customer before taking payment.")}</p>
         )}
 
         <div className="sell-actions">
@@ -1000,24 +984,19 @@ export function SellScreen({
             disabled={!lines.length}
             onClick={parkSale}
             type="button"
-            title="Put this sale aside and start another. It waits under Parked on this device."
-          >
-            Park sale
-          </button>
-          <button className="sell-pay-button" disabled={!lines.length} onClick={openPayment} type="button">
-            Pay {formatMoney(dueNow, currency)}
-          </button>
+            title={t("Put this sale aside and start another. It waits under Parked on this device.")}
+          >{t("Park sale")}</button>
+          <button className="sell-pay-button" disabled={!lines.length} onClick={openPayment} type="button">{t("Pay {dueNow}", { dueNow: formatMoney(dueNow, currency) })}</button>
         </div>
 
         {parked.length > 0 && (
           <div className="sell-parked">
-            <h3>Parked ({parked.length})</h3>
+            <h3>{t("Parked ({length})", { length: parked.length })}</h3>
             {parked.map((entry) => (
               <div key={entry.id} className="sell-parked-item">
                 <button onClick={() => resumeSale(entry)} type="button">
-                  <strong>{entry.label || "Parked sale"}</strong>
-                  <em>
-                    {entry.lines.length} line{entry.lines.length === 1 ? "" : "s"} -{" "}
+                  <strong>{entry.label || t("Parked sale")}</strong>
+                  <em>{tn(entry.lines.length, "{count} line", "{count} lines")} -{" "}
                     {formatMoney(sellTotal(entry.lines), currency)}
                   </em>
                 </button>
@@ -1025,7 +1004,7 @@ export function SellScreen({
                   className="icon-button small"
                   onClick={() => discardParked(entry)}
                   type="button"
-                  aria-label="Discard parked sale"
+                  aria-label={t("Discard parked sale")}
                 >
                   <X size={13} />
                 </button>
@@ -1040,13 +1019,13 @@ export function SellScreen({
         <div className="details-overlay sell-pay-overlay" role="presentation">
           <aside className="details-panel details-modal sell-pay-panel" role="dialog" aria-modal="true">
             <div className="panel-header">
-              <span>Payment</span>
+              <span>{t("Payment")}</span>
               {payStage !== "qr" && payStage !== "tap" && (
                 <button
                   className="icon-button small"
                   onClick={() => (payStage === "done" ? resetSale() : setPayStage("closed"))}
                   type="button"
-                  aria-label="Close payment"
+                  aria-label={t("Close payment")}
                 >
                   <X size={17} />
                 </button>
@@ -1061,33 +1040,27 @@ export function SellScreen({
                 {appliedCoupon > 0 && coupon && (
                   <div className="sell-coupon-paid">
                     <Check size={15} />
-                    <span>
-                      {formatMoney(appliedCoupon, currency)} paid by coupon {coupon.code}
-                    </span>
+                    <span>{t("{appliedCoupon} paid by coupon {code}", { appliedCoupon: formatMoney(appliedCoupon, currency), code: coupon.code })}</span>
                     <button
                       className="text-link-button"
                       disabled={busy}
                       onClick={() => setCouponApplied(false)}
                       type="button"
-                    >
-                      Undo
-                    </button>
+                    >{t("Undo")}</button>
                   </div>
                 )}
                 {coupon && !couponApplied && couponAmount > 0 && (
                   <button className="sell-coupon-pay" disabled={busy} onClick={payWithCoupon} type="button">
                     <ClarityPassesCredits size={16} />
                     <span>
-                      <strong>Pay with coupon</strong>
-                      <em>
-                        {coupon.code} - {formatMoney(coupon.remainingValue, coupon.currency)} available
-                        {couponCovers ? "" : ` (covers ${formatMoney(couponAmount, currency)})`}
+                      <strong>{t("Pay with coupon")}</strong>
+                      <em>{t("{code} - {remainingValue} available", { code: coupon.code, remainingValue: formatMoney(coupon.remainingValue, coupon.currency) })}{couponCovers ? "" : t(" (covers {couponAmount})", { couponAmount: formatMoney(couponAmount, currency) })}
                       </em>
                     </span>
                   </button>
                 )}
                 <p className="field-help">
-                  {appliedCoupon > 0 ? "How is the rest being paid?" : "How is it being paid?"}
+                  {appliedCoupon > 0 ? t("How is the rest being paid?") : t("How is it being paid?")}
                 </p>
                 <div className="pos-method-grid">
                   {payMethods.map((method) => (
@@ -1100,32 +1073,22 @@ export function SellScreen({
                     >
                       {method.kind === "clarity_pay" && <ClarityPayments size={15} />}
                       {method.name}
-                      {!method.settlesImmediately && <span className="pos-method-tag">owed</span>}
+                      {!method.settlesImmediately && <span className="pos-method-tag">{t("owed")}</span>}
                     </button>
                   ))}
                 </div>
-                {!payMethods.length && <p className="field-help">No payment methods - add one under Billing &gt; Settings.</p>}
+                {!payMethods.length && <p className="field-help">{t("No payment methods - add one under Billing > Settings.")}</p>}
               </>
             )}
 
             {payStage === "coupon" && coupon && (
               <>
                 <h2 className="sell-pay-total">{formatMoney(couponAmount, currency)}</h2>
-                <p>
-                  {coupon.code} has {formatMoney(coupon.remainingValue, coupon.currency)} on it, which covers{" "}
-                  {formatMoney(couponAmount, currency)} of this {formatMoney(total, currency)} sale.
-                </p>
-                <p className="field-help">
-                  Put it down as paid credit and choose how the remaining {formatMoney(total - couponAmount, currency)} is
-                  paid. The voucher is charged when the sale is completed, so backing out leaves it untouched.
-                </p>
+                <p>{t("{code} has {remainingValue} on it, which covers {couponAmount} of this {total} sale.", { code: coupon.code, remainingValue: formatMoney(coupon.remainingValue, coupon.currency), couponAmount: formatMoney(couponAmount, currency), total: formatMoney(total, currency) })}</p>
+                <p className="field-help">{t("Put it down as paid credit and choose how the remaining {value} is paid. The voucher is charged when the sale is completed, so backing out leaves it untouched.", { value: formatMoney(total - couponAmount, currency) })}</p>
                 <div className="panel-actions">
-                  <button className="outline-button" onClick={() => setPayStage("method")} type="button">
-                    Back
-                  </button>
-                  <button className="primary-button" onClick={confirmCouponCredit} type="button">
-                    Use {formatMoney(couponAmount, currency)} credit
-                  </button>
+                  <button className="outline-button" onClick={() => setPayStage("method")} type="button">{t("Back")}</button>
+                  <button className="primary-button" onClick={confirmCouponCredit} type="button">{t("Use {couponAmount} credit", { couponAmount: formatMoney(couponAmount, currency) })}</button>
                 </div>
               </>
             )}
@@ -1134,7 +1097,7 @@ export function SellScreen({
               <>
                 <h2 className="sell-pay-total">{formatMoney(dueNow, currency)}</h2>
                 <div className="settings-field">
-                  <label htmlFor="sell-tendered">Cash received</label>
+                  <label htmlFor="sell-tendered">{t("Cash received")}</label>
                   <input
                     id="sell-tendered"
                     className="sell-tendered"
@@ -1154,20 +1117,18 @@ export function SellScreen({
                   ))}
                 </div>
                 <div className={`sell-change${change < 0 ? " short" : ""}`}>
-                  <span>{change < 0 ? "Still to pay" : "Change"}</span>
+                  <span>{change < 0 ? t("Still to pay") : t("Change")}</span>
                   <strong>{formatMoney(Math.abs(change), currency)}</strong>
                 </div>
                 <div className="panel-actions">
-                  <button className="outline-button" onClick={() => setPayStage("method")} type="button">
-                    Back
-                  </button>
+                  <button className="outline-button" onClick={() => setPayStage("method")} type="button">{t("Back")}</button>
                   <button
                     className="primary-button"
                     disabled={busy || !selectedMethod || tendered === "" || change < 0}
                     onClick={() => selectedMethod && void takePayment(selectedMethod)}
                     type="button"
                   >
-                    {busy ? "Working..." : "Complete sale"}
+                    {busy ? t("Working...") : t("Complete sale")}
                   </button>
                 </div>
               </>
@@ -1192,24 +1153,16 @@ export function SellScreen({
                 <h2 className="sell-pay-total">
                   {formatMoney(remainingAfterCoupon(sale.amount, sale.couponAmount ?? 0), sale.currency)}
                 </h2>
-                <p className="field-help">
-                  Customer scans this and pays with Apple Pay, Google Pay or a card. This screen updates on its own the
-                  moment it clears.
-                </p>
+                <p className="field-help">{t("Customer scans this and pays with Apple Pay, Google Pay or a card. This screen updates on its own the moment it clears.")}</p>
                 {qrMarkup && (
-                  <div className="pos-qr" aria-label="Payment QR code" dangerouslySetInnerHTML={{ __html: qrMarkup }} />
+                  <div className="pos-qr" aria-label={t("Payment QR code")} dangerouslySetInnerHTML={{ __html: qrMarkup }} />
                 )}
                 <div className="panel-actions">
-                  <button className="outline-button" disabled={busy} onClick={() => void cancelPendingSale()} type="button">
-                    Cancel sale
-                  </button>
+                  <button className="outline-button" disabled={busy} onClick={() => void cancelPendingSale()} type="button">{t("Cancel sale")}</button>
                   <a className="outline-button" href={checkoutUrl} target="_blank" rel="noreferrer noopener">
-                    <ExternalLink size={15} /> Pay on this device
-                  </a>
+                    <ExternalLink size={15} />{" "}{t("Pay on this device")}</a>
                   {tapToPay.ready && (
-                    <button className="outline-button" disabled={busy} onClick={() => setPayStage("tap")} type="button">
-                      Tap card instead
-                    </button>
+                    <button className="outline-button" disabled={busy} onClick={() => setPayStage("tap")} type="button">{t("Tap card instead")}</button>
                   )}
                 </div>
               </>
@@ -1237,43 +1190,38 @@ export function SellScreen({
                   </ul>
                 ) : (
                   (sale.couponAmount ?? 0) > 0 && (
-                    <p className="field-help">
-                      {formatMoney(sale.couponAmount ?? 0, sale.currency)} of it paid by coupon
-                      {coupon ? ` ${coupon.code}` : ""}.
+                    <p className="field-help">{t("{value} of it paid by coupon", { value: formatMoney(sale.couponAmount ?? 0, sale.currency) })}{coupon ? ` ${coupon.code}` : ""}.
                     </p>
                   )
                 )}
                 {tendered !== "" && change > 0 && (
                   <div className="sell-change">
-                    <span>Change</span>
+                    <span>{t("Change")}</span>
                     <strong>{formatMoney(change, currency)}</strong>
                   </div>
                 )}
                 {issuedCoupons.length > 0 && (
                   <div className="sell-issued-coupons">
                     <strong>
-                      {issuedCoupons.length === 1 ? "Voucher code" : "Voucher codes"}
+                      {issuedCoupons.length === 1 ? t("Voucher code") : t("Voucher codes")}
                     </strong>
                     {issuedCoupons.map((issued) => (
                       <span key={issued.id}>
                         {issued.code} - {formatMoney(issued.originalValue, issued.currency)}
                       </span>
                     ))}
-                    <em>Write these on the card before it goes out the door.</em>
+                    <em>{t("Write these on the card before it goes out the door.")}</em>
                   </div>
                 )}
                 {issuedPasses.length > 0 && (
                   <p className="field-help">
                     {issuedPasses.length === 1
-                      ? `${issuedPasses[0]} is now on their profile.`
-                      : `${issuedPasses.join(", ")} are now on their profile.`}
+                      ? t("{issuedPasses} is now on their profile.", { issuedPasses: issuedPasses[0] })
+                      : t("{issuedPasses} are now on their profile.", { issuedPasses: issuedPasses.join(", ") })}
                   </p>
                 )}
                 {sale.status === "pending" && (
-                  <p className="field-help">
-                    Recorded as owed on {sale.paymentMethodName}. Mark it paid from Billing &gt; POS Transactions once it
-                    is settled.
-                  </p>
+                  <p className="field-help">{t("Recorded as owed on {paymentMethodName}. Mark it paid from Billing > POS Transactions once it is settled.", { paymentMethodName: sale.paymentMethodName })}</p>
                 )}
                 <ReceiptEmailPrompt
                   key={sale.id}
@@ -1288,9 +1236,7 @@ export function SellScreen({
                 />
                 <div className="panel-actions">
                   <button className="primary-button" onClick={resetSale} type="button">
-                    <ClarityStore size={16} />
-                    New sale
-                  </button>
+                    <ClarityStore size={16} />{t("New sale")}</button>
                 </div>
               </>
             )}

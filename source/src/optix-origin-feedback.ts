@@ -1,3 +1,5 @@
+import { t } from "./lib/i18n";
+
 type OptixOriginRecord = {
   id: string;
   title: string;
@@ -91,7 +93,7 @@ function decorate(node: HTMLElement, record: OptixOriginRecord) {
   }
   if (
     !node.querySelector(".optix-origin-card") &&
-    /booking records|resend confirmation|no email records/i.test(node.textContent || "")
+    [t("Resend confirmation"), t("No email records")].some((marker) => (node.textContent || "").includes(marker))
   ) {
     const card = document.createElement("section");
     card.className = "optix-origin-card";
@@ -99,7 +101,8 @@ function decorate(node: HTMLElement, record: OptixOriginRecord) {
     // value as Bay status, one line below it, under a label it has nothing to
     // do with. There is no email on this record (see optix-origin-status.mts,
     // which does not select one), so the line is gone rather than patched.
-    card.innerHTML = `<strong>External booking · Optix</strong><div>Bay status: ${esc(record.external_sync_state === "bay_booked" ? "Bay booked" : "Bay assignment required")}</div><details><summary>Source details</summary><div>Inbound lesson booking ID: ${esc(record.external_booking_id)}</div><div>Outbound bay booking is shown separately under Resource booking.</div></details>`;
+    const bayStatus = record.external_sync_state === "bay_booked" ? t("Bay booked") : t("Bay assignment required");
+    card.innerHTML = `<strong>${esc(t("External booking · Optix"))}</strong><div>${esc(t("Bay status: {status}", { status: bayStatus }))}</div><details><summary>${esc(t("Source details"))}</summary><div>${esc(t("Inbound lesson booking ID: {id}", { id: record.external_booking_id }))}</div><div>${esc(t("Outbound bay booking is shown separately under Resource booking."))}</div></details>`;
     node.appendChild(card);
   }
   // This is a standard editable Clarity appointment. In particular, keep the

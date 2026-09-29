@@ -12,6 +12,7 @@ import type {
   ClarityCloudImportTransfer,
   SavedVideoItem,
 } from "../video-analysis/utils/savedVideoLibrary";
+import { t } from "../../lib/i18n";
 
 /* The player's video library, and the way videos leave it.
  *
@@ -57,8 +58,8 @@ function formatSize(bytes?: number) {
  *  device that has never held it -- a new phone, or one whose local library was
  *  cleared. Only the first of the three is something they are waiting for. */
 function cloudVideoLabel(transfer: ClarityCloudImportTransfer) {
-  if (transfer.direction === "coach-return") return "Your coach sent this back";
-  return transfer.direction === "coach-device" ? "From your coach" : "You sent this";
+  if (transfer.direction === "coach-return") return t("Your coach sent this back");
+  return transfer.direction === "coach-device" ? t("From your coach") : t("You sent this");
 }
 
 /** A return the player has not opened yet. The dot the portal counts. */
@@ -74,22 +75,22 @@ function sendStatusLabel(item: SavedVideoItem, isGuest = false, connected = fals
     case "imported":
       // "Sent to your coach" over-promises for a guest: nobody has accepted it
       // yet, and it expires if nobody does.
-      if (isGuest && !connected) return "Sent — waiting for your coach";
-      return "Sent to your coach";
+      if (isGuest && !connected) return t("Sent — waiting for your coach");
+      return t("Sent to your coach");
     case "preparing":
     case "session-created":
     case "uploading":
     case "verifying":
-      return "Sending…";
+      return t("Sending…");
     case "paused":
-      return "Paused";
+      return t("Paused");
     case "cancelled":
-      return "Not sent";
+      return t("Not sent");
     case "failed":
     case "expired":
-      return "Could not send — try again";
+      return t("Could not send — try again");
     default:
-      return "On this device only";
+      return t("On this device only");
   }
 }
 
@@ -313,17 +314,15 @@ export function PlayerVideoShelf({
         <div className="player-portal-shelf-bar">
           {editing ? (
             <>
-              <span className="player-portal-shelf-hint">Drag a video to the bin to delete it.</span>
+              <span className="player-portal-shelf-hint">{t("Drag a video to the bin to delete it.")}</span>
               <button
                 className="player-portal-shelf-done"
                 type="button"
                 onClick={() => setEditing(false)}
-              >
-                Done
-              </button>
+              >{t("Done")}</button>
             </>
           ) : (
-            <span className="player-portal-shelf-hint">Hold a video to delete.</span>
+            <span className="player-portal-shelf-hint">{t("Hold a video to delete.")}</span>
           )}
         </div>
       )}
@@ -332,7 +331,7 @@ export function PlayerVideoShelf({
         <ul className={`player-portal-video-grid${editing ? " is-editing" : ""}`}>
           {cloudVideos.map((transfer) => {
             const downloading = downloadingIds.has(transfer.savedVideoId);
-            const title = transfer.savedVideo?.title || "Swing video";
+            const title = transfer.savedVideo?.title || t("Swing video");
             const size = formatSize(transfer.video?.sizeBytes || transfer.expectedSizeBytes);
             const unseen = isUnseenReturn(transfer);
             const coachNote = transfer.direction === "coach-return" ? transfer.coachMessage : "";
@@ -353,7 +352,7 @@ export function PlayerVideoShelf({
                   className="player-portal-video-media player-portal-video-media-cloud"
                   disabled={downloading}
                   onClick={() => onDownload(transfer.savedVideoId)}
-                  aria-label={`Download ${title} to this device`}
+                  aria-label={t("Download {title} to this device", { title })}
                 >
                   <span className="player-portal-video-cloud-glyph" aria-hidden="true" />
                   {transfer.video?.duration != null && (
@@ -366,7 +365,7 @@ export function PlayerVideoShelf({
                   <strong>{title}</strong>
                   <span>{formatDate(transfer.savedVideo?.createdAt || transfer.readyToImportAt)}</span>
                   <span>
-                    {[unseen ? "New" : "", cloudVideoLabel(transfer), size]
+                    {[unseen ? t("New") : "", cloudVideoLabel(transfer), size]
                       .filter(Boolean)
                       .join(" · ")}
                   </span>
@@ -380,7 +379,7 @@ export function PlayerVideoShelf({
                   disabled={downloading}
                   onClick={() => onDownload(transfer.savedVideoId)}
                 >
-                  {downloading ? "Downloading…" : "Download"}
+                  {downloading ? t("Downloading…") : t("Download")}
                 </button>
               </li>
             );
@@ -397,7 +396,7 @@ export function PlayerVideoShelf({
             // "on this device". The state line appears only when there is
             // state: in flight, sent, stalled or failed.
             const showState = sending || sent || failed || cloudStatus === "paused";
-            const title = item.title || "Swing video";
+            const title = item.title || t("Swing video");
             const isDragging = dragging?.id === id;
             return (
               <li
@@ -426,7 +425,7 @@ export function PlayerVideoShelf({
                   onPointerUp={(event) => endPress(event, title)}
                   onPointerCancel={handlePointerCancel}
                   onContextMenu={(event) => event.preventDefault()}
-                  aria-label={editing ? title : `Open ${title}`}
+                  aria-label={editing ? title : t("Open {title}", { title })}
                 >
                   {item.thumbnailDataUrl ? (
                     <img src={item.thumbnailDataUrl} alt="" loading="lazy" draggable={false} />
@@ -453,7 +452,7 @@ export function PlayerVideoShelf({
                     type="button"
                     className="player-portal-video-remove"
                     onClick={() => beginDelete(id, title)}
-                    aria-label={`Delete ${title}`}
+                    aria-label={t("Delete {title}", { title })}
                   >
                     <span aria-hidden="true">−</span>
                   </button>
@@ -468,7 +467,7 @@ export function PlayerVideoShelf({
                     className={`player-portal-video-state${sent ? " is-sent" : ""}${failed ? " is-error" : ""}`}
                   >
                     {sending
-                      ? `Sending… ${Math.round(progress)}%`
+                      ? t("Sending… {progress}%", { progress: Math.round(progress) })
                       : sendStatusLabel(item, isGuest, guestConnected)}
                   </span>
                 )}
@@ -479,7 +478,7 @@ export function PlayerVideoShelf({
                     disabled={sending}
                     onClick={() => onSend(id)}
                   >
-                    {sending ? "Sending…" : failed ? "Try again" : "Send to coach"}
+                    {sending ? t("Sending…") : failed ? t("Try again") : t("Send to coach")}
                   </button>
                 )}
               </li>
@@ -489,8 +488,8 @@ export function PlayerVideoShelf({
       ) : (
         <p className="player-portal-empty">
           {cloudLoading
-            ? "Looking for your videos…"
-            : "No videos on this device yet. Record a swing to get started."}
+            ? t("Looking for your videos…")
+            : t("No videos on this device yet. Record a swing to get started.")}
         </p>
       )}
 
@@ -501,16 +500,14 @@ export function PlayerVideoShelf({
           aria-hidden="true"
         >
           <IconBin />
-          <span>{overTrash ? "Release to delete" : "Drag here"}</span>
+          <span>{overTrash ? t("Release to delete") : t("Drag here")}</span>
         </div>
       )}
 
       {pending && (
         <div className="player-portal-undo" role="status">
-          <span>Deleted “{pending.title}”</span>
-          <button type="button" onClick={undoDelete}>
-            Undo
-          </button>
+          <span>{t("Deleted “{title}”", { title: pending.title })}</span>
+          <button type="button" onClick={undoDelete}>{t("Undo")}</button>
         </div>
       )}
     </>

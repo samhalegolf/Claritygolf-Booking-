@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ClarityNotifications } from "../shared/ClarityIcons";
 
 import { disablePush, enablePush, loadPushStatus, sendTestPush, type PushStatus } from "./browserPush";
+import { t, tn } from "../../lib/i18n";
 
 /**
  * Settings → Email → Browser notifications.
@@ -20,7 +21,7 @@ export default function BrowserNotificationsPanel() {
     try {
       setStatus(await loadPushStatus());
     } catch {
-      setError("Could not read notification settings.");
+      setError(t("Could not read notification settings."));
     }
   }, []);
 
@@ -35,7 +36,7 @@ export default function BrowserNotificationsPanel() {
     try {
       await action();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Something went wrong.");
+      setError(caught instanceof Error ? caught.message : t("Something went wrong."));
     } finally {
       setBusy(false);
     }
@@ -48,44 +49,37 @@ export default function BrowserNotificationsPanel() {
     <article className="data-card notification-card settings-section settings-notifications browser-push-card">
       <div className="data-card-header">
         <div>
-          <span>Notifications</span>
-          <h2>Browser notifications</h2>
+          <span>{t("Notifications")}</span>
+          <h2>{t("Browser notifications")}</h2>
         </div>
         <ClarityNotifications size={24} />
       </div>
 
-      <p className="field-help">
-        Pop-ups next to your browser when a client books, moves or cancels a lesson, and when a booking arrives from
-        a system you've connected. They work with the browser closed. Turn them on separately on each device you want alerted.
-      </p>
+      <p className="field-help">{t("Pop-ups next to your browser when a client books, moves or cancels a lesson, and when a booking arrives from a system you've connected. They work with the browser closed. Turn them on separately on each device you want alerted.")}</p>
 
       {status === null ? (
-        <p className="field-help">Checking this browser…</p>
+        <p className="field-help">{t("Checking this browser…")}</p>
       ) : !status.supported ? (
         <p className="field-help">
           {status.needsHomeScreenInstall
-            ? "On iPhone and iPad, add Clarity to the home screen first — Safari only allows notifications for an installed app."
-            : "This browser cannot show notifications."}
+            ? t("On iPhone and iPad, add Clarity to the home screen first — Safari only allows notifications for an installed app.")
+            : t("This browser cannot show notifications.")}
         </p>
       ) : !status.configured ? (
-        <p className="field-help">
-          Notifications are not set up on the server yet. Add the VAPID keys in Netlify and redeploy.
-        </p>
+        <p className="field-help">{t("Notifications are not set up on the server yet. Add the VAPID keys in Netlify and redeploy.")}</p>
       ) : (
         <>
           <div className="browser-push-state">
-            <strong>{enabled ? "On for this browser" : "Off for this browser"}</strong>
+            <strong>{enabled ? t("On for this browser") : t("Off for this browser")}</strong>
             <span className="field-help">
               {status.deviceCount === 0
-                ? "No devices registered."
-                : `${status.deviceCount} device${status.deviceCount === 1 ? "" : "s"} registered on this account.`}
+                ? t("No devices registered.")
+                : tn(status.deviceCount, "{count} device registered on this account.", "{count} devices registered on this account.")}
             </span>
           </div>
 
           {blocked && !enabled ? (
-            <p className="field-help">
-              Notifications are blocked for this site. Allow them in the browser's site settings, then try again.
-            </p>
+            <p className="field-help">{t("Notifications are blocked for this site. Allow them in the browser's site settings, then try again.")}</p>
           ) : null}
 
           <div className="browser-push-actions">
@@ -95,18 +89,14 @@ export default function BrowserNotificationsPanel() {
                 className="outline-button"
                 disabled={busy}
                 onClick={() => void run(async () => setStatus(await disablePush()))}
-              >
-                Turn off on this browser
-              </button>
+              >{t("Turn off on this browser")}</button>
             ) : (
               <button
                 type="button"
                 className="primary-button"
                 disabled={busy}
                 onClick={() => void run(async () => setStatus(await enablePush()))}
-              >
-                Turn on for this browser
-              </button>
+              >{t("Turn on for this browser")}</button>
             )}
             <button
               type="button"
@@ -117,14 +107,12 @@ export default function BrowserNotificationsPanel() {
                   const result = await sendTestPush();
                   setNote(
                     result.sent > 0
-                      ? `Test sent to ${result.sent} device${result.sent === 1 ? "" : "s"}.`
-                      : "No device accepted the test. Try turning notifications off and on again.",
+                      ? tn(result.sent, "Test sent to {count} device.", "Test sent to {count} devices.")
+                      : t("No device accepted the test. Try turning notifications off and on again."),
                   );
                 })
               }
-            >
-              Send a test
-            </button>
+            >{t("Send a test")}</button>
           </div>
         </>
       )}

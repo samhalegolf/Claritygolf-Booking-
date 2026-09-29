@@ -5,6 +5,7 @@
 // (billing-api.mts formatDateOnly), which keys invoices/expenses by date only.
 
 import type { BillingReportSummary } from "./types";
+import { t } from "../../lib/i18n";
 
 export type ReportRangePreset =
   | "this-month"
@@ -62,11 +63,11 @@ export function presetRange(preset: ReportRangePreset, ref: Date): ReportRange |
 }
 
 export const REPORT_PRESET_LABELS: Record<Exclude<ReportRangePreset, "custom">, string> = {
-  "this-month": "This month",
-  "last-month": "Last month",
-  "this-quarter": "This quarter",
-  "this-financial-year": "This financial year",
-  "last-financial-year": "Last financial year",
+  "this-month": t("This month"),
+  "last-month": t("Last month"),
+  "this-quarter": t("This quarter"),
+  "this-financial-year": t("This financial year"),
+  "last-financial-year": t("Last financial year"),
 };
 
 // The report is a set of toggleable sections: the same keys gate the live
@@ -81,12 +82,12 @@ export type ReportSectionKey =
   | "aging";
 
 export const REPORT_SECTIONS: ReadonlyArray<{ key: ReportSectionKey; label: string }> = [
-  { key: "pl", label: "Profit & Loss" },
-  { key: "gst", label: "Tax summary" },
-  { key: "chart", label: "Income vs expenses" },
-  { key: "expensesByCategory", label: "Expenses by category" },
-  { key: "topCustomers", label: "Top customers" },
-  { key: "aging", label: "Accounts receivable" },
+  { key: "pl", label: t("Profit & Loss") },
+  { key: "gst", label: t("Tax summary") },
+  { key: "chart", label: t("Income vs expenses") },
+  { key: "expensesByCategory", label: t("Expenses by category") },
+  { key: "topCustomers", label: t("Top customers") },
+  { key: "aging", label: t("Accounts receivable") },
 ];
 
 export const ALL_REPORT_SECTIONS: readonly ReportSectionKey[] = REPORT_SECTIONS.map((section) => section.key);
@@ -117,41 +118,41 @@ export function buildReportCsv(
   const excludedCategories = new Set(excludedCategoryIds);
   const lines: string[] = [];
 
-  lines.push(csvRow(["Financial report"]));
-  lines.push(csvRow(["Range", `${summary.rangeStart} to ${summary.rangeEnd}`]));
-  lines.push(csvRow(["Currency", summary.currency]));
-  lines.push(csvRow(["Generated", summary.generatedAt]));
+  lines.push(csvRow([t("Financial report")]));
+  lines.push(csvRow([t("Range"), t("{start} to {end}", { start: summary.rangeStart, end: summary.rangeEnd })]));
+  lines.push(csvRow([t("Currency"), summary.currency]));
+  lines.push(csvRow([t("Generated"), summary.generatedAt]));
   // Whole-report filter annotation so an exported CSV is never mistaken for the
   // full picture. Totals here already exclude these categories.
   if (summary.expenses.excludedCategoryNames && summary.expenses.excludedCategoryNames.length) {
-    lines.push(csvRow(["Filtered", `Expenses exclude: ${summary.expenses.excludedCategoryNames.join("; ")}`]));
+    lines.push(csvRow([t("Filtered"), t("Expenses exclude: {categories}", { categories: summary.expenses.excludedCategoryNames.join("; ") })]));
   }
   lines.push("");
 
   if (shown.has("pl")) {
-    lines.push(csvRow(["Profit & loss", "Amount"]));
-    lines.push(csvRow(["Income", money(summary.income.total)]));
-    lines.push(csvRow(["Expenses", money(summary.expenses.total)]));
-    lines.push(csvRow(["Net profit", money(summary.netProfit)]));
+    lines.push(csvRow([t("Profit & loss"), t("Amount")]));
+    lines.push(csvRow([t("Income"), money(summary.income.total)]));
+    lines.push(csvRow([t("Expenses"), money(summary.expenses.total)]));
+    lines.push(csvRow([t("Net profit"), money(summary.netProfit)]));
     lines.push("");
 
-    lines.push(csvRow(["Income by status", "Amount"]));
-    lines.push(csvRow(["Paid", money(summary.income.byStatus.paid)]));
-    lines.push(csvRow(["Sent", money(summary.income.byStatus.sent)]));
-    lines.push(csvRow(["Overdue", money(summary.income.byStatus.overdue)]));
+    lines.push(csvRow([t("Income by status"), t("Amount")]));
+    lines.push(csvRow([t("Paid"), money(summary.income.byStatus.paid)]));
+    lines.push(csvRow([t("Sent"), money(summary.income.byStatus.sent)]));
+    lines.push(csvRow([t("Overdue"), money(summary.income.byStatus.overdue)]));
     lines.push("");
   }
 
   if (shown.has("gst")) {
-    lines.push(csvRow([`${summary.taxName} summary (${summary.taxRate}%)`, "Amount"]));
-    lines.push(csvRow([`${summary.taxName} collected on income`, money(summary.gst.collected)]));
-    lines.push(csvRow([`${summary.taxName} on expenses (est.)`, money(summary.gst.onExpenses)]));
-    lines.push(csvRow([`Net ${summary.taxName}`, money(summary.gst.net)]));
+    lines.push(csvRow([t("{taxName} summary ({taxRate}%)", { taxName: summary.taxName, taxRate: summary.taxRate }), t("Amount")]));
+    lines.push(csvRow([t("{taxName} collected on income", { taxName: summary.taxName }), money(summary.gst.collected)]));
+    lines.push(csvRow([t("{taxName} on expenses (est.)", { taxName: summary.taxName }), money(summary.gst.onExpenses)]));
+    lines.push(csvRow([t("Net {taxName}", { taxName: summary.taxName }), money(summary.gst.net)]));
     lines.push("");
   }
 
   if (shown.has("expensesByCategory")) {
-    lines.push(csvRow(["Expenses by category", "Count", "Amount"]));
+    lines.push(csvRow([t("Expenses by category"), t("Count"), t("Amount")]));
     for (const category of summary.expenses.byCategory) {
       if (excludedCategories.has(category.categoryId)) continue;
       lines.push(csvRow([category.categoryName, category.count, money(category.total)]));
@@ -160,7 +161,7 @@ export function buildReportCsv(
   }
 
   if (shown.has("chart")) {
-    lines.push(csvRow(["Month", "Income", "Expenses", "Net"]));
+    lines.push(csvRow([t("Month"), t("Income"), t("Expenses"), t("Net")]));
     for (const month of summary.months) {
       lines.push(csvRow([month.label, money(month.income), money(month.expenses), money(month.net)]));
     }
@@ -168,7 +169,7 @@ export function buildReportCsv(
   }
 
   if (shown.has("topCustomers")) {
-    lines.push(csvRow(["Top customers", "Invoices", "Income"]));
+    lines.push(csvRow([t("Top customers"), t("Invoices"), t("Income")]));
     for (const customer of summary.topCustomers) {
       lines.push(csvRow([customer.customerName, customer.invoiceCount, money(customer.total)]));
     }
@@ -176,16 +177,16 @@ export function buildReportCsv(
   }
 
   if (shown.has("aging")) {
-    lines.push(csvRow([`Accounts receivable (as of ${summary.aging.asOf})`, "Amount"]));
-    lines.push(csvRow(["Current", money(summary.aging.current)]));
-    lines.push(csvRow(["1-30 days", money(summary.aging.d1_30)]));
-    lines.push(csvRow(["31-60 days", money(summary.aging.d31_60)]));
-    lines.push(csvRow(["61-90 days", money(summary.aging.d61_90)]));
-    lines.push(csvRow(["90+ days", money(summary.aging.d90plus)]));
-    lines.push(csvRow(["Total outstanding", money(summary.aging.total)]));
+    lines.push(csvRow([t("Accounts receivable (as of {date})", { date: summary.aging.asOf }), t("Amount")]));
+    lines.push(csvRow([t("Current"), money(summary.aging.current)]));
+    lines.push(csvRow([t("1-30 days"), money(summary.aging.d1_30)]));
+    lines.push(csvRow([t("31-60 days"), money(summary.aging.d31_60)]));
+    lines.push(csvRow([t("61-90 days"), money(summary.aging.d61_90)]));
+    lines.push(csvRow([t("90+ days"), money(summary.aging.d90plus)]));
+    lines.push(csvRow([t("Total outstanding"), money(summary.aging.total)]));
     lines.push("");
 
-    lines.push(csvRow(["Outstanding invoice", "Customer", "Due", "Days overdue", "Outstanding"]));
+    lines.push(csvRow([t("Outstanding invoice"), t("Customer"), t("Due"), t("Days overdue"), t("Outstanding")]));
     for (const invoice of summary.aging.invoices) {
       lines.push(csvRow([invoice.invoiceNumber, invoice.customerName, invoice.dueDate, invoice.daysOverdue, money(invoice.outstanding)]));
     }

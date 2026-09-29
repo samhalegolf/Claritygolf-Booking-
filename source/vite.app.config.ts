@@ -11,7 +11,7 @@ import { defineConfig } from "vite";
  * the code:
  *
  *   - `root: app/` picks up app/index.html, whose only script is
- *     src/main.app.tsx. Rollup follows that graph, so the coach workspace is
+ *     src/main.app.tsx (then src/boot.app.tsx). Rollup follows that graph, so the coach workspace is
  *     never the entry; it comes along only as the lazy chunk the portal's
  *     booking panel loads.
  *   - `base: "./"` because the webview serves from capacitor://localhost,

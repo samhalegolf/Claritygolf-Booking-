@@ -9,6 +9,7 @@ import { useState } from "react";
 import { Check } from "lucide-react";
 import { ClarityEmail } from "../shared/ClarityIcons";
 import { postPosJson } from "./posCheckoutPoll";
+import { t } from "../../lib/i18n";
 
 export type ReceiptEmailPromptProps = {
   transactionId: string;
@@ -40,7 +41,7 @@ export function ReceiptEmailPrompt({
   async function send() {
     const to = onFile || address.trim();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
-      setError("Enter a valid email address.");
+      setError(t("Enter a valid email address."));
       return;
     }
     setState("sending");
@@ -55,7 +56,7 @@ export function ReceiptEmailPrompt({
       if (result.savedToClient && canSave) onClientEmailSaved?.(clientId, result.recipient || to);
       setState("sent");
     } catch (sendError) {
-      setError(sendError instanceof Error ? sendError.message : "The receipt could not be sent.");
+      setError(sendError instanceof Error ? sendError.message : t("The receipt could not be sent."));
       setState("ask");
     }
   }
@@ -66,9 +67,7 @@ export function ReceiptEmailPrompt({
     return (
       <div className="receipt-email sent" role="status">
         <Check size={15} />
-        <span>
-          Receipt sent to {sentTo}.
-          {saved ? ` Saved to ${clientName ? `${clientName}'s` : "their"} profile.` : ""}
+        <span>{t("Receipt sent to {sentTo}.", { sentTo })}{saved ? (clientName ? t(" Saved to {clientName}'s profile.", { clientName }) : t(" Saved to their profile.")) : ""}
         </span>
       </div>
     );
@@ -78,7 +77,7 @@ export function ReceiptEmailPrompt({
     <div className="receipt-email">
       <p className="receipt-email-question">
         <ClarityEmail size={15} />
-        {onFile ? <>Email a receipt to {onFile}?</> : <>Email a receipt?</>}
+        {onFile ? <>{t("Email a receipt to {onFile}?", { onFile })}</> : <>{t("Email a receipt?")}</>}
       </p>
       {!onFile && (
         <input
@@ -93,25 +92,23 @@ export function ReceiptEmailPrompt({
           onKeyDown={(event) => {
             if (event.key === "Enter") void send();
           }}
-          placeholder="Customer's email"
-          aria-label="Customer's email"
+          placeholder={t("Customer's email")}
+          aria-label={t("Customer's email")}
         />
       )}
       {!onFile && canSave && (
-        <p className="field-help">Sending also saves it as {clientName || "the client"}'s email.</p>
+        <p className="field-help">{t("Sending also saves it as")}{" "}{clientName || "the client"}{t("'s email.")}</p>
       )}
       {error && <p className="pos-error">{error}</p>}
       <div className="receipt-email-actions">
-        <button className="outline-button" disabled={state === "sending"} onClick={() => setState("declined")} type="button">
-          No
-        </button>
+        <button className="outline-button" disabled={state === "sending"} onClick={() => setState("declined")} type="button">{t("No")}</button>
         <button
           className="primary-button"
           disabled={state === "sending" || (!onFile && !address.trim())}
           onClick={() => void send()}
           type="button"
         >
-          {state === "sending" ? "Sending..." : onFile ? "Yes, send" : "Send receipt"}
+          {state === "sending" ? t("Sending...") : onFile ? t("Yes, send") : t("Send receipt")}
         </button>
       </div>
     </div>

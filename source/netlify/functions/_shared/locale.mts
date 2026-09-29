@@ -62,12 +62,14 @@ export function currencyForAccountSettings(
 }
 
 /**
- * A BCP-47 tag for date and number formatting. We only ever render English text,
- * so the language stays "en" and the region does the work: en-NZ gives 8/07/2026,
- * en-US gives 7/8/2026. Intl falls back sensibly for any region it does not know.
+ * A BCP-47 tag for date and number formatting. The region decides the order:
+ * en-NZ gives 8/07/2026, en-US gives 7/8/2026. The language decides the words:
+ * de-NZ writes "Dienstag" in a New Zealand date order. The server only writes
+ * English, so it leaves the language at "en". Intl falls back sensibly for any
+ * pairing it does not know.
  */
-export function localeForCountry(country: unknown): string {
-  return `en-${cleanPhoneCountry(country)}`;
+export function localeForCountry(country: unknown, language = "en"): string {
+  return `${language}-${cleanPhoneCountry(country)}`;
 }
 
 // activeLocale() and activeCurrency() used to live here, reading the country

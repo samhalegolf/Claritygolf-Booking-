@@ -19,6 +19,7 @@ import {
   IconTrash,
   IconUpload,
 } from "./VideoIcons";
+import { t } from "../../../lib/i18n";
 
 // Everything that used to sit in the coach's always-on toolbar and isn't
 // drawing or transport -- comparison mode, linked playback, sync, screen
@@ -39,8 +40,8 @@ const ORIENTATION_CHOICES: ReadonlyArray<{
   label: string;
   ratio: string;
 }> = [
-  { value: "portrait", label: "Portrait", ratio: "9:16" },
-  { value: "landscape", label: "Landscape", ratio: "16:9" },
+  { value: "portrait", label: t("Portrait"), ratio: "9:16" },
+  { value: "landscape", label: t("Landscape"), ratio: "16:9" },
 ];
 
 export type VideoSettingsSheetProps = {
@@ -126,25 +127,21 @@ export function VideoSettingsSheet({
       <button
         type="button"
         className="va-sheet-backdrop"
-        aria-label="Close settings"
+        aria-label={t("Close settings")}
         onClick={onClose}
       />
-      <div className="va-sheet" role="dialog" aria-label="Video settings">
+      <div className="va-sheet" role="dialog" aria-label={t("Video settings")}>
         <span className="va-sheet-handle" aria-hidden="true" />
 
         <section className="va-sheet-group va-camera-group" aria-labelledby="va-camera-heading">
           <h2 className="va-sheet-group-title" id="va-camera-heading">
             <IconCamera />
-            <span>Camera</span>
+            <span>{t("Camera")}</span>
           </h2>
-          <p className="va-sheet-group-label" id="va-camera-choice-label">
-            Default recording camera
-          </p>
+          <p className="va-sheet-group-label" id="va-camera-choice-label">{t("Default recording camera")}</p>
 
           {!cameraSupported ? (
-            <p className="va-sheet-note">
-              This browser cannot list cameras, so recording is unavailable here.
-            </p>
+            <p className="va-sheet-note">{t("This browser cannot list cameras, so recording is unavailable here.")}</p>
           ) : (
             <div role="radiogroup" aria-labelledby="va-camera-choice-label">
               {savedCameraMissing ? (
@@ -153,7 +150,7 @@ export function VideoSettingsSheet({
                   <span className="va-camera-name">
                     {describePreferredCamera(preferredCamera)}
                   </span>
-                  <span className="va-camera-state">Not connected</span>
+                  <span className="va-camera-state">{t("Not connected")}</span>
                 </span>
               ) : null}
 
@@ -175,14 +172,14 @@ export function VideoSettingsSheet({
                       aria-hidden="true"
                     />
                     <span className="va-camera-name">
-                      {device.label || `Camera ${index + 1}`}
+                      {device.label || t("Camera {value}", { value: index + 1 })}
                     </span>
                   </button>
                 );
               })}
 
               {!cameraDevices.length ? (
-                <p className="va-sheet-note">No cameras found.</p>
+                <p className="va-sheet-note">{t("No cameras found.")}</p>
               ) : null}
 
               {!cameraLabelsAvailable ? (
@@ -192,7 +189,7 @@ export function VideoSettingsSheet({
                   onClick={onRequestCameraLabels}
                 >
                   <IconCamera />
-                  <span>Allow camera access to name your cameras</span>
+                  <span>{t("Allow camera access to name your cameras")}</span>
                 </button>
               ) : null}
 
@@ -210,11 +207,9 @@ export function VideoSettingsSheet({
         <section className="va-sheet-group" aria-labelledby="va-orientation-heading">
           <h2 className="va-sheet-group-title" id="va-orientation-heading">
             <IconOrientation />
-            <span>Orientation</span>
+            <span>{t("Orientation")}</span>
           </h2>
-          <p className="va-sheet-group-label" id="va-orientation-label">
-            Recording orientation
-          </p>
+          <p className="va-sheet-group-label" id="va-orientation-label">{t("Recording orientation")}</p>
           <div role="radiogroup" aria-labelledby="va-orientation-label">
             {ORIENTATION_CHOICES.map((choice) => {
               const selected = recordingOrientation === choice.value;
@@ -248,7 +243,7 @@ export function VideoSettingsSheet({
           onClick={() => onModeChange(mode === "compare" ? "single" : "compare")}
         >
           <IconModeCompare />
-          <span>Compare mode</span>
+          <span>{t("Compare mode")}</span>
           <span className={`va-sheet-toggle${mode === "compare" ? " is-on" : ""}`} aria-hidden="true" />
         </button>
         <button
@@ -258,7 +253,7 @@ export function VideoSettingsSheet({
           onClick={onLinkedPlaybackToggle}
         >
           <IconLinked />
-          <span>Linked playback</span>
+          <span>{t("Linked playback")}</span>
           <span className={`va-sheet-toggle${linkedPlayback ? " is-on" : ""}`} aria-hidden="true" />
         </button>
         <button
@@ -268,7 +263,7 @@ export function VideoSettingsSheet({
           disabled={!syncPlayheadsEnabled}
         >
           <IconSync />
-          <span>Sync playheads</span>
+          <span>{t("Sync playheads")}</span>
         </button>
 
         {/* What to do with the clip that is loaded on the active side --
@@ -288,11 +283,11 @@ export function VideoSettingsSheet({
               onClick={onRecordReplacement}
             >
               <IconRecord />
-              <span>Record {activeSideLabel.toLowerCase()} clip</span>
+              <span>{t("Record {activeSideLabel} clip", { activeSideLabel: activeSideLabel.toLowerCase() })}</span>
             </button>
             <button type="button" className="va-sheet-row va-sheet-row-btn" onClick={onReplaceClip}>
               <IconUpload />
-              <span>Replace {activeSideLabel.toLowerCase()} clip</span>
+              <span>{t("Replace {activeSideLabel} clip", { activeSideLabel: activeSideLabel.toLowerCase() })}</span>
             </button>
             <button
               type="button"
@@ -300,7 +295,7 @@ export function VideoSettingsSheet({
               onClick={onClearClip}
             >
               <IconTrash />
-              <span>Clear {activeSideLabel.toLowerCase()} clip</span>
+              <span>{t("Clear {activeSideLabel} clip", { activeSideLabel: activeSideLabel.toLowerCase() })}</span>
             </button>
           </>
         ) : null}
@@ -314,7 +309,7 @@ export function VideoSettingsSheet({
           disabled={screenRecordingBusy}
         >
           <IconRecord className={isRecordingScreen ? "va-sheet-icon-recording" : undefined} />
-          <span>{isRecordingScreen ? "Stop screen recording" : "Screen record"}</span>
+          <span>{isRecordingScreen ? t("Stop screen recording") : t("Screen record")}</span>
         </button>
         {screenRecordingMessage ? <p className="va-sheet-note">{screenRecordingMessage}</p> : null}
 
@@ -325,7 +320,7 @@ export function VideoSettingsSheet({
           disabled={saveBusy}
         >
           <IconLibrary />
-          <span>Save permanently to My Library</span>
+          <span>{t("Save permanently to My Library")}</span>
         </button>
 
         <button
@@ -335,7 +330,7 @@ export function VideoSettingsSheet({
           onClick={onToggleDiagnostics}
         >
           <IconDiagnostics />
-          <span>Diagnostics</span>
+          <span>{t("Diagnostics")}</span>
           <span className={`va-sheet-toggle${showDiagnostics ? " is-on" : ""}`} aria-hidden="true" />
         </button>
       </div>

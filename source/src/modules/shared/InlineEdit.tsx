@@ -18,6 +18,7 @@ import {
   savedLabel,
   type InlineEditState,
 } from "./inlineEditState";
+import { t } from "../../lib/i18n";
 
 /**
  * Rule 06: Save appears because there is something to save.
@@ -151,7 +152,7 @@ export function InlineEditRow<T extends string | number>({
     } catch (error) {
       dispatch({
         type: "rejected",
-        error: error instanceof Error ? error.message : "That could not be saved.",
+        error: error instanceof Error ? error.message : t("That could not be saved."),
       });
     }
   }, [state, onSave, registry, id]);
@@ -178,9 +179,9 @@ export function InlineEditRow<T extends string | number>({
           onClick={startEditing}
           disabled={disabled}
           type="button"
-          aria-label={`Edit ${label}`}
+          aria-label={t("Edit {label}", { label })}
         >
-          {shown || <em>Not set</em>}
+          {shown || <em>{t("Not set")}</em>}
         </button>
         {state.status === "saved" ? (
           <span className="inline-saved" aria-live="polite">{savedLabel(state.savedAt)}</span>
@@ -227,11 +228,9 @@ export function InlineEditRow<T extends string | number>({
           inside a box touches its edge". */}
       <div className="inline-edit-actions">
         <button className="primary-button small" disabled={saving} onClick={() => void commit()} type="button">
-          {saving ? "Saving…" : "Save"}
+          {saving ? t("Saving…") : t("Save")}
         </button>
-        <button className="text-button" disabled={saving} onClick={cancel} type="button">
-          Cancel
-        </button>
+        <button className="text-button" disabled={saving} onClick={cancel} type="button">{t("Cancel")}</button>
         {unit ? <span className="inline-edit-unit">{unit}</span> : null}
       </div>
       {state.error ? (
@@ -274,12 +273,12 @@ export function AutoSaved({
   onRetry?: () => void;
   busy?: boolean;
 }) {
-  if (busy) return <span className="inline-working">Saving…</span>;
+  if (busy) return <span className="inline-working">{t("Saving…")}</span>;
   if (error) {
     return (
       <span className="inline-error" role="alert">
         {error}
-        {onRetry ? <button className="text-button" onClick={onRetry} type="button">Retry</button> : null}
+        {onRetry ? <button className="text-button" onClick={onRetry} type="button">{t("Retry")}</button> : null}
       </span>
     );
   }

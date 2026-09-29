@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 
 import IntegrationPanel from "./IntegrationPanel";
 import { integrationsStore, type IntegrationCard as Card } from "./integrationsStore";
+import { t } from "../../lib/i18n";
 
 /**
  * The connection list — used twice, for two different audiences.
@@ -26,14 +27,14 @@ import { integrationsStore, type IntegrationCard as Card } from "./integrationsS
 const KIND_ORDER: Record<string, number> = { oauth2: 0, "api-key-pair": 1, "api-token": 2, "webhook-in": 3, "service-link": 4 };
 
 const CATEGORY_LABEL: Record<string, string> = {
-  calendar: "Calendar",
-  "resource-booking": "Resource booking",
-  accounting: "Accounting",
-  payments: "Payments",
-  email: "Email",
-  storage: "Storage",
-  billing: "Billing",
-  "clarity-apps": "Clarity apps",
+  calendar: t("Calendar"),
+  "resource-booking": t("Resource booking"),
+  accounting: t("Accounting"),
+  payments: t("Payments"),
+  email: t("Email"),
+  storage: t("Storage"),
+  billing: t("Billing"),
+  "clarity-apps": t("Clarity apps"),
 };
 
 /** The order categories read in, rather than alphabetical by accident. */
@@ -44,28 +45,28 @@ const CATEGORY_ORDER = [
 
 const COPY = {
   integration: {
-    eyebrow: "Connections",
-    title: "Integrations",
-    lead: "Your own accounts, connected to Clarity.",
-    empty: "Nothing connected yet.",
-    add: "+ New integration",
+    eyebrow: t("Connections"),
+    title: t("Integrations"),
+    lead: t("Your own accounts, connected to Clarity."),
+    empty: t("Nothing connected yet."),
+    add: t("+ New integration"),
   },
   admin: {
-    eyebrow: "Platform",
-    title: "Admin",
-    lead: "The services Clarity itself runs on. Not things a coach picks.",
-    empty: "Nothing configured.",
-    add: "+ Show unconfigured",
+    eyebrow: t("Platform"),
+    title: t("Admin"),
+    lead: t("The services Clarity itself runs on. Not things a coach picks."),
+    empty: t("Nothing configured."),
+    add: t("+ Show unconfigured"),
   },
 };
 
 function statusOf(card: Card) {
   // A recorded error outranks "configured". An integration that is connected
   // and failing is the one worth knowing about, and it used to read as fine.
-  if (card.connectionError) return { tone: "bad", label: "Needs attention" };
-  if (!card.configured) return { tone: "unset", label: "Not set up" };
-  if (card.needsAuthorisation) return { tone: "ok", label: card.connectedAs ? `Connected · ${card.connectedAs}` : "Connected" };
-  return { tone: "ok", label: "Ready" };
+  if (card.connectionError) return { tone: "bad", label: t("Needs attention") };
+  if (!card.configured) return { tone: "unset", label: t("Not set up") };
+  if (card.needsAuthorisation) return { tone: "ok", label: card.connectedAs ? t("Connected · {connectedAs}", { connectedAs: card.connectedAs }) : t("Connected") };
+  return { tone: "ok", label: t("Ready") };
 }
 
 export default function IntegrationsPanel({
@@ -142,7 +143,7 @@ export default function IntegrationsPanel({
       </header>
 
       <div className="integration-body">
-        {error ? <div className="integration-error"><strong>The list is unavailable</strong>{error}</div> : null}
+        {error ? <div className="integration-error"><strong>{t("The list is unavailable")}</strong>{error}</div> : null}
         {loading && !cards.length && !error ? <Loading /> : null}
 
         {byCategory(configured).map((group) => (
@@ -160,7 +161,7 @@ export default function IntegrationsPanel({
           <div className="integration-cards">
             <button className="integration-card is-add" onClick={() => setAdding((current) => !current)} type="button">
               <strong>{copy.add}</strong>
-              <em>{available.length} available</em>
+              <em>{t("{length} available", { length: available.length })}</em>
             </button>
           </div>
         ) : null}
@@ -168,12 +169,8 @@ export default function IntegrationsPanel({
         {adding && available.length ? (
           <>
             <div className="integration-note">
-              <strong>What Clarity can already talk to</strong>
-              <span>
-                Only these. Reading another system's data means knowing what its fields are called, which is code
-                rather than configuration — so this is the honest list, not a form for adding anything. Each one
-                below is live in the product today and configured by environment variable.
-              </span>
+              <strong>{t("What Clarity can already talk to")}</strong>
+              <span>{t("Only these. Reading another system's data means knowing what its fields are called, which is code rather than configuration — so this is the honest list, not a form for adding anything. Each one below is live in the product today and configured by environment variable.")}</span>
             </div>
             {byCategory(available).map((group) => (
               <section className="integration-group" key={group.category}>
@@ -182,7 +179,7 @@ export default function IntegrationsPanel({
                   {group.items.map((card) =>
                     cardButton(card, {
                       tone: "unset",
-                      label: `${card.missing.length} ${card.missing.length === 1 ? "field" : "fields"} to set`,
+                      label: card.missing.length === 1 ? t("1 field to set") : t("{count} fields to set", { count: card.missing.length }),
                     }),
                   )}
                 </div>
@@ -192,9 +189,7 @@ export default function IntegrationsPanel({
         ) : null}
 
         {cards.length ? (
-          <p className="integration-cards-note">
-            {configured.length} of {cards.length} set up.
-            {available.length ? " The rest work the same way — they just have nothing filled in yet." : ""}
+          <p className="integration-cards-note">{t("{length} of {length2} set up.", { length: configured.length, length2: cards.length })}{available.length ? t(" The rest work the same way — they just have nothing filled in yet.") : ""}
           </p>
         ) : null}
       </div>

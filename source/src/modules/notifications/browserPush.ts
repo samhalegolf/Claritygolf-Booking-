@@ -1,3 +1,4 @@
+import { t } from "../../lib/i18n";
 /**
  * Browser (web push) notifications for the coach.
  *
@@ -73,7 +74,7 @@ async function currentSubscription() {
 async function readServerStatus(endpoint: string) {
   const query = endpoint ? `?endpoint=${encodeURIComponent(endpoint)}` : "";
   const response = await fetch(`${API}${query}`, { credentials: "same-origin", cache: "no-store" });
-  if (!response.ok) throw new Error("Could not read notification settings.");
+  if (!response.ok) throw new Error(t("Could not read notification settings."));
   return (await response.json()) as { configured: boolean; publicKey: string; subscribed: boolean; deviceCount: number };
 }
 
@@ -105,20 +106,20 @@ export async function loadPushStatus(): Promise<PushStatus> {
 }
 
 export async function enablePush(): Promise<PushStatus> {
-  if (!pushSupported()) throw new Error("This browser cannot show notifications.");
+  if (!pushSupported()) throw new Error(t("This browser cannot show notifications."));
 
   const permission = await Notification.requestPermission();
   if (permission !== "granted") {
     throw new Error(
       permission === "denied"
-        ? "Notifications are blocked for this site. Allow them in the browser's site settings, then try again."
-        : "Notification permission was not granted.",
+        ? t("Notifications are blocked for this site. Allow them in the browser's site settings, then try again.")
+        : t("Notification permission was not granted."),
     );
   }
 
   const server = await readServerStatus("");
   if (!server.configured || !server.publicKey) {
-    throw new Error("Browser notifications are not set up on the server yet.");
+    throw new Error(t("Browser notifications are not set up on the server yet."));
   }
 
   const registration = await registerServiceWorker();
@@ -140,7 +141,7 @@ export async function enablePush(): Promise<PushStatus> {
   });
   if (!response.ok) {
     await subscription.unsubscribe();
-    throw new Error("Could not register this browser for notifications.");
+    throw new Error(t("Could not register this browser for notifications."));
   }
 
   return loadPushStatus();
@@ -170,7 +171,7 @@ export async function sendTestPush() {
   });
   const payload = await response.json().catch(() => ({}) as any);
   if (!response.ok && response.status !== 207) {
-    throw new Error(payload?.message || "Could not send the test notification.");
+    throw new Error(payload?.message || t("Could not send the test notification."));
   }
   return payload as { ok: boolean; sent: number; failed: number; pruned: number };
 }

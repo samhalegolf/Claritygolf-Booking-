@@ -2,6 +2,7 @@ import { Loading } from "../shared/Loading";
 import { useCallback, useEffect, useState } from "react";
 
 import { videoShareToken } from "../shared/bookingHandoff";
+import { t, readerLocale } from "../../lib/i18n";
 
 // The coach's view of a video someone with no account sent them.
 //
@@ -40,7 +41,7 @@ function formatDate(value?: string) {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  return date.toLocaleDateString(readerLocale(), { year: "numeric", month: "short", day: "numeric" });
 }
 
 export default function VideoSharePage() {
@@ -110,7 +111,7 @@ export default function VideoSharePage() {
       // Give the browser a moment to start the save before revoking.
       setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
     } catch {
-      setDownloadError("The download stopped part way. Try again, or play it above.");
+      setDownloadError(t("The download stopped part way. Try again, or play it above."));
     } finally {
       setDownloading(false);
     }
@@ -118,7 +119,7 @@ export default function VideoSharePage() {
 
   if (state === "loading") {
     return (
-      <Loading size="screen" what="video" />
+      <Loading size="screen" what={t("video")} />
     );
   }
 
@@ -128,12 +129,8 @@ export default function VideoSharePage() {
     return (
       <main className="login-shell">
         <div className="login-card">
-          <h1>This link has expired</h1>
-          <p>
-            Videos sent by someone without an account are kept for a limited time. Ask them to
-            send it again, or add them as a player in Clarity Golf Booking to keep their videos
-            for good.
-          </p>
+          <h1>{t("This link has expired")}</h1>
+          <p>{t("Videos sent by someone without an account are kept for a limited time. Ask them to send it again, or add them as a player in Clarity Golf Booking to keep their videos for good.")}</p>
         </div>
       </main>
     );
@@ -145,14 +142,12 @@ export default function VideoSharePage() {
     <main className="login-shell">
       <div className="login-card">
         <div>
-          <p className="eyebrow">Video</p>
+          <p className="eyebrow">{t("Video")}</p>
           <h1>{share.video.title}</h1>
           {sender && (
-            <p>
-              Sent by {sender.name}
-              {sender.email ? ` (${sender.email})` : ""}.{" "}
+            <p>{t("Sent by {name}", { name: sender.name })}{sender.email ? ` (${sender.email})` : ""}.{" "}
               {/* Never let this page imply the identity was checked. It wasn't. */}
-              {!sender.verified && "They typed this themselves and do not have an account yet."}
+              {!sender.verified && t("They typed this themselves and do not have an account yet.")}
             </p>
           )}
         </div>
@@ -165,24 +160,21 @@ export default function VideoSharePage() {
           style={{ width: "100%", borderRadius: 9, background: "#000" }}
         />
 
-        {share.message && <p>Their note: {share.message}</p>}
+        {share.message && <p>{t("Their note: {message}", { message: share.message })}</p>}
 
         <p>
           {formatBytes(share.video.sizeBytes)}
           {formatDate(share.video.createdAt) ? ` · ${formatDate(share.video.createdAt)}` : ""}
-          {formatDate(share.expiresAt) ? ` · link expires ${formatDate(share.expiresAt)}` : ""}
+          {formatDate(share.expiresAt) ? t(" · link expires {expiresAt}", { expiresAt: formatDate(share.expiresAt) }) : ""}
         </p>
 
         {downloadError && <div className="auth-error">{downloadError}</div>}
 
         <button className="primary-button" type="button" onClick={() => void download()} disabled={downloading}>
-          {downloading ? `Downloading ${downloadPercent}%` : "Download video"}
+          {downloading ? t("Downloading {downloadPercent}%", { downloadPercent }) : t("Download video")}
         </button>
 
-        <p>
-          Add them as a player in Clarity Golf Booking and this video is kept for good, in their
-          profile.
-        </p>
+        <p>{t("Add them as a player in Clarity Golf Booking and this video is kept for good, in their profile.")}</p>
       </div>
     </main>
   );

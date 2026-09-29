@@ -14,6 +14,7 @@ import { ArrowRight, Check, GitMerge, Plus, Search, Upload } from "lucide-react"
 import { ClarityAddClient, ClarityClientsPlayers, ClarityIntegrations } from "../shared/ClarityIcons";
 
 import type { PeopleImportDiagnostic, Person } from "./clientsModel";
+import { t, tn } from "../../lib/i18n";
 
 /** What a row needs. The workspace's ClientSummary carries more; that is fine. */
 export type ClientRow = Person & { count: number };
@@ -78,27 +79,25 @@ export function ClientsPanel<T extends ClientRow>({
       <div className="client-toolbar">
         <div className="client-search">
           <Search size={18} />
-          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search clients" />
+          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t("Search clients")} />
         </div>
         <button
           className={`outline-button import-client-button${importOpen ? " active" : ""}`}
           onClick={onToggleImport}
-          aria-label={importOpen ? "Hide import clients" : "Import clients"}
+          aria-label={importOpen ? t("Hide import clients") : t("Import clients")}
           type="button"
         >
-          <Upload size={16} />
-          Import
-        </button>
+          <Upload size={16} />{t("Import")}</button>
         <button
           className={`icon-button merge-clients-button${mergeMode ? " active" : ""}`}
           onClick={onToggleMergeMode}
-          aria-label={mergeMode ? "Cancel merging clients" : "Merge duplicate clients"}
-          title={mergeMode ? "Cancel merging clients" : "Merge duplicate clients"}
+          aria-label={mergeMode ? t("Cancel merging clients") : t("Merge duplicate clients")}
+          title={mergeMode ? t("Cancel merging clients") : t("Merge duplicate clients")}
           type="button"
         >
           <GitMerge size={18} />
         </button>
-        <button className="icon-button add-client-button" onClick={onAddClient} aria-label="Add client" title="Add client" type="button">
+        <button className="icon-button add-client-button" onClick={onAddClient} aria-label={t("Add client")} title={t("Add client")} type="button">
           <Plus size={18} />
         </button>
       </div>
@@ -107,14 +106,12 @@ export function ClientsPanel<T extends ClientRow>({
         <div className="client-merge-bar">
           <span>
             {mergeSelection.length === 2
-              ? "2 clients selected."
+              ? t("2 clients selected.")
               : mergeSelection.length === 1
-                ? "Select 1 more client to merge."
-                : "Select 2 clients to merge."}
+                ? t("Select 1 more client to merge.")
+                : t("Select 2 clients to merge.")}
           </span>
-          <button className="primary-button" disabled={mergeSelection.length !== 2} onClick={onReviewMerge} type="button">
-            Review merge
-          </button>
+          <button className="primary-button" disabled={mergeSelection.length !== 2} onClick={onReviewMerge} type="button">{t("Review merge")}</button>
         </div>
       )}
 
@@ -122,24 +119,22 @@ export function ClientsPanel<T extends ClientRow>({
         <article className="data-card import-card">
           <div className="data-card-header">
             <div>
-              <span>Import</span>
-              <h2>Import clients</h2>
+              <span>{t("Import")}</span>
+              <h2>{t("Import clients")}</h2>
             </div>
             <Upload size={24} />
           </div>
           <textarea
             value={importText}
             onChange={(event) => onImportTextChange(event.target.value)}
-            placeholder="name,email,phone,notes,caddyProfileUrl"
+            placeholder={t("name,email,phone,notes,caddyProfileUrl")}
           />
           <div className="import-actions">
             <div className="import-action-tools">
               <label className="outline-button import-file-button">
-                <Upload size={16} />
-                CSV file
-                <input accept=".csv,text/csv,text/plain" onChange={onImportFile} type="file" />
+                <Upload size={16} />{t("CSV file")}<input accept=".csv,text/csv,text/plain" onChange={onImportFile} type="file" />
               </label>
-              <span>{importPreview} ready</span>
+              <span>{t("{importPreview} ready", { importPreview })}</span>
             </div>
             <button
               className="primary-button"
@@ -147,17 +142,15 @@ export function ClientsPanel<T extends ClientRow>({
               disabled={importState === "importing" || importPreview === 0}
               type="button"
             >
-              {importState === "importing" ? "Importing" : importState === "imported" ? "Imported" : "Import"}
+              {importState === "importing" ? t("Importing") : importState === "imported" ? t("Imported") : t("Import")}
             </button>
           </div>
           {importDiagnostic && (
             <div className={`import-diagnostics${importDiagnostic.ok ? "" : " error"}`} role={importDiagnostic.ok ? "status" : "alert"}>
               <strong>{importDiagnostic.message}</strong>
-              <span>Endpoint: {importDiagnostic.endpoint}</span>
-              <span>HTTP: {importDiagnostic.status}</span>
-              <span>
-                Imported {importDiagnostic.imported} · Updated {importDiagnostic.updated} · Skipped {importDiagnostic.skipped}
-                {importDiagnostic.failed ? ` · Failed ${importDiagnostic.failed}` : ""}
+              <span>{t("Endpoint: {endpoint}", { endpoint: importDiagnostic.endpoint })}</span>
+              <span>{t("HTTP: {status}", { status: importDiagnostic.status })}</span>
+              <span>{t("Imported {imported} · Updated {updated} · Skipped {skipped}", { imported: importDiagnostic.imported, updated: importDiagnostic.updated, skipped: importDiagnostic.skipped })}{importDiagnostic.failed ? t(" · Failed {failed}", { failed: importDiagnostic.failed }) : ""}
               </span>
               {importDiagnostic.errors.map((message) => (
                 <em key={message}>{message}</em>
@@ -167,7 +160,7 @@ export function ClientsPanel<T extends ClientRow>({
         </article>
       )}
 
-      <div className="client-list-tabs" role="tablist" aria-label="Client lists">
+      <div className="client-list-tabs" role="tablist" aria-label={t("Client lists")}>
         <button
           className={`outline-button${listTab === "main" ? " active" : ""}`}
           onClick={() => setListTab("main")}
@@ -175,9 +168,7 @@ export function ClientsPanel<T extends ClientRow>({
           aria-selected={listTab === "main"}
           type="button"
         >
-          <ClarityClientsPlayers size={16} />
-          Clients ({mainList.length})
-        </button>
+          <ClarityClientsPlayers size={16} />{t("Clients ({length})", { length: mainList.length })}</button>
         <button
           className={`outline-button${listTab === "external" ? " active" : ""}`}
           onClick={() => setListTab("external")}
@@ -185,9 +176,7 @@ export function ClientsPanel<T extends ClientRow>({
           aria-selected={listTab === "external"}
           type="button"
         >
-          <ClarityIntegrations size={16} />
-          External bookings ({externalList.length})
-        </button>
+          <ClarityIntegrations size={16} />{t("External bookings ({length})", { length: externalList.length })}</button>
       </div>
 
       <div className="client-table">
@@ -201,7 +190,7 @@ export function ClientsPanel<T extends ClientRow>({
                 key={client.id}
                 onClick={() => (mergeMode ? onToggleMergeSelection(client) : onOpenClient(client))}
                 disabled={mergeMode && !mergeEligible}
-                title={mergeMode && !mergeEligible ? "Save this client before merging — it isn't linked to a client record yet." : undefined}
+                title={mergeMode && !mergeEligible ? t("Save this client before merging — it isn't linked to a client record yet.") : undefined}
                 type="button"
               >
                 {mergeMode && (
@@ -211,36 +200,35 @@ export function ClientsPanel<T extends ClientRow>({
                 )}
                 <div className="client-main">
                   <strong>{client.name}</strong>
-                  <span>{client.email || "No email yet"}</span>
+                  <span>{client.email || t("No email yet")}</span>
                 </div>
-                <span className="client-phone">{client.phone || "No phone"}</span>
-                <span className="client-booking-count">
-                  {client.count} booking{client.count === 1 ? "" : "s"}
-                  {(client.caddyProfileId || client.caddyProfileUrl) && <em>Linked to Caddy</em>}
+                <span className="client-phone">{client.phone || t("No phone")}</span>
+                <span className="client-booking-count">{tn(client.count, "{count} booking", "{count} bookings")}
+                  {(client.caddyProfileId || client.caddyProfileUrl) && <em>{t("Linked to Caddy")}</em>}
                 </span>
                 <span className="client-row-arrow">{mergeMode ? null : <ArrowRight size={17} />}</span>
               </button>
             );
           })
         ) : loading && !term && listTab === "main" ? (
-          <Loading size="panel" what="clients" detail="Your client list is on its way." />
+          <Loading size="panel" what={t("clients")} detail={t("Your client list is on its way.")} />
         ) : listTab === "external" ? (
           <div className="empty-panel compact">
             <ClarityIntegrations size={28} />
-            <h2>No external booking clients</h2>
-            <p>People created by a booking from a connected system appear here until you merge or move them into your clients.</p>
+            <h2>{t("No external booking clients")}</h2>
+            <p>{t("People created by a booking from a connected system appear here until you merge or move them into your clients.")}</p>
           </div>
         ) : term ? (
           <div className="empty-panel compact">
             <ClarityClientsPlayers size={28} />
-            <h2>No clients found</h2>
-            <p>Try a different name, email, or phone number.</p>
+            <h2>{t("No clients found")}</h2>
+            <p>{t("Try a different name, email, or phone number.")}</p>
           </div>
         ) : (
           <div className="empty-panel compact">
             <ClarityAddClient size={28} />
-            <h2>No clients yet</h2>
-            <p>Add one with +, import a list, or take a booking.</p>
+            <h2>{t("No clients yet")}</h2>
+            <p>{t("Add one with +, import a list, or take a booking.")}</p>
           </div>
         )}
       </div>

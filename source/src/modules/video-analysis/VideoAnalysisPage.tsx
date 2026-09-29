@@ -12,6 +12,7 @@ import {
   saveSavedVideoToCloud,
   type SavedVideoLibraryStore,
 } from "./utils/savedVideoLibrary";
+import { t } from "../../lib/i18n";
 
 export interface VideoAnalysisPageProps {
   playerId?: string;
@@ -39,7 +40,7 @@ export function VideoAnalysisPage(props: VideoAnalysisPageProps) {
   const defaultSaveAndSend = React.useCallback(
     async (result: VideoWorkspaceSaveResult) => {
       if (!props.savedVideoLibrary) {
-        throw new Error("Clarity Cloud video storage is unavailable.");
+        throw new Error(t("Clarity Cloud video storage is unavailable."));
       }
 
       for (const item of result.savedItems) {

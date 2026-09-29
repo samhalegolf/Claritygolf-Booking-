@@ -13,6 +13,7 @@ import type {
   InvoiceLineTag,
   InvoiceSettings,
 } from "./types";
+import { t } from "../../lib/i18n";
 
 // Seed values for the first render, before the account has loaded. Currency and
 // tax are the fallback country's; cleanInvoiceSettings fills them from the
@@ -78,7 +79,7 @@ export function printableInvoiceCustomFields(fields: InvoiceCustomField[]): Invo
     const label = field.label.trim();
     const value = field.value.trim();
     if (!label && !value) continue;
-    printable.push({ ...field, label: label || "Custom field", value });
+    printable.push({ ...field, label: label || t("Custom field"), value });
   }
   return printable;
 }

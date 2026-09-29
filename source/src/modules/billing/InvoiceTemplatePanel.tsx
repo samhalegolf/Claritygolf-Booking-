@@ -17,6 +17,7 @@ import { useState } from "react";
 import { Check, ImageIcon, Pencil, RotateCcw, Smartphone, X } from "lucide-react";
 import { computeInvoiceTotals } from "./invoiceMath";
 import type { InvoiceLine, InvoiceSettings } from "./types";
+import { t, tn } from "../../lib/i18n";
 
 /** The fields this sheet owns. Everything else about invoicing stays a form field. */
 export type InvoiceTemplateField =
@@ -44,7 +45,7 @@ const EXAMPLE_LINES: InvoiceLine[] = [
   {
     id: "example-1",
     source: "booking_snapshot",
-    description: "45 min private lesson",
+    description: t("45 min private lesson"),
     quantity: 3,
     unitPrice: 120,
     taxRate: 0,
@@ -57,7 +58,7 @@ const EXAMPLE_LINES: InvoiceLine[] = [
   {
     id: "example-2",
     source: "catalog",
-    description: "Golf balls, dozen",
+    description: t("Golf balls, dozen"),
     quantity: 1,
     unitPrice: 89,
     taxRate: 0,
@@ -70,7 +71,7 @@ const EXAMPLE_LINES: InvoiceLine[] = [
   {
     id: "example-3",
     source: "package_sale",
-    description: "Six lesson block",
+    description: t("Six lesson block"),
     quantity: 1,
     unitPrice: 660,
     taxRate: 0,
@@ -84,8 +85,8 @@ const EXAMPLE_LINES: InvoiceLine[] = [
 
 const EXAMPLE_NOTES: Record<string, string> = {
   "example-1": "3 lessons · Aug 4, 11, 18",
-  "example-2": "From the catalog",
-  "example-3": "Package sale",
+  "example-2": t("From the catalog"),
+  "example-3": t("Package sale"),
 };
 
 export type InvoiceTemplatePanelProps = {
@@ -166,10 +167,10 @@ export function InvoiceTemplatePanel({
           ) : (
             <input value={draft} onChange={(event) => setDraft(event.target.value)} aria-label={options.label} autoFocus />
           )}
-          <button className="it-commit" onClick={commit} type="button" aria-label={`Save ${options.label}`}>
+          <button className="it-commit" onClick={commit} type="button" aria-label={t("Save {label}", { label: options.label })}>
             <Check size={14} />
           </button>
-          <button className="it-cancel" onClick={cancelEdit} type="button" aria-label={`Cancel ${options.label}`}>
+          <button className="it-cancel" onClick={cancelEdit} type="button" aria-label={t("Cancel {label}", { label: options.label })}>
             <X size={14} />
           </button>
         </span>
@@ -197,17 +198,15 @@ export function InvoiceTemplatePanel({
     <div className="invoice-template">
       <div className="it-toolbar">
         <span className="it-dashed-key">
-          <span className="it-dashed-swatch" />
-          Dashed is yours to write
-        </span>
+          <span className="it-dashed-swatch" />{t("Dashed is yours to write")}</span>
         <span className="it-tax-mode">
-          {taxInclusive ? `Prices include ${settings.taxName}` : `${settings.taxName} added on top`}
+          {taxInclusive ? t("Prices include {taxName}", { taxName: settings.taxName }) : `${settings.taxName} added on top`}
         </span>
         <button
           className={`it-width${narrow ? " is-active" : ""}`}
           onClick={() => setNarrow((current) => !current)}
           aria-pressed={narrow}
-          title="Preview at phone width"
+          title={t("Preview at phone width")}
           type="button"
         >
           <Smartphone size={16} />
@@ -215,20 +214,15 @@ export function InvoiceTemplatePanel({
         {/* Rule 10: clearing the whole template is text, not a filled button
             beside the sheet it would empty. */}
         <button className="text-button" onClick={resetAll} disabled={locked || !anySet} type="button">
-          <RotateCcw size={14} />
-          Clear every field
-        </button>
+          <RotateCcw size={14} />{t("Clear every field")}</button>
       </div>
 
-      <p className="settings-note">
-        Lines and totals below are an example, so you can see the template in use. The number, dates, bill-to block and
-        the lines come from the invoice itself.
-      </p>
+      <p className="settings-note">{t("Lines and totals below are an example, so you can see the template in use. The number, dates, bill-to block and the lines come from the invoice itself.")}</p>
 
       <div className="it-mat">
         <div className={`it-sheet${narrow ? " is-narrow" : ""}`}>
           <div className="it-head">
-            <span className={`it-logo${logoUrl ? "" : " is-empty"}`} title="Set in Settings › Business">
+            <span className={`it-logo${logoUrl ? "" : " is-empty"}`} title={t("Set in Settings › Business")}>
               {logoUrl ? <img src={logoUrl} alt={`${businessName} logo`} /> : <ImageIcon size={18} />}
             </span>
 
@@ -236,19 +230,19 @@ export function InvoiceTemplatePanel({
               {businessName.trim() ? (
                 <strong>{businessName}</strong>
               ) : (
-                <span className="it-from-business">Set your business name in Settings › Business</span>
+                <span className="it-from-business">{t("Set your business name in Settings › Business")}</span>
               )}
               {slot("businessAddress", {
                 className: "it-address",
                 multiline: true,
                 rows: 3,
-                label: "Business address",
-                empty: "Add your business address",
+                label: t("Business address"),
+                empty: t("Add your business address"),
               })}
               {slot("taxNumber", {
                 className: "it-taxnumber",
                 label: `${settings.taxName} number`,
-                empty: `Add your ${settings.taxName} number`,
+                empty: t("Add your {taxName} number", { taxName: settings.taxName }),
               })}
             </div>
 
@@ -256,39 +250,39 @@ export function InvoiceTemplatePanel({
               <strong>
                 {settings.prefix}-{String(settings.nextNumber).padStart(4, "0")}
               </strong>
-              <span>Issued 12 Aug 2026</span>
-              <span>Due 19 Aug 2026</span>
+              <span>{t("Issued 12 Aug 2026")}</span>
+              <span>{t("Due 19 Aug 2026")}</span>
               <span>
                 {settings.paymentTermsDays === 0
-                  ? "Due on receipt"
-                  : `Payment terms ${settings.paymentTermsDays} day${settings.paymentTermsDays === 1 ? "" : "s"}`}
+                  ? t("Due on receipt")
+                  : tn(settings.paymentTermsDays, "Payment terms {count} day", "Payment terms {count} days")}
               </span>
             </div>
           </div>
 
           <div className="it-headertext">
-            {slot("headerText", { label: "Header line", empty: "A line under your name, on every invoice" })}
+            {slot("headerText", { label: t("Header line"), empty: t("A line under your name, on every invoice") })}
           </div>
 
           <div className="it-parties">
             <div>
-              <span className="it-label">Bill to</span>
-              <strong>[client name]</strong>
-              <em>From the invoice</em>
+              <span className="it-label">{t("Bill to")}</span>
+              <strong>{t("[client name]")}</strong>
+              <em>{t("From the invoice")}</em>
             </div>
             <div>
-              <span className="it-label">Reference</span>
-              <strong>Lessons, Aug 2026</strong>
-              <em>From the invoice</em>
+              <span className="it-label">{t("Reference")}</span>
+              <strong>{t("Lessons, Aug 2026")}</strong>
+              <em>{t("From the invoice")}</em>
             </div>
           </div>
 
           <div className="it-lines">
             <div className="it-line it-line-head">
-              <span>Item</span>
-              <span>Qty</span>
-              <span>Unit</span>
-              <span>Amount</span>
+              <span>{t("Item")}</span>
+              <span>{t("Qty")}</span>
+              <span>{t("Unit")}</span>
+              <span>{t("Amount")}</span>
             </div>
             {EXAMPLE_LINES.map((line) => (
               <div className="it-line" key={line.id}>
@@ -305,61 +299,59 @@ export function InvoiceTemplatePanel({
 
           <div className="it-totals">
             <div className="it-total-row">
-              <span>Subtotal</span>
+              <span>{t("Subtotal")}</span>
               <span>{formatMoney(totals.lineSubtotal)}</span>
             </div>
             {totals.lineDiscountTotal > 0 && (
               <div className="it-total-row">
-                <span>Line discounts</span>
+                <span>{t("Line discounts")}</span>
                 <span>− {formatMoney(totals.lineDiscountTotal)}</span>
               </div>
             )}
             <div className="it-total-row">
-              <span>Total excl. {settings.taxName}</span>
+              <span>{t("Total excl. {taxName}", { taxName: settings.taxName })}</span>
               <span>{formatMoney(totals.total - totals.taxTotal)}</span>
             </div>
             <div className="it-total-row">
               <span>
-                {settings.taxName} {settings.taxRate}%{taxInclusive ? " (included)" : " (added)"}
+                {settings.taxName} {settings.taxRate}%{taxInclusive ? t(" (included)") : t(" (added)")}
               </span>
               <span>{formatMoney(totals.taxTotal)}</span>
             </div>
             <div className="it-total-row it-total-grand">
-              <span>Total {taxInclusive ? `incl. ${settings.taxName}` : "due"}</span>
+              <span>{t("Total")}{" "}{taxInclusive ? `incl. ${settings.taxName}` : "due"}</span>
               <span>{formatMoney(totals.total)}</span>
             </div>
           </div>
 
           <div className="it-block">
-            <span className="it-label">How to pay</span>
-            {slot("bankAccount", { label: "Bank account", empty: "Add your bank account" })}
+            <span className="it-label">{t("How to pay")}</span>
+            {slot("bankAccount", { label: t("Bank account"), empty: t("Add your bank account") })}
             {slot("paymentInstructions", {
               multiline: true,
               rows: 2,
-              label: "Payment instructions",
-              empty: "Add payment instructions",
+              label: t("Payment instructions"),
+              empty: t("Add payment instructions"),
             })}
           </div>
 
           <div className="it-block">
-            <span className="it-label">Note to the client</span>
+            <span className="it-label">{t("Note to the client")}</span>
             {slot("defaultCustomerNote", {
               multiline: true,
               rows: 2,
-              label: "Default note",
-              empty: "A note on every invoice — the one-off note is written per invoice",
+              label: t("Default note"),
+              empty: t("A note on every invoice — the one-off note is written per invoice"),
             })}
           </div>
 
           <div className="it-foot">
-            {slot("footerText", { label: "Footer", empty: "A footer line, on every invoice" })}
+            {slot("footerText", { label: t("Footer"), empty: t("A footer line, on every invoice") })}
           </div>
         </div>
       </div>
 
-      <p className="settings-note">
-        Everything dashed is saved here once and used on every invoice. Left blank, it simply does not print.
-      </p>
+      <p className="settings-note">{t("Everything dashed is saved here once and used on every invoice. Left blank, it simply does not print.")}</p>
     </div>
   );
 }

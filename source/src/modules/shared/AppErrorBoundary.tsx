@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { isChunkLoadError, reloadForStaleDeploy } from "./staleDeploy";
+import { t } from "../../lib/i18n";
 
 // The last line of defence. Without it any error thrown while rendering, a
 // failed lazy import included, unmounts the whole tree and leaves a white page
@@ -30,16 +31,14 @@ export class AppErrorBoundary extends Component<Props, State> {
     return (
       <main className="login-shell">
         <div className="login-card" role="alert">
-          <h1>{stale ? "Clarity has been updated" : "Something went wrong"}</h1>
+          <h1>{stale ? t("Clarity has been updated") : t("Something went wrong")}</h1>
           <p>
             {stale
-              ? "This tab is running an older version. Reload to pick up the new one."
-              : "This screen hit an error. Reloading usually clears it; nothing you had saved is lost."}
+              ? t("This tab is running an older version. Reload to pick up the new one.")
+              : t("This screen hit an error. Reloading usually clears it; nothing you had saved is lost.")}
           </p>
           {stale ? null : <p className="muted">{error.message}</p>}
-          <button className="primary-button" onClick={() => window.location.reload()} type="button">
-            Reload
-          </button>
+          <button className="primary-button" onClick={() => window.location.reload()} type="button">{t("Reload")}</button>
         </div>
       </main>
     );

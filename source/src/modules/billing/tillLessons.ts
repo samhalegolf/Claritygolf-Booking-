@@ -1,3 +1,4 @@
+import { readerLocale } from "../../lib/i18n";
 // Lessons the till can take money for.
 //
 // Typing a client's name into the till's search used to find nothing unless a
@@ -92,13 +93,13 @@ export function tillLessonWhen(startsAt: string, now = new Date()) {
   const date = new Date(startsAt);
   if (!Number.isFinite(date.getTime())) return "";
   const sameYear = date.getFullYear() === now.getFullYear();
-  const day = date.toLocaleDateString(undefined, {
+  const day = date.toLocaleDateString(readerLocale(), {
     weekday: "short",
     day: "numeric",
     month: "short",
     ...(sameYear ? {} : { year: "numeric" }),
   });
-  const time = date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const time = date.toLocaleTimeString(readerLocale(), { hour: "numeric", minute: "2-digit" });
   return `${day}, ${time}`;
 }
 

@@ -29,6 +29,7 @@ import {
   type PracticeSuggestion,
   type PracticeTypeMeta,
 } from "./practiceModel";
+import { t } from "../../lib/i18n";
 
 export type PracticeSnapshot = {
   blocks: PracticeBlock[];
@@ -58,7 +59,7 @@ const entries = new Map<string, Entry>();
 const FRESH_MS = 60_000;
 
 function unauthorizedError() {
-  return Object.assign(new Error("Admin login required"), { code: "unauthorized" });
+  return Object.assign(new Error(t("Admin login required")), { code: "unauthorized" });
 }
 
 async function readJson(path: string) {
@@ -71,7 +72,7 @@ async function readJson(path: string) {
     suggestions?: PracticeSuggestion[];
     blockTypes?: PracticeTypeMeta[];
   };
-  if (!response.ok) throw new Error(data?.message || "Practice request failed.");
+  if (!response.ok) throw new Error(data?.message || t("Practice request failed."));
   return data;
 }
 
@@ -97,7 +98,7 @@ async function fetchSnapshot(playerId: string): Promise<PracticeSnapshot> {
       blocksResult.status === "rejected"
         ? blocksResult.reason instanceof Error
           ? blocksResult.reason.message
-          : "Could not load practice."
+          : t("Could not load practice.")
         : "",
   };
   if (blocksResult.status === "rejected" && (blocksResult.reason as { code?: string })?.code === "unauthorized") {

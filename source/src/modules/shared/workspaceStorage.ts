@@ -1,5 +1,5 @@
 // The one local-storage key that both the entry point and the coach workspace
-// read. It lives here rather than in App.tsx because main.tsx must not import
+// read. It lives here rather than in App.tsx because boot.tsx must not import
 // App -- that would pull the whole workspace into the first download.
 
 /** The workspace accounts (and so the plan) from the last coach visit. */

@@ -5,6 +5,7 @@ import { MediaPipePoseProvider } from "../utils/mediaPipePoseProvider";
 import type { PoseFrame, PosePoint } from "../utils/poseSwingDetector";
 import { MP } from "../../../../motion-lab/src/observe/mediapipe/landmarks";
 import { MP_CONNECTIONS } from "../../../../motion-lab/src/observe/mediapipe/connections";
+import { t } from "../../../lib/i18n";
 
 // The two live reads on the flat picture: the detector's markers drawn over
 // the body, and a ground-force estimate built from the same landmarks.
@@ -64,17 +65,17 @@ export type GroundForceRead =
  */
 export const readGroundForce = (frame: PoseFrame | null): GroundForceRead => {
   const points = frame?.landmarks;
-  if (!points || points.length < 33) return { kind: "none", reason: "No body found" };
+  if (!points || points.length < 33) return { kind: "none", reason: t("No body found") };
 
   const feet = [MP.LEFT_HEEL, MP.LEFT_FOOT_INDEX, MP.RIGHT_HEEL, MP.RIGHT_FOOT_INDEX];
   if (feet.some((index) => (points[index].visibility ?? 1) < VISIBLE)) {
-    return { kind: "none", reason: "Feet not in view" };
+    return { kind: "none", reason: t("Feet not in view") };
   }
 
   const leftX = midX(points, [MP.LEFT_HEEL, MP.LEFT_FOOT_INDEX]);
   const rightX = midX(points, [MP.RIGHT_HEEL, MP.RIGHT_FOOT_INDEX]);
   if (Math.abs(rightX - leftX) < 0.03) {
-    return { kind: "none", reason: "Needs a face-on view" };
+    return { kind: "none", reason: t("Needs a face-on view") };
   }
 
   let massX = 0;
@@ -86,11 +87,11 @@ export const readGroundForce = (frame: PoseFrame | null): GroundForceRead => {
     massX += x * segment.share;
   }
 
-  const t = Math.min(1, Math.max(0, (massX - leftX) / (rightX - leftX)));
+  const leftShare = Math.min(1, Math.max(0, (massX - leftX) / (rightX - leftX)));
   const trusted = [...feet, MP.LEFT_HIP, MP.RIGHT_HIP, MP.LEFT_SHOULDER, MP.RIGHT_SHOULDER];
   const confidence =
     trusted.reduce((sum, index) => sum + (points[index].visibility ?? 1), 0) / trusted.length;
-  return { kind: "split", left: 1 - t, confidence };
+  return { kind: "split", left: 1 - leftShare, confidence };
 };
 
 type TrackerStatus = "idle" | "loading" | "ready" | "error";
@@ -127,7 +128,7 @@ export function LivePoseLayer({
   const showMarkersRef = useRef(showMarkers);
   const showForceRef = useRef(showGroundForce);
   const [status, setStatus] = useState<TrackerStatus>("idle");
-  const [force, setForce] = useState<GroundForceRead>({ kind: "none", reason: "Finding the body…" });
+  const [force, setForce] = useState<GroundForceRead>({ kind: "none", reason: t("Finding the body…") });
 
   showMarkersRef.current = showMarkers;
   showForceRef.current = showGroundForce;
@@ -260,13 +261,13 @@ export function LivePoseLayer({
       <canvas ref={canvasRef} className="va-pose-canvas" aria-hidden="true" />
       {status === "loading" || status === "error" ? (
         <span className={`va-pose-status${status === "error" ? " is-error" : ""}`} role="status">
-          {status === "loading" ? "Loading body tracking…" : "Body tracking could not start"}
+          {status === "loading" ? t("Loading body tracking…") : t("Body tracking could not start")}
         </span>
       ) : null}
       {showGroundForce && widgetHost
         ? createPortal(
             <GroundForceWidget
-              read={status === "ready" ? force : status === "error" ? { kind: "none", reason: "Body tracking could not start" } : null}
+              read={status === "ready" ? force : status === "error" ? { kind: "none", reason: t("Body tracking could not start") } : null}
               onClose={onCloseGroundForce}
             />,
             widgetHost
@@ -306,17 +307,15 @@ export function GroundForceWidget({ read, leadSide = "left", onClose }: GroundFo
   const trailPct = Math.round(trail * 100);
 
   return (
-    <section className="va-force-card" aria-label="Ground force estimate">
+    <section className="va-force-card" aria-label={t("Ground force estimate")}>
       <header className="va-force-head">
-        <h2>Ground force</h2>
+        <h2>{t("Ground force")}</h2>
         <span className="va-force-tag">
           <svg viewBox="0 0 12 12" aria-hidden="true">
             <path d="M2 8 8 2M5 11l6-9" />
-          </svg>
-          Estimated
-        </span>
+          </svg>{t("Estimated")}</span>
         {onClose ? (
-          <button type="button" className="va-force-close" aria-label="Close ground force" onClick={onClose}>
+          <button type="button" className="va-force-close" aria-label={t("Close ground force")} onClick={onClose}>
             <svg viewBox="0 0 16 16" aria-hidden="true">
               <path d="M3.5 3.5l9 9M12.5 3.5l-9 9" />
             </svg>
@@ -330,8 +329,8 @@ export function GroundForceWidget({ read, leadSide = "left", onClose }: GroundFo
         role="img"
         aria-label={
           split
-            ? `Whole-foot estimate: trail ${trailPct}%, lead ${100 - trailPct}%`
-            : "No estimate for this frame"
+            ? t("Whole-foot estimate: trail {trailPct}%, lead {value}%", { trailPct, value: 100 - trailPct })
+            : t("No estimate for this frame")
         }
       >
         <defs>
@@ -346,8 +345,8 @@ export function GroundForceWidget({ read, leadSide = "left", onClose }: GroundFo
           </clipPath>
         </defs>
         <rect x="2" y="4" width="372" height="202" rx="9" className="va-force-area" />
-        <text x="112" y="24" textAnchor="middle" className="va-force-foot-label">TRAIL</text>
-        <text x="264" y="24" textAnchor="middle" className="va-force-foot-label">LEAD</text>
+        <text x="112" y="24" textAnchor="middle" className="va-force-foot-label">{t("TRAIL")}</text>
+        <text x="264" y="24" textAnchor="middle" className="va-force-foot-label">{t("LEAD")}</text>
         {[
           { clip: "va-force-trail", x: 86, share: trail, transform: TRAIL_FOOT },
           { clip: "va-force-lead", x: 237, share: lead, transform: LEAD_FOOT },
@@ -363,7 +362,7 @@ export function GroundForceWidget({ read, leadSide = "left", onClose }: GroundFo
           </g>
         ))}
         <text x="188" y="194" textAnchor="middle" className="va-force-caption">
-          {split ? "Whole-foot estimate · no map inside the foot" : read?.kind === "none" ? read.reason : "Starting…"}
+          {split ? t("Whole-foot estimate · no map inside the foot") : read?.kind === "none" ? read.reason : t("Starting…")}
         </text>
       </svg>
 
@@ -379,20 +378,15 @@ export function GroundForceWidget({ read, leadSide = "left", onClose }: GroundFo
             <b>{100 - trailPct}%</b>
           </div>
           <div className="va-force-split-names">
-            <span>Trail</span>
-            <span>Lead</span>
+            <span>{t("Trail")}</span>
+            <span>{t("Lead")}</span>
           </div>
-          <p className="va-force-note">
-            Worked out from body position. Confidence {Math.round(split.confidence * 100)}%. No
-            pressure was measured, so there is no kPa figure and no path.
-          </p>
+          <p className="va-force-note">{t("Worked out from body position. Confidence {value}%. No pressure was measured, so there is no kPa figure and no path.", { value: Math.round(split.confidence * 100) })}</p>
         </div>
       ) : (
         <div className="va-force-split">
-          <p className="va-force-empty">No split</p>
-          <p className="va-force-note">
-            A percentage here would be invented. Face-on, with both feet in frame, gives a read.
-          </p>
+          <p className="va-force-empty">{t("No split")}</p>
+          <p className="va-force-note">{t("A percentage here would be invented. Face-on, with both feet in frame, gives a read.")}</p>
         </div>
       )}
     </section>

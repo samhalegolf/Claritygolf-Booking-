@@ -6,6 +6,7 @@
 import { useSyncExternalStore } from "react";
 
 import { apiFetch } from "../auth/apiFetch";
+import { t } from "../../lib/i18n";
 
 export type RemoteListStatus = "idle" | "loading" | "loaded" | "error";
 
@@ -48,7 +49,7 @@ export type RemoteListStore<T> = {
 };
 
 function unauthorizedError() {
-  return Object.assign(new Error("Admin login required"), { code: "unauthorized" });
+  return Object.assign(new Error(t("Admin login required")), { code: "unauthorized" });
 }
 
 /** The session is gone: the caller decides what that means for the screen. */

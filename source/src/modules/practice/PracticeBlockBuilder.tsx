@@ -13,6 +13,7 @@ import {
   type PracticeTypeMeta,
 } from "./practiceModel";
 import { practiceDraftIsWritten, type PracticeDraft } from "./practiceStore";
+import { t } from "../../lib/i18n";
 
 /* The composer.
  *
@@ -160,7 +161,7 @@ export function PracticeBlockBuilder({
 
   const applyStarter = useCallback(
     (source: { title: string; content: string; blockType: PracticeBlockType; dose: string }) => {
-      if (practiceDraftIsWritten(draft) && !window.confirm("Replace what you've written with this one?")) return;
+      if (practiceDraftIsWritten(draft) && !window.confirm(t("Replace what you've written with this one?"))) return;
       const steps = practiceSteps(source.content);
       let nextStepId = draft.nextStepId;
       onDraftChange({
@@ -271,7 +272,7 @@ export function PracticeBlockBuilder({
   const visibleSuggestions = narrow ? shownSuggestions.slice(0, fitCount) : shownSuggestions;
   const visiblePresets = narrow ? shownPresets.slice(0, fitCount) : shownPresets;
 
-  const emptyNote = `None for ${typeMeta.label.toLowerCase()} yet`;
+  const emptyNote = t("None for {type} yet", { type: typeMeta.label.toLowerCase() });
 
   const suggestionTile = (suggestion: PracticeSuggestion) => (
     <div className="practice-tile-wrap" key={suggestion.title}>
@@ -280,9 +281,7 @@ export function PracticeBlockBuilder({
         className="practice-tile"
         data-practice-type={suggestion.blockType}
         style={{ "--practice-tone": practiceTypeMeta(types, suggestion.blockType).tone } as CSSProperties}
-        title={`${suggestion.title} — ${practiceSteps(suggestion.content).length} steps${
-          suggestion.dose ? ` · ${suggestion.dose}` : ""
-        } · used ${suggestion.uses}×`}
+        title={t("{title} — {length} steps{value} · used {uses}×", { title: suggestion.title, length: practiceSteps(suggestion.content).length, value: suggestion.dose ? ` · ${suggestion.dose}` : "", uses: suggestion.uses })}
         onClick={() => applyStarter(suggestion)}
       >
         <strong>{practiceRailLabel(suggestion.title, tier === "short")}</strong>
@@ -291,8 +290,8 @@ export function PracticeBlockBuilder({
         <button
           type="button"
           className="practice-tile-remove"
-          title="Stop suggesting this"
-          aria-label={`Stop suggesting ${suggestion.title}`}
+          title={t("Stop suggesting this")}
+          aria-label={t("Stop suggesting {title}", { title: suggestion.title })}
           onClick={() => onDismissSuggestion(suggestion)}
         >
           ×
@@ -347,7 +346,7 @@ export function PracticeBlockBuilder({
           className="practice-tile"
           data-practice-type={preset.blockType}
           style={{ "--practice-tone": practiceTypeMeta(types, preset.blockType).tone } as CSSProperties}
-          title={`${preset.title} — ${practiceSteps(preset.content).length} steps${preset.dose ? ` · ${preset.dose}` : ""}`}
+          title={t("{title} — {length} steps{value}", { title: preset.title, length: practiceSteps(preset.content).length, value: preset.dose ? ` · ${preset.dose}` : "" })}
           onClick={() => applyStarter(preset)}
         >
           <strong>{practiceRailLabel(preset.title, tier === "short")}</strong>
@@ -356,7 +355,7 @@ export function PracticeBlockBuilder({
               <span
                 role="button"
                 tabIndex={0}
-                title={`Rename "${preset.title}"`}
+                title={t("Rename \"{title}\"", { title: preset.title })}
                 onClick={(event) => {
                   event.stopPropagation();
                   setRenamingId(preset.id);
@@ -375,7 +374,7 @@ export function PracticeBlockBuilder({
               <span
                 role="button"
                 tabIndex={0}
-                title={`Remove "${preset.title}" from favourites`}
+                title={t("Remove \"{title}\" from favourites", { title: preset.title })}
                 onClick={(event) => {
                   event.stopPropagation();
                   onRemovePreset(preset);
@@ -400,12 +399,12 @@ export function PracticeBlockBuilder({
     <div className="practice-builder" ref={rootRef} data-tier={tier}>
       <div className={railClass("often")}>
         <div className="practice-rail-head">
-          <strong>{tier === "short" ? "Oft" : "Often"}</strong>
+          <strong>{tier === "short" ? t("Oft") : t("Often")}</strong>
           {oftenHidden > 0 || openRail === "often" ? (
             <button
               type="button"
               className="practice-rail-more"
-              title={openRail === "often" ? "Close" : `Show all ${shownSuggestions.length}`}
+              title={openRail === "often" ? t("Close") : t("Show all {length}", { length: shownSuggestions.length })}
               onClick={() => setOpenRail((current) => (current === "often" ? null : "often"))}
             >
               {openRail === "often" ? "×" : `+${oftenHidden}`}
@@ -415,8 +414,8 @@ export function PracticeBlockBuilder({
             type="button"
             className="practice-rail-edit"
             data-on={editingSuggestions ? "1" : undefined}
-            title={editingSuggestions ? "Done editing suggestions" : "Edit suggestions"}
-            aria-label={editingSuggestions ? "Done editing suggestions" : "Edit suggestions"}
+            title={editingSuggestions ? t("Done editing suggestions") : t("Edit suggestions")}
+            aria-label={editingSuggestions ? t("Done editing suggestions") : t("Edit suggestions")}
             onClick={() => setEditingSuggestions((current) => !current)}
           >
             ✎
@@ -476,7 +475,7 @@ export function PracticeBlockBuilder({
             onChange={(event) => onDraftChange({ ...draft, title: event.target.value })}
             placeholder={typeMeta.titleHint}
             maxLength={200}
-            aria-label="Block title"
+            aria-label={t("Block title")}
           />
 
           <div className="practice-steps">
@@ -492,24 +491,24 @@ export function PracticeBlockBuilder({
                   value={step.text}
                   onChange={(event) => setStepText(step.id, event.target.value)}
                   placeholder={
-                    !showSteps ? "What to practise." : index === 0 ? "What to do, in one instruction." : "Then…"
+                    !showSteps ? t("What to practise.") : index === 0 ? t("What to do, in one instruction.") : t("Then…")
                   }
-                  aria-label={showSteps ? `Step ${index + 1}` : "What to practise"}
+                  aria-label={showSteps ? t("Step {value}", { value: index + 1 }) : t("What to practise")}
                 />
                 {showDose && index === 0 && (
                   <span className="practice-dose">
                     <input
                       value={draft.dose}
                       onChange={(event) => onDraftChange({ ...draft, dose: event.target.value })}
-                      placeholder={typeMeta.doseHint || "How much"}
+                      placeholder={typeMeta.doseHint || t("How much")}
                       maxLength={60}
-                      aria-label="How much of it"
+                      aria-label={t("How much of it")}
                     />
                     {draft.dose && (
                       <button
                         type="button"
-                        title="Remove this dose"
-                        aria-label="Remove this dose"
+                        title={t("Remove this dose")}
+                        aria-label={t("Remove this dose")}
                         onClick={() => onDraftChange({ ...draft, dose: "" })}
                       >
                         ×
@@ -521,8 +520,8 @@ export function PracticeBlockBuilder({
                   <button
                     type="button"
                     className="practice-step-remove"
-                    title={`Remove step ${index + 1}`}
-                    aria-label={`Remove step ${index + 1}`}
+                    title={t("Remove step {value}", { value: index + 1 })}
+                    aria-label={t("Remove step {value}", { value: index + 1 })}
                     onClick={() => removeStep(step.id)}
                   >
                     ×
@@ -531,9 +530,7 @@ export function PracticeBlockBuilder({
               </div>
             ))}
             {showSteps && (
-              <button type="button" className="practice-step-add" onClick={addStep}>
-                + Add step
-              </button>
+              <button type="button" className="practice-step-add" onClick={addStep}>{t("+ Add step")}</button>
             )}
           </div>
         </div>
@@ -543,20 +540,20 @@ export function PracticeBlockBuilder({
           <label className="practice-expiry">
             <span>
               {draft.expiryType === "none"
-                ? "No expiry"
+                ? t("No expiry")
                 : draft.expiryType === "set_date"
-                  ? "Expires on date"
-                  : "Expires next lesson"}
+                  ? t("Expires on date")
+                  : t("Expires next lesson")}
               <em aria-hidden="true">▾</em>
             </span>
             <select
               value={draft.expiryType}
-              aria-label="Expiry"
+              aria-label={t("Expiry")}
               onChange={(event) => onDraftChange({ ...draft, expiryType: event.target.value as ExpiryType })}
             >
-              <option value="none">No expiry</option>
-              <option value="set_date">Set date</option>
-              <option value="next_lesson">Expires next lesson</option>
+              <option value="none">{t("No expiry")}</option>
+              <option value="set_date">{t("Set date")}</option>
+              <option value="next_lesson">{t("Expires next lesson")}</option>
             </select>
           </label>
           ) : (
@@ -570,7 +567,7 @@ export function PracticeBlockBuilder({
               type="date"
               className="practice-expiry-date"
               value={draft.expiryDate}
-              aria-label="Expiry date"
+              aria-label={t("Expiry date")}
               required
               onChange={(event) => onDraftChange({ ...draft, expiryDate: event.target.value })}
             />
@@ -579,7 +576,7 @@ export function PracticeBlockBuilder({
           {showVideo && videoControl}
 
           <button type="submit" className="primary-button" disabled={busy || !canSave}>
-            {draft.id ? "Save changes" : "Save"}
+            {draft.id ? t("Save changes") : t("Save")}
           </button>
 
           {/* Only on a new block. Favouriting an edit would keep the corrected
@@ -588,8 +585,8 @@ export function PracticeBlockBuilder({
             <button
               type="button"
               className="practice-star"
-              title="Save and add to favourites"
-              aria-label="Save and add to favourites"
+              title={t("Save and add to favourites")}
+              aria-label={t("Save and add to favourites")}
               disabled={busy || !canSave}
               onClick={() => void submit(true)}
             >
@@ -598,19 +595,19 @@ export function PracticeBlockBuilder({
           )}
 
           <button type="button" className="practice-clear" onClick={onCancelEdit}>
-            {draft.id ? "Cancel" : "Clear"}
+            {draft.id ? t("Cancel") : t("Clear")}
           </button>
         </div>
       </form>
 
       <div className={railClass("saved")}>
         <div className="practice-rail-head">
-          <strong>{tier === "short" ? "Sav" : "Saved"}</strong>
+          <strong>{tier === "short" ? t("Sav") : t("Saved")}</strong>
           {savedHidden > 0 || openRail === "saved" ? (
             <button
               type="button"
               className="practice-rail-more"
-              title={openRail === "saved" ? "Close" : `Show all ${shownPresets.length}`}
+              title={openRail === "saved" ? t("Close") : t("Show all {length}", { length: shownPresets.length })}
               onClick={() => setOpenRail((current) => (current === "saved" ? null : "saved"))}
             >
               {openRail === "saved" ? "×" : `+${savedHidden}`}
@@ -620,8 +617,8 @@ export function PracticeBlockBuilder({
             type="button"
             className="practice-rail-edit"
             data-on={editingFavourites ? "1" : undefined}
-            title={editingFavourites ? "Done editing favourites" : "Edit favourites"}
-            aria-label={editingFavourites ? "Done editing favourites" : "Edit favourites"}
+            title={editingFavourites ? t("Done editing favourites") : t("Edit favourites")}
+            aria-label={editingFavourites ? t("Done editing favourites") : t("Edit favourites")}
             onClick={() => {
               setEditingFavourites((current) => !current);
               setRenamingId(null);
@@ -633,7 +630,7 @@ export function PracticeBlockBuilder({
         <div className="practice-rail-list">{visiblePresets.map((preset) => favouriteTile(preset, !narrow))}</div>
         {!shownPresets.length && !loading && (
           <span className="practice-rail-empty">
-            {presets.length ? emptyNote : "Save one with ★"}
+            {presets.length ? emptyNote : t("Save one with ★")}
           </span>
         )}
         {openRail === "saved" && (

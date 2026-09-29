@@ -32,6 +32,7 @@ import { TerminalPayment, tapIsBusy } from "./TerminalPayment";
 import { tenderLabel, useTapToPay, type PosTender, type TapState } from "./terminal";
 import { addToBasket, basketTotal, describeBasket, isLowStock, lineTotal, round2, setBasketQuantity } from "./stockMath";
 import type { BasketLine } from "./stockMath";
+import { t, readerLocale } from "../../lib/i18n";
 
 export type PosCheckoutModalProps = {
   context: PosCheckoutContext;
@@ -162,8 +163,8 @@ export function PosCheckoutModal({
   const describeInline = !context.description && !lines.length;
   const extrasSummary = [
     !passId && coupon ? coupon.code : "",
-    note.trim() ? "Note" : "",
-    !describeInline && descriptionTouched.current ? "Receipt text" : "",
+    note.trim() ? t("Note") : "",
+    !describeInline && descriptionTouched.current ? t("Receipt text") : "",
   ]
     .filter(Boolean)
     .join(" · ");
@@ -171,10 +172,10 @@ export function PosCheckoutModal({
     ? ""
     : selectedMethod?.kind === "clarity_pay"
       ? tapToPay.ready
-        ? "Customer taps their card on this iPhone. The QR is there if they'd rather."
-        : "Shows a QR code the customer scans to pay."
+        ? t("Customer taps their card on this iPhone. The QR is there if they'd rather.")
+        : t("Shows a QR code the customer scans to pay.")
       : selectedMethod && !selectedMethod.settlesImmediately
-        ? "Recorded as owed. Mark it paid from the POS list once settled."
+        ? t("Recorded as owed. Mark it paid from the POS list once settled.")
         : "";
 
   const qrMarkup = useMemo(() => (checkoutUrl ? renderQrSvg(checkoutUrl) : ""), [checkoutUrl]);
@@ -187,7 +188,7 @@ export function PosCheckoutModal({
           credentials: "same-origin",
           cache: "no-store",
         });
-        if (!response.ok) throw new Error("Could not load payment methods.");
+        if (!response.ok) throw new Error(t("Could not load payment methods."));
         const data = (await response.json()) as { paymentMethods?: PosPaymentMethod[] };
         if (cancelled) return;
         const active = (data.paymentMethods || []).filter((method) => method.active);
@@ -199,7 +200,7 @@ export function PosCheckoutModal({
           (current) => current || active.find((method) => method.kind !== "pass" && method.kind !== "coupon")?.id || "",
         );
       } catch (loadError) {
-        if (!cancelled) setError(loadError instanceof Error ? loadError.message : "Could not load payment methods.");
+        if (!cancelled) setError(loadError instanceof Error ? loadError.message : t("Could not load payment methods."));
       } finally {
         if (!cancelled) setMethodsLoaded(true);
       }
@@ -277,7 +278,7 @@ export function PosCheckoutModal({
       setStage("done");
       onCompleted(paid);
     },
-    () => setError("Stopped checking for payment. Cancel the sale and start it again."),
+    () => setError(t("Stopped checking for payment. Cancel the sale and start it again.")),
   );
 
   function releaseCoupon() {
@@ -300,26 +301,26 @@ export function PosCheckoutModal({
     }
     const payingMethod = passId ? passMethod : payByCoupon ? couponMethod : selectedMethod;
     if (passId && !passMethod) {
-      setError("This account has no Pass payment method yet. Reopen the checkout and try again.");
+      setError(t("This account has no Pass payment method yet. Reopen the checkout and try again."));
       return;
     }
     if (payByCoupon && !couponMethod) {
-      setError("This account has no Coupon payment method yet. Reopen the checkout and try again.");
+      setError(t("This account has no Coupon payment method yet. Reopen the checkout and try again."));
       return;
     }
     const spendCoupon = !passId && Boolean(coupon) && (payByCoupon || couponApplied);
     if (!payingMethod) {
-      setError("Choose a payment method.");
+      setError(t("Choose a payment method."));
       return;
     }
     if (!description.trim()) {
       if (!describeInline) setExtrasOpen(true);
-      setError("Add a description so the receipt makes sense later.");
+      setError(t("Add a description so the receipt makes sense later."));
       return;
     }
     if (!amountValid) {
       setEditingAmount(true);
-      setError("Enter an amount greater than zero.");
+      setError(t("Enter an amount greater than zero."));
       return;
     }
     setBusy(true);
@@ -357,15 +358,15 @@ export function PosCheckoutModal({
           })) as { transaction?: PosTransaction; issuedPasses?: string[] });
 
       const sale = transaction || created?.transaction;
-      if (!sale) throw new Error("Payment could not be recorded.");
+      if (!sale) throw new Error(t("Payment could not be recorded."));
       setTransaction(sale);
       onCompleted(sale);
       if (spendCoupon) couponBook.reload();
       if (created?.issuedPasses?.length) {
         onToast(
           created.issuedPasses.length === 1
-            ? `${created.issuedPasses[0]} added to their profile.`
-            : `${created.issuedPasses.join(", ")} added to their profile.`,
+            ? t("{issuedPasses} added to their profile.", { issuedPasses: created.issuedPasses[0] })
+            : t("{issuedPasses} added to their profile.", { issuedPasses: created.issuedPasses.join(", ") }),
         );
       }
 
@@ -379,7 +380,7 @@ export function PosCheckoutModal({
       }
       await showQr(sale);
     } catch (paymentError) {
-      setError(paymentError instanceof Error ? paymentError.message : "Payment could not be recorded.");
+      setError(paymentError instanceof Error ? paymentError.message : t("Payment could not be recorded."));
     } finally {
       setBusy(false);
     }
@@ -391,7 +392,7 @@ export function PosCheckoutModal({
     const checkout = (await postPosJson(`/api/billing/pos/transactions/${encodeURIComponent(sale.id)}/checkout`, {})) as {
       url?: string;
     };
-    if (!checkout.url) throw new Error("Stripe did not return a checkout link.");
+    if (!checkout.url) throw new Error(t("Stripe did not return a checkout link."));
     setCheckoutUrl(checkout.url);
     setStage("qr");
   }
@@ -403,7 +404,7 @@ export function PosCheckoutModal({
     try {
       await showQr(transaction);
     } catch (qrError) {
-      setError(qrError instanceof Error ? qrError.message : "Could not show the QR.");
+      setError(qrError instanceof Error ? qrError.message : t("Could not show the QR."));
     } finally {
       setBusy(false);
     }
@@ -414,7 +415,7 @@ export function PosCheckoutModal({
     setTenders(paid.tenders);
     setStage("done");
     onCompleted(paid.transaction);
-    if (paid.issuedPasses.length) onToast(`${paid.issuedPasses.join(", ")} added to their profile.`);
+    if (paid.issuedPasses.length) onToast(t("{issuedPasses} added to their profile.", { issuedPasses: paid.issuedPasses.join(", ") }));
   }
 
   // Abandoning a Clarity Pay sale voids the pending record rather than leaving
@@ -433,14 +434,14 @@ export function PosCheckoutModal({
       if (!response.ok) {
         // Refused because a card is paying for it right now, or just did.
         // Stay open so the coach sees how it ends.
-        setError(data?.message || "Could not cancel the sale.");
+        setError(data?.message || t("Could not cancel the sale."));
         setBusy(false);
         return;
       }
       if (data?.transaction) onCompleted(data.transaction);
-      onToast(`${transaction.receiptNumber} cancelled.`);
+      onToast(t("{receiptNumber} cancelled.", { receiptNumber: transaction.receiptNumber }));
     } catch {
-      onToast("Could not cancel the sale - check the POS list.");
+      onToast(t("Could not cancel the sale - check the POS list."));
     }
     setBusy(false);
     onClose();
@@ -465,7 +466,7 @@ export function PosCheckoutModal({
   }
 
   const heading =
-    stage === "done" ? "Payment recorded" : stage === "qr" || stage === "tap" ? "Waiting for payment" : "Checkout";
+    stage === "done" ? t("Payment recorded") : stage === "qr" || stage === "tap" ? t("Waiting for payment") : t("Checkout");
 
   // Backdrop dismissal is disabled while the QR is up so a stray tap on a till
   // screen can't void a payment the customer is mid-way through.
@@ -483,7 +484,7 @@ export function PosCheckoutModal({
       >
         <div className="pos-checkout-head">
           <h2 id="pos-checkout-title">{heading}</h2>
-          <button className="icon-button small" onClick={closeModal} type="button" aria-label="Close checkout">
+          <button className="icon-button small" onClick={closeModal} type="button" aria-label={t("Close checkout")}>
             <X size={17} />
           </button>
         </div>
@@ -497,23 +498,23 @@ export function PosCheckoutModal({
             {editingCustomer ? (
               <div className="settings-field-row pos-customer-edit">
                 <div className="settings-field">
-                  <label htmlFor="pos-customer-name">Customer</label>
+                  <label htmlFor="pos-customer-name">{t("Customer")}</label>
                   <input
                     id="pos-customer-name"
                     value={customerName}
                     onChange={(event) => setCustomerName(event.target.value)}
-                    placeholder="Optional"
+                    placeholder={t("Optional")}
                     autoFocus
                   />
                 </div>
                 <div className="settings-field">
-                  <label htmlFor="pos-customer-email">Email</label>
+                  <label htmlFor="pos-customer-email">{t("Email")}</label>
                   <input
                     id="pos-customer-email"
                     type="email"
                     value={customerEmail}
                     onChange={(event) => setCustomerEmail(event.target.value)}
-                    placeholder="Optional"
+                    placeholder={t("Optional")}
                   />
                 </div>
               </div>
@@ -526,14 +527,11 @@ export function PosCheckoutModal({
                   <strong>{customerName.trim() || customerEmail.trim()}</strong>
                   {customerName.trim() && customerEmail.trim() && <em>{customerEmail.trim()}</em>}
                 </span>
-                <button className="pos-text-button" onClick={() => setEditingCustomer(true)} type="button">
-                  Change
-                </button>
+                <button className="pos-text-button" onClick={() => setEditingCustomer(true)} type="button">{t("Change")}</button>
               </div>
             ) : (
               <button className="pos-text-button pos-add-customer" onClick={() => setEditingCustomer(true)} type="button">
-                <Plus size={14} /> Add customer
-              </button>
+                <Plus size={14} />{" "}{t("Add customer")}</button>
             )}
 
             {/* The order: what opened the checkout, anything rung up on top of
@@ -551,7 +549,7 @@ export function PosCheckoutModal({
               ) : (
                 describeInline && (
                   <div className="settings-field pos-order-describe">
-                    <label htmlFor="pos-description">What is being paid for</label>
+                    <label htmlFor="pos-description">{t("What is being paid for")}</label>
                     <input
                       id="pos-description"
                       value={description}
@@ -559,7 +557,7 @@ export function PosCheckoutModal({
                         descriptionTouched.current = true;
                         setDescription(event.target.value);
                       }}
-                      placeholder="e.g. Club fitting"
+                      placeholder={t("e.g. Club fitting")}
                     />
                   </div>
                 )
@@ -569,14 +567,14 @@ export function PosCheckoutModal({
                 <div key={line.productId} className="pos-order-line">
                   <span className="pos-order-name">
                     <strong>{line.name}</strong>
-                    <em>{formatMoney(line.unitPrice, currency)} each</em>
+                    <em>{t("{unitPrice} each", { unitPrice: formatMoney(line.unitPrice, currency) })}</em>
                   </span>
                   <div className="pos-basket-qty">
                     <button
                       className="icon-button small"
                       onClick={() => applyLines(setBasketQuantity(lines, line.productId, line.quantity - 1))}
                       type="button"
-                      aria-label={`One fewer ${line.name}`}
+                      aria-label={t("One fewer {name}", { name: line.name })}
                     >
                       <Minus size={14} />
                     </button>
@@ -585,7 +583,7 @@ export function PosCheckoutModal({
                       className="icon-button small"
                       onClick={() => applyLines(setBasketQuantity(lines, line.productId, line.quantity + 1))}
                       type="button"
-                      aria-label={`One more ${line.name}`}
+                      aria-label={t("One more {name}", { name: line.name })}
                     >
                       <Plus size={14} />
                     </button>
@@ -595,7 +593,7 @@ export function PosCheckoutModal({
                     className="icon-button small"
                     onClick={() => applyLines(setBasketQuantity(lines, line.productId, 0))}
                     type="button"
-                    aria-label={`Remove ${line.name}`}
+                    aria-label={t("Remove {name}", { name: line.name })}
                   >
                     <X size={14} />
                   </button>
@@ -606,10 +604,10 @@ export function PosCheckoutModal({
                 <div className="pos-order-search">
                   <div className="pos-order-search-bar">
                     <input
-                      aria-label="Search products and packages"
+                      aria-label={t("Search products and packages")}
                       value={productSearch}
                       onChange={(event) => setProductSearch(event.target.value)}
-                      placeholder="Search products and packages"
+                      placeholder={t("Search products and packages")}
                       autoFocus
                     />
                     <button
@@ -619,9 +617,7 @@ export function PosCheckoutModal({
                         setProductSearch("");
                       }}
                       type="button"
-                    >
-                      Done
-                    </button>
+                    >{t("Done")}</button>
                   </div>
                   <div className="pos-product-options">
                     {productMatches.map((product) => (
@@ -642,42 +638,38 @@ export function PosCheckoutModal({
                         </span>
                         <em>
                           {formatMoney(product.price, currency)}
-                          {product.trackStock ? ` - ${product.stockLevel ?? 0} left` : ""}
+                          {product.trackStock ? t(" - {value} left", { value: product.stockLevel ?? 0 }) : ""}
                         </em>
                       </button>
                     ))}
                     {!productMatches.length && (
                       <p className="field-help">
                         {productSearch.trim()
-                          ? "Nothing matches that. Packages are found by name -- try the package's own name."
-                          : "Nothing on the shelf yet? Add items under Billing > Products."}
+                          ? t("Nothing matches that. Packages are found by name -- try the package's own name.")
+                          : t("Nothing on the shelf yet? Add items under Billing > Products.")}
                       </p>
                     )}
                   </div>
                 </div>
               ) : (
                 <button className="pos-order-add" onClick={() => setSearchOpen(true)} type="button">
-                  <Plus size={15} /> Add product or package
-                </button>
+                  <Plus size={15} />{" "}{t("Add product or package")}</button>
               )}
 
               <div className="pos-order-total">
-                <span className="pos-order-total-label">
-                  Total
-                  {amountChanged && listedAmount !== null && (
+                <span className="pos-order-total-label">{t("Total")}{amountChanged && listedAmount !== null && (
                     <button
                       className="pos-text-button"
                       type="button"
                       onClick={() => setAmountInput(String(listedAmount))}
                     >
-                      <RotateCcw size={12} /> Reset to {formatMoney(listedAmount, currency)}
-                    </button>
+                      <RotateCcw size={12} />{" "}{t("Reset to {listedAmount}", { listedAmount: formatMoney(listedAmount, currency) })}</button>
                   )}
                 </span>
                 {editingAmount ? (
                   <input
                     className="pos-order-amount"
-                    aria-label="Amount"
+                    aria-label={t("Amount")}
                     type="number"
                     inputMode="decimal"
                     min="0"
@@ -695,26 +687,24 @@ export function PosCheckoutModal({
                     className="pos-order-amount-button"
                     type="button"
                     onClick={() => setEditingAmount(true)}
-                    aria-label={`Total ${amountValid ? formatMoney(amount, currency) : ""}. Change amount`}
+                    aria-label={t("Total {value}. Change amount", { value: amountValid ? formatMoney(amount, currency) : "" })}
                   >
-                    {amountValid ? formatMoney(amount, currency) : "Set amount"}
+                    {amountValid ? formatMoney(amount, currency) : t("Set amount")}
                     <Pencil size={13} />
                   </button>
                 )}
               </div>
               {appliedCoupon > 0 && (
                 <div className="pos-order-coupon">
-                  <span>Coupon {coupon?.code}</span>
-                  <span>
-                    -{formatMoney(appliedCoupon, currency)} · {formatMoney(dueNow, currency)} due
-                  </span>
+                  <span>{t("Coupon")}{" "}{coupon?.code}</span>
+                  <span>{t("-{appliedCoupon} · {dueNow} due", { appliedCoupon: formatMoney(appliedCoupon, currency), dueNow: formatMoney(dueNow, currency) })}</span>
                 </div>
               )}
             </div>
 
             <div className="pos-pay">
               <span className="pos-section-label">
-                {passId ? "Paying with a pass" : appliedCoupon > 0 ? `Remaining ${formatMoney(dueNow, currency)} paid by` : "Pay with"}
+                {passId ? t("Paying with a pass") : appliedCoupon > 0 ? t("Remaining {dueNow} paid by", { dueNow: formatMoney(dueNow, currency) }) : t("Pay with")}
               </span>
 
               {passOptions.length > 0 && (
@@ -739,14 +729,14 @@ export function PosCheckoutModal({
                       <span className="pos-pass-meta">
                         {option.covered
                           ? (option.paymentKind === "cross_redemption"
-                              ? `Use Clarity balance · ${formatMoney(option.availableValueCents / 100, option.currency || currency)} available`
-                              : `${option.creditsAvailable} of ${option.creditsAllocated} left`) +
+                              ? t("Use Clarity balance · {amount} available", { amount: formatMoney(option.availableValueCents / 100, option.currency || currency) })
+                              : t("{available} of {allocated} left", { available: option.creditsAvailable, allocated: option.creditsAllocated })) +
                             (option.nextExpiry
-                              ? ` · expires ${new Date(option.nextExpiry).toLocaleDateString(undefined, {
+                              ? t(" · expires {date}", { date: new Date(option.nextExpiry).toLocaleDateString(readerLocale(), {
                                   day: "numeric",
                                   month: "short",
                                   year: "numeric",
-                                })}`
+                                }) })
                               : "")
                           : option.reason}
                       </span>
@@ -755,25 +745,23 @@ export function PosCheckoutModal({
                   {passId ? (
                     <p className="field-help">
                       {selectedPassOption?.paymentKind === "cross_redemption" ? (
-                        <>
-                          Using balance will leave {selectedPassOption.remainingCreditsAfter ?? 0} whole entitlement
-                          {(selectedPassOption.remainingCreditsAfter ?? 0) === 1 ? "" : "s"}
+                        <>{(selectedPassOption.remainingCreditsAfter ?? 0) === 1 ? t("Using balance will leave 1 whole entitlement") : t("Using balance will leave {count} whole entitlements", { count: selectedPassOption.remainingCreditsAfter ?? 0 })}
                           {selectedPassOption.residualValueCentsAfter
-                            ? ` and ${formatMoney(selectedPassOption.residualValueCentsAfter / 100, selectedPassOption.currency || currency)} credit`
+                            ? t(" and {value} credit", { value: formatMoney(selectedPassOption.residualValueCentsAfter / 100, selectedPassOption.currency || currency) })
                             : ""}
                           .
                         </>
                       ) : (
-                        <>One native entitlement will be used. Flexible credit stays untouched.</>
+                        <>{t("One native entitlement will be used. Flexible credit stays untouched.")}</>
                       )}
                     </p>
                   ) : null}
                 </div>
               )}
 
-              {!methodsLoaded && <Loading what="payment methods" className="field-help" />}
+              {!methodsLoaded && <Loading what={t("payment methods")} className="field-help" />}
               {methodsLoaded && !methods.length && (
-                <p className="field-help">No payment methods yet - add one under Billing &gt; Settings.</p>
+                <p className="field-help">{t("No payment methods yet - add one under Billing > Settings.")}</p>
               )}
               <div className="pos-method-grid">
                 {coupon && !couponApplied && !passId && couponAmount > 0 && (
@@ -785,7 +773,7 @@ export function PosCheckoutModal({
                       setConfirmingCoupon(false);
                     }}
                   >
-                    <span>Coupon</span>
+                    <span>{t("Coupon")}</span>
                     <span className="pos-method-tag">{coupon.code}</span>
                   </button>
                 )}
@@ -803,9 +791,9 @@ export function PosCheckoutModal({
                   >
                     <span>{method.name}</span>
                     {method.kind === "clarity_pay" ? (
-                      <span className="pos-method-tag">Card / QR</span>
+                      <span className="pos-method-tag">{t("Card / QR")}</span>
                     ) : (
-                      !method.settlesImmediately && <span className="pos-method-tag">Owed</span>
+                      !method.settlesImmediately && <span className="pos-method-tag">{t("Owed")}</span>
                     )}
                   </button>
                 ))}
@@ -822,15 +810,15 @@ export function PosCheckoutModal({
                 aria-controls="pos-extras-body"
                 onClick={() => setExtrasOpen((current) => !current)}
               >
-                <span>{passId ? "Note & receipt text" : "Coupon, note & receipt text"}</span>
-                <em>{extrasOpen ? "" : extrasSummary || "Optional"}</em>
+                <span>{passId ? t("Note & receipt text") : t("Coupon, note & receipt text")}</span>
+                <em>{extrasOpen ? "" : extrasSummary || t("Optional")}</em>
                 {extrasOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
               </button>
               {extrasOpen && (
                 <div className="pos-extras-body" id="pos-extras-body">
                   {!passId && (
                     <div className="settings-field">
-                      <label>Coupon</label>
+                      <label>{t("Coupon")}</label>
                       <CouponPicker
                         book={couponBook}
                         held={coupon}
@@ -848,15 +836,9 @@ export function PosCheckoutModal({
                       />
                       {confirmingCoupon && coupon && (
                         <div className="pos-coupon-confirm">
-                          <p>
-                            {coupon.code} has {formatMoney(coupon.remainingValue, coupon.currency)} on it, which covers{" "}
-                            {formatMoney(couponAmount, currency)} of {formatMoney(amount, currency)}. Put it down as paid
-                            credit and choose how the remaining {formatMoney(amount - couponAmount, currency)} is paid?
-                          </p>
+                          <p>{t("{code} has {remainingValue} on it, which covers {couponAmount} of {amount}. Put it down as paid credit and choose how the remaining {value} is paid?", { code: coupon.code, remainingValue: formatMoney(coupon.remainingValue, coupon.currency), couponAmount: formatMoney(couponAmount, currency), amount: formatMoney(amount, currency), value: formatMoney(amount - couponAmount, currency) })}</p>
                           <div className="panel-actions">
-                            <button className="outline-button" onClick={() => setConfirmingCoupon(false)} type="button">
-                              Back
-                            </button>
+                            <button className="outline-button" onClick={() => setConfirmingCoupon(false)} type="button">{t("Back")}</button>
                             <button
                               className="primary-button"
                               onClick={() => {
@@ -865,9 +847,7 @@ export function PosCheckoutModal({
                                 setConfirmingCoupon(false);
                               }}
                               type="button"
-                            >
-                              Use {formatMoney(couponAmount, currency)} credit
-                            </button>
+                            >{t("Use {couponAmount} credit", { couponAmount: formatMoney(couponAmount, currency) })}</button>
                           </div>
                         </div>
                       )}
@@ -876,7 +856,7 @@ export function PosCheckoutModal({
 
                   {!describeInline && (
                     <div className="settings-field">
-                      <label htmlFor="pos-description">Receipt description</label>
+                      <label htmlFor="pos-description">{t("Receipt description")}</label>
                       <input
                         id="pos-description"
                         value={description}
@@ -884,18 +864,18 @@ export function PosCheckoutModal({
                           descriptionTouched.current = true;
                           setDescription(event.target.value);
                         }}
-                        placeholder="What is being paid for"
+                        placeholder={t("What is being paid for")}
                       />
                     </div>
                   )}
 
                   <div className="settings-field">
-                    <label htmlFor="pos-note">Note</label>
+                    <label htmlFor="pos-note">{t("Note")}</label>
                     <input
                       id="pos-note"
                       value={note}
                       onChange={(event) => setNote(event.target.value)}
-                      placeholder="Optional - shows on the POS list only"
+                      placeholder={t("Optional - shows on the POS list only")}
                     />
                   </div>
                 </div>
@@ -910,18 +890,28 @@ export function PosCheckoutModal({
                 type="button"
               >
                 {busy
-                  ? "Working..."
+                  ? t("Working...")
                   : passId
-                    ? "Use pass"
+                    ? t("Use pass")
                     : payByCoupon
                       ? couponCovers
-                        ? `Pay ${formatMoney(amount, currency)} with coupon`
-                        : "Pay with coupon"
+                        ? t("Pay {amount} with coupon", { amount: formatMoney(amount, currency) })
+                        : t("Pay with coupon")
                       : selectedMethod?.kind === "clarity_pay"
-                        ? `${tapToPay.ready ? "Tap card" : "Charge"} ${amountValid ? formatMoney(dueNow, currency) : ""}`.trim()
+                        ? amountValid
+                          ? tapToPay.ready
+                            ? t("Tap card {amount}", { amount: formatMoney(dueNow, currency) })
+                            : t("Charge {amount}", { amount: formatMoney(dueNow, currency) })
+                          : tapToPay.ready
+                            ? t("Tap card")
+                            : t("Charge")
                         : selectedMethod && !selectedMethod.settlesImmediately
-                          ? `Record ${amountValid ? formatMoney(dueNow, currency) : "payment"} as owed`
-                          : `Record ${amountValid ? formatMoney(dueNow, currency) : "payment"}`}
+                          ? amountValid
+                            ? t("Record {amount} as owed", { amount: formatMoney(dueNow, currency) })
+                            : t("Record payment as owed")
+                          : amountValid
+                            ? t("Record {amount}", { amount: formatMoney(dueNow, currency) })
+                            : t("Record payment")}
               </button>
               {ctaHint && <p className="field-help">{ctaHint}</p>}
             </div>
@@ -935,10 +925,7 @@ export function PosCheckoutModal({
               {transaction.receiptNumber}
             </p>
             {(transaction.couponAmount ?? 0) > 0 && (
-              <p className="field-help">
-                {formatMoney(transaction.amount, transaction.currency)}, less{" "}
-                {formatMoney(transaction.couponAmount ?? 0, transaction.currency)} on a voucher.
-              </p>
+              <p className="field-help">{t("{amount}, less {value} on a voucher.", { amount: formatMoney(transaction.amount, transaction.currency), value: formatMoney(transaction.couponAmount ?? 0, transaction.currency) })}</p>
             )}
             <TerminalPayment
               transactionId={transaction.id}
@@ -960,22 +947,14 @@ export function PosCheckoutModal({
               {formatMoney(remainingAfterCoupon(transaction.amount, transaction.couponAmount ?? 0), transaction.currency)} -{" "}
               {transaction.receiptNumber}
             </p>
-            <p className="field-help">
-              Customer scans this with their phone camera and pays with Apple Pay, Google Pay or a card. This screen
-              updates on its own the moment it clears.
-            </p>
-            {qrMarkup && <div className="pos-qr" aria-label="Payment QR code" dangerouslySetInnerHTML={{ __html: qrMarkup }} />}
+            <p className="field-help">{t("Customer scans this with their phone camera and pays with Apple Pay, Google Pay or a card. This screen updates on its own the moment it clears.")}</p>
+            {qrMarkup && <div className="pos-qr" aria-label={t("Payment QR code")} dangerouslySetInnerHTML={{ __html: qrMarkup }} />}
             <div className="panel-actions">
-              <button className="outline-button" disabled={busy} onClick={cancelPendingSale} type="button">
-                Cancel sale
-              </button>
+              <button className="outline-button" disabled={busy} onClick={cancelPendingSale} type="button">{t("Cancel sale")}</button>
               <a className="outline-button" href={checkoutUrl} target="_blank" rel="noreferrer noopener">
-                <ExternalLink size={15} /> Pay on this device
-              </a>
+                <ExternalLink size={15} />{" "}{t("Pay on this device")}</a>
               {tapToPay.ready && (
-                <button className="outline-button" disabled={busy} onClick={() => setStage("tap")} type="button">
-                  Tap card instead
-                </button>
+                <button className="outline-button" disabled={busy} onClick={() => setStage("tap")} type="button">{t("Tap card instead")}</button>
               )}
             </div>
           </>
@@ -1003,16 +982,12 @@ export function PosCheckoutModal({
               </ul>
             ) : (
               (transaction.couponAmount ?? 0) > 0 && (
-                <p className="field-help">
-                  {formatMoney(transaction.couponAmount ?? 0, transaction.currency)} of it paid by coupon
-                  {coupon ? ` ${coupon.code}` : ""}.
+                <p className="field-help">{t("{value} of it paid by coupon", { value: formatMoney(transaction.couponAmount ?? 0, transaction.currency) })}{coupon ? ` ${coupon.code}` : ""}.
                 </p>
               )
             )}
             {transaction.status === "pending" && (
-              <p className="field-help">
-                Recorded as owed on {transaction.paymentMethodName}. Mark it paid from the POS list once it is settled.
-              </p>
+              <p className="field-help">{t("Recorded as owed on {paymentMethodName}. Mark it paid from the POS list once it is settled.", { paymentMethodName: transaction.paymentMethodName })}</p>
             )}
             <ReceiptEmailPrompt
               key={transaction.id}
@@ -1023,9 +998,7 @@ export function PosCheckoutModal({
               onClientEmailSaved={onClientEmailSaved}
             />
             <div className="panel-actions">
-              <button className="primary-button" onClick={onClose} type="button">
-                Done
-              </button>
+              <button className="primary-button" onClick={onClose} type="button">{t("Done")}</button>
             </div>
           </>
         )}

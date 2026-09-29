@@ -16,6 +16,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import "./snapshotFrameViewer.css";
+import { t } from "../../lib/i18n";
 
 export type FrameViewerRect = { x: number; y: number; width: number; height: number };
 
@@ -252,7 +253,7 @@ export function SnapshotFrameViewer({ shots, initialKey, resolveVideoUrl, onClos
         className="frame-viewer"
         role="dialog"
         aria-modal="true"
-        aria-label="Screenshot in its video"
+        aria-label={t("Screenshot in its video")}
         tabIndex={-1}
         ref={dialogRef}
         onClick={(event) => event.stopPropagation()}
@@ -262,16 +263,15 @@ export function SnapshotFrameViewer({ shots, initialKey, resolveVideoUrl, onClos
             <strong>{active.title}</strong>
             <span>
               {videos > 1 ? `${active.videoTitle} · ` : ""}
-              {clock(active.currentTime)} · {activeIndex + 1} of {ordered.length}
-            </span>
+              {clock(active.currentTime)} · {activeIndex + 1}{" "}{t("of {length}", { length: ordered.length })}</span>
           </div>
-          <button type="button" className="frame-viewer-close" onClick={onClose} aria-label="Close">
+          <button type="button" className="frame-viewer-close" onClick={onClose} aria-label={t("Close")}>
             ×
           </button>
         </header>
 
         <div className="frame-viewer-body">
-          <section className="frame-viewer-stage" aria-label="Video at the screenshot's frame">
+          <section className="frame-viewer-stage" aria-label={t("Video at the screenshot's frame")}>
             <div
               className="frame-viewer-picture"
               style={{ aspectRatio: String(aspect), ["--frame-aspect" as string]: String(aspect) }}
@@ -305,11 +305,11 @@ export function SnapshotFrameViewer({ shots, initialKey, resolveVideoUrl, onClos
               {videoState === "missing" ? (
                 <div className="frame-viewer-missing">
                   {active.imageUrl ? <img src={active.imageUrl} alt="" /> : null}
-                  <p>The video for this screenshot is not on this device.</p>
+                  <p>{t("The video for this screenshot is not on this device.")}</p>
                 </div>
               ) : videoState === "loading" ? (
                 <div className="frame-viewer-missing">
-                  <p>Loading the video…</p>
+                  <p>{t("Loading the video…")}</p>
                 </div>
               ) : null}
               {videoState === "ready" && box ? (
@@ -326,19 +326,19 @@ export function SnapshotFrameViewer({ shots, initialKey, resolveVideoUrl, onClos
               ) : null}
               {videoState === "ready" && !box && onFrame ? (
                 <div className="frame-viewer-whole" aria-hidden="true">
-                  <span>Whole frame</span>
+                  <span>{t("Whole frame")}</span>
                 </div>
               ) : null}
             </div>
 
             <div className="frame-viewer-controls">
-              <button type="button" onClick={() => nudge(-FRAME_STEP)} aria-label="Back one frame">
+              <button type="button" onClick={() => nudge(-FRAME_STEP)} aria-label={t("Back one frame")}>
                 ‹
               </button>
-              <button type="button" className="is-play" onClick={togglePlay} aria-label={playing ? "Pause" : "Play"}>
+              <button type="button" className="is-play" onClick={togglePlay} aria-label={playing ? t("Pause") : t("Play")}>
                 {playing ? "❚❚" : "▶"}
               </button>
-              <button type="button" onClick={() => nudge(FRAME_STEP)} aria-label="Forward one frame">
+              <button type="button" onClick={() => nudge(FRAME_STEP)} aria-label={t("Forward one frame")}>
                 ›
               </button>
               <div
@@ -375,16 +375,14 @@ export function SnapshotFrameViewer({ shots, initialKey, resolveVideoUrl, onClos
               </div>
               <span className="frame-viewer-time">{clock(time)}</span>
               {!onFrame ? (
-                <button type="button" className="frame-viewer-return" onClick={seekToActive}>
-                  Back to screenshot
-                </button>
+                <button type="button" className="frame-viewer-return" onClick={seekToActive}>{t("Back to screenshot")}</button>
               ) : null}
             </div>
 
             {active.note ? <p className="frame-viewer-note">{active.note}</p> : null}
           </section>
 
-          <ol className="frame-viewer-rail" ref={railRef} aria-label="Screenshots in this review">
+          <ol className="frame-viewer-rail" ref={railRef} aria-label={t("Screenshots in this review")}>
             {ordered.map((shot, index) => {
               const previous = ordered[index - 1];
               const newVideo = videos > 1 && (!previous || previous.savedVideoId !== shot.savedVideoId);
@@ -414,9 +412,7 @@ export function SnapshotFrameViewer({ shots, initialKey, resolveVideoUrl, onClos
             })}
           </ol>
         </div>
-        <footer className="frame-viewer-hint">
-          ↑ ↓ screenshot · ← → one frame · space play
-        </footer>
+        <footer className="frame-viewer-hint">{t("↑ ↓ screenshot · ← → one frame · space play")}</footer>
       </div>
     </div>,
     document.body,

@@ -1,4 +1,5 @@
 import { FRAME_RATE_DEFAULT, snapFrameRate } from "./frameMath";
+import { t } from "../../../lib/i18n";
 
 export interface VideoMetadata {
   duration: number;
@@ -56,11 +57,11 @@ export const waitForMetadata = (element: HTMLVideoElement): Promise<Omit<VideoMe
     };
     const onError = () => {
       cleanup();
-      reject(new Error("Unable to read video metadata"));
+      reject(new Error(t("Unable to read video metadata")));
     };
     const timeoutId = window.setTimeout(() => {
       cleanup();
-      reject(new Error("Timed out reading video metadata"));
+      reject(new Error(t("Timed out reading video metadata")));
     }, METADATA_TIMEOUT_MS);
 
     element.addEventListener("loadedmetadata", onLoaded, { once: true });

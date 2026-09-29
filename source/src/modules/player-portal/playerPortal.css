@@ -2281,3 +2281,16 @@
   color: var(--pt-text);
   font-weight: 700;
 }
+
+/* The language picker under the legal links: as quiet as they are. */
+.player-portal-legal .settings-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--pt-text-soft);
+  font-size: 12px;
+}
+
+.player-portal-legal .settings-field select {
+  font: inherit;
+}

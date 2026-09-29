@@ -11,6 +11,7 @@ import { ClarityPassesCredits } from "../shared/ClarityIcons";
 
 import { Loading } from "../shared/Loading";
 import type { Pass } from "./PassesPanel";
+import { t, readerLocale } from "../../lib/i18n";
 
 export type IssuedPass = Pass & {
   personId: string | null;
@@ -21,11 +22,11 @@ export type IssuedPass = Pass & {
 type StatusFilter = "active" | "all" | "exhausted" | "expired" | "void";
 
 const FILTERS: { value: StatusFilter; label: string }[] = [
-  { value: "active", label: "Active" },
-  { value: "all", label: "All" },
-  { value: "exhausted", label: "All used" },
-  { value: "expired", label: "Expired" },
-  { value: "void", label: "Voided" },
+  { value: "active", label: t("Active") },
+  { value: "all", label: t("All") },
+  { value: "exhausted", label: t("All used") },
+  { value: "expired", label: t("Expired") },
+  { value: "void", label: t("Voided") },
 ];
 
 export type IssuedPassesPanelProps = {
@@ -41,15 +42,15 @@ function dateLabel(value: string | null) {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  return date.toLocaleDateString(readerLocale(), { day: "numeric", month: "short", year: "numeric" });
 }
 
 function statusText(pass: IssuedPass) {
-  if (pass.status === "void") return "Voided";
-  if (pass.status === "expired") return "Expired";
-  if (pass.status === "scheduled") return "Not started";
-  if (pass.status === "exhausted") return "All used";
-  return "Active";
+  if (pass.status === "void") return t("Voided");
+  if (pass.status === "expired") return t("Expired");
+  if (pass.status === "scheduled") return t("Not started");
+  if (pass.status === "exhausted") return t("All used");
+  return t("Active");
 }
 
 // The same pill the invoice and POS tables use, so a pass reads like every
@@ -63,9 +64,9 @@ function statusPillClass(pass: IssuedPass) {
 
 function sourceLabel(source: string) {
   if (source === "optix") return "Optix";
-  if (source === "clarity_pos" || source === "pos") return "Point of sale";
-  if (source === "clarity_invoice" || source === "invoice") return "Invoice";
-  if (source === "manual") return "Given";
+  if (source === "clarity_pos" || source === "pos") return t("Point of sale");
+  if (source === "clarity_invoice" || source === "invoice") return t("Invoice");
+  if (source === "manual") return t("Given");
   return source || "-";
 }
 
@@ -87,7 +88,7 @@ export function IssuedPassesPanel({
     <div className="issued-passes">
       <div className="issued-passes-toolbar">
         <label>
-          <span>Show</span>
+          <span>{t("Show")}</span>
           <select value={filter} onChange={(event) => setFilter(event.target.value as StatusFilter)}>
             {FILTERS.map((entry) => (
               <option key={entry.value} value={entry.value}>
@@ -99,26 +100,22 @@ export function IssuedPassesPanel({
       </div>
 
       {loadState === "loading" && !passes.length ? (
-        <Loading what="passes" />
+        <Loading what={t("passes")} />
       ) : loadState === "error" ? (
-        <p>
-          Could not load passes.{" "}
-          <button className="link-button" type="button" onClick={onRetry}>
-            Retry
-          </button>
+        <p>{t("Could not load passes.")}{" "}<button className="link-button" type="button" onClick={onRetry}>{t("Retry")}</button>
         </p>
       ) : shown.length ? (
         <table className="recent-invoices-table">
           <thead>
             <tr>
-              <th>Holder</th>
-              <th>Pass</th>
-              <th>Left</th>
-              <th>Covers</th>
-              <th>Expires</th>
-              <th>Source</th>
-              <th>Issued</th>
-              <th>Status</th>
+              <th>{t("Holder")}</th>
+              <th>{t("Pass")}</th>
+              <th>{t("Left")}</th>
+              <th>{t("Covers")}</th>
+              <th>{t("Expires")}</th>
+              <th>{t("Source")}</th>
+              <th>{t("Issued")}</th>
+              <th>{t("Status")}</th>
             </tr>
           </thead>
           <tbody>
@@ -129,10 +126,10 @@ export function IssuedPassesPanel({
                   <td>
                     {pass.personId ? (
                       <button className="link-button" type="button" onClick={() => onOpenPerson(pass.personId as string)}>
-                        {pass.personName || "Unnamed client"}
+                        {pass.personName || t("Unnamed client")}
                       </button>
                     ) : (
-                      "Nobody yet"
+                      t("Nobody yet")
                     )}
                   </td>
                   <td>
@@ -141,11 +138,9 @@ export function IssuedPassesPanel({
                     </span>
                     {pass.note ? <em className="pos-adjusted-note">{pass.note}</em> : null}
                   </td>
-                  <td>
-                    {pass.creditsAvailable} of {pass.creditsAllocated}
-                  </td>
+                  <td>{t("{creditsAvailable} of {creditsAllocated}", { creditsAvailable: pass.creditsAvailable, creditsAllocated: pass.creditsAllocated })}</td>
                   <td>{covers || "-"}</td>
-                  <td>{pass.expiresAt ? dateLabel(pass.expiresAt) : "Never"}</td>
+                  <td>{pass.expiresAt ? dateLabel(pass.expiresAt) : t("Never")}</td>
                   <td>{sourceLabel(pass.source)}</td>
                   <td>{dateLabel(pass.issuedAt)}</td>
                   <td>
@@ -157,7 +152,7 @@ export function IssuedPassesPanel({
           </tbody>
         </table>
       ) : (
-        <p>{filter === "all" ? "No passes issued yet." : `No ${FILTERS.find((entry) => entry.value === filter)?.label.toLowerCase()} passes.`}</p>
+        <p>{filter === "all" ? t("No passes issued yet.") : `No ${FILTERS.find((entry) => entry.value === filter)?.label.toLowerCase()} passes.`}</p>
       )}
     </div>
   );

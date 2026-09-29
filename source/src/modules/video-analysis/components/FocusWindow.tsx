@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { FocusAreaRect, FocusMode } from "../models/Focus";
 import type { ComparisonSide } from "../utils/localPersistence";
+import { t } from "../../../lib/i18n";
 
 type ScreenshotResult = { ok: boolean; error?: string };
 type ScreenshotStatus = "idle" | "saving" | "success" | "error";
@@ -162,7 +163,7 @@ export function FocusWindow({
     ? `x ${Math.round(area.x * 100)}% • y ${Math.round(area.y * 100)}% • w ${Math.round(
         area.width * 100
       )}% • h ${Math.round(area.height * 100)}%`
-    : "No area selected";
+    : t("No area selected");
 
   // Structural ability to render a crop, independent of transient decode
   // errors. The canvas stays mounted whenever this is true so the render loop
@@ -172,11 +173,11 @@ export function FocusWindow({
 
   const renderFallback = showPlaceholder
     ? mode === "track"
-      ? "Track focus is placeholder-only in this foundation."
+      ? t("Track focus is placeholder-only in this foundation.")
       : hasSource
-        ? "Live crop is not available for the selected area right now."
-        : `No ${sideLabel} video is available for live focus rendering.`
-    : "Live area focus lens active.";
+        ? t("Live crop is not available for the selected area right now.")
+        : t("No {side} video is available for live focus rendering.", { side: sideLabel })
+    : t("Live area focus lens active.");
 
   const trackMouseEnter = useCallback(() => onHoverChange?.(true), [onHoverChange]);
   const trackMouseLeave = useCallback(() => onHoverChange?.(false), [onHoverChange]);
@@ -185,35 +186,35 @@ export function FocusWindow({
   // A capture no longer lands in the analysis on its own -- it opens a note
   // beside the crop and is filed from there, so the wording stops at "taken".
   const screenshotButtonText = screenshotStatus === "saving"
-    ? "Capturing..."
+    ? t("Capturing...")
     : screenshotStatus === "success"
-      ? "Captured"
+      ? t("Captured")
       : screenshotStatus === "error"
-        ? "Retry"
-        : "Screenshot";
+        ? t("Retry")
+        : t("Screenshot");
 
   const handleScreenshot = useCallback(async () => {
     if (!onScreenshot) {
-      setFeedback("error", "Screenshot action is unavailable.");
+      setFeedback("error", t("Screenshot action is unavailable."));
       return;
     }
 
     if (!canCapture) {
-      setFeedback("error", "No active area crop to capture yet.");
+      setFeedback("error", t("No active area crop to capture yet."));
       return;
     }
 
-    setFeedback("saving", "Capturing crop...");
+    setFeedback("saving", t("Capturing crop..."));
     try {
       const imageDataUrl = canvasRef.current ? canvasRef.current.toDataURL("image/png") : "";
       const result = await Promise.resolve(onScreenshot(imageDataUrl));
       if (result.ok) {
-        setFeedback("success", "Add your note, then Save.");
+        setFeedback("success", t("Add your note, then Save."));
         return;
       }
-      setFeedback("error", result.error || "Could not capture snapshot.");
+      setFeedback("error", result.error || t("Could not capture snapshot."));
     } catch {
-      setFeedback("error", "Could not capture snapshot.");
+      setFeedback("error", t("Could not capture snapshot."));
     }
   }, [canCapture, onScreenshot, setFeedback]);
 
@@ -227,9 +228,9 @@ export function FocusWindow({
     >
       <div className="focus-window-header">
         <div className="focus-window-title">
-          <strong>Focus lens</strong>
+          <strong>{t("Focus lens")}</strong>
           <span className="focus-window-subtitle">
-            {mode === "track" ? "Track focus beta" : `Area focus · ${sideLabel.toUpperCase()}`}
+            {mode === "track" ? t("Track focus beta") : t("Area focus · {sideLabel}", { sideLabel: sideLabel.toUpperCase() })}
           </span>
         </div>
       </div>
@@ -248,7 +249,7 @@ export function FocusWindow({
       </div>
 
       {mode === "area" ? (
-        <div className="focus-window-metadata">Live area: {areaDetails}</div>
+        <div className="focus-window-metadata">{t("Live area: {areaDetails}", { areaDetails })}</div>
       ) : null}
 
       {screenshotMessage ? (
@@ -261,15 +262,13 @@ export function FocusWindow({
       ) : null}
 
       <div className="focus-window-controls">
-        <button type="button" className="focus-window-control" onClick={onReselect}>
-          Reselect
-        </button>
+        <button type="button" className="focus-window-control" onClick={onReselect}>{t("Reselect")}</button>
         <button
           type="button"
           className="focus-window-control"
           onClick={handleScreenshot}
           disabled={screenshotStatus === "saving"}
-          title={canCapture ? "Capture current focus crop" : "Capture unavailable"}
+          title={canCapture ? t("Capture current focus crop") : t("Capture unavailable")}
         >
           {screenshotButtonText}
         </button>
@@ -277,16 +276,10 @@ export function FocusWindow({
           type="button"
           className="focus-window-control focus-window-control--disabled"
           disabled
-          title="Save clip (coming later)"
-        >
-          Save clip (coming later)
-        </button>
-        <button type="button" className="focus-window-control" onClick={doNothing}>
-          Expand
-        </button>
-        <button type="button" className="focus-window-control focus-window-control--danger" onClick={onClose}>
-          Close
-        </button>
+          title={t("Save clip (coming later)")}
+        >{t("Save clip (coming later)")}</button>
+        <button type="button" className="focus-window-control" onClick={doNothing}>{t("Expand")}</button>
+        <button type="button" className="focus-window-control focus-window-control--danger" onClick={onClose}>{t("Close")}</button>
       </div>
     </div>
   );

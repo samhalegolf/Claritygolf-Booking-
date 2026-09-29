@@ -1,3 +1,4 @@
+import { t } from "../../../lib/i18n";
 export const VIDEO_ANALYSIS_DB_NAME = "clarity-video-analysis";
 export const VIDEO_ANALYSIS_DB_VERSION = 3;
 
@@ -47,7 +48,7 @@ export const isIndexedDbFactoryAvailable = () =>
 const resolveIndexedDbFactory = (): IDBFactory => {
   if (typeof indexedDB !== "undefined" && indexedDB !== null) return indexedDB;
   if (typeof window !== "undefined" && window.indexedDB) return window.indexedDB;
-  throw new Error("IndexedDB is not available in this browser.");
+  throw new Error(t("IndexedDB is not available in this browser."));
 };
 
 const detectIndexedDbDatabaseVersion = async (databaseName: string): Promise<number | null> => {
@@ -150,10 +151,10 @@ export const openIndexedDbDatabase = ({
       resolve(request.result);
     };
     request.onerror = () => {
-      fail(request.error || new Error("IndexedDB open request failed."));
+      fail(request.error || new Error(t("IndexedDB open request failed.")));
     };
     request.onblocked = () => {
-      fail(new Error("IndexedDB open request was blocked by another tab."), "INDEXEDDB_OPEN_BLOCKED");
+      fail(new Error(t("IndexedDB open request was blocked by another tab.")), "INDEXEDDB_OPEN_BLOCKED");
     };
   });
 

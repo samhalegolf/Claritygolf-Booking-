@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { TimelineMarker } from "../models/Timeline";
+import { MARKER_LABEL_TEXT, TimelineMarker } from "../models/Timeline";
+import { t } from "../../../lib/i18n";
 import { formatTime } from "../utils/frameMath";
 
 interface MarkerPreviewProps {
@@ -13,12 +14,12 @@ export function MarkerPreview({ marker, left }: MarkerPreviewProps) {
 
   return (
     <div className="timeline-thumb-preview" style={{ left: `${left}px` }}>
-      <div className="timeline-thumb-label">{marker.label}</div>
+      <div className="timeline-thumb-label">{MARKER_LABEL_TEXT[marker.label] ?? marker.label}</div>
       {hasThumbnail ? (
         <img
           className="timeline-thumb-image"
           src={marker.thumbnail}
-          alt={`${marker.label} preview`}
+          alt={t("{marker} preview", { marker: MARKER_LABEL_TEXT[marker.label] ?? marker.label })}
           onError={() => setThumbnailError(true)}
           loading="eager"
         />

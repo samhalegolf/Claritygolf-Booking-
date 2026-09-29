@@ -14,6 +14,7 @@ import {
   IconTrash,
   IconUndo,
 } from "./VideoIcons";
+import { t } from "../../../lib/i18n";
 
 // The player's half of the workspace chrome.
 //
@@ -33,11 +34,11 @@ import {
 // the buttons sit on; the separators inside them are hairlines.
 
 const TOOLS: { id: DrawingTool; label: string; icon: React.ReactNode }[] = [
-  { id: "select", label: "Select", icon: <IconToolSelect /> },
-  { id: "line", label: "Line", icon: <IconToolLine /> },
-  { id: "angle", label: "Angle", icon: <IconToolAngle /> },
-  { id: "circle", label: "Circle", icon: <IconToolCircle /> },
-  { id: "pen", label: "Draw", icon: <IconToolPen /> },
+  { id: "select", label: t("Select"), icon: <IconToolSelect /> },
+  { id: "line", label: t("Line"), icon: <IconToolLine /> },
+  { id: "angle", label: t("Angle"), icon: <IconToolAngle /> },
+  { id: "circle", label: t("Circle"), icon: <IconToolCircle /> },
+  { id: "pen", label: t("Draw"), icon: <IconToolPen /> },
 ];
 
 /** The pencil glyph on the rail toggle. Its own icon rather than reusing the
@@ -69,7 +70,7 @@ export function PlayerToolRailToggle({ open, onToggle }: PlayerToolRailTogglePro
     <button
       type="button"
       className={`va-rail-toggle${open ? " is-active" : ""}`}
-      aria-label={open ? "Hide drawing tools" : "Show drawing tools"}
+      aria-label={open ? t("Hide drawing tools") : t("Show drawing tools")}
       aria-pressed={open}
       onClick={onToggle}
     >
@@ -160,7 +161,7 @@ export function PlayerToolRail({
       <button
         type="button"
         className="va-rail-btn"
-        aria-label="Undo"
+        aria-label={t("Undo")}
         disabled={!canUndo}
         onClick={onUndo}
       >
@@ -169,7 +170,7 @@ export function PlayerToolRail({
       <button
         type="button"
         className="va-rail-btn"
-        aria-label="Clear markings"
+        aria-label={t("Clear markings")}
         disabled={!canClear}
         onClick={onClear}
       >
@@ -181,7 +182,7 @@ export function PlayerToolRail({
           <button
             type="button"
             className="va-rail-btn"
-            aria-label="Focus palette"
+            aria-label={t("Focus palette")}
             onClick={onFocusOpen}
           >
             <IconFocus />
@@ -238,15 +239,15 @@ const IconSwingPhases = () => (
 const phaseTitle = (state: PhaseDetectionState) => {
   switch (state.kind) {
     case "running":
-      return `Finding the swing… ${Math.round(state.progress * 100)}%`;
+      return t("Finding the swing… {percent}%", { percent: Math.round(state.progress * 100) });
     case "failed":
-      return `Swing not found: ${state.message}`;
+      return t("Swing not found: {message}", { message: state.message });
     case "ready":
       return state.placed
-        ? "Markers are on the swing. Press to snap them back."
-        : "Snap the markers to the swing";
+        ? t("Markers are on the swing. Press to snap them back.")
+        : t("Snap the markers to the swing");
     default:
-      return "Snap the markers to the swing";
+      return t("Snap the markers to the swing");
   }
 };
 
@@ -283,14 +284,14 @@ export function AnalysisRail({
   const phaseLabel = phaseTitle(phaseState);
   const running = phaseState.kind === "running";
   return (
-    <div className="va-analysis-rail" role="toolbar" aria-label="Body analysis">
+    <div className="va-analysis-rail" role="toolbar" aria-label={t("Body analysis")}>
       {onOpen3D ? (
         <>
           <button
             type="button"
             className={`va-rail-btn va-rail-btn-3d${motionLabOpen ? " is-active" : ""}`}
-            aria-label="3D motion"
-            title="3D motion"
+            aria-label={t("3D motion")}
+            title={t("3D motion")}
             aria-pressed={motionLabOpen}
             disabled={motionLabDisabled}
             onClick={onOpen3D}
@@ -303,8 +304,8 @@ export function AnalysisRail({
       <button
         type="button"
         className={`va-rail-btn${showMarkers ? " is-active" : ""}`}
-        aria-label="Live body markers"
-        title="Live body markers"
+        aria-label={t("Live body markers")}
+        title={t("Live body markers")}
         aria-pressed={showMarkers}
         onClick={onToggleMarkers}
       >
@@ -313,8 +314,8 @@ export function AnalysisRail({
       <button
         type="button"
         className={`va-rail-btn${showGroundForce ? " is-active" : ""}`}
-        aria-label="Ground force heat map"
-        title="Ground force heat map"
+        aria-label={t("Ground force heat map")}
+        title={t("Ground force heat map")}
         aria-pressed={showGroundForce}
         onClick={onToggleGroundForce}
       >
@@ -392,7 +393,7 @@ export function PlayerActionBar({
           <button
             type="button"
             className="va-bar-btn"
-            aria-label="Previous frame"
+            aria-label={t("Previous frame")}
             onClick={() => onStepFrame(-1)}
           >
             <IconStepBack />
@@ -400,7 +401,7 @@ export function PlayerActionBar({
           <button
             type="button"
             className="va-bar-btn is-play"
-            aria-label={isPlaying ? "Pause" : "Play"}
+            aria-label={isPlaying ? t("Pause") : t("Play")}
             onClick={onTogglePlay}
           >
             {isPlaying ? <IconPause /> : <IconPlay />}
@@ -408,7 +409,7 @@ export function PlayerActionBar({
           <button
             type="button"
             className="va-bar-btn"
-            aria-label="Next frame"
+            aria-label={t("Next frame")}
             onClick={() => onStepFrame(1)}
           >
             <IconStepForward />
@@ -420,7 +421,7 @@ export function PlayerActionBar({
             <button
               type="button"
               className={`va-bar-btn${settingsOpen ? " is-active" : ""}`}
-              aria-label={settingsOpen ? "Hide settings" : "Show settings"}
+              aria-label={settingsOpen ? t("Hide settings") : t("Show settings")}
               aria-pressed={Boolean(settingsOpen)}
               onClick={onSettingsToggle}
             >
@@ -428,11 +429,11 @@ export function PlayerActionBar({
             </button>
           ) : null}
           <button type="button" className="va-bar-text-btn" onClick={onSave} disabled={busy}>
-            {saving ? "Saving…" : "Save"}
+            {saving ? t("Saving…") : t("Save")}
           </button>
           {canSend && onSend ? (
             <button type="button" className="va-bar-send" onClick={onSend} disabled={busy}>
-              {sending ? "Sending…" : "Send to coach"}
+              {sending ? t("Sending…") : t("Send to coach")}
             </button>
           ) : null}
         </div>

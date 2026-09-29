@@ -1,7 +1,8 @@
 import React, { useCallback, useRef, useState } from "react";
 import { MarkerPreview } from "./MarkerPreview";
 import { TimelineEngine } from "../engines/TimelineEngine";
-import { TimelineMarker } from "../models/Timeline";
+import { MARKER_LABEL_TEXT, TimelineMarker } from "../models/Timeline";
+import { t } from "../../../lib/i18n";
 
 export interface TimelineProps {
   duration: number;
@@ -182,7 +183,11 @@ export function Timeline({
   const playheadPosPercent = duration > 0 ? (Math.min(currentTime, safeDuration) / safeDuration) * 100 : 0;
   const safeTrackWidth = Math.max(1, trackWidth);
 
-  const titleText = compact ? `${sideLabel ? `${sideLabel} ` : ""}timeline` : "Timeline";
+  const titleText = compact
+    ? sideLabel
+      ? t("{side} timeline", { side: sideLabel })
+      : t("timeline")
+    : t("Timeline");
   const wrapClassName = ["timeline-wrap", compact ? "is-compact" : "", className]
     .filter(Boolean)
     .join(" ");
@@ -193,7 +198,7 @@ export function Timeline({
         <div style={{ marginBottom: 8, display: "flex", gap: 8, alignItems: "center" }}>
           <span style={{ fontSize: compact ? 11 : 12, color: "#c3cee6" }}>{titleText}</span>
           <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-            <span style={{ fontSize: 11, color: "#94a2c0" }}>Zoom</span>
+            <span style={{ fontSize: 11, color: "#94a2c0" }}>{t("Zoom")}</span>
             <input
               type="range"
               min={0.6}
@@ -236,7 +241,7 @@ export function Timeline({
               key={marker.id}
               style={{ left: `${left}%` }}
               className="timeline-marker"
-              title={marker.label}
+              title={MARKER_LABEL_TEXT[marker.label] ?? marker.label}
               onMouseEnter={() => onMarkerEnter(marker, markerLeftPx)}
               onMouseLeave={onMarkerLeave}
               onMouseDown={(event) => {
@@ -282,7 +287,7 @@ export function Timeline({
               className="timeline-marker-label"
               style={{ left: `${(marker.time / safeDuration) * 100}%` }}
             >
-              {marker.label}
+              {MARKER_LABEL_TEXT[marker.label] ?? marker.label}
             </div>
           ))}
         </div>

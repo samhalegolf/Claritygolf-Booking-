@@ -16,6 +16,7 @@ import { Search, X } from "lucide-react";
 import { ClarityPassesCredits } from "../shared/ClarityIcons";
 import type { BillingCoupon } from "./types";
 import { searchCoupons } from "./couponMath";
+import { t } from "../../lib/i18n";
 
 export type SpendableCoupons = {
   coupons: BillingCoupon[];
@@ -40,7 +41,7 @@ export function useSpendableCoupons(): SpendableCoupons {
           credentials: "same-origin",
           cache: "no-store",
         });
-        if (!response.ok) throw new Error("Could not load coupons.");
+        if (!response.ok) throw new Error(t("Could not load coupons."));
         const data = (await response.json()) as { coupons?: BillingCoupon[] };
         if (cancelled) return;
         setCoupons(Array.isArray(data.coupons) ? data.coupons : []);
@@ -105,8 +106,10 @@ export function CouponPicker({
           </strong>
           <em>
             {applied
-              ? `${formatMoney(applyAmount, held.currency)} paid by coupon${left > 0 ? ` - ${formatMoney(left, held.currency)} stays on it` : ""}`
-              : `${formatMoney(held.remainingValue, held.currency)} available - held for this sale, not yet used`}
+              ? left > 0
+                ? t("{amount} paid by coupon - {left} stays on it", { amount: formatMoney(applyAmount, held.currency), left: formatMoney(left, held.currency) })
+                : t("{amount} paid by coupon", { amount: formatMoney(applyAmount, held.currency) })
+              : t("{remainingValue} available - held for this sale, not yet used", { remainingValue: formatMoney(held.remainingValue, held.currency) })}
           </em>
         </span>
         <button
@@ -114,7 +117,7 @@ export function CouponPicker({
           disabled={disabled}
           onClick={onRelease}
           type="button"
-          aria-label="Remove coupon"
+          aria-label={t("Remove coupon")}
         >
           <X size={13} />
         </button>
@@ -137,8 +140,8 @@ export function CouponPicker({
             setQuery("");
           }
         }}
-        placeholder="Search coupons by code or name"
-        aria-label="Search coupons by code or name"
+        placeholder={t("Search coupons by code or name")}
+        aria-label={t("Search coupons by code or name")}
       />
       {Boolean(needle) && (
         <div className="coupon-search-results">
@@ -154,7 +157,7 @@ export function CouponPicker({
             >
               <span>
                 <strong>{coupon.code}</strong>
-                <em>{coupon.issuedToName || coupon.customerName || "No name on it"}</em>
+                <em>{coupon.issuedToName || coupon.customerName || t("No name on it")}</em>
               </span>
               <b>{formatMoney(coupon.remainingValue, coupon.currency)}</b>
             </button>
@@ -162,10 +165,10 @@ export function CouponPicker({
           {!matches.length && (
             <p className="field-help">
               {book.state === "loading"
-                ? "Loading coupons..."
+                ? t("Loading coupons...")
                 : book.state === "error"
-                  ? "Could not load coupons."
-                  : "No usable coupon matches that."}
+                  ? t("Could not load coupons.")
+                  : t("No usable coupon matches that.")}
             </p>
           )}
         </div>

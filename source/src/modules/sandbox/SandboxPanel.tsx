@@ -22,13 +22,14 @@ import {
   type SandboxStatus,
 } from "./sandboxApi";
 import "./sandbox.css";
+import { t } from "../../lib/i18n";
 
 const PLAN_LABELS: Record<SandboxPlanKey, string> = {
-  solo: "Solo — 1 coach, 1 location, 10 lesson types",
-  studio: "Studio — 5 coaches, 3 locations, invoicing, branding",
-  academy: "Academy — everything, 20 coaches",
-  enterprise: "Enterprise — everything, no practical limits",
-  founder: "Founder — everything, no practical limits",
+  solo: t("Solo — 1 coach, 1 location, 10 lesson types"),
+  studio: t("Studio — 5 coaches, 3 locations, invoicing, branding"),
+  academy: t("Academy — everything, 20 coaches"),
+  enterprise: t("Enterprise — everything, no practical limits"),
+  founder: t("Founder — everything, no practical limits"),
 };
 
 export default function SandboxPanel() {
@@ -56,23 +57,18 @@ export default function SandboxPanel() {
     try {
       await work();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "That did not work.");
+      setError(cause instanceof Error ? cause.message : t("That did not work."));
     } finally {
       setBusy(false);
     }
   }
 
   if (error && !status) return <p className="sandbox-panel__error">{error}</p>;
-  if (!status) return <p className="sandbox-panel__lede">Checking…</p>;
+  if (!status) return <p className="sandbox-panel__lede">{t("Checking…")}</p>;
 
   return (
     <>
-      <p className="sandbox-panel__lede">
-        Your tenant test space: a brand-new business on Clarity, walled off from
-        this one. It starts empty — no lesson types, no hours, no integrations —
-        and has its own booking page, so you can set it up and book into it the
-        way a new coach would. Nothing from this workspace shows up in it.
-      </p>
+      <p className="sandbox-panel__lede">{t("Your tenant test space: a brand-new business on Clarity, walled off from this one. It starts empty — no lesson types, no hours, no integrations — and has its own booking page, so you can set it up and book into it the way a new coach would. Nothing from this workspace shows up in it.")}</p>
 
       {status.sandbox ? (
         <>
@@ -83,10 +79,10 @@ export default function SandboxPanel() {
               disabled={busy || status.inSandbox}
               onClick={() => run(() => switchWorkspace(status.sandbox!.id))}
             >
-              {status.inSandbox ? "You are in the sandbox" : "Enter sandbox"}
+              {status.inSandbox ? t("You are in the sandbox") : t("Enter sandbox")}
             </button>
             <label className="settings-field">
-              <span>Plan it runs on</span>
+              <span>{t("Plan it runs on")}</span>
               <select
                 value={status.sandbox.planKey}
                 disabled={busy}
@@ -107,11 +103,7 @@ export default function SandboxPanel() {
               </select>
             </label>
           </div>
-          <p className="sandbox-panel__note">
-            Everyone on this business shares this one sandbox. Dropping to a
-            smaller plan keeps anything already over its limit and refuses the
-            next one — the same thing a coach who downgrades sees.
-          </p>
+          <p className="sandbox-panel__note">{t("Everyone on this business shares this one sandbox. Dropping to a smaller plan keeps anything already over its limit and refuses the next one — the same thing a coach who downgrades sees.")}</p>
         </>
       ) : (
         <>
@@ -127,14 +119,10 @@ export default function SandboxPanel() {
                 })
               }
             >
-              {busy ? "Creating…" : "Create sandbox"}
+              {busy ? t("Creating…") : t("Create sandbox")}
             </button>
           </div>
-          <p className="sandbox-panel__note">
-            It starts with your country, timezone and currency and two demo
-            players. Everything else you set up yourself, through the real
-            screens.
-          </p>
+          <p className="sandbox-panel__note">{t("It starts with your country, timezone and currency and two demo players. Everything else you set up yourself, through the real screens.")}</p>
         </>
       )}
 

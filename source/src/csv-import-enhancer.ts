@@ -1,3 +1,4 @@
+import { t } from "./lib/i18n";
 type CsvField = "" | "name" | "firstName" | "lastName" | "email" | "phone" | "notes" | "caddyProfileUrl" | "caddyProfileId";
 
 type CsvPerson = {
@@ -19,15 +20,15 @@ type CsvAnalysis = {
 };
 
 const fieldOptions: Array<{ value: CsvField; label: string }> = [
-  { value: "", label: "Ignore" },
-  { value: "name", label: "Full name" },
-  { value: "firstName", label: "First name" },
-  { value: "lastName", label: "Last name" },
-  { value: "email", label: "Email" },
-  { value: "phone", label: "Phone" },
-  { value: "notes", label: "Notes" },
-  { value: "caddyProfileUrl", label: "Caddy profile URL" },
-  { value: "caddyProfileId", label: "Caddy profile ID" },
+  { value: "", label: t("Ignore") },
+  { value: "name", label: t("Full name") },
+  { value: "firstName", label: t("First name") },
+  { value: "lastName", label: t("Last name") },
+  { value: "email", label: t("Email") },
+  { value: "phone", label: t("Phone") },
+  { value: "notes", label: t("Notes") },
+  { value: "caddyProfileUrl", label: t("Caddy profile URL") },
+  { value: "caddyProfileId", label: t("Caddy profile ID") },
 ];
 
 function escapeHtml(value: string) {
@@ -156,10 +157,10 @@ function analyse(text: string, manualMapping: Record<number, CsvField> = {}): Cs
     .filter(Boolean) as CsvPerson[];
 
   const warnings: string[] = [];
-  if (!Object.values(mapping).some((field) => field === "name" || field === "firstName" || field === "lastName")) warnings.push("No name column detected. Email will be used as name where possible.");
-  if (!Object.values(mapping).includes("email")) warnings.push("No email column detected.");
-  if (people.some((person) => !person.email)) warnings.push("Some clients do not have an email address.");
-  if (!people.length) warnings.push("No importable clients found yet.");
+  if (!Object.values(mapping).some((field) => field === "name" || field === "firstName" || field === "lastName")) warnings.push(t("No name column detected. Email will be used as name where possible."));
+  if (!Object.values(mapping).includes("email")) warnings.push(t("No email column detected."));
+  if (people.some((person) => !person.email)) warnings.push(t("Some clients do not have an email address."));
+  if (!people.length) warnings.push(t("No importable clients found yet."));
   return { headers, rows, mapping, people, warnings, hasHeader };
 }
 
@@ -236,10 +237,10 @@ function enhanceCard(card: HTMLElement) {
   panel.innerHTML = `
     <div class="csv-enhancer-uploader">
       <label class="outline-button csv-enhancer-upload">
-        Upload CSV
+        ${t("Upload CSV")}
         <input type="file" accept=".csv,text/csv,text/plain" />
       </label>
-      <span>No CSV chosen</span>
+      <span>${t("No CSV chosen")}</span>
     </div>
     <div class="csv-enhancer-checkpoint" hidden></div>
   `;
@@ -253,25 +254,25 @@ function enhanceCard(card: HTMLElement) {
     const analysis = analyse(currentText, currentMapping);
     checkpoint.hidden = !currentText;
     if (!currentText) return;
-    const importLabel = importState === "importing" ? "Importing..." : importState === "imported" ? "Imported" : "Import checked clients";
+    const importLabel = importState === "importing" ? t("Importing...") : importState === "imported" ? t("Imported") : t("Import checked clients");
     const preview = analysis.people.slice(0, 5).map((person) => `
-      <div><strong>${escapeHtml(person.name)}</strong><span>${escapeHtml([person.email, person.phone].filter(Boolean).join(" · ") || "No email or phone")}</span></div>
+      <div><strong>${escapeHtml(person.name)}</strong><span>${escapeHtml([person.email, person.phone].filter(Boolean).join(" · ") || t("No email or phone"))}</span></div>
     `).join("");
     checkpoint.innerHTML = `
-      <div class="csv-enhancer-summary"><strong>${analysis.people.length} clients ready</strong><span>${analysis.hasHeader ? "Header row detected" : "No header row detected"}</span></div>
+      <div class="csv-enhancer-summary"><strong>${t("{count} clients ready", { count: analysis.people.length })}</strong><span>${analysis.hasHeader ? t("Header row detected") : t("No header row detected")}</span></div>
       ${analysis.warnings.length ? `<div class="csv-enhancer-warnings">${analysis.warnings.map((warning) => `<span>${escapeHtml(warning)}</span>`).join("")}</div>` : ""}
       <div class="csv-enhancer-grid">
         ${analysis.headers.map((header, index) => `
           <label>
-            <span>${escapeHtml(header || `Column ${index + 1}`)}</span>
+            <span>${escapeHtml((analysis.hasHeader && header) || t("Column {number}", { number: index + 1 }))}</span>
             <select data-csv-column="${index}">${fieldOptions.map((option) => `<option value="${option.value}"${analysis.mapping[index] === option.value ? " selected" : ""}>${option.label}</option>`).join("")}</select>
-            <em>${escapeHtml(analysis.rows.slice(0, 2).map((row) => row[index]).filter(Boolean).join(" / ") || "No sample")}</em>
+            <em>${escapeHtml(analysis.rows.slice(0, 2).map((row) => row[index]).filter(Boolean).join(" / ") || t("No sample"))}</em>
           </label>
         `).join("")}
       </div>
       <div class="csv-enhancer-preview">${preview}</div>
       <div class="csv-enhancer-actions">
-        <button class="outline-button csv-enhancer-canonical" type="button"${analysis.people.length ? "" : " disabled"}>Use checked CSV in box</button>
+        <button class="outline-button csv-enhancer-canonical" type="button"${analysis.people.length ? "" : " disabled"}>${t("Use checked CSV in box")}</button>
         <button class="primary-button csv-enhancer-import" type="button"${analysis.people.length && importState !== "importing" ? "" : " disabled"}>${importLabel}</button>
       </div>
       ${statusText ? `<div class="csv-enhancer-status">${escapeHtml(statusText)}</div>` : ""}
@@ -296,7 +297,7 @@ function enhanceCard(card: HTMLElement) {
     currentMapping = analyse(currentText).mapping;
     importState = "idle";
     statusText = "";
-    fileName.textContent = currentText ? "Pasted CSV" : "No CSV chosen";
+    fileName.textContent = currentText ? t("Pasted CSV") : t("No CSV chosen");
     render();
   });
 
@@ -321,14 +322,14 @@ function enhanceCard(card: HTMLElement) {
       textareaValueSet(textarea, canonical);
       currentText = canonical;
       currentMapping = analyse(canonical).mapping;
-      statusText = "Checked CSV copied into the import box.";
+      statusText = t("Checked CSV copied into the import box.");
       render();
       return;
     }
 
     if (!importButton || !people.length || importState === "importing") return;
     importState = "importing";
-    statusText = "Importing clients...";
+    statusText = t("Importing clients...");
     render();
     try {
       const result = await importCheckedPeople(people);
@@ -337,12 +338,22 @@ function enhanceCard(card: HTMLElement) {
       const skipped = Number(result.skipped ?? 0);
       const errors = Array.isArray(result.errors) ? result.errors.length : 0;
       importState = "imported";
-      statusText = `${imported} added, ${updated} updated${skipped ? `, ${skipped} skipped` : ""}${errors ? `, ${errors} row errors` : ""}. Reloading client list...`;
+      statusText = [
+        t("{count} added", { count: imported }),
+        t("{count} updated", { count: updated }),
+        skipped ? t("{count} skipped", { count: skipped }) : "",
+        errors ? t("{count} row errors", { count: errors }) : "",
+      ]
+        .filter(Boolean)
+        .join(", ");
+      statusText = t("{summary}. Reloading client list...", { summary: statusText });
       render();
       window.setTimeout(() => window.location.reload(), 900);
     } catch (error) {
       importState = "error";
-      statusText = `Import failed: ${error instanceof Error ? error.message.slice(0, 220) : "Unknown error"}`;
+      statusText = t("Import failed: {reason}", {
+        reason: error instanceof Error ? error.message.slice(0, 220) : t("Unknown error"),
+      });
       render();
     }
   });

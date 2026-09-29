@@ -12,6 +12,7 @@
 import { useEffect, useRef } from "react";
 import qrcode from "qrcode-generator";
 import type { PosTransaction } from "./types";
+import { t } from "../../lib/i18n";
 
 // Stripe checkout sessions live for 24h, but a customer standing at a counter
 // either pays within a couple of minutes or does not. Stop polling after that
@@ -84,7 +85,7 @@ export async function postPosJson(path: string, body: unknown) {
   });
   const data = (await response.json().catch(() => null)) as Record<string, unknown> | null;
   if (!response.ok) {
-    throw new Error(typeof data?.message === "string" ? data.message : "Payment could not be recorded.");
+    throw new Error(typeof data?.message === "string" ? data.message : t("Payment could not be recorded."));
   }
   return data || {};
 }

@@ -6,8 +6,10 @@
 // Say what is coming in the reader's own words -- "clients", "your lessons" --
 // and pick the size by where the wait sits, not by how long it is.
 
+import { t } from "../../lib/i18n";
+
 export function loadingLabel(what?: string) {
-  return what ? `Loading ${what}…` : "Loading…";
+  return what ? t("Loading {what}…", { what }) : t("Loading…");
 }
 
 export type LoadingSize =

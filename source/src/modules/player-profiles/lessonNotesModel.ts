@@ -1,3 +1,4 @@
+import { t } from "../../lib/i18n";
 // A lesson note as the workspace understands it, and the normaliser that turns
 // the server's answer into that shape. Moved out of App.tsx so the notes store
 // and Player Profiles can exist without importing the whole workspace.
@@ -36,7 +37,7 @@ export function cleanLessonNote(note: Partial<LessonNote> & { id?: unknown } = {
     playerName: text(note.playerName),
     lessonId: text(note.lessonId),
     calendarItemId: text(note.calendarItemId),
-    title: text(note.title) || "Lesson note",
+    title: text(note.title) || t("Lesson note"),
     body: text(note.body),
     source: note.source === "voice" ? "voice" : "typed",
     createdAt,

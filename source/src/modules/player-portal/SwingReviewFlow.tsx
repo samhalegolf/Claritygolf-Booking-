@@ -18,6 +18,7 @@ import { useState } from "react";
 
 import { formatDate } from "./format";
 import type { SavedVideoItem } from "../video-analysis/utils/savedVideoLibrary";
+import { t, tn } from "../../lib/i18n";
 
 export type ReviewPassOption = {
   passId: string;
@@ -73,15 +74,13 @@ export function SwingReviewFlow({
   if (step === "pay") {
     return (
       <section className="player-portal-section swing-review-flow">
-        <h2>Send it</h2>
-        <p className="player-portal-lead">
-          {review.name} — back with you within {review.turnaroundDays} day
-          {review.turnaroundDays === 1 ? "" : "s"}.
+        <h2>{t("Send it")}</h2>
+        <p className="player-portal-lead">{tn(review.turnaroundDays, "{name} — back with you within {count} day.", "{name} — back with you within {count} days.", { name: review.name })}
         </p>
 
         <div className="swing-review-summary">
-          <span>{chosenVideo ? chosenVideo.title : "No video"}</span>
-          <span>{draft.notes ? `"${draft.notes.slice(0, 90)}${draft.notes.length > 90 ? "…" : ""}"` : "No note"}</span>
+          <span>{chosenVideo ? chosenVideo.title : t("No video")}</span>
+          <span>{draft.notes ? `"${draft.notes.slice(0, 90)}${draft.notes.length > 90 ? "…" : ""}"` : t("No note")}</span>
         </div>
 
         {error && (
@@ -100,12 +99,10 @@ export function SwingReviewFlow({
               disabled={busy}
               onClick={() => onRedeem(draft, credit.passId)}
             >
-              {busy ? "Sending…" : "Use a credit"}
+              {busy ? t("Sending…") : t("Use a credit")}
             </button>
-            <p className="player-portal-empty">
-              {credit.name} — {credit.creditsAvailable} left
-              {credit.expiresAt && formatDate(credit.expiresAt)
-                ? `, use by ${formatDate(credit.expiresAt)}`
+            <p className="player-portal-empty">{t("{name} — {creditsAvailable} left", { name: credit.name, creditsAvailable: credit.creditsAvailable })}{credit.expiresAt && formatDate(credit.expiresAt)
+                ? t(", use by {expiresAt}", { expiresAt: formatDate(credit.expiresAt) })
                 : ""}
             </p>
           </>
@@ -117,32 +114,23 @@ export function SwingReviewFlow({
               disabled={busy}
               onClick={() => onBuy(draft)}
             >
-              {busy ? "Opening…" : `Pay ${review.currency} ${review.price.toFixed(2)}`}
+              {busy ? t("Opening…") : t("Pay {currency} {price}", { currency: review.currency, price: review.price.toFixed(2) })}
             </button>
-            <p className="player-portal-empty">
-              Card payment. Your note and video are kept while you pay.
-            </p>
+            <p className="player-portal-empty">{t("Card payment. Your note and video are kept while you pay.")}</p>
           </>
         ) : (
-          <p className="player-portal-empty">
-            You do not have a review credit available in this app. Credits already added to your
-            account will appear here.
-          </p>
+          <p className="player-portal-empty">{t("You do not have a review credit available in this app. Credits already added to your account will appear here.")}</p>
         )}
 
-        <button className="player-portal-ghost" type="button" disabled={busy} onClick={() => setStep("compose")}>
-          Back
-        </button>
+        <button className="player-portal-ghost" type="button" disabled={busy} onClick={() => setStep("compose")}>{t("Back")}</button>
       </section>
     );
   }
 
   return (
     <section className="player-portal-section swing-review-flow">
-      <h2>New swing review</h2>
-      <p className="player-portal-lead">
-        Send a swing, a question, or both. Your coach marks it up and sends it back.
-      </p>
+      <h2>{t("New swing review")}</h2>
+      <p className="player-portal-lead">{t("Send a swing, a question, or both. Your coach marks it up and sends it back.")}</p>
 
       {/* Videos already on the phone come first: the usual case is a swing
           filmed minutes ago, and making them film it again to send it is the
@@ -173,16 +161,16 @@ export function SwingReviewFlow({
       )}
 
       <button className="player-portal-ghost" type="button" onClick={onRecord}>
-        {savedVideos.length ? "Film a new one" : "Film or upload a swing"}
+        {savedVideos.length ? t("Film a new one") : t("Film or upload a swing")}
       </button>
 
       <label className="player-portal-field">
-        <span>What would you like looked at?</span>
+        <span>{t("What would you like looked at?")}</span>
         <textarea
           value={notes}
           onChange={(event) => setNotes(event.target.value)}
           rows={4}
-          placeholder="Anything in particular — a shot shape, a feeling, a hole you keep losing."
+          placeholder={t("Anything in particular — a shot shape, a feeling, a hole you keep losing.")}
         />
       </label>
 
@@ -193,20 +181,16 @@ export function SwingReviewFlow({
       )}
 
       <div className="player-portal-note-form-actions">
-        <button className="player-portal-ghost" type="button" onClick={onCancel}>
-          Cancel
-        </button>
+        <button className="player-portal-ghost" type="button" onClick={onCancel}>{t("Cancel")}</button>
         <button
           className="player-portal-primary"
           type="button"
           disabled={!hasSomething}
           onClick={() => setStep("pay")}
-        >
-          Continue
-        </button>
+        >{t("Continue")}</button>
       </div>
       {!hasSomething && (
-        <p className="player-portal-empty">Pick a video, write a note, or both.</p>
+        <p className="player-portal-empty">{t("Pick a video, write a note, or both.")}</p>
       )}
     </section>
   );
