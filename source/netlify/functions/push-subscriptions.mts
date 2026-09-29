@@ -10,7 +10,9 @@ import {
   pushPublicKey,
   savePushSubscription,
   sendCoachPush,
+  updatePushSubscriptionLanguage,
 } from "./_shared/push-notify.mts";
+import { messageText } from "./_shared/message-language.mts";
 
 /**
  * Browser notification subscriptions for the signed-in coach.
@@ -18,6 +20,7 @@ import {
  * GET    -> { configured, publicKey, subscribed, deviceCount }
  * POST   -> save this browser's subscription (upsert by endpoint)
  * POST   -> { test: true } sends a pop-up to every registered browser
+ * POST   -> { endpoint, language } this browser now reads another language
  * DELETE -> forget this browser
  */
 
@@ -96,13 +99,26 @@ export default async function handler(req: Request) {
           503,
         );
       }
-      const result = await sendCoachPush(accountId, {
-        title: "Clarity test notification",
-        body: "Browser notifications are working.\nThis is what a new booking will look like.",
-        url: "/",
-        tag: "clarity-test",
+      const result = await sendCoachPush(accountId, (language) => {
+        const mt = messageText(language);
+        return {
+          title: mt("Clarity test notification"),
+          body: mt("Browser notifications are working.\nThis is what a new booking will look like."),
+          url: "/",
+          tag: "clarity-test",
+        };
       });
       return json({ ok: result.sent > 0, ...result }, result.sent > 0 ? 200 : 207);
+    }
+
+    if (body?.language && body?.endpoint && !body?.subscription) {
+      try {
+        const updated = await updatePushSubscriptionLanguage(accountId, cleanText(body.endpoint, 600), body.language);
+        return json({ ok: updated });
+      } catch (error) {
+        console.error("push_subscriptions:language_failed", error);
+        return json({ error: "save_failed", message: "Could not update this browser." }, 500);
+      }
     }
 
     const endpoint = cleanText(body?.subscription?.endpoint, 600);
@@ -120,6 +136,7 @@ export default async function handler(req: Request) {
         p256dh,
         auth,
         label: cleanText(body?.label, 200) || cleanText(req.headers.get("user-agent"), 200),
+        language: body?.language,
       });
       return json({ ok: true, deviceCount: await countPushSubscriptions(accountId) });
     } catch (error) {

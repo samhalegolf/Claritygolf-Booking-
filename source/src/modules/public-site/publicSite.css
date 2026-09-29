@@ -338,3 +338,26 @@
     padding: 22px 0;
   }
 }
+
+/* "Read it in English" under a translated policy: a link that switches language. */
+.public-link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+/* The language picker in the footer, as quiet as the links beside it. */
+.public-site-footer .settings-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.public-site-footer .settings-field select {
+  font: inherit;
+}

@@ -1,6 +1,8 @@
 import { getDatabase } from "@netlify/database";
 import { randomUUID } from "node:crypto";
 
+import { cleanMessageLanguage } from "./message-language.mts";
+
 /**
  * Web push transport for coach browser notifications.
  *
@@ -19,6 +21,8 @@ export type StoredPushSubscription = {
   endpoint: string;
   p256dh: string;
   auth: string;
+  /** The screen language of the browser that subscribed; "" for one saved before that was kept. */
+  language: string;
 };
 
 export type CoachPushMessage = {
@@ -89,13 +93,18 @@ export async function ensurePushSubscriptionsTable() {
     CREATE INDEX IF NOT EXISTS idx_push_subscriptions_account
     ON push_subscriptions (account_id)
   `;
+  // A pop-up is read on one device, so it is written in that device's
+  // language. Rows saved before this column existed read as "".
+  await db().sql`
+    ALTER TABLE push_subscriptions ADD COLUMN IF NOT EXISTS language TEXT NOT NULL DEFAULT ''
+  `;
   tableReady = true;
 }
 
 export async function listPushSubscriptions(accountId: string): Promise<StoredPushSubscription[]> {
   await ensurePushSubscriptionsTable();
   const rows = await db().sql`
-    SELECT id, endpoint, p256dh, auth
+    SELECT id, endpoint, p256dh, auth, language
     FROM push_subscriptions
     WHERE account_id = ${accountId}
     ORDER BY created_at ASC
@@ -105,6 +114,7 @@ export async function listPushSubscriptions(accountId: string): Promise<StoredPu
     endpoint: String(row.endpoint),
     p256dh: String(row.p256dh),
     auth: String(row.auth),
+    language: String(row.language || ""),
   }));
 }
 
@@ -140,10 +150,11 @@ export async function savePushSubscription(input: {
   p256dh: string;
   auth: string;
   label?: string;
+  language?: string;
 }) {
   await ensurePushSubscriptionsTable();
   await db().sql`
-    INSERT INTO push_subscriptions (id, account_id, user_id, endpoint, p256dh, auth, label)
+    INSERT INTO push_subscriptions (id, account_id, user_id, endpoint, p256dh, auth, label, language)
     VALUES (
       ${`push-${randomUUID()}`},
       ${input.accountId},
@@ -151,7 +162,8 @@ export async function savePushSubscription(input: {
       ${input.endpoint},
       ${input.p256dh},
       ${input.auth},
-      ${String(input.label || "").slice(0, 200)}
+      ${String(input.label || "").slice(0, 200)},
+      ${cleanMessageLanguage(input.language)}
     )
     ON CONFLICT (endpoint) DO UPDATE SET
       account_id = EXCLUDED.account_id,
@@ -159,10 +171,27 @@ export async function savePushSubscription(input: {
       p256dh = EXCLUDED.p256dh,
       auth = EXCLUDED.auth,
       label = EXCLUDED.label,
+      language = EXCLUDED.language,
       failure_count = 0,
       last_error = '',
       last_seen_at = NOW()
   `;
+}
+
+/**
+ * This browser now reads Clarity in another language. Its pop-ups follow.
+ * Returns whether the browser was registered at all.
+ */
+export async function updatePushSubscriptionLanguage(accountId: string, endpoint: string, language: unknown) {
+  if (!endpoint) return false;
+  await ensurePushSubscriptionsTable();
+  const rows = await db().sql`
+    UPDATE push_subscriptions
+    SET language = ${cleanMessageLanguage(language)}, last_seen_at = NOW()
+    WHERE account_id = ${accountId} AND endpoint = ${endpoint}
+    RETURNING id
+  `;
+  return rows.length > 0;
 }
 
 export async function deletePushSubscription(accountId: string, endpoint: string) {
@@ -185,13 +214,19 @@ async function loadWebPush() {
 }
 
 /**
- * Send one message to every browser the coach has enabled.
+ * Send one message to every browser the coach has enabled, each in its own
+ * language: `compose` is asked once per language in use. A browser that never
+ * said which language it reads gets `fallbackLanguage` (the business's).
  *
  * Never throws. A pop-up is a courtesy on top of the email that already went
  * out; nothing in the booking path should fail because a push service was
  * having a bad afternoon.
  */
-export async function sendCoachPush(accountId: string, message: CoachPushMessage): Promise<CoachPushResult> {
+export async function sendCoachPush(
+  accountId: string,
+  compose: (language: string) => CoachPushMessage,
+  fallbackLanguage = "en",
+): Promise<CoachPushResult> {
   if (!pushConfigured()) return { sent: 0, failed: 0, pruned: 0, skipped: "not_configured" };
 
   let subscriptions: StoredPushSubscription[] = [];
@@ -212,12 +247,23 @@ export async function sendCoachPush(accountId: string, message: CoachPushMessage
     return { sent: 0, failed: 0, pruned: 0, skipped: "library_missing" };
   }
 
-  const payload = JSON.stringify({
-    title: message.title,
-    body: message.body,
-    url: message.url || "/",
-    tag: message.tag || "clarity-booking",
-  });
+  const payloads = new Map<string, string>();
+  function payloadFor(subscription: StoredPushSubscription) {
+    const language = cleanMessageLanguage(subscription.language || fallbackLanguage);
+    if (!payloads.has(language)) {
+      const message = compose(language);
+      payloads.set(
+        language,
+        JSON.stringify({
+          title: message.title,
+          body: message.body,
+          url: message.url || "/",
+          tag: message.tag || "clarity-booking",
+        }),
+      );
+    }
+    return payloads.get(language)!;
+  }
 
   let sent = 0;
   let failed = 0;
@@ -228,7 +274,7 @@ export async function sendCoachPush(accountId: string, message: CoachPushMessage
       try {
         await webPush.sendNotification(
           { endpoint: subscription.endpoint, keys: { p256dh: subscription.p256dh, auth: subscription.auth } },
-          payload,
+          payloadFor(subscription),
           { TTL: 60 * 60 * 12, urgency: "high" },
         );
         sent += 1;
