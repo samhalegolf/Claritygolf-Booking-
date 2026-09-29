@@ -2,6 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, Mic, Save, Square } from 'lucide-react';
 import { buildVocabularyPhrases, DEFAULT_CLARITY_VOICE_VOCABULARY } from './clarityVoiceVocabulary';
 import { useClarityVoice } from './useClarityVoice';
+import { speechLocale } from './clarityVoiceLanguage';
+import { activeLanguage, t } from '../../lib/i18n';
+import { getActiveCountry } from '../../lib/activeCountry';
 import './clarityVoiceText.css';
 
 type SaveState = 'idle' | 'saving' | 'saved';
@@ -19,8 +22,8 @@ export interface ClarityVoiceTextPanelProps {
 
 export function ClarityVoiceTextPanel({
   initialValue = '',
-  fieldLabel = 'Voice note',
-  placeholder = 'Type or dictate the coach lesson note.',
+  fieldLabel = t('Voice note'),
+  placeholder = t('Type or dictate the coach lesson note.'),
   onCommit
 }: ClarityVoiceTextPanelProps) {
   const [noteText, setNoteText] = useState(initialValue);
@@ -28,7 +31,9 @@ export function ClarityVoiceTextPanel({
   const lastAppliedTranscriptRef = useRef('');
 
   const voice = useClarityVoice({
-    lang: 'en-NZ',
+    // The language the coach reads Clarity in, with the business's country
+    // for the accent where that language is spoken there.
+    lang: speechLocale(activeLanguage(), getActiveCountry()),
     continuous: true,
     interimResults: true,
     maxAlternatives: 5,
@@ -43,9 +48,9 @@ export function ClarityVoiceTextPanel({
     domainPhrases: buildVocabularyPhrases(DEFAULT_CLARITY_VOICE_VOCABULARY)
   });
 
-  const cleanedTranscript = voice.smartNote.cleanedText.trim();
+  const cleanedTranscript = voice.cleanedText.trim();
   const isListening = voice.state === 'listening' || voice.state === 'starting' || voice.state === 'checking';
-  const micLabel = isListening ? 'Stop dictation' : 'Start dictation';
+  const micLabel = isListening ? t('Stop dictation') : t('Start dictation');
 
   useEffect(() => {
     if (!cleanedTranscript) return;
@@ -102,11 +107,11 @@ export function ClarityVoiceTextPanel({
     setSaveState('saved');
   }
 
-  const saveLabel = isSaving ? 'Saving…' : saveState === 'saved' ? 'Saved' : 'Save note';
-  const saveHint = hasText ? saveLabel : 'Type or dictate a note first';
+  const saveLabel = isSaving ? t('Saving…') : saveState === 'saved' ? t('Saved') : t('Save note');
+  const saveHint = hasText ? saveLabel : t('Type or dictate a note first');
 
   return (
-    <section className="clarityVoicePanel" aria-label="Lesson note dictation">
+    <section className="clarityVoicePanel" aria-label={t('Lesson note dictation')}>
       <div className="clarityVoiceInputRow">
         <button
           type="button"

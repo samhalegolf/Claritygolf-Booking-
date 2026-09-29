@@ -3,7 +3,6 @@ import { getClarityVoiceSupportReport, getSpeechRecognitionConstructor, requestM
 import { buildVocabularyPhrases, DEFAULT_CLARITY_VOICE_VOCABULARY, mergeClarityVocabularyTerms } from './clarityVoiceVocabulary';
 import { cleanClarityTranscript, scoreTranscriptAlternative, suppressDictationFillers } from './clarityVoiceTextCleaner';
 import type {
-  ClarityVoiceAccentPreset,
   ClarityVoiceAudioActivity,
   ClarityVoiceCallbacks,
   ClarityVoiceController,
@@ -198,7 +197,7 @@ export function createClarityVoiceController(
 
       for (let i = event.resultIndex; i < event.results.length; i += 1) {
         const result = event.results[i];
-        const selected = chooseBestAlternative(result, effectiveDomainPhrases, effectiveVocabulary);
+        const selected = chooseBestAlternative(result, effectiveDomainPhrases, effectiveVocabulary, merged.lang);
         if (!selected) continue;
         latestConfidence = selected.confidence ?? latestConfidence;
         freshAlternatives.push(selected);
@@ -209,7 +208,7 @@ export function createClarityVoiceController(
       if (freshFinal.trim()) {
         let nextFinal = freshFinal;
         if (merged.suppressFillers) {
-          const suppressed = suppressDictationFillers(nextFinal);
+          const suppressed = suppressDictationFillers(nextFinal, merged.lang);
           nextFinal = suppressed.text;
           pauseStats = {
             ...pauseStats,
@@ -222,14 +221,14 @@ export function createClarityVoiceController(
         }
 
         finalText = cleanClarityTranscript(joinTranscript(finalText, nextFinal), {
+          locale: merged.lang,
           removeFillers: merged.suppressFillers,
           smartPunctuation: merged.smartPunctuation,
-          profanityFilter: merged.profanityFilter,
-          vocabularyTerms: effectiveVocabulary
+          profanityFilter: merged.profanityFilter
         });
       }
 
-      interimText = merged.suppressFillers ? suppressDictationFillers(freshInterim).text : freshInterim.trim();
+      interimText = merged.suppressFillers ? suppressDictationFillers(freshInterim, merged.lang).text : freshInterim.trim();
       confidence = latestConfidence;
       alternatives = freshAlternatives;
       emitTranscript();
@@ -373,7 +372,7 @@ export function createClarityVoiceController(
       pauseStats = { ...DEFAULT_PAUSE_STATS };
       emitTranscript();
     },
-    setLanguage(lang: ClarityVoiceAccentPreset) {
+    setLanguage(lang: string) {
       merged.lang = lang;
       if (recognition) recognition.lang = lang;
     },
@@ -391,14 +390,14 @@ export function createClarityVoiceController(
   return controller;
 }
 
-function chooseBestAlternative(result: SpeechRecognitionResult, domainPhrases: string[], vocabularyTerms = DEFAULT_CLARITY_VOICE_VOCABULARY): ClarityVoiceTranscriptAlternative | null {
+function chooseBestAlternative(result: SpeechRecognitionResult, domainPhrases: string[], vocabularyTerms = DEFAULT_CLARITY_VOICE_VOCABULARY, locale = 'en'): ClarityVoiceTranscriptAlternative | null {
   let best: ClarityVoiceTranscriptAlternative | null = null;
 
   for (let index = 0; index < result.length; index += 1) {
     const alternative = result[index];
     if (!alternative?.transcript) continue;
     const confidence = typeof alternative.confidence === 'number' ? alternative.confidence : null;
-    const score = scoreTranscriptAlternative(alternative.transcript, domainPhrases, vocabularyTerms) + (confidence ?? 0) * 4;
+    const score = scoreTranscriptAlternative(alternative.transcript, domainPhrases, vocabularyTerms, locale) + (confidence ?? 0) * 4;
     const candidate = { transcript: alternative.transcript.trim(), confidence, score };
     if (!best || candidate.score > best.score) best = candidate;
   }

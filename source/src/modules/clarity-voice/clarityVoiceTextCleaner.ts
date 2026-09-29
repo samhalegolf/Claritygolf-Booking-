@@ -1,23 +1,21 @@
-import { DEFAULT_CLARITY_VOICE_VOCABULARY, normaliseWithClarityVocabulary, scoreWithClarityVocabulary } from './clarityVoiceVocabulary';
+import { DEFAULT_CLARITY_VOICE_VOCABULARY, scoreWithClarityVocabulary } from './clarityVoiceVocabulary';
+import { dictationRules } from './clarityVoiceLanguage';
 import type { ClarityVoiceVocabularyTerm } from './types';
-
-const STANDALONE_FILLERS = [
-  'um', 'umm', 'uh', 'uhh', 'ah', 'ahh', 'erm', 'er', 'hmm', 'mmm'
-];
-
-const PHRASE_FILLERS = [
-  'you know', 'i mean', 'sort of', 'kind of', 'basically', 'actually', 'right so', 'okay so', 'like'
-];
 
 const PROFANITY_LIGHT = [
   /\bf+u+c+k+\w*\b/gi,
   /\bs+h+i+t+\w*\b/gi
 ];
 
+// Word edges that work for any alphabet: \b only knows ASCII, so "ähm" or
+// "punto y aparte" would never match it.
+const BEFORE = '(?<![\\p{L}\\p{N}])';
+const AFTER = '(?![\\p{L}\\p{N}])';
+
 export interface CleanTranscriptOptions {
+  /** The speech locale the text was heard in ("en-NZ", "de-CH"). */
+  locale?: string;
   removeFillers?: boolean;
-  normaliseGolfTerms?: boolean;
-  vocabularyTerms?: ClarityVoiceVocabularyTerm[];
   trimWhitespace?: boolean;
   sentenceCase?: boolean;
   smartPunctuation?: boolean;
@@ -30,30 +28,31 @@ export interface FillerSuppressionResult {
   rejectedFillerCount: number;
 }
 
-export function suppressDictationFillers(input: string): FillerSuppressionResult {
+export function suppressDictationFillers(input: string, locale = 'en'): FillerSuppressionResult {
+  const rules = dictationRules(locale);
   let text = input;
   let fillerCount = 0;
-  let rejectedFillerCount = 0;
 
-  for (const filler of STANDALONE_FILLERS) {
-    const pattern = new RegExp(`(^|[\\s,.;:!?])${escapeRegExp(filler)}([\\s,.;:!?]|$)`, 'gi');
-    text = text.replace(pattern, (match, left: string, right: string) => {
+  for (const filler of rules.fillers) {
+    // Written without spaces there is no edge to find: the sound goes wherever it is.
+    const pattern = rules.noSpaces
+      ? new RegExp(`()${escapeRegExp(filler)}()`, 'gu')
+      : new RegExp(`(^|[\\s,.;:!?])${escapeRegExp(filler)}([\\s,.;:!?]|$)`, 'giu');
+    text = text.replace(pattern, (_match, left: string, right: string) => {
       fillerCount += 1;
-      rejectedFillerCount += 1;
       return `${left}${right}`;
     });
   }
 
-  for (const filler of PHRASE_FILLERS) {
-    const pattern = new RegExp(`\\b${escapeRegExp(filler)}\\b,?\\s*`, 'gi');
+  for (const filler of rules.fillerPhrases) {
+    const pattern = new RegExp(`${BEFORE}${escapeRegExp(filler)}${AFTER},?\\s*`, 'giu');
     text = text.replace(pattern, () => {
       fillerCount += 1;
-      rejectedFillerCount += 1;
       return '';
     });
   }
 
-  return { text: tidySpacing(text), fillerCount, rejectedFillerCount };
+  return { text: tidySpacing(text), fillerCount, rejectedFillerCount: fillerCount };
 }
 
 export function cleanClarityTranscript(
@@ -61,34 +60,36 @@ export function cleanClarityTranscript(
   options: CleanTranscriptOptions = {}
 ): string {
   const {
+    locale = 'en',
     removeFillers = true,
-    normaliseGolfTerms = true,
     trimWhitespace = true,
     sentenceCase = true,
     smartPunctuation = true,
-    profanityFilter = false,
-    vocabularyTerms = DEFAULT_CLARITY_VOICE_VOCABULARY
+    profanityFilter = false
   } = options;
 
   let text = input;
 
-  if (removeFillers) text = suppressDictationFillers(text).text;
-
-  if (normaliseGolfTerms) text = normaliseWithClarityVocabulary(text, vocabularyTerms);
+  if (removeFillers) text = suppressDictationFillers(text, locale).text;
 
   if (profanityFilter) {
     for (const pattern of PROFANITY_LIGHT) text = text.replace(pattern, '');
   }
 
   text = tidySpacing(text);
-  if (smartPunctuation) text = addLightPunctuation(text);
+  if (smartPunctuation) text = addLightPunctuation(text, locale);
   if (trimWhitespace) text = text.trim();
   if (sentenceCase) text = toSentenceCase(text);
 
   return text;
 }
 
-export function scoreTranscriptAlternative(transcript: string, domainPhrases: string[] = [], vocabularyTerms: ClarityVoiceVocabularyTerm[] = DEFAULT_CLARITY_VOICE_VOCABULARY): number {
+export function scoreTranscriptAlternative(
+  transcript: string,
+  domainPhrases: string[] = [],
+  vocabularyTerms: ClarityVoiceVocabularyTerm[] = DEFAULT_CLARITY_VOICE_VOCABULARY,
+  locale = 'en'
+): number {
   const lower = transcript.toLowerCase();
   let score = scoreWithClarityVocabulary(transcript, vocabularyTerms);
 
@@ -98,52 +99,62 @@ export function scoreTranscriptAlternative(transcript: string, domainPhrases: st
   }
 
   if (/\b(?:lesson|booking|customer|client|paid|invoice|driver|wedge|putting|slice|hook|draw|fade|TrackMan|trackman)\b/i.test(transcript)) score += 2;
-  if (/\b(?:um|uh|ah|erm|mmm)\b/i.test(transcript)) score -= 2;
-  if (/[\w)]$/.test(transcript.trim())) score += 0.5;
+  const fillers = dictationRules(locale).fillers.map(escapeRegExp).join('|');
+  if (fillers && new RegExp(`${BEFORE}(?:${fillers})${AFTER}`, 'iu').test(transcript)) score -= 2;
+  if (/[\p{L}\p{N})]$/u.test(transcript.trim())) score += 0.5;
 
   return score;
 }
 
-function addLightPunctuation(value: string): string {
-  let text = value
-    .replace(/\b(new line|next line|new paragraph)\b/gi, '\n')
-    .replace(/\b(full stop|period)\b/gi, '.')
-    .replace(/\b(comma)\b/gi, ',')
-    .replace(/\b(question mark)\b/gi, '?')
-    .replace(/\b(exclamation mark)\b/gi, '!');
+function addLightPunctuation(value: string, locale: string): string {
+  const rules = dictationRules(locale);
+  const stop = rules.fullStop;
+  let text = value;
+  for (const [words, mark] of rules.punctuation) {
+    const alternatives = words.map(escapeRegExp).join('|');
+    const pattern = rules.noSpaces
+      ? new RegExp(`(?:${alternatives})`, 'gu')
+      : new RegExp(`${BEFORE}(?:${alternatives})${AFTER}`, 'giu');
+    text = text.replace(pattern, mark);
+  }
 
   text = text.replace(/\s+\n\s+/g, '\n');
-  text = text.replace(/([^.!?\n])\n/g, '$1.\n');
+  text = text.replace(/([^.!?。！？\n])\n/gu, `$1${stop}\n`);
 
   // Browser speech APIs usually return plain words, not ChatGPT-style punctuation.
   // This is deliberately conservative: it only inserts sentence breaks around
   // strong lesson-note / booking-note cues so it does not mangle golf terms.
-  const sentenceCues: Array<[RegExp, string]> = [
-    [/\b(today|yesterday|this morning|this afternoon)\s+(he|she|they|we|i)\b/gi, '$1. $2'],
-    [/\b(TrackMan|GCQuad|FlightScope|Foresight|SkyTrak)\s+(showed|said|reported|data|numbers)\b/g, '. $1 $2'],
-    [/\b(paid by|payment was|invoice|invoiced|send invoice|bank transfer|card payment)\b/gi, '. $1'],
-    [/\b(book|rebook|schedule|reschedule)\s+(him|her|them|the client|the player)\b/gi, '. $1 $2'],
-    [/\b(next step|homework|main focus|practice plan|follow up)\b/gi, '. $1'],
-    [/\b(client note|coach note|admin note)\b/gi, '. $1'],
-  ];
+  // The cues are English phrases, so they only apply to English notes.
+  if (dictationRules(locale) === dictationRules('en')) {
+    const sentenceCues: Array<[RegExp, string]> = [
+      [/\b(today|yesterday|this morning|this afternoon)\s+(he|she|they|we|i)\b/gi, '$1. $2'],
+      [/\b(TrackMan|GCQuad|FlightScope|Foresight|SkyTrak)\s+(showed|said|reported|data|numbers)\b/g, '. $1 $2'],
+      [/\b(paid by|payment was|invoice|invoiced|send invoice|bank transfer|card payment)\b/gi, '. $1'],
+      [/\b(book|rebook|schedule|reschedule)\s+(him|her|them|the client|the player)\b/gi, '. $1 $2'],
+      [/\b(next step|homework|main focus|practice plan|follow up)\b/gi, '. $1'],
+      [/\b(client note|coach note|admin note)\b/gi, '. $1'],
+    ];
 
-  for (const [pattern, replacement] of sentenceCues) {
-    text = text.replace(pattern, replacement);
+    for (const [pattern, replacement] of sentenceCues) {
+      text = text.replace(pattern, replacement);
+    }
   }
 
   text = text
     .replace(/(^|[\s\n])\.\s*/g, '$1')
     .replace(/\s+([,.!?])/g, '$1')
     .replace(/([.!?])\s*([.!?])+/g, '$1')
-    .replace(/([.!?])\s+([a-z])/g, (_match, punct: string, letter: string) => `${punct} ${letter.toUpperCase()}`);
+    // A spoken "new line" survives: only the space after a mark is normalised.
+    .replace(/([.!?])(\s+)(\p{Ll})/gu, (_match, punct: string, space: string, letter: string) =>
+      `${punct}${space.includes('\n') ? '\n' : ' '}${letter.toUpperCase()}`);
 
-  if (text && !/[.!?]$/.test(text.trim())) text = `${text.trim()}.`;
+  if (text && !/[.!?。！？]$/u.test(text.trim())) text = `${text.trim()}${stop}`;
   return text;
 }
 
 function toSentenceCase(value: string): string {
   if (!value) return value;
-  return value.replace(/(^\s*[a-z])|([.!?]\s+[a-z])|(\n\s*[a-z])/g, match => match.toUpperCase());
+  return value.replace(/(^\s*\p{Ll})|([.!?]\s+\p{Ll})|(\n\s*\p{Ll})/gu, match => match.toUpperCase());
 }
 
 function tidySpacing(value: string): string {

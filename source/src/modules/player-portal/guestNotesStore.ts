@@ -1,8 +1,7 @@
 // Local-only notes a guest player keeps for themselves.
 //
-// Modeled on clarityVoiceVocabularyStore.ts: no IndexedDB, no server round
-// trip -- these are the guest's own scratch notes, stored on-device only,
-// separate from the coach-authored "Lesson notes" a signed-in player sees
+// No IndexedDB, no server round trip -- these are the guest's own scratch
+// notes, stored on-device only, separate from the coach-authored "Lesson notes" a signed-in player sees
 // (those come from GET /api/player/profile and never touch localStorage).
 
 export type GuestNote = {
