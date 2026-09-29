@@ -3965,5 +3965,21 @@
   "{count} things to work on. Tap a block to read it.": "{count} ting å jobbe med. Trykk på en blokk for å lese den.",
   "{count} credit": "{count} kreditt",
   "{name} — back with you within {count} day.": "{name} – svar innen {count} dag.",
-  "{name} — back with you within {count} days.": "{name} – svar innen {count} dager."
+  "{name} — back with you within {count} days.": "{name} – svar innen {count} dager.",
+  "New booking": "Ny booking",
+  "Sent the moment a lesson is booked": "Sendes med en gang en time blir booket",
+  "Rescheduled": "Ny tid",
+  "Sent when a lesson moves": "Sendes når en time flyttes",
+  "Sent before the lesson, at your reminder lead time": "Sendes før timen, etter påminnelsestiden du har valgt",
+  "Sent immediately on cancellation": "Sendes med en gang ved avlysning",
+  "Group session": "Gruppeøkt",
+  "Sent instead of New booking when the lesson type is a group": "Sendes i stedet for Ny booking når timetypen er en gruppe",
+  "Sent instead of New booking when the lesson type is a package": "Sendes i stedet for Ny booking når timetypen er en pakke",
+  "{characters} · {segments}": "{characters} · {segments}",
+  "{count} character": "{count} tegn",
+  "{count} characters": "{count} tegn",
+  "{count} segment": "{count} segment",
+  "{count} segments": "{count} segmenter",
+  "Email & text language": "Språk for e-post og SMS",
+  "The language of Clarity's wording in the emails and texts your clients receive. Anything you have written yourself in Message templates is sent exactly as you wrote it.": "Språket i Claritys tekst i e-postene og SMS-ene klientene dine mottar. Alt du har skrevet selv i Meldingsmaler, sendes nøyaktig slik du skrev det."
 }
