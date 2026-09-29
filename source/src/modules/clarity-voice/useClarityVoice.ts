@@ -1,13 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createClarityVoiceController } from './clarityVoiceEngine';
-import { buildClaritySmartNote } from './clarityVoiceSmartNotes';
+import { cleanClarityTranscript } from './clarityVoiceTextCleaner';
 import type {
-  ClarityVoiceAccentPreset,
   ClarityVoiceAudioActivity,
   ClarityVoiceController,
   ClarityVoiceError,
   ClarityVoiceOptions,
-  ClarityVoiceSmartNote,
   ClarityVoiceState,
   ClarityVoiceSupportReport,
   ClarityVoiceTranscript
@@ -69,9 +67,9 @@ export function useClarityVoice(options: ClarityVoiceOptions = {}) {
     };
   }, [stableOptions]);
 
-  const smartNote: ClarityVoiceSmartNote = useMemo(
-    () => buildClaritySmartNote(transcript.combinedText, transcript.confidence, stableOptions.vocabularyTerms),
-    [transcript.combinedText, transcript.confidence, stableOptions.vocabularyTerms]
+  const cleanedText = useMemo(
+    () => cleanClarityTranscript(transcript.combinedText, { locale: stableOptions.lang, smartPunctuation: true }),
+    [transcript.combinedText, stableOptions.lang]
   );
 
   const start = useCallback(() => {
@@ -83,7 +81,7 @@ export function useClarityVoice(options: ClarityVoiceOptions = {}) {
   const abort = useCallback(() => controllerRef.current?.abort(), []);
   const reset = useCallback(() => controllerRef.current?.reset(), []);
   const refreshSupportReport = useCallback(() => controllerRef.current?.refreshSupportReport(), []);
-  const setLanguage = useCallback((lang: ClarityVoiceAccentPreset) => {
+  const setLanguage = useCallback((lang: string) => {
     controllerRef.current?.setLanguage(lang);
   }, []);
 
@@ -91,7 +89,7 @@ export function useClarityVoice(options: ClarityVoiceOptions = {}) {
     isSupported: controllerRef.current?.isSupported ?? false,
     state,
     transcript,
-    smartNote,
+    cleanedText,
     audioActivity,
     supportReport,
     error,

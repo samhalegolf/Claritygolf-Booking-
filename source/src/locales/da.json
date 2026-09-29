@@ -4056,5 +4056,10 @@
   "If your question is about a lesson time, cancellation, coaching service or payment arranged with a coach, contact the coach or golf business that provided your booking link. Those arrangements are managed by the individual business.": "Hvis dit spørgsmål handler om et lektionstidspunkt, en aflysning, en træningsydelse eller en betaling aftalt med en træner, skal du kontakte den træner eller golfvirksomhed, der gav dig bookinglinket. Disse ordninger administreres af den enkelte virksomhed.",
   "Google connection help": "Hjælp til Google-forbindelse",
   "Coaches can manage Google Calendar and Clarity Cloud connections from the integrations area after signing in. If a connection needs to be reset or removed and you cannot access the app, contact Support.": "Trænere kan administrere forbindelser til Google Calendar og Clarity Cloud under integrationer efter at have logget ind. Hvis en forbindelse skal nulstilles eller fjernes, og du ikke kan få adgang til appen, skal du kontakte Support.",
-  "Email support": "E-mailsupport"
+  "Email support": "E-mailsupport",
+  "Stop dictation": "Stop diktering",
+  "Start dictation": "Start diktering",
+  "Save note": "Gem note",
+  "Type or dictate a note first": "Skriv eller diktér en note først",
+  "Lesson note dictation": "Diktering af lektionsnoter"
 }
