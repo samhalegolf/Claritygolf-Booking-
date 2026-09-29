@@ -821,20 +821,27 @@ function accountNowSlotCoords(timeZone = "Pacific/Auckland") {
   return { week, dayIndex, nowMinutes };
 }
 
-test("public booking never offers times earlier than now today", () => {
+// The clock is fixed rather than read, so the answer is the same whenever the
+// suite runs. It used to read the real time: it skipped itself late and early
+// in the Auckland day, and on Wednesday mornings failed outright, because the
+// window it opened around "now" ran into the fixture's Wednesday 10:00 group
+// session -- which the booking page rightly refuses to double-book. The moment
+// below is a Wednesday morning, the time it used to fail.
+test("public booking never offers times earlier than now today", (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-09-29T20:41:00Z") }); // Wed 30 Sep, 09:41 in Auckland
   const timeZone = "Pacific/Auckland";
   const { week, dayIndex, nowMinutes } = accountNowSlotCoords(timeZone);
-  // Skip the rare case where "now" leaves no whole 30-minute slot before or
-  // after it inside a business day (very early / very late in the local day).
+  assert.equal(dayIndex, 2);
+  assert.equal(nowMinutes, 9 * 60 + 41);
   const windowStart = nowMinutes - 90;
   const windowEnd = nowMinutes + 90;
-  if (windowStart < 6 * 60 || windowEnd > 22 * 60) return;
 
   const availabilityDays = Array.from({ length: 7 }, () => [] as any[]);
   availabilityDays[dayIndex].push({ accountId, coachId, start: windowStart, end: windowEnd });
 
+  // Only the lesson under test: nothing else in the diary for it to collide with.
   const payload = publicBookingSlots(
-    calendarState({ availability: availabilityDays }),
+    calendarState({ availability: availabilityDays, services: [service()] }),
     { serviceId, week },
   );
   const starts = payload.slots.map((slot: any) => slot.start);
@@ -843,11 +850,8 @@ test("public booking never offers times earlier than now today", () => {
   for (const start of starts) {
     assert.ok(start > nowMinutes, `slot at ${start} should be after now (${nowMinutes})`);
   }
-  // A slot 60 minutes from now is inside the window and must still be offered.
-  assert.ok(
-    starts.some((start: number) => start >= nowMinutes + 30),
-    "a clearly-future slot should remain bookable",
-  );
+  // The earlier half of the window is gone; the later half is still offered.
+  assert.deepEqual(starts, [windowStart + 120, windowStart + 150]);
 });
 
 // --- compatiblePersonMatch: contactless clients ------------------------------
