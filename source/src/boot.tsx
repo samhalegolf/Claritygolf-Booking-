@@ -1,0 +1,235 @@
+import { StrictMode, Suspense, lazy, useCallback, useEffect, useState } from "react";
+import { createRoot } from "react-dom/client";
+import LoginScreen from "./modules/auth/LoginScreen";
+import PublicSite, { type PublicPage } from "./modules/public-site/PublicSite";
+import { Loading } from "./modules/shared/Loading";
+import { fetchSession, guestSession, type Session } from "./modules/auth/session";
+import { isBookingEmbedMode, isPlayerBookingMode, isReviewShareMode, isVideoShareMode } from "./modules/shared/bookingHandoff";
+import { lastVisitorWasCoach } from "./modules/shared/workspaceStorage";
+import { installOptixOriginFeedback } from "./optix-origin-feedback";
+import { installBoxAudit } from "./lib/boxAudit";
+import { AppErrorBoundary } from "./modules/shared/AppErrorBoundary";
+import { installStaleDeployReload } from "./modules/shared/staleDeploy";
+// Tokens first: styles.css and every module stylesheet read --c-*.
+import "./tokens.css";
+import "./styles.css";
+// After styles.css: the app-wide switch settles the ties with the per-screen
+// rules that used to size these as tick boxes.
+import "./switches.css";
+
+// The nesting law is a property of the rendered page, not the stylesheet, so
+// it is checked in the browser rather than by uiRules.test.ts. Dev only.
+installBoxAudit();
+
+// Before anything lazy is imported: a tab open across a deploy reloads once
+// rather than going white on its first panel.
+installStaleDeployReload();
+
+// Both shells are lazy so a player never downloads the coach workspace, and a
+// visitor at the login screen downloads neither. This is why the login form
+// lives in its own module rather than inside App.
+const loadApp = () => import("./App");
+const App = lazy(loadApp);
+const PublicBookingApp = lazy(() => import("./modules/public-booking/PublicBookingApp"));
+const PublicBookingManage = lazy(() => import("./modules/public-booking/PublicBookingManage"));
+const PlayerPortal = lazy(() => import("./modules/player-portal/PlayerPortal"));
+const VideoSharePage = lazy(() => import("./modules/video-share/VideoSharePage"));
+const SwingReviewSharePage = lazy(() => import("./modules/review-share/SwingReviewSharePage"));
+// Not lazy: it is small, and a testing workspace that renders its warning a
+// beat after the workspace it warns about is a workspace someone acts in first.
+import SandboxBar from "./modules/sandbox/SandboxBar";
+import { t } from "./lib/i18n";
+
+// The booking embed is public by design -- it is the widget clients book
+// through. It wins over everything below, including any session.
+//
+// Player booking is the same widget entered from the Player Terminal. It is
+// the one booking entry that waits for the session, because the whole point is
+// that the player is already signed in and is not asked again.
+const bookingEmbed = isBookingEmbedMode();
+const playerBooking = isPlayerBookingMode();
+const publicBookingOnly = bookingEmbed && !playerBooking;
+const publicReschedule = publicBookingOnly && new URLSearchParams(window.location.search).get("mode") === "reschedule";
+// The coach's emailed link to a video a guest sent them. Like the booking
+// embed it wins over everything below, including any session -- the token is
+// the credential, and asking a coach to log in to watch one video is exactly
+// the friction the link exists to remove.
+const videoShare = isVideoShareMode();
+// The player's emailed link to a finished swing review. Same reasoning as the
+// line above: the token is the credential, and a player who has never signed in
+// must not be stopped at a login screen on the way to their own review.
+const reviewShare = isReviewShareMode();
+
+// Public verification/legal pages deliberately bypass authentication. Google,
+// a player, or anyone deciding whether to use Clarity must be able to read
+// these without possessing a Clarity session.
+const publicPath = window.location.pathname.replace(/\/+$/, "") || "/";
+const authLinkAtRoot =
+  publicPath === "/" &&
+  (new URLSearchParams(window.location.search).has("portalInvite") ||
+    new URLSearchParams(window.location.search).has("reset"));
+const publicPage: PublicPage | null =
+  publicPath === "/privacy"
+    ? "privacy"
+    : publicPath === "/terms"
+      ? "terms"
+      : publicPath === "/support"
+        ? "support"
+        : publicPath === "/" && !authLinkAtRoot
+          ? "home"
+          : null;
+
+// A coach who was here last time and did not sign out is a coach again, so
+// their workspace starts downloading now, alongside the session check, rather
+// than after it. The lazy import above reuses the same promise. A player or a
+// stranger never trips this: the hint is removed on logout.
+if (!publicPage && !publicBookingOnly && !videoShare && !reviewShare && lastVisitorWasCoach()) {
+  void loadApp();
+  // The client list too. It is the first thing Clients and Player Profiles
+  // need, it is served by its own function, and nothing about the request
+  // depends on the session answer beyond the cookie this page already has.
+  // If the session turns out to be gone the read fails quietly.
+  void import("./modules/clients/clientsStore")
+    .then((store) => store.prefetchClients())
+    .catch(() => undefined);
+  // And the lesson notes: Player Profiles cannot list anyone until both have
+  // answered, so both start now.
+  void import("./modules/player-profiles/lessonNotesStore")
+    .then((store) => store.prefetchLessonNotes())
+    .catch(() => undefined);
+}
+
+let adminHooksInstalled = false;
+
+
+/**
+ * Who is signed in decides which app runs.
+ *
+ * This used to be decided by hostname: players.claritygolf.app got the portal,
+ * everything else got the admin app, and each had its own login. Now the server
+ * answers /api/auth/session with a role and this routes on it, so one login
+ * screen leads to two apps. The portal hostname still works -- it just is not
+ * the mechanism any more.
+ */
+function Root() {
+  const [session, setSession] = useState<Session | null>(null);
+
+  useEffect(() => {
+    // The share page never asks who is looking -- that is the whole point of
+    // it -- so it must not make a session call either.
+    if (publicPage || publicBookingOnly || videoShare || reviewShare) return;
+    let cancelled = false;
+    void fetchSession().then((next) => {
+      if (!cancelled) setSession(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Admin-only document hooks, installed once the coach shell is actually the
+  // thing being rendered. They hook the document rather than React, so they
+  // cannot live inside App -- but a player must never get them.
+  //
+  // Two of these are gone: installOptixBookingFeedback, whose panel is now the
+  // React BookingResourcesPanel inside the booking modal, and
+  // installOptixBookingMutationSync, whose whole body was a comment saying it
+  // did nothing.
+  useEffect(() => {
+    if (bookingEmbed || session?.role !== "coach" || adminHooksInstalled) return;
+    // (bookingEmbed covers player booking too: the widget never wants them.)
+    adminHooksInstalled = true;
+    installOptixOriginFeedback();
+  }, [session?.role]);
+
+  // App calls this when the server rejects it mid-session (an expired or
+  // revoked cookie), which drops straight back to the login screen instead of
+  // leaving a workspace on screen that can no longer save anything.
+  const handleSessionLost = useCallback(() => setSession(guestSession), []);
+
+  if (publicPage) {
+    return <PublicSite page={publicPage} />;
+  }
+
+  if (videoShare) {
+    return (
+      <Suspense fallback={<Loading size="screen" what={t("video")} />}>
+        <VideoSharePage />
+      </Suspense>
+    );
+  }
+
+  if (reviewShare) {
+    return (
+      <Suspense fallback={<Loading size="screen" what={t("your review")} />}>
+        <SwingReviewSharePage />
+      </Suspense>
+    );
+  }
+
+  if (publicBookingOnly) {
+    return (
+      <Suspense fallback={<Loading size="screen" what={t("booking")} />}>
+        {publicReschedule ? <PublicBookingManage /> : <PublicBookingApp />}
+      </Suspense>
+    );
+  }
+
+  if (!session) return <Loading size="screen" label={t("Checking session…")} />;
+
+  // A player always gets the terminal, booking included. The portal renders
+  // booking inside its own shell rather than handing the page over, so the
+  // navigation bar survives the trip.
+  if (session.role === "player") {
+    return (
+      <>
+        {/* A coach part-way through a sandbox handoff. The portal below is the
+            real one -- this is the only thing on screen that knows the player
+            looking at it is not the player. */}
+        {session.accountKind === "sandbox" && session.viewingAs ? (
+          <SandboxBar viewingAs={session.viewingAs} />
+        ) : null}
+        <Suspense fallback={<Loading size="screen" what={t("your profile")} />}>
+          <PlayerPortal session={session} onSignedOut={handleSessionLost} />
+        </Suspense>
+      </>
+    );
+  }
+
+  // Everyone else who lands on the player-booking URL -- a shared link, an
+  // expired cookie, a coach -- gets the ordinary public widget rather than a
+  // login wall. The parameter asked; the session decided.
+  if (bookingEmbed) {
+    return (
+      <Suspense fallback={<Loading size="screen" what={t("booking")} />}>
+        <PublicBookingApp />
+      </Suspense>
+    );
+  }
+
+  if (session.role === "coach") {
+    return (
+      <>
+        {/* Above the shell rather than inside it, so the coach workspace and the
+            player terminal both get the same bar without either layout having to
+            make room for it. */}
+        {session.accountKind === "sandbox" ? (
+          <SandboxBar liveAccountId={session.liveAccountId || ""} />
+        ) : null}
+        <Suspense fallback={<Loading size="screen" what={t("your workspace")} />}>
+          <App onSessionLost={handleSessionLost} session={session} />
+        </Suspense>
+      </>
+    );
+  }
+
+  return <LoginScreen onSignedIn={setSession} />;
+}
+
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <AppErrorBoundary>
+      <Root />
+    </AppErrorBoundary>
+  </StrictMode>,
+);

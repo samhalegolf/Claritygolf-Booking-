@@ -1,6 +1,6 @@
 // The bar that says you are not in the real workspace.
 //
-// Rendered from main.tsx above whichever shell the session role chose, so the
+// Rendered from boot.tsx above whichever shell the session role chose, so the
 // coach workspace and the player terminal both get it without either layout
 // knowing it exists. It is fixed-position and adds its own height as body
 // padding, which is what lets it sit above two full-height layouts that share
@@ -21,6 +21,7 @@ import {
   type SandboxPlayer,
 } from "./sandboxApi";
 import "./sandbox.css";
+import { t } from "../../lib/i18n";
 
 export type SandboxBarProps = {
   /**
@@ -67,16 +68,13 @@ export default function SandboxBar({ liveAccountId = "", viewingAs }: SandboxBar
   return (
     <div className="sandbox-bar" role="status">
       <span className="sandbox-bar__mark">
-        <FlaskConical size={14} aria-hidden="true" />
-        Test tenant
-      </span>
+        <FlaskConical size={14} aria-hidden="true" />{t("Test tenant")}</span>
       <span className="sandbox-bar__detail">
         {impersonating ? (
-          <>
-            Viewing as <strong>{viewingAs}</strong>
+          <>{t("Viewing as")}{" "}<strong>{viewingAs}</strong>
           </>
         ) : (
-          <>A fresh business, walled off from your live workspace. Emails and bookings made here are real.</>
+          <>{t("A fresh business, walled off from your live workspace. Emails and bookings made here are real.")}</>
         )}
       </span>
       <span className="sandbox-bar__actions">
@@ -87,7 +85,7 @@ export default function SandboxBar({ liveAccountId = "", viewingAs }: SandboxBar
             disabled={busy}
             onClick={() => run(returnToCoach)}
           >
-            {busy ? "Returning…" : "Return to coach"}
+            {busy ? t("Returning…") : t("Return to coach")}
           </button>
         ) : (
           <>
@@ -101,7 +99,7 @@ export default function SandboxBar({ liveAccountId = "", viewingAs }: SandboxBar
                   if (personId) void run(() => continueAsPlayer(personId));
                 }}
               >
-                <option value="">Choose a player…</option>
+                <option value="">{t("Choose a player…")}</option>
                 {players.map((player) => (
                   <option key={player.id} value={player.id}>
                     {player.name || player.email || player.id}
@@ -115,7 +113,7 @@ export default function SandboxBar({ liveAccountId = "", viewingAs }: SandboxBar
               disabled={busy}
               onClick={() => void openPicker()}
             >
-              {players ? "Cancel" : "Continue as player"}
+              {players ? t("Cancel") : t("Continue as player")}
             </button>
             <button
               type="button"
@@ -123,7 +121,7 @@ export default function SandboxBar({ liveAccountId = "", viewingAs }: SandboxBar
               disabled={busy || !liveAccountId}
               onClick={() => run(() => switchWorkspace(liveAccountId))}
             >
-              {busy ? "Leaving…" : "Leave sandbox"}
+              {busy ? t("Leaving…") : t("Leave sandbox")}
             </button>
           </>
         )}

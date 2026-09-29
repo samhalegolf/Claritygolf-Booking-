@@ -29,6 +29,7 @@ import {
   currencyForAccountSettings,
   localeForCountry,
 } from "../../netlify/functions/_shared/locale.mts";
+import { activeLanguage } from "./i18n";
 
 let activeCountry: CountryCode = FALLBACK_PHONE_COUNTRY;
 let activeCurrencyCode = "";
@@ -48,9 +49,9 @@ export function getActiveCountry(): CountryCode {
   return activeCountry;
 }
 
-/** This workspace's locale, for dates and numbers. */
+/** This workspace's locale, for dates and numbers, in the reader's language. */
 export function activeLocale(): string {
-  return localeForCountry(activeCountry);
+  return localeForCountry(activeCountry, activeLanguage());
 }
 
 /** This workspace's currency. */
