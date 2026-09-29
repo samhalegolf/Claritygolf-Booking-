@@ -150,6 +150,14 @@
   background: #fff;
 }
 
+.public-summary-logo {
+  display: block;
+  width: 112px;
+  height: 112px;
+  margin-bottom: 20px;
+  border-radius: 14px;
+}
+
 .public-summary-card span,
 .public-feature-grid article > span {
   color: #76736d;
