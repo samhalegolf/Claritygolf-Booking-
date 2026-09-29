@@ -1041,7 +1041,6 @@
   "available times": "beschikbare tijden",
   "No upcoming group lesson times are available yet.": "Er zijn nog geen komende groepslestijden beschikbaar.",
   "No public times available for this day.": "Geen openbare tijden beschikbaar op deze dag.",
-  "Choose a day first.": "Kies eerst een dag.",
   "Choose an appointment type first.": "Kies eerst een soort afspraak.",
   "Date not selected": "Geen datum gekozen",
   "Select appointment first": "Kies eerst een afspraak",
@@ -4061,5 +4060,11 @@
   "Start dictation": "Dicteren starten",
   "Save note": "Notitie opslaan",
   "Type or dictate a note first": "Typ of dicteer eerst een notitie",
-  "Lesson note dictation": "Lesnotitie dicteren"
+  "Lesson note dictation": "Lesnotitie dicteren",
+  "Look busy": "Druk lijken",
+  "No public times available this week.": "Deze week zijn er geen openbare tijden beschikbaar.",
+  "On — fewer gaps between lessons": "Aan — minder gaten tussen lessen",
+  "Off — every open time is shown": "Uit — alle vrije tijden worden getoond",
+  "Only offer times next to an existing booking or the start or end of your day": "Alleen tijden aanbieden direct naast een bestaande boeking of aan het begin of einde van je dag",
+  "Your booking page shows fewer times, so your diary looks in demand and lessons book back to back instead of leaving gaps.": "Je boekingspagina toont minder tijden, zodat je agenda gewild oogt en lessen aansluitend worden geboekt in plaats van gaten te laten."
 }

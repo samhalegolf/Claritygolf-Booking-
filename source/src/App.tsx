@@ -201,6 +201,8 @@ import {
   type BookingEntryMode,
 } from "./modules/shared/bookingHandoff";
 import { currentPublicBookingScreenId, publicApi, publicBookingPath } from "./modules/public-booking/bookingScreen";
+import { WeekSlots } from "./modules/public-booking/WeekSlots";
+import { lookBusyStarts } from "../netlify/functions/_shared/look-busy.mts";
 import type {
   VideoWorkspaceNavigationContext,
   VideoWorkspacePlayerChoice,
@@ -2103,6 +2105,9 @@ type NotificationSettings = {
   adminEmailSubject: string;
   adminEmailIntro: string;
   minBookingNoticeMinutes: number;
+  // Booking page › Look busy: offer only the times that butt up against the
+  // day's edges or an existing booking, so lessons pack together.
+  publicBookingLookBusy: boolean;
   smsProviderName: string;
   smsWebhookUrl: string;
   smsFromNumber: string;
@@ -5544,6 +5549,7 @@ const defaultNotificationSettings: NotificationSettings = {
   adminEmailSubject: "New booking: {{client}}",
   adminEmailIntro: "{{client}} booked {{service}} for {{date}} at {{time}}.",
   minBookingNoticeMinutes: DEFAULT_MIN_BOOKING_NOTICE_MINUTES,
+  publicBookingLookBusy: false,
   smsProviderName: "",
   smsWebhookUrl: "",
   smsFromNumber: "",
@@ -5598,6 +5604,7 @@ const NOTIFICATION_BLOCK_KEYS = {
     "adminEmailIntro",
   ],
   bookingNotice: ["minBookingNoticeMinutes"],
+  lookBusy: ["publicBookingLookBusy"],
   playerBookingEmbed: [
     "playerBookingEmbedUrl",
     "playerBookingEmbedLabel",
@@ -6521,6 +6528,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     value: notificationSettings,
     onSave: (draft) => saveNotificationSettings(draft, NOTIFICATION_BLOCK_KEYS.bookingNotice),
   });
+  const lookBusyEditor = useEditableBlock<NotificationSettings>({
+    value: notificationSettings,
+    onSave: (draft) => saveNotificationSettings(draft, NOTIFICATION_BLOCK_KEYS.lookBusy),
+  });
   const playerBookingEmbedEditor = useEditableBlock<NotificationSettings>({
     value: notificationSettings,
     onSave: (draft) => saveNotificationSettings(draft, NOTIFICATION_BLOCK_KEYS.playerBookingEmbed),
@@ -6543,6 +6554,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       { id: "text-machine", title: "SMS", editor: textMachineEditor },
       { id: "message-templates", title: t("Templates"), editor: messageTemplatesEditor },
       { id: "booking-page-notice", title: t("Booking Page notice"), editor: bookingNoticeEditor },
+      { id: "booking-page-look-busy", title: t("Look busy"), editor: lookBusyEditor },
       { id: "booking-screen-name", title: t("Booking Page screen name"), editor: bookingScreenNameEditor },
       { id: "player-booking-embed", title: t("Player portal booking widget"), editor: playerBookingEmbedEditor },
     ],
@@ -6555,6 +6567,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       textMachineEditor,
       messageTemplatesEditor,
       bookingNoticeEditor,
+      lookBusyEditor,
       bookingScreenNameEditor,
       playerBookingEmbedEditor,
     ],
@@ -6630,6 +6643,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     messageTemplatesEditor.status !== "editing" && messageTemplatesEditor.status !== "error";
   const bookingNoticeDraft = bookingNoticeEditor.draftValue;
   const bookingNoticeIsLocked = bookingNoticeEditor.status !== "editing" && bookingNoticeEditor.status !== "error";
+  const lookBusyIsLocked = lookBusyEditor.status !== "editing" && lookBusyEditor.status !== "error";
+  // The preview follows the switch as it is flipped, before Save.
+  const lookBusy = lookBusyEditor.draftValue.publicBookingLookBusy;
   const bookingScreenNameDraft = bookingScreenNameEditor.draftValue;
   const bookingScreenNameIsLocked = bookingScreenNameEditor.status !== "editing" && bookingScreenNameEditor.status !== "error";
   const playerBookingEmbedDraft = playerBookingEmbedEditor.draftValue;
@@ -8753,6 +8769,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       ...(settings ?? {}),
       notificationDelaySeconds: Number.isFinite(delaySeconds) ? clamp(delaySeconds, 30, 3600) : 30,
       minBookingNoticeMinutes: cleanMinBookingNoticeMinutes(minBookingNoticeMinutes),
+      publicBookingLookBusy: settings?.publicBookingLookBusy === true,
       reminderLeadMinutes: Number.isFinite(reminderLeadMinutes) ? clamp(reminderLeadMinutes, 60, 14 * 24 * 60) : 24 * 60,
       googleReviewUrl: cleanUrl(settings?.googleReviewUrl, ""),
       // Always a complete set of six, whatever the server sent - the editor
@@ -10814,20 +10831,17 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const publicBookingSlotStatus = publicBookingSlotKey
     ? publicBookingSlotStatuses[publicBookingSlotKey] ?? "idle"
     : "idle";
-  const publicBookingNeedsSlots = Boolean(bookingTargetService) && (isScheduledGroupService(bookingTargetService) || bookingDaySelected);
   const publicBookingSlotsLoading =
     isEmbedMode &&
     publicBookingStateStatus === "loaded" &&
-    publicBookingNeedsSlots &&
+    Boolean(bookingTargetService) &&
     (publicBookingSlotStatus === "idle" || publicBookingSlotStatus === "loading");
 
   const bookingSlots = useMemo<BookingSlot[]>(() => {
     if (!bookingTargetService) return [];
     if (isEmbedMode) {
       if (publicBookingStateStatus !== "loaded") return [];
-      const cachedSlots = publicBookingSlotKey ? publicBookingSlots[publicBookingSlotKey] ?? [] : [];
-      if (isScheduledGroupService(bookingTargetService)) return cachedSlots;
-      return bookingDaySelected ? cachedSlots.filter((slot) => slot.day === bookingDay) : [];
+      return publicBookingSlotKey ? publicBookingSlots[publicBookingSlotKey] ?? [] : [];
     }
 
     const ignoreId = bookingMode === "reschedule" ? selectedRescheduleMatch?.id : undefined;
@@ -10860,52 +10874,57 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       ];
     }
 
-    if (!bookingDaySelected) return [];
-
     // Each time once, with the first coach and place (in the lesson type's
-    // order) who are free for it -- the same rule the booking server uses.
+    // order) who are free for it -- the same rule the booking server uses,
+    // Look busy included, across the whole week.
+    const duration = bookingTargetService.duration;
     const slots: BookingSlot[] = [];
-    const offered = new Set<number>();
+    const offered = new Set<string>();
     bookingOptions.forEach(({ coachId, locationId }) => {
       const coachAvailability = availabilityForCoach(accountAvailability, coachId, fallbackCoachId);
-      const windows = (coachAvailability[bookingDay] ?? []).filter((window) =>
-        availabilityWindowCoversLocation(window, locationId),
-      );
-      windows.forEach((window) => {
-        for (let start = window.start; start + bookingTargetService.duration <= window.end; start += 30) {
-          if (offered.has(start)) continue;
-          const candidate = {
-            week: activeWeek,
-            day: bookingDay,
-            start,
-            duration: bookingTargetService.duration,
-          };
-          if (!hasCollision(candidate, ignoreId, bookingTargetService, { candidateCoachId: coachId, candidateLocationId: locationId })) {
-            offered.add(start);
-            slots.push({
-              week: candidate.week,
-              day: candidate.day,
-              start: candidate.start,
-              remainingSpots: 0,
-              coachId,
-              locationId,
-            });
+      for (let day = 0; day < 7; day += 1) {
+        const windows = (coachAvailability[day] ?? []).filter((window) =>
+          availabilityWindowCoversLocation(window, locationId),
+        );
+        const busy = lookBusy
+          ? items
+              .filter((item) => {
+                if (item.id === ignoreId || itemWeek(item) !== activeWeek || item.day !== day || isInactiveForConflict(item)) return false;
+                const service = itemService(item, services);
+                return isLocationOnlyBlock(item)
+                  ? resolvedCalendarItemLocationId(item, service, locations, coachAccount) === locationId
+                  : resolvedCalendarItemCoachId(item, service, coachProfiles, coachAccount) === coachId;
+              })
+              .map((item) => ({ start: item.start, end: item.start + item.duration }))
+          : [];
+        windows.forEach((window) => {
+          const starts: number[] = [];
+          if (lookBusy) starts.push(...lookBusyStarts(window, duration, busy));
+          else for (let start = window.start; start + duration <= window.end; start += 30) starts.push(start);
+          for (const start of starts) {
+            if (offered.has(`${day}:${start}`)) continue;
+            const candidate = { week: activeWeek, day, start, duration };
+            if (!hasCollision(candidate, ignoreId, bookingTargetService, { candidateCoachId: coachId, candidateLocationId: locationId })) {
+              offered.add(`${day}:${start}`);
+              slots.push({ week: activeWeek, day, start, remainingSpots: 0, coachId, locationId });
+            }
           }
-        }
-      });
+        });
+      }
     });
-    return slots.sort((a, b) => a.start - b.start);
+    return slots.sort((a, b) => a.day - b.day || a.start - b.start);
   }, [
     accountAvailability,
     accountCoachProfiles,
     accountLocations,
     activeWeek,
-    bookingDay,
-    bookingDaySelected,
     bookingMode,
     bookingTargetService,
     coachAccount,
+    coachProfiles,
     locations,
+    lookBusy,
+    services,
     publicBookingSlotKey,
     publicBookingSlots,
     isEmbedMode,
@@ -10914,7 +10933,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     publicBookingStateStatus,
     selectedRescheduleMatch,
   ]);
-  const visibleBookingSlots = bookingStart === null ? bookingSlots : bookingSlots.filter((slot) => slot.start === bookingStart);
+  const visibleBookingSlots =
+    bookingStart === null ? bookingSlots : bookingSlots.filter((slot) => slot.day === bookingDay && slot.start === bookingStart);
 
   const isAppointmentStepComplete = Boolean(selectedBookingService);
   const isDateTimeStepComplete = bookingDaySelected && bookingStart !== null;
@@ -14231,21 +14251,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const isGroupBookingTimeSelection =
     bookingMode === "book" && isScheduledGroupService(bookingTargetService);
 
-  function handlePublicBookingDaySelect(dayIndex: number) {
-    setBookingDay(dayIndex);
-    setBookingDaySelected(true);
-    setBookingSubmitError("");
-    setBookingStart(null);
-    setOpenPublicBookingSection("datetime");
-  }
-
   function handlePublicBookingTimeSelect(slot: BookingSlot) {
-    const next = bookingStart === slot.start ? null : slot.start;
+    const next = bookingDaySelected && bookingDay === slot.day && bookingStart === slot.start ? null : slot.start;
     setBookingSubmitError("");
-    if (isScheduledGroupService(bookingTargetService)) {
-      setBookingDay(slot.day);
-      setBookingDaySelected(next !== null);
-    }
+    setBookingDay(slot.day);
+    setBookingDaySelected(next !== null);
     setBookingStart(next);
     setOpenPublicBookingSection(next === null ? "datetime" : "information");
   }
@@ -24026,57 +24036,24 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   <ArrowRight size={15} />
                 </button>
               </div>
-              {!isGroupBookingTimeSelection ? (
-                <div className="booking-days-wrap">
-                  <div className="booking-days">
-                    {weekDays.map((day, index) => (
-                      <button
-                        className={bookingDaySelected && bookingDay === index ? "selected-day" : ""}
-                        key={day.label}
-                        onClick={() => handlePublicBookingDaySelect(index)}
-                        type="button"
-                      >
-                        <strong>{day.short}</strong>
-                        <em>{day.date}</em>
-                        {day.isToday ? <small className="booking-day-marker">{t("Today")}</small> : null}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-              <div className="time-slots">
-                {selectedBookingService ? (
-                  publicBookingSlotsLoading ? (
-                    <Loading what={t("available times")} />
-                  ) : bookingSlots.length ? (
-                    visibleBookingSlots.map((slot) => {
-                      const slotLabel = isGroupBookingTimeSelection
-                        ? `${dateForSlot(slot.week, slot.day).toLocaleDateString(activeLocale(), { weekday: "short", month: "short", day: "numeric" })} · ${formatTime(slot.start)} · ${tn(slot.remainingSpots, "{count} spot left", "{count} spots left")}`
-                        : formatTime(slot.start);
-                      return (
-                        <button
-                          className={bookingStart === slot.start ? "selected-time" : ""}
-                          key={`${slot.week}-${slot.day}-${slot.start}`}
-                          onClick={() => handlePublicBookingTimeSelect(slot)}
-                          type="button"
-                        >
-                          {slotLabel}
-                        </button>
-                      );
-                    })
-                  ) : (
-                    <p>
-                      {isGroupBookingTimeSelection
-                        ? t("No upcoming group lesson times are available yet.")
-                        : bookingDaySelected
-                          ? t("No public times available for this day.")
-                          : t("Choose a day first.")}
-                    </p>
-                  )
-                ) : (
-                  <p>{t("Choose an appointment type first.")}</p>
-                )}
-              </div>
+              {selectedBookingService ? (
+                <WeekSlots
+                  week={activeWeek}
+                  slots={visibleBookingSlots}
+                  placeholder={publicBookingSlotsLoading ? <Loading what={t("available times")} /> : null}
+                  dayLabel={(day) => weekDays[day]?.isToday ? `${weekDays[day].label} · ${t("Today")}` : weekDays[day]?.label ?? ""}
+                  slotLabel={(slot) =>
+                    isGroupBookingTimeSelection
+                      ? `${formatTime(slot.start)} · ${tn(slot.remainingSpots, "{count} spot left", "{count} spots left")}`
+                      : formatTime(slot.start)
+                  }
+                  isSelected={(slot) => bookingDaySelected && bookingDay === slot.day && bookingStart === slot.start}
+                  onSelect={handlePublicBookingTimeSelect}
+                  emptyLabel={isGroupBookingTimeSelection ? t("No upcoming group lesson times are available yet.") : t("No public times available this week.")}
+                />
+              ) : (
+                <p>{t("Choose an appointment type first.")}</p>
+              )}
             </div>
           ) : isDateTimeStepComplete ? (
             <button
@@ -24270,6 +24247,36 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           ))}
         </div>
         <button className="outline-button" disabled={bookingNoticeIsLocked} onClick={() => updateBookingNoticeHours(0)} type="button">{t("Clear buffer")}</button>
+      </details>
+      </EditableSettingsBlock>
+      <EditableSettingsBlock
+        id="booking-page-look-busy-block"
+        title={t("Look busy")}
+        status={lookBusyEditor.status}
+        dirty={lookBusyEditor.dirty}
+        errorMessage={lookBusyEditor.errorMessage}
+        onEdit={() => startEditableBlock("booking-page-look-busy")}
+        onCancel={() => cancelEditableBlock("booking-page-look-busy")}
+        onSave={() => void saveEditableBlock("booking-page-look-busy")}
+      >
+      <details className="settings-subsection">
+        <summary className="settings-subsection-title">
+          <ClaritySessions size={18} />
+          <div>
+            <span>{t("Look busy")}</span>
+            <strong>{lookBusy ? t("On — fewer gaps between lessons") : t("Off — every open time is shown")}</strong>
+          </div>
+        </summary>
+        <label className="settings-toggle">
+          <input
+            checked={lookBusy}
+            disabled={lookBusyIsLocked}
+            onChange={(event) => updateNotificationBlockDraft(lookBusyEditor, "publicBookingLookBusy", event.target.checked)}
+            type="checkbox"
+          />
+          <span>{t("Only offer times next to an existing booking or the start or end of your day")}</span>
+        </label>
+        <p className="field-help">{t("Your booking page shows fewer times, so your diary looks in demand and lessons book back to back instead of leaving gaps.")}</p>
       </details>
       </EditableSettingsBlock>
       <EditableSettingsBlock
@@ -31163,57 +31170,24 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                             <ArrowRight size={15} />
                           </button>
                         </div>
-                        {!isGroupBookingTimeSelection ? (
-                          <div className="booking-days-wrap">
-                            <div className="booking-days">
-                              {weekDays.map((day, index) => (
-                                <button
-                                  className={bookingDaySelected && bookingDay === index ? "selected-day" : ""}
-                                  key={day.label}
-                                  onClick={() => handlePublicBookingDaySelect(index)}
-                                  type="button"
-                                >
-                                  <strong>{day.short}</strong>
-                                  <em>{day.date}</em>
-                                  {day.isToday ? <small className="booking-day-marker">{t("Today")}</small> : null}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        ) : null}
-                        <div className="time-slots">
-                          {selectedBookingService ? (
-                            publicBookingSlotsLoading ? (
-                              <Loading what={t("available times")} />
-                            ) : bookingSlots.length ? (
-                              visibleBookingSlots.map((slot) => {
-                                const slotLabel = isGroupBookingTimeSelection
-                                  ? `${dateForSlot(slot.week, slot.day).toLocaleDateString(activeLocale(), { weekday: "short", month: "short", day: "numeric" })} · ${formatTime(slot.start)} · ${tn(slot.remainingSpots, "{count} spot left", "{count} spots left")}`
-                                  : formatTime(slot.start);
-                                return (
-                                  <button
-                                    className={bookingStart === slot.start ? "selected-time" : ""}
-                                    key={`${slot.week}-${slot.day}-${slot.start}`}
-                                    onClick={() => handlePublicBookingTimeSelect(slot)}
-                                    type="button"
-                                  >
-                                    {slotLabel}
-                                  </button>
-                                );
-                              })
-                            ) : (
-                              <p>
-                                {isGroupBookingTimeSelection
-                                  ? t("No upcoming group lesson times are available yet.")
-                                  : bookingDaySelected
-                                    ? t("No public times available for this day.")
-                                    : t("Choose a day first.")}
-                              </p>
-                            )
-                          ) : (
-                            <p>{t("Choose an appointment type first.")}</p>
-                          )}
-                        </div>
+                        {selectedBookingService ? (
+                          <WeekSlots
+                            week={activeWeek}
+                            slots={visibleBookingSlots}
+                            placeholder={publicBookingSlotsLoading ? <Loading what={t("available times")} /> : null}
+                            dayLabel={(day) => weekDays[day]?.isToday ? `${weekDays[day].label} · ${t("Today")}` : weekDays[day]?.label ?? ""}
+                            slotLabel={(slot) =>
+                              isGroupBookingTimeSelection
+                                ? `${formatTime(slot.start)} · ${tn(slot.remainingSpots, "{count} spot left", "{count} spots left")}`
+                                : formatTime(slot.start)
+                            }
+                            isSelected={(slot) => bookingDaySelected && bookingDay === slot.day && bookingStart === slot.start}
+                            onSelect={handlePublicBookingTimeSelect}
+                            emptyLabel={isGroupBookingTimeSelection ? t("No upcoming group lesson times are available yet.") : t("No public times available this week.")}
+                          />
+                        ) : (
+                          <p>{t("Choose an appointment type first.")}</p>
+                        )}
                       </div>
                     ) : isDateTimeStepComplete ? (
                       <button

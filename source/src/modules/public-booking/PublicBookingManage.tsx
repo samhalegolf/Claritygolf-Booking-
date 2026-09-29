@@ -1,9 +1,9 @@
 import { Loading } from "../shared/Loading";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowLeft, ArrowRight, Check, X } from "lucide-react";
-import { ClaritySessions } from "../shared/ClarityIcons";
 import { apiFetch } from "../auth/apiFetch";
 import { publicApi } from "./bookingScreen";
+import { WeekSlots } from "./WeekSlots";
 import { t, readerLocale } from "../../lib/i18n";
 
 type Service = { id: string; name: string; duration: number; location?: string };
@@ -11,7 +11,6 @@ type Match = { id: string; serviceId: string; serviceName: string; duration: num
 type Slot = { week: number; day: number; start: number; remainingSpots?: number };
 type Credentials = { email: string; phone: string };
 const BASE_WEEK_START = new Date(2026, 5, 1);
-const days = [t("Mon"), t("Tue"), t("Wed"), t("Thu"), t("Fri"), t("Sat"), t("Sun")];
 function dateFor(week: number, day: number) { const date = new Date(BASE_WEEK_START); date.setDate(date.getDate() + week * 7 + day); return date; }
 function time(minutes: number) { const hour = Math.floor(minutes / 60); return `${hour % 12 || 12}:${String(minutes % 60).padStart(2, "0")} ${hour >= 12 ? "PM" : "AM"}`; }
 function initialCredentials(): Credentials { const query = new URLSearchParams(location.search); return { email: query.get("email") ?? "", phone: query.get("phone") ?? "" }; }
@@ -26,7 +25,6 @@ export default function PublicBookingManage() {
   const [matches, setMatches] = useState<Match[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [week, setWeek] = useState(0);
-  const [day, setDay] = useState(0);
   const [slots, setSlots] = useState<Slot[]>([]);
   const [slot, setSlot] = useState<Slot | null>(null);
   const [state, setState] = useState<"idle" | "loading" | "saving" | "done" | "error">("idle");
@@ -59,7 +57,7 @@ export default function PublicBookingManage() {
       setMatches(found);
       const preferred = initialBookingId();
       const selection = found.find((match: Match) => match.id === preferred) ?? (found.length === 1 ? found[0] : null);
-      if (selection) { setSelectedId(selection.id); setWeek(selection.week); setDay(selection.day); }
+      if (selection) { setSelectedId(selection.id); setWeek(selection.week); }
       if (!found.length) setMessage(t("No booking matched those details."));
       setState("idle");
     } catch (error) { setMessage(error instanceof Error ? error.message : t("Could not reach the booking server.")); setState("error"); }
@@ -85,12 +83,11 @@ export default function PublicBookingManage() {
     } catch (error) { setMessage(error instanceof Error ? error.message : t("Could not cancel that booking.")); setState("error"); }
   }
   const weekLabel = `${dateFor(week, 0).toLocaleDateString(readerLocale(), { month: "short", day: "numeric" })} – ${dateFor(week, 6).toLocaleDateString(readerLocale(), { month: "short", day: "numeric" })}`;
-  const visibleSlots = useMemo(() => slots.filter((candidate) => candidate.day === day), [slots, day]);
   if (state === "done") return <main className="public-booking"><div className="booking-card booking-confirmation"><Check size={24} /><h1>{message || t("Booking updated")}</h1><a className="primary-button" href={bookingUrl()}>{t("Back to booking")}</a></div></main>;
   return <main className="public-booking"><div className="booking-toolbar"><a className="booking-hero-action" href={bookingUrl()}>{t("Book a lesson")}</a></div><div className="booking-columns">
     <section className="booking-card"><span>{t("Manage Booking")}</span><div className="booking-login-copy"><strong>{t("Find your booking")}</strong><em>{t("Use the email and phone number from your booking.")}</em></div><div className="booking-form"><input value={credentials.email} onChange={(event) => setCredentials((current) => ({ ...current, email: event.target.value }))} placeholder={t("Email")} type="email" /><input value={credentials.phone} onChange={(event) => setCredentials((current) => ({ ...current, phone: event.target.value }))} placeholder={t("Phone")} type="tel" /></div><button className="primary-button confirm-booking" disabled={state === "loading"} onClick={() => void lookup()} type="button">{state === "loading" ? t("Finding…") : t("Find booking")}</button></section>
-    {matches.length ? <section className="booking-card"><span>{t("Your bookings")}</span><div className="service-picker reschedule-list">{matches.map((match) => <button className={match.id === selectedId ? "selected-service" : ""} key={match.id} onClick={() => { setSelectedId(match.id); setWeek(match.week); setDay(match.day); }} type="button"><strong>{match.serviceName}</strong><em>{dateFor(match.week, match.day).toLocaleDateString(readerLocale(), { weekday: "short", month: "short", day: "numeric" })} · {time(match.start)}</em><small>{match.client}</small></button>)}</div></section> : null}
-    {selected ? <><section className="booking-card"><span>{t("New Date & Time")}</span><div className="booking-week-controls"><button onClick={() => setWeek((value) => value - 1)} type="button"><ArrowLeft size={15} />{t("Previous week")}</button><strong>{weekLabel}</strong><button onClick={() => setWeek((value) => value + 1)} type="button">{t("Next week")}<ArrowRight size={15} /></button></div><div className="booking-days">{days.map((name, index) => <button className={day === index ? "selected-day" : ""} key={name} onClick={() => { setDay(index); setSlot(null); }} type="button"><strong>{name}</strong><em>{dateFor(week, index).getDate()}</em></button>)}</div><div className="time-slots">{state === "loading" ? <Loading what={t("available times")} /> : visibleSlots.length ? visibleSlots.map((candidate) => <button className={slot?.start === candidate.start ? "selected-time" : ""} key={`${candidate.day}-${candidate.start}`} onClick={() => setSlot(candidate)} type="button"><ClaritySessions size={15} />{time(candidate.start)}</button>) : <p>{t("No public times available for this day.")}</p>}</div></section><section className="booking-card"><span>{t("Confirm Change")}</span><div className="booking-summary"><strong>{selected.serviceName}</strong><span>{t("Current: {toLocaleDateString} · {start}", { toLocaleDateString: dateFor(selected.week, selected.day).toLocaleDateString(readerLocale()), start: time(selected.start) })}</span><span>{slot ? t("New: {toLocaleDateString} · {start}", { toLocaleDateString: dateFor(slot.week, slot.day).toLocaleDateString(readerLocale()), start: time(slot.start) }) : t("Choose a new time")}</span>{selectedService?.location ? <small>{selectedService.location}</small> : null}</div><button className="primary-button confirm-booking" disabled={!slot || state === "saving"} onClick={() => void reschedule()} type="button">{state === "saving" ? t("Moving…") : t("Confirm Reschedule")}</button><button className="danger-button public-cancel-booking" disabled={state === "saving"} onClick={() => void cancel()} type="button">{t("Cancel Booking")}</button></section></> : null}
+    {matches.length ? <section className="booking-card"><span>{t("Your bookings")}</span><div className="service-picker reschedule-list">{matches.map((match) => <button className={match.id === selectedId ? "selected-service" : ""} key={match.id} onClick={() => { setSelectedId(match.id); setWeek(match.week); }} type="button"><strong>{match.serviceName}</strong><em>{dateFor(match.week, match.day).toLocaleDateString(readerLocale(), { weekday: "short", month: "short", day: "numeric" })} · {time(match.start)}</em><small>{match.client}</small></button>)}</div></section> : null}
+    {selected ? <><section className="booking-card"><span>{t("New Date & Time")}</span><div className="booking-week-controls"><button onClick={() => setWeek((value) => value - 1)} type="button"><ArrowLeft size={15} />{t("Previous week")}</button><strong>{weekLabel}</strong><button onClick={() => setWeek((value) => value + 1)} type="button">{t("Next week")}<ArrowRight size={15} /></button></div><WeekSlots week={week} slots={slots} placeholder={state === "loading" ? <Loading what={t("available times")} /> : null} dayLabel={(day) => dateFor(week, day).toLocaleDateString(readerLocale(), { weekday: "long", month: "short", day: "numeric" })} slotLabel={(candidate) => time(candidate.start)} isSelected={(candidate) => slot?.day === candidate.day && slot?.start === candidate.start} onSelect={setSlot} emptyLabel={t("No public times available this week.")} /></section><section className="booking-card"><span>{t("Confirm Change")}</span><div className="booking-summary"><strong>{selected.serviceName}</strong><span>{t("Current: {toLocaleDateString} · {start}", { toLocaleDateString: dateFor(selected.week, selected.day).toLocaleDateString(readerLocale()), start: time(selected.start) })}</span><span>{slot ? t("New: {toLocaleDateString} · {start}", { toLocaleDateString: dateFor(slot.week, slot.day).toLocaleDateString(readerLocale()), start: time(slot.start) }) : t("Choose a new time")}</span>{selectedService?.location ? <small>{selectedService.location}</small> : null}</div><button className="primary-button confirm-booking" disabled={!slot || state === "saving"} onClick={() => void reschedule()} type="button">{state === "saving" ? t("Moving…") : t("Confirm Reschedule")}</button><button className="danger-button public-cancel-booking" disabled={state === "saving"} onClick={() => void cancel()} type="button">{t("Cancel Booking")}</button></section></> : null}
     {message ? <p className="email-status failed" role="alert"><X size={17} />{message}</p> : null}
   </div></main>;
 }

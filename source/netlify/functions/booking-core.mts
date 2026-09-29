@@ -156,6 +156,7 @@ import {
 } from "./_shared/phone.mts";
 import { deliverEmail } from "./_shared/email-delivery.mts";
 import { cleanMessageLanguage, messageText } from "./_shared/message-language.mts";
+import { lookBusyStarts } from "./_shared/look-busy.mts";
 import {
   notificationRetryDelayMs,
   planBookingNotificationIntent,
@@ -6018,6 +6019,9 @@ export async function readPublicSlotContext({ accountId, serviceId, week } = {},
     availability: availabilityFromSettings(settingsMap, accountId),
     brand: brandSettingsFromSettings(settingsMap, account),
     account,
+    // Booking page › Look busy. Offers only the times that butt up against the
+    // day's edges or an existing booking, so lessons pack together.
+    lookBusy: settingValue(settingsMap, "publicBookingLookBusy") === "true",
   };
   if (metrics) metrics.settingsReadMs = Date.now() - settingsStartedAt;
 
@@ -11142,6 +11146,34 @@ function publicSlotRelevantResourceItems(items = [], service, state = {}) {
   return items.filter((item) => publicSlotItemMayAffectService(item, service, state));
 }
 
+/** Every start on the public grid that fits inside the window. */
+function everyStepStarts(window, duration) {
+  const starts = [];
+  for (let start = window.start; start + duration <= window.end; start += PUBLIC_SLOT_STEP_MINUTES) starts.push(start);
+  return starts;
+}
+
+/**
+ * The ranges already taken in this coach's day at this place: their bookings
+ * and blocks, and any block on the place itself. Look busy packs new lessons
+ * against these.
+ */
+function lookBusyRanges(items, state, { week, day, coachId, locationId }) {
+  const services = state.services || defaultServices;
+  const coaches = state.coaches || [];
+  const locations = state.locations || [];
+  const account = state.account || defaultCoachAccount();
+  return items
+    .filter((item) => {
+      if (itemWeek(item) !== week || item.day !== day || isInactiveForConflict(item)) return false;
+      const itemService = serviceForCalendarItem(item, services);
+      return isLocationOnlyBlock(item)
+        ? resolvedCalendarItemLocationId(item, itemService, locations, account) === locationId
+        : resolvedCalendarItemCoachId(item, itemService, coaches, account) === coachId;
+    })
+    .map((item) => ({ start: Number(item.start), end: Number(item.start) + Number(item.duration) }));
+}
+
 function publicSlotsForService(accountState, service, week, ignoreId = "", handedness = null) {
   const ignoredItemId = cleanString(ignoreId, "", 160);
   const items = ignoredItemId ? accountState.items.filter((item) => item.id !== ignoredItemId) : accountState.items;
@@ -11197,7 +11229,10 @@ function publicSlotsForService(accountState, service, week, ignoreId = "", hande
       for (const window of windows) {
         if ((window.coachId || fallbackCoachId) !== coachId) continue;
         if (!availabilityWindowCoversLocation(window, locationId)) continue;
-        for (let start = window.start; start + service.duration <= window.end; start += PUBLIC_SLOT_STEP_MINUTES) {
+        const starts = accountState.lookBusy
+          ? lookBusyStarts(window, service.duration, lookBusyRanges(items, accountState, { week, day, coachId, locationId }))
+          : everyStepStarts(window, service.duration);
+        for (const start of starts) {
           const key = `${day}:${start}`;
           if (offered.has(key)) continue;
           const candidate = {

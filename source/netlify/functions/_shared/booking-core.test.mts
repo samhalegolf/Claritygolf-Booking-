@@ -268,6 +268,38 @@ test("public booking slots endpoint returns all public services without serviceI
   }
 });
 
+function lookBusyState(items = [], lookBusy = true) {
+  const days = Array.from({ length: 7 }, () => []);
+  days[day].push({ accountId, coachId, start: minutes(9, 0), end: minutes(17, 0) });
+  return calendarState({ items, availability: days, lookBusy });
+}
+
+test("look busy offers only the ends of an empty day", () => {
+  const payload = publicBookingSlots(lookBusyState(), { serviceId, week: testWeek });
+  assert.deepEqual(slotStarts(payload), [minutes(9, 0), minutes(16, 30)]);
+});
+
+test("look busy offers the times either side of a booking, off the half-hour grid too", () => {
+  const payload = publicBookingSlots(
+    lookBusyState([item({ start: minutes(12, 15), duration: 60 })]),
+    { serviceId, week: testWeek },
+  );
+  assert.deepEqual(slotStarts(payload), [minutes(9, 0), minutes(11, 45), minutes(13, 15), minutes(16, 30)]);
+});
+
+test("look busy ignores another coach's bookings", () => {
+  const payload = publicBookingSlots(
+    lookBusyState([item({ coachId: otherCoachId, locationId: otherLocationId, start: minutes(12, 0) })]),
+    { serviceId, week: testWeek },
+  );
+  assert.deepEqual(slotStarts(payload), [minutes(9, 0), minutes(16, 30)]);
+});
+
+test("look busy off keeps every half hour", () => {
+  const payload = publicBookingSlots(lookBusyState([], false), { serviceId, week: testWeek });
+  assert.equal(payload.slots.length, 16);
+});
+
 test("invalid or non-public public booking serviceId keeps the request error path", () => {
   for (const candidateServiceId of ["missing-service", privateServiceId]) {
     assert.throws(

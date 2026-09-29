@@ -1041,7 +1041,6 @@
   "available times": "orari disponibili",
   "No upcoming group lesson times are available yet.": "Ancora nessun orario disponibile per le prossime lezioni di gruppo.",
   "No public times available for this day.": "Nessun orario pubblico disponibile per questo giorno.",
-  "Choose a day first.": "Scegli prima un giorno.",
   "Choose an appointment type first.": "Scegli prima un tipo di appuntamento.",
   "Date not selected": "Data non selezionata",
   "Select appointment first": "Seleziona prima l'appuntamento",
@@ -4061,5 +4060,11 @@
   "Start dictation": "Avvia dettatura",
   "Save note": "Salva nota",
   "Type or dictate a note first": "Scrivi o detta prima una nota",
-  "Lesson note dictation": "Dettatura note della lezione"
+  "Lesson note dictation": "Dettatura note della lezione",
+  "Look busy": "Sembra occupato",
+  "No public times available this week.": "Nessun orario pubblico disponibile questa settimana.",
+  "On — fewer gaps between lessons": "Attivo — meno buchi tra le lezioni",
+  "Off — every open time is shown": "Disattivo — vengono mostrati tutti gli orari liberi",
+  "Only offer times next to an existing booking or the start or end of your day": "Offri solo orari accanto a una prenotazione esistente o all'inizio o alla fine della tua giornata",
+  "Your booking page shows fewer times, so your diary looks in demand and lessons book back to back instead of leaving gaps.": "La tua pagina di prenotazione mostra meno orari, così la tua agenda sembra richiesta e le lezioni vengono prenotate una dopo l'altra invece di lasciare buchi."
 }

@@ -1041,7 +1041,6 @@
   "available times": "vapaat ajat",
   "No upcoming group lesson times are available yet.": "Tulevia ryhmätuntien aikoja ei vielä ole.",
   "No public times available for this day.": "Tälle päivälle ei ole julkisia aikoja.",
-  "Choose a day first.": "Valitse ensin päivä.",
   "Choose an appointment type first.": "Valitse ensin ajanvaraustyyppi.",
   "Date not selected": "Päivää ei valittu",
   "Select appointment first": "Valitse ensin ajanvaraus",
@@ -4061,5 +4060,11 @@
   "Start dictation": "Aloita sanelu",
   "Save note": "Tallenna muistiinpano",
   "Type or dictate a note first": "Kirjoita tai sanele ensin muistiinpano",
-  "Lesson note dictation": "Oppitunnin muistiinpanojen sanelu"
+  "Lesson note dictation": "Oppitunnin muistiinpanojen sanelu",
+  "Look busy": "Näytä kiireiseltä",
+  "No public times available this week.": "Tällä viikolla ei ole vapaita julkisia aikoja.",
+  "On — fewer gaps between lessons": "Päällä — vähemmän taukoja tuntien välillä",
+  "Off — every open time is shown": "Pois — kaikki vapaat ajat näytetään",
+  "Only offer times next to an existing booking or the start or end of your day": "Tarjoa vain aikoja, jotka ovat olemassa olevan varauksen vieressä tai päiväsi alussa tai lopussa",
+  "Your booking page shows fewer times, so your diary looks in demand and lessons book back to back instead of leaving gaps.": "Varaussivusi näyttää vähemmän aikoja, joten kalenterisi näyttää kysytyltä ja tunnit varataan peräkkäin ilman aukkoja."
 }

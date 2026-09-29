@@ -171,6 +171,7 @@ async function readAdminSettings(accountId: string) {
     notificationSubjectLine: cleanString(settings.notificationSubjectLine, "", 180),
     notificationDelaySeconds: Number.isFinite(delaySeconds) ? Math.max(30, Math.min(3600, delaySeconds)) : 30,
     minBookingNoticeMinutes: cleanMinBookingNoticeMinutes(settings.minBookingNoticeMinutes ?? env("CLARITY_MIN_BOOKING_NOTICE_MINUTES", String(defaultMinBookingNoticeMinutes))),
+    publicBookingLookBusy: settings.publicBookingLookBusy === "true",
     sendClientEmail: settings.sendClientEmail !== "false",
     sendCoachEmail: settings.sendCoachEmail !== "false",
     sendAdminEmail: settings.sendAdminEmail !== "false",
@@ -218,6 +219,7 @@ async function writeAdminSettings(accountId: string, settings: any) {
   if (hasOwn(settings, "minBookingNoticeMinutes")) {
     stage("minBookingNoticeMinutes", String(cleanMinBookingNoticeMinutes(settings?.minBookingNoticeMinutes)));
   }
+  if (hasOwn(settings, "publicBookingLookBusy")) stage("publicBookingLookBusy", settings?.publicBookingLookBusy ? "true" : "false");
   if (hasOwn(settings, "sendClientEmail")) stage("sendClientEmail", settings?.sendClientEmail ? "true" : "false");
   if (hasOwn(settings, "sendCoachEmail")) stage("sendCoachEmail", settings?.sendCoachEmail ? "true" : "false");
   if (hasOwn(settings, "sendAdminEmail")) stage("sendAdminEmail", settings?.sendAdminEmail ? "true" : "false");

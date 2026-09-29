@@ -1041,7 +1041,6 @@
   "available times": "空き時間",
   "No upcoming group lesson times are available yet.": "今後のグループレッスンの枠はまだありません。",
   "No public times available for this day.": "この日は予約可能な時間がありません。",
-  "Choose a day first.": "先に日付を選択してください。",
   "Choose an appointment type first.": "先に予約の種類を選択してください。",
   "Date not selected": "日付が選択されていません",
   "Select appointment first": "先に予約内容を選択",
@@ -4061,5 +4060,11 @@
   "Start dictation": "音声入力を開始",
   "Save note": "メモを保存",
   "Type or dictate a note first": "先にメモを入力または音声入力してください",
-  "Lesson note dictation": "レッスンメモの音声入力"
+  "Lesson note dictation": "レッスンメモの音声入力",
+  "Look busy": "忙しく見せる",
+  "No public times available this week.": "今週は公開中の空き時間がありません。",
+  "On — fewer gaps between lessons": "オン — レッスン間の空きを減らす",
+  "Off — every open time is shown": "オフ — 空いている時間をすべて表示",
+  "Only offer times next to an existing booking or the start or end of your day": "既存の予約の前後、または1日の始まりか終わりに接する時間のみを提示する",
+  "Your booking page shows fewer times, so your diary looks in demand and lessons book back to back instead of leaving gaps.": "予約ページに表示される時間が少なくなり、スケジュールが埋まっているように見え、レッスンが間を空けずに続けて予約されます。"
 }

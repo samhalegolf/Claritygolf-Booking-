@@ -1041,7 +1041,6 @@
   "available times": "ledige tider",
   "No upcoming group lesson times are available yet.": "Der er endnu ingen kommende tider for gruppelektioner.",
   "No public times available for this day.": "Ingen offentlige tider denne dag.",
-  "Choose a day first.": "Vælg en dag først.",
   "Choose an appointment type first.": "Vælg en aftaletype først.",
   "Date not selected": "Ingen dato valgt",
   "Select appointment first": "Vælg aftale først",
@@ -4061,5 +4060,11 @@
   "Start dictation": "Start diktering",
   "Save note": "Gem note",
   "Type or dictate a note first": "Skriv eller diktér en note først",
-  "Lesson note dictation": "Diktering af lektionsnoter"
+  "Lesson note dictation": "Diktering af lektionsnoter",
+  "Look busy": "Se travl ud",
+  "No public times available this week.": "Ingen offentlige tider ledige denne uge.",
+  "On — fewer gaps between lessons": "Til — færre huller mellem lektioner",
+  "Off — every open time is shown": "Fra — alle ledige tider vises",
+  "Only offer times next to an existing booking or the start or end of your day": "Tilbyd kun tider ved siden af en eksisterende booking eller starten eller slutningen af din dag",
+  "Your booking page shows fewer times, so your diary looks in demand and lessons book back to back instead of leaving gaps.": "Din bookingside viser færre tider, så din kalender ser efterspurgt ud, og lektioner bookes i forlængelse af hinanden i stedet for at efterlade huller."
 }
