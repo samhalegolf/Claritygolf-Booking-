@@ -1,4 +1,3 @@
-import { getDatabase } from "@netlify/database";
 import type { Config } from "@netlify/functions";
 import { processStoredExternalEvent } from "./_shared/integrations/ingest.mts";
 import { integrationRequest } from "./_shared/integrations/db.mts";

@@ -86,52 +86,6 @@ const installBrowserGlobals = () => {
   });
 };
 
-const installMockXhr = (
-  handler: (request: { method: string; url: string; headers: Record<string, string>; body: Blob }) => {
-    status: number;
-    body?: unknown;
-    contentType?: string;
-  }
-) => {
-  const requests: Array<{ method: string; url: string; headers: Record<string, string>; body: Blob }> = [];
-  class MockXhr {
-    method = "";
-    url = "";
-    status = 0;
-    responseText = "";
-    headers: Record<string, string> = {};
-    responseContentType = "application/json";
-    upload: { onprogress?: (event: { lengthComputable: boolean; loaded: number; total: number }) => void } = {};
-    onload?: () => void;
-    onerror?: () => void;
-
-    open(method: string, url: string) {
-      this.method = method;
-      this.url = url;
-    }
-
-    setRequestHeader(key: string, value: string) {
-      this.headers[key.toLowerCase()] = value;
-    }
-
-    getResponseHeader(key: string) {
-      return key.toLowerCase() === "content-type" ? this.responseContentType : "";
-    }
-
-    send(body: Blob) {
-      requests.push({ method: this.method, url: this.url, headers: this.headers, body });
-      this.upload.onprogress?.({ lengthComputable: true, loaded: body.size, total: body.size });
-      const response = handler({ method: this.method, url: this.url, headers: this.headers, body });
-      this.status = response.status;
-      this.responseContentType = response.contentType || "application/json";
-      this.responseText = typeof response.body === "string" ? response.body : JSON.stringify(response.body || {});
-      this.onload?.();
-    }
-  }
-  Object.defineProperty(globalThis, "XMLHttpRequest", { value: MockXhr, configurable: true });
-  return requests;
-};
-
 const savedVideoWithLargeImages = async () => {
   const store = createMemorySavedVideoLibraryStore();
   const item = await store.saveItem({

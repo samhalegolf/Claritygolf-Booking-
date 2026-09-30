@@ -7,7 +7,7 @@
 
 import { apiFetch } from "../auth/apiFetch";
 
-export const TERMINAL_PATH_PREFIX = "/terminal/";
+const TERMINAL_PATH_PREFIX = "/terminal/";
 
 /** The code in /terminal/<code>, or "" when this page load is anything else. */
 export function terminalCodeFromPath(pathname = typeof window === "undefined" ? "" : window.location.pathname) {

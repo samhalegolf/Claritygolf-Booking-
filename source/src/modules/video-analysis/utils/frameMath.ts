@@ -1,6 +1,6 @@
 export const FRAME_RATE_DEFAULT = 30;
-export const MIN_FRAME_RATE = 1;
-export const MAX_FRAME_RATE = 120;
+const MIN_FRAME_RATE = 1;
+const MAX_FRAME_RATE = 120;
 
 export const clamp = (value: number, min = 0, max = 1) =>
   Math.min(Math.max(value, min), max);
@@ -16,7 +16,7 @@ export const formatTime = (timeInSeconds: number) => {
   return `${mm}:${ss}.${ms.toString().padStart(3, "0")}`;
 };
 
-export const clampFrameRate = (value: number) =>
+const clampFrameRate = (value: number) =>
   clamp(value, MIN_FRAME_RATE, MAX_FRAME_RATE);
 
 export const resolveFrameRate = (fps?: number) =>
@@ -45,9 +45,6 @@ export const snapFrameRate = (rawFps: number): number => {
   if (closestDelta <= closest * 0.05) return closest;
   return clampFrameRate(rawFps);
 };
-
-export const secondsToFrame = (time: number, fps: number) =>
-  Math.round(time * resolveFrameRate(fps));
 
 export const frameToSeconds = (frame: number, fps: number) =>
   frame / resolveFrameRate(fps);

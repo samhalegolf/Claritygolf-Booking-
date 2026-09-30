@@ -20,8 +20,6 @@ import {
   canonicalPhoneKey as sharedCanonicalPhoneKey,
   cleanPhoneCountry,
   dialCodeFor as sharedDialCodeFor,
-  formatPhoneForDisplay as sharedFormatPhoneForDisplay,
-  isValidPhone as sharedIsValidPhone,
   FALLBACK_PHONE_COUNTRY,
   type CountryCode,
 } from "../../netlify/functions/_shared/phone.mts";
@@ -61,14 +59,6 @@ export function activeCurrency(): string {
 
 export function canonicalPhoneKey(value: unknown, country: CountryCode = activeCountry): string {
   return sharedCanonicalPhoneKey(value, country);
-}
-
-export function formatPhoneForDisplay(value: unknown, country: CountryCode = activeCountry): string {
-  return sharedFormatPhoneForDisplay(value, country);
-}
-
-export function isValidPhone(value: unknown, country: CountryCode = activeCountry): boolean {
-  return sharedIsValidPhone(value, country);
 }
 
 export function dialCodeFor(country: CountryCode = activeCountry): string {

@@ -106,10 +106,6 @@ export const savePreferredCamera = (camera: PreferredCamera) => {
   }
 };
 
-export const clearPreferredCamera = () => {
-  removeStorage(PREFERRED_CAMERA_KEY);
-};
-
 /**
  * Find the saved camera among the devices the browser can currently see.
  *

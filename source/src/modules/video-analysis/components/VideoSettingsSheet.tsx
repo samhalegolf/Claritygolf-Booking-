@@ -1,4 +1,3 @@
-import React from "react";
 import { WorkspaceMode } from "../utils/localPersistence";
 import {
   CameraDevice,

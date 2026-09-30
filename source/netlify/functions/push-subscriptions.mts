@@ -1,4 +1,3 @@
-import { getDatabase } from "@netlify/database";
 import type { Config } from "@netlify/functions";
 
 import { requireCoachActor } from "./_shared/coach-auth.mts";
@@ -24,10 +23,6 @@ import { messageText } from "./_shared/message-language.mts";
  * DELETE -> forget this browser
  */
 
-
-function db() {
-  return getDatabase();
-}
 
 function json(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), {

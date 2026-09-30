@@ -1,3 +1,8 @@
+# The only Netlify config. Functions declare their own routes in code
+# (`export const config = { path }`), and booking-api's /api/* catch-all lists
+# every one of them in excludedPath (src/uiRules.test.ts checks this), so no
+# /api redirects are needed here.
+
 [build]
   base = "source"
   command = "npm run build"
@@ -11,81 +16,6 @@
   for = "/assets/*"
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
-
-[[redirects]]
-  from = "/api/auth/login"
-  to = "/.netlify/functions/auth-login"
-  status = 200
-
-[[redirects]]
-  from = "/api/auth/session"
-  to = "/.netlify/functions/auth-session"
-  status = 200
-
-[[redirects]]
-  from = "/api/auth/forgot-password"
-  to = "/.netlify/functions/auth-forgot-password"
-  status = 200
-
-[[redirects]]
-  from = "/api/auth/reset-password"
-  to = "/.netlify/functions/auth-reset-password"
-  status = 200
-
-[[redirects]]
-  from = "/api/auth/change-password"
-  to = "/.netlify/functions/auth-change-password"
-  status = 200
-
-[[redirects]]
-  from = "/api/auth/logout"
-  to = "/.netlify/functions/auth-logout"
-  status = 200
-
-[[redirects]]
-  from = "/api/google-calendar-sync"
-  to = "/.netlify/functions/google-calendar-sync"
-  status = 200
-
-[[redirects]]
-  from = "/api/google-calendar/*"
-  to = "/.netlify/functions/google-calendar/:splat"
-  status = 200
-
-[[redirects]]
-  from = "/api/public-booking"
-  to = "/.netlify/functions/public-booking"
-  status = 200
-
-# Keep these Optix routes above the /api/* catch-all so the native settings,
-# resources, data feed, and diagnostics reach their dedicated functions.
-[[redirects]]
-  from = "/api/external-bookings"
-  to = "/.netlify/functions/external-bookings"
-  status = 200
-
-[[redirects]]
-  from = "/api/optix-booking-type-settings"
-  to = "/.netlify/functions/optix-booking-type-settings"
-  status = 200
-
-# Stripe billing sync + webhook. Needed because booking-api owns the /api/*
-# catch-all; without an explicit rewrite these routes fall through to it and
-# 404 (same pattern as the auth/google-calendar routes above).
-[[redirects]]
-  from = "/api/billing-stripe-sync"
-  to = "/.netlify/functions/stripe-billing-sync"
-  status = 200
-
-[[redirects]]
-  from = "/api/stripe-billing-webhook"
-  to = "/.netlify/functions/stripe-billing-webhook"
-  status = 200
-
-[[redirects]]
-  from = "/api/stripe-connect/*"
-  to = "/.netlify/functions/stripe-connect/:splat"
-  status = 200
 
 [[redirects]]
   from = "/*"

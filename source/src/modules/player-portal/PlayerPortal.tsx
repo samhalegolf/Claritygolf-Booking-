@@ -322,8 +322,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   const [reviewFlowOpen, setReviewFlowOpen] = useState(false);
   const [reviewBusy, setReviewBusy] = useState(false);
   const [reviewError, setReviewError] = useState("");
-  /** Which half of Lessons is showing, and which way its Book toggle is set. */
-  const [lessonsView, setLessonsView] = useState<"book" | "past">("book");
+  /** Which way the Lessons tab's Book toggle is set. */
   const [bookMode, setBookMode] = useState<"in-person" | "review">("in-person");
   const [openBookingId, setOpenBookingId] = useState("");
   /* Light or dark. "system" until the player touches the switch, which is why

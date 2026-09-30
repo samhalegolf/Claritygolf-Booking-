@@ -161,4 +161,3 @@ export function PlayerBookingEmbed({ config }: { config: PlayerBookingEmbedConfi
   );
 }
 
-export default PlayerBookingEmbed;

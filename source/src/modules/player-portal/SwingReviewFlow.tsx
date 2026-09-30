@@ -196,4 +196,3 @@ export function SwingReviewFlow({
   );
 }
 
-export default SwingReviewFlow;

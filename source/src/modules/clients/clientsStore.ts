@@ -46,8 +46,6 @@ export function getClientsState(): ClientsState {
   return cached;
 }
 
-export const subscribeClients = store.subscribe;
-
 /** The list and its status, for components. Re-renders on every change. */
 export function useClientsState(): ClientsState {
   // Same object for the same underlying state, or useSyncExternalStore loops.

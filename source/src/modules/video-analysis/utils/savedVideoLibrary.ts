@@ -370,7 +370,7 @@ const bufferToHex = (buffer: ArrayBuffer) =>
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
 
-export const calculateBlobSha256 = async (blob: Blob): Promise<string | undefined> => {
+const calculateBlobSha256 = async (blob: Blob): Promise<string | undefined> => {
   try {
     if (typeof crypto === "undefined" || !crypto.subtle) return undefined;
     const digest = await crypto.subtle.digest("SHA-256", await blob.arrayBuffer());
@@ -518,7 +518,7 @@ export const getSavedVideoDeviceState = (item: SavedVideoItem): SavedVideoDevice
   };
 };
 
-export const buildSavedVideoCloudCatalogueRecord = (item: SavedVideoItem): SavedVideoCloudCatalogueRecord => {
+const buildSavedVideoCloudCatalogueRecord = (item: SavedVideoItem): SavedVideoCloudCatalogueRecord => {
   const provider = item.cloud?.provider || "google-drive";
   return {
     savedVideoId: item.savedVideoId,
@@ -1555,8 +1555,6 @@ export const saveSavedVideoToCloud = async (
   }
 };
 
-export const retrySavedVideoCloudUpload = saveSavedVideoToCloud;
-
 export const pauseSavedVideoCloudUpload = async (
   savedVideoId: string,
   store: SavedVideoLibraryStore,
@@ -2307,7 +2305,6 @@ export const verifyManagedLocalVideoLibrary = async (store: SavedVideoLibrarySto
   return { status: await getManagedLocalVideoLibraryStatus(), verified, repaired };
 };
 
-export const rescanManagedLocalVideoLibrary = verifyManagedLocalVideoLibrary;
 
 /**
  * The id the video workspace used to file saves under when it was opened

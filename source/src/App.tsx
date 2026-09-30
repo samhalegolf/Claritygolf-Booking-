@@ -224,7 +224,6 @@ import {
   reassignSavedVideoPlayer,
   reconnectManagedLocalVideoLibrary,
   removeSavedVideoCloudTransfer,
-  rescanManagedLocalVideoLibrary,
   saveSavedVideoToCloud,
   verifyManagedLocalVideoLibrary,
   type ManagedLocalVideoLibraryStatus,
@@ -4771,10 +4770,8 @@ function isoDateDiffDays(laterIso: string, earlierIso: string) {
 }
 
 // --- Bank CSV import (expenses) ---------------------------------------------
-// Self-contained parser, deliberately similar to csv-import-enhancer.ts's
-// client-import parser (quote-aware, handles escaped "" quotes, mixed line
-// endings, BOM) - that script isn't a module and can't be imported into this
-// component, so the same logic is reimplemented here rather than shared.
+// Self-contained parser: quote-aware, handles escaped "" quotes, mixed line
+// endings and a BOM.
 
 // Currency follows the workspace country. It was hardcoded to NZD, which meant
 // a coach in another country was quoted prices in New Zealand dollars.
@@ -13018,9 +13015,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
         setToast({ message: t("My Library moved.") });
       } else if (action === "verify" || action === "rescan") {
         if (!store) throw new Error(t("Saved video library is unavailable in this browser."));
-        const result = action === "verify"
-          ? await verifyManagedLocalVideoLibrary(store)
-          : await rescanManagedLocalVideoLibrary(store);
+        const result = await verifyManagedLocalVideoLibrary(store);
         setToast({ message: action === "verify" ? t("Verified {n} saved videos.", { n: result.verified }) : t("Rescanned {n} saved videos.", { n: result.verified }) });
       } else if (action === "migrate") {
         if (!store) throw new Error(t("Saved video library is unavailable in this browser."));

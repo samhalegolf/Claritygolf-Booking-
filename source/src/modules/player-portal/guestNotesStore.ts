@@ -12,7 +12,7 @@ export type GuestNote = {
   updatedAt: string;
 };
 
-export const GUEST_NOTES_STORAGE_KEY = "clarity.guest.notes.v1";
+const GUEST_NOTES_STORAGE_KEY = "clarity.guest.notes.v1";
 
 export function listGuestNotes(storageKey = GUEST_NOTES_STORAGE_KEY): GuestNote[] {
   const storage = getStorage();

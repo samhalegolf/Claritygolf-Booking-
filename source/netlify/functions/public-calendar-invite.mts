@@ -1,5 +1,5 @@
 import type { Config } from "@netlify/functions";
-import { LEGACY_DEFAULT_ACCOUNT_ID as LEGACY_ORIGINAL_WORKSPACE_ID, defaultCalendarSlug } from "./_shared/account.mts";
+import { LEGACY_DEFAULT_ACCOUNT_ID as LEGACY_ORIGINAL_WORKSPACE_ID } from "./_shared/account.mts";
 import { resolvePublicAccount } from "./_shared/coach-auth.mts";
 import { settingsSelectQuery } from "./_shared/settings-scope.mts";
 import { cleanMessageLanguage, messageText } from "./_shared/message-language.mts";

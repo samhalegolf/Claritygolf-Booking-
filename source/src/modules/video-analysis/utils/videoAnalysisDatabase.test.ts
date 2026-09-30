@@ -193,7 +193,7 @@ class FakeDatabase {
     ) as unknown as IDBObjectStore;
   }
 
-  transaction(storeName: string, _mode?: IDBTransactionMode) {
+  transaction(_storeName: string, _mode?: IDBTransactionMode) {
     return new FakeTransaction(this.state) as unknown as IDBTransaction;
   }
 

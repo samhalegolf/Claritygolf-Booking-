@@ -1,13 +1,8 @@
-import { getDatabase } from "@netlify/database";
 import type { Config } from "@netlify/functions";
 
 import { holdResource } from "./_shared/resource-handler.mts";
 import { requireCoachActor } from "./_shared/coach-auth.mts";
 
-
-function db() {
-  return getDatabase();
-}
 
 function json(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), {

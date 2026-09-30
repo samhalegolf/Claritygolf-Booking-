@@ -9,7 +9,6 @@ import { t } from "../../../lib/i18n";
 
 const ANALYSIS_PREFIX = "clarity.video.analysis";
 const WORKSPACE_PREFIX = "clarity.video.workspace";
-const ARTIFACT_PREFIX = "clarity.video.artifact";
 const DEVICE_DB_NAME = "clarity-video-analysis-device";
 const DEVICE_DB_VERSION = 1;
 const DEVICE_STORE_NAME = "keyValue";
@@ -130,7 +129,7 @@ const isQuotaError = (error: unknown): boolean => {
   );
 };
 
-export const browserStorageAdapter: PersistenceAdapter = {
+const browserStorageAdapter: PersistenceAdapter = {
   getItem: (key) => {
     if (typeof window === "undefined") return null;
     try {
@@ -212,7 +211,7 @@ export const indexedDbStorageAdapter: PersistenceAdapter = {
   },
 };
 
-export const buildAnalysisKey = (playerId: string, videoId: string, lessonId?: string) =>
+const buildAnalysisKey = (playerId: string, videoId: string, lessonId?: string) =>
   `${ANALYSIS_PREFIX}.${playerId}.${lessonId ?? "default"}.${videoId}`;
 
 export const saveAnalysis = (
@@ -369,19 +368,3 @@ export const clearComparisonWorkspaceState = (
   return adapter.removeItem(getWorkspaceKey(context));
 };
 
-const getArtifactKey = (context: WorkspacePersistenceContext) =>
-  `${ARTIFACT_PREFIX}.${context.playerId ?? "global"}.${context.lessonId ?? "default"}`;
-
-export const saveVideoAnalysisArtifactToDevice = (
-  artifact: VideoAnalysisSaveArtifact,
-  adapter: PersistenceAdapter = indexedDbStorageAdapter
-) => {
-  return adapter.setItem(
-    getArtifactKey({ playerId: artifact.playerId, lessonId: artifact.lessonId }),
-    JSON.stringify(artifact)
-  );
-};
-
-export const saveVideoAnalysisArtifactToCloud = async () => {
-  throw new Error(t("Cloud video transfer is disabled until the saved-video Drive adapter is implemented."));
-};

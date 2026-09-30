@@ -17,8 +17,8 @@ export const BOOKING_EMBED_VALUE = "booking";
  * server who is signed in, and anyone who is not a player gets the ordinary
  * public widget -- so a shared or edited URL can never turn into an identity.
  */
-export const PLAYER_BOOKING_PARAM = "portal";
-export const PLAYER_BOOKING_VALUE = "player";
+const PLAYER_BOOKING_PARAM = "portal";
+const PLAYER_BOOKING_VALUE = "player";
 
 /**
  * The coach's no-login view of a guest submission: ?videoShare=<token>.
@@ -28,7 +28,7 @@ export const PLAYER_BOOKING_VALUE = "player";
  * already sends /* to index.html and there is no router, so a path would need
  * its own redirect and would still land in the same entry point.
  */
-export const VIDEO_SHARE_PARAM = "videoShare";
+const VIDEO_SHARE_PARAM = "videoShare";
 
 export function videoShareToken(): string {
   if (typeof window === "undefined") return "";
@@ -48,7 +48,7 @@ export function isVideoShareMode(): boolean {
  * different things -- one video, and a whole review -- and a page that had to
  * work out which it had been handed would be a page that could get it wrong.
  */
-export const REVIEW_SHARE_PARAM = "reviewShare";
+const REVIEW_SHARE_PARAM = "reviewShare";
 
 export function reviewShareToken(): string {
   if (typeof window === "undefined") return "";

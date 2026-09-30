@@ -56,10 +56,3 @@ export function takeReviewDraft(): StoredReviewDraft | null {
   }
 }
 
-export function clearReviewDraft() {
-  try {
-    window.localStorage.removeItem(KEY);
-  } catch {
-    // Nothing to do, and nothing depends on it having worked.
-  }
-}

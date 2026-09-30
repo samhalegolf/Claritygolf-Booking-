@@ -240,7 +240,7 @@ test("a sale with no usable time still records, defaulting at the caller", () =>
 test("an unknown buyer becomes an external client, never a main-list guess", async () => {
   const mock = withMockSupabase({
     // Nobody in the account carries this name.
-    people: (url, init) => (init.method === "POST" ? Response.json([{ id: "created" }]) : Response.json([])),
+    people: (_url, init) => (init.method === "POST" ? Response.json([{ id: "created" }]) : Response.json([])),
     optix_pass_purchases: () => Response.json([{ id: "row-1" }]),
   });
   try {
@@ -336,7 +336,7 @@ test("a sale from a known client links by name and says so", async () => {
 
 test("an ambiguous name falls through to a new external client", async () => {
   const mock = withMockSupabase({
-    people: (url, init) =>
+    people: (url, _init) =>
       url.includes("name=ilike")
         ? Response.json([{ id: "sam-1", name: "Sam Hale" }, { id: "sam-2", name: "Sam Hale" }])
         : Response.json([{ id: "created" }]),

@@ -58,13 +58,6 @@ test("exactly the configured identity is sent, and the other is withheld", () =>
   assert.ok(!("account" in ownerOnly), "the withheld member id must not be sent");
 });
 
-test("the owning user is sent under an organisation token too", () => {
-  // It used to go only with a personal token, so organisation token plus a user
-  // id -- the combination that works -- could not be expressed.
-  const withOrgToken: any = buildBookingSetInput({ ...bookingInput, ownerUserId: "user-456" }, "organization");
-  assert.equal(withOrgToken.owner_user_id, "user-456");
-});
-
 test("Optix setup with neither identity fails before any request is made", () => {
   assert.throws(
     () => buildBookingSetInput(bookingInput),

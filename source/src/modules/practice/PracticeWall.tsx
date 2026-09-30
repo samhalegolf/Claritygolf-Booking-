@@ -153,4 +153,3 @@ export function PracticeWall({
   );
 }
 
-export default PracticeWall;

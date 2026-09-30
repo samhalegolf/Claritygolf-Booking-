@@ -390,13 +390,6 @@
   cursor: pointer;
 }
 
-
-
-
-
-
-
-
 .player-portal-booking {
   display: flex;
   align-items: center;
@@ -455,27 +448,6 @@
   margin: 0;
   font-size: 13px;
   color: var(--pt-muted);
-}
-
-.player-portal-loading {
-  align-items: center;
-  text-align: center;
-  color: var(--pt-text-soft);
-}
-
-.player-portal-spinner {
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  border: 3px solid var(--pt-border);
-  border-top-color: var(--pt-text);
-  animation: player-portal-spin 700ms linear infinite;
-}
-
-@keyframes player-portal-spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 /* --- Videos: the library grid --------------------------------------------- */
@@ -985,21 +957,6 @@
   padding-top: 28px;
 }
 
-/* Booking renders in the same column the portal card occupies, so moving
-   between Lessons and Book reads as changing panel, not leaving the app. */
-.player-terminal-booking {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  justify-content: center;
-  padding: 28px 16px;
-}
-
-.player-terminal-booking .app-shell {
-  width: min(760px, 100%);
-  padding: 0;
-}
-
 /* Sticky rather than fixed: it stays reachable while a long list scrolls, and
    a phone in landscape gets its height back as soon as the page moves. */
 .player-terminal-nav {
@@ -1154,8 +1111,7 @@
     font-size: 12px;
   }
 
-  .player-terminal .player-portal,
-  .player-terminal-booking {
+  .player-terminal .player-portal {
     padding: 20px 12px;
   }
 }
@@ -1185,24 +1141,6 @@
   font-size: 13px;
   font-style: normal;
   color: var(--pt-muted);
-}
-
-.player-portal-past {
-  border: 1px solid var(--pt-border-soft);
-  border-radius: 10px;
-  background: var(--pt-surface-soft);
-  padding: 10px 14px;
-}
-
-.player-portal-past summary {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--pt-text-soft);
-  cursor: pointer;
-}
-
-.player-portal-past .player-portal-list {
-  margin-top: 10px;
 }
 
 /* --- Clarity Caddy -------------------------------------------------------- */
@@ -1673,48 +1611,12 @@
   margin-bottom: 4px;
 }
 
-.player-portal-dash-card {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  padding: 12px 14px;
-  border: 1px solid var(--pt-border-soft);
-  border-radius: 12px;
-  background: var(--pt-surface-soft);
-  color: var(--pt-text);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.player-portal-dash-card.is-wide {
-  grid-column: 1 / -1;
-}
-
-/* Something the coach sent that has not been opened. The same accent border
-   the video shelf uses for the same meaning. */
-.player-portal-dash-card.is-unseen {
-  border-color: var(--pt-accent);
-}
-
 .player-portal-dash-label {
   font-size: 11px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--pt-muted);
-}
-
-.player-portal-dash-card strong {
-  font-size: 15px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.player-portal-dash-card span:not(.player-portal-dash-label) {
-  font-size: 13px;
-  color: var(--pt-text-soft);
 }
 
 /* --- Booking history ----------------------------------------------------- */

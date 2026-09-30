@@ -33,7 +33,7 @@ import type {
 
 /** The prefix startSwingReviewForClient() stamps on. The one link between the
  *  coach's side and this one, so it is named rather than inlined twice. */
-export const SWING_REVIEW_LESSON_PREFIX = "swing-review-";
+const SWING_REVIEW_LESSON_PREFIX = "swing-review-";
 
 export function isSwingReviewLessonId(lessonId?: string | null) {
   return Boolean(lessonId && lessonId.startsWith(SWING_REVIEW_LESSON_PREFIX));

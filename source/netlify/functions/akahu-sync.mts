@@ -12,10 +12,6 @@ import { listAkahuAccounts, syncAkahuTransactions } from "./_shared/akahu.mts";
 //   since: ISO date-time (exclusive start); omit for all available history.
 
 
-function env(name: string, fallback = "") {
-  return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
-}
-
 function json(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), {
     status,

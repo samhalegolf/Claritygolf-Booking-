@@ -95,7 +95,7 @@ export function printableInvoiceCustomFields(fields: InvoiceCustomField[]): Invo
  * and would make "Add tag" appear to do nothing at all. Unlabelled tags are
  * filtered out where they would actually be seen (the line's Tag picker).
  */
-export function cleanInvoiceLineTag(tag?: Partial<InvoiceLineTag>, index = 0): InvoiceLineTag | null {
+function cleanInvoiceLineTag(tag?: Partial<InvoiceLineTag>, index = 0): InvoiceLineTag | null {
   if (!tag || typeof tag !== "object") return null;
   return {
     id: typeof tag.id === "string" && tag.id.trim() ? tag.id.trim().slice(0, 80) : `tag-${index + 1}`,

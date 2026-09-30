@@ -837,7 +837,6 @@ async function handleTerminalVideoRoute(
       await requestForTake(req, take),
       accountId,
       accessToken,
-      settings,
       googleDriveProviderAdapter(accessToken, settings, diagnostics),
       savedVideoId,
       diagnostics,
@@ -2082,7 +2081,6 @@ async function handleSession(
   req: Request,
   accountId: string,
   accessToken: string,
-  settings: Record<string, string>,
   provider: ClarityCloudProviderAdapter,
   savedVideoId: string,
   diagnostics: ProviderDiagnostics = {},
@@ -3337,7 +3335,6 @@ async function handleGuestVideoRoute(
       req,
       accountId,
       accessToken,
-      settings,
       googleDriveProviderAdapter(accessToken, settings, diagnostics),
       savedVideoId,
       diagnostics,
@@ -3561,7 +3558,6 @@ async function handlePlayerVideoRoute(
       req,
       accountId,
       accessToken,
-      settings,
       googleDriveProviderAdapter(accessToken, settings, diagnostics),
       savedVideoId,
       diagnostics,
@@ -3640,7 +3636,6 @@ async function handlePlayerVideoRoute(
       req,
       accountId,
       accessToken,
-      settings,
       googleDriveProviderAdapter(accessToken, settings, diagnostics),
       savedVideoId,
       diagnostics,
@@ -4357,7 +4352,7 @@ async function routeVideoTransferRequest(
       // NOTE: every route below must use `return await` so rejections are caught
       // by this try/catch. A bare `return somePromise` escapes the try block and
       // crashes the function process (Netlify then returns an opaque 502).
-      return await handleSession(req, accountId, accessToken, settings, googleDriveProviderAdapter(accessToken, settings, diagnostics), savedVideoId, diagnostics, null, null, coachReturn);
+      return await handleSession(req, accountId, accessToken, googleDriveProviderAdapter(accessToken, settings, diagnostics), savedVideoId, diagnostics, null, null, coachReturn);
     }
     if (req.method === "GET" && parts[0] === "imports") {
       const accessToken = await ensureDriveReady(accountId, diagnostics);
@@ -4367,7 +4362,7 @@ async function routeVideoTransferRequest(
     if ((req.method === "POST" || req.method === "GET") && parts[1] === "session") {
       const coachReturn = req.method === "POST" ? await resolveCoachReturn(req, accountId) : null;
       const accessToken = req.method === "POST" ? await ensureDriveReady(accountId, diagnostics) : "";
-      return await handleSession(req, accountId, accessToken, settings, googleDriveProviderAdapter(accessToken, settings, diagnostics), parts[0], diagnostics, null, null, coachReturn);
+      return await handleSession(req, accountId, accessToken, googleDriveProviderAdapter(accessToken, settings, diagnostics), parts[0], diagnostics, null, null, coachReturn);
     }
     if (req.method === "PUT" && (parts[1] === "chunk" || parts[1] === "upload")) {
       return await handleChunk(req, accountId, parts[0], googleDriveProviderAdapter("", settings, diagnostics));

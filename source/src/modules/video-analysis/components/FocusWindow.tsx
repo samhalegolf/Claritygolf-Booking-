@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { FocusAreaRect, FocusMode } from "../models/Focus";
 import type { ComparisonSide } from "../utils/localPersistence";
 import { t } from "../../../lib/i18n";

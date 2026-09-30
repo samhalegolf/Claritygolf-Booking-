@@ -28,7 +28,7 @@ function text(value: unknown, fallback = "") {
   return typeof value === "string" ? value : value == null ? fallback : String(value);
 }
 
-export function cleanLessonNote(note: Partial<LessonNote> & { id?: unknown } = {}, fallbackAccountId = ""): LessonNote {
+function cleanLessonNote(note: Partial<LessonNote> & { id?: unknown } = {}, fallbackAccountId = ""): LessonNote {
   const createdAt = text(note.createdAt) || new Date().toISOString();
   return {
     id: text(note.id),

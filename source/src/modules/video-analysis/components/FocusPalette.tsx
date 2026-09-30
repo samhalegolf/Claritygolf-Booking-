@@ -1,4 +1,3 @@
-import React from "react";
 import { ToolButton } from "./ToolButton";
 import { IconFocusArea, IconFocusTrackBeta } from "./VideoIcons";
 import { t } from "../../../lib/i18n";

@@ -179,7 +179,7 @@ function writeLocal(key: string, value: string) {
 }
 
 /** Which phone took a payment, for the audit trail. Not a security boundary. */
-export function terminalDevice() {
+function terminalDevice() {
   let id = readLocal(DEVICE_KEY);
   if (!id) {
     id = globalThis.crypto?.randomUUID?.() || `device-${Date.now()}`;

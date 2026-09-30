@@ -385,12 +385,6 @@ export function getClarityCloudHealth(status: GoogleDriveTransferStatus): Clarit
   };
 }
 
-export const googleDriveClarityCloudProvider: ClarityCloudProvider = {
-  id: "google-drive",
-  displayName: googleDriveProviderLabel,
-  getHealth: getClarityCloudHealth,
-};
-
 export function getClarityCloudActionLabel(action?: ClarityCloudAction) {
   if (action === "connect") return t("Connect Clarity Cloud");
   if (action === "grant-permission") return t("Grant permission");
@@ -410,8 +404,6 @@ export function getSavedVideoDeviceStatusLabel(video: SavedVideoItem) {
   if (device.status === "download-failed") return t("Device • Download failed");
   return t("Device • Not downloaded");
 }
-
-export const getSavedVideoLocalStatusLabel = getSavedVideoDeviceStatusLabel;
 
 export function getSavedVideoCloudStatusLabel(
   video: SavedVideoItem,

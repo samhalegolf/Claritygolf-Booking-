@@ -45,7 +45,7 @@ import {
   serviceLocationIds,
 } from "./_shared/service-scope.mts";
 import { planExternalReschedule, sameSlot } from "./_shared/external-reschedule.mts";
-import { legacyOriginalWorkspaceId, defaultCalendarSlug } from "./_shared/account.mts";
+import { legacyOriginalWorkspaceId } from "./_shared/account.mts";
 import {
   cleanCoachAccount,
   coachAccountFromSettings,
@@ -110,7 +110,6 @@ import {
   appUserRoleForMembership,
   resolvePublicAccount,
   ensureLegacyOwnerMembershipIfMissing,
-  createCoachSession,
   findSupabaseAuthUserId as findCoachAuthUserId,
   verifySupabaseAuthPassword as verifyCoachAuthPassword,
   userBelongsToAccountStrict,
@@ -124,7 +123,6 @@ import {
 import type { CoachActor } from "./_shared/coach-auth.mts";
 import { authSessionResponse, type WorkspaceBootstrap } from "./_shared/auth-contract.mts";
 import { currencyForAccountSettings, localeForCountry } from "./_shared/locale.mts";
-import { taxDefaultsForCountry } from "./_shared/region.mts";
 import { publicCoachAccount } from "./_shared/public-account.mts";
 import { terminologyFor } from "./_shared/business-terminology.mts";
 import {
@@ -1477,15 +1475,15 @@ function calendarItemLocation(item, service, locations, account) {
   );
 }
 
-function calendarItemCoach(item, coaches, account) {
+function calendarItemCoach(item, coaches) {
   return (
     cleanBookingCoachSnapshot(item?.coach) ||
     bookingCoachSnapshotFor(item?.coachId, coaches)
   );
 }
 
-function resolvedCalendarItemCoachId(item, service, coaches, account) {
-  return item?.coachId || item?.coach?.coachId || primaryServiceCoachId(service) || calendarItemCoach(item, coaches, account)?.coachId || firstCoachId(coaches);
+function resolvedCalendarItemCoachId(item, service, coaches) {
+  return item?.coachId || item?.coach?.coachId || primaryServiceCoachId(service) || calendarItemCoach(item, coaches)?.coachId || firstCoachId(coaches);
 }
 
 function resolvedCalendarItemLocationId(item, service, locations, account) {
@@ -1494,10 +1492,6 @@ function resolvedCalendarItemLocationId(item, service, locations, account) {
 
 function serviceForCalendarItem(item, services = []) {
   return (services || []).find((service) => service.id && service.id === item?.serviceId) || null;
-}
-
-function recordAccountId(record) {
-  return typeof record?.accountId === "string" && record.accountId !== "" ? record.accountId : "";
 }
 
 export function recordBelongsToAccount(record, accountId) {
@@ -1509,16 +1503,16 @@ export function calendarItemBelongsToAccount(item, accountId) {
   return recordBelongsToAccount(item, accountId);
 }
 
-function calendarItemBelongsToCoach(item, coachId, services = [], coaches = [], account = defaultCoachAccount()) {
+function calendarItemBelongsToCoach(item, coachId, services = [], coaches = []) {
   if (!coachId) return false;
   if (isLocationOnlyBlock(item)) return true;
-  return resolvedCalendarItemCoachId(item, serviceForCalendarItem(item, services), coaches, account) === coachId;
+  return resolvedCalendarItemCoachId(item, serviceForCalendarItem(item, services), coaches) === coachId;
 }
 
 function canReadCalendarItem(context, item, state) {
   if (!calendarItemBelongsToAccount(item, context.accountId)) return false;
   if (context.isAdmin) return true;
-  return calendarItemBelongsToCoach(item, context.coachId, state.services, state.coaches, state.account);
+  return calendarItemBelongsToCoach(item, context.coachId, state.services, state.coaches);
 }
 
 function assertCanWriteCalendarItem(context, item, previousItem, state) {
@@ -1532,10 +1526,10 @@ function assertCanWriteCalendarItem(context, item, previousItem, state) {
   if (isLocationOnlyBlock(item)) {
     throw permissionDenied("You do not have permission to block an entire location.");
   }
-  if (previousItem && !calendarItemBelongsToCoach(previousItem, context.coachId, state.services, state.coaches, state.account)) {
+  if (previousItem && !calendarItemBelongsToCoach(previousItem, context.coachId, state.services, state.coaches)) {
     throw permissionDenied("You do not have permission to edit another coach's calendar.");
   }
-  if (!calendarItemBelongsToCoach(item, context.coachId, state.services, state.coaches, state.account)) {
+  if (!calendarItemBelongsToCoach(item, context.coachId, state.services, state.coaches)) {
     throw permissionDenied("You do not have permission to move bookings to another coach.");
   }
 }
@@ -5592,13 +5586,6 @@ async function readWorkspaceAccounts(accountId: string) {
   }
 }
 
-async function writeWorkspaceAccounts(accountId: string, accounts) {
-  const account = await readCoachAccount(accountId);
-  const clean = normalizeWorkspaceAccounts(accounts, account);
-  await setSettingsBulk(accountId, { workspaceAccountsJson: JSON.stringify(clean), updatedAt: nowIso() });
-  return clean;
-}
-
 // The workspace-account record for one explicit business. The id is supplied
 // by the caller (from the authenticated actor or a validated public slug);
 // this only looks it up, it never chooses.
@@ -5630,30 +5617,6 @@ async function writeCoachProfiles(accountId: string, coaches, context = null) {
   assertAccountLimit(workspaceAccount, activeCoaches, "maxCoaches");
   await setSettingsBulk(accountId, { coachProfilesJson: JSON.stringify(clean), updatedAt: nowIso() });
   return clean;
-}
-
-async function readAppUsers(accountId: string) {
-  await ensureSeeded();
-  const account = await readCoachAccount(accountId);
-  try {
-    const users = JSON.parse((await getSetting(accountId, "appUsersJson")) || "[]");
-    return Array.isArray(users) && users.length ? users : [defaultAppUserFromAccount(account)];
-  } catch {
-    return [defaultAppUserFromAccount(account)];
-  }
-}
-
-async function readLocations(accountId: string) {
-  await ensureSeeded();
-  const account = await readCoachAccount(accountId);
-  try {
-    return normalizeLocations(
-      JSON.parse((await getSetting(accountId, "locationsJson")) || "[]"),
-      account,
-    );
-  } catch {
-    return normalizeLocations([], account);
-  }
 }
 
 async function writeLocations(accountId: string, locations, context = null) {
@@ -7360,11 +7323,6 @@ function appointmentById(items = []) {
   );
 }
 
-function parseTimestamp(value) {
-  const timestamp = Date.parse(typeof value === "string" ? value : "");
-  return Number.isFinite(timestamp) ? timestamp : 0;
-}
-
 function slotDateParts(week = 0, day = 0) {
   const date = new Date(baseWeekStart);
   date.setUTCDate(baseWeekStart.getUTCDate() + Number(week || 0) * 7 + Number(day || 0));
@@ -8612,127 +8570,6 @@ async function resendBookingConfirmation(appointmentId, context, state = null) {
   };
 }
 
-async function sendInitialBookingNotifications(accountId: string, appointment: Record<string, any>, kind = "booking") {
-  try {
-    const results = await sendBookingNotifications(accountId, appointment, { kind });
-    return Array.isArray(results) ? results : [];
-  } catch (error) {
-    const errorMessage = cleanString(
-      error instanceof Error ? error.message : String(error || "unknown_error"),
-      "unknown_error",
-      450,
-    );
-    console.error(
-      "Initial booking notifications failed",
-      appointment?.id,
-      kind,
-      error,
-    );
-
-    const fallbackResults = [];
-    try {
-      const sharedSettingsMap = await readSettingsMap(accountId);
-      const [settings, account, services, coaches] = await Promise.all([
-        readAdminSettings(accountId, sharedSettingsMap),
-        readCoachAccount(accountId, sharedSettingsMap),
-        readServices(accountId),
-        readCoachProfiles(accountId),
-      ]);
-      const service = services.find(
-        (candidate) => candidate.id === appointment?.serviceId,
-      );
-      const coach = resolveAppointmentCoach(appointment, coaches, account, settings);
-      const variables = bookingEmailVariables({
-        appointment,
-        service,
-        account,
-        coach,
-      });
-      const personKey = notificationPersonKey({
-        name: appointment?.client || appointment?.title,
-        email: appointment?.email,
-        phone: appointment?.phone,
-      });
-
-      async function recordFailed(
-        channel,
-        recipient,
-        subject,
-        reason = "send_exception",
-      ) {
-        const notificationKind = `${kind}_${channel}_email`;
-        const result = {
-          channel,
-          recipient,
-          subject,
-          kind: notificationKind,
-          status: "failed",
-          sent: false,
-          reason,
-          error: errorMessage,
-        };
-        fallbackResults.push(result);
-        await recordNotification({
-          accountId,
-          personKey,
-          calendarItemId: appointment?.id || "",
-          recipient,
-          subject,
-          kind: notificationKind,
-          status: "failed",
-          provider: "resend",
-          providerId: "",
-          error: `${reason}:${errorMessage}`,
-        });
-      }
-
-      if (appointment?.email && settings.sendClientEmail) {
-        await recordFailed(
-          "client",
-          appointment.email,
-          renderTemplate(settings.clientEmailSubject, variables),
-        );
-      }
-
-      if (settings.sendCoachEmail && coach.email) {
-        await recordFailed(
-          "coach",
-          coach.email,
-          renderTemplate(settings.adminEmailSubject, variables),
-        );
-      }
-
-      if (settings.sendAdminEmail) {
-        const recipient = settings.notificationEmail || account.contactEmail;
-        await recordFailed(
-          "admin",
-          recipient,
-          renderTemplate(settings.adminEmailSubject, variables),
-        );
-      }
-    } catch (recordError) {
-      console.error(
-        "Initial booking notification fallback receipt failed",
-        appointment?.id,
-        kind,
-        recordError,
-      );
-    }
-
-    return fallbackResults.length
-      ? fallbackResults
-      : [
-          {
-            channel: "client",
-            sent: false,
-            status: "failed",
-            reason: "send_exception",
-            error: errorMessage,
-          },
-        ];
-  }
-}
-
 async function resetAdminPassword(token, password) {
   const cleanToken = cleanString(token, "", 500);
   if (!cleanToken) return { error: "invalid_token" };
@@ -8927,10 +8764,6 @@ async function destroyAdminSession(token) {
   if (!token) return;
   const tokenHash = hashToken(token);
   await db().sql`DELETE FROM admin_sessions WHERE token_hash = ${tokenHash}`;
-}
-
-async function cleanupExpiredSessions() {
-  await db().sql`DELETE FROM admin_sessions WHERE expires_at <= NOW()`;
 }
 
 /**
@@ -10810,7 +10643,7 @@ function scheduledGroupSessionHolds(items = [], candidate, state = {}) {
       kind: "appointment",
       status: "booked",
       serviceId: groupService.id,
-      coachId: resolvedCalendarItemCoachId(holdSeed, groupService, coaches, account),
+      coachId: resolvedCalendarItemCoachId(holdSeed, groupService, coaches),
       locationId: resolvedCalendarItemLocationId(holdSeed, groupService, locations, account),
       title: `${groupService.name} (group session)`,
       syntheticGroupSlot: true,
@@ -10842,7 +10675,7 @@ function conflictItemSummary(item, state = {}) {
     day: item.day,
     start: item.start,
     duration: item.duration,
-    coachId: resolvedCalendarItemCoachId(item, service, coaches, account),
+    coachId: resolvedCalendarItemCoachId(item, service, coaches),
     locationId: resolvedCalendarItemLocationId(item, service, locations, account),
   };
 }
@@ -10927,7 +10760,7 @@ function findCollision(items, candidate, service, state = {}) {
   const existingService = (item) => services.find((candidateService) => candidateService.id === item.serviceId);
   const isCoachConflict = (item) => {
     if (isInactiveForConflict(item) || isLocationOnlyBlock(item)) return false;
-    const itemCoachId = resolvedCalendarItemCoachId(item, existingService(item), coaches, account);
+    const itemCoachId = resolvedCalendarItemCoachId(item, existingService(item), coaches);
     return Boolean(candidateCoachId && itemCoachId && candidateCoachId === itemCoachId);
   };
   const isLocationConflict = (item) => {
@@ -11110,7 +10943,7 @@ function publicSlotItemMayAffectService(item, service, state = {}) {
   const serviceLocationIds_ = new Set(options.map((option) => option.locationId).filter(Boolean));
   const itemCoachId = isLocationOnlyBlock(item)
     ? ""
-    : resolvedCalendarItemCoachId(item, itemService, coaches, account);
+    : resolvedCalendarItemCoachId(item, itemService, coaches);
   const itemLocationId = resolvedCalendarItemLocationId(item, itemService, locations, account);
 
   if (item.serviceId && item.serviceId === service?.id) return true;
@@ -11169,7 +11002,7 @@ function lookBusyRanges(items, state, { week, day, coachId, locationId }) {
       const itemService = serviceForCalendarItem(item, services);
       return isLocationOnlyBlock(item)
         ? resolvedCalendarItemLocationId(item, itemService, locations, account) === locationId
-        : resolvedCalendarItemCoachId(item, itemService, coaches, account) === coachId;
+        : resolvedCalendarItemCoachId(item, itemService, coaches) === coachId;
     })
     .map((item) => ({ start: Number(item.start), end: Number(item.start) + Number(item.duration) }));
 }
@@ -12171,7 +12004,7 @@ export async function reschedulePublicBooking(
     Number.isInteger(duration) &&
     !(isScheduledGroupService(service) && !isGroupServiceSlotMatch(service, slot))
       ? freeBookingOption({ ...accountState, items: itemsWithoutOriginal }, service, slot, {
-          coachId: resolvedCalendarItemCoachId(appointment, service, accountState.coaches || [], accountState.account),
+          coachId: resolvedCalendarItemCoachId(appointment, service, accountState.coaches || []),
           locationId: resolvedCalendarItemLocationId(appointment, service, accountState.locations || [], accountState.account),
         }).option
       : null;
@@ -12181,7 +12014,7 @@ export async function reschedulePublicBooking(
     });
   }
 
-  const changedCoach = moved.coachId !== resolvedCalendarItemCoachId(appointment, service, accountState.coaches || [], accountState.account);
+  const changedCoach = moved.coachId !== resolvedCalendarItemCoachId(appointment, service, accountState.coaches || []);
   const changedLocation = moved.locationId !== resolvedCalendarItemLocationId(appointment, service, accountState.locations || [], accountState.account);
   const updatedAppointment = {
     ...appointment,

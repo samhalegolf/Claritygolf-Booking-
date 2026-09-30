@@ -20,7 +20,7 @@
  * required: on :root the --c-* values are the light ones, so every alias below
  * would resolve light.
  */
-export const videoAnalysisTheme = {
+const videoAnalysisTheme = {
   /**
    * Marks on the picture. Literal on purpose -- see the note above.
    *

@@ -57,7 +57,7 @@ const clock = (seconds: number) => {
   return `${minutes}:${rest.toFixed(2).padStart(5, "0")}`;
 };
 
-export function boxForShot(shot: FrameViewerShot): FrameViewerRect | null {
+function boxForShot(shot: FrameViewerShot): FrameViewerRect | null {
   if (shot.captureKind === "frame") return null;
   const rect = shot.cropRect;
   if (!rect) return null;
