@@ -4036,5 +4036,9 @@
   "This computer only needs pairing once.": "Tämä tietokone tarvitsee parittaa vain kerran.",
   "Remove {name}? That computer will need pairing again.": "Poistetaanko {name}? Tietokone on silloin paritettava uudelleen.",
   "On the computer the cameras are plugged into, open {address} and leave it running. Then add it here with the code it shows.": "Avaa {address} tietokoneella, johon kamerat on kytketty, ja jätä se käyntiin. Lisää se sitten tänne sen näyttämällä koodilla.",
-  "Code shown on the terminal": "Päätteen näyttämä koodi"
+  "Code shown on the terminal": "Päätteen näyttämä koodi",
+  "Same swing · 2 angles": "Sama svingi · 2 kulmaa",
+  "Open both": "Avaa molemmat",
+  "That video could not be loaded.": "Videota ei voitu ladata.",
+  "On this device": "Tällä laitteella"
 }

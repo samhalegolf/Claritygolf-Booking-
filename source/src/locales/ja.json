@@ -4036,5 +4036,9 @@
   "This computer only needs pairing once.": "このコンピューターのペアリングは一度だけで済みます。",
   "Remove {name}? That computer will need pairing again.": "{name}を削除しますか?そのコンピューターは再度ペアリングが必要になります。",
   "On the computer the cameras are plugged into, open {address} and leave it running. Then add it here with the code it shows.": "カメラを接続したコンピューターで {address} を開き、そのままにしてください。表示されたコードを使ってここで追加します。",
-  "Code shown on the terminal": "ターミナルに表示されたコード"
+  "Code shown on the terminal": "ターミナルに表示されたコード",
+  "Same swing · 2 angles": "同じスイング · 2アングル",
+  "Open both": "両方を開く",
+  "That video could not be loaded.": "その動画を読み込めませんでした。",
+  "On this device": "このデバイス上"
 }

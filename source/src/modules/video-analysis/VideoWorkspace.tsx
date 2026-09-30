@@ -28,7 +28,11 @@ import {
   IconSettings,
   IconUpload,
 } from "./components/VideoIcons";
-import type { MotionLabSwing } from "../../../motion-lab/src/embed/MotionLabView";
+import type {
+  MotionLabSwing,
+  SecondAngleClip,
+  SecondAngleLibrary,
+} from "../../../motion-lab/src/embed/MotionLabView";
 import {
   AnalysisRail,
   PlayerActionBar,
@@ -71,9 +75,14 @@ import {
 import {
   createIndexedDbSavedVideoLibrary,
   importSavedVideoFromClarityCloud,
+  linkSavedVideoAngles,
+  listClarityCloudImportTransfers,
+  pairSavedVideoAngles,
+  refuseSavedVideoAngles,
   SavedVideoCloudError,
   SavedVideoLibraryError,
   type SavedVideoItem,
+  type VideoTransferScope,
   type SavedVideoLibraryStore,
 } from "./utils/savedVideoLibrary";
 import { useAnalysisStore } from "./hooks/useAnalysisStore";
@@ -99,6 +108,7 @@ import {
 import { PlayerVideo } from "./models/Video";
 import { DrawingTool } from "./models/Drawing";
 import { TimelineMarker } from "./models/Timeline";
+import { activeLocale } from "../../lib/activeCountry";
 import { t } from "../../lib/i18n";
 
 /**
@@ -123,6 +133,15 @@ const waitForFirstFrame = async (stream: MediaStream, timeoutMs = 1500) => {
 
 const LEFT_ANALYSIS_SLOT = "comparison-left-slot";
 const RIGHT_ANALYSIS_SLOT = "comparison-right-slot";
+
+/** A file's own recording start, when its timestamp can be trusted. See loadClipFileForSide. */
+function recordedAtFromFile(file: File, durationS?: number): string | undefined {
+  const modified = file.lastModified;
+  if (!Number.isFinite(modified) || modified <= 0) return undefined;
+  if (Date.now() - modified < 2 * 60 * 1000) return undefined;
+  // A camera writes the file as it stops, so the timestamp is the finish.
+  return new Date(modified - (durationS || 0) * 1000).toISOString();
+}
 
 function getSideTitle(side: ComparisonSide) {
   return side === "left" ? t("Left") : t("Right");
@@ -281,6 +300,11 @@ export interface VideoWorkspaceProps {
   lessonId?: string;
   lessonTitle?: string;
   savedVideoId?: string;
+  /**
+   * The same swing from another camera, opened beside `savedVideoId` in
+   * compare mode -- a same-swing pair from the library.
+   */
+  pairedSavedVideoId?: string;
   persistence?: Partial<VideoAnalysisPersistenceLayer>;
   savedVideoLibrary?: SavedVideoLibraryStore | null;
   onSavedVideoLibraryChange?: () => void;
@@ -580,6 +604,7 @@ export function VideoWorkspace({
   lessonId,
   lessonTitle,
   savedVideoId,
+  pairedSavedVideoId,
   persistence,
   savedVideoLibrary,
   onSavedVideoLibraryChange,
@@ -717,6 +742,8 @@ export function VideoWorkspace({
   // In compare mode, the other panel's clip: the same swing from the other
   // camera, fused with the first for depth. Null in single mode.
   const [motionLabSecondAngle, setMotionLabSecondAngle] = useState<MotionLabSwing | null>(null);
+  // Whose library the lab's second-angle picker lists.
+  const [motionLabPlayerId, setMotionLabPlayerId] = useState<string | null>(null);
   const [motionLabOpen, setMotionLabOpen] = useState(false);
   const [motionLabError, setMotionLabError] = useState<string | null>(null);
   // The right rail's two live reads. Shared by both panels in compare mode,
@@ -1210,7 +1237,14 @@ export function VideoWorkspace({
   );
 
   const loadClipFileForSide = useCallback(
-    async (side: ComparisonSide, file: File) => {
+    /**
+     * `recordedAt` is when the camera started, when the caller knows it -- a
+     * live recording does. Otherwise it is read from the file's own
+     * timestamp, but only when that timestamp predates opening the file: a
+     * phone's gallery often stamps a file as it hands it over, and two clips
+     * picked together would then look filmed together.
+     */
+    async (side: ComparisonSide, file: File, recordedAt?: string) => {
       const isLeft = side === "left";
       const playback = isLeft ? leftPlayback : rightPlayback;
       const analysisStore = isLeft ? leftStore : rightStore;
@@ -1226,6 +1260,7 @@ export function VideoWorkspace({
         sourceUrl: loaded.sourceUrl,
         title: file.name,
         createdAt: new Date().toISOString(),
+        recordedAt: recordedAt ?? recordedAtFromFile(file, loaded.duration),
         duration: loaded.duration,
         fps: loaded.fps,
         width: loaded.width,
@@ -1339,7 +1374,11 @@ export function VideoWorkspace({
   );
 
   const restoreSavedVideo = useCallback(
-    async (targetSavedVideoId: string) => {
+    /**
+     * `pairSide` opens the video as one of a same-swing pair: on that side,
+     * in compare mode with linked playback, whatever layout it was saved in.
+     */
+    async (targetSavedVideoId: string, pairSide?: ComparisonSide) => {
       if (!savedVideoStore) {
         throw new SavedVideoLibraryError(
           "SAVED_VIDEO_LOAD_FAILED",
@@ -1348,6 +1387,15 @@ export function VideoWorkspace({
       }
 
       let item = await savedVideoStore.getItem(targetSavedVideoId);
+      if (!item && pairSide) {
+        // The other angle of a pair may only be in Clarity Cloud so far.
+        setSaveStatus("downloading");
+        setSaveMessage(t("Downloading from Clarity Cloud..."));
+        item = await importSavedVideoFromClarityCloud(targetSavedVideoId, savedVideoStore, {
+          scope: isPlayerVariant ? "player" : "coach",
+        });
+        onSavedVideoLibraryChange?.();
+      }
       if (!item) {
         throw new SavedVideoLibraryError(
           "SAVED_VIDEO_METADATA_MISSING",
@@ -1373,7 +1421,7 @@ export function VideoWorkspace({
         return;
       }
 
-      const side = item.sourceSide || "left";
+      const side = pairSide || item.sourceSide || "left";
       const isLeft = side === "left";
       const playback = isLeft ? leftPlayback : rightPlayback;
       const analysisStore = isLeft ? leftStore : rightStore;
@@ -1393,6 +1441,7 @@ export function VideoWorkspace({
         sourceUrl: loaded.sourceUrl,
         title: item.title || item.source.originalFileName,
         createdAt: item.capturedAt || item.createdAt,
+        recordedAt: item.source.recordedAt,
         duration: item.source.duration || loaded.duration,
         fps: item.analysisSnapshot.videoMeta?.fps || loaded.fps,
         width: item.source.width || loaded.width,
@@ -1416,17 +1465,24 @@ export function VideoWorkspace({
           height: restoredVideo.height,
         },
       });
-      setComparisonMode(item.workspaceSnapshot.mode);
-      setActiveSide(item.workspaceSnapshot.mode === "single" ? "left" : item.workspaceSnapshot.activeSide);
-      setLinkedPlayback(item.workspaceSnapshot.linkedPlayback);
-      setShowFocusWindow(item.workspaceSnapshot.focusWindowOpen);
-      setFocusWindowMode(item.workspaceSnapshot.focusWindowMode);
-      setFocusWindowSide(item.workspaceSnapshot.mode === "single" ? "left" : item.workspaceSnapshot.focusWindowSide);
-      setFocusAreaRect(item.workspaceSnapshot.focusAreaRect);
-      setCurrentSavedVideoIds({
-        ...item.workspaceSnapshot.savedVideoIds,
-        [side]: item.savedVideoId,
-      });
+      if (pairSide) {
+        setComparisonMode("compare");
+        setActiveSide("left");
+        setLinkedPlayback(true);
+        setCurrentSavedVideoIds((current) => ({ ...current, [side]: item.savedVideoId }));
+      } else {
+        setComparisonMode(item.workspaceSnapshot.mode);
+        setActiveSide(item.workspaceSnapshot.mode === "single" ? "left" : item.workspaceSnapshot.activeSide);
+        setLinkedPlayback(item.workspaceSnapshot.linkedPlayback);
+        setShowFocusWindow(item.workspaceSnapshot.focusWindowOpen);
+        setFocusWindowMode(item.workspaceSnapshot.focusWindowMode);
+        setFocusWindowSide(item.workspaceSnapshot.mode === "single" ? "left" : item.workspaceSnapshot.focusWindowSide);
+        setFocusAreaRect(item.workspaceSnapshot.focusAreaRect);
+        setCurrentSavedVideoIds({
+          ...item.workspaceSnapshot.savedVideoIds,
+          [side]: item.savedVideoId,
+        });
+      }
       setActiveSideInCompare(side);
 
       persistenceLayer.videoStore
@@ -1482,6 +1538,10 @@ export function VideoWorkspace({
         }
         await restoreSavedVideo(item.savedVideoId);
       }
+      // Two cameras from one press are one swing from two angles.
+      if (takes.length === 2) {
+        await linkSavedVideoAngles(savedVideoStore, takes[0].savedVideoId, takes[1].savedVideoId);
+      }
       onSavedVideoLibraryChange?.();
       setRemoteSide(null);
     },
@@ -1492,7 +1552,13 @@ export function VideoWorkspace({
   useEffect(() => {
     if (!savedVideoId || openedSavedVideoRef.current === savedVideoId) return;
     openedSavedVideoRef.current = savedVideoId;
-    void restoreSavedVideo(savedVideoId).catch((error) => {
+    // A same-swing pair opens side by side, the angle asked for on the left.
+    const opening = pairedSavedVideoId
+      ? restoreSavedVideo(savedVideoId, "left").then(() =>
+          restoreSavedVideo(pairedSavedVideoId, "right")
+        )
+      : restoreSavedVideo(savedVideoId);
+    void opening.catch((error) => {
       setSaveStatus("error");
       setSaveMessage(
         error instanceof SavedVideoLibraryError
@@ -1502,7 +1568,7 @@ export function VideoWorkspace({
       // eslint-disable-next-line no-console
       console.error("Saved video load failed", error);
     });
-  }, [restoreSavedVideo, savedVideoId]);
+  }, [pairedSavedVideoId, restoreSavedVideo, savedVideoId]);
 
   const resolvedCamera = useMemo(
     () => resolvePreferredCamera(cameraDeviceList.devices, preferredCamera),
@@ -1629,6 +1695,8 @@ export function VideoWorkspace({
       try {
         const mimeType = getPreferredRecordingMimeType();
         const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+        // Stamped as it starts, so a second camera started with it pairs with it.
+        const recordingStartedAt = new Date().toISOString();
         recordingChunksRef.current = [];
         mediaRecorderRef.current = recorder;
 
@@ -1676,7 +1744,7 @@ export function VideoWorkspace({
               getRecordingFileName(`live-recording-${recordingSide}`, blob.type || blobType),
               { type: blob.type || blobType }
             );
-            await loadClipFileForSide(recordingSide, file);
+            await loadClipFileForSide(recordingSide, file, recordingStartedAt);
             setSaveStatus("idle");
             setSaveMessage(t("Recording ready to save."));
             // The loaded file now owns this side's normal VideoCanvas. Releasing
@@ -3956,6 +4024,41 @@ export function VideoWorkspace({
    * on screen, and the lab fuses them. If the two turn out not to be the same
    * swing, the lab says so and uses the active clip alone.
    */
+  const cloudScope: VideoTransferScope = isPlayerVariant ? "player" : "coach";
+
+  /** A saved video's bytes, from this device or, failing that, Clarity Cloud. */
+  const readSavedVideo = useCallback(
+    async (savedId: string): Promise<MotionLabSwing> => {
+      if (!savedVideoStore) {
+        throw new Error(t("Saved video library is unavailable in this browser."));
+      }
+      let item = await savedVideoStore.getItem(savedId);
+      let blob = item ? await savedVideoStore.getBlob(savedId) : null;
+      if (!blob) {
+        item = await importSavedVideoFromClarityCloud(savedId, savedVideoStore, { scope: cloudScope });
+        onSavedVideoLibraryChange?.();
+        blob = await savedVideoStore.getBlob(item.savedVideoId);
+      }
+      if (!item || !blob) throw new Error(t("That video could not be loaded."));
+      return {
+        blob,
+        name: item.title || item.source.originalFileName || t("Saved video"),
+        id: item.savedVideoId,
+      };
+    },
+    [cloudScope, onSavedVideoLibraryChange, savedVideoStore]
+  );
+
+  /**
+   * Open the lab on the active clip, and bring its other angle with it.
+   *
+   * In compare mode the other panel's clip is the other angle: a coach
+   * comparing face-on with down the line has both cameras of one swing on
+   * screen. Otherwise it is the clip the library pairs with this one as the
+   * same swing (see utils/sameSwingAngles), when there is one. If the two
+   * turn out not to be the same swing, the lab says so, uses the active clip
+   * alone, and the library stops pairing them.
+   */
   const openMotionLab = useCallback(async () => {
     const side = effectiveActiveSide;
     const otherSide: ComparisonSide = side === "left" ? "right" : "left";
@@ -3963,26 +4066,125 @@ export function VideoWorkspace({
     const otherClip = modeIsCompare ? (side === "left" ? playerVideoRight : playerVideoLeft) : null;
     if (!clip) return;
     setMotionLabError(null);
+    // The workspace holds each clip as an object URL (see loadClipFileForSide);
+    // reading it back is a blob: URL over memory the page already owns.
     const read = async (source: NonNullable<typeof clip>, sourceSide: ComparisonSide): Promise<MotionLabSwing> => {
       const response = await fetch(source.sourceUrl);
       if (!response.ok) throw new Error(t("The clip could not be read ({status}).", { status: response.status }));
       const blob = await response.blob();
-      return { blob, name: source.title || t("{side} clip", { side: getSideTitle(sourceSide) }) };
+      return {
+        blob,
+        name: source.title || t("{side} clip", { side: getSideTitle(sourceSide) }),
+        id: currentSavedVideoIds[sourceSide],
+      };
     };
     try {
-      const [swing, secondAngle] = await Promise.all([
+      const [swing, shownAngle] = await Promise.all([
         read(clip, side),
         otherClip ? read(otherClip, otherSide) : Promise.resolve(null),
       ]);
+      let secondAngle = shownAngle;
+      if (!secondAngle && swing.id && savedVideoStore) {
+        try {
+          const items = await savedVideoStore.listItemsForPlayer(clip.playerId);
+          const partnerId = pairSavedVideoAngles(items).get(swing.id);
+          if (partnerId) secondAngle = await readSavedVideo(partnerId);
+        } catch {
+          // The swing opens alone; the lab's picker can still add the angle.
+        }
+      }
       setMotionLabSwing(swing);
       setMotionLabSecondAngle(secondAngle);
+      setMotionLabPlayerId(clip.playerId);
       setMotionLabOpen(true);
     } catch (error) {
       setMotionLabError(
         error instanceof Error ? error.message : t("The clip could not be read.")
       );
     }
-  }, [effectiveActiveSide, modeIsCompare, playerVideoLeft, playerVideoRight]);
+  }, [
+    currentSavedVideoIds,
+    effectiveActiveSide,
+    modeIsCompare,
+    playerVideoLeft,
+    playerVideoRight,
+    readSavedVideo,
+    savedVideoStore,
+  ]);
+
+  /**
+   * The player's library, as the lab's second-angle picker sees it: every
+   * saved video on this device, and every one in Clarity Cloud that is not,
+   * with the clip the library pairs with the swing first.
+   */
+  const motionLabLibrary = useMemo<SecondAngleLibrary | undefined>(() => {
+    if (!savedVideoStore || !motionLabPlayerId) return undefined;
+    const swingId = motionLabSwing?.id;
+    const when = (iso?: string) => {
+      const date = iso ? new Date(iso) : null;
+      return date && !Number.isNaN(date.getTime())
+        ? date.toLocaleString(activeLocale(), { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })
+        : t("No date recorded");
+    };
+    return {
+      list: async () => {
+        const items = await savedVideoStore.listItemsForPlayer(motionLabPlayerId);
+        const partnerId = swingId ? pairSavedVideoAngles(items).get(swingId) : undefined;
+        const clips: (SecondAngleClip & { at: string })[] = items
+          .filter((item) => item.savedVideoId !== swingId)
+          .map((item) => {
+            const at = item.source.recordedAt || item.capturedAt || item.createdAt;
+            return {
+              id: item.savedVideoId,
+              title: item.title || item.source.originalFileName || t("Saved video"),
+              detail: `${when(at)} · ${
+                item.local.status === "available" ? t("On this device") : t("Clarity Cloud")
+              }`,
+              thumbnail: item.thumbnailDataUrl,
+              sameSwing: item.savedVideoId === partnerId,
+              at,
+            };
+          });
+        const onDevice = new Set(items.map((item) => item.savedVideoId));
+        try {
+          const transfers = await listClarityCloudImportTransfers(cloudScope, motionLabPlayerId);
+          for (const transfer of transfers) {
+            const id = transfer.savedVideoId || transfer.savedVideo?.savedVideoId;
+            if (!id || id === swingId || onDevice.has(id)) continue;
+            if (transfer.savedVideo?.playerId !== motionLabPlayerId) continue;
+            onDevice.add(id);
+            const at = transfer.savedVideo.createdAt;
+            clips.push({
+              id,
+              title: transfer.savedVideo.title || t("Saved video"),
+              detail: `${when(at)} · ${t("Clarity Cloud")}`,
+              at,
+            });
+          }
+        } catch {
+          // Offline, or no cloud: the picker lists what is on this device.
+        }
+        return clips.sort(
+          (a, b) => Number(Boolean(b.sameSwing)) - Number(Boolean(a.sameSwing)) || b.at.localeCompare(a.at)
+        );
+      },
+      load: readSavedVideo,
+    };
+  }, [cloudScope, motionLabPlayerId, motionLabSwing?.id, readSavedVideo, savedVideoStore]);
+
+  /** The lab tried two library clips together: keep them paired, or stop pairing them. */
+  const recordMotionLabVerdict = useCallback(
+    (swingId: string, secondId: string, sameSwing: boolean) => {
+      if (!savedVideoStore) return;
+      const write = sameSwing ? linkSavedVideoAngles : refuseSavedVideoAngles;
+      void write(savedVideoStore, swingId, secondId)
+        .then(() => onSavedVideoLibraryChange?.())
+        .catch(() => {
+          // The pairing is a convenience; the 3D view itself is unaffected.
+        });
+    },
+    [onSavedVideoLibraryChange, savedVideoStore]
+  );
 
   const closeMotionLab = useCallback(() => {
     setMotionLabOpen(false);
@@ -3990,6 +4192,7 @@ export function VideoWorkspace({
     // reopening starts a fresh detection rather than showing a stale one.
     setMotionLabSwing(null);
     setMotionLabSecondAngle(null);
+    setMotionLabPlayerId(null);
   }, []);
 
   return (
@@ -4062,6 +4265,8 @@ export function VideoWorkspace({
             <MotionLabView
               swing={motionLabSwing}
               secondAngle={motionLabSecondAngle}
+              library={motionLabLibrary}
+              onSecondAngleVerdict={recordMotionLabVerdict}
               title={playerName || undefined}
               keysEnabled={!settingsOpen}
               onClose={closeMotionLab}

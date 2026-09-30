@@ -222,6 +222,7 @@ import {
   pauseSavedVideoCloudUpload,
   LEGACY_UNASSIGNED_PLAYER_ID,
   reassignSavedVideoPlayer,
+  pairSavedVideoAngles,
   reconnectManagedLocalVideoLibrary,
   removeSavedVideoCloudTransfer,
   saveSavedVideoToCloud,
@@ -231,6 +232,7 @@ import {
   type SavedVideoItem,
   type SavedVideoLibraryStore,
 } from "./modules/video-analysis/utils/savedVideoLibrary";
+import { groupSameSwingAngles } from "./modules/video-analysis/utils/sameSwingAngles";
 import {
   getClarityCloudActionLabel,
   getClarityCloudHealth,
@@ -5712,6 +5714,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     playerId: string;
     playerName: string;
     savedVideoId?: string;
+    pairedSavedVideoId?: string;
     startRecording?: boolean;
     lessonId?: string;
     lessonTitle?: string;
@@ -9534,6 +9537,9 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
       .filter((video) => playerIds.has(video.playerId))
       .sort((a, b) => String(b.updatedAt || b.createdAt).localeCompare(String(a.updatedAt || a.createdAt)));
   }, [notesWorkspaceClient, savedVideoItems]);
+  // Clips that are the same swing from two cameras, packaged together in
+  // both library views. See utils/sameSwingAngles.
+  const playerVideoAnglePairs = useMemo(() => pairSavedVideoAngles(playerToolVideos), [playerToolVideos]);
   // Player submissions the coach has not opened yet, counted per profile so the
   // list itself shows where the new video is.
   const unseenSubmissionCounts = useMemo(() => {
@@ -9604,8 +9610,10 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
       kind: "saved" | "submission" | "recovery";
       unseen: boolean;
       playable: boolean;
+      /** The same swing from the other camera: shown and opened as one package. */
+      partner?: ShelfClip;
     };
-    const clips: ShelfClip[] = [
+    const loose: ShelfClip[] = [
       ...playerToolVideos.map((video) => ({
         key: `saved-${video.savedVideoId}`,
         savedVideoId: video.savedVideoId,
@@ -9643,6 +9651,11 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
         playable: false,
       })),
     ].filter((clip) => clip.savedVideoId);
+    const clips: ShelfClip[] = groupSameSwingAngles(
+      loose,
+      (clip) => clip.savedVideoId,
+      playerVideoAnglePairs,
+    ).map(([clip, partner]) => (partner ? { ...clip, partner } : clip));
 
     const groups = new Map<string, { label: string; clips: ShelfClip[] }>();
     for (const clip of clips) {
@@ -9664,7 +9677,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
         clips: group.clips.sort((a, b) => String(b.at).localeCompare(String(a.at))),
         unseen: group.clips.filter((clip) => clip.unseen).length,
       }));
-  }, [playerToolCloudVideos, playerToolLegacyVideoRecords, playerToolVideos]);
+  }, [playerToolCloudVideos, playerToolLegacyVideoRecords, playerToolVideos, playerVideoAnglePairs]);
 
   /* The one-line summary above the two views. Counted from the same three
    * lists the views are built from, so the count and the list can never
@@ -12407,6 +12420,8 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     id: string;
     name: string;
     savedVideoId?: string;
+    /** The other angle of a same-swing pair, opened beside `savedVideoId`. */
+    pairedSavedVideoId?: string;
     startRecording?: boolean;
     lessonId?: string;
     lessonTitle?: string;
@@ -12415,6 +12430,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
       playerId: client.id,
       playerName: client.name,
       savedVideoId: client.savedVideoId,
+      pairedSavedVideoId: client.pairedSavedVideoId,
       startRecording: client.startRecording,
       lessonId: client.lessonId,
       lessonTitle: client.lessonTitle,
@@ -26083,7 +26099,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
                                               >
                                                 <button
                                                   type="button"
-                                                  className="player-video-shelf-thumb"
+                                                  className={`player-video-shelf-thumb${clip.partner ? " is-pair" : ""}`}
                                                   disabled={!clip.playable}
                                                   title={clip.playable ? t("Play {title}", { title: clip.title }) : clip.title}
                                                   onClick={() =>
@@ -26094,13 +26110,16 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
                                                       ),
                                                       name: notesWorkspaceClient.name,
                                                       savedVideoId: clip.savedVideoId,
+                                                      pairedSavedVideoId: clip.partner?.savedVideoId,
                                                     })
                                                   }
                                                 >
-                                                  {clip.thumbnail ? (
-                                                    <img src={clip.thumbnail} alt="" />
-                                                  ) : (
-                                                    <ClarityVideoAnalysis size={20} />
+                                                  {[clip, ...(clip.partner ? [clip.partner] : [])].map((angle) =>
+                                                    angle.thumbnail ? (
+                                                      <img key={angle.key} src={angle.thumbnail} alt="" />
+                                                    ) : (
+                                                      <ClarityVideoAnalysis key={angle.key} size={20} />
+                                                    ),
                                                   )}
                                                   {clip.unseen ? (
                                                     <span className="player-video-shelf-badge">{t("New")}</span>
@@ -26114,7 +26133,9 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
                                                 <div className="player-video-shelf-body">
                                                   <strong>{clip.title}</strong>
                                                   <span>
-                                                    {clip.kind === "submission"
+                                                    {clip.partner
+                                                      ? t("Same swing · 2 angles")
+                                                      : clip.kind === "submission"
                                                       ? t("Player submission")
                                                       : clip.kind === "recovery"
                                                         ? t("Recovery only")
@@ -26182,7 +26203,12 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
                                   ) : null}
                                   {playerToolVideos.length || playerToolCloudVideos.length || playerToolLegacyVideoRecords.length ? (
                                     <>
-                                      {playerToolVideos.map((video) => {
+                                      {groupSameSwingAngles(
+                                        playerToolVideos,
+                                        (video) => video.savedVideoId,
+                                        playerVideoAnglePairs,
+                                      ).map((angles) => {
+                                        const renderSavedVideoCard = (video: SavedVideoItem) => {
                                         const cloudOperational = isClarityCloudOperational(clarityCloudHealth);
                                         const cloudStatus = video.cloud?.status || "not-uploaded";
                                         const isUploading =
@@ -26476,6 +26502,30 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
                                             </div>
                                           </article>
                                         );
+                                        };
+                                        if (angles.length === 1) return renderSavedVideoCard(angles[0]);
+                                        // Two cameras on one swing: one package, opened together.
+                                        return (
+                                          <div className="player-video-pair" key={`pair-${angles[0].savedVideoId}`}>
+                                            <div className="player-video-pair-head">
+                                              <strong>{t("Same swing · 2 angles")}</strong>
+                                              <button
+                                                type="button"
+                                                className="outline-button"
+                                                onClick={() =>
+                                                  openVideoAnalysisForClient({
+                                                    id: angles[0].playerId,
+                                                    name: notesWorkspaceClient.name,
+                                                    savedVideoId: angles[0].savedVideoId,
+                                                    pairedSavedVideoId: angles[1].savedVideoId,
+                                                  })
+                                                }
+                                              >
+                                                <Play size={14} />{t("Open both")}</button>
+                                            </div>
+                                            {angles.map(renderSavedVideoCard)}
+                                          </div>
+                                        );
                                       })}
                                       {playerToolCloudVideos.map((transfer) => {
                                         const savedVideo = transfer.savedVideo;
@@ -26707,6 +26757,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
                 lessonId={videoContext?.lessonId}
                 lessonTitle={videoContext?.lessonTitle}
                 savedVideoId={videoContext?.savedVideoId}
+                pairedSavedVideoId={videoContext?.pairedSavedVideoId}
                 autoStartLiveRecording={videoContext?.startRecording}
                 savedVideoLibrary={savedVideoLibraryRef.current}
                 onSavedVideoLibraryChange={refreshSavedVideoLibrary}

@@ -74,6 +74,13 @@ export interface TwoViewReport {
   /** Why not, in words. Null when usable. */
   readonly reason: string | null;
   /**
+   * Whether the two clips are the same swing: true when they fused, false
+   * when they were shown not to be -- the hands never matched, or the bodies
+   * disagreed once lined up -- and null when there was too little of the
+   * golfer in one of them to say. A library can keep the first two.
+   */
+  readonly sameSwing: boolean | null;
+  /**
    * Where the second clip's clock sits against the first's, milliseconds:
    * the second clip's time is `primary time × rate + offsetMs`.
    */
@@ -595,12 +602,14 @@ const fitImageProjection = (
 const unusable = (
   primary: CameraObservationSequence,
   reason: string,
+  sameSwing: false | null,
   partial: Partial<TwoViewReport> = {}
 ): TwoViewFusion => ({
   sequence: primary,
   report: {
     usable: false,
     reason,
+    sameSwing,
     offsetMs: 0,
     rate: 1,
     syncScore: 0,
@@ -625,6 +634,8 @@ export const fuseTwoViews = (
     return unusable(
       primary,
       "the two clips could not be lined up in time from the hands -- check they are the same swing",
+      // A score of nothing means too few frames with hands to compare at all.
+      sync.score > 0 ? false : null,
       { syncScore: Math.max(0, sync.score), offsetMs: sync.offsetMs, rate: sync.rate }
     );
   }
@@ -651,7 +662,7 @@ export const fuseTwoViews = (
 
   const sharedFrames = resampled.filter((joints) => Object.keys(joints).length > 0).length;
   if (pairs.length < 60) {
-    return unusable(primary, "the two clips share too few moments where both saw the golfer", {
+    return unusable(primary, "the two clips share too few moments where both saw the golfer", null, {
       syncScore: sync.score,
       offsetMs: sync.offsetMs,
       rate: sync.rate,
@@ -722,6 +733,7 @@ export const fuseTwoViews = (
     return unusable(
       primary,
       `once lined up, the two cameras put the same joints ${(agreementM * 100).toFixed(0)} cm apart -- they do not look like the same swing`,
+      false,
       {
         syncScore: sync.score,
         offsetMs: sync.offsetMs,
@@ -775,6 +787,7 @@ export const fuseTwoViews = (
     report: {
       usable: true,
       reason: null,
+      sameSwing: true,
       offsetMs: sync.offsetMs,
       rate: sync.rate,
       syncScore: sync.score,

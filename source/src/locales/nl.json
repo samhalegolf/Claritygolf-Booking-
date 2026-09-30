@@ -4036,5 +4036,9 @@
   "This computer only needs pairing once.": "Deze computer hoeft maar één keer gekoppeld te worden.",
   "Remove {name}? That computer will need pairing again.": "{name} verwijderen? Die computer moet dan opnieuw gekoppeld worden.",
   "On the computer the cameras are plugged into, open {address} and leave it running. Then add it here with the code it shows.": "Open {address} op de computer waarop de camera's zijn aangesloten en laat het openstaan. Voeg hem daarna hier toe met de code die hij toont.",
-  "Code shown on the terminal": "Code op het scherm van de terminal"
+  "Code shown on the terminal": "Code op het scherm van de terminal",
+  "Same swing · 2 angles": "Zelfde swing · 2 hoeken",
+  "Open both": "Beide openen",
+  "That video could not be loaded.": "Die video kon niet worden geladen.",
+  "On this device": "Op dit apparaat"
 }

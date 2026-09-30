@@ -4036,5 +4036,9 @@
   "This computer only needs pairing once.": "Denne datamaskinen trenger bare å pares én gang.",
   "Remove {name}? That computer will need pairing again.": "Fjerne {name}? Den datamaskinen må da pares på nytt.",
   "On the computer the cameras are plugged into, open {address} and leave it running. Then add it here with the code it shows.": "Åpne {address} på datamaskinen kameraene er koblet til, og la den stå på. Legg den så til her med koden den viser.",
-  "Code shown on the terminal": "Kode vist på terminalen"
+  "Code shown on the terminal": "Kode vist på terminalen",
+  "Same swing · 2 angles": "Samme sving · 2 vinkler",
+  "Open both": "Åpne begge",
+  "That video could not be loaded.": "Videoen kunne ikke lastes inn.",
+  "On this device": "På denne enheten"
 }

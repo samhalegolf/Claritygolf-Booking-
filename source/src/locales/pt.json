@@ -4036,5 +4036,9 @@
   "This computer only needs pairing once.": "Este computador só precisa de ser emparelhado uma vez.",
   "Remove {name}? That computer will need pairing again.": "Remover {name}? Esse computador terá de ser emparelhado de novo.",
   "On the computer the cameras are plugged into, open {address} and leave it running. Then add it here with the code it shows.": "No computador onde as câmaras estão ligadas, abra {address} e deixe-o a correr. Depois adicione-o aqui com o código que mostra.",
-  "Code shown on the terminal": "Código mostrado no terminal"
+  "Code shown on the terminal": "Código mostrado no terminal",
+  "Same swing · 2 angles": "Mesmo swing · 2 ângulos",
+  "Open both": "Abrir ambos",
+  "That video could not be loaded.": "Não foi possível carregar esse vídeo.",
+  "On this device": "Neste dispositivo"
 }

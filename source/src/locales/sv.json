@@ -4036,5 +4036,9 @@
   "This computer only needs pairing once.": "Den här datorn behöver bara parkopplas en gång.",
   "Remove {name}? That computer will need pairing again.": "Ta bort {name}? Datorn behöver då parkopplas igen.",
   "On the computer the cameras are plugged into, open {address} and leave it running. Then add it here with the code it shows.": "Öppna {address} på datorn som kamerorna är anslutna till och låt den vara igång. Lägg sedan till den här med koden som visas.",
-  "Code shown on the terminal": "Kod som visas på terminalen"
+  "Code shown on the terminal": "Kod som visas på terminalen",
+  "Same swing · 2 angles": "Samma sving · 2 vinklar",
+  "Open both": "Öppna båda",
+  "That video could not be loaded.": "Videon kunde inte läsas in.",
+  "On this device": "På den här enheten"
 }
