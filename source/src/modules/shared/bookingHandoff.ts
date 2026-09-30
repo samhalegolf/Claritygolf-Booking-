@@ -84,9 +84,6 @@ export function isBookingEmbedMode(): boolean {
   );
 }
 
-/** Which of the two ways into the booking widget this page load is. */
-export type BookingEntryMode = "public" | "player";
-
 /**
  * True when the booking widget was opened from the Player Terminal. Same
  * widget, same booking flow -- it just already knows who is booking, so the
@@ -100,11 +97,6 @@ export function isPlayerBookingMode(): boolean {
   );
 }
 
-/** True for the ordinary public widget: no session needed, none assumed. */
-export function isPublicBookingEmbedMode(): boolean {
-  return isBookingEmbedMode() && !isPlayerBookingMode();
-}
-
 /** Turns a stored (week, day, start-minute) triple into a local Date. */
 export function slotDate(week: number, day: number, startMinutes: number): Date {
   const date = new Date(BASE_WEEK_START);
@@ -113,35 +105,3 @@ export function slotDate(week: number, day: number, startMinutes: number): Date 
   return date;
 }
 
-/** The address of booking-as-this-player, for linking and history entries. */
-export function playerBookingUrl() {
-  const url = new URL(window.location.href);
-  url.searchParams.set(BOOKING_EMBED_PARAM, BOOKING_EMBED_VALUE);
-  url.searchParams.set(PLAYER_BOOKING_PARAM, PLAYER_BOOKING_VALUE);
-  return url.toString();
-}
-
-/** The address of the Player Terminal proper, with booking left behind. */
-export function playerTerminalUrl() {
-  const url = new URL(window.location.href);
-  url.searchParams.delete(BOOKING_EMBED_PARAM);
-  url.searchParams.delete(PLAYER_BOOKING_PARAM);
-  return url.toString();
-}
-
-/**
- * Opens booking as the signed-in player.
- *
- * A history entry rather than a page load: booking is a room in the terminal,
- * not a different building, so the navigation bar and the session stay put and
- * the browser's back button still works. Nothing personal travels in the URL --
- * the booking view asks the server who this session belongs to.
- */
-export function openPlayerBooking() {
-  window.history.pushState({}, "", playerBookingUrl());
-}
-
-/** Returns from booking to the rest of the Player Terminal. */
-export function closePlayerBooking() {
-  window.history.pushState({}, "", playerTerminalUrl());
-}

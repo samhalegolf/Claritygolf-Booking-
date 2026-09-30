@@ -31,17 +31,6 @@ body {
   overflow-anchor: none;
 }
 
-html.clarity-embed-mode,
-body.clarity-embed-mode {
-  min-height: auto;
-  background: transparent;
-}
-
-body.clarity-embed-mode #root {
-  min-height: auto;
-  background: transparent;
-}
-
 #root,
 .app-shell,
 .main-panel {
@@ -2449,31 +2438,6 @@ button {
   margin: -22px -22px 22px;
 }
 
-/* Booking entered from the Player Terminal. The strip keeps the way back to
-   the portal in view and says whose booking this is, so the player never has
-   to wonder whether the widget knows them.
-   It only ever renders inside the booking widget, where .embed-mode has
-   already zeroed the page padding -- hence no negative margins here. */
-.booking-player-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 10px;
-  padding: 12px 18px;
-  border-bottom: 1px solid #e8e6df;
-  background: #f6f6f2;
-}
-
-.booking-player-identity {
-  color: #57544d;
-  font-size: 13px;
-}
-
-.booking-player-identity strong {
-  color: #171717;
-}
-
 .booking-brand strong {
   font-size: 32px;
   letter-spacing: 0;
@@ -2644,10 +2608,6 @@ button {
   padding-bottom: 6px;
 }
 
-.booking-days {
-  min-width: max(280px, 100%);
-}
-
 .booking-day-marker {
   color: #5d5a54;
   text-transform: uppercase;
@@ -2704,60 +2664,6 @@ button {
   color: #5d5a54;
 }
 
-.booking-confirmed {
-  display: grid;
-  gap: 16px;
-  padding: 22px;
-  border: 1px solid #deded8;
-  background: #fbfbf9;
-}
-
-.booking-confirmed > span {
-  color: #76736d;
-  font-size: 12px;
-  font-weight: 850;
-  text-transform: uppercase;
-}
-
-.booking-confirmed h2 {
-  margin: 0;
-  color: #171717;
-  font-size: clamp(30px, 5vw, 52px);
-  line-height: 1;
-}
-
-.booking-confirmed-summary {
-  display: grid;
-  gap: 5px;
-  padding: 14px;
-  border: 1px solid #deded8;
-  background: #fff;
-}
-
-.booking-confirmed-summary strong,
-.booking-confirmed-summary em,
-.booking-confirmed-summary p {
-  margin: 0;
-  font-style: normal;
-}
-
-.booking-confirmed-summary strong {
-  color: #171717;
-  font-size: 20px;
-}
-
-.booking-confirmed-summary em,
-.booking-confirmed-summary p {
-  color: #5f5c56;
-}
-
-.email-status-list,
-.calendar-add-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
 .email-status {
   display: inline-flex;
   align-items: center;
@@ -2791,8 +2697,7 @@ button {
 
 .service-picker button,
 .time-slots button,
-.booking-handedness button,
-.booking-days button {
+.booking-handedness button {
   border: 1px solid #deded8;
   background: #fbfbf9;
   color: #171717;
@@ -2819,18 +2724,10 @@ button {
 
 .service-picker .selected-service,
 .time-slots .selected-time,
-.booking-handedness .selected-handedness,
-.booking-days .selected-day {
+.booking-handedness .selected-handedness {
   border-color: #111;
   background: #111;
   color: #fff;
-}
-
-.booking-days {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(44px, 1fr));
-  gap: 6px;
-  margin-top: 14px;
 }
 
 .booking-week-controls {
@@ -2863,17 +2760,6 @@ button {
   white-space: nowrap;
 }
 
-.booking-days button {
-  min-height: 58px;
-  text-align: center;
-}
-
-.booking-days strong,
-.booking-days em {
-  display: block;
-  font-style: normal;
-}
-
 .time-slots {
   grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
 }
@@ -2895,8 +2781,8 @@ button {
 }
 
 /* Handedness toggle and player notes on the public booking page. The option
-   buttons borrow every theme's day-picker look (their selectors sit beside
-   .booking-days above); this only lays them out and adds the explainer. The
+   buttons borrow every theme's picker look (their selectors sit beside
+   .service-picker above); this only lays them out and adds the explainer. The
    notes box reads the booking theme's input colours so it matches the fields. */
 .booking-handedness {
   display: grid;
@@ -3025,53 +2911,12 @@ button {
   margin-top: 10px;
 }
 
-.booking-save-progress {
-  position: relative;
-  height: 4px;
-  margin: -4px 0 12px;
-  overflow: hidden;
-  border: 1px solid #d8ded1;
-  background: #eef2e8;
-}
-
-.booking-save-progress::before {
-  content: "";
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 45%;
-  background: linear-gradient(90deg, #07100a, var(--coach-primary), #07100a);
-  animation: booking-save-slide 920ms ease-in-out infinite;
-}
-
-@keyframes booking-save-slide {
-  0% {
-    transform: translateX(-110%);
-  }
-  100% {
-    transform: translateX(250%);
-  }
-}
-
-.booking-login-error em {
-  font-style: normal;
-}
-
 .embed-panel {
   margin-top: 18px;
   border: 1px solid #deded8;
   background: #fbfbf9;
 }
 
-.embed-copy {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 18px;
-  padding: 18px;
-  border-bottom: 1px solid #e4e2da;
-}
-
-.embed-copy span,
 .embed-code span,
 .sync-field span,
 .sync-output span,
@@ -3081,18 +2926,6 @@ button {
   font-size: 12px;
   text-transform: uppercase;
   font-weight: 800;
-}
-
-.embed-copy h2 {
-  margin: 5px 0 8px;
-  font-size: 22px;
-}
-
-.embed-copy p {
-  max-width: 660px;
-  margin: 0;
-  color: #56534d;
-  line-height: 1.5;
 }
 
 .embed-actions,
@@ -3194,38 +3027,6 @@ button {
   border: 1px solid #d8d6ce;
   border-radius: 6px;
   background: #fff;
-}
-
-.widget-preview {
-  margin: 18px;
-  border: 1px solid #d8d6ce;
-  background: #fff;
-}
-
-.preview-bar {
-  min-height: 42px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 0 12px;
-  border-bottom: 1px solid #e4e2da;
-}
-
-.preview-bar strong {
-  font-size: 13px;
-}
-
-.preview-bar span {
-  color: #76736d;
-  font-size: 12px;
-}
-
-.widget-preview iframe {
-  display: block;
-  width: 100%;
-  height: 520px;
-  border: 0;
 }
 
 .sync-card {
@@ -5075,7 +4876,6 @@ button {
 .booking-card,
 .booking-preview,
 .embed-panel,
-.widget-preview,
 .quick-create,
 .client-match-prompt,
 .availability-window.is-editing,
@@ -5094,7 +4894,6 @@ button {
 .data-card,
 .booking-card,
 .booking-preview,
-.widget-preview,
 .quick-create,
 .client-match-prompt {
   border-radius: var(--c-radius-card);
@@ -5153,14 +4952,12 @@ button {
 .service-picker small,
 .time-slots p,
 .booking-summary span,
-.embed-copy span,
 .embed-code span,
 .sync-field span,
 .sync-output span,
 .sync-meta span,
 .dock-label span,
 .dock-empty,
-.preview-bar span,
 .settings-field span,
 .login-card label span,
 .linked-profile span,
@@ -5174,7 +4971,6 @@ button {
 }
 
 .data-card p,
-.embed-copy p,
 .service-summary p,
 .sync-status em,
 .info-stack div,
@@ -5213,8 +5009,7 @@ button {
 .client-match-prompt,
 .service-picker button,
 .time-slots button,
-.booking-handedness button,
-.booking-days button {
+.booking-handedness button {
   border-color: var(--border);
   border-radius: 8px;
   background: var(--panel-soft);
@@ -5238,8 +5033,7 @@ button {
 .client-match-prompt:hover,
 .service-picker button:hover,
 .time-slots button:hover,
-.booking-handedness button:hover,
-.booking-days button:hover {
+.booking-handedness button:hover {
   border-color: color-mix(in srgb, var(--coach-primary) 22%, var(--border));
   background: color-mix(in srgb, var(--coach-primary) 3%, var(--panel-soft));
 }
@@ -5248,8 +5042,7 @@ button {
 .active-pill,
 .service-picker .selected-service,
 .time-slots .selected-time,
-.booking-handedness .selected-handedness,
-.booking-days .selected-day {
+.booking-handedness .selected-handedness {
   border-color: color-mix(in srgb, var(--coach-primary) 24%, #050805);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 40%),
@@ -5445,7 +5238,6 @@ button {
 .linked-profile,
 .admin-override,
 .embed-code,
-.preview-bar,
 .service-summary {
   border-color: var(--border);
   border-radius: 8px;
@@ -5884,11 +5676,6 @@ button {
   background: var(--panel-soft);
 }
 
-.embed-copy,
-.preview-bar {
-  border-color: var(--border);
-}
-
 .embed-code code,
 .sync-output code {
   color: var(--heading);
@@ -6155,7 +5942,6 @@ button {
 .theme-dark .data-card,
 .theme-dark .booking-card,
 .theme-dark .booking-preview,
-.theme-dark .widget-preview,
 .theme-dark .quick-create {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 46%),
@@ -6254,12 +6040,6 @@ button {
 
 .app-shell .public-booking .booking-login-copy em {
   color: var(--booking-muted);
-}
-
-/* Same specificity as the muted rule above, and after it, so a failed sign-in
-   reads as a failure rather than as more small print. */
-.app-shell .public-booking .booking-login-error em {
-  color: var(--booking-danger);
 }
 
 .app-shell .public-booking .booking-card {
@@ -6430,8 +6210,7 @@ button {
 
 .app-shell .public-booking .service-picker button,
 .app-shell .public-booking .time-slots button,
-.app-shell .public-booking .booking-handedness button,
-.app-shell .public-booking .booking-days button {
+.app-shell .public-booking .booking-handedness button {
   border-color: color-mix(in srgb, var(--card-outline) 28%, var(--booking-border));
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--card-vein) 10%, transparent), transparent),
@@ -6441,16 +6220,14 @@ button {
 
 .app-shell .public-booking .service-picker button:hover,
 .app-shell .public-booking .time-slots button:hover,
-.app-shell .public-booking .booking-handedness button:hover,
-.app-shell .public-booking .booking-days button:hover {
+.app-shell .public-booking .booking-handedness button:hover {
   border-color: color-mix(in srgb, var(--card-outline) 58%, var(--booking-border));
   background: var(--booking-control-hover);
 }
 
 .app-shell .public-booking .service-picker .selected-service,
 .app-shell .public-booking .time-slots .selected-time,
-.app-shell .public-booking .booking-handedness .selected-handedness,
-.app-shell .public-booking .booking-days .selected-day {
+.app-shell .public-booking .booking-handedness .selected-handedness {
   border-color: color-mix(in srgb, var(--card-outline) 88%, var(--booking-border));
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.1), transparent 42%),
@@ -6657,8 +6434,7 @@ button {
 
 .app-shell .public-booking.booking-theme-light .service-picker button,
 .app-shell .public-booking.booking-theme-light .time-slots button,
-.app-shell .public-booking.booking-theme-light .booking-handedness button,
-.app-shell .public-booking.booking-theme-light .booking-days button {
+.app-shell .public-booking.booking-theme-light .booking-handedness button {
   border-color: #deded8;
   background: #fbfbf9;
   color: #171717;
@@ -6672,8 +6448,7 @@ button {
 
 .app-shell .public-booking.booking-theme-light .service-picker button:hover,
 .app-shell .public-booking.booking-theme-light .time-slots button:hover,
-.app-shell .public-booking.booking-theme-light .booking-handedness button:hover,
-.app-shell .public-booking.booking-theme-light .booking-days button:hover {
+.app-shell .public-booking.booking-theme-light .booking-handedness button:hover {
   border-color: #cfcfc8;
   background: #f7f7f3;
 }
@@ -6698,7 +6473,6 @@ button {
 .app-shell .public-booking.booking-theme-light .service-picker .selected-service,
 .app-shell .public-booking.booking-theme-light .time-slots .selected-time,
 .app-shell .public-booking.booking-theme-light .booking-handedness .selected-handedness,
-.app-shell .public-booking.booking-theme-light .booking-days .selected-day,
 .app-shell .public-booking.booking-theme-light .confirm-booking {
   border-color: #111;
   background: #111;
@@ -6740,8 +6514,7 @@ button {
 .app-shell .public-booking.booking-theme-light .booking-card:first-child .service-picker button,
 .app-shell .public-booking.booking-theme-light .service-picker button,
 .app-shell .public-booking.booking-theme-light .time-slots button,
-.app-shell .public-booking.booking-theme-light .booking-handedness button,
-.app-shell .public-booking.booking-theme-light .booking-days button {
+.app-shell .public-booking.booking-theme-light .booking-handedness button {
   border-color: #deded8;
   background: #fbfbf9;
   color: #171717;
@@ -6751,8 +6524,7 @@ button {
 .app-shell .public-booking.booking-theme-light .booking-card:first-child .service-picker button:hover,
 .app-shell .public-booking.booking-theme-light .service-picker button:hover,
 .app-shell .public-booking.booking-theme-light .time-slots button:hover,
-.app-shell .public-booking.booking-theme-light .booking-handedness button:hover,
-.app-shell .public-booking.booking-theme-light .booking-days button:hover {
+.app-shell .public-booking.booking-theme-light .booking-handedness button:hover {
   border-color: #cfcfc8;
   background: #f7f7f3;
 }
@@ -6760,8 +6532,7 @@ button {
 .app-shell .public-booking.booking-theme-light .booking-card:first-child .service-picker .selected-service,
 .app-shell .public-booking.booking-theme-light .service-picker .selected-service,
 .app-shell .public-booking.booking-theme-light .time-slots .selected-time,
-.app-shell .public-booking.booking-theme-light .booking-handedness .selected-handedness,
-.app-shell .public-booking.booking-theme-light .booking-days .selected-day {
+.app-shell .public-booking.booking-theme-light .booking-handedness .selected-handedness {
   border-color: #cfcfc8;
   background: #f7f7f3;
   color: #171717;
@@ -6790,12 +6561,10 @@ button {
 .app-shell .public-booking.booking-theme-light .service-picker button:hover,
 .app-shell .public-booking.booking-theme-light .time-slots button:hover,
 .app-shell .public-booking.booking-theme-light .booking-handedness button:hover,
-.app-shell .public-booking.booking-theme-light .booking-days button:hover,
 .app-shell .public-booking.booking-theme-light .booking-card:first-child .service-picker .selected-service,
 .app-shell .public-booking.booking-theme-light .service-picker .selected-service,
 .app-shell .public-booking.booking-theme-light .time-slots .selected-time,
-.app-shell .public-booking.booking-theme-light .booking-handedness .selected-handedness,
-.app-shell .public-booking.booking-theme-light .booking-days .selected-day {
+.app-shell .public-booking.booking-theme-light .booking-handedness .selected-handedness {
   border-color: #111;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.04) 38%, transparent 62%),
@@ -6844,21 +6613,6 @@ button {
 .app-shell .public-booking .booking-brand.booking-brand-subtle em,
 .app-shell .public-booking.booking-theme-light .booking-brand.booking-brand-subtle em {
   color: var(--booking-muted);
-}
-
-/* The Player Terminal strip follows whichever booking theme is set, so it
-   reads as part of the widget rather than bolted above it. */
-.app-shell .public-booking .booking-player-bar {
-  border-bottom-color: var(--booking-border);
-  background: color-mix(in srgb, var(--booking-text) 5%, transparent);
-}
-
-.app-shell .public-booking .booking-player-identity {
-  color: var(--booking-muted);
-}
-
-.app-shell .public-booking .booking-player-identity strong {
-  color: var(--booking-text);
 }
 
 @media (max-width: 1120px) {
@@ -7170,17 +6924,6 @@ button {
   .week-grid {
     min-width: 0;
     width: 100%;
-  }
-
-  .booking-days {
-    grid-template-columns: repeat(7, minmax(0, 1fr));
-    gap: 4px;
-  }
-
-  .booking-days button {
-    min-width: 0;
-    min-height: 50px;
-    padding-inline: 4px;
   }
 
   .calendar-card.calendar-detail-mode {
