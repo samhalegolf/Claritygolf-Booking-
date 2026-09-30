@@ -96,7 +96,7 @@ const createOpenError = async (
   return new VideoAnalysisIndexedDbError(message, diagnostics, error);
 };
 
-export const ensureVideoAnalysisDatabaseStores = (db: IDBDatabase) => {
+const ensureVideoAnalysisDatabaseStores = (db: IDBDatabase) => {
   if (!db.objectStoreNames.contains(VIDEO_ANALYSIS_DB_STORES.transientVideos)) {
     db.createObjectStore(VIDEO_ANALYSIS_DB_STORES.transientVideos);
   }

@@ -149,8 +149,7 @@ button {
   font-size: 13px;
 }
 
-.auth-success,
-.login-hint {
+.auth-success {
   padding: 10px 12px;
   border: 1px solid #e2e0d8;
   background: #f7f7f3;
@@ -260,9 +259,7 @@ button {
 }
 
 .brand strong,
-.brand span,
-.booking-preview strong,
-.booking-preview span {
+.brand span {
   display: block;
 }
 
@@ -271,14 +268,12 @@ button {
 }
 
 .brand span,
-.booking-preview span,
 .eyebrow,
 .muted {
   color: #76736d;
 }
 
-.brand span,
-.booking-preview span {
+.brand span {
   font-size: 12px;
 }
 
@@ -325,28 +320,6 @@ button {
    item reads as part of the item, not as a divider above the rest. */
 .side-nav button.nav-home {
   margin-bottom: var(--c-space-4);
-}
-
-.booking-preview {
-  margin-top: auto;
-  border: 1px solid #deded8;
-  padding: 16px;
-  background: #fff;
-  color: #171717;
-  cursor: pointer;
-  text-align: left;
-}
-
-.booking-preview strong {
-  margin: 8px 0 6px;
-  font-size: 18px;
-}
-
-.booking-preview p {
-  margin: 0;
-  color: #5d5a54;
-  font-size: 13px;
-  line-height: 1.45;
 }
 
 .main-panel {
@@ -477,7 +450,6 @@ button {
   padding: 22px;
 }
 
-.module-grid,
 .settings-grid {
   display: grid;
   /* min(260px, 100%): a bare 260px minimum is wider than a small phone once the
@@ -780,8 +752,7 @@ button {
 
 .data-card span,
 .booking-card > span,
-.client-row span,
-.meta-row span {
+.client-row span {
   color: #76736d;
   font-size: 12px;
 }
@@ -994,19 +965,6 @@ button {
   color: var(--c-text);
   text-decoration: underline;
   text-underline-offset: 3px;
-}
-
-.meta-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 16px;
-}
-
-.meta-row span {
-  padding: 6px 8px;
-  border: 1px solid #e2e0d8;
-  background: #f7f7f3;
 }
 
 .service-layout {
@@ -1396,48 +1354,6 @@ button {
   font: inherit;
 }
 
-.client-ghost {
-  position: absolute;
-  top: 5px;
-  right: 6px;
-  bottom: 5px;
-  z-index: 5;
-  min-width: 0;
-  width: min(240px, calc(100% - 54px));
-  min-height: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 4px 8px;
-  border: 1px solid #deded8;
-  border-radius: 8px;
-  background: #fbfbf9;
-  color: #171717;
-  text-align: left;
-  cursor: pointer;
-  overflow: hidden;
-}
-
-.client-ghost span,
-.client-ghost em {
-  display: block;
-}
-
-.client-ghost em {
-  color: #76736d;
-  font-style: normal;
-  font-size: 12px;
-}
-
-.client-ghost span,
-.client-ghost em {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .client-table {
   position: relative;
   z-index: 1;
@@ -1723,8 +1639,7 @@ button {
   margin-top: 24px;
 }
 
-.client-editor,
-.client-history {
+.client-editor {
   display: grid;
   gap: 10px;
 }
@@ -1768,53 +1683,6 @@ button {
   margin: 0;
   padding: 0;
   color: var(--text);
-}
-
-.client-history {
-  margin-top: 16px;
-  padding-top: 14px;
-  border-top: 1px solid #e4e2da;
-}
-
-.client-history summary {
-  color: #76736d;
-  font-size: 12px;
-  text-transform: uppercase;
-  font-weight: 800;
-  cursor: pointer;
-  list-style: none;
-}
-
-.client-history summary::-webkit-details-marker {
-  display: none;
-}
-
-.client-history summary::after {
-  content: "+";
-  float: right;
-}
-
-.client-history[open] summary::after {
-  content: "-";
-}
-
-.client-history div {
-  display: grid;
-  gap: 3px;
-  padding: 9px 0;
-  border-bottom: 1px solid #efeee9;
-}
-
-.client-history div:last-child {
-  border-bottom: 0;
-}
-
-.client-history em,
-.client-history p {
-  margin: 0;
-  color: #76736d;
-  font-style: normal;
-  font-size: 13px;
 }
 
 .client-profile-tabs {
@@ -2600,19 +2468,6 @@ button {
 .booking-progressive-summary-empty strong,
 .booking-progressive-summary-empty span {
   font-style: normal;
-}
-
-.booking-days-wrap {
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding-bottom: 6px;
-}
-
-.booking-day-marker {
-  color: #5d5a54;
-  text-transform: uppercase;
-  font-size: 10px;
-  letter-spacing: 0.02em;
 }
 
 .booking-progressive-section.is-open .booking-progressive-body {
@@ -4019,24 +3874,6 @@ button {
   border-bottom: 1px solid #f0f0ea;
 }
 
-.hour-line {
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: #d9d9d2;
-  pointer-events: none;
-}
-
-.hour-line::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 36px;
-  border-top: 1px dashed #d6d6ce;
-}
-
 .calendar-item {
   position: absolute;
   z-index: 2;
@@ -4386,20 +4223,6 @@ button {
   background: transparent;
   color: #171717;
   font: inherit;
-}
-
-.quick-client-ghost {
-  position: absolute;
-  left: -1px;
-  right: -1px;
-  top: calc(100% + 4px);
-  z-index: 2;
-  min-height: 34px;
-  padding: 7px 10px;
-  border: 1px solid #deded8;
-  background: #fff;
-  color: #171717;
-  text-align: left;
 }
 
 .client-match-prompt {
@@ -4872,9 +4695,7 @@ button {
 .client-row,
 .client-search,
 .client-table,
-.client-ghost,
 .booking-card,
-.booking-preview,
 .embed-panel,
 .quick-create,
 .client-match-prompt,
@@ -4893,7 +4714,6 @@ button {
 .details-panel,
 .data-card,
 .booking-card,
-.booking-preview,
 .quick-create,
 .client-match-prompt {
   border-radius: var(--c-radius-card);
@@ -4931,20 +4751,16 @@ button {
 .booking-card h2,
 .details-panel h2,
 .empty-panel h2,
-.booking-preview strong,
 .quick-create strong {
   color: var(--heading);
 }
 
 .brand span,
-.booking-preview span,
-.booking-preview p,
 .eyebrow,
 .muted,
 .data-card span,
 .booking-card > span,
 .client-row span,
-.meta-row span,
 .calendar-toolbar p,
 .topbar span,
 .day-heading span,
@@ -5130,15 +4946,8 @@ button {
   box-shadow: 0 8px 18px rgba(0, 0, 0, 0.04);
 }
 
-.booking-preview {
-  background:
-    var(--shine),
-    var(--panel);
-}
-
 .client-table,
 .client-search,
-.client-ghost,
 .client-match-prompt,
 .quick-client-search,
 .quick-create-form input,
@@ -5176,8 +4985,7 @@ button {
   border-bottom-color: var(--border);
 }
 
-.client-row:hover,
-.client-ghost:hover {
+.client-row:hover {
   background: var(--panel-soft);
 }
 
@@ -5229,8 +5037,6 @@ button {
   color: var(--text);
 }
 
-.login-hint,
-.meta-row span,
 .booking-summary,
 .sync-output,
 .sync-meta span,
@@ -5359,12 +5165,6 @@ button {
     0 calc(-1 * var(--band-offset, 0px)),
     0 0;
   box-shadow: 0 1px 2px rgba(8, 18, 12, 0.03);
-}
-
-/* Ticks are drawn inside the availability card now, so a grid-wide hour rule
-   would only ever land on empty page. */
-.hour-line {
-  display: none;
 }
 
 /* --- Week pager ---------------------------------------------------------
@@ -5941,7 +5741,6 @@ button {
 .theme-dark .details-panel,
 .theme-dark .data-card,
 .theme-dark .booking-card,
-.theme-dark .booking-preview,
 .theme-dark .quick-create {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 46%),
@@ -6635,10 +6434,6 @@ button {
     grid-auto-columns: max-content;
   }
 
-  .booking-preview {
-    display: none;
-  }
-
   .workspace {
     grid-template-columns: 1fr;
   }
@@ -6978,16 +6773,6 @@ button {
     padding-right: 0;
   }
 
-  .client-ghost {
-    top: calc(100% + 6px);
-    right: 0;
-    bottom: auto;
-    left: 0;
-    width: auto;
-    min-height: 42px;
-    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.16);
-  }
-
   .client-row {
     min-height: 92px;
     padding: 14px;
@@ -7169,16 +6954,6 @@ button {
     transition: none;
     transform: none;
   }
-}
-
-.item-email-indicators {
-  position: absolute;
-  top: 5px;
-  right: 5px;
-  z-index: 3;
-  display: inline-flex;
-  gap: 3px;
-  pointer-events: auto;
 }
 
 .email-status-dot {
@@ -8015,13 +7790,6 @@ button {
   margin: 0;
 }
 
-.billing-builder {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(290px, 0.36fr);
-  gap: 14px;
-  align-items: start;
-}
-
 .invoice-document-card,
 .invoice-side-panel {
   min-width: 0;
@@ -8314,27 +8082,6 @@ button {
   background: var(--c-hover);
 }
 
-/* Completed lesson that belongs to the chosen billing customer: floated to the
-   top of the pull list and accented. */
-.completed-booking-list button.for-billing-client {
-  background: var(--c-hover);
-  box-shadow: inset 3px 0 0 var(--c-accent);
-}
-
-.pull-billing-flag {
-  margin-left: 8px;
-  padding: 1px 7px;
-  border-radius: var(--c-radius-pill);
-  background: var(--c-hover);
-  color: var(--c-success-text);
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  white-space: nowrap;
-  vertical-align: middle;
-}
-
 .invoice-customer-results button span,
 .invoice-customer-settled div,
 .invoice-option-list button span,
@@ -8432,79 +8179,11 @@ button {
   white-space: nowrap;
 }
 
-/* Money/percent input adornment: a currency symbol, "-$", or "%" pinned inside
-   the input via a data-prefix / data-suffix attribute, so numbers in the invoice
-   editor never render without their unit. */
-/* Rule 05: a money field is as wide as money. A grid rather than a block so
-   the input stretches to the wrapper without a width of its own, and the
-   wrapper is the one that carries the content width. */
-.affixed-field {
-  position: relative;
-  display: grid;
-  width: var(--c-w-price);
-  max-width: 100%;
-}
-
-/* A grid item's min-width is auto, which for an input is its `size` attribute
-   -- about 20 characters. Without this the input keeps that intrinsic width
-   and overflows the money-sized wrapper around it. */
-.affixed-field > input {
-  min-width: 0;
-}
-
-.affixed-field[data-prefix]::before {
-  content: attr(data-prefix);
-  position: absolute;
-  left: 11px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--c-muted);
-  font-weight: 700;
-  font-size: 14px;
-  pointer-events: none;
-}
-
-/* The width token is the width of the number. The symbol pinned inside the
-   field needs its own room on top, or a four-figure price reads as "1200.0" --
-   and the max-width above still stops the whole thing outgrowing its column,
-   which is the same shape as the token's own min(Nch, 100%). */
-.affixed-field[data-prefix] {
-  width: calc(var(--c-w-price) + 23px);
-}
-
-.affixed-field[data-prefix] > input {
-  padding-left: 34px;
-}
-
-.affixed-field[data-suffix]::after {
-  content: attr(data-suffix);
-  position: absolute;
-  right: 12px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--c-muted);
-  font-weight: 700;
-  font-size: 14px;
-  pointer-events: none;
-}
-
-.affixed-field[data-suffix] {
-  width: calc(var(--c-w-price) + 17px);
-}
-
-.affixed-field[data-suffix] > input {
-  padding-right: 28px;
-}
-
 /* Per-line discount cell: a preset/custom dropdown with an optional value input
    stacked beneath it. Rule 05 -- the select holds a preset name and its value,
    so it is sized as a name rather than stretched to the column. */
 .invoice-line-discount select {
   width: var(--c-w-name);
-}
-
-.invoice-line-discount .affixed-field {
-  margin-top: 6px;
 }
 
 /* Plain (locked-in or pre-set) line: a boring invoice line. Description and
@@ -10374,15 +10053,11 @@ button {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .billing-builder {
-    grid-template-columns: minmax(0, 1fr) minmax(280px, 0.72fr);
-  }
 }
 
 @media (max-width: 760px) {
   .billing-dashboard-grid,
   .billing-reports,
-  .billing-builder,
   .invoice-form-grid,
   .invoice-detail-grid,
   .invoice-line-search,
@@ -10573,10 +10248,6 @@ button {
   border-color: var(--c-accent);
   background: var(--c-accent);
   color: var(--c-accent-text);
-}
-
-.report-category-subtotal {
-  margin: 10px 0 0;
 }
 
 /* Notice that the report's expense figures are filtered, so an on-screen or
@@ -12059,27 +11730,6 @@ button {
   font-size: 13px;
 }
 
-/* The amount is the one field that gets edited on nearly every sale, so it
-   reads a size larger than the rest of the form. */
-.pos-amount-field input {
-  font-size: 20px;
-  font-weight: 700;
-}
-
-.pos-reset-amount {
-  margin-left: 8px;
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  background: none;
-  border: none;
-  padding: 0;
-  color: var(--coach-primary, #1fd36d);
-  font: inherit;
-  font-weight: 700;
-  cursor: pointer;
-}
-
 /* Four across on the modal's width, so Clarity Pay, Cash, Eftpos and On
    account sit in one row; a fifth wraps rather than squashing. */
 .pos-method-grid {
@@ -12692,34 +12342,6 @@ button {
   font-size: 12px;
   color: var(--muted);
   white-space: nowrap;
-}
-
-.pos-basket {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 12px 0;
-  padding: 10px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-}
-
-.pos-basket-line {
-  display: grid;
-  grid-template-columns: 1fr auto auto auto;
-  align-items: center;
-  gap: 10px;
-}
-
-.pos-basket-line > span {
-  display: flex;
-  flex-direction: column;
-}
-
-.pos-basket-line em {
-  font-style: normal;
-  font-size: 11px;
-  color: var(--muted);
 }
 
 .pos-basket-qty {
@@ -13607,76 +13229,6 @@ button {
 }
 
 /* --- Redeeming at the till --- */
-
-.sell-coupon-entry {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 10px;
-  padding: 0 10px;
-  border: 1px dashed var(--border);
-  border-radius: 10px;
-  color: var(--muted);
-}
-
-.sell-coupon-entry input {
-  flex: 1;
-  min-width: 0;
-  padding: 9px 0;
-  border: none;
-  background: none;
-  color: inherit;
-  font: inherit;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.sell-coupon-entry input:focus {
-  outline: none;
-}
-
-.sell-coupon-entry .outline-button {
-  margin: 5px 0;
-}
-
-.sell-coupon-applied {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 10px;
-  padding: 9px 10px;
-  border: 1px solid var(--coach-primary, #1fd36d);
-  border-radius: 10px;
-}
-
-.sell-coupon-applied span {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.sell-coupon-applied strong {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 13px;
-  letter-spacing: 0.04em;
-}
-
-.sell-coupon-applied em {
-  font-style: normal;
-  font-size: 11px;
-  color: var(--muted);
-}
-
-.sell-coupon-applied > button:last-child {
-  margin-left: auto;
-}
-
-.sell-coupon-error {
-  margin: 6px 0 0;
-  font-size: 12px;
-  color: var(--danger, #a52e15);
-}
 
 .sell-total-row.coupon {
   color: var(--coach-primary, #1fd36d);

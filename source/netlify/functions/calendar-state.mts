@@ -1,6 +1,6 @@
 import type { Config, Context } from "@netlify/functions";
 import { getDatabase } from "@netlify/database";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { legacyOriginalWorkspaceId } from "./_shared/account.mts";
 import {
   cleanCoachAccount,
@@ -13,7 +13,6 @@ import { cleanLocationKind, cleanLocationResources, cleanResourceSource } from "
 import { serviceIncludesCoach } from "./_shared/service-scope.mts";
 import {
   requireCoachActor,
-  recordBelongsToAccountStrict,
   appUserRoleForMembership,
 } from "./_shared/coach-auth.mts";
 
@@ -21,7 +20,6 @@ type BookingCoreModule = {
   handleBookingApiRoute: (req: Request, forcedPathname?: string, context?: Context) => Promise<Response> | Response;
 };
 
-const sessionCookieName = "clarity_session";
 const CANCELLED_GROUP_SESSION_TITLE = "Cancelled group session";
 const CANCELLED_GROUP_SESSION_NOTE = "__cancelled_group_session__";
 
@@ -161,41 +159,6 @@ function jsonError(req: Request, error: unknown, phase: "import" | "handler" | "
   );
 }
 
-function hashToken(token: string) {
-  return createHash("sha256").update(token).digest("hex");
-}
-
-function parseCookies(req: Request) {
-  const cookieHeaderValue = req.headers.get("cookie") || "";
-  return Object.fromEntries(
-    cookieHeaderValue
-      .split(";")
-      .map((pair) => pair.trim())
-      .filter(Boolean)
-      .map((pair) => {
-        const index = pair.indexOf("=");
-        return index === -1
-          ? [decodeURIComponent(pair), ""]
-          : [decodeURIComponent(pair.slice(0, index)), decodeURIComponent(pair.slice(index + 1))];
-      }),
-  );
-}
-
-async function readAdminSession(req: Request) {
-  const token = parseCookies(req)[sessionCookieName] || "";
-  if (!token) return null;
-  const tokenHash = hashToken(token);
-  const rows = await db().sql`
-    SELECT admin_users.id, admin_users.email, admin_sessions.expires_at
-    FROM admin_sessions
-    JOIN admin_users ON admin_users.id = admin_sessions.user_id
-    WHERE admin_sessions.token_hash = ${tokenHash}
-  `;
-  const row = rows[0];
-  if (!row || new Date(row.expires_at).getTime() <= Date.now()) return null;
-  return { id: row.id, email: row.email, expiresAt: row.expires_at };
-}
-
 function defaultWorkspaceAccountFromCoachAccount(account = defaultCoachAccount()) {
   const clean = cleanCoachAccount(account);
   const slug = cleanSlug(clean.calendarSlug || clean.businessName, legacyOriginalWorkspaceId());
@@ -243,27 +206,6 @@ function defaultLocationFromCoachAccount(account = defaultCoachAccount()) {
     archived: false,
     isDefault: true,
     sortOrder: 0,
-  };
-}
-
-function defaultAppUserFromAccount(account = defaultCoachAccount()) {
-  const coach = defaultCoachProfileFromAccount(account);
-  const workspaceAccount = defaultWorkspaceAccountFromCoachAccount(account);
-  return {
-    id: `${coach.id}-admin`,
-    accountId: workspaceAccount.id,
-    email: coach.email,
-    name: coach.displayName,
-    role: "admin",
-    coachId: coach.id,
-    permissions: {
-      bookings: "all",
-      services: "all",
-      availability: "all",
-      locations: "all",
-      clients: "all",
-      settings: "all",
-    },
   };
 }
 
@@ -571,10 +513,6 @@ function recordBelongsToAccount(record: Record<string, unknown>, accountId: stri
   return record.accountId === accountId;
 }
 
-function isAdminUser(user: Record<string, unknown> | null | undefined) {
-  return ["admin", "account_admin", "platform_admin"].includes(String(user?.role || "")) || Object.values((user?.permissions || {}) as Record<string, unknown>).includes("all");
-}
-
 function filterCalendarStateForContext(state: Record<string, any>, context: { accountId: string; isAdmin: boolean; coachId?: string }) {
   const coaches = state.coaches || [];
   const fallbackCoachId = coaches.find((coach: Record<string, unknown>) => coach.active && !coach.archived)?.id || coaches[0]?.id || "";
@@ -639,11 +577,6 @@ async function readItems(accountId: string) {
     ORDER BY ci.week, ci.day, ci.start, ci.id
   `;
   return rows.map(rowToItem);
-}
-
-function appUsersFromSettings(settings: Record<string, string>, account: ReturnType<typeof cleanCoachAccount>) {
-  const users = parseSettingJson(settings, "appUsersJson", []);
-  return Array.isArray(users) && users.length ? users : [defaultAppUserFromAccount(account)];
 }
 
 async function readTinyCalendarShell(req: Request, requestStartedAt: number) {

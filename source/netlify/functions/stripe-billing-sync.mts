@@ -1,5 +1,4 @@
 import type { Config } from "@netlify/functions";
-import { createHash } from "node:crypto";
 import { requireCoachActor } from "./_shared/coach-auth.mts";
 import { DEFAULT_SINCE_EPOCH, syncChargesSince, syncInvoicesSince } from "./_shared/stripe-billing.mts";
 
@@ -14,10 +13,6 @@ import { DEFAULT_SINCE_EPOCH, syncChargesSince, syncInvoicesSince } from "./_sha
 //   { action?: "syncAll" | "syncInvoices" | "syncCharges",
 //     since?: string | number }   // since "all" (or 0) backfills full history
 
-
-function env(name: string, fallback = "") {
-  return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
-}
 
 function json(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), {

@@ -390,4 +390,3 @@ export function PracticeSettingsPanel({ onToast }: PracticeSettingsPanelProps) {
   );
 }
 
-export default PracticeSettingsPanel;

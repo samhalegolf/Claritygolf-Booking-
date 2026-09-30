@@ -39,7 +39,7 @@ const readDimensions = (element: HTMLVideoElement): Omit<VideoMetadata, "fps"> =
 
 // Waits for a video element to report its metadata. Rejects on error and on a
 // timeout so callers never hang on a source that fires neither event.
-export const waitForMetadata = (element: HTMLVideoElement): Promise<Omit<VideoMetadata, "fps">> => {
+const waitForMetadata = (element: HTMLVideoElement): Promise<Omit<VideoMetadata, "fps">> => {
   return new Promise((resolve, reject) => {
     if (element.readyState >= 1 && Number.isFinite(element.duration)) {
       resolve(readDimensions(element));
@@ -69,7 +69,7 @@ export const waitForMetadata = (element: HTMLVideoElement): Promise<Omit<VideoMe
   });
 };
 
-export const getMetadataFromUrl = async (
+const getMetadataFromUrl = async (
   videoUrl: string,
   { estimateFps = false }: { estimateFps?: boolean } = {}
 ): Promise<VideoMetadata> => {
@@ -105,7 +105,7 @@ export const getMetadataFromFile = async (file: File): Promise<VideoMetadata> =>
 // requestVideoFrameCallback during a brief muted playback burst. HTML5 video
 // exposes no fps in metadata, so without this every clip is assumed to be 30fps
 // and frame stepping/indexing is wrong for 24/25/60fps sources.
-export const estimateFrameRate = (
+const estimateFrameRate = (
   video: HTMLVideoElement,
   { sampleCount = 12, timeoutMs = 1200 }: { sampleCount?: number; timeoutMs?: number } = {}
 ): Promise<number> => {

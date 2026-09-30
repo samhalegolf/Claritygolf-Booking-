@@ -10,7 +10,7 @@ import type { SwingPhaseKey, SwingPhases } from "../../../../motion-lab/src/embe
 // hold. This file is the only place that knows both, so neither side has to
 // learn the other's vocabulary.
 
-export const PHASE_FOR_LABEL: Record<FriendlyMarkerLabel, SwingPhaseKey> = {
+const PHASE_FOR_LABEL: Record<FriendlyMarkerLabel, SwingPhaseKey> = {
   Setup: "setup",
   Takeaway: "takeaway",
   Top: "top",
@@ -20,7 +20,7 @@ export const PHASE_FOR_LABEL: Record<FriendlyMarkerLabel, SwingPhaseKey> = {
 };
 
 /** Below this the lab's phase is not trusted over where the marker already is. */
-export const MIN_PHASE_CONFIDENCE = 0.3;
+const MIN_PHASE_CONFIDENCE = 0.3;
 
 export interface PlacedMarkers {
   markers: TimelineMarker[];

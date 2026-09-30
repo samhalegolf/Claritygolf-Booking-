@@ -2837,12 +2837,6 @@ export function VideoWorkspace({
     onMarkersUpdated: (next) => syncMarkersWithAnalysis("right", next),
   });
 
-  const currentDrawingObject = useMemo(
-    () =>
-      activeDrawing.objects.find((entry) => entry.id === activeDrawing.selectedObjectId) || null,
-    [activeDrawing.objects, activeDrawing.selectedObjectId]
-  );
-
   useKeyboardShortcuts({
     // The lab owns space and the arrows while it is open.
     enabled: !motionLabOpen,
@@ -3454,7 +3448,6 @@ export function VideoWorkspace({
     const playback = isLeft ? leftPlayback : rightPlayback;
     const drawingState = isLeft ? leftDrawing : rightDrawing;
     const timelineState = isLeft ? leftTimelineState : rightTimelineState;
-    const analysis = isLeft ? leftStore.analysis : rightStore.analysis;
     const markerMode = isLeft ? leftMarkers : rightMarkers;
     const hoverMarker = isLeft ? leftHoverMarker : rightHoverMarker;
     const mountedSource = isLeft ? leftMountedSource : rightMountedSource;

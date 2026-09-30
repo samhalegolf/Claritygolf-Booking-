@@ -63,7 +63,7 @@ export type GroundForceRead =
  * Down the line the feet overlap and there is no line to place it on, so
  * that is reported as no read rather than a guess.
  */
-export const readGroundForce = (frame: PoseFrame | null): GroundForceRead => {
+const readGroundForce = (frame: PoseFrame | null): GroundForceRead => {
   const points = frame?.landmarks;
   if (!points || points.length < 33) return { kind: "none", reason: t("No body found") };
 
@@ -300,7 +300,7 @@ export type GroundForceWidgetProps = {
  * no centre-of-pressure path and no map inside the foot -- inventing those
  * from a picture is the thing the design exists to refuse.
  */
-export function GroundForceWidget({ read, leadSide = "left", onClose }: GroundForceWidgetProps) {
+function GroundForceWidget({ read, leadSide = "left", onClose }: GroundForceWidgetProps) {
   const split = read?.kind === "split" ? read : null;
   const lead = split ? (leadSide === "left" ? split.left : 1 - split.left) : 0;
   const trail = split ? 1 - lead : 0;

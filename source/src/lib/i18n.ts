@@ -75,7 +75,7 @@ function isLanguage(value: unknown): value is LanguageCode {
 }
 
 /** "de-CH" -> "de", "no"/"nn" -> "nb". Anything we do not offer -> null. */
-export function matchLanguage(tag: unknown): LanguageCode | null {
+function matchLanguage(tag: unknown): LanguageCode | null {
   const primary = String(tag || "").trim().toLowerCase().split(/[-_]/)[0];
   if (primary === "no" || primary === "nn") return "nb";
   return isLanguage(primary) ? primary : null;

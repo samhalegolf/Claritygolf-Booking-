@@ -46,11 +46,11 @@ export type CalendarAxis = {
 };
 
 /** Breathing room kept either side of a booking before a stretch counts as dead. */
-export const SQUASH_BUSY_PAD_MINUTES = 20;
+const SQUASH_BUSY_PAD_MINUTES = 20;
 /** Below this, a quiet stretch is left at full scale — collapsing it would save nothing. */
-export const SQUASH_GAP_MINUTES = 45;
-export const SQUASH_GAP_BASE_HEIGHT = 14;
-export const SQUASH_GAP_MINUTE_HEIGHT = 0.09;
+const SQUASH_GAP_MINUTES = 45;
+const SQUASH_GAP_BASE_HEIGHT = 14;
+const SQUASH_GAP_MINUTE_HEIGHT = 0.09;
 export const SQUASH_GAP_MAX_HEIGHT = 44;
 /** Width a day with nothing in it collapses to in squash view. */
 export const COLLAPSED_DAY_WIDTH = 26;

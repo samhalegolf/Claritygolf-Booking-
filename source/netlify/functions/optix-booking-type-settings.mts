@@ -4,7 +4,6 @@ import { requireCoachActor } from "./_shared/coach-auth.mts";
 
 const SETTINGS_KEY = "optixBookingTypeConfigJson";
 const PROFILES_KEY = "optixResourceProfilesJson";
-const SESSION_COOKIE = "clarity_session";
 const KNOWN_RESOURCE_IDS = new Set([
   "600009",
   "600004",
@@ -27,21 +26,6 @@ function json(value: unknown, status = 200) {
       "cache-control": "no-store",
     },
   });
-}
-
-function parseCookies(req: Request) {
-  return Object.fromEntries(
-    (req.headers.get("cookie") || "")
-      .split(";")
-      .map((part) => part.trim())
-      .filter(Boolean)
-      .map((part) => {
-        const index = part.indexOf("=");
-        return index < 0
-          ? [decodeURIComponent(part), ""]
-          : [decodeURIComponent(part.slice(0, index)), decodeURIComponent(part.slice(index + 1))];
-      }),
-  );
 }
 
 /**

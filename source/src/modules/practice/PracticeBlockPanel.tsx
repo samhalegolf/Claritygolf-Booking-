@@ -21,7 +21,6 @@ import {
 } from "./practiceModel";
 import {
   cachedPractice,
-  clearPracticeDraft,
   emptyPracticeDraft,
   invalidatePractice,
   loadPractice,
@@ -593,4 +592,3 @@ export function PracticeBlockPanel({ player, onUnauthorized, onToast }: Practice
   );
 }
 
-export default PracticeBlockPanel;

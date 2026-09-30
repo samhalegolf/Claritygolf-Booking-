@@ -1,4 +1,3 @@
-import { getDatabase } from "@netlify/database";
 import type { Config } from "@netlify/functions";
 import { requireCoachActor } from "./_shared/coach-auth.mts";
 

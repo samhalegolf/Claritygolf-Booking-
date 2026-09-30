@@ -290,7 +290,7 @@ async function optixGraphQL<T>(
   return payload.data;
 }
 
-export function buildBookingSetInput(input: OptixBookingInput, tokenKind?: OptixClientConfig["tokenKind"]) {
+export function buildBookingSetInput(input: OptixBookingInput) {
   // Cancelling an existing booking by its Optix booking_id is a different
   // shape from creating one: the booking already carries its resource, owner
   // and external id in Optix, so none of those are required — or even known —
@@ -361,7 +361,7 @@ type CredentialRead = (name: string) => string;
 export async function draftOptixBooking(input: OptixBookingInput, read?: CredentialRead): Promise<OptixBookingResult> {
   const config = getOptixClientConfig(read);
   const data = await optixGraphQL<any>(BOOKINGS_DRAFT, {
-    input: buildBookingSetInput(input, config.tokenKind),
+    input: buildBookingSetInput(input),
   }, config);
   return readBookingResult(data);
 }
@@ -369,7 +369,7 @@ export async function draftOptixBooking(input: OptixBookingInput, read?: Credent
 export async function commitOptixBooking(input: OptixBookingInput, read?: CredentialRead): Promise<OptixBookingResult> {
   const config = getOptixClientConfig(read);
   const data = await optixGraphQL<any>(BOOKINGS_COMMIT, {
-    input: buildBookingSetInput(input, config.tokenKind),
+    input: buildBookingSetInput(input),
   }, config);
   return readBookingResult(data);
 }

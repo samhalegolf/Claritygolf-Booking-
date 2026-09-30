@@ -43,7 +43,7 @@ function text(value: unknown, fallback = "") {
  * its own is filed under; the server sends one on every row now, so this is a
  * safety net rather than a path anything relies on.
  */
-export function cleanPerson(person: Partial<Person> & { id?: unknown } = {}, fallbackAccountId = ""): Person {
+function cleanPerson(person: Partial<Person> & { id?: unknown } = {}, fallbackAccountId = ""): Person {
   return {
     id: text(person.id),
     accountId: text(person.accountId) || fallbackAccountId,

@@ -1490,20 +1490,11 @@
   color: var(--va-text);
 }
 
-.workspace-bottom {
-  display: grid;
-  gap: 10px;
-  grid-template-columns: 1fr 1fr;
-}
-
 @media (max-width: 960px) {
   .video-analysis-layout {
     gap: 10px;
   }
 
-  .workspace-bottom {
-    grid-template-columns: 1fr;
-  }
 }
 
 /* Split View is a side-by-side comparison, so it follows the long edge of the

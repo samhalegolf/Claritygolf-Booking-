@@ -82,7 +82,7 @@ export type PassInboxUnassigned = {
  *
  * Mirrors resolveInboxPassValue on the server, which decides it for real.
  */
-export function suggestedValueCents(
+function suggestedValueCents(
   purchase: { amountCents: number | null; quantity: number },
   template: { priceCents: number | null } | undefined,
 ): number | null {
@@ -517,4 +517,3 @@ export function PassInboxPanel({
   );
 }
 
-export default PassInboxPanel;

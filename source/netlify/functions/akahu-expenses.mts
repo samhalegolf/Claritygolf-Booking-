@@ -21,10 +21,6 @@ import {
 //   { action: "ignoreMany", ids }
 
 
-function env(name: string, fallback = "") {
-  return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
-}
-
 function json(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), {
     status,

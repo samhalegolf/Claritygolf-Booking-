@@ -69,7 +69,7 @@ function toRgb(value: string) {
   return resolved;
 }
 
-export function boxAudit(root: Element = document.body): Finding[] {
+function boxAudit(root: Element = document.body): Finding[] {
   const hairline = toRgb(resolveToken("--c-border-soft") || "#ecebe5");
   const findings: Finding[] = [];
 

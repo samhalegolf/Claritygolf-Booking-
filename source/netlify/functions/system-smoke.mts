@@ -1,5 +1,5 @@
 import type { Config } from "@netlify/functions";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { requireCoachActor } from "./_shared/coach-auth.mts";
 import { deliverEmail } from "./_shared/email-delivery.mts";
 import {

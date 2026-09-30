@@ -3,7 +3,6 @@ import type { Config, Context } from "@netlify/functions";
 import { syncGoogleCalendarChangesIfEnabled } from "./google-calendar-sync.mts";
 import { notifyBookingEvent } from "./notification-engine.mts";
 import { releaseResource } from "./_shared/resource-handler.mts";
-import { defaultCalendarSlug } from "./_shared/account.mts";
 import { resolvePublicAccount } from "./_shared/coach-auth.mts";
 import {
   SETTINGS_UPSERT_QUERY,

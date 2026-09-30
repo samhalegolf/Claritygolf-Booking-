@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { MARKER_LABEL_TEXT, TimelineMarker } from "../models/Timeline";
 import { t } from "../../../lib/i18n";
 import { formatTime } from "../utils/frameMath";

@@ -99,7 +99,7 @@ export function practiceTypeMeta(types: PracticeTypeMeta[], id: string | null | 
 }
 
 /** "pressure-test" -> "Pressure test", for a type whose definition is gone. */
-export function practiceLabelFromId(id: string) {
+function practiceLabelFromId(id: string) {
   const words = String(id).replace(/[-_]+/g, " ").trim();
   return words ? words[0].toUpperCase() + words.slice(1) : t("Block");
 }
@@ -200,10 +200,6 @@ export function practiceSteps(content: string): string[] {
     .filter(Boolean);
 }
 
-export function practiceContentFromSteps(steps: string[]): string {
-  return steps.map((step) => step.trim()).filter(Boolean).join("\n");
-}
-
 function shortDate(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
@@ -221,15 +217,6 @@ export function practiceExpiryLabel(block: Pick<PracticeBlock, "expiryType" | "e
   if (block.expiryType === "next_lesson") return t("Expires next lesson");
   const date = shortDate(block.expiryDate);
   return date ? t("Expires {date}", { date }) : t("Has an expiry date");
-}
-
-export function practiceAssignedLabel(block: Pick<PracticeBlock, "assignedAt">) {
-  const date = shortDate(block.assignedAt);
-  return date ? t("Assigned {date}", { date }) : "";
-}
-
-export function isPracticeBlockActive(block: Pick<PracticeBlock, "status">) {
-  return block.status === "active";
 }
 
 /**
@@ -264,7 +251,7 @@ function fitsRailTile(title: string) {
   return String(title).trim().length <= 38 && !/\S{15,}/.test(title);
 }
 
-export function practiceShortLabel(title: string) {
+function practiceShortLabel(title: string) {
   const words = String(title).trim().split(/[\s-]+/).filter(Boolean);
   if (words.length >= 2) return words.slice(0, 3).map((word) => word[0]).join("").toUpperCase();
   return (words[0] || "").slice(0, 3).toUpperCase();

@@ -12,7 +12,6 @@
 // business named", which the server resolves exactly as before.
 import { isBookingEmbedMode } from "../shared/bookingHandoff";
 
-export const BOOKING_SCREEN_IDS = ["main", "group-lessons", "private-lessons"] as const;
 const SCREEN_SEGMENTS = new Set<string>(["group-lessons", "private-lessons"]);
 
 function pathSegments(pathname = "") {

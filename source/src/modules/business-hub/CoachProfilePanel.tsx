@@ -74,7 +74,7 @@ const PHOTO_SIZE = 320;
 const PHOTO_MAX_LENGTH = 150_000;
 
 /** A square, centre-cropped JPEG small enough to live in the coach record. */
-export async function resizeCoachPhoto(file: File): Promise<string> {
+async function resizeCoachPhoto(file: File): Promise<string> {
   const objectUrl = URL.createObjectURL(file);
   try {
     const image = await new Promise<HTMLImageElement>((resolve, reject) => {

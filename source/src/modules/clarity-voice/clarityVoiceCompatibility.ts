@@ -17,7 +17,7 @@ export function getSpeechRecognitionConstructor(): SpeechRecognitionConstructor 
   return (window as Window & { SpeechRecognition?: SpeechRecognitionConstructor }).SpeechRecognition ?? window.webkitSpeechRecognition;
 }
 
-export async function getMicrophonePermissionState(): Promise<ClarityVoicePermissionState> {
+async function getMicrophonePermissionState(): Promise<ClarityVoicePermissionState> {
   if (typeof navigator === 'undefined') return 'unknown';
 
   try {

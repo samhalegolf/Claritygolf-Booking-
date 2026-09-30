@@ -30,10 +30,6 @@ function db() {
   return getDatabase();
 }
 
-function nowIso(): string {
-  return new Date().toISOString();
-}
-
 function cleanString(value: unknown, fallback = "", max = 600): string {
   if (typeof value !== "string") return fallback;
   return value.trim().slice(0, max);

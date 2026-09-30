@@ -19,7 +19,6 @@ import type {
   IntegrationEventKind,
   IntegrationMapping,
   NormalizedBookingEvent,
-  ProviderAdapter,
 } from "./types.mts";
 
 /**

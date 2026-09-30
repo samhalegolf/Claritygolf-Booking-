@@ -712,4 +712,3 @@ function startFlight(id: string, from: DOMRect, tone: string, title: string) {
   });
 }
 
-export default PracticeBlockBuilder;

@@ -26,7 +26,7 @@ export type ResourceTone = "ok" | "idle" | "warn" | "error";
  */
 export type ResourceSystem = { provider: "optix" | "webhook"; name: string };
 
-export const OPTIX_SYSTEM: ResourceSystem = { provider: "optix", name: "Optix" };
+const OPTIX_SYSTEM: ResourceSystem = { provider: "optix", name: "Optix" };
 export const WEBHOOK_SYSTEM: ResourceSystem = { provider: "webhook", name: t("your booking system") };
 
 export function resourceSystemFor(provider: string | null | undefined): ResourceSystem {

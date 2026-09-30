@@ -420,7 +420,7 @@ function customGroupConfirmUrl(token: string, settings: any) {
   }
 }
 
-function customGroupInviteBody(appt: any, attendee: any, serviceName: string, settings: any, variables: Record<string, string>) {
+function customGroupInviteBody(attendee: any, serviceName: string, settings: any, variables: Record<string, string>) {
   const mt = messageText(settings.messageLanguage);
   const confirmUrl = customGroupConfirmUrl(attendee.token, settings);
   const subject = mt("{client} invited you to {service}", { client: variables.client, service: serviceName });
@@ -990,7 +990,7 @@ export async function notifyBookingEvent(input: NotifyInput) {
     const recipient = cleanEmail(attendee?.email, "");
     const token = cleanText(attendee?.token, "", 220);
     if (!recipient || !token || attendee?.status !== "invited") return;
-    const invite = customGroupInviteBody(appt, attendee, serviceName, settings, variables);
+    const invite = customGroupInviteBody(attendee, serviceName, settings, variables);
     const kind = `${action}_custom_group_invite_email`;
     if (!settings.sendClientEmail) {
       const skipped = { channel: "custom_group_invite", recipient, subject: invite.subject, kind, status: "skipped", sent: false, reason: "disabled_client_email" };

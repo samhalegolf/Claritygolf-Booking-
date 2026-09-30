@@ -21,13 +21,6 @@ const Svg = ({ children, className }: { children: React.ReactNode; className?: s
   </svg>
 );
 
-export const IconModeSingle = ({ className }: IconProps) => (
-  <Svg className={className}>
-    <rect x="5" y="6" width="14" height="12" rx="2.5" />
-    <path d="M8 9h8M8 12h5M8 15h7" />
-  </Svg>
-);
-
 export const IconModeCompare = ({ className }: IconProps) => (
   <Svg className={className}>
     <rect x="3.5" y="6" width="7" height="12" rx="2" />
@@ -177,15 +170,6 @@ export const IconSettings = ({ className }: IconProps) => (
   <Svg className={className}>
     <circle cx="12" cy="12" r="3.2" />
     <path d="M12 3v2M12 19v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M3 12h2M19 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4" />
-  </Svg>
-);
-
-// A cube on its point: the one icon in the set that is not from the pack.
-// It opens the 3D motion lab, and the pack predates that.
-export const IconMotion3D = ({ className }: IconProps) => (
-  <Svg className={className}>
-    <path d="M12 3l7.5 4.3v8.6L12 20.2l-7.5-4.3V7.3z" />
-    <path d="M12 11.6l7.5-4.3M12 11.6L4.5 7.3M12 11.6v8.6" />
   </Svg>
 );
 

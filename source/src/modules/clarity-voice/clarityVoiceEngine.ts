@@ -72,7 +72,7 @@ const DEFAULT_OPTIONS: Required<ClarityVoiceOptions> = {
   audioActivityMonitor: false
 };
 
-export function getClarityVoiceSupport(): {
+function getClarityVoiceSupport(): {
   isSupported: boolean;
   constructorRef: SpeechRecognitionConstructor | undefined;
 } {

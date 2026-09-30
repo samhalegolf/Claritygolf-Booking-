@@ -232,6 +232,3 @@ export function writePracticeDraft(playerId: string, draft: PracticeDraft) {
   else drafts.delete(playerId);
 }
 
-export function clearPracticeDraft(playerId: string) {
-  drafts.delete(playerId);
-}

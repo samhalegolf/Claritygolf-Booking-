@@ -1,7 +1,6 @@
 import type { Config } from "@netlify/functions";
 import { createHash, randomUUID } from "node:crypto";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
-import { defaultCalendarSlug } from "./_shared/account.mts";
 import { generateCouponCode, normaliseCouponCode } from "./_shared/coupon-codes.mts";
 import {
   chargeIsClaimable,
@@ -81,8 +80,6 @@ import { cleanPhoneCountry } from "./_shared/phone.mts";
 // both -- and the alternative, teaching the pass engine to write into
 // billing_pos_transactions, would put billing's tables in someone else's hands.
 
-const sessionCookieName = "clarity_session";
-
 function env(name: string, fallback = "") {
   return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
 }
@@ -98,36 +95,8 @@ function json(value: unknown, status = 200) {
   });
 }
 
-function hashToken(token: string) {
-  return createHash("sha256").update(token).digest("hex");
-}
-
-function parseCookies(req: Request) {
-  const cookieHeaderValue = req.headers.get("cookie") || "";
-  return Object.fromEntries(
-    cookieHeaderValue
-      .split(";")
-      .map((pair) => pair.trim())
-      .filter(Boolean)
-      .map((pair) => {
-        const index = pair.indexOf("=");
-        return index === -1
-          ? [decodeURIComponent(pair), ""]
-          : [decodeURIComponent(pair.slice(0, index)), decodeURIComponent(pair.slice(index + 1))];
-      }),
-  );
-}
-
 function cleanString(value: unknown, fallback = "", max = 600) {
   return typeof value === "string" ? value.trim().slice(0, max) || fallback : fallback;
-}
-
-function cleanSlug(value: unknown, fallback = "") {
-  const cleaned = cleanString(value, fallback, 160)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return cleaned || fallback;
 }
 
 // A calendar date on its way into a DATE column. Anything that isn't an actual
@@ -5112,13 +5081,6 @@ async function listCoupons(accountId: string, url: URL) {
     query: `select=*&${filters.join("&")}&order=issued_at.desc&limit=${limit}`,
   });
   return { coupons: (rows as Array<Record<string, unknown>>).map(couponRowToApi) };
-}
-
-async function getCouponRow(accountId: string, id: string) {
-  const rows = await supabase("billing_coupons", {
-    query: `select=*&id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}&limit=1`,
-  });
-  return rows.length ? (rows[0] as Record<string, unknown>) : null;
 }
 
 // What the till calls when a code is typed in. Codes are stored with hyphens

@@ -24,7 +24,7 @@ export type PushStatus = {
   needsHomeScreenInstall: boolean;
 };
 
-export function pushSupported() {
+function pushSupported() {
   return (
     typeof window !== "undefined" &&
     "serviceWorker" in navigator &&
@@ -38,7 +38,7 @@ export function pushSupported() {
  * been added to the home screen. Detecting it lets the panel say so instead of
  * showing a button that can never succeed.
  */
-export function needsHomeScreenInstall() {
+function needsHomeScreenInstall() {
   if (typeof window === "undefined") return false;
   const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent);
   if (!isIos) return false;

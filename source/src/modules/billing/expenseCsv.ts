@@ -19,7 +19,7 @@ export type ExpenseCandidate = {
   valid: boolean;
 };
 
-export function guessExpenseCsvDelimiter(text: string) {
+function guessExpenseCsvDelimiter(text: string) {
   const sample = text.split(/\r?\n/).slice(0, 8).join("\n");
   return (
     [",", "\t", ";"]

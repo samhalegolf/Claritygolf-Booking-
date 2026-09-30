@@ -14,7 +14,7 @@ export type CatalogTile = {
   active?: boolean;
 };
 
-export const CATALOG_TILE_LIMIT = 120;
+const CATALOG_TILE_LIMIT = 120;
 
 /**
  * Typing a name is asking for that thing, wherever it lives.

@@ -89,7 +89,7 @@ test("an empty product name is not a match for an empty template name", () => {
 function fakeDatabase(pass: Record<string, unknown> | null) {
   const issued: string[] = [];
   setDatabaseForTests({
-    async sql(strings: TemplateStringsArray, ...values: unknown[]) {
+    async sql(strings: TemplateStringsArray, ..._values: unknown[]) {
       const text = strings.join("?").replace(/\s+/g, " ").trim();
       issued.push(text);
       if (text.startsWith("SELECT id, person_id")) return pass ? [pass] : [];

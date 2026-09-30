@@ -28,7 +28,7 @@ const store = createRemoteListStore<LessonNote>({
 
 let cached: LessonNotesState | null = null;
 let cachedFrom = store.getState();
-export function getLessonNotesState(): LessonNotesState {
+function getLessonNotesState(): LessonNotesState {
   const current = store.getState();
   if (!cached || current !== cachedFrom) {
     cachedFrom = current;
@@ -36,8 +36,6 @@ export function getLessonNotesState(): LessonNotesState {
   }
   return cached;
 }
-
-export const subscribeLessonNotes = store.subscribe;
 
 /** The notes and their status, for components. Re-renders on every change. */
 export function useLessonNotesState(): LessonNotesState {

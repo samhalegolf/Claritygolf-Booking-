@@ -16,7 +16,7 @@ export interface Dimensions {
   height: number;
 }
 
-export const DEFAULT_STROKE = "#9be8ba";
+const DEFAULT_STROKE = "#9be8ba";
 
 const strokeDefault: Omit<DrawingObjectBase, "id" | "type" | "createdAt" | "updatedAt"> = {
   color: DEFAULT_STROKE,
