@@ -4066,5 +4066,9 @@
   "On — fewer gaps between lessons": "Päällä — vähemmän taukoja tuntien välillä",
   "Off — every open time is shown": "Pois — kaikki vapaat ajat näytetään",
   "Only offer times next to an existing booking or the start or end of your day": "Tarjoa vain aikoja, jotka ovat olemassa olevan varauksen vieressä tai päiväsi alussa tai lopussa",
-  "Your booking page shows fewer times, so your diary looks in demand and lessons book back to back instead of leaving gaps.": "Varaussivusi näyttää vähemmän aikoja, joten kalenterisi näyttää kysytyltä ja tunnit varataan peräkkäin ilman aukkoja."
+  "Your booking page shows fewer times, so your diary looks in demand and lessons book back to back instead of leaving gaps.": "Varaussivusi näyttää vähemmän aikoja, joten kalenterisi näyttää kysytyltä ja tunnit varataan peräkkäin ilman aukkoja.",
+  "Booking as {name}": "Varataan nimellä {name}",
+  "Edit details": "Muokkaa tietoja",
+  "Not you?": "Etkö ole sinä?",
+  "Remember me on this device": "Muista minut tällä laitteella"
 }

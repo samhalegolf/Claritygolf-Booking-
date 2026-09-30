@@ -120,31 +120,6 @@ export function slotDate(week: number, day: number, startMinutes: number): Date 
   return date;
 }
 
-export type BookingHandoffDetails = {
-  firstName: string;
-  lastName: string;
-  phone: string;
-  email: string;
-};
-
-/** Writes the player's details where the booking embed will find them. */
-export function storeBookingHandoff(details: BookingHandoffDetails) {
-  try {
-    window.localStorage.setItem(BOOKING_LOGIN_STORAGE_KEY, JSON.stringify(details));
-  } catch {
-    // If storage is unavailable the player can still fill the form manually.
-  }
-}
-
-/** Sends the browser to the public booking embed on this origin. */
-export function openBookingEmbed() {
-  const url = new URL(window.location.href);
-  // Public booking must never inherit a player entry from the current URL.
-  url.searchParams.delete(PLAYER_BOOKING_PARAM);
-  url.searchParams.set(BOOKING_EMBED_PARAM, BOOKING_EMBED_VALUE);
-  window.location.href = url.toString();
-}
-
 /** The address of booking-as-this-player, for linking and history entries. */
 export function playerBookingUrl() {
   const url = new URL(window.location.href);
@@ -167,9 +142,7 @@ export function playerTerminalUrl() {
  * A history entry rather than a page load: booking is a room in the terminal,
  * not a different building, so the navigation bar and the session stay put and
  * the browser's back button still works. Nothing personal travels in the URL --
- * the booking view asks the server who this session belongs to. The old
- * localStorage handoff stays available for public prefill, but it is no longer
- * how the portal identifies a player.
+ * the booking view asks the server who this session belongs to.
  */
 export function openPlayerBooking() {
   window.history.pushState({}, "", playerBookingUrl());

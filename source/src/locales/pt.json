@@ -4066,5 +4066,9 @@
   "On — fewer gaps between lessons": "Ligado — menos intervalos entre aulas",
   "Off — every open time is shown": "Desligado — todos os horários livres são mostrados",
   "Only offer times next to an existing booking or the start or end of your day": "Oferecer apenas horários junto a uma reserva existente ou ao início ou fim do seu dia",
-  "Your booking page shows fewer times, so your diary looks in demand and lessons book back to back instead of leaving gaps.": "A sua página de reservas mostra menos horários, para que a sua agenda pareça procurada e as aulas sejam marcadas seguidas em vez de deixar intervalos."
+  "Your booking page shows fewer times, so your diary looks in demand and lessons book back to back instead of leaving gaps.": "A sua página de reservas mostra menos horários, para que a sua agenda pareça procurada e as aulas sejam marcadas seguidas em vez de deixar intervalos.",
+  "Booking as {name}": "A reservar como {name}",
+  "Edit details": "Editar dados",
+  "Not you?": "Não é você?",
+  "Remember me on this device": "Lembrar-me neste dispositivo"
 }

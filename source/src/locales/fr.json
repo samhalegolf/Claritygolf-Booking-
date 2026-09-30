@@ -4066,5 +4066,9 @@
   "On — fewer gaps between lessons": "Activé — moins de trous entre les cours",
   "Off — every open time is shown": "Désactivé — tous les créneaux libres sont affichés",
   "Only offer times next to an existing booking or the start or end of your day": "Proposer uniquement les créneaux collés à une réservation existante ou au début ou à la fin de votre journée",
-  "Your booking page shows fewer times, so your diary looks in demand and lessons book back to back instead of leaving gaps.": "Votre page de réservation affiche moins de créneaux : votre agenda paraît demandé et les cours se réservent à la suite au lieu de laisser des trous."
+  "Your booking page shows fewer times, so your diary looks in demand and lessons book back to back instead of leaving gaps.": "Votre page de réservation affiche moins de créneaux : votre agenda paraît demandé et les cours se réservent à la suite au lieu de laisser des trous.",
+  "Booking as {name}": "Réservation au nom de {name}",
+  "Edit details": "Modifier mes coordonnées",
+  "Not you?": "Ce n’est pas vous ?",
+  "Remember me on this device": "Se souvenir de moi sur cet appareil"
 }

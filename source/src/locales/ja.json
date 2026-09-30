@@ -4066,5 +4066,9 @@
   "On — fewer gaps between lessons": "オン — レッスン間の空きを減らす",
   "Off — every open time is shown": "オフ — 空いている時間をすべて表示",
   "Only offer times next to an existing booking or the start or end of your day": "既存の予約の前後、または1日の始まりか終わりに接する時間のみを提示する",
-  "Your booking page shows fewer times, so your diary looks in demand and lessons book back to back instead of leaving gaps.": "予約ページに表示される時間が少なくなり、スケジュールが埋まっているように見え、レッスンが間を空けずに続けて予約されます。"
+  "Your booking page shows fewer times, so your diary looks in demand and lessons book back to back instead of leaving gaps.": "予約ページに表示される時間が少なくなり、スケジュールが埋まっているように見え、レッスンが間を空けずに続けて予約されます。",
+  "Booking as {name}": "{name} として予約",
+  "Edit details": "情報を編集",
+  "Not you?": "ご本人ではありませんか？",
+  "Remember me on this device": "このデバイスで情報を記憶する"
 }

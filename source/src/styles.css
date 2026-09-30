@@ -6358,6 +6358,45 @@ button {
   border-color: var(--coach-primary);
 }
 
+/* Remember me: the tick box under the details, and the "Booking as" line that
+   stands in for the fields once a browser has been remembered. */
+.app-shell .public-booking .booking-remember {
+  display: flex;
+  align-items: center;
+  gap: var(--c-space-2);
+  font-size: var(--c-size-meta);
+  cursor: pointer;
+}
+
+.app-shell .public-booking .booking-remember input {
+  min-height: 0;
+  margin: 0;
+  accent-color: var(--coach-primary);
+}
+
+.app-shell .public-booking .booking-remembered {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--c-space-2);
+}
+
+.app-shell .public-booking .booking-remembered p {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+}
+
+.app-shell .public-booking .booking-remembered small {
+  opacity: 0.72;
+}
+
+.app-shell .public-booking .booking-remembered-actions {
+  display: flex;
+  gap: var(--c-space-2);
+}
+
 .app-shell .public-booking .booking-progressive-section.is-complete:not(.is-open) .booking-progressive-title {
   display: none;
 }

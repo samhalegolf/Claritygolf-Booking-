@@ -11406,7 +11406,14 @@ function publicSlotUnavailableError(detail) {
   });
 }
 
-export async function createPublicBooking(accountId: string, payload: Record<string, any>, context = null) {
+// `personId` is set only from a verified "remember me" token (see
+// rememberedBookingPerson), never from the request body.
+export async function createPublicBooking(
+  accountId: string,
+  payload: Record<string, any>,
+  context = null,
+  options: { personId?: string } = {},
+) {
   const state = await readFastPublicCalendarState(accountId);
   const workspaceAccount = publicWorkspaceAccount(state);
   assertAccountFeature(workspaceAccount, "publicBooking");
@@ -11592,6 +11599,7 @@ export async function createPublicBooking(accountId: string, payload: Record<str
     locationId: cleanSlug(location?.locationId || chosen.locationId, ""),
     coach,
     serviceId: service.id,
+    ...(options.personId ? { personId: options.personId } : {}),
     client,
     title: client,
     phone,
@@ -11618,13 +11626,95 @@ export async function createPublicBooking(accountId: string, payload: Record<str
   return { appointment, notifications: [], state: nextState };
 }
 
+// "Remember me on this device" for the public booking page and widget. The
+// browser holds a random token; public_booking_remembered holds its hash and
+// the latest booking it made. It signs nobody in and returns nothing: its only
+// effect is that the next booking from that browser is stamped with the same
+// client, so a changed email or phone does not spin off a new record.
+// Duplicates that slip through anyway are what People > Merge is for.
+function rememberTokenHash(token: string) {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+/**
+ * The client a remember token belongs to, or null. The booking has to still
+ * look like that client -- same name, email or phone -- so someone else on a
+ * shared computer who ignores "Not you?" and types their own details becomes
+ * their own client rather than renaming the remembered one.
+ */
+async function rememberedBookingPerson(accountId: string, token: unknown, payload: Record<string, any>) {
+  const clean = cleanString(token, "", 120);
+  if (!clean) return null;
+  const tokenHash = rememberTokenHash(clean);
+  const [row] = (await db().sql`
+    SELECT p.id, p.name, p.email, p.phone
+    FROM public.public_booking_remembered r
+    JOIN people p
+      ON p.account_id = r.account_id
+     AND p.id = COALESCE(
+       (SELECT c.person_id FROM calendar_items c WHERE c.id = r.appointment_id AND c.account_id = r.account_id),
+       r.person_id
+     )
+    WHERE r.token_hash = ${tokenHash}
+      AND r.account_id = ${accountId}
+      AND r.last_used_at > NOW() - INTERVAL '400 days'
+  `) as Record<string, any>[];
+  if (!row) return null;
+  const country = await accountPhoneCountry(accountId);
+  const email = normalizedPersonEmail(payload.email);
+  const phone = normalizedPersonPhone(payload.phone, country);
+  const samePerson =
+    normalizedPersonName(`${payload.firstName ?? ""} ${payload.lastName ?? ""}`) === normalizedPersonName(row.name) ||
+    (email && email === normalizedPersonEmail(row.email)) ||
+    (phone && phone === normalizedPersonPhone(row.phone, country));
+  return samePerson ? { token: clean, tokenHash, personId: String(row.id) } : null;
+}
+
+/** Points a remember token at the booking just made, issuing one if needed. */
+async function rememberBooking(
+  accountId: string,
+  remembered: { token: string; tokenHash: string; personId: string } | null,
+  appointmentId: string,
+) {
+  if (remembered) {
+    await db().sql`
+      UPDATE public.public_booking_remembered
+      SET appointment_id = ${appointmentId}, person_id = ${remembered.personId}, last_used_at = NOW()
+      WHERE token_hash = ${remembered.tokenHash}
+    `;
+    return remembered.token;
+  }
+  const token = randomBytes(32).toString("base64url");
+  await db().sql`
+    INSERT INTO public.public_booking_remembered (token_hash, account_id, appointment_id)
+    VALUES (${rememberTokenHash(token)}, ${accountId}, ${appointmentId})
+  `;
+  return token;
+}
+
 export async function handlePublicBookingRequest(req, context = null) {
   try {
     console.log("public_booking:start");
-    const result = await createPublicBooking(await resolvePublicAccountId(req), await parseBody(req), context);
+    const accountId = await resolvePublicAccountId(req);
+    const body = await parseBody(req);
+    // Remembering is a convenience: if it fails, the booking still goes
+    // through and the client is matched the ordinary way.
+    const remembered = await rememberedBookingPerson(accountId, body.rememberToken, body).catch((error) => {
+      console.error("public_booking:remember_lookup_failed", error);
+      return null;
+    });
+    const result = await createPublicBooking(accountId, body, context, { personId: remembered?.personId });
     console.log("public_booking:saved", result.appointment.id);
+    const rememberToken =
+      body.remember === true
+        ? await rememberBooking(accountId, remembered, result.appointment.id).catch((error) => {
+            console.error("public_booking:remember_save_failed", error);
+            return "";
+          })
+        : "";
     return json({
       ok: true,
+      ...(rememberToken ? { rememberToken } : {}),
       appointment: {
         id: result.appointment.id,
         week: result.appointment.week,
