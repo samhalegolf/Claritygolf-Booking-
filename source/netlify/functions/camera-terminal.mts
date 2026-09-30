@@ -7,10 +7,11 @@ import { requireCoachActor } from "./_shared/coach-auth.mts";
 /**
  * Clarity Terminal: the computer in the bay with the cameras plugged into it.
  *
- * The terminal is never signed in. It opens /terminal/<code> once and is left
- * running; the code is its whole credential, sent as X-Clarity-Terminal-Code.
- * The coach's laptop drives it from the video workspace with the ordinary
- * coach session.
+ * The terminal is never signed in. It opens /terminal, shows a short pairing
+ * code, and the coach types that code into Settings when adding it. The
+ * computer is then handed its credential (the terminal's code), keeps it, and
+ * sends it as X-Clarity-Terminal-Code from then on. The coach's laptop drives
+ * it from the video workspace with the ordinary coach session.
  *
  * Both sides poll the terminal's one row. There is no socket to keep alive and
  * nothing to reconnect: a terminal that drops off the network is just a row
@@ -18,13 +19,17 @@ import { requireCoachActor } from "./_shared/coach-auth.mts";
  *
  * Coach (signed in):
  *   GET    /api/camera-terminal                 this business's terminals
- *   POST   /api/camera-terminal                 { name } -> a new terminal and its link
+ *   POST   /api/camera-terminal                 { name, pairCode } -> a new terminal, paired
  *   DELETE /api/camera-terminal/:id
  *   GET    /api/camera-terminal/:id             live state, this press's takes, preview answer
  *   POST   /api/camera-terminal/:id/attach      { playerId, playerName, lessonId }
  *   POST   /api/camera-terminal/:id/start       { playerId, playerName, lessonId }
  *   POST   /api/camera-terminal/:id/stop
  *   POST   /api/camera-terminal/:id/preview     { sessionId, sdp } -- a WebRTC offer
+ *
+ * Pairing (no credential yet):
+ *   POST   /api/camera-terminal/pair            -> { pairCode, pairToken, expiresAt }
+ *   POST   /api/camera-terminal/pair/check      { pairToken } -> { code } once claimed
  *
  * Terminal (code header):
  *   POST   /api/camera-terminal/station         heartbeat in, instructions out
@@ -47,6 +52,8 @@ const onlineWindowMs = 10_000;
 const commandTtlMs = 20_000;
 const maxCameras = 2;
 const maxSdpLength = 20_000;
+/** How long a pairing code on the terminal's screen stays valid. */
+const pairingTtlMs = 10 * 60 * 1000;
 
 function db() {
   return getDatabase();
@@ -66,11 +73,25 @@ function cleanText(value: unknown, max: number) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
 
-/** 16 characters from a 32-letter alphabet: 80 bits, and still typeable. */
+const codeAlphabet = "abcdefghjkmnpqrstuvwxyz23456789";
+
+function randomCode(length: number) {
+  return Array.from(randomBytes(length), (byte) => codeAlphabet[byte % codeAlphabet.length]).join("");
+}
+
+/** The terminal's credential. Nobody types it: pairing hands it over. */
 export function newTerminalCode() {
-  const alphabet = "abcdefghjkmnpqrstuvwxyz23456789";
-  const bytes = randomBytes(16);
-  return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join("");
+  return randomCode(32);
+}
+
+/** Six characters, shown big on the terminal and typed once by the coach. */
+export function newPairCode() {
+  return randomCode(6);
+}
+
+/** What the coach typed, however they typed it: "k7m 4qp", "K7M-4QP". */
+export function cleanPairCode(value: unknown) {
+  return typeof value === "string" ? value.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 12) : "";
 }
 
 export function isTerminalOnline(lastSeenAt: unknown, now = Date.now()) {
@@ -113,13 +134,12 @@ function jsonArray(value: unknown): unknown[] {
   return [];
 }
 
-/** What the coach sees about a terminal. The code is theirs to share. */
+/** What the coach sees about a terminal. Never its credential. */
 function coachTerminal(row: any) {
   const online = isTerminalOnline(row.last_seen_at);
   return {
     id: row.id,
     name: row.name,
-    code: row.code,
     online,
     // A terminal that has gone quiet is offline whatever it last said.
     state: online ? row.state : "offline",
@@ -137,6 +157,38 @@ async function readJson(req: Request) {
   } catch {
     return {};
   }
+}
+
+// --- Pairing ---------------------------------------------------------------
+
+async function handleNewPairing() {
+  // Old pairings are only clutter; sweep them as new ones are made.
+  await db().sql`DELETE FROM public.camera_terminal_pairings WHERE expires_at < NOW()`;
+  const pairToken = randomCode(32);
+  const expiresAt = new Date(Date.now() + pairingTtlMs);
+  // Six characters from 31 is nearly a billion codes, but a clash is still
+  // possible; a fresh code on the next try is all it takes.
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const pairCode = newPairCode();
+    const rows = await db().sql`
+      INSERT INTO public.camera_terminal_pairings (pair_code, pair_token, expires_at)
+      VALUES (${pairCode}, ${pairToken}, ${expiresAt.toISOString()})
+      ON CONFLICT (pair_code) DO NOTHING
+      RETURNING pair_code`;
+    if (rows[0]) return json({ ok: true, pairCode, pairToken, expiresAt: expiresAt.toISOString() }, 201);
+  }
+  return json({ error: "server_error", message: "Could not make a pairing code. Try again." }, 500);
+}
+
+async function handlePairingCheck(req: Request) {
+  const pairToken = cleanText((await readJson(req)).pairToken, 80);
+  if (!pairToken) return json({ error: "bad_request", message: "Missing pairing." }, 400);
+  const rows = await db().sql`
+    SELECT terminal_code FROM public.camera_terminal_pairings
+    WHERE pair_token = ${pairToken} AND expires_at > NOW()
+    LIMIT 1`;
+  if (!rows[0]) return json({ error: "expired", message: "This pairing code has run out." }, 410);
+  return json({ ok: true, code: rows[0].terminal_code || null });
 }
 
 // --- The terminal's side ----------------------------------------------------
@@ -329,10 +381,25 @@ async function handleCoachRoute(req: Request, accountId: string, parts: string[]
     if (req.method === "POST") {
       const body = await readJson(req);
       const name = cleanText(body.name, 60);
+      const pairCode = cleanPairCode(body.pairCode);
       if (!name) return json({ error: "bad_request", message: "Give the terminal a name." }, 400);
+      if (!pairCode) return json({ error: "bad_request", message: "Type the code shown on the terminal." }, 400);
+      // Claim the code and fill in the credential in one step, so two coaches
+      // typing the same code cannot both have it.
+      const code = newTerminalCode();
+      const claimed = await db().sql`
+        UPDATE public.camera_terminal_pairings SET terminal_code = ${code}
+        WHERE pair_code = ${pairCode} AND terminal_code IS NULL AND expires_at > NOW()
+        RETURNING pair_code`;
+      if (!claimed[0]) {
+        return json(
+          { error: "bad_pair_code", message: "That code doesn't match a terminal. Check the code on the terminal's screen." },
+          400,
+        );
+      }
       const rows = await db().sql`
         INSERT INTO public.camera_terminals (id, account_id, name, code)
-        VALUES (${randomUUID()}, ${accountId}, ${name}, ${newTerminalCode()})
+        VALUES (${randomUUID()}, ${accountId}, ${name}, ${code})
         RETURNING *`;
       return json({ ok: true, terminal: coachTerminal(rows[0]) }, 201);
     }
@@ -400,10 +467,16 @@ export default async function handler(req: Request) {
   try {
     // The terminal's own credential, checked before the coach gate, and
     // nothing past that gate is reachable with it.
+    if (parts[0] === "pair") {
+      if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+      if (!parts[1]) return await handleNewPairing();
+      if (parts[1] === "check") return await handlePairingCheck(req);
+      return json({ error: "not_found" }, 404);
+    }
     if (parts[0] === "station") {
       if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
       const terminal = await readTerminalByCode(req);
-      if (!terminal) return json({ error: "unauthorized", message: "This terminal link is not recognised." }, 401);
+      if (!terminal) return json({ error: "unauthorized", message: "This terminal has been removed." }, 401);
       if (parts[1] === "answer") return await handleStationAnswer(req, terminal);
       if (parts[1] === "take") return await handleStationTake(req, terminal);
       if (!parts[1]) return await handleStationBeat(req, terminal);

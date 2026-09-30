@@ -87,6 +87,19 @@
   margin: 15vh auto 0;
 }
 
+.terminal-pairing {
+  text-align: center;
+}
+
+.terminal-pair-code {
+  margin: 24px 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: clamp(40px, 10vw, 72px);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--c-text);
+}
+
 .terminal-hint {
   color: var(--c-text-soft);
   font-size: 0.9rem;
@@ -345,9 +358,13 @@
   color: var(--c-success-text);
 }
 
-.remote-camera-links code {
-  flex: 1 1 220px;
-  overflow-wrap: anywhere;
-  font-size: 0.85rem;
-  color: var(--c-text-body);
+.remote-camera-links .terminal-online {
+  flex: 1 1 auto;
+}
+
+.remote-camera-setup .terminal-pair-input {
+  flex: 0 1 140px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }

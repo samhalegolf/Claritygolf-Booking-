@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 
 import { t } from "../../lib/i18n";
-import { createTerminal, deleteTerminal, listTerminals, terminalLink, type CoachTerminal } from "./terminalApi";
+import { createTerminal, deleteTerminal, listTerminals, terminalAddress, type CoachTerminal } from "./terminalApi";
 import "./clarityTerminal.css";
 
-// Setting terminals up: add one, copy its link to the camera computer, take one
-// away. The one copy of it, shown both in Settings and inside the video
+// Setting terminals up: pair one with the code on the camera computer's
+// screen, take one away. The one copy of it, shown both in Settings and inside the video
 // workspace's Clarity Terminal panel.
 
 /** Fast enough to see a terminal come online while setting it up. */
@@ -27,7 +27,7 @@ const statusText = (terminal: CoachTerminal) => {
 export function TerminalManager({ onTerminalsChange, onAdded }: TerminalManagerProps) {
   const [terminals, setTerminals] = useState<CoachTerminal[] | null>(null);
   const [newName, setNewName] = useState("");
-  const [copied, setCopied] = useState("");
+  const [pairCode, setPairCode] = useState("");
   const [error, setError] = useState("");
   const onChangeRef = useRef(onTerminalsChange);
   onChangeRef.current = onTerminalsChange;
@@ -38,7 +38,7 @@ export function TerminalManager({ onTerminalsChange, onAdded }: TerminalManagerP
   }, []);
 
   // Re-read while on screen, so "Offline" turns into the terminal's cameras
-  // the moment its link is opened on the camera computer.
+  // the moment the camera computer is paired.
   useEffect(() => {
     let stopped = false;
     let timer: number | undefined;
@@ -63,10 +63,12 @@ export function TerminalManager({ onTerminalsChange, onAdded }: TerminalManagerP
   const addTerminal = async (event: FormEvent) => {
     event.preventDefault();
     const name = newName.trim();
-    if (!name) return;
+    if (!name || !pairCode.trim()) return;
     try {
-      const created = await createTerminal(name);
+      const created = await createTerminal(name, pairCode);
       setNewName("");
+      setPairCode("");
+      setError("");
       apply([...(terminals || []), created]);
       onAdded?.(created);
     } catch (reason) {
@@ -75,7 +77,7 @@ export function TerminalManager({ onTerminalsChange, onAdded }: TerminalManagerP
   };
 
   const removeTerminal = async (entry: CoachTerminal) => {
-    if (!window.confirm(t("Remove {name}? Its link will stop working.", { name: entry.name }))) return;
+    if (!window.confirm(t("Remove {name}? That computer will need pairing again.", { name: entry.name }))) return;
     try {
       await deleteTerminal(entry.id);
       apply((terminals || []).filter((terminal) => terminal.id !== entry.id));
@@ -84,20 +86,12 @@ export function TerminalManager({ onTerminalsChange, onAdded }: TerminalManagerP
     }
   };
 
-  const copyLink = async (entry: CoachTerminal) => {
-    try {
-      await navigator.clipboard.writeText(terminalLink(entry.code));
-      setCopied(entry.id);
-      window.setTimeout(() => setCopied(""), 2000);
-    } catch {
-      // The link is on screen to copy by hand.
-    }
-  };
-
   return (
     <div className="remote-camera-setup">
       <p className="terminal-hint">
-        {t("Open a terminal's link on the computer the cameras are plugged into, and leave it running.")}
+        {t("On the computer the cameras are plugged into, open {address} and leave it running. Then add it here with the code it shows.", {
+          address: terminalAddress(),
+        })}
       </p>
       {terminals?.length ? (
         <ul className="remote-camera-links">
@@ -105,10 +99,6 @@ export function TerminalManager({ onTerminalsChange, onAdded }: TerminalManagerP
             <li key={entry.id}>
               <strong>{entry.name}</strong>
               <span className={`terminal-online${entry.online ? " is-online" : ""}`}>{statusText(entry)}</span>
-              <code>{terminalLink(entry.code)}</code>
-              <button type="button" className="terminal-button" onClick={() => void copyLink(entry)}>
-                {copied === entry.id ? t("Copied") : t("Copy link")}
-              </button>
               <button type="button" className="terminal-button" onClick={() => void removeTerminal(entry)}>
                 {t("Remove")}
               </button>
@@ -124,7 +114,18 @@ export function TerminalManager({ onTerminalsChange, onAdded }: TerminalManagerP
           aria-label={t("Terminal name")}
           maxLength={60}
         />
-        <button type="submit" className="terminal-button is-primary" disabled={!newName.trim()}>
+        <input
+          className="terminal-pair-input"
+          value={pairCode}
+          onChange={(event) => setPairCode(event.target.value)}
+          placeholder={t("Code")}
+          aria-label={t("Code shown on the terminal")}
+          autoCapitalize="characters"
+          autoComplete="off"
+          spellCheck={false}
+          maxLength={9}
+        />
+        <button type="submit" className="terminal-button is-primary" disabled={!newName.trim() || !pairCode.trim()}>
           {t("Add terminal")}
         </button>
       </form>
