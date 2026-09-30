@@ -133,7 +133,7 @@ export function TerminalManager({ onTerminalsChange, onAdded }: TerminalManagerP
   );
 }
 
-/** Settings › Integrations › Clarity Terminal. Lazy-loaded by the settings screen. */
+/** Settings › Booking › Clarity Terminal. Lazy-loaded by the settings screen. */
 export default function TerminalSettingsPanel() {
   return <TerminalManager />;
 }
