@@ -4036,5 +4036,12 @@
   "This computer only needs pairing once.": "Tämä tietokone tarvitsee parittaa vain kerran.",
   "Remove {name}? That computer will need pairing again.": "Poistetaanko {name}? Tietokone on silloin paritettava uudelleen.",
   "On the computer the cameras are plugged into, open {address} and leave it running. Then add it here with the code it shows.": "Avaa {address} tietokoneella, johon kamerat on kytketty, ja jätä se käyntiin. Lisää se sitten tänne sen näyttämällä koodilla.",
-  "Code shown on the terminal": "Päätteen näyttämä koodi"
+  "Code shown on the terminal": "Päätteen näyttämä koodi",
+  "Putting Lab": "Putting Lab",
+  "Face, path and start line from an overhead camera. Calibrate once with the printed template, then putt.": "Mailan lapa, rata ja lähtölinja yläpuolisesta kamerasta. Kalibroi kerran tulostetulla mallilla ja puttaa sitten.",
+  "Open Putting Lab": "Avaa Putting Lab",
+  "Print the calibration template": "Tulosta kalibrointimalli",
+  "Last session: {count} putts": "Edellinen harjoitus: {count} puttia",
+  "Average face {face}, path {path}, start {start}": "Keskiarvo: lapa {face}, rata {path}, lähtö {start}",
+  "The Putting Lab could not open: {message}": "Putting Labia ei voitu avata: {message}"
 }

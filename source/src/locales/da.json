@@ -4036,5 +4036,12 @@
   "This computer only needs pairing once.": "Denne computer skal kun parres én gang.",
   "Remove {name}? That computer will need pairing again.": "Fjern {name}? Den computer skal så parres igen.",
   "On the computer the cameras are plugged into, open {address} and leave it running. Then add it here with the code it shows.": "Åbn {address} på den computer, kameraerne er tilsluttet, og lad den køre. Tilføj den derefter her med den kode, den viser.",
-  "Code shown on the terminal": "Kode vist på terminalen"
+  "Code shown on the terminal": "Kode vist på terminalen",
+  "Putting Lab": "Putting Lab",
+  "Face, path and start line from an overhead camera. Calibrate once with the printed template, then putt.": "Kølleblad, bane og startlinje fra et kamera oppefra. Kalibrer én gang med den udskrevne skabelon, og put derefter.",
+  "Open Putting Lab": "Åbn Putting Lab",
+  "Print the calibration template": "Udskriv kalibreringsskabelonen",
+  "Last session: {count} putts": "Seneste session: {count} putts",
+  "Average face {face}, path {path}, start {start}": "Gennemsnit: kølleblad {face}, bane {path}, start {start}",
+  "The Putting Lab could not open: {message}": "Putting Lab kunne ikke åbnes: {message}"
 }

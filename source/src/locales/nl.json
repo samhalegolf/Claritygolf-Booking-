@@ -4036,5 +4036,12 @@
   "This computer only needs pairing once.": "Deze computer hoeft maar één keer gekoppeld te worden.",
   "Remove {name}? That computer will need pairing again.": "{name} verwijderen? Die computer moet dan opnieuw gekoppeld worden.",
   "On the computer the cameras are plugged into, open {address} and leave it running. Then add it here with the code it shows.": "Open {address} op de computer waarop de camera's zijn aangesloten en laat het openstaan. Voeg hem daarna hier toe met de code die hij toont.",
-  "Code shown on the terminal": "Code op het scherm van de terminal"
+  "Code shown on the terminal": "Code op het scherm van de terminal",
+  "Putting Lab": "Putting Lab",
+  "Face, path and start line from an overhead camera. Calibrate once with the printed template, then putt.": "Clubface, baan en startlijn vanaf een camera boven de bal. Eén keer kalibreren met de geprinte mal, daarna putten.",
+  "Open Putting Lab": "Putting Lab openen",
+  "Print the calibration template": "Kalibratiemal printen",
+  "Last session: {count} putts": "Laatste sessie: {count} putts",
+  "Average face {face}, path {path}, start {start}": "Gemiddeld: clubface {face}, baan {path}, start {start}",
+  "The Putting Lab could not open: {message}": "Putting Lab kon niet worden geopend: {message}"
 }

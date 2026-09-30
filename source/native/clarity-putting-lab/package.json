@@ -1,0 +1,13 @@
+{
+  "name": "@claritygolf/capacitor-putting-lab",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Clarity Putting Lab for the Clarity Booking staff app: overhead-camera putting measurement (face, path, start). Native only: the web side talks to it through window.Capacitor.Plugins.ClarityPuttingLab (src/native/clarityPuttingLab.ts).",
+  "files": ["ios/Sources", "Package.swift"],
+  "capacitor": {
+    "ios": { "src": "ios" }
+  },
+  "peerDependencies": {
+    "@capacitor/core": ">=8.0.0"
+  }
+}

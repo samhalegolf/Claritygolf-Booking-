@@ -4036,5 +4036,12 @@
   "This computer only needs pairing once.": "このコンピューターのペアリングは一度だけで済みます。",
   "Remove {name}? That computer will need pairing again.": "{name}を削除しますか?そのコンピューターは再度ペアリングが必要になります。",
   "On the computer the cameras are plugged into, open {address} and leave it running. Then add it here with the code it shows.": "カメラを接続したコンピューターで {address} を開き、そのままにしてください。表示されたコードを使ってここで追加します。",
-  "Code shown on the terminal": "ターミナルに表示されたコード"
+  "Code shown on the terminal": "ターミナルに表示されたコード",
+  "Putting Lab": "Putting Lab",
+  "Face, path and start line from an overhead camera. Calibrate once with the printed template, then putt.": "真上からのカメラでフェース、軌道、打ち出し方向を測定します。印刷したテンプレートで一度キャリブレーションしてから、パットしてください。",
+  "Open Putting Lab": "Putting Lab を開く",
+  "Print the calibration template": "キャリブレーション用テンプレートを印刷",
+  "Last session: {count} putts": "前回のセッション：{count} パット",
+  "Average face {face}, path {path}, start {start}": "平均：フェース {face}、軌道 {path}、打ち出し {start}",
+  "The Putting Lab could not open: {message}": "Putting Lab を開けませんでした：{message}"
 }

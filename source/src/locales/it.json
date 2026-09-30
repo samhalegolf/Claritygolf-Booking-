@@ -4036,5 +4036,12 @@
   "This computer only needs pairing once.": "Questo computer va associato una sola volta.",
   "Remove {name}? That computer will need pairing again.": "Rimuovere {name}? Quel computer andrà associato di nuovo.",
   "On the computer the cameras are plugged into, open {address} and leave it running. Then add it here with the code it shows.": "Sul computer a cui sono collegate le telecamere, apri {address} e lascialo in esecuzione. Poi aggiungilo qui con il codice che mostra.",
-  "Code shown on the terminal": "Codice mostrato sul terminale"
+  "Code shown on the terminal": "Codice mostrato sul terminale",
+  "Putting Lab": "Putting Lab",
+  "Face, path and start line from an overhead camera. Calibrate once with the printed template, then putt.": "Faccia, traiettoria e linea di partenza da una telecamera dall’alto. Calibra una volta con la sagoma stampata, poi patta.",
+  "Open Putting Lab": "Apri Putting Lab",
+  "Print the calibration template": "Stampa la sagoma di calibrazione",
+  "Last session: {count} putts": "Ultima sessione: {count} putt",
+  "Average face {face}, path {path}, start {start}": "Media: faccia {face}, traiettoria {path}, partenza {start}",
+  "The Putting Lab could not open: {message}": "Impossibile aprire Putting Lab: {message}"
 }
