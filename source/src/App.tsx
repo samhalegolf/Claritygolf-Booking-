@@ -29743,6 +29743,14 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
                   </div>
                 </SettingsGroup>
               ) : null}
+              {/* The camera computers in the bays. Under Booking rather than
+                  Integrations so every coach can set one up, not only admins
+                  -- the same people who use them from the video workspace. */}
+              <SettingsGroup id="clarity-terminal" icon={ClarityVideoAnalysis} section="booking" title="Clarity Terminal">
+                <Suspense fallback={<Loading what="Clarity Terminal" />}>
+                  <TerminalSettingsPanel />
+                </Suspense>
+              </SettingsGroup>
               {bookingSettingsPanel}
               {isAdminUser ? playerBookingEmbedPanel : null}
               {/* The coach's own, on this device -- unlike everything below it. */}
@@ -30506,15 +30514,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
                       <ExternalLink size={16} />{t("Google")}</a>
                   </div>
                 </details>
-              </SettingsGroup>
-
-              {/* The camera computers in the bays. Also reachable from the
-                  Clarity Terminal button in the video workspace; this is the
-                  same manager, for setting a bay up before a lesson. */}
-              <SettingsGroup id="clarity-terminal" icon={ClarityVideoAnalysis} section="developer" title="Clarity Terminal">
-                <Suspense fallback={<Loading what="Clarity Terminal" />}>
-                  <TerminalSettingsPanel />
-                </Suspense>
               </SettingsGroup>
 
               {/* Settings › Email / SMS › Sender & delivery. Who email comes
