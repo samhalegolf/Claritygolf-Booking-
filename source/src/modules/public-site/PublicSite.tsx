@@ -10,7 +10,7 @@ const SUPPORT_EMAIL = "support@claritygolf.app";
 
 // When the privacy policy and terms last changed. Written out in the reader's
 // language; the date itself is the English version's.
-const LAST_UPDATED = new Date(Date.UTC(2026, 8, 25)).toLocaleDateString(readerLocale(), {
+const LAST_UPDATED = new Date(Date.UTC(2026, 8, 30)).toLocaleDateString(readerLocale(), {
   day: "numeric",
   month: "long",
   year: "numeric",
@@ -189,7 +189,15 @@ function PrivacyPage() {
       <p>{t("To keep an integration working without asking the coach to reconnect for every sync, Clarity may retain a Google refresh token. Refresh tokens are encrypted and stored server-side. Google access and refresh tokens are not exposed to the normal browser application.")}</p>
 
       <h3>{t("Google API data use and sharing")}</h3>
-      <p>{t("Information received from Google APIs is used only to provide and maintain the Google-connected features described above. We do not sell Google user data or use it for advertising. We may use infrastructure and service providers where necessary to operate Clarity, subject to appropriate confidentiality and security obligations.")}</p>
+      <p>{t("Information received from Google APIs is used only to provide and maintain the Google-connected features described above. We do not sell, rent or trade Google user data. We do not use it for advertising, and we do not use it to train artificial intelligence or machine-learning models.")}</p>
+      <p>{t("We share, transfer or disclose Google user data only with the following parties:")}</p>
+      <ul>
+        <li>{t("The coach's own golf business in Clarity. Busy times imported from Google Calendar, with their event titles unless the coach chooses to hide them, are shown to the coach and to people in the same golf business who can view that coach's diary. Players and people booking a lesson only see that a time is unavailable and never see Google Calendar event details.")}</li>
+        <li>{t("Our infrastructure providers, which process data only on our behalf and under our instructions to run Clarity: Netlify, which hosts the application and its server functions, and Supabase, which hosts the database where Google-derived data and encrypted Google refresh tokens are stored.")}</li>
+        <li>{t("Authorities or other parties where we are required to by law, such as to comply with a valid legal request, or where necessary to protect the rights, safety and security of our users or Clarity.")}</li>
+        <li>{t("A successor organisation if Clarity is involved in a merger, acquisition or sale of assets. Any successor must continue to protect Google user data under this policy and the Limited Use requirements, and we will notify affected users first.")}</li>
+      </ul>
+      <p>{t("We do not share Google user data with any other third party, including advertisers, data brokers and artificial intelligence providers.")}</p>
       <p>
         {withLink(
           t("Clarity Golf Booking's use and transfer of information received from Google APIs adheres to the {link}, including the Limited Use requirements."),
