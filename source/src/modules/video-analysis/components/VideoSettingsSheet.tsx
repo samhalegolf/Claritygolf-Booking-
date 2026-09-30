@@ -65,6 +65,8 @@ export type VideoSettingsSheetProps = {
   hasActiveClip: boolean;
   onReplaceClip: () => void;
   onRecordReplacement: () => void;
+  /** Record the active side from a Clarity Terminal. Absent without a player. */
+  onRecordWithTerminal?: () => void;
   onClearClip: () => void;
   /** Video inputs the browser can see right now. */
   cameraDevices: MediaDeviceInfo[];
@@ -103,6 +105,7 @@ export function VideoSettingsSheet({
   hasActiveClip,
   onReplaceClip,
   onRecordReplacement,
+  onRecordWithTerminal,
   onClearClip,
   cameraDevices,
   preferredCamera,
@@ -285,6 +288,12 @@ export function VideoSettingsSheet({
               <IconRecord />
               <span>{t("Record {activeSideLabel} clip", { activeSideLabel: activeSideLabel.toLowerCase() })}</span>
             </button>
+            {onRecordWithTerminal ? (
+              <button type="button" className="va-sheet-row va-sheet-row-btn" onClick={onRecordWithTerminal}>
+                <IconCamera />
+                <span>{t("Record {activeSideLabel} clip with Clarity Terminal", { activeSideLabel: activeSideLabel.toLowerCase() })}</span>
+              </button>
+            ) : null}
             <button type="button" className="va-sheet-row va-sheet-row-btn" onClick={onReplaceClip}>
               <IconUpload />
               <span>{t("Replace {activeSideLabel} clip", { activeSideLabel: activeSideLabel.toLowerCase() })}</span>

@@ -81,6 +81,8 @@ import { useDrawing } from "./hooks/useDrawing";
 import { useMarkerThumbnails } from "./hooks/useMarkerThumbnails";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useCameraDevices } from "./hooks/useCameraDevices";
+import { RemoteCameraPanel } from "../clarity-terminal/RemoteCameraPanel";
+import type { TerminalTake } from "../clarity-terminal/terminalApi";
 import { usePlayback } from "./hooks/usePlayback";
 import { useTimeline } from "./hooks/useTimeline";
 import { TimelineEngine } from "./engines/TimelineEngine";
@@ -682,6 +684,8 @@ export function VideoWorkspace({
   const [intakeError, setIntakeError] = useState("");
   const [liveRecording, setLiveRecording] = useState<LiveRecordingSession | null>(null);
   const [liveStream, setLiveStream] = useState<MediaStream | null>(null);
+  /** The side a Clarity Terminal panel is open on, if any. */
+  const [remoteSide, setRemoteSide] = useState<ComparisonSide | null>(null);
   // The workstation's default recording camera, chosen once in Video Settings.
   // Read on mount rather than taken from a prop: it belongs to this browser,
   // not to the player or lesson the workspace happens to be showing.
@@ -1445,6 +1449,43 @@ export function VideoWorkspace({
       setActiveSideInCompare,
       onSavedVideoLibraryChange,
     ]
+  );
+
+  /**
+   * Takes from a Clarity Terminal, already in Clarity Cloud and filed under
+   * this player. They are brought into this device's library and opened.
+   *
+   * One camera fills the side the coach recorded from, in the layout they
+   * already have. Two cameras arrive as a compare pair, left and right, the
+   * way the terminal filed them.
+   */
+  const loadTerminalTakes = useCallback(
+    async (takes: TerminalTake[]) => {
+      if (!savedVideoStore) {
+        throw new Error(t("Device video storage is unavailable in this browser."));
+      }
+      const requestedSide = remoteSide || "left";
+      for (const take of takes) {
+        let item = await importSavedVideoFromClarityCloud(take.savedVideoId, savedVideoStore);
+        if (takes.length === 1) {
+          item = {
+            ...item,
+            sourceSide: requestedSide,
+            workspaceSnapshot: {
+              ...item.workspaceSnapshot,
+              mode: requestedSide === "right" ? "compare" : comparisonMode,
+              activeSide: requestedSide,
+              focusWindowSide: requestedSide,
+            },
+          };
+          await savedVideoStore.putItem(item);
+        }
+        await restoreSavedVideo(item.savedVideoId);
+      }
+      onSavedVideoLibraryChange?.();
+      setRemoteSide(null);
+    },
+    [comparisonMode, onSavedVideoLibraryChange, remoteSide, restoreSavedVideo, savedVideoStore]
   );
 
   const openedSavedVideoRef = useRef<string | null>(null);
@@ -3572,6 +3613,19 @@ export function VideoWorkspace({
               disabled={!canRecord}
             >
               <IconRecord />{t("Record")}</button>
+            {/* The cameras on the bay's own computer, driven from here. */}
+            {playerId ? (
+              <button
+                type="button"
+                className="upload-button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  closeLiveRecording();
+                  setRemoteSide(side);
+                }}
+              >
+                <IconCamera />Clarity Terminal</button>
+            ) : null}
             {/* Importing a clip is a different job from recording one, and it
                 still has to work: the stage takes a drop, this takes a click. */}
             <button
@@ -3610,6 +3664,24 @@ export function VideoWorkspace({
         </div>
       );
     };
+
+    // The Clarity Terminal panel takes the side over until the take lands or
+    // the coach closes it. It needs a player: a take is filed under one the
+    // moment Record is pressed.
+    if (remoteSide === side && playerId) {
+      return (
+        <div
+          className={`comparison-video-panel ${isActive ? "is-active" : ""}`}
+          onMouseDown={() => setActiveSideInCompare(side)}
+        >
+          <RemoteCameraPanel
+            player={{ playerId, playerName: resolvedPlayerName, lessonId }}
+            onTakesReady={loadTerminalTakes}
+            onClose={() => setRemoteSide(null)}
+          />
+        </div>
+      );
+    }
 
     // Recording intentionally uses the same canvas component and shell as a
     // loaded clip. Once capture finishes, `loadClipFileForSide` swaps this
@@ -4158,6 +4230,15 @@ export function VideoWorkspace({
             setSettingsOpen(false);
             void startLiveRecording(effectiveActiveSide);
           }}
+          onRecordWithTerminal={
+            playerId
+              ? () => {
+                  setSettingsOpen(false);
+                  closeLiveRecording();
+                  setRemoteSide(effectiveActiveSide);
+                }
+              : undefined
+          }
           onClearClip={() => {
             clearCurrentSide(effectiveActiveSide);
             setSettingsOpen(false);

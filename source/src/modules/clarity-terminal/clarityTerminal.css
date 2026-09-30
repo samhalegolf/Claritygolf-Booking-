@@ -1,0 +1,344 @@
+/* Clarity Terminal: the camera computer's page, and the coach's remote panel.
+   Colours come from tokens.css so both follow light and dark with the app. */
+
+.terminal-shell {
+  min-height: 100vh;
+  box-sizing: border-box;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: var(--c-page);
+  color: var(--c-text);
+  font-family: var(--c-font);
+}
+
+.terminal-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.terminal-header h1 {
+  margin: 0;
+  font-size: 1.6rem;
+}
+
+.terminal-eyebrow {
+  margin: 0 0 4px;
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--c-text-soft);
+}
+
+.terminal-status {
+  margin: 0;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-weight: 600;
+  background: var(--c-surface-soft);
+  border: 1px solid var(--c-border);
+}
+
+.terminal-status.is-ready {
+  color: var(--c-success-text);
+}
+
+.terminal-status.is-warning {
+  color: var(--c-error-text);
+}
+
+.terminal-status.is-recording {
+  color: white;
+  background: var(--c-danger);
+  border-color: var(--c-danger);
+  font-variant-numeric: tabular-nums;
+}
+
+.terminal-player {
+  margin: 0;
+  font-size: 1.1rem;
+  color: var(--c-text-body);
+}
+
+.terminal-card {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.terminal-card h2 {
+  margin: 0 0 8px;
+  font-size: 1.05rem;
+}
+
+.terminal-card p {
+  margin: 0 0 12px;
+}
+
+.terminal-message {
+  max-width: 480px;
+  margin: 15vh auto 0;
+}
+
+.terminal-hint {
+  color: var(--c-text-soft);
+  font-size: 0.9rem;
+}
+
+.terminal-error {
+  color: var(--c-error-text);
+  margin-top: 12px;
+}
+
+.terminal-button {
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: 8px;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
+  color: var(--c-text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.terminal-button.is-primary {
+  background: var(--c-accent);
+  border-color: var(--c-accent);
+  color: var(--c-accent-text);
+}
+
+.terminal-button.is-record {
+  background: var(--c-danger);
+  border-color: var(--c-danger);
+  color: white;
+}
+
+.terminal-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.terminal-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 12px;
+}
+
+.terminal-tile {
+  margin: 0;
+  position: relative;
+  border-radius: 12px;
+  overflow: hidden;
+  background: black;
+  border: 3px solid transparent;
+}
+
+.terminal-tile.is-recording {
+  border-color: var(--c-danger);
+}
+
+.terminal-tile video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+  background: black;
+}
+
+.terminal-tile figcaption {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  color: white;
+  font-size: 0.85rem;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.65));
+}
+
+.terminal-tile-spec {
+  opacity: 0.8;
+  font-variant-numeric: tabular-nums;
+}
+
+.terminal-empty {
+  margin: 0;
+  padding: 48px 16px;
+  text-align: center;
+  color: var(--c-text-soft);
+  border: 1px dashed var(--c-border);
+  border-radius: 12px;
+}
+
+.terminal-camera-list,
+.terminal-uploads {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.terminal-camera-list label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  cursor: pointer;
+}
+
+.terminal-side {
+  margin-left: auto;
+  font-size: 0.8rem;
+  color: var(--c-text-soft);
+}
+
+.terminal-uploads li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 40px;
+}
+
+.terminal-uploads li.is-failed {
+  color: var(--c-error-text);
+}
+
+.terminal-uploads li.is-done {
+  color: var(--c-text-soft);
+}
+
+.terminal-footer {
+  margin-top: auto;
+  color: var(--c-text-soft);
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+/* --- The coach's remote panel, inside the video workspace ---------------- */
+
+.remote-camera-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  color: var(--c-text);
+}
+
+.remote-camera-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.remote-camera-head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.remote-camera-head select {
+  min-height: 36px;
+  font: inherit;
+}
+
+.remote-camera-previews {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 8px;
+}
+
+.remote-camera-previews .terminal-tile video {
+  aspect-ratio: 16 / 9;
+}
+
+.remote-camera-placeholder {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 9;
+  padding: 16px;
+  text-align: center;
+  color: var(--c-text-soft);
+  background: var(--c-surface-soft);
+  border: 1px dashed var(--c-border);
+  border-radius: 12px;
+}
+
+.remote-camera-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.remote-camera-status {
+  color: var(--c-text-soft);
+}
+
+.remote-camera-status.is-error {
+  color: var(--c-error-text);
+}
+
+.remote-camera-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.remote-camera-setup form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.remote-camera-setup input {
+  flex: 1 1 200px;
+  min-height: 40px;
+  padding: 0 12px;
+  font: inherit;
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  background: var(--c-surface);
+  color: var(--c-text);
+}
+
+.remote-camera-links {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.remote-camera-links li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.remote-camera-links code {
+  flex: 1 1 220px;
+  overflow-wrap: anywhere;
+  font-size: 0.85rem;
+  color: var(--c-text-body);
+}
