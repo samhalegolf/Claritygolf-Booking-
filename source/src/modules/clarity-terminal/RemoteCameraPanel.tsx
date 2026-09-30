@@ -1,22 +1,20 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { t } from "../../lib/i18n";
 import {
   PREVIEW_ICE_SERVERS,
   attachTerminal,
-  createTerminal,
-  deleteTerminal,
   listTerminals,
   offerTerminalPreview,
   readTerminal,
   startTerminalRecording,
   stopTerminalRecording,
-  terminalLink,
   waitForIceGathering,
   type CoachTerminal,
   type TerminalPlayer,
   type TerminalTake,
 } from "./terminalApi";
+import { TerminalManager } from "./TerminalManager";
 import "./clarityTerminal.css";
 
 // The coach's end of Clarity Terminal, inside the video workspace.
@@ -90,9 +88,7 @@ export function RemoteCameraPanel({ player, onTakesReady, onClose }: RemoteCamer
   // Separate from error: a missed poll clears itself on the next good one.
   const [unreachable, setUnreachable] = useState(false);
   const [managing, setManaging] = useState(false);
-  const [newName, setNewName] = useState("");
   const [previews, setPreviews] = useState<MediaStream[]>([]);
-  const [copied, setCopied] = useState("");
 
   const phaseRef = useRef<Phase>("idle");
   const takesRef = useRef<TerminalTake[]>([]);
@@ -329,41 +325,6 @@ export function RemoteCameraPanel({ player, onTakesReady, onClose }: RemoteCamer
     onClose();
   };
 
-  const addTerminal = async (event: FormEvent) => {
-    event.preventDefault();
-    const name = newName.trim();
-    if (!name) return;
-    try {
-      const created = await createTerminal(name);
-      setNewName("");
-      setTerminals((current) => [...(current || []), created]);
-      setTerminalId(created.id);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : t("Clarity Terminal could not be reached."));
-    }
-  };
-
-  const removeTerminal = async (entry: CoachTerminal) => {
-    if (!window.confirm(t("Remove {name}? Its link will stop working.", { name: entry.name }))) return;
-    try {
-      await deleteTerminal(entry.id);
-      if (entry.id === terminalId) setTerminalId("");
-      await loadTerminals();
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : t("Clarity Terminal could not be reached."));
-    }
-  };
-
-  const copyLink = async (entry: CoachTerminal) => {
-    try {
-      await navigator.clipboard.writeText(terminalLink(entry.code));
-      setCopied(entry.id);
-      window.setTimeout(() => setCopied(""), 2000);
-    } catch {
-      // The link is on screen to copy by hand.
-    }
-  };
-
   // --- Screen ----------------------------------------------------------------
 
   const cameras = terminal?.online ? terminal.cameras : [];
@@ -465,39 +426,14 @@ export function RemoteCameraPanel({ player, onTakesReady, onClose }: RemoteCamer
       </div>
 
       {managing ? (
-        <div className="remote-camera-setup">
-          <p className="terminal-hint">
-            {t("Open a terminal's link on the computer the cameras are plugged into, and leave it running.")}
-          </p>
-          {terminals?.length ? (
-            <ul className="remote-camera-links">
-              {terminals.map((entry) => (
-                <li key={entry.id}>
-                  <strong>{entry.name}</strong>
-                  <code>{terminalLink(entry.code)}</code>
-                  <button type="button" className="terminal-button" onClick={() => void copyLink(entry)}>
-                    {copied === entry.id ? t("Copied") : t("Copy link")}
-                  </button>
-                  <button type="button" className="terminal-button" onClick={() => void removeTerminal(entry)}>
-                    {t("Remove")}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          <form onSubmit={(event) => void addTerminal(event)}>
-            <input
-              value={newName}
-              onChange={(event) => setNewName(event.target.value)}
-              placeholder={t("Bay 1")}
-              aria-label={t("Terminal name")}
-              maxLength={60}
-            />
-            <button type="submit" className="terminal-button is-primary" disabled={!newName.trim()}>
-              {t("Add terminal")}
-            </button>
-          </form>
-        </div>
+        <TerminalManager
+          onTerminalsChange={(list) => {
+            setTerminals(list);
+            // The one in use was removed: move to another rather than poll a ghost.
+            setTerminalId((current) => (list.some((entry) => entry.id === current) ? current : list[0]?.id || ""));
+          }}
+          onAdded={(created) => setTerminalId(created.id)}
+        />
       ) : null}
     </section>
   );

@@ -407,6 +407,7 @@ const PosCheckoutModal = lazy(() =>
 const IntegrationsPanel = lazy(() => import("./modules/integrations/IntegrationsPanel"));
 const ApiAccessPanel = lazy(() => import("./modules/api-access/ApiAccessPanel"));
 const SandboxPanel = lazy(() => import("./modules/sandbox/SandboxPanel"));
+const TerminalSettingsPanel = lazy(() => import("./modules/clarity-terminal/TerminalManager"));
 const BrowserNotificationsPanel = lazy(() => import("./modules/notifications/BrowserNotificationsPanel"));
 const MessageTemplatesPanel = lazy(() =>
   import("./modules/notifications/MessageTemplatesPanel").then((module) => ({ default: module.MessageTemplatesPanel })),
@@ -32466,6 +32467,15 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       <ExternalLink size={16} />{t("Google")}</a>
                   </div>
                 </details>
+              </SettingsGroup>
+
+              {/* The camera computers in the bays. Also reachable from the
+                  Clarity Terminal button in the video workspace; this is the
+                  same manager, for setting a bay up before a lesson. */}
+              <SettingsGroup id="clarity-terminal" icon={ClarityVideoAnalysis} section="developer" title="Clarity Terminal">
+                <Suspense fallback={<Loading what="Clarity Terminal" />}>
+                  <TerminalSettingsPanel />
+                </Suspense>
               </SettingsGroup>
 
               {/* Settings › Email / SMS › Sender & delivery. Who email comes
