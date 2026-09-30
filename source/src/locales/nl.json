@@ -3984,7 +3984,6 @@
   "Your booking page shows fewer times, so your diary looks in demand and lessons book back to back instead of leaving gaps.": "Je boekingspagina toont minder tijden, zodat je agenda gewild oogt en lessen aansluitend worden geboekt in plaats van gaten te laten.",
   "Booking as {name}": "Boeken als {name}",
   "Edit details": "Gegevens wijzigen",
-  "Not you?": "Niet jij?",
   "Remember me on this device": "Onthoud mij op dit apparaat",
   "Camera {number}": "Camera {number}",
   "{camera} could not be opened.": "{camera} kon niet worden geopend.",
@@ -4031,5 +4030,9 @@
   "Bay 1": "Bay 1",
   "Terminal name": "Naam terminal",
   "Add terminal": "Terminal toevoegen",
-  "Record {activeSideLabel} clip with Clarity Terminal": "Clip {activeSideLabel} opnemen met Clarity Terminal"
+  "Record {activeSideLabel} clip with Clarity Terminal": "Clip {activeSideLabel} opnemen met Clarity Terminal",
+  "Booking for someone else": "Boeken voor iemand anders",
+  "Book as {name} instead": "Toch boeken als {name}",
+  "Book for someone else": "Boeken voor iemand anders",
+  "Forget me": "Vergeet mij"
 }

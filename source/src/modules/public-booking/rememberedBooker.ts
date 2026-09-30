@@ -1,8 +1,9 @@
 // "Remember me on this device" for the public booking page and widget.
 //
-// Only in this browser, and only when the player ticks the box. The details
-// are kept here so the form can fill itself; the token is what the server
-// uses to put the next booking on the same client record (see
+// Only in this browser. On by default, with the box under the details there to
+// untick on a shared computer, and never for a booking made for someone else.
+// The details are kept here so the form can fill itself; the token is what
+// the server uses to put the next booking on the same client record (see
 // rememberedBookingPerson in booking-core). Nothing is remembered by IP: a
 // club, office or household shares one, and that would hand one person's
 // details to the next.
