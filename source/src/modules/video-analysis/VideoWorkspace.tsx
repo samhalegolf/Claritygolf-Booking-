@@ -81,6 +81,7 @@ import { useDrawing } from "./hooks/useDrawing";
 import { useMarkerThumbnails } from "./hooks/useMarkerThumbnails";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useCameraDevices } from "./hooks/useCameraDevices";
+import { useLinkedPlayback } from "./hooks/useLinkedPlayback";
 import { RemoteCameraPanel } from "../clarity-terminal/RemoteCameraPanel";
 import type { TerminalTake } from "../clarity-terminal/terminalApi";
 import { usePlayback } from "./hooks/usePlayback";
@@ -736,6 +737,13 @@ export function VideoWorkspace({
 
   const timelineEngine = useMemo(() => new TimelineEngine(), []);
   const modeIsCompare = comparisonMode === "compare";
+  const bothSidesLoaded = Boolean(leftMountedSource && rightMountedSource);
+  const { setOffset: setLinkedOffset } = useLinkedPlayback({
+    enabled: linkedPlayback && modeIsCompare && bothSidesLoaded,
+    leftRef: leftVideoRef,
+    rightRef: rightVideoRef,
+    sourceKey: `${comparisonMode}|${leftMountedSource}|${rightMountedSource}`,
+  });
   const workspaceHasVideo = Boolean(playerVideoLeft || playerVideoRight);
   const { mobile: isMobileViewport, portrait: isPortraitViewport } = useVideoViewport();
   // Desktop keeps Split View exactly as it is. A phone held upright gets the
@@ -1102,24 +1110,8 @@ export function VideoWorkspace({
       return;
     }
 
-    if (linkedPlayback) {
-      // Drive every loaded side to the same target state using explicit
-      // play/pause (never per-side toggles, which can desync the lanes).
-      const anyPlaying =
-        (Boolean(playerVideoLeft) && leftPlayback.isPlaying) ||
-        (Boolean(playerVideoRight) && rightPlayback.isPlaying);
-      const shouldPlay = !anyPlaying;
-      if (playerVideoLeft) {
-        if (shouldPlay) leftPlayback.play();
-        else leftPlayback.pause();
-      }
-      if (playerVideoRight) {
-        if (shouldPlay) rightPlayback.play();
-        else rightPlayback.pause();
-      }
-      return;
-    }
-
+    // Linked sides need nothing here: useLinkedPlayback mirrors whichever
+    // side is played or paused onto the other.
     if (!activeVideo) {
       if (playerVideoLeft) {
         playPauseSide("left");
@@ -1135,13 +1127,10 @@ export function VideoWorkspace({
     playPauseSide(effectiveActiveSide);
   }, [
     effectiveActiveSide,
-    linkedPlayback,
     modeIsCompare,
     playerVideoLeft,
     playerVideoRight,
     playPauseSide,
-    leftPlayback,
-    rightPlayback,
   ]);
 
   const stepActiveSide = useCallback(
@@ -1167,8 +1156,16 @@ export function VideoWorkspace({
       sourcePlayback.currentTime * (sourcePlayback.frameRate || FRAME_RATE_DEFAULT)
     );
     const targetFps = targetPlayback.frameRate || FRAME_RATE_DEFAULT;
-    targetPlayback.seekTo(sourceFrame / targetFps);
-  }, [effectiveActiveSide, leftPlayback, modeIsCompare, playerVideoLeft, playerVideoRight, rightPlayback]);
+    const targetTime = sourceFrame / targetFps;
+    // Lining the sides up is a new gap on purpose; the link keeps this one
+    // from here rather than dragging the source back to the old one.
+    setLinkedOffset(
+      sourceSide === "left"
+        ? targetTime - sourcePlayback.currentTime
+        : sourcePlayback.currentTime - targetTime
+    );
+    targetPlayback.seekTo(targetTime);
+  }, [effectiveActiveSide, leftPlayback, setLinkedOffset, modeIsCompare, playerVideoLeft, playerVideoRight, rightPlayback]);
 
   const updateActiveDrawingTool = (tool: DrawingTool) => {
     leftDrawing.setTool(tool);

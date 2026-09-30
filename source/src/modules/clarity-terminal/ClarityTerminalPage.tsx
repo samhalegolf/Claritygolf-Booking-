@@ -18,6 +18,21 @@ import {
   type StationInstructions,
   type TakeSide,
 } from "./terminalApi";
+import {
+  CameraBlockedError,
+  MAX_CAMERAS,
+  cameraFromStream,
+  findByName,
+  isLive,
+  openCameraById,
+  readSavedSelection,
+  saveSelection,
+  selectionIndex,
+  stopStream,
+  type ActiveCamera,
+  type CameraOption,
+} from "./terminalCameras";
+import type { PreferredCamera } from "../video-analysis/utils/cameraPreference";
 import "./clarityTerminal.css";
 
 // Clarity Terminal: the page the camera computer in the bay is left sitting
@@ -30,7 +45,6 @@ import "./clarityTerminal.css";
 //   3. send each recording to Clarity Cloud, filed under the coach's player,
 //   4. answer the laptop's request for a live preview.
 
-const MAX_CAMERAS = 2;
 const BEAT_MS = 1000;
 /** A forgotten Stop must not fill the coach's Drive. */
 const MAX_RECORDING_MS = 3 * 60 * 1000;
@@ -38,18 +52,6 @@ const RECORDING_BITS_PER_SECOND = 16_000_000;
 /** The preview is a window onto the bay, not the recording: keep it light. */
 const PREVIEW_MAX_BITRATE = 1_500_000;
 const UPLOAD_ATTEMPTS = 3;
-const SELECTION_KEY = "clarity-terminal-cameras";
-
-type CameraOption = { deviceId: string; label: string };
-
-type ActiveCamera = {
-  deviceId: string;
-  label: string;
-  stream: MediaStream;
-  width?: number;
-  height?: number;
-  fps?: number;
-};
 
 type Take = { savedVideoId: string; side: TakeSide; cameraLabel: string };
 
@@ -70,49 +72,6 @@ type Upload = {
   status: "waiting" | "uploading" | "done" | "failed";
   progress: number;
   error: string;
-};
-
-const readSavedSelection = (): string[] => {
-  try {
-    const raw = window.localStorage.getItem(SELECTION_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed.filter((id) => typeof id === "string") : [];
-  } catch {
-    return [];
-  }
-};
-
-const saveSelection = (ids: string[]) => {
-  try {
-    window.localStorage.setItem(SELECTION_KEY, JSON.stringify(ids));
-  } catch {
-    // A blocked store only means choosing the cameras again next time.
-  }
-};
-
-const stopStream = (stream: MediaStream | null | undefined) =>
-  stream?.getTracks().forEach((track) => track.stop());
-
-/** Full HD at the highest frame rate the camera offers, up to 60. */
-const openCamera = async (option: CameraOption): Promise<ActiveCamera> => {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: false,
-    video: {
-      deviceId: { exact: option.deviceId },
-      width: { ideal: 1920 },
-      height: { ideal: 1080 },
-      frameRate: { ideal: 60 },
-    },
-  });
-  const settings = stream.getVideoTracks()[0]?.getSettings() || {};
-  return {
-    deviceId: option.deviceId,
-    label: option.label,
-    stream,
-    width: settings.width,
-    height: settings.height,
-    fps: settings.frameRate ? Math.round(settings.frameRate) : undefined,
-  };
 };
 
 const listCameraOptions = async (): Promise<CameraOption[]> => {
@@ -156,7 +115,7 @@ export default function ClarityTerminalPage() {
   const [linkError, setLinkError] = useState("");
   const [permission, setPermission] = useState<"unknown" | "asking" | "granted" | "blocked">("unknown");
   const [options, setOptions] = useState<CameraOption[]>([]);
-  const [selected, setSelected] = useState<string[]>([]);
+  const [selected, setSelected] = useState<PreferredCamera[]>([]);
   const [cameras, setCameras] = useState<ActiveCamera[]>([]);
   const [cameraError, setCameraError] = useState("");
   const [instructions, setInstructions] = useState<StationInstructions | null>(null);
@@ -187,32 +146,67 @@ export default function ClarityTerminalPage() {
 
   // --- Cameras ---------------------------------------------------------------
 
-  const openSelection = useCallback(async (ids: string[], available: CameraOption[]) => {
-    const wanted = ids
-      .map((id) => available.find((option) => option.deviceId === id))
-      .filter((option): option is CameraOption => Boolean(option))
-      .slice(0, MAX_CAMERAS);
+  /**
+   * Opens the chosen cameras, in order, keeping any that are already running.
+   *
+   * Each is tried by its saved id first, even when the device list does not
+   * mention it: a sleeping Continuity Camera iPhone is often not listed until
+   * something asks for a camera. Then, after listing again, by its name, which
+   * is how a camera that came back under a new id is found.
+   */
+  const openSelection = useCallback(async (selection: PreferredCamera[]) => {
     const current = camerasRef.current;
     const next: ActiveCamera[] = [];
     const errors: string[] = [];
-    for (const option of wanted) {
-      const kept = current.find((camera) => camera.deviceId === option.deviceId);
+    const found: PreferredCamera[] = [];
+    let available: CameraOption[] | null = null;
+    const wantedIds = new Set(selection.map((entry) => entry.deviceId).filter(Boolean));
+    const taken = () => new Set([...wantedIds, ...next.map((camera) => camera.deviceId)]);
+    for (const wanted of selection.slice(0, MAX_CAMERAS)) {
+      const kept = current.find(
+        (camera) => isLive(camera) && !next.includes(camera) && camera.deviceId === wanted.deviceId,
+      );
       if (kept) {
         next.push(kept);
+        found.push({ deviceId: kept.deviceId, label: kept.label });
         continue;
       }
+      let opened: ActiveCamera | null = null;
       try {
-        next.push(await openCamera(option));
-      } catch {
-        errors.push(t("{camera} could not be opened.", { camera: option.label }));
+        const byId = wanted.deviceId ? await openCameraById(wanted.deviceId) : null;
+        if (byId) opened = cameraFromStream(wanted.deviceId, wanted.label, byId);
+        if (!opened) {
+          available ||= await listCameraOptions();
+          const resolved = findByName(available, wanted, taken());
+          const byName = resolved ? await openCameraById(resolved.deviceId) : null;
+          if (resolved && byName) opened = cameraFromStream(resolved.deviceId, resolved.label, byName);
+        }
+      } catch (error) {
+        if (error instanceof CameraBlockedError) {
+          setPermission("blocked");
+          setCameraError(t("Camera access was blocked. Allow cameras for this site in the browser's address bar, then try again."));
+          return;
+        }
+      }
+      if (opened) {
+        next.push(opened);
+        found.push({ deviceId: opened.deviceId, label: opened.label });
+      } else {
+        errors.push(t("{camera} could not be opened.", { camera: wanted.label || t("Camera {number}", { number: next.length + errors.length + 1 }) }));
+        // Kept in the selection, so it opens by itself when plugged back in.
+        found.push(wanted);
       }
     }
     current
-      .filter((camera) => !next.some((kept) => kept.deviceId === camera.deviceId))
+      .filter((camera) => !next.includes(camera))
       .forEach((camera) => stopStream(camera.stream));
     camerasRef.current = next;
     setCameras(next);
     setCameraError(errors.join(" "));
+    // Remember the ids that worked, so the next start goes straight to them.
+    setSelected(found);
+    saveSelection(found);
+    if (available) setOptions(available);
 
     // An open preview is carrying the old cameras. Swap the pictures in place
     // when the count is unchanged; otherwise drop it and let the laptop ask
@@ -252,10 +246,10 @@ export default function ClarityTerminalPage() {
     setPermission("granted");
     const available = await listCameraOptions();
     setOptions(available);
-    const remembered = readSavedSelection().filter((id) => available.some((option) => option.deviceId === id));
-    const ids = remembered.length ? remembered : available.slice(0, 1).map((option) => option.deviceId);
-    setSelected(ids);
-    await openSelection(ids, available);
+    const remembered = readSavedSelection();
+    await openSelection(
+      remembered.length ? remembered : available.slice(0, 1).map(({ deviceId, label }) => ({ deviceId, label })),
+    );
   }, [openSelection]);
 
   // A terminal that was already allowed cameras -- the usual case after a
@@ -275,30 +269,41 @@ export default function ClarityTerminalPage() {
     };
   }, [connectCameras]);
 
-  // Plugging a camera in or out updates the list; the selection stays put.
+  // Plugging a camera in or out, or one dropping out on its own (a loose
+  // cable, a phone that locked), reopens the selection. Settled for a moment
+  // first: one replug fires several events.
   useEffect(() => {
     if (permission !== "granted" || !navigator.mediaDevices) return;
+    let timer: number | undefined;
     const refresh = () => {
-      void listCameraOptions().then((available) => {
-        setOptions(available);
-        if (!recordingRef.current) {
-          const ids = readSavedSelection();
-          void openSelection(ids.length ? ids : available.slice(0, 1).map((option) => option.deviceId), available);
-        }
-      });
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        void listCameraOptions().then((available) => {
+          setOptions(available);
+          if (!recordingRef.current) void openSelection(readSavedSelection());
+        });
+      }, 800);
     };
+    const tracks = cameras.flatMap((camera) => camera.stream.getVideoTracks());
+    tracks.forEach((track) => track.addEventListener("ended", refresh));
     navigator.mediaDevices.addEventListener("devicechange", refresh);
-    return () => navigator.mediaDevices.removeEventListener("devicechange", refresh);
-  }, [openSelection, permission]);
+    return () => {
+      window.clearTimeout(timer);
+      tracks.forEach((track) => track.removeEventListener("ended", refresh));
+      navigator.mediaDevices.removeEventListener("devicechange", refresh);
+    };
+  }, [cameras, openSelection, permission]);
 
-  const toggleCamera = (deviceId: string) => {
+  const toggleCamera = (option: CameraOption) => {
     if (recordingRef.current) return;
-    const next = selected.includes(deviceId)
-      ? selected.filter((id) => id !== deviceId)
-      : [...selected, deviceId].slice(-MAX_CAMERAS);
+    const index = selectionIndex(option, selected, options);
+    const next =
+      index >= 0
+        ? selected.filter((_, position) => position !== index)
+        : [...selected, { deviceId: option.deviceId, label: option.label }].slice(-MAX_CAMERAS);
     setSelected(next);
     saveSelection(next);
-    void openSelection(next, options);
+    void openSelection(next);
   };
 
   // Screens that sleep stop cameras. Ask the browser to keep this one awake.
@@ -523,16 +528,23 @@ export default function ClarityTerminalPage() {
           return;
         }
         try {
-          const recorder = new MediaRecorder(camera.stream, {
-            ...(mimeType ? { mimeType } : {}),
-            videoBitsPerSecond: RECORDING_BITS_PER_SECOND,
-          });
+          let recorder: MediaRecorder;
+          try {
+            recorder = new MediaRecorder(camera.stream, {
+              ...(mimeType ? { mimeType } : {}),
+              videoBitsPerSecond: RECORDING_BITS_PER_SECOND,
+            });
+          } catch {
+            // A browser that turns the preferred settings down still records
+            // on its own defaults rather than losing the swing.
+            recorder = new MediaRecorder(camera.stream);
+          }
           const chunks: Blob[] = [];
           recorder.ondataavailable = (event) => {
             if (event.data.size > 0) chunks.push(event.data);
           };
           recorder.start(1000);
-          parts.push({ take, camera, recorder, chunks, mimeType: mimeType || recorder.mimeType || "video/webm" });
+          parts.push({ take, camera, recorder, chunks, mimeType: recorder.mimeType || mimeType || "video/webm" });
         } catch (error) {
           const message = error instanceof Error ? error.message : t("The terminal could not start recording.");
           void reportStationTake(take.savedVideoId, "failed", message).catch(() => undefined);
@@ -726,7 +738,7 @@ export default function ClarityTerminalPage() {
             <p className="terminal-hint">{t("Up to two. The first fills the left side on your laptop, the second the right.")}</p>
             <ul className="terminal-camera-list">
               {options.map((option) => {
-                const index = selected.indexOf(option.deviceId);
+                const index = selectionIndex(option, selected, options);
                 return (
                   <li key={option.deviceId}>
                     <label>
@@ -734,7 +746,7 @@ export default function ClarityTerminalPage() {
                         type="checkbox"
                         checked={index >= 0}
                         disabled={Boolean(recording)}
-                        onChange={() => toggleCamera(option.deviceId)}
+                        onChange={() => toggleCamera(option)}
                       />
                       <span>{option.label}</span>
                       {index >= 0 ? (
