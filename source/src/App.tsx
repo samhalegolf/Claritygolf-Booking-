@@ -24,7 +24,6 @@ import {
   LogOut,
   Minimize2,
   Moon,
-  Palette,
   Pause,
   Percent,
   Phone,
@@ -159,9 +158,6 @@ import {
   activeLocale,
   canonicalPhoneKey as sharedCanonicalPhoneKey,
   dialCodeFor,
-  formatPhoneForDisplay,
-  getActiveCountry,
-  isValidPhone,
   setActiveRegion,
 } from "./lib/activeCountry";
 import { BusinessHubPanel, OwnerIdentityCard } from "./modules/business-hub/BusinessHubPanel";
@@ -178,7 +174,7 @@ import {
   NOTIFICATION_VARIANTS,
 } from "../netlify/functions/_shared/notification-templates.mts";
 import type { NotificationTemplates } from "../netlify/functions/_shared/notification-templates.mts";
-import { cleanMessageLanguage, messageText } from "../netlify/functions/_shared/message-language.mts";
+import { cleanMessageLanguage } from "../netlify/functions/_shared/message-language.mts";
 import {
   cleanPlayerBookingEmbedHeight,
   cleanPlayerBookingEmbedIntro,
@@ -258,7 +254,6 @@ import type {
   InvoiceCustomFieldPlacement,
   InvoiceCustomField,
   InvoiceSettings,
-  BillingCatalogKind,
   BillingCatalogItem,
   InvoiceLineSource,
   InvoiceLine,
@@ -266,7 +261,6 @@ import type {
   BillingInvoiceStatus,
   InvoicePaymentSource,
   BillingInvoiceRecord,
-  BillingRevenueBucket,
   BillingRevenueReport,
   BillingReportSummary,
   BillingDiscountType,
@@ -915,11 +909,6 @@ function isScheduledGroupService(service?: Partial<Service> | null) {
   return Boolean(service?.lessonFormat === "group" && !isCustomGroupService(service));
 }
 
-/** An asynchronous video review: booked without a time, owed back by a date. */
-function isVideoReviewService(service?: Partial<Service> | null) {
-  return Boolean(service?.lessonFormat === "video-review");
-}
-
 const DEFAULT_REVIEW_TURNAROUND_DAYS = 3;
 const MAX_REVIEW_TURNAROUND_DAYS = 30;
 
@@ -1029,12 +1018,6 @@ function adminCustomGroupAttendee(name: string, email = ""): CustomGroupAttendee
     status: cleanEmail ? "invited" : "manual",
     token: cleanEmail ? customGroupAttendeeToken() : undefined,
   };
-}
-
-// The person normaliser lives in modules/clients/clientsModel. These keep the
-// workspace's fallback account on any record that arrives without one.
-function cleanPerson(person: Partial<Person> & { id?: unknown } = {}): Person {
-  return cleanPeopleWith([person], defaultWorkspaceAccountFromCoachAccount().id)[0];
 }
 
 function cleanPeople(people: unknown[]): Person[] {
@@ -2520,14 +2503,6 @@ function renderTemplate(template: string, variables: Record<string, string>) {
   return template.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, key: string) => variables[key] ?? "");
 }
 
-function minutesToTop(minutes: number, gridStartMinutes = DEFAULT_CALENDAR_START_MINUTES) {
-  return ((minutes - gridStartMinutes) / 60) * HOUR_HEIGHT;
-}
-
-function durationToHeight(minutes: number) {
-  return (minutes / 60) * HOUR_HEIGHT;
-}
-
 
 function itemService(item: CalendarItem, serviceCatalog = defaultServices): Service | undefined {
   const service = serviceCatalog.find((candidate) => candidate.id === item.serviceId);
@@ -3651,18 +3626,6 @@ function serviceBelongsToAccount(service: Partial<Service> | undefined, accountI
   return recordBelongsToAccount(service, accountId);
 }
 
-function coachBelongsToAccount(coach: Partial<CoachProfile> | undefined, accountId: string) {
-  return recordBelongsToAccount(coach, accountId);
-}
-
-function locationBelongsToAccount(location: Partial<Location> | undefined, accountId: string) {
-  return recordBelongsToAccount(location, accountId);
-}
-
-function calendarItemBelongsToAccount(item: Partial<CalendarItem> | undefined, accountId: string) {
-  return recordBelongsToAccount(item, accountId);
-}
-
 function userBelongsToAccount(user: Partial<AppUser> | undefined, accountId: string) {
   return recordBelongsToAccount(user, accountId);
 }
@@ -3892,7 +3855,6 @@ function cleanBookingCoachSnapshot(
 function calendarItemCoach(
   item: Partial<CalendarItem> | undefined,
   coaches: CoachProfile[],
-  account: Partial<CoachAccount>,
 ): BookingCoachSnapshot | undefined {
   return (
     cleanBookingCoachSnapshot(item?.coach) ??
@@ -3904,9 +3866,8 @@ function resolvedCalendarItemCoachId(
   item: Partial<CalendarItem> | undefined,
   service: Partial<Service> | undefined,
   coaches: CoachProfile[],
-  account: Partial<CoachAccount>,
 ) {
-  return item?.coachId || item?.coach?.coachId || primaryServiceCoachId(service) || calendarItemCoach(item, coaches, account)?.coachId || firstCoachId(coaches);
+  return item?.coachId || item?.coach?.coachId || primaryServiceCoachId(service) || calendarItemCoach(item, coaches)?.coachId || firstCoachId(coaches);
 }
 
 function calendarItemBelongsToCoach(
@@ -3914,10 +3875,9 @@ function calendarItemBelongsToCoach(
   coachId: string | undefined,
   service: Partial<Service> | undefined,
   coaches: CoachProfile[],
-  account: Partial<CoachAccount>,
 ) {
   if (!coachId) return false;
-  return resolvedCalendarItemCoachId(item, service, coaches, account) === coachId;
+  return resolvedCalendarItemCoachId(item, service, coaches) === coachId;
 }
 
 function cleanLocation(raw?: Partial<Location>, fallback?: Location, index = 0): Location {
@@ -4084,33 +4044,12 @@ function resolvedCalendarItemLocationId(
   return item?.locationId || item?.location?.locationId || primaryServiceLocationId(service) || calendarItemLocation(item, service, locations, account).locationId || defaultLocationId(locations);
 }
 
-function calendarItemBelongsToLocation(
-  item: Partial<CalendarItem> | undefined,
-  locationId: string | undefined,
-  service: Partial<Service> | undefined,
-  locations: Location[],
-  account: Partial<CoachAccount>,
-) {
-  if (!locationId) return false;
-  return resolvedCalendarItemLocationId(item, service, locations, account) === locationId;
-}
-
 function calendarItemCoachColumnId(
   item: Partial<CalendarItem> | undefined,
   service: Partial<Service> | undefined,
   coaches: CoachProfile[],
-  account: Partial<CoachAccount>,
 ) {
-  return resolvedCalendarItemCoachId(item, service, coaches, account);
-}
-
-function calendarItemLocationLaneId(
-  item: Partial<CalendarItem> | undefined,
-  service: Partial<Service> | undefined,
-  locations: Location[],
-  account: Partial<CoachAccount>,
-) {
-  return resolvedCalendarItemLocationId(item, service, locations, account);
+  return resolvedCalendarItemCoachId(item, service, coaches);
 }
 
 function isLocationOnlyBlock(item: Partial<CalendarItem> | undefined) {
@@ -4147,8 +4086,8 @@ function isCoachConflict(
   if (isInactiveForConflict(existing)) return false;
   const candidateCoachId =
     context.candidateCoachId ??
-    resolvedCalendarItemCoachId(candidate, context.candidateService, context.coaches, context.account);
-  const existingCoachId = resolvedCalendarItemCoachId(existing, context.existingService, context.coaches, context.account);
+    resolvedCalendarItemCoachId(candidate, context.candidateService, context.coaches);
+  const existingCoachId = resolvedCalendarItemCoachId(existing, context.existingService, context.coaches);
   if (!candidateCoachId || !existingCoachId || candidateCoachId !== existingCoachId) return false;
   if (isLocationOnlyBlock(existing)) return false;
   return existing.kind === "appointment" || existing.kind === "block";
@@ -4440,13 +4379,6 @@ function servicePriceLabel(service?: (Pick<Service, "price" | "priceMode"> & Par
     return t("{price} up to {count}", { price: formatMoney(customGroupBasePrice(service)), count: customGroupBaseParticipants(service) });
   }
   return service.priceMode === "per-person" ? t("{price} pp", { price: formatMoney(service.price) }) : formatMoney(service.price);
-}
-
-function serviceCapacityLabel(service: Pick<Service, "capacity" | "lessonFormat" | "minParticipants">) {
-  if (service.lessonFormat === "package") return t("Package");
-  if (isCustomGroupService(service)) return t("{min}-{max} clients", { min: service.minParticipants, max: service.capacity });
-  if (service.lessonFormat === "group") return t("{min}-{max} clients", { min: service.minParticipants, max: service.capacity });
-  return service.capacity === 1 ? t("1 client") : t("{capacity} clients", { capacity: service.capacity });
 }
 
 function notificationKindLabel(kind = "") {
@@ -5607,7 +5539,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   const [workspaceAccounts, setWorkspaceAccounts] = useState<WorkspaceAccount[]>(() =>
     bootstrap?.accounts ?? cleanWorkspaceAccounts(getStoredWorkspaceAccounts(), getStoredCoachAccount()),
   );
-  const [coachAccountSaveState, setCoachAccountSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [coachProfiles, setCoachProfiles] = useState<CoachProfile[]>(
     () => bootstrap?.coaches ?? cleanCoachProfiles(undefined, getStoredCoachAccount()),
   );
@@ -5636,7 +5567,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     },
     [onSessionLost],
   );
-  const [adminEmail, setAdminEmail] = useState(entrySession?.role === "coach" ? entrySession.email : "");
   const [adminWorkspaceLoadStatus, setAdminWorkspaceLoadStatus] =
     useState<AdminWorkspaceLoadStatus>("idle");
   const [adminWorkspaceLoadError, setAdminWorkspaceLoadError] = useState("");
@@ -6276,8 +6206,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   const autoCloudUploadKeyRef = useRef("");
   const [notificationSettings, setNotificationSettings] =
     useState<NotificationSettings>(defaultNotificationSettings);
-  const [settingsSaveState, setSettingsSaveState] = useState<"idle" | "saving" | "saved">("idle");
-  const [settingsSaveError, setSettingsSaveError] = useState("");
   const [testEmailAddress, setTestEmailAddress] = useState("");
   const [testEmailState, setTestEmailState] = useState<"idle" | "sending" | "sent">("idle");
   const [hasMoved, setHasMoved] = useState(false);
@@ -6757,7 +6685,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
 
   const selected = selectedId ? items.find((item) => item.id === selectedId) : undefined;
   const selectedService = selected ? itemService(selected, services) : null;
-  const selectedCoachSnapshot = selected ? calendarItemCoach(selected, coachProfiles, coachAccount) : null;
+  const selectedCoachSnapshot = selected ? calendarItemCoach(selected, coachProfiles) : null;
   const selectedLocationSnapshot = selected
     ? calendarItemLocation(selected, selectedService ?? undefined, locations, coachAccount)
     : null;
@@ -6955,7 +6883,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
         if (isCancelledGroupSessionItem(item)) return false;
         const service = itemService(item, services);
         if (effectiveCalendarPerspective === "coach") {
-          return resolvedCalendarItemCoachId(item, service, coachProfiles, coachAccount) === selectedCalendarCoachId;
+          return resolvedCalendarItemCoachId(item, service, coachProfiles) === selectedCalendarCoachId;
         }
         if (effectiveCalendarPerspective === "location") {
           return resolvedCalendarItemLocationId(item, service, locations, coachAccount) === selectedCalendarLocationId;
@@ -7084,7 +7012,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     });
     visibleWeekItems.forEach((item) =>
       coachIds.add(
-        resolvedCalendarItemCoachId(item, itemService(item, services), coachProfiles, coachAccount),
+        resolvedCalendarItemCoachId(item, itemService(item, services), coachProfiles),
       ),
     );
     return Array.from(coachIds)
@@ -7108,7 +7036,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     if (!coachId) return 0;
     return visibleWeekItems.filter((item) => {
       if (item.kind !== "appointment") return false;
-      return calendarItemCoachColumnId(item, itemService(item, services), coachProfiles, coachAccount) === coachId;
+      return calendarItemCoachColumnId(item, itemService(item, services), coachProfiles) === coachId;
     }).length;
   };
   const appointments = weekItems.filter((item) => item.kind === "appointment").length;
@@ -7336,7 +7264,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
       (pointerSession?.mode === "move" && Boolean(floatingDrag)));
   const serviceScopeCoachId = isAdminUser ? selectedCalendarCoachId || activeCoachId : activeCoachId;
   const itemInCoachScope = (item: CalendarItem) =>
-    isAdminUser || resolvedCalendarItemCoachId(item, itemService(item, services), coachProfiles, coachAccount) === serviceScopeCoachId;
+    isAdminUser || resolvedCalendarItemCoachId(item, itemService(item, services), coachProfiles) === serviceScopeCoachId;
   const serviceVisibleToCurrentUser = (service: Service) =>
     serviceBelongsToAccount(service, activeAccountId) &&
     (isAdminUser || serviceIncludesCoach(service, serviceScopeCoachId, firstCoachId(accountCoachProfiles)));
@@ -7393,7 +7321,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
         (service.locationIds.length ? service.locationIds : [defaultLocation.id]).includes(locationId) &&
         service.archived !== true,
     ).length;
-  const packageServices = activeServices.filter((service) => service.active && service.lessonFormat === "package");
   const bookableServices = activeServices.filter((service) => service.active && service.lessonFormat !== "package");
   const appointmentServices = activeServices.filter((service) => service.active && isAppointmentStyleService(service));
   const publicBookingEnabled = canUseFeature(activeAccount, "publicBooking");
@@ -7485,8 +7412,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
       );
     });
   }, [clarityCloudHealth, savedVideoItems, uploadingSavedVideoIds]);
-  const hasMissingInvoiceCoachSettings =
-    !invoiceSettings.bankAccount.trim() || !invoiceSettings.taxNumber.trim() || !invoiceSettings.businessAddress.trim();
   const activeAccountEntitlements = accountEntitlements(activeAccount);
   const accountUsage = {
     maxCoaches: activeCoachList.length,
@@ -7681,8 +7606,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     lineSubtotal: invoiceLineSubtotal,
     lineDiscountTotal: invoiceLineDiscountTotal,
     discountTotal: invoiceDiscountTotal,
-    taxableSubtotal: invoiceTaxableSubtotal,
-    taxRatePct: invoiceTaxRatePct,
     taxTotal: invoiceTaxTotal,
     total: invoiceTotal,
   } = computeInvoiceTotals(invoiceDraft, invoiceSettings.taxRate);
@@ -7715,26 +7638,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     .filter(Boolean)
     .join(" ");
   const discountSet = invoiceDiscountTotal > 0 || invoiceDraft.discountLabel.trim() !== "";
-  // What the client reads, so in the business's message language, not the
-  // coach's screen language.
-  const mt = messageText(coachAccount.messageLanguage);
-  const invoiceEmailSubject = mt("{number} from {businessName}", {
-    number: activeInvoiceNumber,
-    businessName: coachAccount.businessName,
-  });
-  const invoiceEmailBody = [
-    invoiceDraft.message,
-    "",
-    mt("Invoice: {number}", { number: activeInvoiceNumber }),
-    mt("Total: {amount}", { amount: formatMoney(invoiceTotal, invoiceSettings.currency) }),
-    mt("Due: {date}", { date: invoiceDraft.dueDate }),
-    invoiceSettings.paymentInstructions,
-  ]
-    .filter(Boolean)
-    .join("\n");
-  const gmailComposeUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(
-    invoiceDraft.payerEmail,
-  )}&su=${encodeURIComponent(invoiceEmailSubject)}&body=${encodeURIComponent(invoiceEmailBody)}`;
   const invoiceSearchTerm = invoiceDraft.lineSearch.trim().toLowerCase();
   // The lesson types used to be merged in here as well as being fetched from
   // the catalog API, which is how a lesson could be offered at two prices in
@@ -7800,8 +7703,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   const emailSubjectTemplatePreview = notificationSettings.notificationSubjectLine.trim()
     ? renderTemplate(notificationSettings.notificationSubjectLine, emailTemplateVariables)
     : "";
-  const minBookingNoticeHours = Math.max(0, Math.round((notificationSettings.minBookingNoticeMinutes / 60) * 100) / 100);
-  const minBookingNoticeSummary = formatBookingNoticeLabel(notificationSettings.minBookingNoticeMinutes);
   const bookingNoticeDraftHours = Math.max(0, Math.round((bookingNoticeDraft.minBookingNoticeMinutes / 60) * 100) / 100);
   const bookingNoticeDraftSummary = formatBookingNoticeLabel(bookingNoticeDraft.minBookingNoticeMinutes);
   // The alert that lands in the coach's own inbox. The client-facing half of
@@ -7873,7 +7774,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
         // component for a coach. Asking again cost a full round trip before the
         // calendar shell could even start, so its answer is taken as given.
         if (entrySession?.role === "coach") {
-          if (entrySession.email) setAdminEmail(entrySession.email);
           setAuthStatus("authenticated");
           void startAdminWorkspaceHydration();
           return;
@@ -7924,7 +7824,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
           return;
         }
 
-        if (session.email) setAdminEmail(session.email);
         setAuthStatus("authenticated");
         void startAdminWorkspaceHydration();
       } catch {
@@ -8398,25 +8297,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
 
   async function readApiFailure(response: Response, fallback: string) {
     return summarizeApiFailureDetail(await readApiFailureDetail(response, fallback)) || fallback;
-  }
-
-  type PublicBookingSubmitResponse = {
-    message?: string;
-    error?: string;
-    code?: string;
-    reason?: string;
-    fallback?: boolean;
-    state?: { items?: CalendarItem[] };
-    appointment?: { id?: string; location?: BookingLocationSnapshot; locationId?: string; coach?: BookingCoachSnapshot };
-    notifications?: EmailSendResult[];
-  };
-
-  function isSelectedSlotUnavailableResponse(response: Response, data: PublicBookingSubmitResponse) {
-    const detail = [data.code, data.error, data.reason, data.message].filter(Boolean).join(" ").toLowerCase();
-    if (!detail) return false;
-    if (detail.includes("slot") && (detail.includes("unavailable") || detail.includes("stale") || detail.includes("taken"))) return true;
-    if (detail.includes("time") && (detail.includes("unavailable") || detail.includes("stale") || detail.includes("taken"))) return true;
-    return response.status === 409 && (detail.includes("no longer available") || detail.includes("has just been taken"));
   }
 
   function workspaceRecordName(record: WorkspaceConfigRecord) {
@@ -10253,7 +10133,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
                 const service = itemService(item, services);
                 return isLocationOnlyBlock(item)
                   ? resolvedCalendarItemLocationId(item, service, locations, coachAccount) === locationId
-                  : resolvedCalendarItemCoachId(item, service, coachProfiles, coachAccount) === coachId;
+                  : resolvedCalendarItemCoachId(item, service, coachProfiles) === coachId;
               })
               .map((item) => ({ start: item.start, end: item.start + item.duration }))
           : [];
@@ -11032,11 +10912,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     );
   }
 
-  function isInsideAvailability(day: number, start: number, duration: number) {
-    const end = start + duration;
-    return availability[day].some((window) => start >= window.start && end <= window.end);
-  }
-
   // Recurring group sessions are service definitions, not stored calendar items: no row
   // exists until someone books one. Conflict checks therefore synthesise a hold for every
   // live occurrence, otherwise a private lesson can be booked on top of an empty group session.
@@ -11231,7 +11106,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
       start: candidate.start,
       duration: candidate.duration,
     };
-    const candidateCoachId = resolvedCalendarItemCoachId(candidateItem, service, coachProfiles, coachAccount);
+    const candidateCoachId = resolvedCalendarItemCoachId(candidateItem, service, coachProfiles);
     const candidateLocationId = resolvedCalendarItemLocationId(candidateItem, service, locations, coachAccount);
     return !items.some((other) => {
       if (other.id === item.id || itemWeek(other) !== candidate.week || other.day !== candidate.day) return false;
@@ -11326,7 +11201,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   function isValidForItem(item: CalendarItem, candidate: SlotCandidate) {
     return item.kind === "block"
       ? isValidBlockSlot(candidate, item.id, {
-          coachId: resolvedCalendarItemCoachId(item, itemService(item, services), coachProfiles, coachAccount),
+          coachId: resolvedCalendarItemCoachId(item, itemService(item, services), coachProfiles),
           locationId: resolvedCalendarItemLocationId(item, itemService(item, services), locations, coachAccount),
           locationOnly: isLocationOnlyBlock(item),
         })
@@ -12296,7 +12171,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
       : null;
     const option = shelvedSource
       ? isValidAppointmentSlot(candidate, shelvedSource.id, service, {
-          candidateCoachId: resolvedCalendarItemCoachId(shelvedSource, service, coachProfiles, coachAccount),
+          candidateCoachId: resolvedCalendarItemCoachId(shelvedSource, service, coachProfiles),
           candidateLocationId: resolvedCalendarItemLocationId(shelvedSource, service, locations, coachAccount),
         })
         ? { coachId: "", locationId: "" }
@@ -13583,13 +13458,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     updateNotificationBlockDraft(bookingNoticeEditor, "minBookingNoticeMinutes", cleanMinBookingNoticeMinutes(hours * 60));
   }
 
-  function updateNotificationSetting<K extends keyof NotificationSettings>(field: K, value: NotificationSettings[K]) {
-    notificationSettingsDraftVersionRef.current += 1;
-    setSettingsSaveState("idle");
-    setSettingsSaveError("");
-    setNotificationSettings((current) => ({ ...current, [field]: value }));
-  }
-
   // Stored as typed; saveBrandSettings cleans. Cleaning here trimmed every
   // keystroke, so a space could never be typed into the brand name.
   function updateBrandSetting<K extends keyof BrandSettings>(field: K, value: BrandSettings[K]) {
@@ -14224,67 +14092,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     void persistCoaches(next, `${coach.displayName || coach.name} restored.`);
   }
 
-  function updateInvoiceSettings<K extends keyof InvoiceSettings>(field: K, value: InvoiceSettings[K]) {
-    if ((field === "enabled" || field === "showBillingWorkspace") && value === true && !canUseFeature(activeAccount, "invoicing")) {
-      setToast({ message: featureUnavailableMessage("invoicing") });
-      return;
-    }
-    setCoachAccountSaveState("idle");
-    setCoachAccount((current) =>
-      cleanCoachAccount({
-        ...current,
-        invoiceSettings: {
-          ...current.invoiceSettings,
-          [field]: value,
-        },
-      }),
-    );
-  }
-
-  function updateInvoiceCustomField<K extends keyof InvoiceCustomField>(id: string, field: K, value: InvoiceCustomField[K]) {
-    setCoachAccountSaveState("idle");
-    setCoachAccount((current) =>
-      cleanCoachAccount({
-        ...current,
-        invoiceSettings: {
-          ...current.invoiceSettings,
-          customFields: current.invoiceSettings.customFields.map((customField) =>
-            customField.id === id ? { ...customField, [field]: value } : customField,
-          ),
-        },
-      }),
-    );
-  }
-
-  function addInvoiceCustomField() {
-    setCoachAccountSaveState("idle");
-    setCoachAccount((current) =>
-      cleanCoachAccount({
-        ...current,
-        invoiceSettings: {
-          ...current.invoiceSettings,
-          customFields: [
-            ...current.invoiceSettings.customFields,
-            { id: `field-${Date.now()}`, label: t("Reference"), value: "", placement: "header" },
-          ],
-        },
-      }),
-    );
-  }
-
-  function removeInvoiceCustomField(id: string) {
-    setCoachAccountSaveState("idle");
-    setCoachAccount((current) =>
-      cleanCoachAccount({
-        ...current,
-        invoiceSettings: {
-          ...current.invoiceSettings,
-          customFields: current.invoiceSettings.customFields.filter((field) => field.id !== id),
-        },
-      }),
-    );
-  }
-
   // The lesson type's physical places that have resources set up -- the only
   // ones where using a resource means anything. Clarity keeps track of the
   // "clarity" ones; the others are held by another booking system.
@@ -14873,7 +14680,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
       serviceId: nextServiceId,
       duration: nextService.duration,
       // Stays with its coach and place when the new lesson type has them.
-      coachId: serviceCoachFor(nextService, resolvedCalendarItemCoachId(targetItem, itemService(targetItem, services), coachProfiles, coachAccount)),
+      coachId: serviceCoachFor(nextService, resolvedCalendarItemCoachId(targetItem, itemService(targetItem, services), coachProfiles)),
       ...(() => {
         const currentLocationId = resolvedCalendarItemLocationId(targetItem, itemService(targetItem, services), locations, coachAccount);
         const keepLocation = nextService.locationIds.includes(currentLocationId);
@@ -15163,7 +14970,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     const expectedRevision = typeof calendarStateVersion === "string" ? calendarStateVersion : "";
     const targetItem = items.find((item) => item.id === itemId && item.kind === "appointment");
     const calendarId = targetItem
-      ? resolvedCalendarItemCoachId(targetItem, itemService(targetItem, services), coachProfiles, coachAccount) ||
+      ? resolvedCalendarItemCoachId(targetItem, itemService(targetItem, services), coachProfiles) ||
         targetItem.locationId ||
         targetItem.accountId ||
         "unknown"
@@ -17148,7 +16955,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     // explicitly chosen from the client list.
     setInvoiceDraft((current) => ({
       ...current,
-      coachId: resolvedCalendarItemCoachId(item, service, coachProfiles, coachAccount),
+      coachId: resolvedCalendarItemCoachId(item, service, coachProfiles),
       lines: [
         ...current.lines.filter((line) => line.description.trim() || line.unitPrice > 0),
         {
@@ -18554,7 +18361,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   async function saveCoachAccount(draft = coachAccount): Promise<CoachAccount> {
     const clean = cleanCoachAccount(draft);
     setCoachAccount(clean);
-    setCoachAccountSaveState("saving");
     try {
       const response = await fetch("/api/coach-account", {
         method: "PUT",
@@ -18568,13 +18374,10 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
       if (!response.ok) throw new Error(await readApiFailure(response, t("Coach account save failed")));
       const saved = (await response.json()) as Partial<CoachAccount>;
       applyCoachAccount(saved);
-      setCoachAccountSaveState("saved");
       setToast({ message: t("Coach account saved.") });
-      window.setTimeout(() => setCoachAccountSaveState("idle"), 1600);
       return cleanCoachAccount(saved);
     } catch (error) {
       setCoachAccount(draft);
-      setCoachAccountSaveState("idle");
       const message = error instanceof Error ? error.message : t("Could not save coach account.");
       setToast({ message });
       throw new Error(message);
@@ -18641,7 +18444,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
         setPasswordChangeMessage(data.message || t("Could not change password."));
         return;
       }
-      if (data.email) setAdminEmail(data.email);
       setPasswordChangeForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
       setShowPasswordFields(false);
       setPasswordChangeState("saved");
@@ -18686,8 +18488,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     const saveVersion = ++settingsSaveVersionRef.current;
     beginAdminSave("settings");
     const isCurrentSave = () => settingsSaveVersionRef.current === saveVersion;
-    setSettingsSaveState("saving");
-    setSettingsSaveError("");
     try {
       const response = await fetch("/api/admin-settings", {
         method: "PUT",
@@ -18704,30 +18504,16 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
       const settings = (await response.json()) as NotificationSettings;
       if (!isCurrentSave()) return draft;
       applyNotificationSettings(settings);
-      setSettingsSaveState("saved");
       setToast({ message: t("Notification and text settings saved.") });
-      window.setTimeout(() => {
-        if (isCurrentSave()) setSettingsSaveState("idle");
-      }, 1600);
       return settings;
     } catch (error) {
       if (!isCurrentSave()) return draft;
       const message = error instanceof Error ? error.message : t("Could not save notification settings.");
-      setSettingsSaveState("idle");
-      setSettingsSaveError(message);
       setToast({ message });
       throw new Error(message);
     } finally {
       endAdminSave("settings");
     }
-  }
-
-  function settingsSaveErrorNotice() {
-    return settingsSaveError ? (
-      <p className="workspace-save-error" role="alert">
-        {settingsSaveError}
-      </p>
-    ) : null;
   }
 
   // Google Calendar is per coach: every call names the coach whose profile is
@@ -20303,10 +20089,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     });
   }
 
-  function updateBookingScreenName(screenId: string, nextValue: string) {
-    setBookingScreenNames((previous) => ({ ...previous, [screenId]: nextValue }));
-  }
-
   function regenerateSyncKey() {
     setCalendarSyncKey(generateSyncKey());
     setCopiedSync(null);
@@ -21753,7 +21535,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
         .filter((item) => {
           if (itemWeek(item) !== week || item.day !== day) return false;
           if (item.syntheticGroupSlot || isInactiveForConflict(item) || isCancelledGroupSessionItem(item)) return false;
-          return calendarItemBelongsToCoach(item, coachId, itemService(item, services), coachProfiles, coachAccount);
+          return calendarItemBelongsToCoach(item, coachId, itemService(item, services), coachProfiles);
         })
         .sort((a, b) => a.start - b.start)
         .map((item): CoachWeekEntry => {
@@ -24774,7 +24556,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
                   // Day view draws one day; the rest are not on screen at all.
                   if (calendarDayColumns[item.day]?.hidden) return null;
                   const service = itemService(item, services);
-                  const resolvedItemCoachId = resolvedCalendarItemCoachId(item, service, coachProfiles, coachAccount);
+                  const resolvedItemCoachId = resolvedCalendarItemCoachId(item, service, coachProfiles);
                   const activeDraft =
                     draft && (draft.mode === "move" || draft.mode === "resize") && draft.itemId === item.id
                       ? draft
