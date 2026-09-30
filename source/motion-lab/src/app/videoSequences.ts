@@ -21,6 +21,7 @@
  */
 
 import type { ClaritySequence } from "../contracts";
+import { fuseTwoViews, type TwoViewReport } from "../motion/fuse/twoView";
 import { reconstructCalibrated, type CalibratedResult } from "../motion/level/calibrated";
 import type { NeutralFarSideReport } from "../motion/reconstruct/neutralFarSide";
 import type { StandingCalibration } from "../motion/level/standingShot";
@@ -50,6 +51,8 @@ export interface VideoSequences {
   readonly levelling: LevellingReadout;
   /** The standing shot's verdict, when one was supplied. */
   readonly calibration: StandingCalibration | null;
+  /** What putting the second angle together with the swing found. Null with no second angle. */
+  readonly fusion: TwoViewReport | null;
 }
 
 /** The observations of one swing: both spaces, as `observeVideo` returns them. */
@@ -60,9 +63,25 @@ export interface SwingObservations {
 
 export const buildVideoSequences = (
   swing: SwingObservations,
-  standing: CameraObservationSequence | null
+  standing: CameraObservationSequence | null,
+  secondAngle: CameraObservationSequence | null = null
 ): VideoSequences => {
-  const built = reconstructCalibrated(swing.camera, standing);
+  /*
+   * A second angle of the same swing replaces the swing's 3D lift with both
+   * cameras' agreement, on the swing's own timeline and pixels. Everything
+   * after it -- levelling, the standing shot, the Motion Layer -- runs on the
+   * fused clip exactly as on one. See `motion/fuse/twoView`.
+   */
+  const fusion = secondAngle ? fuseTwoViews(swing.camera, secondAngle) : null;
+  const fused = fusion?.report.usable ?? false;
+  const built = reconstructCalibrated(fusion?.sequence ?? swing.camera, standing, {
+    /*
+     * Zeroing the far leg's depth exists because, down the line, nothing
+     * could see along the target line. With a second camera something can,
+     * and zeroing would throw that measurement away.
+     */
+    reconstruct: fused ? { stages: { neutralFarSide: false } } : undefined,
+  });
 
   return {
     /*
@@ -71,7 +90,8 @@ export const buildVideoSequences = (
      * Its whole job is to show what arrives with nothing done to it, so that
      * the Motion Layer beside it can be judged. Quietly rotating its world
      * would make the comparison a lie -- and it is the comparison, not the
-     * baseline itself, that anyone is looking at.
+     * baseline itself, that anyone is looking at. For the same reason it is
+     * the on-screen clip alone, with no second angle folded in.
      */
     sequence: passthroughSequence(swing.world),
     reconstructed: built.sequence,
@@ -85,5 +105,6 @@ export const buildVideoSequences = (
       neutral: built.neutral,
     },
     calibration: built.calibration,
+    fusion: fusion?.report ?? null,
   };
 };

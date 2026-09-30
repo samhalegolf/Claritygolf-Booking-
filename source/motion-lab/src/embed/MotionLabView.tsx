@@ -13,6 +13,10 @@
  *     second picker would be a second source of truth about which swing
  *     this is. The standing shot is different -- it is extra evidence the
  *     workspace knows nothing about -- so its buttons live here.
+ *   - Optionally, a second angle of the same swing: in compare mode the
+ *     workspace already has the other camera's clip open beside the first,
+ *     and hands it over too. There is also a button for it here, for a
+ *     second angle the workspace does not have open.
  *   - Keyboard arbitration. The view listens for space and the arrows on
  *     the window while `keysEnabled` is true; a host with shortcuts of its
  *     own on the same keys must switch them off while this is open.
@@ -32,7 +36,7 @@ import { ConfidencePanel } from "../app/panels/ConfidencePanel";
 import { LayerPanel } from "../app/panels/LayerPanel";
 import { MassPanel } from "../app/panels/MassPanel";
 import { ObservationPanel } from "../app/panels/ObservationPanel";
-import { StandingShotButtons } from "../app/panels/StandingShotButtons";
+import { ExtraClipButtons } from "../app/panels/ExtraClipButtons";
 import { Timeline } from "../app/panels/Timeline";
 import { Transport } from "../app/panels/Transport";
 import { VideoPanel } from "../app/panels/VideoPanel";
@@ -53,6 +57,12 @@ export interface MotionLabViewProps {
    * host should hold it in state rather than build a fresh object per render.
    */
   readonly swing: MotionLabSwing | null;
+  /**
+   * The same swing from another camera -- down the line beside face-on, or
+   * the other way round -- fused with it for depth. Held in state like
+   * `swing`; detection reruns when either changes identity.
+   */
+  readonly secondAngle?: MotionLabSwing | null;
   /** A line for the header, such as the player's name. */
   readonly title?: string;
   /** Whether the lab may own space and the arrow keys right now. */
@@ -60,21 +70,35 @@ export interface MotionLabViewProps {
   readonly onClose?: () => void;
 }
 
-export function MotionLabView({ swing, title, keysEnabled = true, onClose }: MotionLabViewProps) {
+export function MotionLabView({
+  swing,
+  secondAngle = null,
+  title,
+  keysEnabled = true,
+  onClose,
+}: MotionLabViewProps) {
   const [layers, setLayers] = useState<SceneLayers>(DEFAULT_LAYERS);
   const [cameraPreset, setCameraPreset] = useState<CameraPreset>("face-on");
   const [showLowConfidence, setShowLowConfidence] = useState(true);
   const [useMotionLayer, setUseMotionLayer] = useState(true);
 
   const video = useVideoObservation();
-  const { run } = video;
+  const { run, runSecondAngle } = video;
 
   // A File rather than the Blob so the detector has a name to report. No
   // bytes are copied: a File built from a Blob references the same parts.
+  // One after the other, because starting a detection cancels the last.
   useEffect(() => {
     if (!swing) return;
-    void run(new File([swing.blob], swing.name, { type: swing.blob.type }));
-  }, [swing, run]);
+    let live = true;
+    void (async () => {
+      const detected = await run(asFile(swing));
+      if (live && detected && secondAngle) await runSecondAngle(asFile(secondAngle));
+    })();
+    return () => {
+      live = false;
+    };
+  }, [swing, secondAngle, run, runSecondAngle]);
 
   const sequence = useMotionLayer ? video.state.reconstructed : video.state.sequence;
   const frameCount = sequence?.frames.length ?? 0;
@@ -101,7 +125,7 @@ export function MotionLabView({ swing, title, keysEnabled = true, onClose }: Mot
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose, keysEnabled]);
 
-  const { status, result, videoUrl, calibrationFileName } = video.state;
+  const { status, result, videoUrl, secondAngleFileName } = video.state;
 
   return (
     <div className="lab lab-embedded">
@@ -109,19 +133,13 @@ export function MotionLabView({ swing, title, keysEnabled = true, onClose }: Mot
         <div className="lab-title">
           <h1>{title ? `${title} · 3D motion` : "3D motion"}</h1>
           <p>
-            {swing ? `${swing.name} — ` : ""}
+            {swing ? `${swing.name}${secondAngleFileName ? ` + ${secondAngleFileName}` : ""} — ` : ""}
             Google observes, Clarity reconstructs, the 3D Space renders Clarity.
           </p>
         </div>
 
         <div className="lab-source-picker">
-          <StandingShotButtons
-            status={status}
-            calibrationFileName={calibrationFileName}
-            onPick={(file) => void video.runStandingShot(file)}
-            onClear={video.clearStandingShot}
-            onCancel={video.cancel}
-          />
+          <ExtraClipButtons video={video} />
           {onClose && (
             <button type="button" className="lab-chip" onClick={onClose}>
               Close
@@ -207,3 +225,6 @@ export function MotionLabView({ swing, title, keysEnabled = true, onClose }: Mot
     </div>
   );
 }
+
+const asFile = (clip: MotionLabSwing): File =>
+  new File([clip.blob], clip.name, { type: clip.blob.type });

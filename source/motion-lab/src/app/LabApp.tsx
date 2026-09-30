@@ -24,7 +24,7 @@ import { ConfidencePanel } from "./panels/ConfidencePanel";
 import { LayerPanel } from "./panels/LayerPanel";
 import { MassPanel } from "./panels/MassPanel";
 import { ObservationPanel } from "./panels/ObservationPanel";
-import { StandingShotButtons } from "./panels/StandingShotButtons";
+import { ExtraClipButtons } from "./panels/ExtraClipButtons";
 import { Timeline } from "./panels/Timeline";
 import { Transport } from "./panels/Transport";
 import { VideoPanel } from "./panels/VideoPanel";
@@ -80,7 +80,7 @@ export function LabApp() {
 
   useLabKeyboard(playback, setCameraPreset);
 
-  const { status, result, videoUrl, fileName, calibrationFileName } = video.state;
+  const { status, result, videoUrl, fileName } = video.state;
 
   return (
     <div className="lab">
@@ -157,13 +157,7 @@ export function LabApp() {
               >
                 {fileName ? "Choose another clip" : "Choose a clip"}
               </button>
-              <StandingShotButtons
-                status={status}
-                calibrationFileName={calibrationFileName}
-                onPick={(file) => void video.runStandingShot(file)}
-                onClear={video.clearStandingShot}
-                onCancel={video.cancel}
-              />
+              <ExtraClipButtons video={video} />
             </div>
           )}
         </div>
@@ -172,7 +166,7 @@ export function LabApp() {
       <p className="lab-scenario-purpose">
         {source === "synthetic"
           ? scenario.purpose
-          : "MediaPipe on a real clip, through the real pipeline. Toggle the Motion Layer to compare reconstruction against the do-nothing baseline. Add a standing shot — two seconds of the golfer standing still, same camera — to measure the camera's pitch instead of merely bounding it."}
+          : "MediaPipe on a real clip, through the real pipeline. Toggle the Motion Layer to compare reconstruction against the do-nothing baseline. Add a standing shot — two seconds of the golfer standing still, same camera — to measure the camera's pitch instead of merely bounding it. Add a second angle — the same swing from another camera — to fuse face-on with down the line."}
       </p>
 
       <div className="lab-body">

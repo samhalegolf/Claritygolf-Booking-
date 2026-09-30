@@ -597,6 +597,39 @@ The stance line is used for as long as it has 150 mm of horizontal image
 extent, which is a length rather than a yaw — so a wide stance survives further
 round than a narrow one, and that falls out instead of being special-cased.
 
+### Two cameras on one swing
+
+The two views are complements, so the lab can take both. **Add second angle**
+(or open 3D motion from compare mode in the booking app, which hands over the
+other panel's clip) fuses the same swing from another camera into the one on
+screen. `motion/fuse/twoView.ts` does it in three steps:
+
+| step | how |
+| --- | --- |
+| sync | the height of the hands above the hips is the same curve from any side, so the clips are lined up by cross-correlating it -- to a fraction of a frame, and at ×2 … ×8 for a slow-motion export |
+| align | both clips are hip-centred, Y-up and metric, so what is unknown is one rotation, one small scale, and how much each camera squashed its own depth -- solved together over every joint both saw |
+| fuse | each joint goes where the two agree best, each camera trusted across its picture and hardly along its line of sight; a joint one camera missed is taken from the other |
+
+Nothing assumes the second camera is square to the first: the angle is
+measured, so a down-the-line phone a little off the target line works the
+same way. Under 30° apart neither camera can see across the other's depth,
+and the readout says so.
+
+On the fixture, with each camera's depth squashed to half as real footage
+does, mean joint error goes from **71–97 mm** with one camera to **10–15 mm**
+with both.
+
+The fused clip keeps the on-screen clip's timeline and pixels, so the overlay,
+the club and every Motion Layer stage run on it unchanged -- except zeroing
+the far leg down the line, which exists only because nothing could see that
+depth. Two refusals keep a wrong pairing out: the hand curves must match, and
+once aligned the cameras must agree on the body to within 15 cm. Either
+failing leaves the on-screen clip alone and says why. The baseline is always
+the on-screen clip alone.
+
+The club still comes from the on-screen clip. Triangulating the clubhead from
+both would fix its known depth limit, and is its own change.
+
 ### In the video path
 
 Two clips, **detected once each**. A swing, and optionally a standing shot,
