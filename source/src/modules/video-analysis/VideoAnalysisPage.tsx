@@ -20,6 +20,7 @@ export interface VideoAnalysisPageProps {
   lessonId?: string;
   lessonTitle?: string;
   savedVideoId?: string;
+  pairedSavedVideoId?: string;
   persistence?: Partial<VideoAnalysisPersistenceLayer>;
   savedVideoLibrary?: SavedVideoLibraryStore | null;
   onSavedVideoLibraryChange?: () => void;

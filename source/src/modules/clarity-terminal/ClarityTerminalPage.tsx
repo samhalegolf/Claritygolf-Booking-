@@ -72,6 +72,8 @@ type Upload = {
   take: Take;
   takeCount: number;
   blob: Blob;
+  /** When the press started recording. Shared by every camera of the press. */
+  startedAt: number;
   durationMs: number;
   width?: number;
   height?: number;
@@ -429,7 +431,13 @@ export default function ClarityTerminalPage() {
     async (upload: Upload) => {
       const { take } = upload;
       const store = createMemorySavedVideoLibraryStore();
-      const createdAt = new Date().toISOString();
+      /*
+       * The press's start, not the upload's: every camera of one press then
+       * carries the same moment, which is how the library knows they are the
+       * same swing from two angles. Uploads run one after another and would
+       * stamp them minutes apart.
+       */
+      const createdAt = new Date(upload.startedAt).toISOString();
       const title = `${instructions?.terminal.name || "Clarity Terminal"} · ${take.cameraLabel}`;
       const duration = upload.durationMs / 1000;
       await store.saveItem({
@@ -445,6 +453,7 @@ export default function ClarityTerminalPage() {
           sourceUrl: "",
           title,
           createdAt,
+          recordedAt: createdAt,
           duration,
           fps: upload.fps,
           width: upload.width,
@@ -545,6 +554,7 @@ export default function ClarityTerminalPage() {
                 take: part.take,
                 takeCount: active.parts.length,
                 blob: new Blob(part.chunks, { type: part.mimeType }),
+                startedAt: active.startedAt,
                 durationMs,
                 width: part.camera.width,
                 height: part.camera.height,

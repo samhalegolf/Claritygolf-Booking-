@@ -466,6 +466,33 @@
   gap: 18px 12px;
 }
 
+/* Same swing from two cameras: one package across the whole row, its two
+   tiles side by side inside it, opened together. */
+.player-portal-video-pair {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--pt-border);
+  border-left: 3px solid var(--pt-accent);
+  border-radius: var(--c-radius-card);
+  background: var(--pt-surface-soft);
+}
+
+.player-portal-video-pair-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--pt-text);
+  font-size: 14px;
+}
+
+.player-portal-video-pair > .player-portal-video-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .player-portal-video-tile {
   position: relative;
   display: flex;
