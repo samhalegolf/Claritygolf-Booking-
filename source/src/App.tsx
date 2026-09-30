@@ -1647,12 +1647,6 @@ type BookingConfirmation = {
   notice?: string;
 };
 
-type SavedRescheduleLogin = {
-  email: string;
-  phone: string;
-  appointmentId?: string;
-};
-
 type RescheduleLookupCredentials = RescheduleForm & {
   appointmentId?: string;
 };
@@ -2326,7 +2320,6 @@ const CADDY_APP_URL = "https://caddy.claritygolf.app";
 const THEME_STORAGE_KEY = "clarity-booking-theme";
 const BRAND_STORAGE_KEY = "clarity-booking-brand";
 const COACH_ACCOUNT_STORAGE_KEY = "clarity-booking-coach-account";
-const RESCHEDULE_LOGIN_STORAGE_KEY = "clarity-booking-reschedule-login";
 const PAST_ADMIN_LESSON_WARNING =
   t("This lesson is in the past. It will be saved for records only and no emails will be sent.");
 // A completed card is a record, and a click that drifts into a drag should not
@@ -2823,30 +2816,6 @@ function getInitialView(embedded = false): View {
   if (requestedView === "video") return "video";
   if (requestedView === "profile") return "profile";
   return isBookingWidgetMode() ? "booking" : "calendar";
-}
-
-function getInitialRescheduleLogin(): SavedRescheduleLogin | null {
-  if (typeof window === "undefined") return null;
-  const params = new URLSearchParams(window.location.search);
-  const email = params.get("email") ?? "";
-  const phone = params.get("phone") ?? "";
-  const appointmentId = params.get("booking") ?? "";
-  if (email && phone) {
-    return {
-      email,
-      phone,
-      appointmentId: appointmentId || undefined,
-    };
-  }
-  try {
-    const stored = window.localStorage.getItem(RESCHEDULE_LOGIN_STORAGE_KEY);
-    if (!stored) return null;
-    const parsed = JSON.parse(stored) as SavedRescheduleLogin;
-    if (!parsed?.email || !parsed?.phone) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
 }
 
 function buildRescheduleLink(
@@ -6371,7 +6340,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const [rescheduleMatches, setRescheduleMatches] = useState<PublicRescheduleMatch[]>([]);
   const [selectedRescheduleId, setSelectedRescheduleId] = useState("");
   const [rescheduleState, setRescheduleState] = useState<"idle" | "checking" | "saving">("idle");
-  const [forceRescheduleLogin, setForceRescheduleLogin] = useState(false);
   const [bookingSubmitState, setBookingSubmitState] = useState<"idle" | "saving">("idle");
   const [bookingSubmitError, setBookingSubmitError] = useState("");
   const [bookingConfirmation, setBookingConfirmation] = useState<BookingConfirmation | null>(null);
@@ -6464,7 +6432,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const [emailNoticeVisible, setEmailNoticeVisible] = useState(false);
   const emailNoticeToastKeyRef = useRef("");
   const [hasMoved, setHasMoved] = useState(false);
-  const initialRescheduleLoginRef = useRef<SavedRescheduleLogin | null>(getInitialRescheduleLogin());
   const activeAccountId = defaultAccountId(workspaceAccounts);
   const activeAccount =
     accountById(workspaceAccounts, activeAccountId) ?? defaultWorkspaceAccountFromCoachAccount(coachAccount);
@@ -6884,7 +6851,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       void refreshClarityCloudImports();
     }
   }, [activeView, settingsTab, googleDriveTransfer.connected, googleDriveTransfer.incomingImportReady]);
-  const attemptedSavedRescheduleRef = useRef(false);
   const gridRef = useRef<HTMLDivElement | null>(null);
   const dockRef = useRef<HTMLDivElement | null>(null);
   const draftRef = useRef<Draft | null>(null);
@@ -7715,28 +7681,17 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         defaultLocation.shortName ||
         defaultLocation.name
       : selectedCalendarCoach?.displayName || selectedCalendarCoach?.name || t("No coach");
-  const isEmailLinkReschedule = Boolean(
-    bookingMode === "reschedule" &&
-      initialRescheduleLoginRef.current?.appointmentId &&
-      rescheduleForm.email.trim() &&
-      rescheduleForm.phone.trim(),
-  );
   /**
    * How the Manage-booking step establishes who is asking.
    *
    * "bookings" -- a signed-in player. Their session already answered the
    *   question, so they get their bookings, not a form.
-   * "link"     -- arrived from the link in a confirmation email, which carries
-   *   the booking with it. Still the path for a guest with no account.
    * "sign-in"  -- everyone else, who signs in with their Clarity Golf account.
+   *   A guest's confirmation-email link opens PublicBookingManage instead.
    *   This replaced an email-plus-phone booking lookup that was a second,
    *   parallel notion of identity with no relationship to a real login.
    */
-  const rescheduleIdentityStep: "bookings" | "link" | "sign-in" = isPlayerBooking
-    ? "bookings"
-    : forceRescheduleLogin || !isEmailLinkReschedule
-      ? "sign-in"
-      : "link";
+  const rescheduleIdentityStep: "bookings" | "sign-in" = isPlayerBooking ? "bookings" : "sign-in";
   const bookingLoginUrl = bookingConfirmation
     ? buildRescheduleLink(coachAccount.bookingUrl, {
         appointmentId: bookingConfirmation.appointmentId,
@@ -8083,27 +8038,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   useEffect(() => {
     window.localStorage.setItem(BRAND_STORAGE_KEY, JSON.stringify(brandSettings));
   }, [brandSettings]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    // A signed-in player's details came from their session and are already
-    // theirs on every device. Caching them here would only leave a copy behind
-    // on a shared browser for no gain.
-    if (isPlayerBooking) return;
-    const hasCredentials = Boolean(rescheduleForm.email.trim() && rescheduleForm.phone.trim());
-    if (hasCredentials) {
-      const nextSaved: SavedRescheduleLogin = {
-        email: rescheduleForm.email.trim(),
-        phone: rescheduleForm.phone.trim(),
-        appointmentId: selectedRescheduleId || initialRescheduleLoginRef.current?.appointmentId,
-      };
-      window.localStorage.setItem(RESCHEDULE_LOGIN_STORAGE_KEY, JSON.stringify(nextSaved));
-      return;
-    }
-    if (bookingMode === "book" && !selectedRescheduleId) {
-      window.localStorage.removeItem(RESCHEDULE_LOGIN_STORAGE_KEY);
-    }
-  }, [bookingMode, isPlayerBooking, rescheduleForm.email, rescheduleForm.phone, selectedRescheduleId]);
 
   // A signed-in player never asks to find their own bookings -- the session
   // already knows the details the old lookup form was collecting, so the
@@ -8459,19 +8393,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     window.setTimeout(() => void processPendingAdminNotifications(), 32000);
     window.setTimeout(() => void refreshNotificationHistory(), 35000);
   }
-
-  useEffect(() => {
-    if (!isEmbedMode || attemptedSavedRescheduleRef.current) return;
-    const saved = initialRescheduleLoginRef.current;
-    if (!saved?.email || !saved?.phone) return;
-    attemptedSavedRescheduleRef.current = true;
-    setBookingMode("reschedule");
-    setRescheduleForm({ email: saved.email, phone: saved.phone });
-    setSelectedRescheduleId(saved.appointmentId || "");
-    window.setTimeout(() => {
-      void lookupPublicReschedule(true, saved);
-    }, 0);
-  }, [isEmbedMode]);
 
   useEffect(() => {
     if (isEmbedMode || authStatus !== "authenticated" || !hasLoadedCalendarApiRef.current) return;
@@ -14148,7 +14069,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     setCustomGroupAttendees((current) => current.filter((attendee) => attendee.id !== attendeeId));
   }
 
-  function changeBookingMode(nextMode: BookingMode, showLogin = false) {
+  function changeBookingMode(nextMode: BookingMode) {
     setBookingMode(nextMode);
     setBookingConfirmation(null);
     setBookingSubmitError("");
@@ -14157,7 +14078,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     setCustomGroupAttendeeDraft({ name: "", email: "" });
     setBookingDaySelected(nextMode === "book" ? false : bookingDaySelected);
     setOpenPublicBookingSection("appointment");
-    setForceRescheduleLogin(nextMode === "reschedule" && showLogin);
     if (nextMode === "book") {
       setSelectedRescheduleId("");
     } else if (!rescheduleMatches.length && rescheduleForm.email.trim() && rescheduleForm.phone.trim()) {
@@ -14338,7 +14258,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       }
       const matches = Array.isArray(data.matches) ? data.matches : [];
       setRescheduleMatches(matches);
-      const preferredId = lookupCredentials.appointmentId || initialRescheduleLoginRef.current?.appointmentId || selectedRescheduleId;
+      const preferredId = lookupCredentials.appointmentId || selectedRescheduleId;
       const preferredMatch = preferredId ? matches.find((match) => match.id === preferredId) : null;
       if (preferredMatch) {
         selectRescheduleMatch(preferredMatch);
@@ -14346,14 +14266,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         selectRescheduleMatch(matches[0]);
       }
       if (!matches.length && !silent) setToast({ message: t("No booking matched those details.") });
-      if (matches.length && !isPlayerBooking) {
-        const nextSaved: SavedRescheduleLogin = {
-          email: lookupCredentials.email,
-          phone: lookupCredentials.phone,
-          appointmentId: preferredMatch?.id || matches[0]?.id,
-        };
-        window.localStorage.setItem(RESCHEDULE_LOGIN_STORAGE_KEY, JSON.stringify(nextSaved));
-      }
     } catch {
       if (!silent) setToast({ message: t("Could not reach the booking server.") });
     } finally {
@@ -30952,7 +30864,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   button goes straight to their existing bookings. */}
               <button
                 className={`booking-login-trigger ${bookingMode === "reschedule" ? "active" : ""}`}
-                onClick={() => changeBookingMode("reschedule", !isPlayerBooking)}
+                onClick={() => changeBookingMode("reschedule")}
                 type="button"
               >
                 <ClarityAccessPermissions size={14} />
@@ -31326,7 +31238,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       </div>
                     )}
                   </div>
-                  ) : rescheduleIdentityStep === "sign-in" ? (
+                  ) : (
                   <div className="booking-card">
                     <span>{t("Sign In")}</span>
                     <div className="booking-login-copy">
@@ -31374,24 +31286,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                       <em>{t("Booked as a guest? Use the manage-booking link in your confirmation email.")}</em>
                     </div>
                   </div>
-                  ) : (
-                    <div className="booking-card reschedule-link-state">
-                      <span>{t("Manage Booking")}</span>
-                      <div className="booking-login-copy">
-                        <strong>
-                          {selectedRescheduleMatch
-                            ? selectedRescheduleMatch.client
-                            : rescheduleState === "checking"
-                            ? t("Opening your booking...")
-                            : t("Booking link opened")}
-                        </strong>
-                        <em>
-                          {selectedRescheduleMatch
-                            ? describeRescheduleMatch(selectedRescheduleMatch)
-                            : t("Choose a new time below.")}
-                        </em>
-                      </div>
-                    </div>
                   )}
 
                   <div className="booking-card">
