@@ -4053,5 +4053,9 @@
   "Print the calibration template": "Stampa la sagoma di calibrazione",
   "Last session: {count} putts": "Ultima sessione: {count} putt",
   "Average face {face}, path {path}, start {start}": "Media: faccia {face}, traiettoria {path}, partenza {start}",
-  "The Putting Lab could not open: {message}": "Impossibile aprire Putting Lab: {message}"
+  "The Putting Lab could not open: {message}": "Impossibile aprire Putting Lab: {message}",
+  "From library": "Dalla libreria",
+  "Loading the library…": "Caricamento della libreria…",
+  "No saved videos for this player yet.": "Nessun video salvato per questo giocatore.",
+  "Same swing": "Stesso swing"
 }

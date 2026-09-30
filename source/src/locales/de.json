@@ -4053,5 +4053,9 @@
   "Print the calibration template": "Kalibriervorlage drucken",
   "Last session: {count} putts": "Letzte Session: {count} Putts",
   "Average face {face}, path {path}, start {start}": "Durchschnitt: Schlagfläche {face}, Bahn {path}, Start {start}",
-  "The Putting Lab could not open: {message}": "Putting Lab konnte nicht geöffnet werden: {message}"
+  "The Putting Lab could not open: {message}": "Putting Lab konnte nicht geöffnet werden: {message}",
+  "From library": "Aus der Bibliothek",
+  "Loading the library…": "Bibliothek wird geladen…",
+  "No saved videos for this player yet.": "Noch keine gespeicherten Videos für diesen Spieler.",
+  "Same swing": "Gleicher Schwung"
 }

@@ -4053,5 +4053,9 @@
   "Print the calibration template": "Udskriv kalibreringsskabelonen",
   "Last session: {count} putts": "Seneste session: {count} putts",
   "Average face {face}, path {path}, start {start}": "Gennemsnit: kølleblad {face}, bane {path}, start {start}",
-  "The Putting Lab could not open: {message}": "Putting Lab kunne ikke åbnes: {message}"
+  "The Putting Lab could not open: {message}": "Putting Lab kunne ikke åbnes: {message}",
+  "From library": "Fra biblioteket",
+  "Loading the library…": "Indlæser biblioteket…",
+  "No saved videos for this player yet.": "Ingen gemte videoer for denne spiller endnu.",
+  "Same swing": "Samme sving"
 }

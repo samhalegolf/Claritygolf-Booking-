@@ -26,13 +26,14 @@ import {
   IconEdit,
   IconRecord,
   IconSettings,
+  IconLibrary,
   IconUpload,
 } from "./components/VideoIcons";
 import type {
   MotionLabSwing,
-  SecondAngleClip,
   SecondAngleLibrary,
 } from "../../../motion-lab/src/embed/MotionLabView";
+import { LibraryClipPanel, type LibraryClip } from "./components/LibraryClipPanel";
 import {
   AnalysisRail,
   PlayerActionBar,
@@ -133,6 +134,14 @@ const waitForFirstFrame = async (stream: MediaStream, timeoutMs = 1500) => {
 
 const LEFT_ANALYSIS_SLOT = "comparison-left-slot";
 const RIGHT_ANALYSIS_SLOT = "comparison-right-slot";
+
+/** When a library clip was filmed, for a picker's second line. */
+function describeClipDate(iso?: string): string {
+  const date = iso ? new Date(iso) : null;
+  return date && !Number.isNaN(date.getTime())
+    ? date.toLocaleString(activeLocale(), { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })
+    : t("No date recorded");
+}
 
 /** A file's own recording start, when its timestamp can be trusted. See loadClipFileForSide. */
 function recordedAtFromFile(file: File, durationS?: number): string | undefined {
@@ -712,6 +721,8 @@ export function VideoWorkspace({
   const [liveStream, setLiveStream] = useState<MediaStream | null>(null);
   /** The side a Clarity Terminal panel is open on, if any. */
   const [remoteSide, setRemoteSide] = useState<ComparisonSide | null>(null);
+  // The side whose empty panel is showing the player's library.
+  const [librarySide, setLibrarySide] = useState<ComparisonSide | null>(null);
   // The workstation's default recording camera, chosen once in Video Settings.
   // Read on mount rather than taken from a prop: it belongs to this browser,
   // not to the player or lesson the workspace happens to be showing.
@@ -1375,10 +1386,15 @@ export function VideoWorkspace({
 
   const restoreSavedVideo = useCallback(
     /**
-     * `pairSide` opens the video as one of a same-swing pair: on that side,
-     * in compare mode with linked playback, whatever layout it was saved in.
+     * `placement` puts the video on a chosen side rather than the layout it
+     * was saved in. As one of a same-swing pair (`pair`) that is compare mode
+     * with linked playback; otherwise the layout on screen stays as it is.
+     * A placed video that is only in Clarity Cloud is downloaded first.
      */
-    async (targetSavedVideoId: string, pairSide?: ComparisonSide) => {
+    async (
+      targetSavedVideoId: string,
+      placement?: { side: ComparisonSide; pair: boolean }
+    ) => {
       if (!savedVideoStore) {
         throw new SavedVideoLibraryError(
           "SAVED_VIDEO_LOAD_FAILED",
@@ -1387,8 +1403,9 @@ export function VideoWorkspace({
       }
 
       let item = await savedVideoStore.getItem(targetSavedVideoId);
-      if (!item && pairSide) {
-        // The other angle of a pair may only be in Clarity Cloud so far.
+      if (!item && placement) {
+        // Picked from the library, or the other angle of a pair: it may only
+        // be in Clarity Cloud so far.
         setSaveStatus("downloading");
         setSaveMessage(t("Downloading from Clarity Cloud..."));
         item = await importSavedVideoFromClarityCloud(targetSavedVideoId, savedVideoStore, {
@@ -1421,7 +1438,7 @@ export function VideoWorkspace({
         return;
       }
 
-      const side = pairSide || item.sourceSide || "left";
+      const side = placement?.side || item.sourceSide || "left";
       const isLeft = side === "left";
       const playback = isLeft ? leftPlayback : rightPlayback;
       const analysisStore = isLeft ? leftStore : rightStore;
@@ -1465,10 +1482,12 @@ export function VideoWorkspace({
           height: restoredVideo.height,
         },
       });
-      if (pairSide) {
-        setComparisonMode("compare");
-        setActiveSide("left");
-        setLinkedPlayback(true);
+      if (placement) {
+        if (placement.pair) {
+          setComparisonMode("compare");
+          setActiveSide("left");
+          setLinkedPlayback(true);
+        }
         setCurrentSavedVideoIds((current) => ({ ...current, [side]: item.savedVideoId }));
       } else {
         setComparisonMode(item.workspaceSnapshot.mode);
@@ -1554,8 +1573,8 @@ export function VideoWorkspace({
     openedSavedVideoRef.current = savedVideoId;
     // A same-swing pair opens side by side, the angle asked for on the left.
     const opening = pairedSavedVideoId
-      ? restoreSavedVideo(savedVideoId, "left").then(() =>
-          restoreSavedVideo(pairedSavedVideoId, "right")
+      ? restoreSavedVideo(savedVideoId, { side: "left", pair: true }).then(() =>
+          restoreSavedVideo(pairedSavedVideoId, { side: "right", pair: true })
         )
       : restoreSavedVideo(savedVideoId);
     void opening.catch((error) => {
@@ -3698,6 +3717,20 @@ export function VideoWorkspace({
               }}
             >
               <IconUpload />{t("Upload a video")}</button>
+            {/* A video already saved -- on this device or in Clarity Cloud --
+                onto this side, without leaving the workspace. */}
+            {savedVideoStore && playerId ? (
+              <button
+                type="button"
+                className="upload-button is-subtle"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  closeLiveRecording();
+                  setLibrarySide(side);
+                }}
+              >
+                <IconLibrary />{t("From library")}</button>
+            ) : null}
             {/* The only route into Video Settings while the workspace is
                 empty -- the action bar's gear arrives with a clip. It is one
                 link, not a wizard: changing camera is a deliberate trip to
@@ -3729,6 +3762,21 @@ export function VideoWorkspace({
     // The Clarity Terminal panel takes the side over until the take lands or
     // the coach closes it. It needs a player: a take is filed under one the
     // moment Record is pressed.
+    if (librarySide === side && savedVideoStore) {
+      return (
+        <div
+          className={`comparison-video-panel ${isActive ? "is-active" : ""}`}
+          onMouseDown={() => setActiveSideInCompare(side)}
+        >
+          <LibraryClipPanel
+            list={listLibraryForSide}
+            onPick={loadLibraryClipIntoSide}
+            onClose={() => setLibrarySide(null)}
+          />
+        </div>
+      );
+    }
+
     if (remoteSide === side && playerId) {
       return (
         <div
@@ -4117,60 +4165,92 @@ export function VideoWorkspace({
    * saved video on this device, and every one in Clarity Cloud that is not,
    * with the clip the library pairs with the swing first.
    */
+  /**
+   * A player's library as a picker lists it: every saved video on this
+   * device, and every one in Clarity Cloud that is not. The clip the library
+   * pairs with `anchorId` (the clip already open) comes first, marked as the
+   * same swing; `exclude` leaves out clips that are already on screen.
+   * Shared by the empty panel's "From library" and the 3D second-angle picker.
+   */
+  const listPlayerLibrary = useCallback(
+    async (ownerId: string, anchorId: string | undefined, exclude: readonly string[]): Promise<LibraryClip[]> => {
+      if (!savedVideoStore) return [];
+      const items = await savedVideoStore.listItemsForPlayer(ownerId);
+      const partnerId = anchorId ? pairSavedVideoAngles(items).get(anchorId) : undefined;
+      const skip = new Set(exclude);
+      const clips: (LibraryClip & { at: string })[] = items
+        .filter((item) => !skip.has(item.savedVideoId))
+        .map((item) => {
+          const at = item.source.recordedAt || item.capturedAt || item.createdAt;
+          return {
+            id: item.savedVideoId,
+            title: item.title || item.source.originalFileName || t("Saved video"),
+            detail: `${describeClipDate(at)} · ${
+              item.local.status === "available" ? t("On this device") : t("Clarity Cloud")
+            }`,
+            thumbnail: item.thumbnailDataUrl,
+            sameSwing: item.savedVideoId === partnerId,
+            at,
+          };
+        });
+      const listed = new Set(items.map((item) => item.savedVideoId));
+      try {
+        const transfers = await listClarityCloudImportTransfers(cloudScope, ownerId);
+        for (const transfer of transfers) {
+          const id = transfer.savedVideoId || transfer.savedVideo?.savedVideoId;
+          if (!id || skip.has(id) || listed.has(id)) continue;
+          if (transfer.savedVideo?.playerId !== ownerId) continue;
+          listed.add(id);
+          const at = transfer.savedVideo.createdAt;
+          clips.push({
+            id,
+            title: transfer.savedVideo.title || t("Saved video"),
+            detail: `${describeClipDate(at)} · ${t("Clarity Cloud")}`,
+            at,
+          });
+        }
+      } catch {
+        // Offline, or no cloud: the picker lists what is on this device.
+      }
+      return clips.sort(
+        (a, b) => Number(Boolean(b.sameSwing)) - Number(Boolean(a.sameSwing)) || b.at.localeCompare(a.at)
+      );
+    },
+    [cloudScope, savedVideoStore]
+  );
+
+  /** The player's library, as the lab's second-angle picker sees it. */
   const motionLabLibrary = useMemo<SecondAngleLibrary | undefined>(() => {
     if (!savedVideoStore || !motionLabPlayerId) return undefined;
     const swingId = motionLabSwing?.id;
-    const when = (iso?: string) => {
-      const date = iso ? new Date(iso) : null;
-      return date && !Number.isNaN(date.getTime())
-        ? date.toLocaleString(activeLocale(), { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })
-        : t("No date recorded");
-    };
     return {
-      list: async () => {
-        const items = await savedVideoStore.listItemsForPlayer(motionLabPlayerId);
-        const partnerId = swingId ? pairSavedVideoAngles(items).get(swingId) : undefined;
-        const clips: (SecondAngleClip & { at: string })[] = items
-          .filter((item) => item.savedVideoId !== swingId)
-          .map((item) => {
-            const at = item.source.recordedAt || item.capturedAt || item.createdAt;
-            return {
-              id: item.savedVideoId,
-              title: item.title || item.source.originalFileName || t("Saved video"),
-              detail: `${when(at)} · ${
-                item.local.status === "available" ? t("On this device") : t("Clarity Cloud")
-              }`,
-              thumbnail: item.thumbnailDataUrl,
-              sameSwing: item.savedVideoId === partnerId,
-              at,
-            };
-          });
-        const onDevice = new Set(items.map((item) => item.savedVideoId));
-        try {
-          const transfers = await listClarityCloudImportTransfers(cloudScope, motionLabPlayerId);
-          for (const transfer of transfers) {
-            const id = transfer.savedVideoId || transfer.savedVideo?.savedVideoId;
-            if (!id || id === swingId || onDevice.has(id)) continue;
-            if (transfer.savedVideo?.playerId !== motionLabPlayerId) continue;
-            onDevice.add(id);
-            const at = transfer.savedVideo.createdAt;
-            clips.push({
-              id,
-              title: transfer.savedVideo.title || t("Saved video"),
-              detail: `${when(at)} · ${t("Clarity Cloud")}`,
-              at,
-            });
-          }
-        } catch {
-          // Offline, or no cloud: the picker lists what is on this device.
-        }
-        return clips.sort(
-          (a, b) => Number(Boolean(b.sameSwing)) - Number(Boolean(a.sameSwing)) || b.at.localeCompare(a.at)
-        );
-      },
+      list: () => listPlayerLibrary(motionLabPlayerId, swingId, swingId ? [swingId] : []),
       load: readSavedVideo,
     };
-  }, [cloudScope, motionLabPlayerId, motionLabSwing?.id, readSavedVideo, savedVideoStore]);
+  }, [listPlayerLibrary, motionLabPlayerId, motionLabSwing?.id, readSavedVideo, savedVideoStore]);
+
+  /**
+   * The empty panel's "From library": the player's saved videos, with the
+   * one the library pairs with the other side's clip first -- so the second
+   * angle of a swing already open is one tap away.
+   */
+  const listLibraryForSide = useCallback(() => {
+    const side = librarySide ?? "left";
+    const otherId = currentSavedVideoIds[side === "left" ? "right" : "left"];
+    const onScreen = [currentSavedVideoIds.left, currentSavedVideoIds.right].filter(
+      (id): id is string => Boolean(id)
+    );
+    return listPlayerLibrary(resolvedPlayerId, otherId, onScreen);
+  }, [currentSavedVideoIds, librarySide, listPlayerLibrary, resolvedPlayerId]);
+
+  const loadLibraryClipIntoSide = useCallback(
+    async (id: string) => {
+      const side = librarySide ?? "left";
+      await restoreSavedVideo(id, { side, pair: false });
+      setLibrarySide(null);
+    },
+    [librarySide, restoreSavedVideo]
+  );
 
   /** The lab tried two library clips together: keep them paired, or stop pairing them. */
   const recordMotionLabVerdict = useCallback(

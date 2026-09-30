@@ -2713,3 +2713,111 @@
 .va-rail-btn-phases.is-failed {
   color: var(--va-warn-text);
 }
+
+/* "From library": the player's saved videos inside an empty panel. */
+.library-clip-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  max-height: var(--va-video-max-height, 70vh);
+  padding: 16px;
+  border: 1px solid var(--va-border);
+  border-radius: 16px;
+  background: var(--va-bg);
+  color: var(--va-text);
+}
+
+.library-clip-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.library-clip-head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.library-clip-head .upload-button {
+  font: inherit;
+  font-size: 0.86rem;
+}
+
+.library-clip-note {
+  margin: 0;
+  color: var(--va-muted);
+  font-size: 0.86rem;
+}
+
+.library-clip-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+}
+
+.library-clip-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: var(--va-panel);
+  color: var(--va-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.library-clip-item:hover:not(:disabled) {
+  border-color: var(--va-accent);
+}
+
+.library-clip-item:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.library-clip-thumb {
+  flex: none;
+  width: 72px;
+  height: 46px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: var(--va-panel-soft);
+}
+
+.library-clip-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-size: 0.86rem;
+}
+
+.library-clip-text strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-clip-text span {
+  color: var(--va-muted);
+  font-size: 0.8rem;
+}
+
+.library-clip-badge {
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--va-accent-wash);
+  color: var(--va-accent);
+  font-size: 0.72rem;
+  font-weight: 600;
+}

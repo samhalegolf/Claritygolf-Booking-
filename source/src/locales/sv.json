@@ -4053,5 +4053,9 @@
   "Print the calibration template": "Skriv ut kalibreringsmallen",
   "Last session: {count} putts": "Senaste passet: {count} puttar",
   "Average face {face}, path {path}, start {start}": "Snitt: klubbblad {face}, bana {path}, start {start}",
-  "The Putting Lab could not open: {message}": "Putting Lab kunde inte öppnas: {message}"
+  "The Putting Lab could not open: {message}": "Putting Lab kunde inte öppnas: {message}",
+  "From library": "Från biblioteket",
+  "Loading the library…": "Läser in biblioteket…",
+  "No saved videos for this player yet.": "Inga sparade videor för den här spelaren ännu.",
+  "Same swing": "Samma sving"
 }

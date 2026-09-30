@@ -4053,5 +4053,9 @@
   "Print the calibration template": "キャリブレーション用テンプレートを印刷",
   "Last session: {count} putts": "前回のセッション：{count} パット",
   "Average face {face}, path {path}, start {start}": "平均：フェース {face}、軌道 {path}、打ち出し {start}",
-  "The Putting Lab could not open: {message}": "Putting Lab を開けませんでした：{message}"
+  "The Putting Lab could not open: {message}": "Putting Lab を開けませんでした：{message}",
+  "From library": "ライブラリから",
+  "Loading the library…": "ライブラリを読み込み中…",
+  "No saved videos for this player yet.": "このプレーヤーの保存済み動画はまだありません。",
+  "Same swing": "同じスイング"
 }
