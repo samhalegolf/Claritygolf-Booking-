@@ -214,6 +214,18 @@ export async function clearGuestToken(): Promise<void> {
 }
 
 /**
+ * A Clarity Terminal's link code: the third credential, and the narrowest. It
+ * is read from the terminal's own URL on every load, so it is only ever held
+ * in memory -- there is nothing to persist and nothing to clear. The server
+ * reads it only on the terminal routes.
+ */
+let terminalCode = "";
+
+export function setTerminalCode(next: string): void {
+  terminalCode = next;
+}
+
+/**
  * fetch() for the Clarity API. Takes the same absolute path either build uses
  * ("/api/player/profile") and adds whatever that build needs to reach it.
  */
@@ -232,6 +244,7 @@ export function apiFetch(path: string, init: RequestInit = {}): Promise<Response
   // sending it everywhere costs nothing and no check written for a player
   // session can be satisfied by it.
   if (guestToken) headers.set("X-Clarity-Guest-Token", guestToken);
+  if (terminalCode) headers.set("X-Clarity-Terminal-Code", terminalCode);
   return fetch(`${API_BASE}${path}`, {
     cache: "no-store",
     ...init,

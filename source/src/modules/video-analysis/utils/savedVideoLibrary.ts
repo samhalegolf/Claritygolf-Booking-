@@ -831,8 +831,12 @@ const applyTransferSessionToCloud = (
  * A guest -- someone with no account at all -- authorises with a guest_senders
  * token at /api/video-transfer/guest/*. Third credential, same engine again,
  * with quota and a retention clock the other two do not have.
+ *
+ * A Clarity Terminal -- the unattended camera computer in the bay -- uploads
+ * with its link code at /api/video-transfer/terminal/*, and only the takes the
+ * coach started from their laptop.
  */
-export type VideoTransferScope = "coach" | "player" | "guest";
+export type VideoTransferScope = "coach" | "player" | "guest" | "terminal";
 
 export type VideoTransferDirection =
   | "coach-device"
@@ -843,7 +847,7 @@ export type VideoTransferDirection =
 const transferUrl = (scope: VideoTransferScope, ...segments: string[]) =>
   [
     "/api/video-transfer",
-    ...(scope === "player" ? ["player"] : scope === "guest" ? ["guest"] : []),
+    ...(scope === "coach" ? [] : [scope]),
     ...segments.map((segment) => encodeURIComponent(segment)),
   ].join("/");
 
