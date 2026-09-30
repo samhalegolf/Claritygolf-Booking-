@@ -3984,7 +3984,6 @@
   "Your booking page shows fewer times, so your diary looks in demand and lessons book back to back instead of leaving gaps.": "Tu página de reservas muestra menos horarios, así tu agenda parece solicitada y las clases se reservan seguidas en lugar de dejar huecos.",
   "Booking as {name}": "Reservando como {name}",
   "Edit details": "Editar datos",
-  "Not you?": "¿No eres tú?",
   "Remember me on this device": "Recordarme en este dispositivo",
   "Camera {number}": "Cámara {number}",
   "{camera} could not be opened.": "No se ha podido abrir {camera}.",
@@ -4031,5 +4030,9 @@
   "Bay 1": "Puesto 1",
   "Terminal name": "Nombre del terminal",
   "Add terminal": "Añadir terminal",
-  "Record {activeSideLabel} clip with Clarity Terminal": "Grabar clip de {activeSideLabel} con Clarity Terminal"
+  "Record {activeSideLabel} clip with Clarity Terminal": "Grabar clip de {activeSideLabel} con Clarity Terminal",
+  "Booking for someone else": "Reservando para otra persona",
+  "Book as {name} instead": "Reservar como {name}",
+  "Book for someone else": "Reservar para otra persona",
+  "Forget me": "Olvidarme"
 }

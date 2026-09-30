@@ -3984,7 +3984,6 @@
   "Your booking page shows fewer times, so your diary looks in demand and lessons book back to back instead of leaving gaps.": "Din bokningssida visar färre tider, så att din kalender ser efterfrågad ut och lektioner bokas i följd i stället för att lämna luckor.",
   "Booking as {name}": "Bokar som {name}",
   "Edit details": "Ändra uppgifter",
-  "Not you?": "Inte du?",
   "Remember me on this device": "Kom ihåg mig på den här enheten",
   "Camera {number}": "Kamera {number}",
   "{camera} could not be opened.": "{camera} kunde inte öppnas.",
@@ -4031,5 +4030,9 @@
   "Bay 1": "Bay 1",
   "Terminal name": "Terminalnamn",
   "Add terminal": "Lägg till terminal",
-  "Record {activeSideLabel} clip with Clarity Terminal": "Spela in klipp för {activeSideLabel} med Clarity Terminal"
+  "Record {activeSideLabel} clip with Clarity Terminal": "Spela in klipp för {activeSideLabel} med Clarity Terminal",
+  "Booking for someone else": "Bokar åt någon annan",
+  "Book as {name} instead": "Boka som {name} i stället",
+  "Book for someone else": "Boka åt någon annan",
+  "Forget me": "Glöm mig"
 }

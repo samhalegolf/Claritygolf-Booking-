@@ -3984,7 +3984,6 @@
   "Your booking page shows fewer times, so your diary looks in demand and lessons book back to back instead of leaving gaps.": "Varaussivusi näyttää vähemmän aikoja, joten kalenterisi näyttää kysytyltä ja tunnit varataan peräkkäin ilman aukkoja.",
   "Booking as {name}": "Varataan nimellä {name}",
   "Edit details": "Muokkaa tietoja",
-  "Not you?": "Etkö ole sinä?",
   "Remember me on this device": "Muista minut tällä laitteella",
   "Camera {number}": "Kamera {number}",
   "{camera} could not be opened.": "Kameraa {camera} ei voitu avata.",
@@ -4031,5 +4030,9 @@
   "Bay 1": "Lyöntipaikka 1",
   "Terminal name": "Päätteen nimi",
   "Add terminal": "Lisää pääte",
-  "Record {activeSideLabel} clip with Clarity Terminal": "Tallenna klippi: {activeSideLabel} Clarity Terminalilla"
+  "Record {activeSideLabel} clip with Clarity Terminal": "Tallenna klippi: {activeSideLabel} Clarity Terminalilla",
+  "Booking for someone else": "Varataan toiselle henkilölle",
+  "Book as {name} instead": "Varaa sen sijaan nimellä {name}",
+  "Book for someone else": "Varaa toiselle henkilölle",
+  "Forget me": "Unohda minut"
 }

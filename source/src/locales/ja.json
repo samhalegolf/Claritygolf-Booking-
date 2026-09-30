@@ -3984,7 +3984,6 @@
   "Your booking page shows fewer times, so your diary looks in demand and lessons book back to back instead of leaving gaps.": "予約ページに表示される時間が少なくなり、スケジュールが埋まっているように見え、レッスンが間を空けずに続けて予約されます。",
   "Booking as {name}": "{name} として予約",
   "Edit details": "情報を編集",
-  "Not you?": "ご本人ではありませんか？",
   "Remember me on this device": "このデバイスで情報を記憶する",
   "Camera {number}": "カメラ{number}",
   "{camera} could not be opened.": "{camera}を開けませんでした。",
@@ -4031,5 +4030,9 @@
   "Bay 1": "打席1",
   "Terminal name": "端末名",
   "Add terminal": "端末を追加",
-  "Record {activeSideLabel} clip with Clarity Terminal": "Clarity Terminalで{activeSideLabel}のクリップを録画"
+  "Record {activeSideLabel} clip with Clarity Terminal": "Clarity Terminalで{activeSideLabel}のクリップを録画",
+  "Booking for someone else": "他の方の予約",
+  "Book as {name} instead": "{name} として予約する",
+  "Book for someone else": "他の方の予約をする",
+  "Forget me": "この情報を削除"
 }
