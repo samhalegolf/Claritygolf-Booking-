@@ -6342,6 +6342,22 @@ button {
   opacity: 0.72;
 }
 
+.app-shell .public-booking .booking-progressive-change {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--booking-text);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.app-shell .public-booking .booking-progressive-change:hover {
+  border-color: var(--coach-primary);
+}
+
 .app-shell .public-booking .booking-progressive-section.is-complete:not(.is-open) .booking-progressive-title {
   display: none;
 }
