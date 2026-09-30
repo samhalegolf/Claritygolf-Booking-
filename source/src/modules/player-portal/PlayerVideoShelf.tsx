@@ -8,10 +8,12 @@ import {
 } from "react";
 
 import { formatDate } from "./format";
-import type {
-  ClarityCloudImportTransfer,
-  SavedVideoItem,
+import {
+  pairSavedVideoAngles,
+  type ClarityCloudImportTransfer,
+  type SavedVideoItem,
 } from "../video-analysis/utils/savedVideoLibrary";
+import { groupSameSwingAngles } from "../video-analysis/utils/sameSwingAngles";
 import { t } from "../../lib/i18n";
 
 /* The player's video library, and the way videos leave it.
@@ -115,6 +117,8 @@ export type PlayerVideoShelfProps = {
   guestConnected: boolean;
   cloudLoading: boolean;
   onOpen: (savedVideoId: string) => void;
+  /** Open a same-swing pair side by side, `savedVideoId` on the left. */
+  onOpenPair: (savedVideoId: string, pairedSavedVideoId: string) => void;
   onSend: (savedVideoId: string) => void;
   onDownload: (savedVideoId: string) => void;
   /** Runs when the undo window closes. This is the destructive step. */
@@ -131,6 +135,7 @@ export function PlayerVideoShelf({
   guestConnected,
   cloudLoading,
   onOpen,
+  onOpenPair,
   onSend,
   onDownload,
   onDelete,
@@ -306,6 +311,109 @@ export function PlayerVideoShelf({
     setOverTrash(false);
   };
 
+  // Same-swing clips sit together as one package. See utils/sameSwingAngles.
+  const anglePairs = pairSavedVideoAngles(visibleSaved);
+
+  const renderSavedTile = (item: SavedVideoItem) => {
+    const id = item.savedVideoId;
+    const sending = sendingIds.has(id);
+    const progress = sendProgress[id] ?? item.cloud?.progress ?? 0;
+    const cloudStatus = item.cloud?.status;
+    const sent = cloudStatus === "ready" || cloudStatus === "imported";
+    const failed = cloudStatus === "failed" || cloudStatus === "expired";
+    // A tile at rest says nothing -- the screen's lead already covers
+    // "on this device". The state line appears only when there is
+    // state: in flight, sent, stalled or failed.
+    const showState = sending || sent || failed || cloudStatus === "paused";
+    const title = item.title || t("Swing video");
+    const isDragging = dragging?.id === id;
+    return (
+      <li
+        className={`player-portal-video-tile${isDragging ? " is-dragging" : ""}`}
+        key={id}
+        style={
+          isDragging
+            ? ({
+                "--tile-dx": `${dragging.dx}px`,
+                "--tile-dy": `${dragging.dy}px`,
+              } as CSSProperties)
+            : undefined
+        }
+      >
+        <button
+          type="button"
+          className="player-portal-video-media"
+          // While the grid is shaking a tap does nothing, the way a
+          // jiggling app icon does nothing. The minus badge and the
+          // bin are the only live targets.
+          onClick={() => {
+            if (!editing) onOpen(id);
+          }}
+          onPointerDown={(event) => handlePointerDown(event, id)}
+          onPointerMove={handlePointerMove}
+          onPointerUp={(event) => endPress(event, title)}
+          onPointerCancel={handlePointerCancel}
+          onContextMenu={(event) => event.preventDefault()}
+          aria-label={editing ? title : t("Open {title}", { title })}
+        >
+          {item.thumbnailDataUrl ? (
+            <img src={item.thumbnailDataUrl} alt="" loading="lazy" draggable={false} />
+          ) : (
+            <span className="player-portal-video-play-glyph" aria-hidden="true" />
+          )}
+          {item.source.duration != null && (
+            <span className="player-portal-video-duration">
+              {formatDuration(item.source.duration)}
+            </span>
+          )}
+          {sending && (
+            <span className="player-portal-video-progress" aria-hidden="true">
+              <span style={{ width: `${Math.min(100, Math.max(4, progress))}%` }} />
+            </span>
+          )}
+        </button>
+
+        {/* The corner minus. It is what makes deleting reachable
+            without a drag -- by keyboard, by screen reader, and by
+            anyone who would rather tap than drag. */}
+        {editing && (
+          <button
+            type="button"
+            className="player-portal-video-remove"
+            onClick={() => beginDelete(id, title)}
+            aria-label={t("Delete {title}", { title })}
+          >
+            <span aria-hidden="true">−</span>
+          </button>
+        )}
+
+        <div className="player-portal-video-meta">
+          <strong>{title}</strong>
+          <span>{formatDate(item.capturedAt || item.createdAt)}</span>
+        </div>
+        {showState && (
+          <span
+            className={`player-portal-video-state${sent ? " is-sent" : ""}${failed ? " is-error" : ""}`}
+          >
+            {sending
+              ? t("Sending… {progress}%", { progress: Math.round(progress) })
+              : sendStatusLabel(item, isGuest, guestConnected)}
+          </span>
+        )}
+        {!sent && !editing && (
+          <button
+            className="player-portal-video-action"
+            type="button"
+            disabled={sending}
+            onClick={() => onSend(id)}
+          >
+            {sending ? t("Sending…") : failed ? t("Try again") : t("Send to coach")}
+          </button>
+        )}
+      </li>
+    );
+  };
+
   const hasAnything = visibleSaved.length > 0 || cloudVideos.length > 0;
 
   return (
@@ -385,102 +493,25 @@ export function PlayerVideoShelf({
             );
           })}
 
-          {visibleSaved.map((item) => {
-            const id = item.savedVideoId;
-            const sending = sendingIds.has(id);
-            const progress = sendProgress[id] ?? item.cloud?.progress ?? 0;
-            const cloudStatus = item.cloud?.status;
-            const sent = cloudStatus === "ready" || cloudStatus === "imported";
-            const failed = cloudStatus === "failed" || cloudStatus === "expired";
-            // A tile at rest says nothing -- the screen's lead already covers
-            // "on this device". The state line appears only when there is
-            // state: in flight, sent, stalled or failed.
-            const showState = sending || sent || failed || cloudStatus === "paused";
-            const title = item.title || t("Swing video");
-            const isDragging = dragging?.id === id;
+          {groupSameSwingAngles(visibleSaved, (item) => item.savedVideoId, anglePairs).map((angles) => {
+            if (angles.length === 1) return renderSavedTile(angles[0]);
+            // Two cameras on one swing: packaged together, opened together.
+            const [first, second] = angles;
             return (
-              <li
-                className={`player-portal-video-tile${isDragging ? " is-dragging" : ""}`}
-                key={id}
-                style={
-                  isDragging
-                    ? ({
-                        "--tile-dx": `${dragging.dx}px`,
-                        "--tile-dy": `${dragging.dy}px`,
-                      } as CSSProperties)
-                    : undefined
-                }
-              >
-                <button
-                  type="button"
-                  className="player-portal-video-media"
-                  // While the grid is shaking a tap does nothing, the way a
-                  // jiggling app icon does nothing. The minus badge and the
-                  // bin are the only live targets.
-                  onClick={() => {
-                    if (!editing) onOpen(id);
-                  }}
-                  onPointerDown={(event) => handlePointerDown(event, id)}
-                  onPointerMove={handlePointerMove}
-                  onPointerUp={(event) => endPress(event, title)}
-                  onPointerCancel={handlePointerCancel}
-                  onContextMenu={(event) => event.preventDefault()}
-                  aria-label={editing ? title : t("Open {title}", { title })}
-                >
-                  {item.thumbnailDataUrl ? (
-                    <img src={item.thumbnailDataUrl} alt="" loading="lazy" draggable={false} />
-                  ) : (
-                    <span className="player-portal-video-play-glyph" aria-hidden="true" />
+              <li className="player-portal-video-pair" key={`pair-${first.savedVideoId}`}>
+                <div className="player-portal-video-pair-head">
+                  <strong>{t("Same swing · 2 angles")}</strong>
+                  {!editing && (
+                    <button
+                      className="player-portal-video-action"
+                      type="button"
+                      onClick={() => onOpenPair(first.savedVideoId, second.savedVideoId)}
+                    >
+                      {t("Open both")}
+                    </button>
                   )}
-                  {item.source.duration != null && (
-                    <span className="player-portal-video-duration">
-                      {formatDuration(item.source.duration)}
-                    </span>
-                  )}
-                  {sending && (
-                    <span className="player-portal-video-progress" aria-hidden="true">
-                      <span style={{ width: `${Math.min(100, Math.max(4, progress))}%` }} />
-                    </span>
-                  )}
-                </button>
-
-                {/* The corner minus. It is what makes deleting reachable
-                    without a drag -- by keyboard, by screen reader, and by
-                    anyone who would rather tap than drag. */}
-                {editing && (
-                  <button
-                    type="button"
-                    className="player-portal-video-remove"
-                    onClick={() => beginDelete(id, title)}
-                    aria-label={t("Delete {title}", { title })}
-                  >
-                    <span aria-hidden="true">−</span>
-                  </button>
-                )}
-
-                <div className="player-portal-video-meta">
-                  <strong>{title}</strong>
-                  <span>{formatDate(item.capturedAt || item.createdAt)}</span>
                 </div>
-                {showState && (
-                  <span
-                    className={`player-portal-video-state${sent ? " is-sent" : ""}${failed ? " is-error" : ""}`}
-                  >
-                    {sending
-                      ? t("Sending… {progress}%", { progress: Math.round(progress) })
-                      : sendStatusLabel(item, isGuest, guestConnected)}
-                  </span>
-                )}
-                {!sent && !editing && (
-                  <button
-                    className="player-portal-video-action"
-                    type="button"
-                    disabled={sending}
-                    onClick={() => onSend(id)}
-                  >
-                    {sending ? t("Sending…") : failed ? t("Try again") : t("Send to coach")}
-                  </button>
-                )}
+                <ul className="player-portal-video-grid">{angles.map(renderSavedTile)}</ul>
               </li>
             );
           })}

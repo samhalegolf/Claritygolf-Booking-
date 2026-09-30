@@ -367,6 +367,12 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   const [sendProgress, setSendProgress] = useState<Record<string, number>>({});
   const [recording, setRecording] = useState(false);
   const [openVideoId, setOpenVideoId] = useState("");
+  // The other angle of a same-swing pair, opened beside openVideoId.
+  const [openPairedVideoId, setOpenPairedVideoId] = useState("");
+  const openVideo = useCallback((savedVideoId: string, pairedSavedVideoId = "") => {
+    setOpenVideoId(savedVideoId);
+    setOpenPairedVideoId(pairedSavedVideoId);
+  }, []);
 
   // Videos that exist in the cloud but not on this device. A guest never has
   // any -- a guest can put bytes into the coach's Drive and can never read one
@@ -839,7 +845,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
 
   const navigateTerminal = useCallback((destination: PlayerTerminalDestination) => {
     setRecording(false);
-    setOpenVideoId("");
+    openVideo("");
     // Leaving Reviews shuts the review that was open, so coming back lands on
     // the list rather than mid-way inside whatever was read last.
     setOpenReviewId("");
@@ -862,7 +868,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   );
 
   const startRecording = useCallback(() => {
-    setOpenVideoId("");
+    openVideo("");
     const input = recordInputRef.current;
     if (!input || !shouldUseDevicePicker()) {
       // Desktop, or no input in the tree. Open the workspace straight onto its
@@ -883,7 +889,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
     // Dismissing the sheet is a decision, not a failure -- stay where we are.
     if (!file) return;
     setPendingVideoFile(file);
-    setOpenVideoId("");
+    openVideo("");
     setRecording(true);
   }, []);
 
@@ -1017,7 +1023,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
     const timer = window.setTimeout(() => {
       setLeavingWorkspace(false);
       setRecording(false);
-      setOpenVideoId("");
+      openVideo("");
       // Holding the File would pin the whole video in memory, and reopening
       // the workspace would silently load the last one again.
       setPendingVideoFile(null);
@@ -1540,6 +1546,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
               playerId={playerId || playerEmail}
               playerName={playerName}
               savedVideoId={openVideoId || undefined}
+              pairedSavedVideoId={openPairedVideoId || undefined}
               initialVideoFile={openVideoId ? null : pendingVideoFile}
               autoStartLiveRecording={!openVideoId && liveRecordRequested}
               savedVideoLibrary={savedVideoLibrary}
@@ -1718,7 +1725,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                                   <button
                                     type="button"
                                     key={video.savedVideoId}
-                                    onClick={() => setOpenVideoId(video.savedVideoId)}
+                                    onClick={() => openVideo(video.savedVideoId)}
                                   >
                                     <span className="player-portal-video-preview-media">
                                       {video.thumbnailDataUrl && (
@@ -2309,7 +2316,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                                     type="button"
                                     className="player-portal-review-video"
                                     key={video.savedVideoId}
-                                    onClick={() => setOpenVideoId(video.savedVideoId)}
+                                    onClick={() => openVideo(video.savedVideoId)}
                                   >
                                     {video.thumbnailDataUrl ? (
                                       <img src={video.thumbnailDataUrl} alt="" />
@@ -2646,7 +2653,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                               <button
                                 type="button"
                                 className="player-portal-practice-video"
-                                onClick={() => setOpenVideoId(openPracticeBlock.linkedVideoId as string)}
+                                onClick={() => openVideo(openPracticeBlock.linkedVideoId as string)}
                               >
                                 {practiceVideos.find(
                                   (transfer) => transfer.savedVideo?.savedVideoId === openPracticeBlock.linkedVideoId,
@@ -2805,7 +2812,8 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                         isGuest={isGuest}
                         guestConnected={Boolean(guestStatus?.connected)}
                         cloudLoading={cloudLoading}
-                        onOpen={setOpenVideoId}
+                        onOpen={openVideo}
+                        onOpenPair={openVideo}
                         onSend={(id) => void sendToCoach(id)}
                         onDownload={(id) => void downloadFromCloud(id)}
                         onDelete={(id) => void deleteSavedVideo(id)}
