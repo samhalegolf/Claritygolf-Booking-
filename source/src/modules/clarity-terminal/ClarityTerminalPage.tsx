@@ -11,10 +11,15 @@ import {
   PREVIEW_ICE_SERVERS,
   TerminalApiError,
   answerStationPreview,
+  checkPairing,
+  formatPairCode,
+  readStoredTerminalCode,
   reportStationTake,
   sendStationBeat,
-  terminalCodeFromPath,
+  startPairing,
+  storeTerminalCode,
   waitForIceGathering,
+  type Pairing,
   type StationInstructions,
   type TakeSide,
 } from "./terminalApi";
@@ -52,6 +57,8 @@ const RECORDING_BITS_PER_SECOND = 16_000_000;
 /** The preview is a window onto the bay, not the recording: keep it light. */
 const PREVIEW_MAX_BITRATE = 1_500_000;
 const UPLOAD_ATTEMPTS = 3;
+/** How often an unpaired terminal asks whether its code has been typed in. */
+const PAIR_CHECK_MS = 2000;
 
 type Take = { savedVideoId: string; side: TakeSide; cameraLabel: string };
 
@@ -110,9 +117,67 @@ function CameraTile({ camera, recording }: { camera: ActiveCamera; recording: bo
   );
 }
 
+/**
+ * The first screen on a new camera computer: a short code for the coach to
+ * type into Settings. Once they have, the computer is handed its credential
+ * and never shows this again.
+ */
+function PairingScreen({ onPaired }: { onPaired: (code: string) => void }) {
+  const [pairing, setPairing] = useState<Pairing | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    document.title = "Clarity Terminal";
+    let stopped = false;
+    let timer: number | undefined;
+    let current: Pairing | null = null;
+
+    const tick = async () => {
+      try {
+        if (!current || Date.parse(current.expiresAt) <= Date.now()) {
+          current = await startPairing();
+          if (!stopped) setPairing(current);
+        } else {
+          const code = await checkPairing(current.pairToken);
+          if (stopped) return;
+          if (code) {
+            onPaired(code);
+            return;
+          }
+        }
+        if (!stopped) setError("");
+      } catch (reason) {
+        if (stopped) return;
+        // Run out: the next tick shows a fresh code.
+        if (reason instanceof TerminalApiError && reason.status === 410) current = null;
+        else setError(t("Can't reach Clarity. Check this computer's internet connection."));
+      }
+      if (!stopped) timer = window.setTimeout(tick, PAIR_CHECK_MS);
+    };
+    void tick();
+    return () => {
+      stopped = true;
+      window.clearTimeout(timer);
+    };
+  }, [onPaired]);
+
+  return (
+    <main className="terminal-shell">
+      <section className="terminal-card terminal-message terminal-pairing">
+        <h1>Clarity Terminal</h1>
+        <p>{t("On your laptop, go to Settings › Booking › Clarity Terminal, add a terminal and type this code:")}</p>
+        <p className="terminal-pair-code" aria-live="polite">
+          {pairing ? formatPairCode(pairing.pairCode) : "··· ···"}
+        </p>
+        <p className="terminal-hint">{t("This computer only needs pairing once.")}</p>
+        {error ? <p className="terminal-error" role="alert">{error}</p> : null}
+      </section>
+    </main>
+  );
+}
+
 export default function ClarityTerminalPage() {
-  const code = terminalCodeFromPath();
-  const [linkError, setLinkError] = useState("");
+  const [code, setCode] = useState(readStoredTerminalCode);
   const [permission, setPermission] = useState<"unknown" | "asking" | "granted" | "blocked">("unknown");
   const [options, setOptions] = useState<CameraOption[]>([]);
   const [selected, setSelected] = useState<PreferredCamera[]>([]);
@@ -143,6 +208,11 @@ export default function ClarityTerminalPage() {
     setTerminalCode(code);
     document.title = "Clarity Terminal";
   }, [code]);
+
+  const paired = useCallback((next: string) => {
+    storeTerminalCode(next);
+    setCode(next);
+  }, []);
 
   // --- Cameras ---------------------------------------------------------------
 
@@ -230,7 +300,7 @@ export default function ClarityTerminalPage() {
   const connectCameras = useCallback(async () => {
     if (!navigator.mediaDevices?.getUserMedia) {
       setPermission("blocked");
-      setCameraError(t("This browser cannot use cameras. Open this link in Chrome or Edge."));
+      setCameraError(t("This browser cannot use cameras. Open this page in Chrome or Edge."));
       return;
     }
     setPermission("asking");
@@ -641,7 +711,9 @@ export default function ClarityTerminalPage() {
       } catch (error) {
         if (stopped) return;
         if (error instanceof TerminalApiError && error.status === 401) {
-          setLinkError(t("This terminal link is not recognised. Ask your coach for a new one."));
+          // Removed in Settings: forget it and show a pairing code again.
+          storeTerminalCode("");
+          setCode("");
           stopped = true;
           return;
         }
@@ -667,16 +739,7 @@ export default function ClarityTerminalPage() {
 
   // --- Screen ----------------------------------------------------------------
 
-  if (!code || linkError) {
-    return (
-      <main className="terminal-shell">
-        <section className="terminal-card terminal-message">
-          <h1>Clarity Terminal</h1>
-          <p>{linkError || t("This terminal link is not recognised. Ask your coach for a new one.")}</p>
-        </section>
-      </main>
-    );
-  }
+  if (!code) return <PairingScreen onPaired={paired} />;
 
   const name = instructions?.terminal.name || "Clarity Terminal";
   const player = instructions?.player?.name || "";

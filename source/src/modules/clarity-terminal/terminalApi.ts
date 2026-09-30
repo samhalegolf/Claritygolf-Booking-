@@ -7,17 +7,42 @@
 
 import { apiFetch } from "../auth/apiFetch";
 
-const TERMINAL_PATH_PREFIX = "/terminal/";
-
-/** The code in /terminal/<code>, or "" when this page load is anything else. */
-export function terminalCodeFromPath(pathname = typeof window === "undefined" ? "" : window.location.pathname) {
-  if (!pathname.startsWith(TERMINAL_PATH_PREFIX)) return "";
-  return pathname.slice(TERMINAL_PATH_PREFIX.length).replace(/\/+$/, "").trim().toLowerCase();
+/** True when this page load is the camera computer's page, /terminal. */
+export function isTerminalPath(pathname = typeof window === "undefined" ? "" : window.location.pathname) {
+  return pathname.replace(/\/+$/, "") === "/terminal";
 }
 
-export function terminalLink(code: string) {
-  const origin = typeof window === "undefined" ? "" : window.location.origin;
-  return `${origin}${TERMINAL_PATH_PREFIX}${code}`;
+/** The address typed on the camera computer, e.g. "claritygolf.app/terminal". */
+export function terminalAddress() {
+  const host = typeof window === "undefined" ? "" : window.location.host;
+  return `${host}/terminal`;
+}
+
+// The camera computer's credential, handed over by pairing and kept here so
+// the page runs by itself after a restart.
+const STORED_CODE_KEY = "clarity-terminal-code";
+
+export function readStoredTerminalCode() {
+  try {
+    return window.localStorage.getItem(STORED_CODE_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+export function storeTerminalCode(code: string) {
+  try {
+    if (code) window.localStorage.setItem(STORED_CODE_KEY, code);
+    else window.localStorage.removeItem(STORED_CODE_KEY);
+  } catch {
+    // Private window: it stays paired until the page closes.
+  }
+}
+
+/** "k7m4qp" as it is shown on screen: "K7M 4QP". */
+export function formatPairCode(code: string) {
+  const upper = code.toUpperCase();
+  return upper.length === 6 ? `${upper.slice(0, 3)} ${upper.slice(3)}` : upper;
 }
 
 export type TerminalState = "offline" | "idle" | "recording" | "uploading" | "no-camera" | "error";
@@ -35,7 +60,6 @@ export type TerminalTake = {
 export type CoachTerminal = {
   id: string;
   name: string;
-  code: string;
   online: boolean;
   state: TerminalState;
   message: string;
@@ -91,8 +115,8 @@ const post = <T>(path: string, body: unknown = {}) =>
 export const listTerminals = async () =>
   (await call<{ terminals: CoachTerminal[] }>("")).terminals;
 
-export const createTerminal = async (name: string) =>
-  (await post<{ terminal: CoachTerminal }>("", { name })).terminal;
+export const createTerminal = async (name: string, pairCode: string) =>
+  (await post<{ terminal: CoachTerminal }>("", { name, pairCode })).terminal;
 
 export const deleteTerminal = (id: string) =>
   call<{ ok: boolean }>(`/${encodeURIComponent(id)}`, { method: "DELETE" });
@@ -115,6 +139,16 @@ export const stopTerminalRecording = (id: string) =>
 
 export const offerTerminalPreview = (id: string, sessionId: string, sdp: string) =>
   post<{ ok: boolean }>(`/${encodeURIComponent(id)}/preview`, { sessionId, sdp });
+
+// --- Pairing ----------------------------------------------------------------
+
+export type Pairing = { pairCode: string; pairToken: string; expiresAt: string };
+
+export const startPairing = () => post<Pairing>("/pair");
+
+/** The terminal's credential once a coach has typed the code, otherwise null. */
+export const checkPairing = async (pairToken: string) =>
+  (await post<{ code: string | null }>("/pair/check", { pairToken })).code;
 
 // --- Terminal ---------------------------------------------------------------
 

@@ -5,7 +5,7 @@ import PublicSite, { type PublicPage } from "./modules/public-site/PublicSite";
 import { Loading } from "./modules/shared/Loading";
 import { fetchSession, guestSession, type Session } from "./modules/auth/session";
 import { isBookingEmbedMode, isPlayerBookingMode, isReviewShareMode, isVideoShareMode } from "./modules/shared/bookingHandoff";
-import { terminalCodeFromPath } from "./modules/clarity-terminal/terminalApi";
+import { isTerminalPath } from "./modules/clarity-terminal/terminalApi";
 import { lastVisitorWasCoach } from "./modules/shared/workspaceStorage";
 import { installOptixOriginFeedback } from "./optix-origin-feedback";
 import { installBoxAudit } from "./lib/boxAudit";
@@ -61,9 +61,9 @@ const videoShare = isVideoShareMode();
 // line above: the token is the credential, and a player who has never signed in
 // must not be stopped at a login screen on the way to their own review.
 const reviewShare = isReviewShareMode();
-// The camera computer in the bay, at /terminal/<code>. Nobody signs in on it:
-// the code is its credential, and the coach drives it from their laptop.
-const clarityTerminal = Boolean(terminalCodeFromPath());
+// The camera computer in the bay, at /terminal. Nobody signs in on it: it is
+// paired once with a short code, and the coach drives it from their laptop.
+const clarityTerminal = isTerminalPath();
 
 // Public verification/legal pages deliberately bypass authentication. Google,
 // a player, or anyone deciding whether to use Clarity must be able to read

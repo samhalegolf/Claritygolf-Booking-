@@ -214,10 +214,9 @@ export async function clearGuestToken(): Promise<void> {
 }
 
 /**
- * A Clarity Terminal's link code: the third credential, and the narrowest. It
- * is read from the terminal's own URL on every load, so it is only ever held
- * in memory -- there is nothing to persist and nothing to clear. The server
- * reads it only on the terminal routes.
+ * A Clarity Terminal's code: the third credential, and the narrowest. The
+ * terminal page owns keeping it (it arrives by pairing); this only holds it
+ * for the requests. The server reads it only on the terminal routes.
  */
 let terminalCode = "";
 

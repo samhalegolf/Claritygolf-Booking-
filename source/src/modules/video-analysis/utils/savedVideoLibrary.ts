@@ -833,7 +833,7 @@ const applyTransferSessionToCloud = (
  * with quota and a retention clock the other two do not have.
  *
  * A Clarity Terminal -- the unattended camera computer in the bay -- uploads
- * with its link code at /api/video-transfer/terminal/*, and only the takes the
+ * with its terminal code at /api/video-transfer/terminal/*, and only the takes the
  * coach started from their laptop.
  */
 export type VideoTransferScope = "coach" | "player" | "guest" | "terminal";

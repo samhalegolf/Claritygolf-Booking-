@@ -1,15 +1,29 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { cleanCameras, isTerminalOnline, newTerminalCode } from "../camera-terminal.mts";
+import { cleanCameras, cleanPairCode, isTerminalOnline, newPairCode, newTerminalCode } from "../camera-terminal.mts";
 
-test("a terminal code is long, lowercase and free of look-alike characters", () => {
+test("a terminal's credential is long, lowercase and free of look-alike characters", () => {
   const codes = new Set(Array.from({ length: 200 }, () => newTerminalCode()));
   assert.equal(codes.size, 200, "codes must not repeat");
   for (const code of codes) {
-    assert.match(code, /^[a-z2-9]{16}$/);
+    assert.match(code, /^[a-z2-9]{32}$/);
     assert.doesNotMatch(code, /[ilo01]/);
   }
+});
+
+test("a pairing code is six easy-to-read characters", () => {
+  for (let i = 0; i < 200; i += 1) {
+    const code = newPairCode();
+    assert.match(code, /^[a-z2-9]{6}$/);
+    assert.doesNotMatch(code, /[ilo01]/);
+  }
+});
+
+test("a pairing code is read however the coach typed it", () => {
+  assert.equal(cleanPairCode("K7M 4QP"), "k7m4qp");
+  assert.equal(cleanPairCode(" k7m-4qp "), "k7m4qp");
+  assert.equal(cleanPairCode(undefined), "");
 });
 
 test("a terminal is online only while its heartbeat is fresh", () => {

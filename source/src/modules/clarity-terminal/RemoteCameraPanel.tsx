@@ -338,7 +338,7 @@ export function RemoteCameraPanel({ player, onTakesReady, onClose }: RemoteCamer
       : !terminal
       ? t("Choose a terminal.")
       : !terminal.online
-        ? t("{name} is offline. Open its link on the camera computer.", { name: terminal.name })
+        ? t("{name} is offline. Check the camera computer is on and showing Clarity Terminal.", { name: terminal.name })
         : !cameras.length
           ? t("No camera switched on")
           : phase === "starting"
