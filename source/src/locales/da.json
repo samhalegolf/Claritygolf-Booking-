@@ -4046,5 +4046,12 @@
   "Our infrastructure providers, which process data only on our behalf and under our instructions to run Clarity: Netlify, which hosts the application and its server functions, and Supabase, which hosts the database where Google-derived data and encrypted Google refresh tokens are stored.": "Vores infrastrukturudbydere, som kun behandler data på vores vegne og efter vores instruktioner for at drive Clarity: Netlify, der hoster applikationen og dens serverfunktioner, og Supabase, der hoster databasen, hvor data fra Google og krypterede Google-opdateringstokens opbevares.",
   "Authorities or other parties where we are required to by law, such as to comply with a valid legal request, or where necessary to protect the rights, safety and security of our users or Clarity.": "Myndigheder eller andre parter, når vi er forpligtet til det ved lov, for eksempel for at efterkomme en gyldig juridisk anmodning, eller når det er nødvendigt for at beskytte rettigheder, tryghed og sikkerhed for vores brugere eller Clarity.",
   "A successor organisation if Clarity is involved in a merger, acquisition or sale of assets. Any successor must continue to protect Google user data under this policy and the Limited Use requirements, and we will notify affected users first.": "En efterfølgende organisation, hvis Clarity indgår i en fusion, et opkøb eller et salg af aktiver. Enhver efterfølger skal fortsat beskytte Google-brugerdata i henhold til denne politik og kravene om begrænset brug (Limited Use), og vi giver berørte brugere besked på forhånd.",
-  "We do not share Google user data with any other third party, including advertisers, data brokers and artificial intelligence providers.": "Vi deler ikke Google-brugerdata med nogen anden tredjepart, herunder annoncører, datamæglere og udbydere af kunstig intelligens."
+  "We do not share Google user data with any other third party, including advertisers, data brokers and artificial intelligence providers.": "Vi deler ikke Google-brugerdata med nogen anden tredjepart, herunder annoncører, datamæglere og udbydere af kunstig intelligens.",
+  "Putting Lab": "Putting Lab",
+  "Face, path and start line from an overhead camera. Calibrate once with the printed template, then putt.": "Kølleblad, bane og startlinje fra et kamera oppefra. Kalibrer én gang med den udskrevne skabelon, og put derefter.",
+  "Open Putting Lab": "Åbn Putting Lab",
+  "Print the calibration template": "Udskriv kalibreringsskabelonen",
+  "Last session: {count} putts": "Seneste session: {count} putts",
+  "Average face {face}, path {path}, start {start}": "Gennemsnit: kølleblad {face}, bane {path}, start {start}",
+  "The Putting Lab could not open: {message}": "Putting Lab kunne ikke åbnes: {message}"
 }

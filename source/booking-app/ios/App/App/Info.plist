@@ -66,6 +66,8 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>The Putting Lab films the putting green from above to measure the putter face, path and the start of the ball's roll. Video stays on this device.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Stripe needs to know where card payments are taken to protect against fraud. Location is only used while you take a payment.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>

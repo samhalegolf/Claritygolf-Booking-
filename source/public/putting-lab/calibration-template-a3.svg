@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="297.00mm" height="420.00mm" viewBox="0 0 297.00 420.00">
+<rect x="0" y="0" width="297.00" height="420.00" fill="#ffffff"/>
+<line x1="148.50" y1="189.00" x2="148.50" y2="50.00" stroke="#9a9a9a" stroke-width="0.60"/>
+<line x1="68.50" y1="246.34" x2="118.50" y2="246.34" stroke="#8a8a8a" stroke-width="0.50"/>
+<line x1="178.50" y1="246.34" x2="228.50" y2="246.34" stroke="#8a8a8a" stroke-width="0.50"/>
+<line x1="182.48" y1="245.15" x2="228.45" y2="243.54" stroke="#c4c4c4" stroke-width="0.35" stroke-dasharray="2 1.5"/>
+<line x1="114.52" y1="247.52" x2="68.55" y2="249.13" stroke="#c4c4c4" stroke-width="0.35" stroke-dasharray="2 1.5"/>
+<text x="234.45" y="243.33" font-family="Helvetica" font-size="3" fill="#9a9a9a" text-anchor="middle">-2°</text>
+<line x1="182.49" y1="245.74" x2="228.49" y2="244.94" stroke="#c4c4c4" stroke-width="0.35" stroke-dasharray="2 1.5"/>
+<line x1="114.51" y1="246.93" x2="68.51" y2="247.73" stroke="#c4c4c4" stroke-width="0.35" stroke-dasharray="2 1.5"/>
+<text x="234.49" y="244.83" font-family="Helvetica" font-size="3" fill="#9a9a9a" text-anchor="middle">-1°</text>
+<line x1="182.49" y1="246.93" x2="228.49" y2="247.73" stroke="#c4c4c4" stroke-width="0.35" stroke-dasharray="2 1.5"/>
+<line x1="114.51" y1="245.74" x2="68.51" y2="244.94" stroke="#c4c4c4" stroke-width="0.35" stroke-dasharray="2 1.5"/>
+<text x="234.49" y="247.84" font-family="Helvetica" font-size="3" fill="#9a9a9a" text-anchor="middle">+1°</text>
+<line x1="182.48" y1="247.52" x2="228.45" y2="249.13" stroke="#c4c4c4" stroke-width="0.35" stroke-dasharray="2 1.5"/>
+<line x1="114.52" y1="245.15" x2="68.55" y2="243.54" stroke="#c4c4c4" stroke-width="0.35" stroke-dasharray="2 1.5"/>
+<text x="234.45" y="249.34" font-family="Helvetica" font-size="3" fill="#9a9a9a" text-anchor="middle">+2°</text>
+<circle cx="148.50" cy="225.00" r="28.00" fill="#000000"/>
+<circle cx="148.50" cy="30.00" r="12.00" fill="#000000"/>
+<circle cx="38.50" cy="390.00" r="8.00" fill="#000000"/>
+<circle cx="258.50" cy="390.00" r="8.00" fill="#000000"/>
+<circle cx="38.50" cy="165.00" r="8.00" fill="#000000"/>
+<circle cx="258.50" cy="165.00" r="8.00" fill="#000000"/>
+<circle cx="38.50" cy="30.00" r="8.00" fill="#000000"/>
+<circle cx="258.50" cy="30.00" r="8.00" fill="#000000"/>
+<circle cx="148.50" cy="225.00" r="21.34" fill="none" stroke="#ffffff" stroke-width="0.3" stroke-dasharray="1.5 1.5"/>
+<line x1="15.00" y1="408.00" x2="115.00" y2="408.00" stroke="#6a6a6a" stroke-width="0.50"/>
+<line x1="15.00" y1="410.00" x2="15.00" y2="406.00" stroke="#6a6a6a" stroke-width="0.50"/>
+<line x1="115.00" y1="410.00" x2="115.00" y2="406.00" stroke="#6a6a6a" stroke-width="0.50"/>
+<text x="65.00" y="404.00" font-family="Helvetica" font-size="3.5" fill="#6a6a6a" text-anchor="middle">100 mm: print at actual size and check this bar</text>
+<text x="148.50" y="10.00" font-family="Helvetica" font-size="4" fill="#6a6a6a" text-anchor="middle">Clarity Putting Lab calibration: target this way</text>
+</svg>

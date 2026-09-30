@@ -331,6 +331,7 @@ import type {
   TouchEvent as ReactTouchEvent,
 } from "react";
 import { t, tn } from "./lib/i18n";
+import { nativePuttingLab } from "./native/clarityPuttingLab";
 
 // Video analysis and voice notes are heavy, coach-only features (together well
 // over a third of the client bundle). They never render on the public booking
@@ -340,6 +341,9 @@ import { t, tn } from "./lib/i18n";
 const VideoAnalysisPage = lazy(() =>
   import("./modules/video-analysis/VideoAnalysisPage").then((module) => ({ default: module.VideoAnalysisPage })),
 );
+// Staff app only: the Putting Lab is a native plugin, so the launcher is not
+// even fetched in a browser (nativePuttingLab() is null there).
+const PuttingLabLauncher = lazy(() => import("./modules/putting-lab/PuttingLabLauncher"));
 const ClarityVoiceTextPanel = lazy(() =>
   import("./modules/clarity-voice/ClarityVoiceTextPanel").then((module) => ({ default: module.ClarityVoiceTextPanel })),
 );
@@ -26750,6 +26754,11 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
 
         {adminWorkspaceReady && activeView === "video" && (
           <section className="module-page video-analysis-page-host">
+            {nativePuttingLab() && (
+              <Suspense fallback={null}>
+                <PuttingLabLauncher />
+              </Suspense>
+            )}
             <Suspense fallback={<Loading size="panel" what={t("video analysis")} />}>
               <VideoAnalysisPage
                 playerId={videoContext?.playerId}

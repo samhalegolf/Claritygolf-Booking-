@@ -4046,5 +4046,12 @@
   "Our infrastructure providers, which process data only on our behalf and under our instructions to run Clarity: Netlify, which hosts the application and its server functions, and Supabase, which hosts the database where Google-derived data and encrypted Google refresh tokens are stored.": "Clarity の運営のために、当社に代わり当社の指示に従ってのみデータを処理するインフラ提供事業者：アプリケーションとサーバー機能をホストする Netlify、および Google 由来のデータと暗号化された Google リフレッシュトークンを保存するデータベースをホストする Supabase。",
   "Authorities or other parties where we are required to by law, such as to comply with a valid legal request, or where necessary to protect the rights, safety and security of our users or Clarity.": "法律により義務付けられている場合の当局またはその他の当事者（有効な法的要請に応じる場合など）、またはユーザーや Clarity の権利、安全、セキュリティを守るために必要な場合。",
   "A successor organisation if Clarity is involved in a merger, acquisition or sale of assets. Any successor must continue to protect Google user data under this policy and the Limited Use requirements, and we will notify affected users first.": "Clarity が合併、買収、資産譲渡の対象となった場合の承継組織。承継者は本ポリシーおよび限定的使用（Limited Use）要件に従って Google ユーザーデータを引き続き保護しなければならず、当社は影響を受けるユーザーに事前に通知します。",
-  "We do not share Google user data with any other third party, including advertisers, data brokers and artificial intelligence providers.": "広告主、データブローカー、人工知能プロバイダーを含め、その他の第三者と Google ユーザーデータを共有することはありません。"
+  "We do not share Google user data with any other third party, including advertisers, data brokers and artificial intelligence providers.": "広告主、データブローカー、人工知能プロバイダーを含め、その他の第三者と Google ユーザーデータを共有することはありません。",
+  "Putting Lab": "Putting Lab",
+  "Face, path and start line from an overhead camera. Calibrate once with the printed template, then putt.": "真上からのカメラでフェース、軌道、打ち出し方向を測定します。印刷したテンプレートで一度キャリブレーションしてから、パットしてください。",
+  "Open Putting Lab": "Putting Lab を開く",
+  "Print the calibration template": "キャリブレーション用テンプレートを印刷",
+  "Last session: {count} putts": "前回のセッション：{count} パット",
+  "Average face {face}, path {path}, start {start}": "平均：フェース {face}、軌道 {path}、打ち出し {start}",
+  "The Putting Lab could not open: {message}": "Putting Lab を開けませんでした：{message}"
 }
