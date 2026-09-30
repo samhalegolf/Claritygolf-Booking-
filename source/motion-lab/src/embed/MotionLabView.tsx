@@ -15,8 +15,13 @@
  *     workspace knows nothing about -- so its buttons live here.
  *   - Optionally, a second angle of the same swing: in compare mode the
  *     workspace already has the other camera's clip open beside the first,
- *     and hands it over too. There is also a button for it here, for a
- *     second angle the workspace does not have open.
+ *     and hands it over too; otherwise it hands over the clip its library
+ *     pairs with the swing. The "Add second angle" button here picks from
+ *     the host's library (`library`) or takes an upload.
+ *   - What the lab learns about the library. When a second angle from the
+ *     library fuses with the swing, or is shown NOT to be the same swing,
+ *     `onSecondAngleVerdict` says so, so the library can keep the pair
+ *     together or stop pairing them.
  *   - Keyboard arbitration. The view listens for space and the arrows on
  *     the window while `keysEnabled` is true; a host with shortcuts of its
  *     own on the same keys must switch them off while this is open.
@@ -27,7 +32,7 @@
  * host passes in reaches the renderer except through a ClarityFrame.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ClaritySpace3D } from "../space3d/ClaritySpace3D";
 import type { CameraPreset } from "../space3d/cameraRig";
@@ -36,7 +41,9 @@ import { ConfidencePanel } from "../app/panels/ConfidencePanel";
 import { LayerPanel } from "../app/panels/LayerPanel";
 import { MassPanel } from "../app/panels/MassPanel";
 import { ObservationPanel } from "../app/panels/ObservationPanel";
-import { ExtraClipButtons } from "../app/panels/ExtraClipButtons";
+import { ExtraClipButtons, type SecondAngleLibrary } from "../app/panels/ExtraClipButtons";
+
+export type { SecondAngleClip, SecondAngleLibrary } from "../app/panels/ExtraClipButtons";
 import { Timeline } from "../app/panels/Timeline";
 import { Transport } from "../app/panels/Transport";
 import { VideoPanel } from "../app/panels/VideoPanel";
@@ -49,6 +56,8 @@ export interface MotionLabSwing {
   readonly blob: Blob;
   /** Shown in the header and used as the detector's file name. */
   readonly name: string;
+  /** The host's library id for this clip, when it has one. */
+  readonly id?: string;
 }
 
 export interface MotionLabViewProps {
@@ -63,6 +72,13 @@ export interface MotionLabViewProps {
    * `swing`; detection reruns when either changes identity.
    */
   readonly secondAngle?: MotionLabSwing | null;
+  /** Where "Add second angle" picks from, besides an upload. */
+  readonly library?: SecondAngleLibrary;
+  /**
+   * A library clip was tried as the second angle and found to be (true) or
+   * not to be (false) the same swing. Not called when it could not tell.
+   */
+  readonly onSecondAngleVerdict?: (swingId: string, secondId: string, sameSwing: boolean) => void;
   /** A line for the header, such as the player's name. */
   readonly title?: string;
   /** Whether the lab may own space and the arrow keys right now. */
@@ -73,6 +89,8 @@ export interface MotionLabViewProps {
 export function MotionLabView({
   swing,
   secondAngle = null,
+  library,
+  onSecondAngleVerdict,
   title,
   keysEnabled = true,
   onClose,
@@ -88,17 +106,45 @@ export function MotionLabView({
   // A File rather than the Blob so the detector has a name to report. No
   // bytes are copied: a File built from a Blob references the same parts.
   // One after the other, because starting a detection cancels the last.
+  /** The library id of the second angle in use, when it came from the library. */
+  const [secondId, setSecondId] = useState<string | null>(null);
   useEffect(() => {
     if (!swing) return;
     let live = true;
+    setSecondId(null);
     void (async () => {
       const detected = await run(asFile(swing));
-      if (live && detected && secondAngle) await runSecondAngle(asFile(secondAngle));
+      if (live && detected && secondAngle) {
+        setSecondId(secondAngle.id ?? null);
+        await runSecondAngle(asFile(secondAngle));
+      }
     })();
     return () => {
       live = false;
     };
   }, [swing, secondAngle, run, runSecondAngle]);
+
+  const onSecondAngle = useCallback(
+    (file: File, id?: string) => {
+      setSecondId(id ?? null);
+      void runSecondAngle(file);
+    },
+    [runSecondAngle]
+  );
+
+  const { fusion, secondAngleFileName: loadedSecond, status: observing } = video.state;
+  const toldRef = useRef<string | null>(null);
+  useEffect(() => {
+    const swingId = swing?.id;
+    // Only a settled result: while the next clip is detecting, the fusion
+    // on show is still the last clip's.
+    if (observing !== "ready" || !fusion || fusion.sameSwing === null || !loadedSecond) return;
+    if (!swingId || !secondId || swingId === secondId || !onSecondAngleVerdict) return;
+    const key = `${swingId}|${secondId}|${fusion.sameSwing}`;
+    if (toldRef.current === key) return;
+    toldRef.current = key;
+    onSecondAngleVerdict(swingId, secondId, fusion.sameSwing);
+  }, [fusion, loadedSecond, observing, onSecondAngleVerdict, secondId, swing?.id]);
 
   const sequence = useMotionLayer ? video.state.reconstructed : video.state.sequence;
   const frameCount = sequence?.frames.length ?? 0;
@@ -139,7 +185,7 @@ export function MotionLabView({
         </div>
 
         <div className="lab-source-picker">
-          <ExtraClipButtons video={video} />
+          <ExtraClipButtons video={video} library={library} onSecondAngle={onSecondAngle} />
           {onClose && (
             <button type="button" className="lab-chip" onClick={onClose}>
               Close

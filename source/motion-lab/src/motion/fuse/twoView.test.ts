@@ -92,6 +92,7 @@ const faceOn = film({ cameraYawDeg: 0 });
 test("the second clip's late start is found to the frame", () => {
   const { report } = fuseTwoViews(faceOn, film({ cameraYawDeg: 90, startFrame: 13 }));
   assert.ok(report.usable, report.reason ?? "");
+  assert.equal(report.sameSwing, true);
   assert.equal(report.rate, 1);
   assert.ok(Math.abs(report.offsetMs - -13 * FRAME_MS) < 1, `offset ${report.offsetMs}`);
 });
@@ -176,6 +177,7 @@ test("a clip that is not the same swing is refused, and the swing is left untouc
   const backwards = film({ cameraYawDeg: 90, frames: [...swing.frames].reverse() });
   const fusion = fuseTwoViews(faceOn, backwards);
   assert.equal(fusion.report.usable, false);
+  assert.equal(fusion.report.sameSwing, false);
   assert.ok(fusion.report.reason);
   assert.equal(fusion.sequence, faceOn);
 });

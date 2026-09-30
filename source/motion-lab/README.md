@@ -630,6 +630,17 @@ the on-screen clip alone.
 The club still comes from the on-screen clip. Triangulating the clubhead from
 both would fix its known depth limit, and is its own change.
 
+**In the booking app** the second angle can come from the player's library
+as well as an upload: the lab asks the host for a list and for one clip's
+bytes (`SecondAngleLibrary`) and knows nothing else about how it is stored.
+The host packages same-swing clips together in the library (recorded at the
+same moment, or confirmed here) and hands the partner over when 3D motion
+opens. Each verdict goes back through `onSecondAngleVerdict` --
+`report.sameSwing` is true when the clips fused, false when they were shown
+not to be one swing, null when there was too little of the golfer to tell --
+so the library keeps a confirmed pair together and stops pairing a refused
+one.
+
 ### In the video path
 
 Two clips, **detected once each**. A swing, and optionally a standing shot,

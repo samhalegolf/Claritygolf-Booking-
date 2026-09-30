@@ -3,6 +3,7 @@ import type { VideoAnalysis } from "../models/Analysis";
 import type { PlayerVideo } from "../models/Video";
 import type { ComparisonSide, ComparisonWorkspaceState } from "./localPersistence";
 import type { StoredVideo } from "./videoBlobStore";
+import { pairSameSwingAngles, type SwingAngleCandidate } from "./sameSwingAngles";
 import {
   VIDEO_ANALYSIS_DB_STORES,
   isIndexedDbFactoryAvailable,
@@ -214,6 +215,8 @@ export interface SavedVideoItem {
     height?: number;
     checksumSha256?: string;
     sourceDeviceId?: string;
+    /** When recording started, only when actually known. See `PlayerVideo.recordedAt`. */
+    recordedAt?: string;
   };
   local: {
     status: SavedVideoLocalStatus;
@@ -226,6 +229,15 @@ export interface SavedVideoItem {
   analysisSnapshot: VideoAnalysis;
   workspaceSnapshot: ComparisonWorkspaceState;
   thumbnailDataUrl?: string;
+  /**
+   * The same swing from another camera. `linkedTo` is a confirmed partner;
+   * `refused` are clips the 3D view proved are not this swing. See
+   * `utils/sameSwingAngles`.
+   */
+  swingAngles?: {
+    linkedTo?: string;
+    refused?: string[];
+  };
 }
 
 export interface SavedVideoBlobRecord {
@@ -274,6 +286,8 @@ export type CompactSavedVideoAnalysisJson = {
     narrationRefs: unknown[];
   };
   workspace: ComparisonWorkspaceState;
+  /** When recording started, only when actually known. Carried so a download keeps it. */
+  recordedAt?: string;
 };
 
 export interface SaveSavedVideoInput {
@@ -626,6 +640,7 @@ const buildItem = async (
       height: input.sourceVideo.height ?? input.analysisSnapshot.videoMeta?.height,
       checksumSha256,
       sourceDeviceId: existing?.source.sourceDeviceId || getStoredClarityDeviceId(),
+      recordedAt: existing?.source.recordedAt || input.sourceVideo.recordedAt,
     },
     local: {
       status: "available",
@@ -641,6 +656,7 @@ const buildItem = async (
       },
     },
     thumbnailDataUrl: input.thumbnailDataUrl || existing?.thumbnailDataUrl,
+    swingAngles: existing?.swingAngles,
   };
 
   return {
@@ -1060,6 +1076,7 @@ export const compactSavedVideoAnalysisJson = (item: SavedVideoItem): CompactSave
     narrationRefs: stripDataUrls(item.analysisSnapshot.narrationRefs) as unknown[],
   },
   workspace: stripDataUrls(item.workspaceSnapshot) as ComparisonWorkspaceState,
+  recordedAt: item.source.recordedAt,
 });
 
 const patchCloudState = async (
@@ -1865,6 +1882,7 @@ export const importSavedVideoFromClarityCloud = async (
       sourceUrl: "",
       title: importPackage.video.fileName || importPackage.savedVideo.title,
       createdAt: importPackage.savedVideo.createdAt,
+      recordedAt: importPackage.analysisJson?.recordedAt,
       duration: importPackage.video.duration,
       width: importPackage.video.width,
       height: importPackage.video.height,
@@ -2651,4 +2669,73 @@ export const createMemorySavedVideoLibraryStore = (): SavedVideoLibraryStore => 
   };
 
   return store;
+};
+
+/* ------------------------ same swing, two cameras ------------------------ */
+
+/** What `sameSwingAngles` needs to know about a saved video. */
+export const swingAngleCandidateOf = (item: SavedVideoItem): SwingAngleCandidate => ({
+  id: item.savedVideoId,
+  playerId: item.playerId,
+  recordedAt: item.source.recordedAt,
+  durationS: item.source.duration,
+  linkedTo: item.swingAngles?.linkedTo,
+  refused: item.swingAngles?.refused,
+});
+
+/** Each saved video's same-swing partner, both ways round. */
+export const pairSavedVideoAngles = (items: readonly SavedVideoItem[]): Map<string, string> =>
+  pairSameSwingAngles(items.map(swingAngleCandidateOf));
+
+/**
+ * Record that two saved videos are the same swing. Any partner either had
+ * before is let go, and any refusal between the two is forgotten.
+ */
+export const linkSavedVideoAngles = async (
+  store: SavedVideoLibraryStore,
+  aId: string,
+  bId: string
+): Promise<void> => {
+  if (aId === bId) return;
+  const [a, b] = await Promise.all([store.getItem(aId), store.getItem(bId)]);
+  if (!a || !b) return;
+  if (a.swingAngles?.linkedTo === bId && b.swingAngles?.linkedTo === aId) return;
+
+  for (const item of [a, b]) {
+    const old = item.swingAngles?.linkedTo;
+    if (!old || old === aId || old === bId) continue;
+    const former = await store.getItem(old);
+    if (former?.swingAngles?.linkedTo === item.savedVideoId) {
+      await store.putItem({ ...former, swingAngles: { ...former.swingAngles, linkedTo: undefined } });
+    }
+  }
+
+  const link = (item: SavedVideoItem, partnerId: string): SavedVideoItem => ({
+    ...item,
+    swingAngles: {
+      linkedTo: partnerId,
+      refused: item.swingAngles?.refused?.filter((id) => id !== partnerId),
+    },
+  });
+  await store.putItem(link(a, bId));
+  await store.putItem(link(b, aId));
+};
+
+/** Record that two saved videos are NOT the same swing, undoing any link between them. */
+export const refuseSavedVideoAngles = async (
+  store: SavedVideoLibraryStore,
+  aId: string,
+  bId: string
+): Promise<void> => {
+  if (aId === bId) return;
+  const [a, b] = await Promise.all([store.getItem(aId), store.getItem(bId)]);
+  const refuse = (item: SavedVideoItem, otherId: string): SavedVideoItem => ({
+    ...item,
+    swingAngles: {
+      linkedTo: item.swingAngles?.linkedTo === otherId ? undefined : item.swingAngles?.linkedTo,
+      refused: [...new Set([...(item.swingAngles?.refused || []), otherId])],
+    },
+  });
+  if (a) await store.putItem(refuse(a, bId));
+  if (b) await store.putItem(refuse(b, aId));
 };

@@ -297,6 +297,29 @@
   border-bottom: 0;
 }
 
+/* Same swing from two cameras, packaged: one head, both cards under it. */
+.player-video-pair {
+  border-bottom: 1px solid var(--c-border-soft);
+  box-shadow: inset 3px 0 0 var(--c-accent);
+}
+
+.player-video-pair:last-child {
+  border-bottom: 0;
+}
+
+.player-video-pair-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px 0;
+  font-size: 13px;
+}
+
+.player-video-pair .player-video-card {
+  border-bottom: 0;
+}
+
 .player-video-card:hover {
   background: var(--c-hover);
 }
@@ -1197,6 +1220,16 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+/* Same swing from two cameras: both angles side by side in one thumb. */
+.player-video-shelf-thumb.is-pair {
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+}
+
+.player-video-shelf-thumb.is-pair img {
+  min-width: 0;
 }
 
 .player-video-shelf-badge {
