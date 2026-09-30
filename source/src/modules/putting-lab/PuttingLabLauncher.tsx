@@ -1,8 +1,9 @@
-// The door into the Clarity Putting Lab from the staff app.
+// The Putting Lab page in the staff app (its own item in the main menu).
 //
-// The lab itself is native and full screen; this strip only opens it, links
+// The lab itself is native and full screen; this page only opens it, links
 // the printable template, and shows the headline of the session just closed.
-// It renders nothing outside the staff app (see nativePuttingLab). Putts are
+// It renders nothing outside the staff app (see nativePuttingLab), and App
+// only offers the menu item there. Putts are
 // not saved anywhere yet: joining them to players, lessons and reports is the
 // next piece of work, once the measurements have been validated on a green.
 
@@ -50,7 +51,6 @@ export default function PuttingLabLauncher() {
   return (
     <section className="putting-lab-launcher" aria-label={t("Putting Lab")}>
       <div className="putting-lab-launcher-text">
-        <h2>{t("Putting Lab")}</h2>
         <p>{t("Face, path and start line from an overhead camera. Calibrate once with the printed template, then putt.")}</p>
         {lastSession && lastSession.count > 0 && (
           <p className="putting-lab-launcher-session">
