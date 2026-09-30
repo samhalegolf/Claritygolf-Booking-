@@ -714,6 +714,9 @@ export function VideoWorkspace({
   // The swing handed to the motion lab, or null while it is closed. Held in
   // state so its identity is stable: the lab re-detects when it changes.
   const [motionLabSwing, setMotionLabSwing] = useState<MotionLabSwing | null>(null);
+  // In compare mode, the other panel's clip: the same swing from the other
+  // camera, fused with the first for depth. Null in single mode.
+  const [motionLabSecondAngle, setMotionLabSecondAngle] = useState<MotionLabSwing | null>(null);
   const [motionLabOpen, setMotionLabOpen] = useState(false);
   const [motionLabError, setMotionLabError] = useState<string | null>(null);
   // The right rail's two live reads. Shared by both panels in compare mode,
@@ -3947,30 +3950,46 @@ export function VideoWorkspace({
    * page already owns -- no copy, no network -- and it works the same for an
    * uploaded file, a restored one and a live recording, which is why this does
    * not go looking in the blob store for whichever of them it was.
+   *
+   * In compare mode the other panel's clip goes too, as a second angle: a
+   * coach comparing face-on with down the line has both cameras of one swing
+   * on screen, and the lab fuses them. If the two turn out not to be the same
+   * swing, the lab says so and uses the active clip alone.
    */
   const openMotionLab = useCallback(async () => {
     const side = effectiveActiveSide;
+    const otherSide: ComparisonSide = side === "left" ? "right" : "left";
     const clip = side === "left" ? playerVideoLeft : playerVideoRight;
+    const otherClip = modeIsCompare ? (side === "left" ? playerVideoRight : playerVideoLeft) : null;
     if (!clip) return;
     setMotionLabError(null);
-    try {
-      const response = await fetch(clip.sourceUrl);
+    const read = async (source: NonNullable<typeof clip>, sourceSide: ComparisonSide): Promise<MotionLabSwing> => {
+      const response = await fetch(source.sourceUrl);
       if (!response.ok) throw new Error(t("The clip could not be read ({status}).", { status: response.status }));
       const blob = await response.blob();
-      setMotionLabSwing({ blob, name: clip.title || t("{side} clip", { side: getSideTitle(side) }) });
+      return { blob, name: source.title || t("{side} clip", { side: getSideTitle(sourceSide) }) };
+    };
+    try {
+      const [swing, secondAngle] = await Promise.all([
+        read(clip, side),
+        otherClip ? read(otherClip, otherSide) : Promise.resolve(null),
+      ]);
+      setMotionLabSwing(swing);
+      setMotionLabSecondAngle(secondAngle);
       setMotionLabOpen(true);
     } catch (error) {
       setMotionLabError(
         error instanceof Error ? error.message : t("The clip could not be read.")
       );
     }
-  }, [effectiveActiveSide, playerVideoLeft, playerVideoRight]);
+  }, [effectiveActiveSide, modeIsCompare, playerVideoLeft, playerVideoRight]);
 
   const closeMotionLab = useCallback(() => {
     setMotionLabOpen(false);
     // Dropping the swing unmounts the lab's detector and revokes its URL;
     // reopening starts a fresh detection rather than showing a stale one.
     setMotionLabSwing(null);
+    setMotionLabSecondAngle(null);
   }, []);
 
   return (
@@ -4042,6 +4061,7 @@ export function VideoWorkspace({
           <Suspense fallback={<div className="va-motion-lab-loading">{t("Loading 3D motion…")}</div>}>
             <MotionLabView
               swing={motionLabSwing}
+              secondAngle={motionLabSecondAngle}
               title={playerName || undefined}
               keysEnabled={!settingsOpen}
               onClose={closeMotionLab}

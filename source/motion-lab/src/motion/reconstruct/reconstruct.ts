@@ -847,7 +847,8 @@ const bodyContradicts = (
 const correspondencesOf = (observation: WorldObservationFrame): Correspondence[] =>
   CLARITY_JOINTS.flatMap((joint) => {
     const observed = observation.joints[joint];
-    if (!observed) return [];
+    // A joint only a second camera saw has a projected pixel, not a seen one.
+    if (!observed || observed.views === "second") return [];
     return [
       {
         world: observed.position as Vec3,

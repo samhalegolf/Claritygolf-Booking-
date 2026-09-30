@@ -7,6 +7,7 @@
  * them matter, and a verdict here would be a guess dressed as one.
  */
 
+import type { TwoViewReport } from "../../motion/fuse/twoView";
 import type { StandingCalibration } from "../../motion/level/standingShot";
 import type { VideoObservationState } from "../useVideoObservation";
 
@@ -32,7 +33,17 @@ export function ObservationPanel({
   useMotionLayer: boolean;
   onUseMotionLayer: (value: boolean) => void;
 }) {
-  const { status, progress, error, result, calibration, calibrationFileName, levelling } = state;
+  const {
+    status,
+    progress,
+    error,
+    result,
+    calibration,
+    calibrationFileName,
+    levelling,
+    fusion,
+    secondAngleFileName,
+  } = state;
 
   return (
     <div className="lab-panel">
@@ -60,7 +71,13 @@ export function ObservationPanel({
           <dl className="lab-readout">
             <div className="lab-readout-row">
               <dt>Detecting</dt>
-              <dd>{progress.phase === "standing" ? "standing shot" : "the swing"}</dd>
+              <dd>
+                {progress.phase === "standing"
+                  ? "standing shot"
+                  : progress.phase === "second"
+                    ? "second angle"
+                    : "the swing"}
+              </dd>
             </div>
             <div className="lab-readout-row">
               <dt>Frame</dt>
@@ -160,6 +177,7 @@ export function ObservationPanel({
               <dd>{(result.elapsedMs / 1000).toFixed(1)} s</dd>
             </div>
           </dl>
+          {fusion && <SecondAngleReadout fusion={fusion} fileName={secondAngleFileName} />}
           {calibration && !calibration.usable && (
             <p className="lab-panel-note">
               Standing shot refused: {calibration.reason}. The world is levelled
@@ -202,8 +220,8 @@ export function ObservationPanel({
               {levelling.neutral.farSide} leg&rsquo;s depth was zeroed to a neutral
               stance at address — weight 50/50, stacked under the hips like the
               near leg. Only the detector&rsquo;s constant bias was taken off; what the
-              leg does through the swing is still what it saw. A face-on clip of the
-              same swing would be what proves otherwise.
+              leg does through the swing is still what it saw. Add the face-on clip of
+              the same swing as a second angle and it is measured instead.
             </p>
           )}
           {!result.world.anchor.anchorIsStable && (
@@ -284,6 +302,93 @@ function StandingShotReadout({
           ? "Measured. Load a swing filmed from the same camera position and it will be levelled with this rather than with the lower bound the swing can prove on its own."
           : `Refused: ${calibration.reason}.`}
       </p>
+    </>
+  );
+}
+
+/**
+ * What putting the second angle together with the swing found.
+ *
+ * The numbers a coach can check against what they know about how the clips
+ * were filmed: how far apart the two phones started recording, and the
+ * angle between them. A down-the-line camera set a little off the target
+ * line should read somewhere short of 90°.
+ */
+function SecondAngleReadout({
+  fusion,
+  fileName,
+}: {
+  fusion: TwoViewReport;
+  fileName: string | null;
+}) {
+  if (!fusion.usable) {
+    return (
+      <p className="lab-panel-note">
+        Second angle{fileName ? ` (${fileName})` : ""} not used: {fusion.reason}. The 3D
+        is from the on-screen clip alone.
+      </p>
+    );
+  }
+  /*
+   * The second clip's clock reads `offsetMs` more than the swing's at the
+   * same moment, so a positive offset means it had been recording longer.
+   */
+  const offset = fusion.offsetMs / 1000;
+  return (
+    <>
+      <dl className="lab-readout">
+        <div className="lab-readout-row">
+          <dt>Second angle</dt>
+          <dd>{fileName ?? "loaded"}</dd>
+        </div>
+        <div className="lab-readout-row">
+          <dt>Second clip started</dt>
+          <dd>
+            {Math.abs(offset) < 0.0005
+              ? "together"
+              : `${Math.abs(offset).toFixed(3)} s ${offset > 0 ? "earlier" : "later"}`}
+            {fusion.rate !== 1 ? ` · runs at ×${fusion.rate}` : ""}
+          </dd>
+        </div>
+        <div className="lab-readout-row">
+          <dt>Sync match</dt>
+          <dd>{Math.round(fusion.syncScore * 100)}%</dd>
+        </div>
+        <div className="lab-readout-row">
+          <dt>Angle between cameras</dt>
+          <dd>{fusion.angleBetweenDeg.toFixed(0)}°</dd>
+        </div>
+        <div className="lab-readout-row">
+          <dt>Depth as seen</dt>
+          <dd>
+            {fusion.depthMeasured
+              ? `${Math.round(fusion.depthScale.primary * 100)}% / ${Math.round(fusion.depthScale.second * 100)}% of true`
+              : "not measurable"}
+          </dd>
+        </div>
+        <div className="lab-readout-row">
+          <dt>Cameras agree to</dt>
+          <dd>{(fusion.agreementM * 100).toFixed(1)} cm</dd>
+        </div>
+        <div className="lab-readout-row">
+          <dt>Joints only it saw</dt>
+          <dd>{fusion.addedFromSecond}</dd>
+        </div>
+      </dl>
+      {!fusion.depthMeasured && (
+        <p className="lab-panel-note">
+          The two cameras are less than 30° apart, so neither can see across the
+          other&rsquo;s depth. The joints are averaged, but the depth is still
+          each camera&rsquo;s own guess.
+        </p>
+      )}
+      {fusion.conflicts > 0 && (
+        <p className="lab-panel-note">
+          On {fusion.conflicts} readings the cameras put a joint more than 25 cm
+          apart, and the more confident one was taken rather than splitting the
+          difference.
+        </p>
+      )}
     </>
   );
 }

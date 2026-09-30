@@ -143,6 +143,15 @@ export interface ObservedJoint {
    * and `visibility` already reflects that -- this says it was derived at all.
    */
   readonly sourceCount: number;
+  /**
+   * Which camera saw it, once a second angle of the same swing has been fused
+   * in. Absent for a single clip.
+   *
+   * "second" means the on-screen camera did NOT see this joint: its position
+   * is the other camera's, and its `image` is projected rather than observed,
+   * so it must never be used to calibrate the on-screen camera.
+   */
+  readonly views?: "both" | "primary" | "second";
 }
 
 interface ObservationSequenceBase {
