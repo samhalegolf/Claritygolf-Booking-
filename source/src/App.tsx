@@ -24,7 +24,6 @@ import {
   LogOut,
   Minimize2,
   Moon,
-  Palette,
   Pause,
   Percent,
   Phone,
@@ -159,9 +158,6 @@ import {
   activeLocale,
   canonicalPhoneKey as sharedCanonicalPhoneKey,
   dialCodeFor,
-  formatPhoneForDisplay,
-  getActiveCountry,
-  isValidPhone,
   setActiveRegion,
 } from "./lib/activeCountry";
 import { BusinessHubPanel, OwnerIdentityCard } from "./modules/business-hub/BusinessHubPanel";
@@ -178,7 +174,7 @@ import {
   NOTIFICATION_VARIANTS,
 } from "../netlify/functions/_shared/notification-templates.mts";
 import type { NotificationTemplates } from "../netlify/functions/_shared/notification-templates.mts";
-import { cleanMessageLanguage, messageText } from "../netlify/functions/_shared/message-language.mts";
+import { cleanMessageLanguage } from "../netlify/functions/_shared/message-language.mts";
 import {
   cleanPlayerBookingEmbedHeight,
   cleanPlayerBookingEmbedIntro,
@@ -194,13 +190,9 @@ import {
   BASE_WEEK_START,
   BOOKING_EMBED_PARAM,
   BOOKING_EMBED_VALUE,
-  BOOKING_LOGIN_STORAGE_KEY,
   PUBLIC_BOOKING_HOST,
-  isBookingEmbedMode,
-  playerBookingUrl,
-  type BookingEntryMode,
 } from "./modules/shared/bookingHandoff";
-import { currentPublicBookingScreenId, publicApi, publicBookingPath } from "./modules/public-booking/bookingScreen";
+import { currentPublicBookingScreenId, publicBookingPath } from "./modules/public-booking/bookingScreen";
 import { WeekSlots } from "./modules/public-booking/WeekSlots";
 import { lookBusyStarts } from "../netlify/functions/_shared/look-busy.mts";
 import type {
@@ -262,7 +254,6 @@ import type {
   InvoiceCustomFieldPlacement,
   InvoiceCustomField,
   InvoiceSettings,
-  BillingCatalogKind,
   BillingCatalogItem,
   InvoiceLineSource,
   InvoiceLine,
@@ -270,7 +261,6 @@ import type {
   BillingInvoiceStatus,
   InvoicePaymentSource,
   BillingInvoiceRecord,
-  BillingRevenueBucket,
   BillingRevenueReport,
   BillingReportSummary,
   BillingDiscountType,
@@ -919,11 +909,6 @@ function isScheduledGroupService(service?: Partial<Service> | null) {
   return Boolean(service?.lessonFormat === "group" && !isCustomGroupService(service));
 }
 
-/** An asynchronous video review: booked without a time, owed back by a date. */
-function isVideoReviewService(service?: Partial<Service> | null) {
-  return Boolean(service?.lessonFormat === "video-review");
-}
-
 const DEFAULT_REVIEW_TURNAROUND_DAYS = 3;
 const MAX_REVIEW_TURNAROUND_DAYS = 30;
 
@@ -1033,12 +1018,6 @@ function adminCustomGroupAttendee(name: string, email = ""): CustomGroupAttendee
     status: cleanEmail ? "invited" : "manual",
     token: cleanEmail ? customGroupAttendeeToken() : undefined,
   };
-}
-
-// The person normaliser lives in modules/clients/clientsModel. These keep the
-// workspace's fallback account on any record that arrives without one.
-function cleanPerson(person: Partial<Person> & { id?: unknown } = {}): Person {
-  return cleanPeopleWith([person], defaultWorkspaceAccountFromCoachAccount().id)[0];
 }
 
 function cleanPeople(people: unknown[]): Person[] {
@@ -1163,7 +1142,6 @@ type Toast = {
 type View =
   | "calendar"
   | "clients"
-  | "booking"
   | "sell"
   | "billing"
   // Who the coach is, and everything Clarity is plugged into on their behalf.
@@ -1211,8 +1189,7 @@ type WorkspaceOverlay =
   | { kind: "billing"; section: Exclude<BillingSection, "none">; title: string };
 
 // The views a Business Hub card is allowed to send you to. Not every View:
-// "booking" is the public page, and "settings" and "billing" open over the
-// profile rather than replacing it.
+// "settings" and "billing" open over the profile rather than replacing it.
 const PROFILE_LINKED_VIEWS: View[] = ["calendar", "clients", "players", "sell", "billing", "video"];
 
 // The Billing sections named once, so the tab bar and the topbar's subtitle
@@ -1581,26 +1558,7 @@ type BookingForm = {
   email: string;
 };
 
-type BookingMode = "book" | "reschedule";
-
 type PublicBookingSection = "appointment" | "datetime" | "information";
-
-type RescheduleForm = {
-  email: string;
-  phone: string;
-};
-
-type PublicRescheduleMatch = {
-  id: string;
-  serviceId: string;
-  serviceName: string;
-  duration: number;
-  week: number;
-  day: number;
-  start: number;
-  client: string;
-  location?: BookingLocationSnapshot;
-};
 
 type NotificationRecord = {
   id: string;
@@ -1629,36 +1587,6 @@ type EmailSendResult = {
   kind?: string;
   status?: string;
 };
-
-type BookingConfirmation = {
-  kind: "booking" | "reschedule" | "cancelled";
-  appointmentId?: string;
-  client: string;
-  service: string;
-  week: number;
-  day: number;
-  start: number;
-  duration: number;
-  dayLabel: string;
-  timeLabel: string;
-  email: string;
-  phone?: string;
-  location?: BookingLocationSnapshot;
-  notifications: EmailSendResult[];
-  notice?: string;
-};
-
-type SavedRescheduleLogin = {
-  email: string;
-  phone: string;
-  appointmentId?: string;
-};
-
-type RescheduleLookupCredentials = RescheduleForm & {
-  appointmentId?: string;
-};
-
-type SavedBookingLogin = BookingForm;
 
 type ClientProfileTab = "bookings" | "notes" | "notifications" | "transactions" | "passes";
 
@@ -1731,8 +1659,6 @@ const SECONDARY_PLAYER_TOOLS: ReadonlySet<PlayerProfileTool> = new Set<PlayerPro
 type CalendarFeedStatus = "checking" | "connected" | "offline";
 type CalendarSaveStatus = "idle" | "saving" | "saved" | "failed";
 type AdminWorkspaceLoadStatus = "idle" | "loading" | "loaded" | "error";
-type PublicBookingStateStatus = "loading" | "loaded" | "error";
-type PublicBookingSlotStatus = "idle" | "loading" | "loaded" | "error";
 type AdminSaveOwner = "lesson_complete" | "upsert_item" | "calendar_delete" | "locations" | "coaches" | "settings";
 type DiagnosticStatus = "started" | "success" | "failed" | "warning" | "skipped" | "verified";
 type DiagnosticSystem =
@@ -2329,7 +2255,6 @@ const CADDY_APP_URL = "https://caddy.claritygolf.app";
 const THEME_STORAGE_KEY = "clarity-booking-theme";
 const BRAND_STORAGE_KEY = "clarity-booking-brand";
 const COACH_ACCOUNT_STORAGE_KEY = "clarity-booking-coach-account";
-const RESCHEDULE_LOGIN_STORAGE_KEY = "clarity-booking-reschedule-login";
 const PAST_ADMIN_LESSON_WARNING =
   t("This lesson is in the past. It will be saved for records only and no emails will be sent.");
 // A completed card is a record, and a click that drifts into a drag should not
@@ -2578,14 +2503,6 @@ function renderTemplate(template: string, variables: Record<string, string>) {
   return template.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, key: string) => variables[key] ?? "");
 }
 
-function minutesToTop(minutes: number, gridStartMinutes = DEFAULT_CALENDAR_START_MINUTES) {
-  return ((minutes - gridStartMinutes) / 60) * HOUR_HEIGHT;
-}
-
-function durationToHeight(minutes: number) {
-  return (minutes / 60) * HOUR_HEIGHT;
-}
-
 
 function itemService(item: CalendarItem, serviceCatalog = defaultServices): Service | undefined {
   const service = serviceCatalog.find((candidate) => candidate.id === item.serviceId);
@@ -2767,19 +2684,6 @@ function isSlotInPast(slot: Pick<SlotCandidate, "week" | "day" | "start">) {
   return slotDay < today || (slotDay === today && slot.start < now.minutes);
 }
 
-function compactDateTime(date: Date, minutes: number) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  const hour = String(Math.floor(minutes / 60)).padStart(2, "0");
-  const minute = String(minutes % 60).padStart(2, "0");
-  return `${year}${month}${day}T${hour}${minute}00`;
-}
-
-function escapeIcsText(value: string) {
-  return value.replaceAll("\\", "\\\\").replaceAll("\n", "\\n").replaceAll(";", "\\;").replaceAll(",", "\\,");
-}
-
 function formatWeekTitle(week: number) {
   const date = new Date(baseWeekStart);
   date.setDate(baseWeekStart.getDate() + week * 7);
@@ -2790,8 +2694,6 @@ function sectionTitle(view: View, terms: BusinessTerminology = terminologyFor())
   switch (view) {
     case "clients":
       return terms.customerPlural;
-    case "booking":
-      return t("Booking Page");
     case "sell":
       return t("Sell");
     case "billing":
@@ -2810,12 +2712,8 @@ function sectionTitle(view: View, terms: BusinessTerminology = terminologyFor())
   }
 }
 
-function getInitialView(embedded = false): View {
+function getInitialView(): View {
   if (typeof window === "undefined") return "calendar";
-  // Mounted as the booking widget, the view is booking and nothing in the URL
-  // may say otherwise -- ?view=settings on a portal page must not open coach
-  // settings inside the player's Lessons tab.
-  if (embedded) return "booking";
   const requestedView = new URLSearchParams(window.location.search).get("view");
   if (requestedView === "settings") return "settings";
   if (requestedView === "billing") return "billing";
@@ -2825,67 +2723,7 @@ function getInitialView(embedded = false): View {
   if (requestedView === "players") return "players";
   if (requestedView === "video") return "video";
   if (requestedView === "profile") return "profile";
-  return isBookingWidgetMode() ? "booking" : "calendar";
-}
-
-function getInitialRescheduleLogin(): SavedRescheduleLogin | null {
-  if (typeof window === "undefined") return null;
-  const params = new URLSearchParams(window.location.search);
-  const email = params.get("email") ?? "";
-  const phone = params.get("phone") ?? "";
-  const appointmentId = params.get("booking") ?? "";
-  if (email && phone) {
-    return {
-      email,
-      phone,
-      appointmentId: appointmentId || undefined,
-    };
-  }
-  try {
-    const stored = window.localStorage.getItem(RESCHEDULE_LOGIN_STORAGE_KEY);
-    if (!stored) return null;
-    const parsed = JSON.parse(stored) as SavedRescheduleLogin;
-    if (!parsed?.email || !parsed?.phone) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function getInitialBookingLogin(): SavedBookingLogin | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const stored = window.localStorage.getItem(BOOKING_LOGIN_STORAGE_KEY);
-    if (!stored) return null;
-    const parsed = JSON.parse(stored) as SavedBookingLogin;
-    if (!parsed?.firstName || !parsed?.lastName || !parsed?.email) return null;
-    return {
-      firstName: parsed.firstName,
-      lastName: parsed.lastName,
-      phone: parsed.phone || "",
-      email: parsed.email,
-    };
-  } catch {
-    return null;
-  }
-}
-
-function buildRescheduleLink(
-  bookingUrl: string,
-  auth: {
-    appointmentId?: string;
-    email: string;
-    phone: string;
-  },
-) {
-  if (!auth.email || !auth.phone) return "";
-  const url = new URL(bookingUrl || defaultCoachAccount.bookingUrl);
-  url.searchParams.set(BOOKING_EMBED_PARAM, BOOKING_EMBED_VALUE);
-  url.searchParams.set("mode", "reschedule");
-  url.searchParams.set("email", auth.email);
-  url.searchParams.set("phone", auth.phone);
-  if (auth.appointmentId) url.searchParams.set("booking", auth.appointmentId);
-  return url.toString();
+  return "calendar";
 }
 
 function getBookingScreenPublicUrl(path: string, showLogo: boolean) {
@@ -2912,23 +2750,10 @@ function getBookingScreenIframeCode(path: string, businessName: string, screenNa
   return `<iframe src="${bookingScreenUrl}" title="${businessName} ${screenName} booking" width="100%" height="760" style="border:0;max-width:100%;border-radius:18px;overflow:hidden;background:transparent;" loading="lazy"></iframe>`;
 }
 
-function getBookingWidgetUrl(business: string, showLogo: boolean) {
-  return getBookingScreenPublicUrl(publicBookingPath(business, "main"), showLogo);
-}
-
 function isBookingLogoHiddenByUrl() {
   if (typeof window === "undefined") return false;
   return new URLSearchParams(window.location.search).get(BOOKING_LOGO_PARAM) === "0";
 }
-
-// True for either way into the booking widget -- the public one and the
-// Player Terminal one. Everything that makes this page the booking widget
-// rather than the coach workspace keys off this; only the handful of places
-// that care *who* is booking look at the entry mode.
-//
-// The definition is shared with the entry point, which has to make the same
-// call before it knows who is signed in.
-const isBookingWidgetMode = isBookingEmbedMode;
 
 function normalizeBookingPath(pathname = "") {
   const cleaned = pathname.trim().toLowerCase();
@@ -3801,18 +3626,6 @@ function serviceBelongsToAccount(service: Partial<Service> | undefined, accountI
   return recordBelongsToAccount(service, accountId);
 }
 
-function coachBelongsToAccount(coach: Partial<CoachProfile> | undefined, accountId: string) {
-  return recordBelongsToAccount(coach, accountId);
-}
-
-function locationBelongsToAccount(location: Partial<Location> | undefined, accountId: string) {
-  return recordBelongsToAccount(location, accountId);
-}
-
-function calendarItemBelongsToAccount(item: Partial<CalendarItem> | undefined, accountId: string) {
-  return recordBelongsToAccount(item, accountId);
-}
-
 function userBelongsToAccount(user: Partial<AppUser> | undefined, accountId: string) {
   return recordBelongsToAccount(user, accountId);
 }
@@ -4042,7 +3855,6 @@ function cleanBookingCoachSnapshot(
 function calendarItemCoach(
   item: Partial<CalendarItem> | undefined,
   coaches: CoachProfile[],
-  account: Partial<CoachAccount>,
 ): BookingCoachSnapshot | undefined {
   return (
     cleanBookingCoachSnapshot(item?.coach) ??
@@ -4054,9 +3866,8 @@ function resolvedCalendarItemCoachId(
   item: Partial<CalendarItem> | undefined,
   service: Partial<Service> | undefined,
   coaches: CoachProfile[],
-  account: Partial<CoachAccount>,
 ) {
-  return item?.coachId || item?.coach?.coachId || primaryServiceCoachId(service) || calendarItemCoach(item, coaches, account)?.coachId || firstCoachId(coaches);
+  return item?.coachId || item?.coach?.coachId || primaryServiceCoachId(service) || calendarItemCoach(item, coaches)?.coachId || firstCoachId(coaches);
 }
 
 function calendarItemBelongsToCoach(
@@ -4064,10 +3875,9 @@ function calendarItemBelongsToCoach(
   coachId: string | undefined,
   service: Partial<Service> | undefined,
   coaches: CoachProfile[],
-  account: Partial<CoachAccount>,
 ) {
   if (!coachId) return false;
-  return resolvedCalendarItemCoachId(item, service, coaches, account) === coachId;
+  return resolvedCalendarItemCoachId(item, service, coaches) === coachId;
 }
 
 function cleanLocation(raw?: Partial<Location>, fallback?: Location, index = 0): Location {
@@ -4234,33 +4044,12 @@ function resolvedCalendarItemLocationId(
   return item?.locationId || item?.location?.locationId || primaryServiceLocationId(service) || calendarItemLocation(item, service, locations, account).locationId || defaultLocationId(locations);
 }
 
-function calendarItemBelongsToLocation(
-  item: Partial<CalendarItem> | undefined,
-  locationId: string | undefined,
-  service: Partial<Service> | undefined,
-  locations: Location[],
-  account: Partial<CoachAccount>,
-) {
-  if (!locationId) return false;
-  return resolvedCalendarItemLocationId(item, service, locations, account) === locationId;
-}
-
 function calendarItemCoachColumnId(
   item: Partial<CalendarItem> | undefined,
   service: Partial<Service> | undefined,
   coaches: CoachProfile[],
-  account: Partial<CoachAccount>,
 ) {
-  return resolvedCalendarItemCoachId(item, service, coaches, account);
-}
-
-function calendarItemLocationLaneId(
-  item: Partial<CalendarItem> | undefined,
-  service: Partial<Service> | undefined,
-  locations: Location[],
-  account: Partial<CoachAccount>,
-) {
-  return resolvedCalendarItemLocationId(item, service, locations, account);
+  return resolvedCalendarItemCoachId(item, service, coaches);
 }
 
 function isLocationOnlyBlock(item: Partial<CalendarItem> | undefined) {
@@ -4297,8 +4086,8 @@ function isCoachConflict(
   if (isInactiveForConflict(existing)) return false;
   const candidateCoachId =
     context.candidateCoachId ??
-    resolvedCalendarItemCoachId(candidate, context.candidateService, context.coaches, context.account);
-  const existingCoachId = resolvedCalendarItemCoachId(existing, context.existingService, context.coaches, context.account);
+    resolvedCalendarItemCoachId(candidate, context.candidateService, context.coaches);
+  const existingCoachId = resolvedCalendarItemCoachId(existing, context.existingService, context.coaches);
   if (!candidateCoachId || !existingCoachId || candidateCoachId !== existingCoachId) return false;
   if (isLocationOnlyBlock(existing)) return false;
   return existing.kind === "appointment" || existing.kind === "block";
@@ -4590,13 +4379,6 @@ function servicePriceLabel(service?: (Pick<Service, "price" | "priceMode"> & Par
     return t("{price} up to {count}", { price: formatMoney(customGroupBasePrice(service)), count: customGroupBaseParticipants(service) });
   }
   return service.priceMode === "per-person" ? t("{price} pp", { price: formatMoney(service.price) }) : formatMoney(service.price);
-}
-
-function serviceCapacityLabel(service: Pick<Service, "capacity" | "lessonFormat" | "minParticipants">) {
-  if (service.lessonFormat === "package") return t("Package");
-  if (isCustomGroupService(service)) return t("{min}-{max} clients", { min: service.minParticipants, max: service.capacity });
-  if (service.lessonFormat === "group") return t("{min}-{max} clients", { min: service.minParticipants, max: service.capacity });
-  return service.capacity === 1 ? t("1 client") : t("{capacity} clients", { capacity: service.capacity });
 }
 
 function notificationKindLabel(kind = "") {
@@ -5101,14 +4883,6 @@ function emptyInvoiceDraft(settings = defaultInvoiceSettings, coachId = defaultC
   };
 }
 
-function emailResultTone(result?: Pick<EmailSendResult, "sent" | "status" | "reason" | "error"> | null) {
-  if (!result) return "pending";
-  if (result.sent || result.status === "sent") return "sent";
-  if (result.status === "skipped") return "skipped";
-  if (result.status === "failed" || result.reason || result.error) return "failed";
-  return "pending";
-}
-
 function emptyServiceEditor(): ServiceEditor {
   return {
     name: "",
@@ -5176,10 +4950,6 @@ function cleanAvailability(availability?: AvailabilityWindow[][], fallbackCoachI
         return merged;
       }, []);
   });
-}
-
-function emptyAvailability(): AvailabilityWindow[][] {
-  return Array.from({ length: DAY_COUNT }, () => []);
 }
 
 /**
@@ -5729,30 +5499,9 @@ type AppProps = {
    * /api/auth/session a second time.
    */
   session?: Session;
-  /**
-   * How this booking page load was entered. "player" means the visitor arrived
-   * from their signed-in Player Terminal, so the widget already knows who is
-   * booking. The entry point resolves this from the server session -- never
-   * from the URL alone.
-   */
-  bookingEntry?: BookingEntryMode;
 };
 
-function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: AppProps = {}) {
-  // How this component was mounted, not what the URL says.
-  //
-  // The portal used to hand the whole page over to ?embed=booking&portal=player
-  // and the URL was the only signal there was. It now renders the widget inline
-  // inside the Lessons tab, and the native build has no query string at all --
-  // its origin is capacitor://localhost. Reading the URL there answers "coach
-  // workspace", so every `if (isEmbedMode) return` guard below stopped
-  // guarding and the coach boot sequence ran inside the player's portal.
-  const isEmbedMode = bookingEntry === "player" || isBookingWidgetMode();
-  const isPlayerBooking = bookingEntry === "player";
-  // True only when the widget *is* the page. The portal nests it inside the
-  // Lessons tab, where stamping the document would restyle the terminal
-  // around it.
-  const ownsPage = isEmbedMode && !isPlayerBooking;
+function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   const bookingCardScheme = useBookingCardScheme();
   const [themeMode, setThemeMode] = useState<ThemeMode>(getStoredTheme);
   // What the session answer said about this workspace, if it said anything.
@@ -5790,7 +5539,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const [workspaceAccounts, setWorkspaceAccounts] = useState<WorkspaceAccount[]>(() =>
     bootstrap?.accounts ?? cleanWorkspaceAccounts(getStoredWorkspaceAccounts(), getStoredCoachAccount()),
   );
-  const [coachAccountSaveState, setCoachAccountSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [coachProfiles, setCoachProfiles] = useState<CoachProfile[]>(
     () => bootstrap?.coaches ?? cleanCoachProfiles(undefined, getStoredCoachAccount()),
   );
@@ -5819,9 +5567,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     },
     [onSessionLost],
   );
-  const [adminEmail, setAdminEmail] = useState(entrySession?.role === "coach" ? entrySession.email : "");
   const [adminWorkspaceLoadStatus, setAdminWorkspaceLoadStatus] =
-    useState<AdminWorkspaceLoadStatus>(isEmbedMode ? "loaded" : "idle");
+    useState<AdminWorkspaceLoadStatus>("idle");
   const [adminWorkspaceLoadError, setAdminWorkspaceLoadError] = useState("");
   const [passwordChangeForm, setPasswordChangeForm] = useState<PasswordChangeForm>({
     currentPassword: "",
@@ -5836,7 +5583,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   // meant every workspace flashed the original coach's lesson list and prices
   // before its own data arrived.
   const [services, setServices] = useState<Service[]>(() => []);
-  const [locations, setLocations] = useState<Location[]>(() => (isEmbedMode ? [] : cleanLocations(undefined, getStoredCoachAccount())));
+  const [locations, setLocations] = useState<Location[]>(() => cleanLocations(undefined, getStoredCoachAccount()));
   const [locationEditor, setLocationEditor] = useState<Location>(() => defaultLocationFromCoachAccount(getStoredCoachAccount()));
   const [editingLocationId, setEditingLocationId] = useState<string | null>(null);
   const [showLocationEditor, setShowLocationEditor] = useState(false);
@@ -5858,7 +5605,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const [groupMinimumInput, setGroupMinimumInput] = useState("");
   const [groupMaximumInput, setGroupMaximumInput] = useState("");
   const [serviceNumberDrafts, setServiceNumberDrafts] = useState<Partial<Record<ServiceNumberField, string>>>({});
-  const [availability, setAvailability] = useState<AvailabilityWindow[][]>(() => (isEmbedMode ? emptyAvailability() : defaultAvailability));
+  const [availability, setAvailability] = useState<AvailabilityWindow[][]>(() => defaultAvailability);
   const [availabilitySaveState, setAvailabilitySaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [editingAvailabilityWindow, setEditingAvailabilityWindow] = useState("");
   const [availabilityCoachChoice, setAvailabilityCoachChoice] = useState("");
@@ -5962,7 +5709,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const [clientMoveSavingId, setClientMoveSavingId] = useState("");
   const [personDeleteBusyId, setPersonDeleteBusyId] = useState("");
   const [selectedGroupSession, setSelectedGroupSession] = useState<GroupSession | null>(null);
-  const [activeView, setActiveView] = useState<View>(() => getInitialView(isEmbedMode));
+  const [activeView, setActiveView] = useState<View>(() => getInitialView());
   const [videoContext, setVideoContext] = useState<{
     playerId: string;
     playerName: string;
@@ -6372,35 +6119,17 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const [bookingDaySelected, setBookingDaySelected] = useState(false);
   const [bookingStart, setBookingStart] = useState<number | null>(null);
   const [openPublicBookingSection, setOpenPublicBookingSection] = useState<PublicBookingSection>("appointment");
-  const [bookingForm, setBookingForm] = useState<BookingForm>(
-    // A player's details come from their session, not from whatever this
-    // browser happens to have cached. The effect below fills them in.
-    () =>
-      (isPlayerBooking ? null : getInitialBookingLogin()) ?? {
-        firstName: "",
-        lastName: "",
-        phone: "",
-        email: "",
-      },
-  );
-  const [playerBookingIdentity, setPlayerBookingIdentity] = useState<{ name: string; email: string } | null>(null);
-  const [bookingSignIn, setBookingSignIn] = useState({ email: "", password: "" });
-  const [bookingSignInState, setBookingSignInState] = useState<"idle" | "checking">("idle");
-  const [bookingSignInError, setBookingSignInError] = useState("");
-  const playerBookingsLoadedRef = useRef(false);
+  // A player's details come from their session. The effect below fills them in.
+  const [bookingForm, setBookingForm] = useState<BookingForm>({
+    firstName: "",
+    lastName: "",
+    phone: "",
+    email: "",
+  });
   const [customGroupAttendees, setCustomGroupAttendees] = useState<CustomGroupAttendee[]>([]);
   const [customGroupAttendeeDraft, setCustomGroupAttendeeDraft] = useState({ name: "", email: "" });
   const [selectedCustomGroupAttendeeDraft, setSelectedCustomGroupAttendeeDraft] = useState({ name: "", email: "" });
-  const [bookingMode, setBookingMode] = useState<BookingMode>("book");
-  const [rescheduleForm, setRescheduleForm] = useState<RescheduleForm>({ email: "", phone: "" });
-  const [rescheduleMatches, setRescheduleMatches] = useState<PublicRescheduleMatch[]>([]);
-  const [selectedRescheduleId, setSelectedRescheduleId] = useState("");
-  const [rescheduleState, setRescheduleState] = useState<"idle" | "checking" | "saving">("idle");
-  const [forceRescheduleLogin, setForceRescheduleLogin] = useState(false);
-  const [bookingSubmitState, setBookingSubmitState] = useState<"idle" | "saving">("idle");
   const [bookingSubmitError, setBookingSubmitError] = useState("");
-  const [bookingConfirmation, setBookingConfirmation] = useState<BookingConfirmation | null>(null);
-  const [copiedEmbed, setCopiedEmbed] = useState(false);
   const [selectedBookingScreenId, setSelectedBookingScreenId] = useState<string>(BOOKING_SCREENS[0]?.id || "main");
   const [bookingScreenNames, setBookingScreenNames] = useState<Record<string, string>>(
     () =>
@@ -6415,11 +6144,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const [calendarSyncKey, setCalendarSyncKey] = useState(generateSyncKey);
   const [copiedSync, setCopiedSync] = useState<"url" | "key" | null>(null);
   const [calendarFeedStatus, setCalendarFeedStatus] = useState<CalendarFeedStatus>("checking");
-  const [publicBookingStateStatus, setPublicBookingStateStatus] = useState<PublicBookingStateStatus>(
-    isEmbedMode ? "loading" : "loaded",
-  );
-  const [publicBookingSlots, setPublicBookingSlots] = useState<Record<string, BookingSlot[]>>({});
-  const [publicBookingSlotStatuses, setPublicBookingSlotStatuses] = useState<Record<string, PublicBookingSlotStatus>>({});
   const [calendarSaveStatus, setCalendarSaveStatus] = useState<CalendarSaveStatus>("idle");
   const [calendarSaveError, setCalendarSaveError] = useState("");
   // Which kind of change the "failed" banner is describing. An autosave failure
@@ -6482,14 +6206,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const autoCloudUploadKeyRef = useRef("");
   const [notificationSettings, setNotificationSettings] =
     useState<NotificationSettings>(defaultNotificationSettings);
-  const [settingsSaveState, setSettingsSaveState] = useState<"idle" | "saving" | "saved">("idle");
-  const [settingsSaveError, setSettingsSaveError] = useState("");
   const [testEmailAddress, setTestEmailAddress] = useState("");
   const [testEmailState, setTestEmailState] = useState<"idle" | "sending" | "sent">("idle");
-  const [emailNoticeVisible, setEmailNoticeVisible] = useState(false);
-  const emailNoticeToastKeyRef = useRef("");
   const [hasMoved, setHasMoved] = useState(false);
-  const initialRescheduleLoginRef = useRef<SavedRescheduleLogin | null>(getInitialRescheduleLogin());
   const activeAccountId = defaultAccountId(workspaceAccounts);
   const activeAccount =
     accountById(workspaceAccounts, activeAccountId) ?? defaultWorkspaceAccountFromCoachAccount(coachAccount);
@@ -6909,7 +6628,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       void refreshClarityCloudImports();
     }
   }, [activeView, settingsTab, googleDriveTransfer.connected, googleDriveTransfer.incomingImportReady]);
-  const attemptedSavedRescheduleRef = useRef(false);
   const gridRef = useRef<HTMLDivElement | null>(null);
   const dockRef = useRef<HTMLDivElement | null>(null);
   const draftRef = useRef<Draft | null>(null);
@@ -6957,7 +6675,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const lastPersistedCalendarItemsRef = useRef<CalendarItem[]>([]);
   const pendingLessonCompleteIdRef = useRef("");
   const activeAdminSaveOwnersRef = useRef<Map<AdminSaveOwner, number>>(new Map());
-  const publicBookingSlotRequestsRef = useRef<Set<string>>(new Set());
   const pendingQuickCreateRef = useRef<QuickCreateState | null>(null);
   const adminBootStartedAtRef = useRef(typeof performance !== "undefined" ? performance.now() : Date.now());
   const adminShellRenderedRef = useRef(false);
@@ -6968,7 +6685,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
   const selected = selectedId ? items.find((item) => item.id === selectedId) : undefined;
   const selectedService = selected ? itemService(selected, services) : null;
-  const selectedCoachSnapshot = selected ? calendarItemCoach(selected, coachProfiles, coachAccount) : null;
+  const selectedCoachSnapshot = selected ? calendarItemCoach(selected, coachProfiles) : null;
   const selectedLocationSnapshot = selected
     ? calendarItemLocation(selected, selectedService ?? undefined, locations, coachAccount)
     : null;
@@ -6994,7 +6711,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   }
 
   function trackDiagnosticEvent(event: DiagnosticEventInput) {
-    if (isEmbedMode) return;
     const next: DiagnosticEvent = {
       ...event,
       id: event.id || createDiagnosticId(),
@@ -7167,7 +6883,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         if (isCancelledGroupSessionItem(item)) return false;
         const service = itemService(item, services);
         if (effectiveCalendarPerspective === "coach") {
-          return resolvedCalendarItemCoachId(item, service, coachProfiles, coachAccount) === selectedCalendarCoachId;
+          return resolvedCalendarItemCoachId(item, service, coachProfiles) === selectedCalendarCoachId;
         }
         if (effectiveCalendarPerspective === "location") {
           return resolvedCalendarItemLocationId(item, service, locations, coachAccount) === selectedCalendarLocationId;
@@ -7186,7 +6902,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     ],
   );
   useEffect(() => {
-    if (isEmbedMode || authStatus !== "authenticated" || adminShellRenderedRef.current) return;
+    if (authStatus !== "authenticated" || adminShellRenderedRef.current) return;
     adminShellRenderedRef.current = true;
     trackDiagnosticMilestone({
       system: "ui",
@@ -7196,10 +6912,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       functionName: "App",
       startedAt: adminBootStartedAtRef.current,
     });
-  }, [authStatus, isEmbedMode]);
+  }, [authStatus]);
   useEffect(() => {
     if (
-      isEmbedMode ||
       authStatus !== "authenticated" ||
       adminWorkspaceLoadStatus !== "loaded" ||
       activeView !== "calendar" ||
@@ -7226,10 +6941,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       adminWorkspaceDetailRefreshRunIdRef.current = runId;
       window.setTimeout(() => refreshAdminWorkspaceDetails(runId, coachAccount), 0);
     }
-  }, [activeView, activeWeek, adminWorkspaceLoadStatus, authStatus, coachAccount, isEmbedMode]);
+  }, [activeView, activeWeek, adminWorkspaceLoadStatus, authStatus, coachAccount]);
   useEffect(() => {
     if (
-      isEmbedMode ||
       authStatus !== "authenticated" ||
       activeView !== "calendar" ||
       bookingCardsFirstRenderedRef.current ||
@@ -7252,10 +6966,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         deferredDataBlocksCards: false,
       },
     });
-  }, [activeView, activeWeek, authStatus, isEmbedMode, visibleWeekItems]);
+  }, [activeView, activeWeek, authStatus, visibleWeekItems]);
   useEffect(() => {
     if (
-      isEmbedMode ||
       authStatus !== "authenticated" ||
       adminWorkspaceLoadStatus !== "loaded" ||
       activeView !== "calendar" ||
@@ -7283,7 +6996,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         deferredDataBlocksCards: false,
       },
     });
-  }, [activeView, adminWorkspaceLoadStatus, authStatus, coachProfiles.length, isEmbedMode, locations.length, services.length, visibleWeekItems]);
+  }, [activeView, adminWorkspaceLoadStatus, authStatus, coachProfiles.length, locations.length, services.length, visibleWeekItems]);
   const locationCalendarCoachGroups = useMemo(() => {
     if (effectiveCalendarPerspective !== "location") return [];
     const coachIds = new Set(
@@ -7299,7 +7012,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     });
     visibleWeekItems.forEach((item) =>
       coachIds.add(
-        resolvedCalendarItemCoachId(item, itemService(item, services), coachProfiles, coachAccount),
+        resolvedCalendarItemCoachId(item, itemService(item, services), coachProfiles),
       ),
     );
     return Array.from(coachIds)
@@ -7323,7 +7036,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     if (!coachId) return 0;
     return visibleWeekItems.filter((item) => {
       if (item.kind !== "appointment") return false;
-      return calendarItemCoachColumnId(item, itemService(item, services), coachProfiles, coachAccount) === coachId;
+      return calendarItemCoachColumnId(item, itemService(item, services), coachProfiles) === coachId;
     }).length;
   };
   const appointments = weekItems.filter((item) => item.kind === "appointment").length;
@@ -7551,7 +7264,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       (pointerSession?.mode === "move" && Boolean(floatingDrag)));
   const serviceScopeCoachId = isAdminUser ? selectedCalendarCoachId || activeCoachId : activeCoachId;
   const itemInCoachScope = (item: CalendarItem) =>
-    isAdminUser || resolvedCalendarItemCoachId(item, itemService(item, services), coachProfiles, coachAccount) === serviceScopeCoachId;
+    isAdminUser || resolvedCalendarItemCoachId(item, itemService(item, services), coachProfiles) === serviceScopeCoachId;
   const serviceVisibleToCurrentUser = (service: Service) =>
     serviceBelongsToAccount(service, activeAccountId) &&
     (isAdminUser || serviceIncludesCoach(service, serviceScopeCoachId, firstCoachId(accountCoachProfiles)));
@@ -7608,7 +7321,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         (service.locationIds.length ? service.locationIds : [defaultLocation.id]).includes(locationId) &&
         service.archived !== true,
     ).length;
-  const packageServices = activeServices.filter((service) => service.active && service.lessonFormat === "package");
   const bookableServices = activeServices.filter((service) => service.active && service.lessonFormat !== "package");
   const appointmentServices = activeServices.filter((service) => service.active && isAppointmentStyleService(service));
   const publicBookingEnabled = canUseFeature(activeAccount, "publicBooking");
@@ -7617,7 +7329,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const currentScreenPublicServices = publicServices.filter((service) =>
     (service.bookingScreenIds ?? ["main"]).includes(currentBookingScreenId),
   );
-  const currentScreenPublicServiceIds = currentScreenPublicServices.map((service) => service.id).join("|");
   // A coach's calendar offers only the lesson types that coach teaches.
   const quickCreateServices =
     effectiveCalendarPerspective === "location"
@@ -7635,24 +7346,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const quickCreateService = quickCreate?.serviceId
     ? activeServices.find((service) => service.id === quickCreate.serviceId) ?? null
     : null;
-  const selectedRescheduleMatch =
-    rescheduleMatches.find((match) => match.id === selectedRescheduleId) ?? null;
-  const selectedRescheduleService = selectedRescheduleMatch
-    ? accountServices.find((service) => service.id === selectedRescheduleMatch.serviceId) ?? null
-    : null;
   const selectedBookingService =
-    bookingMode === "reschedule"
-      ? selectedRescheduleService
-      : currentScreenPublicServices.find((service) => service.id === bookingServiceId) ?? null;
+    currentScreenPublicServices.find((service) => service.id === bookingServiceId) ?? null;
   const visiblePublicServices = selectedBookingService ? [selectedBookingService] : currentScreenPublicServices;
-  const bookingTargetService = bookingMode === "reschedule" ? selectedRescheduleService : selectedBookingService;
-  const isCustomGroupBooking = bookingMode === "book" && isCustomGroupService(bookingTargetService);
+  const isCustomGroupBooking = isCustomGroupService(selectedBookingService);
   const customGroupParticipantCount = isCustomGroupBooking ? 1 + customGroupAttendees.length : 1;
   const customGroupCalculatedPrice = isCustomGroupBooking
-    ? calculateCustomGroupPrice(bookingTargetService, customGroupParticipantCount)
+    ? calculateCustomGroupPrice(selectedBookingService, customGroupParticipantCount)
     : 0;
   const customGroupRemainingAttendees = isCustomGroupBooking
-    ? Math.max(0, customGroupMaxParticipants(bookingTargetService) - customGroupParticipantCount)
+    ? Math.max(0, customGroupMaxParticipants(selectedBookingService) - customGroupParticipantCount)
     : 0;
   // What the public sees in this business's links. The server resolves either
   // the id or the accounts-table slug, so the id is the safe answer -- except
@@ -7678,11 +7381,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     [publicBusinessSlug, bookingScreenNames, brandSettings.showLogo, coachAccount.businessName],
   );
   const selectedBookingScreen = bookingScreenEmbeds.find((bookingScreen) => bookingScreen.id === selectedBookingScreenId) ?? bookingScreenEmbeds[0];
-  const bookingWidgetUrl = useMemo(
-    () => getBookingWidgetUrl(publicBusinessSlug, brandSettings.showLogo),
-    [publicBusinessSlug, brandSettings.showLogo],
-  );
-  const iframeCode = `<iframe src="${bookingWidgetUrl}" title="${coachAccount.businessName} booking" width="100%" height="760" style="border:0;max-width:100%;border-radius:18px;overflow:hidden;background:transparent;" loading="lazy"></iframe>`;
   const calendarFeedUrl = `${syncBaseUrl.trim().replace(/\/+$/, "") || "https://booking.yourdomain.co.nz"}/calendar/${coachAccount.calendarSlug}.ics?key=${calendarSyncKey}`;
   const caddyWorkspaceUrl = coachAccount.caddyWorkspaceUrl || CADDY_APP_URL;
   const invoiceSettings = coachAccount.invoiceSettings;
@@ -7714,8 +7412,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       );
     });
   }, [clarityCloudHealth, savedVideoItems, uploadingSavedVideoIds]);
-  const hasMissingInvoiceCoachSettings =
-    !invoiceSettings.bankAccount.trim() || !invoiceSettings.taxNumber.trim() || !invoiceSettings.businessAddress.trim();
   const activeAccountEntitlements = accountEntitlements(activeAccount);
   const accountUsage = {
     maxCoaches: activeCoachList.length,
@@ -7740,35 +7436,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         defaultLocation.shortName ||
         defaultLocation.name
       : selectedCalendarCoach?.displayName || selectedCalendarCoach?.name || t("No coach");
-  const isEmailLinkReschedule = Boolean(
-    bookingMode === "reschedule" &&
-      initialRescheduleLoginRef.current?.appointmentId &&
-      rescheduleForm.email.trim() &&
-      rescheduleForm.phone.trim(),
-  );
-  /**
-   * How the Manage-booking step establishes who is asking.
-   *
-   * "bookings" -- a signed-in player. Their session already answered the
-   *   question, so they get their bookings, not a form.
-   * "link"     -- arrived from the link in a confirmation email, which carries
-   *   the booking with it. Still the path for a guest with no account.
-   * "sign-in"  -- everyone else, who signs in with their Clarity Golf account.
-   *   This replaced an email-plus-phone booking lookup that was a second,
-   *   parallel notion of identity with no relationship to a real login.
-   */
-  const rescheduleIdentityStep: "bookings" | "link" | "sign-in" = isPlayerBooking
-    ? "bookings"
-    : forceRescheduleLogin || !isEmailLinkReschedule
-      ? "sign-in"
-      : "link";
-  const bookingLoginUrl = bookingConfirmation
-    ? buildRescheduleLink(coachAccount.bookingUrl, {
-        appointmentId: bookingConfirmation.appointmentId,
-        email: bookingConfirmation.email,
-        phone: bookingConfirmation.phone || "",
-      })
-    : "";
   const brandStyle = useMemo(
     () =>
       ({
@@ -7939,8 +7606,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     lineSubtotal: invoiceLineSubtotal,
     lineDiscountTotal: invoiceLineDiscountTotal,
     discountTotal: invoiceDiscountTotal,
-    taxableSubtotal: invoiceTaxableSubtotal,
-    taxRatePct: invoiceTaxRatePct,
     taxTotal: invoiceTaxTotal,
     total: invoiceTotal,
   } = computeInvoiceTotals(invoiceDraft, invoiceSettings.taxRate);
@@ -7973,26 +7638,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     .filter(Boolean)
     .join(" ");
   const discountSet = invoiceDiscountTotal > 0 || invoiceDraft.discountLabel.trim() !== "";
-  // What the client reads, so in the business's message language, not the
-  // coach's screen language.
-  const mt = messageText(coachAccount.messageLanguage);
-  const invoiceEmailSubject = mt("{number} from {businessName}", {
-    number: activeInvoiceNumber,
-    businessName: coachAccount.businessName,
-  });
-  const invoiceEmailBody = [
-    invoiceDraft.message,
-    "",
-    mt("Invoice: {number}", { number: activeInvoiceNumber }),
-    mt("Total: {amount}", { amount: formatMoney(invoiceTotal, invoiceSettings.currency) }),
-    mt("Due: {date}", { date: invoiceDraft.dueDate }),
-    invoiceSettings.paymentInstructions,
-  ]
-    .filter(Boolean)
-    .join("\n");
-  const gmailComposeUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(
-    invoiceDraft.payerEmail,
-  )}&su=${encodeURIComponent(invoiceEmailSubject)}&body=${encodeURIComponent(invoiceEmailBody)}`;
   const invoiceSearchTerm = invoiceDraft.lineSearch.trim().toLowerCase();
   // The lesson types used to be merged in here as well as being fetched from
   // the catalog API, which is how a lesson could be offered at two prices in
@@ -8058,8 +7703,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const emailSubjectTemplatePreview = notificationSettings.notificationSubjectLine.trim()
     ? renderTemplate(notificationSettings.notificationSubjectLine, emailTemplateVariables)
     : "";
-  const minBookingNoticeHours = Math.max(0, Math.round((notificationSettings.minBookingNoticeMinutes / 60) * 100) / 100);
-  const minBookingNoticeSummary = formatBookingNoticeLabel(notificationSettings.minBookingNoticeMinutes);
   const bookingNoticeDraftHours = Math.max(0, Math.round((bookingNoticeDraft.minBookingNoticeMinutes / 60) * 100) / 100);
   const bookingNoticeDraftSummary = formatBookingNoticeLabel(bookingNoticeDraft.minBookingNoticeMinutes);
   // The alert that lands in the coach's own inbox. The client-facing half of
@@ -8076,23 +7719,12 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     document.documentElement.style.colorScheme = themeMode;
   }, [themeMode]);
 
-  useEffect(() => {
-    if (!ownsPage) return;
-    document.documentElement.classList.add("clarity-embed-mode");
-    document.body.classList.add("clarity-embed-mode");
-    return () => {
-      document.documentElement.classList.remove("clarity-embed-mode");
-      document.body.classList.remove("clarity-embed-mode");
-    };
-  }, [ownsPage]);
-
   // The booking widget only ever holds the public view of the account (see
   // public-account.mts). Storing it would overwrite a coach's own saved copy
   // in the same browser with a thinner one.
   useEffect(() => {
-    if (isEmbedMode) return;
     window.localStorage.setItem(COACH_ACCOUNT_STORAGE_KEY, JSON.stringify(coachAccount));
-  }, [coachAccount, isEmbedMode]);
+  }, [coachAccount]);
 
   useEffect(() => {
     window.localStorage.setItem(WORKSPACE_ACCOUNTS_STORAGE_KEY, JSON.stringify(workspaceAccounts));
@@ -8110,176 +7742,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   }, [brandSettings]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    // A signed-in player's details came from their session and are already
-    // theirs on every device. Caching them here would only leave a copy behind
-    // on a shared browser for no gain.
-    if (isPlayerBooking) return;
-    const hasCredentials = Boolean(rescheduleForm.email.trim() && rescheduleForm.phone.trim());
-    if (hasCredentials) {
-      const nextSaved: SavedRescheduleLogin = {
-        email: rescheduleForm.email.trim(),
-        phone: rescheduleForm.phone.trim(),
-        appointmentId: selectedRescheduleId || initialRescheduleLoginRef.current?.appointmentId,
-      };
-      window.localStorage.setItem(RESCHEDULE_LOGIN_STORAGE_KEY, JSON.stringify(nextSaved));
-      return;
-    }
-    if (bookingMode === "book" && !selectedRescheduleId) {
-      window.localStorage.removeItem(RESCHEDULE_LOGIN_STORAGE_KEY);
-    }
-  }, [bookingMode, isPlayerBooking, rescheduleForm.email, rescheduleForm.phone, selectedRescheduleId]);
-
-  useEffect(() => {
-    // Player booking has no use for the cached copy: the session is the
-    // identity, and there is no reason to leave the player's details sitting in
-    // this browser once they can be asked for properly.
-    if (typeof window === "undefined" || !isEmbedMode || isPlayerBooking) return;
-    const hasBookingDetails = Boolean(bookingForm.firstName.trim() && bookingForm.lastName.trim() && bookingForm.email.trim());
-    if (!hasBookingDetails) return;
-    window.localStorage.setItem(
-      BOOKING_LOGIN_STORAGE_KEY,
-      JSON.stringify({
-        firstName: bookingForm.firstName.trim(),
-        lastName: bookingForm.lastName.trim(),
-        phone: bookingForm.phone.trim(),
-        email: bookingForm.email.trim(),
-      }),
-    );
-  }, [bookingForm.email, bookingForm.firstName, bookingForm.lastName, bookingForm.phone, isEmbedMode, isPlayerBooking]);
-
-  // A signed-in player never asks to find their own bookings -- the session
-  // already knows the details the old lookup form was collecting, so the
-  // lookup runs itself the moment they open Manage booking.
-  useEffect(() => {
-    if (!isPlayerBooking || bookingMode !== "reschedule") return;
-    if (playerBookingsLoadedRef.current || rescheduleState === "checking") return;
-    if (!rescheduleForm.email.trim() || !rescheduleForm.phone.trim()) return;
-    playerBookingsLoadedRef.current = true;
-    void lookupPublicReschedule(true);
-  }, [bookingMode, isPlayerBooking, rescheduleForm.email, rescheduleForm.phone, rescheduleState]);
-
-  // Who is booking, answered by the server rather than by the browser. This is
-  // what replaces the old handoff: the player crosses from the portal into
-  // booking without re-entering anything and without anything personal
-  // travelling in the URL.
-  useEffect(() => {
-    if (!isPlayerBooking) return;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const response = await fetch("/api/player/profile", {
-          credentials: "same-origin",
-          headers: { Accept: "application/json" },
-          cache: "no-store",
-        });
-        if (!response.ok) return;
-        const data = (await response.json().catch(() => null)) as {
-          player?: { name?: string; email?: string; phone?: string };
-        } | null;
-        const player = data?.player;
-        if (cancelled || !player?.email) return;
-        const nameParts = safeText(player.name).trim().split(/\s+/).filter(Boolean);
-        setPlayerBookingIdentity({
-          name: safeText(player.name).trim(),
-          email: safeText(player.email).trim(),
-        });
-        setBookingForm((current) => ({
-          firstName: nameParts[0] || current.firstName,
-          lastName: nameParts.slice(1).join(" ") || current.lastName,
-          phone: safeText(player.phone).trim() || current.phone,
-          email: safeText(player.email).trim() || current.email,
-        }));
-        // The reschedule lookup is the other place that used to ask a player to
-        // prove who they are. It gets the same answer.
-        setRescheduleForm((current) => ({
-          email: safeText(player.email).trim() || current.email,
-          phone: safeText(player.phone).trim() || current.phone,
-        }));
-      } catch {
-        // Offline or the function is down. The form is still there to fill in
-        // by hand, which beats blocking the booking.
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [isPlayerBooking]);
-
-  useEffect(() => {
-    if (!isEmbedMode || !bookingConfirmation?.appointmentId) return;
-    if (bookingConfirmation.notifications.some((result) => result.channel === "client" && result.sent)) {
-      setEmailNoticeVisible(true);
-      return;
-    }
-    // A cancelled booking has already been removed from the public calendar,
-    // so it cannot be looked up again by the generic notification retry route.
-    // Cancellation sends are completed synchronously by /api/public-cancel.
-    if (bookingConfirmation.kind === "cancelled") return;
-
-    let cancelled = false;
-    let attempts = 0;
-    let timer: number | null = null;
-
-    const mergeNotificationResults = (results: EmailSendResult[]) => {
-      if (!results.length || cancelled) return;
-      setBookingConfirmation((current) => {
-        if (!current || current.appointmentId !== bookingConfirmation.appointmentId) return current;
-        const seen = new Set(current.notifications.map((result) => `${result.kind || result.channel}:${result.recipient || ""}:${result.status || result.sent}`));
-        const additions = results.filter((result) => {
-          const key = `${result.kind || result.channel}:${result.recipient || ""}:${result.status || result.sent}`;
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        });
-        return additions.length ? { ...current, notifications: [...additions, ...current.notifications] } : current;
-      });
-      if (results.some((result) => result.channel === "client" && result.sent)) setEmailNoticeVisible(true);
-    };
-
-    // The confirmation email is sent server-side in the booking's background
-    // side effects (see booking-core's schedulePublicBookingSideEffects), so
-    // this screen only polls for the receipt — the send no longer depends on
-    // this tab staying open.
-    const poll = async () => {
-      attempts += 1;
-      try {
-        const params = new URLSearchParams({
-          appointment: bookingConfirmation.appointmentId || "",
-          email: bookingConfirmation.email,
-          phone: bookingConfirmation.phone || "",
-        });
-        const response = await fetch(publicApi(`/api/public-notification-status?${params.toString()}`), {
-          headers: { Accept: "application/json" },
-        });
-        const data = (await response.json()) as { sent?: boolean; notification?: EmailSendResult | null };
-        if (!cancelled && response.ok && data.notification) {
-          mergeNotificationResults([data.notification]);
-          if (data.sent) return;
-        }
-      } catch {
-        // The booking is already confirmed; email status is a secondary receipt.
-      }
-      if (!cancelled && attempts < 36) timer = window.setTimeout(poll, 5000);
-    };
-
-    timer = window.setTimeout(poll, 1200);
-
-    return () => {
-      cancelled = true;
-      if (timer) window.clearTimeout(timer);
-    };
-  }, [bookingConfirmation?.appointmentId, bookingConfirmation?.email, bookingConfirmation?.kind, bookingConfirmation?.phone, isEmbedMode]);
-
-  useEffect(() => {
-    if (!isEmbedMode || !emailNoticeVisible || !bookingConfirmation?.appointmentId) return;
-    const noticeKey = `${bookingConfirmation.kind}:${bookingConfirmation.appointmentId}`;
-    if (emailNoticeToastKeyRef.current === noticeKey) return;
-    emailNoticeToastKeyRef.current = noticeKey;
-    setToast({ message: t("Email Sent") });
-  }, [bookingConfirmation?.appointmentId, bookingConfirmation?.kind, emailNoticeVisible, isEmbedMode]);
-
-  useEffect(() => {
     if (activeDockBookingId && !dockBookings.some((booking) => booking.id === activeDockBookingId)) {
       setActiveDockBookingId("");
     }
@@ -8290,42 +7752,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   }, [pointerSession]);
 
   useEffect(() => {
-    if (bookingMode !== "reschedule" && bookingServiceId && !currentScreenPublicServices.some((service) => service.id === bookingServiceId)) {
+    if (bookingServiceId && !currentScreenPublicServices.some((service) => service.id === bookingServiceId)) {
       setBookingServiceId("");
       setBookingDaySelected(false);
       setBookingStart(null);
       setOpenPublicBookingSection("appointment");
     }
-  }, [bookingMode, bookingServiceId, currentScreenPublicServices]);
-
-  useEffect(() => {
-    if (!isEmbedMode || publicBookingStateStatus !== "loaded" || bookingMode !== "book") return;
-    currentScreenPublicServices.forEach((service) => {
-      const key = publicBookingSlotCacheKey(service.id, activeWeek);
-      const status = publicBookingSlotStatuses[key] ?? "idle";
-      if (status === "idle" || status === "error") {
-        void loadPublicBookingSlots(service.id, activeWeek);
-      }
-    });
-  }, [activeWeek, bookingMode, currentScreenPublicServiceIds, isEmbedMode, publicBookingStateStatus]);
-
-  useEffect(() => {
-    if (!isEmbedMode || publicBookingStateStatus !== "loaded" || bookingMode !== "reschedule" || !bookingTargetService || !selectedRescheduleMatch) {
-      return;
-    }
-    const key = publicBookingSlotCacheKey(bookingTargetService.id, activeWeek, selectedRescheduleMatch.id);
-    const status = publicBookingSlotStatuses[key] ?? "idle";
-    if (status === "idle" || status === "error") {
-      void loadPublicBookingSlots(bookingTargetService.id, activeWeek, selectedRescheduleMatch.id);
-    }
-  }, [
-    activeWeek,
-    bookingMode,
-    bookingTargetService?.id,
-    isEmbedMode,
-    publicBookingStateStatus,
-    selectedRescheduleMatch?.id,
-  ]);
+  }, [bookingServiceId, currentScreenPublicServices]);
 
   useEffect(() => {
     if (!quickCreate) setQuickClientSearch("");
@@ -8336,21 +7769,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
     async function loadInitialState() {
       try {
-        if (isEmbedMode) {
-          setPublicBookingStateStatus("loading");
-          await loadPublicBookingCatalog();
-          if (!cancelled) {
-            setCalendarFeedStatus("connected");
-            setPublicBookingStateStatus("loaded");
-          }
-          return;
-        }
 
         // The entry point already asked /api/auth/session and only mounts this
         // component for a coach. Asking again cost a full round trip before the
         // calendar shell could even start, so its answer is taken as given.
         if (entrySession?.role === "coach") {
-          if (entrySession.email) setAdminEmail(entrySession.email);
           setAuthStatus("authenticated");
           void startAdminWorkspaceHydration();
           return;
@@ -8401,7 +7824,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           return;
         }
 
-        if (session.email) setAdminEmail(session.email);
         setAuthStatus("authenticated");
         void startAdminWorkspaceHydration();
       } catch {
@@ -8417,10 +7839,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           });
           hasLoadedCalendarApiRef.current = false;
           setCalendarFeedStatus("offline");
-          if (isEmbedMode) setPublicBookingStateStatus("error");
           setAdminWorkspaceLoadStatus("idle");
           setAdminWorkspaceLoadError("");
-          if (!isEmbedMode) setAuthStatus("guest");
+          setAuthStatus("guest");
         }
       }
     }
@@ -8429,10 +7850,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     return () => {
       cancelled = true;
     };
-  }, [isEmbedMode]);
+  }, []);
 
   async function refreshNotificationHistory() {
-    if (isEmbedMode || authStatus !== "authenticated") return;
+    if (authStatus !== "authenticated") return;
     try {
       const response = await fetch("/api/notification-history", { headers: { Accept: "application/json" } });
       if (!response.ok) return;
@@ -8450,7 +7871,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
    * prefetched moments ago rather than asking a second time.
    */
   async function refreshPeopleList(options: { maxAgeMs?: number } = {}) {
-    if (isEmbedMode || authStatus !== "authenticated") return;
+    if (authStatus !== "authenticated") return;
     try {
       await loadClients(options);
     } catch (error) {
@@ -8464,7 +7885,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
   /** Same shape as refreshPeopleList: the store reads, this decides what a failure means. */
   async function refreshLessonNotes(options: { maxAgeMs?: number } = {}) {
-    if (isEmbedMode || authStatus !== "authenticated") return;
+    if (authStatus !== "authenticated") return;
     try {
       await loadLessonNotes(options);
     } catch (error) {
@@ -8476,7 +7897,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   }
 
   async function processPendingAdminNotifications() {
-    if (isEmbedMode || authStatus !== "authenticated") return;
+    if (authStatus !== "authenticated") return;
     try {
       const response = await fetch("/api/admin-notification-debounce", {
         method: "POST",
@@ -8504,20 +7925,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   }
 
   useEffect(() => {
-    if (!isEmbedMode || attemptedSavedRescheduleRef.current) return;
-    const saved = initialRescheduleLoginRef.current;
-    if (!saved?.email || !saved?.phone) return;
-    attemptedSavedRescheduleRef.current = true;
-    setBookingMode("reschedule");
-    setRescheduleForm({ email: saved.email, phone: saved.phone });
-    setSelectedRescheduleId(saved.appointmentId || "");
-    window.setTimeout(() => {
-      void lookupPublicReschedule(true, saved);
-    }, 0);
-  }, [isEmbedMode]);
-
-  useEffect(() => {
-    if (isEmbedMode || authStatus !== "authenticated" || !hasLoadedCalendarApiRef.current) return;
+    if (authStatus !== "authenticated" || !hasLoadedCalendarApiRef.current) return;
     if (hasActiveAdminSave()) return;
     const requestedFingerprint = calendarStateFingerprint(items, calendarSyncKey);
     if (requestedFingerprint === lastPersistedCalendarFingerprintRef.current) return;
@@ -8730,35 +8138,35 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     }, 650);
 
     return () => window.clearTimeout(saveTimer);
-  }, [authStatus, calendarSyncKey, isEmbedMode, items]);
+  }, [authStatus, calendarSyncKey, items]);
 
   useEffect(() => {
-    if (isEmbedMode || authStatus !== "authenticated" || activeView !== "calendar") return;
+    if (authStatus !== "authenticated" || activeView !== "calendar") return;
     const timer = window.setInterval(() => void refreshNotificationHistory(), 15000);
     return () => window.clearInterval(timer);
-  }, [activeView, authStatus, isEmbedMode]);
+  }, [activeView, authStatus]);
 
   // The Google Calendar controls live on a coach profile and follow whichever
   // one is open: a coach in Settings › Coaches, or your own on the Business Hub.
   // A different coach means a different Google account, so start clean.
   useEffect(() => {
     googleCalendarCoachRef.current = googleCalendarProfileCoachId;
-    if (isEmbedMode || authStatus !== "authenticated" || !googleCalendarProfileCoachId) return;
+    if (authStatus !== "authenticated" || !googleCalendarProfileCoachId) return;
     applyGoogleCalendarStatus(undefined);
     setGoogleCalendarStatusError("");
     setGoogleCalendarDebug(null);
     setGoogleCalendarDebugOpen(false);
     setEditingImportRuleId(null);
     void refreshGoogleCalendarStatus();
-  }, [authStatus, googleCalendarProfileCoachId, isEmbedMode]);
+  }, [authStatus, googleCalendarProfileCoachId]);
 
   // The debug log is only fetched while its panel is open -- it carries full
   // event payloads, so there is no reason to pull it on every Settings visit.
   useEffect(() => {
-    if (isEmbedMode || authStatus !== "authenticated") return;
+    if (authStatus !== "authenticated") return;
     if (!googleCalendarDebugOpen || settingsTab !== "developer") return;
     void refreshGoogleCalendarDebugLog();
-  }, [authStatus, googleCalendarDebugOpen, isEmbedMode, settingsTab]);
+  }, [authStatus, googleCalendarDebugOpen, settingsTab]);
 
   function applyNotificationSettings(settings?: Partial<NotificationSettings>) {
     const delaySeconds = Number(settings?.notificationDelaySeconds ?? defaultNotificationSettings.notificationDelaySeconds);
@@ -8889,33 +8297,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
   async function readApiFailure(response: Response, fallback: string) {
     return summarizeApiFailureDetail(await readApiFailureDetail(response, fallback)) || fallback;
-  }
-
-  type PublicBookingSubmitResponse = {
-    message?: string;
-    error?: string;
-    code?: string;
-    reason?: string;
-    fallback?: boolean;
-    state?: { items?: CalendarItem[] };
-    appointment?: { id?: string; location?: BookingLocationSnapshot; locationId?: string; coach?: BookingCoachSnapshot };
-    notifications?: EmailSendResult[];
-  };
-
-  async function readPublicBookingSubmitResponse(response: Response): Promise<PublicBookingSubmitResponse> {
-    try {
-      return (await response.json()) as PublicBookingSubmitResponse;
-    } catch {
-      return {};
-    }
-  }
-
-  function isSelectedSlotUnavailableResponse(response: Response, data: PublicBookingSubmitResponse) {
-    const detail = [data.code, data.error, data.reason, data.message].filter(Boolean).join(" ").toLowerCase();
-    if (!detail) return false;
-    if (detail.includes("slot") && (detail.includes("unavailable") || detail.includes("stale") || detail.includes("taken"))) return true;
-    if (detail.includes("time") && (detail.includes("unavailable") || detail.includes("stale") || detail.includes("taken"))) return true;
-    return response.status === 409 && (detail.includes("no longer available") || detail.includes("has just been taken"));
   }
 
   function workspaceRecordName(record: WorkspaceConfigRecord) {
@@ -9084,7 +8465,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   }
 
   async function startAdminWorkspaceHydration() {
-    if (isEmbedMode || hasActiveAdminSave()) return;
+    if (hasActiveAdminSave()) return;
     const runId = ++adminHydrationRunIdRef.current;
     adminBootStartedAtRef.current = performance.now();
     calendarFrameRenderedRef.current = false;
@@ -9620,130 +9001,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     })();
   }
 
-  async function loadPublicBookingCatalog() {
-    const timer = startDiagnosticTimer({
-      system: "publicBooking",
-      action: "public_booking_page_load",
-      route: "GET /api/public-booking-catalog",
-      functionName: "loadPublicBookingCatalog",
-    });
-    const response = await fetch(publicApi("/api/public-booking-catalog"), {
-      cache: "no-store",
-      headers: { Accept: "application/json" },
-    });
-    if (!response.ok) {
-      finishDiagnosticTimer(timer, "failed", {
-        httpStatus: response.status,
-        errorCode: "BOOKING_PAGE_LOAD_FAILED",
-        humanMessage: t("Public booking API unavailable."),
-      });
-      throw new Error(t("Public booking API unavailable"));
-    }
-    const data = (await response.json()) as {
-      services?: Service[];
-      locations?: Location[];
-      coaches?: CoachProfile[];
-      workspaceAccounts?: WorkspaceAccount[];
-      brand?: Partial<BrandSettings>;
-      account?: Partial<CoachAccount>;
-      updatedAt?: string;
-    };
-    const loadedAccounts = cleanWorkspaceAccounts(data.workspaceAccounts, data.account ?? coachAccount);
-    const loadedAccountId = defaultAccountId(loadedAccounts);
-    if (typeof data.updatedAt === "string") setCalendarStateVersion(data.updatedAt);
-    setWorkspaceAccounts(loadedAccounts);
-    if (Array.isArray(data.services)) setServices(cleanServices(data.services).map((service) => ({ ...service, accountId: service.accountId || loadedAccountId })));
-    if (Array.isArray(data.locations) && data.locations.length) setLocations(cleanLocations(data.locations, data.account ?? coachAccount));
-    setCoachProfiles(cleanCoachProfiles(data.coaches, data.account ?? coachAccount));
-    applyCoachAccount(data.account);
-    applyBrandSettings(data.brand);
-    hasLoadedCalendarApiRef.current = true;
-    finishDiagnosticTimer(timer, "success", {
-      httpStatus: response.status,
-      returnedAccountId: loadedAccountId,
-      details: {
-        servicesFiltered: Array.isArray(data.services) ? data.services.length : 0,
-        locationsLoaded: Array.isArray(data.locations) ? data.locations.length : 0,
-        coachesLoaded: Array.isArray(data.coaches) ? data.coaches.length : 0,
-      },
-    });
-  }
-
-  function publicBookingSlotCacheKey(serviceId: string, week: number, ignoreId = "") {
-    return [serviceId, week, ignoreId].join(":");
-  }
-
-  function clearPublicBookingSlotCache() {
-    publicBookingSlotRequestsRef.current.clear();
-    setPublicBookingSlots({});
-    setPublicBookingSlotStatuses({});
-  }
-
-  async function loadPublicBookingSlots(serviceId: string, week: number, ignoreId = "", options: { force?: boolean } = {}) {
-    if (!serviceId) return;
-    const key = publicBookingSlotCacheKey(serviceId, week, ignoreId);
-    if (!options.force && publicBookingSlotRequestsRef.current.has(key)) {
-      trackDiagnosticEvent({
-        system: "cache",
-        action: "DUPLICATE_REQUEST_DETECTED",
-        phase: "public_booking_slots",
-        status: "skipped",
-        route: "GET /api/public-booking-slots",
-        functionName: "loadPublicBookingSlots",
-        objectType: "service",
-        objectId: serviceId,
-        details: { week, ignoreId: Boolean(ignoreId) },
-      });
-      return;
-    }
-    publicBookingSlotRequestsRef.current.add(key);
-    const timer = startDiagnosticTimer({
-      system: "calendar",
-      action: "public_booking_slots_load",
-      route: "GET /api/public-booking-slots",
-      functionName: "loadPublicBookingSlots",
-      objectType: "service",
-      objectId: serviceId,
-      details: { week, ignoreId: Boolean(ignoreId) },
-    });
-    setPublicBookingSlotStatuses((current) => ({ ...current, [key]: "loading" }));
-    try {
-      const params = new URLSearchParams({ serviceId, week: String(week) });
-      if (ignoreId) params.set("ignoreId", ignoreId);
-      const response = await fetch(publicApi(`/api/public-booking-slots?${params.toString()}`), {
-        cache: "no-store",
-        headers: { Accept: "application/json" },
-      });
-      if (!response.ok) throw new Error(t("Public booking slots unavailable"));
-      const data = (await response.json()) as {
-        slots?: BookingSlot[];
-        services?: Record<string, { slots?: BookingSlot[] }>;
-      };
-      const slots = Array.isArray(data.slots)
-        ? data.slots
-        : Array.isArray(data.services?.[serviceId]?.slots)
-          ? data.services?.[serviceId]?.slots ?? []
-          : [];
-      setPublicBookingSlots((current) => ({ ...current, [key]: slots }));
-      setPublicBookingSlotStatuses((current) => ({ ...current, [key]: "loaded" }));
-      finishDiagnosticTimer(timer, "success", {
-        httpStatus: response.status,
-        details: { slotsGenerated: slots.length },
-      });
-    } catch (error) {
-      console.warn("public_booking_slots_load_failed", error);
-      finishDiagnosticTimer(timer, "failed", {
-        errorCode: "PUBLIC_BOOKING_SLOT_LOAD_FAILED",
-        humanMessage: error instanceof Error ? error.message : t("Public booking slots unavailable."),
-      });
-      setPublicBookingSlotStatuses((current) => ({ ...current, [key]: "error" }));
-    } finally {
-      publicBookingSlotRequestsRef.current.delete(key);
-    }
-  }
-
   function requireLiveDatabase(action = "edit the calendar") {
-    if (isEmbedMode) return true;
     if (authStatus !== "authenticated") {
       hasLoadedCalendarApiRef.current = false;
       setCalendarFeedStatus("offline");
@@ -9931,7 +9189,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   useEffect(() => {
     // adminWorkspaceReady itself is declared further down the component, so
     // this uses the two values it is built from.
-    const ready = isEmbedMode || adminWorkspaceLoadStatus === "loaded";
+    const ready = adminWorkspaceLoadStatus === "loaded";
     if (activeView !== "calendar" || !ready) {
       calendarOpenedRef.current = false;
       return;
@@ -9945,7 +9203,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     // scrollCalendarToNow reads refs and the axis, both current by the time
     // the frame runs; re-running this on either would defeat the point.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeView, adminWorkspaceLoadStatus, isEmbedMode]);
+  }, [activeView, adminWorkspaceLoadStatus]);
 
   useEffect(() => {
     const update = () => {
@@ -10172,10 +9430,9 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   };
   const bookingClientHasInput = hasClientMatchInput(bookingClientInput);
   const bookingClientSuggestion = useMemo(() => {
-    if (isEmbedMode || !bookingClientHasInput) return null;
+    if (!bookingClientHasInput) return null;
     return findClientMatch(clients, bookingClientInput);
   }, [
-    isEmbedMode,
     bookingClientHasInput,
     clients,
     bookingForm.firstName,
@@ -10537,7 +9794,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     latestCoachEmail?: NotificationRecord,
     latestAdminEmail?: NotificationRecord,
   ) {
-    if (isEmbedMode || pointerSessionRef.current) return;
+    if (pointerSessionRef.current) return;
     if (event.pointerType === "touch") return;
     const groupSessionContext = getGroupSessionContext(item);
     if (!groupSessionContext && item.kind !== "appointment" && item.kind !== "block") return;
@@ -10824,43 +10081,26 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     return openGroupSessionForItem(item);
   }
 
-  const publicBookingSlotIgnoreId = bookingMode === "reschedule" ? selectedRescheduleMatch?.id ?? "" : "";
-  const publicBookingSlotKey = bookingTargetService
-    ? publicBookingSlotCacheKey(bookingTargetService.id, activeWeek, publicBookingSlotIgnoreId)
-    : "";
-  const publicBookingSlotStatus = publicBookingSlotKey
-    ? publicBookingSlotStatuses[publicBookingSlotKey] ?? "idle"
-    : "idle";
-  const publicBookingSlotsLoading =
-    isEmbedMode &&
-    publicBookingStateStatus === "loaded" &&
-    Boolean(bookingTargetService) &&
-    (publicBookingSlotStatus === "idle" || publicBookingSlotStatus === "loading");
 
   const bookingSlots = useMemo<BookingSlot[]>(() => {
-    if (!bookingTargetService) return [];
-    if (isEmbedMode) {
-      if (publicBookingStateStatus !== "loaded") return [];
-      return publicBookingSlotKey ? publicBookingSlots[publicBookingSlotKey] ?? [] : [];
-    }
+    if (!selectedBookingService) return [];
 
-    const ignoreId = bookingMode === "reschedule" ? selectedRescheduleMatch?.id : undefined;
-    const bookingOptions = serviceBookingOptions(bookingTargetService);
+    const bookingOptions = serviceBookingOptions(selectedBookingService);
 
-    if (bookingMode === "book" && isScheduledGroupService(bookingTargetService)) {
-      const schedule = bookingTargetService.groupSchedule;
+    if (isScheduledGroupService(selectedBookingService)) {
+      const schedule = selectedBookingService.groupSchedule;
       if (!schedule?.active) return [];
       const candidate = {
         week: activeWeek,
         day: schedule.dayOfWeek,
         start: schedule.startMinutes,
-        duration: bookingTargetService.duration,
+        duration: selectedBookingService.duration,
       };
       // A scheduled group is one session, with the first coach at the first place.
       const [{ coachId, locationId }] = bookingOptions;
-      if (!isGroupServiceSlotMatch(bookingTargetService, activeWeek, schedule.dayOfWeek, schedule.startMinutes)) return [];
-      if (hasCollision(candidate, ignoreId, bookingTargetService, { candidateCoachId: coachId, candidateLocationId: locationId })) return [];
-      const remainingSpots = getGroupSlotRemainingSpots(candidate, bookingTargetService);
+      if (!isGroupServiceSlotMatch(selectedBookingService, activeWeek, schedule.dayOfWeek, schedule.startMinutes)) return [];
+      if (hasCollision(candidate, undefined, selectedBookingService, { candidateCoachId: coachId, candidateLocationId: locationId })) return [];
+      const remainingSpots = getGroupSlotRemainingSpots(candidate, selectedBookingService);
       if (!remainingSpots) return [];
       return [
         {
@@ -10877,7 +10117,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     // Each time once, with the first coach and place (in the lesson type's
     // order) who are free for it -- the same rule the booking server uses,
     // Look busy included, across the whole week.
-    const duration = bookingTargetService.duration;
+    const duration = selectedBookingService.duration;
     const slots: BookingSlot[] = [];
     const offered = new Set<string>();
     bookingOptions.forEach(({ coachId, locationId }) => {
@@ -10889,11 +10129,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         const busy = lookBusy
           ? items
               .filter((item) => {
-                if (item.id === ignoreId || itemWeek(item) !== activeWeek || item.day !== day || isInactiveForConflict(item)) return false;
+                if (itemWeek(item) !== activeWeek || item.day !== day || isInactiveForConflict(item)) return false;
                 const service = itemService(item, services);
                 return isLocationOnlyBlock(item)
                   ? resolvedCalendarItemLocationId(item, service, locations, coachAccount) === locationId
-                  : resolvedCalendarItemCoachId(item, service, coachProfiles, coachAccount) === coachId;
+                  : resolvedCalendarItemCoachId(item, service, coachProfiles) === coachId;
               })
               .map((item) => ({ start: item.start, end: item.start + item.duration }))
           : [];
@@ -10904,7 +10144,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           for (const start of starts) {
             if (offered.has(`${day}:${start}`)) continue;
             const candidate = { week: activeWeek, day, start, duration };
-            if (!hasCollision(candidate, ignoreId, bookingTargetService, { candidateCoachId: coachId, candidateLocationId: locationId })) {
+            if (!hasCollision(candidate, undefined, selectedBookingService, { candidateCoachId: coachId, candidateLocationId: locationId })) {
               offered.add(`${day}:${start}`);
               slots.push({ week: activeWeek, day, start, remainingSpots: 0, coachId, locationId });
             }
@@ -10918,20 +10158,14 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     accountCoachProfiles,
     accountLocations,
     activeWeek,
-    bookingMode,
-    bookingTargetService,
+    selectedBookingService,
     coachAccount,
     coachProfiles,
     locations,
     lookBusy,
     services,
-    publicBookingSlotKey,
-    publicBookingSlots,
-    isEmbedMode,
     items,
     fallbackCoachId,
-    publicBookingStateStatus,
-    selectedRescheduleMatch,
   ]);
   const visibleBookingSlots =
     bookingStart === null ? bookingSlots : bookingSlots.filter((slot) => slot.day === bookingDay && slot.start === bookingStart);
@@ -10944,7 +10178,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     bookingForm.email.trim() !== "";
   const isBookingInformationComplete =
     isBookingCustomerDetailsComplete &&
-    (!isCustomGroupBooking || customGroupAttendees.length >= customGroupMinParticipants(bookingTargetService) - 1);
+    (!isCustomGroupBooking || customGroupAttendees.length >= customGroupMinParticipants(selectedBookingService) - 1);
   const isInformationStepComplete = isDateTimeStepComplete && isBookingInformationComplete;
   const showCapturedCustomerDetailsSummary =
     isBookingCustomerDetailsComplete && (!isCustomGroupBooking || isBookingInformationComplete || !isDateTimeStepComplete);
@@ -10956,7 +10190,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const isAppointmentSectionOpen = openPublicBookingSection === "appointment";
   const isDateTimeSectionOpen = openPublicBookingSection === "datetime";
   const isInformationSectionOpen = openPublicBookingSection === "information";
-  const publicBookingStateReady = !isEmbedMode || publicBookingStateStatus === "loaded";
 
   const appointmentSummaryName = selectedBookingService
     ? selectedBookingService.name
@@ -11679,11 +10912,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     );
   }
 
-  function isInsideAvailability(day: number, start: number, duration: number) {
-    const end = start + duration;
-    return availability[day].some((window) => start >= window.start && end <= window.end);
-  }
-
   // Recurring group sessions are service definitions, not stored calendar items: no row
   // exists until someone books one. Conflict checks therefore synthesise a hold for every
   // live occurrence, otherwise a private lesson can be booked on top of an empty group session.
@@ -11878,7 +11106,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       start: candidate.start,
       duration: candidate.duration,
     };
-    const candidateCoachId = resolvedCalendarItemCoachId(candidateItem, service, coachProfiles, coachAccount);
+    const candidateCoachId = resolvedCalendarItemCoachId(candidateItem, service, coachProfiles);
     const candidateLocationId = resolvedCalendarItemLocationId(candidateItem, service, locations, coachAccount);
     return !items.some((other) => {
       if (other.id === item.id || itemWeek(other) !== candidate.week || other.day !== candidate.day) return false;
@@ -11973,7 +11201,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   function isValidForItem(item: CalendarItem, candidate: SlotCandidate) {
     return item.kind === "block"
       ? isValidBlockSlot(candidate, item.id, {
-          coachId: resolvedCalendarItemCoachId(item, itemService(item, services), coachProfiles, coachAccount),
+          coachId: resolvedCalendarItemCoachId(item, itemService(item, services), coachProfiles),
           locationId: resolvedCalendarItemLocationId(item, itemService(item, services), locations, coachAccount),
           locationOnly: isLocationOnlyBlock(item),
         })
@@ -12943,7 +12171,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       : null;
     const option = shelvedSource
       ? isValidAppointmentSlot(candidate, shelvedSource.id, service, {
-          candidateCoachId: resolvedCalendarItemCoachId(shelvedSource, service, coachProfiles, coachAccount),
+          candidateCoachId: resolvedCalendarItemCoachId(shelvedSource, service, coachProfiles),
           candidateLocationId: resolvedCalendarItemLocationId(shelvedSource, service, locations, coachAccount),
         })
         ? { coachId: "", locationId: "" }
@@ -13097,7 +12325,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   }
 
   function switchView(view: View) {
-    if (isEmbedMode && view !== "booking") return;
     setActiveView(view);
     setQuickCreate(null);
     if (view === "settings") setSettingsTab("services");
@@ -14089,13 +13316,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   }
 
   function updateBookingForm(field: keyof BookingForm, value: string) {
-    setBookingConfirmation(null);
     setBookingSubmitError("");
     setBookingForm((current) => ({ ...current, [field]: value }));
   }
 
   function updateCustomGroupAttendeeDraft(field: "name" | "email", value: string) {
-    setBookingConfirmation(null);
     setCustomGroupAttendeeDraft((current) => ({ ...current, [field]: value }));
   }
 
@@ -14171,7 +13396,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setToast({ message: t("Enter a valid attendee email or leave it blank.") });
       return;
     }
-    if (customGroupParticipantCount >= customGroupMaxParticipants(bookingTargetService)) {
+    if (customGroupParticipantCount >= customGroupMaxParticipants(selectedBookingService)) {
       setToast({ message: t("This custom group is already at its maximum size.") });
       return;
     }
@@ -14191,50 +13416,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     setCustomGroupAttendees((current) => current.filter((attendee) => attendee.id !== attendeeId));
   }
 
-  function changeBookingMode(nextMode: BookingMode, showLogin = false) {
-    setBookingMode(nextMode);
-    setBookingConfirmation(null);
-    setBookingSubmitError("");
-    setBookingStart(null);
-    setCustomGroupAttendees([]);
-    setCustomGroupAttendeeDraft({ name: "", email: "" });
-    setBookingDaySelected(nextMode === "book" ? false : bookingDaySelected);
-    setOpenPublicBookingSection("appointment");
-    setForceRescheduleLogin(nextMode === "reschedule" && showLogin);
-    if (nextMode === "book") {
-      setSelectedRescheduleId("");
-    } else if (!rescheduleMatches.length && rescheduleForm.email.trim() && rescheduleForm.phone.trim()) {
-      window.setTimeout(() => {
-        void lookupPublicReschedule(true);
-      }, 0);
-    }
-  }
-
-  function selectRescheduleMatch(match: PublicRescheduleMatch) {
-    setSelectedRescheduleId(match.id);
-    setBookingServiceId(match.serviceId);
-    setActiveWeekState(match.week);
-    setBookingDay(match.day);
-    setBookingDaySelected(true);
-    setOpenPublicBookingSection("datetime");
-    setBookingStart(null);
-  }
-
   function setPublicBookingSection(section: PublicBookingSection) {
     setOpenPublicBookingSection(section);
-  }
-
-  function startAnotherPublicBooking() {
-    const hasSelectedPublicService = currentScreenPublicServices.some((service) => service.id === bookingServiceId);
-    setBookingConfirmation(null);
-    setBookingMode("book");
-    setEmailNoticeVisible(false);
-    setBookingSubmitError("");
-    setBookingStart(null);
-    setCustomGroupAttendees([]);
-    setCustomGroupAttendeeDraft({ name: "", email: "" });
-    setOpenPublicBookingSection(hasSelectedPublicService ? "datetime" : "appointment");
-    if (!hasSelectedPublicService) setBookingDaySelected(false);
   }
 
   function handlePublicBookingServiceSelect(serviceId: string) {
@@ -14249,7 +13432,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   }
 
   const isGroupBookingTimeSelection =
-    bookingMode === "book" && isScheduledGroupService(bookingTargetService);
+    isScheduledGroupService(selectedBookingService);
 
   function handlePublicBookingTimeSelect(slot: BookingSlot) {
     const next = bookingDaySelected && bookingDay === slot.day && bookingStart === slot.start ? null : slot.start;
@@ -14258,286 +13441,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     setBookingDaySelected(next !== null);
     setBookingStart(next);
     setOpenPublicBookingSection(next === null ? "datetime" : "information");
-  }
-
-  function describeRescheduleMatch(match: PublicRescheduleMatch) {
-    const days = buildWeekDays(match.week);
-    return `${days[match.day]?.label ?? fullDayNames[match.day]}, ${formatTime(match.start)}`;
-  }
-
-  function googleCalendarUrl(confirmation: BookingConfirmation) {
-    const date = dateForSlot(confirmation.week, confirmation.day);
-    const start = compactDateTime(date, confirmation.start);
-    const end = compactDateTime(date, confirmation.start + confirmation.duration);
-    const location = confirmation.location ?? selectedBookingLocation;
-    const params = new URLSearchParams({
-      action: "TEMPLATE",
-      text: `${confirmation.service} with ${coachAccount.businessName}`,
-      dates: `${start}/${end}`,
-      location: bookingLocationDisplay(location),
-      details: `${confirmation.service} for ${confirmation.client}.`,
-      ctz: location.timezone || coachAccount.timezone,
-    });
-    return `https://calendar.google.com/calendar/render?${params.toString()}`;
-  }
-
-  function downloadAppleCalendarInvite(confirmation: BookingConfirmation) {
-    const date = dateForSlot(confirmation.week, confirmation.day);
-    const start = compactDateTime(date, confirmation.start);
-    const end = compactDateTime(date, confirmation.start + confirmation.duration);
-    const location = confirmation.location ?? selectedBookingLocation;
-    const ics = [
-      "BEGIN:VCALENDAR",
-      "VERSION:2.0",
-      "PRODID:-//Clarity Golf//Booking Confirmation//EN",
-      "BEGIN:VEVENT",
-      `UID:${Date.now()}@clarity-golf-booking`,
-      `DTSTAMP:${compactDateTime(new Date(), new Date().getHours() * 60 + new Date().getMinutes())}`,
-      `DTSTART;TZID=${location.timezone || coachAccount.timezone}:${start}`,
-      `DTEND;TZID=${location.timezone || coachAccount.timezone}:${end}`,
-      `SUMMARY:${escapeIcsText(`${confirmation.service} with ${coachAccount.businessName}`)}`,
-      `LOCATION:${escapeIcsText(bookingLocationDisplay(location))}`,
-      `DESCRIPTION:${escapeIcsText(`${confirmation.service} for ${confirmation.client}.`)}`,
-      "STATUS:CONFIRMED",
-      "END:VEVENT",
-      "END:VCALENDAR",
-    ].join("\r\n");
-    const blob = new Blob([`${ics}\r\n`], { type: "text/calendar;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "clarity-golf-booking.ics";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
-  }
-
-  /**
-   * Signing in on the public booking page.
-   *
-   * The same account and the same endpoint as the Player Portal -- there is one
-   * login for the product, and booking is not allowed a second one. On success
-   * the page reloads into the terminal, because from that moment this visitor
-   * is a player and the portal is where their bookings live.
-   */
-  async function signInFromBooking() {
-    const email = bookingSignIn.email.trim();
-    const password = bookingSignIn.password;
-    if (!email || !password) {
-      setBookingSignInError(t("Enter your email and password."));
-      return;
-    }
-    setBookingSignInState("checking");
-    setBookingSignInError("");
-    try {
-      const response = await fetch("/api/auth/login", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-      const data = (await response.json().catch(() => ({}))) as {
-        authenticated?: boolean;
-        message?: string;
-      };
-      if (!response.ok || !data.authenticated) {
-        throw new Error(data.message || t("Email or password is incorrect."));
-      }
-      setBookingSignIn({ email: "", password: "" });
-      window.location.href = playerBookingUrl();
-    } catch (error) {
-      setBookingSignInState("idle");
-      setBookingSignInError(
-        error instanceof Error ? error.message : t("Could not reach the sign-in service."),
-      );
-    }
-  }
-
-  async function lookupPublicReschedule(silent = false, credentials: RescheduleLookupCredentials = rescheduleForm) {
-    const lookupCredentials = {
-      email: credentials.email.trim(),
-      phone: credentials.phone.trim(),
-      appointmentId: credentials.appointmentId,
-    };
-    if (!lookupCredentials.email || !lookupCredentials.phone) {
-      if (!silent) setToast({ message: t("Enter the email and phone number used on the booking.") });
-      return;
-    }
-    setRescheduleState("checking");
-    setSelectedRescheduleId("");
-    setBookingStart(null);
-    try {
-      const response = await fetch(publicApi("/api/public-reschedule-lookup"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: lookupCredentials.email, phone: lookupCredentials.phone }),
-      });
-      const data = (await response.json()) as { matches?: PublicRescheduleMatch[]; message?: string };
-      if (!response.ok) {
-        if (!silent) setToast({ message: data.message || t("Could not find that booking.") });
-        setRescheduleMatches([]);
-        return;
-      }
-      const matches = Array.isArray(data.matches) ? data.matches : [];
-      setRescheduleMatches(matches);
-      const preferredId = lookupCredentials.appointmentId || initialRescheduleLoginRef.current?.appointmentId || selectedRescheduleId;
-      const preferredMatch = preferredId ? matches.find((match) => match.id === preferredId) : null;
-      if (preferredMatch) {
-        selectRescheduleMatch(preferredMatch);
-      } else if (matches.length === 1) {
-        selectRescheduleMatch(matches[0]);
-      }
-      if (!matches.length && !silent) setToast({ message: t("No booking matched those details.") });
-      if (matches.length && !isPlayerBooking) {
-        const nextSaved: SavedRescheduleLogin = {
-          email: lookupCredentials.email,
-          phone: lookupCredentials.phone,
-          appointmentId: preferredMatch?.id || matches[0]?.id,
-        };
-        window.localStorage.setItem(RESCHEDULE_LOGIN_STORAGE_KEY, JSON.stringify(nextSaved));
-      }
-    } catch {
-      if (!silent) setToast({ message: t("Could not reach the booking server.") });
-    } finally {
-      setRescheduleState("idle");
-    }
-  }
-
-  async function confirmPublicReschedule() {
-    if (!selectedRescheduleMatch || !bookingTargetService || bookingStart === null) {
-      setToast({ message: t("Choose the booking and the new time.") });
-      return;
-    }
-
-    setRescheduleState("saving");
-    try {
-      const response = await fetch(publicApi("/api/public-reschedule"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          appointmentId: selectedRescheduleMatch.id,
-          email: rescheduleForm.email,
-          phone: rescheduleForm.phone,
-          week: activeWeek,
-          day: bookingDay,
-          start: bookingStart,
-        }),
-      });
-      const data = (await response.json()) as {
-        state?: { items?: CalendarItem[] };
-        message?: string;
-        appointment?: { location?: BookingLocationSnapshot };
-        notifications?: EmailSendResult[];
-      };
-      if (!response.ok) {
-        setToast({ message: data.message || t("That time is no longer available.") });
-        if (data.state?.items) setItems(data.state.items);
-        clearPublicBookingSlotCache();
-        setBookingStart(null);
-        return;
-      }
-
-      if (data.state?.items) setItems(data.state.items);
-      clearPublicBookingSlotCache();
-      setBookingConfirmation({
-        kind: "reschedule",
-        appointmentId: selectedRescheduleMatch.id,
-        client: selectedRescheduleMatch.client,
-        service: selectedRescheduleMatch.serviceName,
-        week: activeWeek,
-        day: bookingDay,
-        start: bookingStart,
-        duration: selectedRescheduleMatch.duration,
-        dayLabel: weekDays[bookingDay].label,
-        timeLabel: formatTime(bookingStart),
-        email: rescheduleForm.email,
-        phone: rescheduleForm.phone,
-        location:
-          data.appointment?.location ??
-          selectedRescheduleMatch.location ??
-          bookingLocationSnapshotFor(bookingTargetService, locations, coachAccount),
-        notifications: data.notifications ?? [],
-      });
-      setRescheduleMatches([]);
-      setSelectedRescheduleId("");
-      setBookingStart(null);
-    } catch {
-      setToast({ message: t("Could not complete the reschedule. Please try again.") });
-    } finally {
-      setRescheduleState("idle");
-    }
-  }
-
-  async function confirmPublicCancellation() {
-    if (!selectedRescheduleMatch) {
-      setToast({ message: t("Choose the booking to cancel.") });
-      return;
-    }
-    const confirmed = window.confirm(
-      t("Cancel {serviceName} for {client}?", { serviceName: selectedRescheduleMatch.serviceName, client: selectedRescheduleMatch.client }),
-    );
-    if (!confirmed) return;
-
-    setRescheduleState("saving");
-    try {
-      const response = await fetch(publicApi("/api/public-cancel"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          appointmentId: selectedRescheduleMatch.id,
-          email: rescheduleForm.email,
-          phone: rescheduleForm.phone,
-        }),
-      });
-      const data = (await response.json()) as {
-        state?: { items?: CalendarItem[] };
-        message?: string;
-        notifications?: EmailSendResult[];
-      };
-      if (!response.ok) {
-        setToast({ message: data.message || t("Could not cancel that booking.") });
-        return;
-      }
-
-      const original = selectedRescheduleMatch;
-      if (data.state?.items) {
-        setItems(data.state.items);
-      } else {
-        setItems((current) => current.filter((item) => item.id !== original.id));
-      }
-      clearPublicBookingSlotCache();
-      const confirmationNotifications = data.notifications ?? [];
-      const originalWeekDays = buildWeekDays(original.week);
-      setBookingConfirmation({
-        kind: "cancelled",
-        appointmentId: original.id,
-        client: original.client,
-        service: original.serviceName,
-        week: original.week,
-        day: original.day,
-        start: original.start,
-        duration: original.duration,
-        dayLabel: originalWeekDays[original.day]?.label ?? fullDayNames[original.day],
-        timeLabel: formatTime(original.start),
-        email: rescheduleForm.email,
-        phone: rescheduleForm.phone,
-        location:
-          original.location ??
-          bookingLocationSnapshotFor(services.find((service) => service.id === original.serviceId), locations, coachAccount),
-        notifications: confirmationNotifications,
-      });
-      setEmailNoticeVisible(
-        confirmationNotifications.some((result) => result.channel === "client" && result.sent),
-      );
-      setRescheduleMatches([]);
-      setSelectedRescheduleId("");
-      setBookingStart(null);
-    } catch {
-      setToast({ message: t("Could not cancel that booking. Please try again.") });
-    } finally {
-      setRescheduleState("idle");
-    }
   }
 
   function handleBookingMatchKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
@@ -14553,13 +13456,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
   function updateBookingNoticeHours(hours: number) {
     updateNotificationBlockDraft(bookingNoticeEditor, "minBookingNoticeMinutes", cleanMinBookingNoticeMinutes(hours * 60));
-  }
-
-  function updateNotificationSetting<K extends keyof NotificationSettings>(field: K, value: NotificationSettings[K]) {
-    notificationSettingsDraftVersionRef.current += 1;
-    setSettingsSaveState("idle");
-    setSettingsSaveError("");
-    setNotificationSettings((current) => ({ ...current, [field]: value }));
   }
 
   // Stored as typed; saveBrandSettings cleans. Cleaning here trimmed every
@@ -15196,67 +14092,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     void persistCoaches(next, `${coach.displayName || coach.name} restored.`);
   }
 
-  function updateInvoiceSettings<K extends keyof InvoiceSettings>(field: K, value: InvoiceSettings[K]) {
-    if ((field === "enabled" || field === "showBillingWorkspace") && value === true && !canUseFeature(activeAccount, "invoicing")) {
-      setToast({ message: featureUnavailableMessage("invoicing") });
-      return;
-    }
-    setCoachAccountSaveState("idle");
-    setCoachAccount((current) =>
-      cleanCoachAccount({
-        ...current,
-        invoiceSettings: {
-          ...current.invoiceSettings,
-          [field]: value,
-        },
-      }),
-    );
-  }
-
-  function updateInvoiceCustomField<K extends keyof InvoiceCustomField>(id: string, field: K, value: InvoiceCustomField[K]) {
-    setCoachAccountSaveState("idle");
-    setCoachAccount((current) =>
-      cleanCoachAccount({
-        ...current,
-        invoiceSettings: {
-          ...current.invoiceSettings,
-          customFields: current.invoiceSettings.customFields.map((customField) =>
-            customField.id === id ? { ...customField, [field]: value } : customField,
-          ),
-        },
-      }),
-    );
-  }
-
-  function addInvoiceCustomField() {
-    setCoachAccountSaveState("idle");
-    setCoachAccount((current) =>
-      cleanCoachAccount({
-        ...current,
-        invoiceSettings: {
-          ...current.invoiceSettings,
-          customFields: [
-            ...current.invoiceSettings.customFields,
-            { id: `field-${Date.now()}`, label: t("Reference"), value: "", placement: "header" },
-          ],
-        },
-      }),
-    );
-  }
-
-  function removeInvoiceCustomField(id: string) {
-    setCoachAccountSaveState("idle");
-    setCoachAccount((current) =>
-      cleanCoachAccount({
-        ...current,
-        invoiceSettings: {
-          ...current.invoiceSettings,
-          customFields: current.invoiceSettings.customFields.filter((field) => field.id !== id),
-        },
-      }),
-    );
-  }
-
   // The lesson type's physical places that have resources set up -- the only
   // ones where using a resource means anything. Clarity keeps track of the
   // "clarity" ones; the others are held by another booking system.
@@ -15845,7 +14680,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       serviceId: nextServiceId,
       duration: nextService.duration,
       // Stays with its coach and place when the new lesson type has them.
-      coachId: serviceCoachFor(nextService, resolvedCalendarItemCoachId(targetItem, itemService(targetItem, services), coachProfiles, coachAccount)),
+      coachId: serviceCoachFor(nextService, resolvedCalendarItemCoachId(targetItem, itemService(targetItem, services), coachProfiles)),
       ...(() => {
         const currentLocationId = resolvedCalendarItemLocationId(targetItem, itemService(targetItem, services), locations, coachAccount);
         const keepLocation = nextService.locationIds.includes(currentLocationId);
@@ -16135,7 +14970,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     const expectedRevision = typeof calendarStateVersion === "string" ? calendarStateVersion : "";
     const targetItem = items.find((item) => item.id === itemId && item.kind === "appointment");
     const calendarId = targetItem
-      ? resolvedCalendarItemCoachId(targetItem, itemService(targetItem, services), coachProfiles, coachAccount) ||
+      ? resolvedCalendarItemCoachId(targetItem, itemService(targetItem, services), coachProfiles) ||
         targetItem.locationId ||
         targetItem.accountId ||
         "unknown"
@@ -17714,21 +16549,21 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   // Settings › Integrations paints with its cards already there instead of a
   // beat behind the tab. Nothing here blocks anything the coach can see.
   useEffect(() => {
-    if (isEmbedMode || authStatus !== "authenticated" || adminWorkspaceLoadStatus !== "loaded") return;
+    if (authStatus !== "authenticated" || adminWorkspaceLoadStatus !== "loaded") return;
     return whenIdle(() => {
       prefetchIntegrations("integration");
       if (isPlatformAdmin) prefetchIntegrations("admin");
       void import("./modules/integrations/IntegrationsPanel").catch(() => undefined);
     }, 2500);
-  }, [isEmbedMode, authStatus, adminWorkspaceLoadStatus, isPlatformAdmin]);
+  }, [authStatus, adminWorkspaceLoadStatus, isPlatformAdmin]);
 
   // Profile navigation is a stronger signal than the generic idle warm-up.
   // Start/join the shared integration request immediately so Coach Profile and
   // Settings consume one resource lifecycle rather than mounting separate reads.
   useEffect(() => {
-    if (isEmbedMode || authStatus !== "authenticated" || activeView !== "profile") return;
+    if (authStatus !== "authenticated" || activeView !== "profile") return;
     prefetchIntegrations("integration");
-  }, [activeView, authStatus, isEmbedMode]);
+  }, [activeView, authStatus]);
 
   // Billing data is not part of the calendar frame. It used to load the moment
   // the plan allowed it: seven billing-api calls at boot, racing the calendar
@@ -17741,7 +16576,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const billingWorkspaceWanted =
     activeView === "sell" || activeView === "billing" || workspaceOverlay?.kind === "billing";
   useEffect(() => {
-    if (isEmbedMode || authStatus !== "authenticated" || !billingWorkspaceEnabled) return;
+    if (authStatus !== "authenticated" || !billingWorkspaceEnabled) return;
     if (billingDataLoadState !== "idle") return;
     if (billingWorkspaceWanted) {
       void loadBillingWorkspace();
@@ -17754,25 +16589,25 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       // before the first "Pay" is pressed.
       void import("./modules/billing/PosCheckoutModal").catch(() => undefined);
     }, 2000);
-  }, [isEmbedMode, authStatus, billingWorkspaceEnabled, billingDataLoadState, billingWorkspaceWanted, adminWorkspaceLoadStatus]);
+  }, [authStatus, billingWorkspaceEnabled, billingDataLoadState, billingWorkspaceWanted, adminWorkspaceLoadStatus]);
 
   useEffect(() => {
-    if (isEmbedMode || authStatus !== "authenticated" || !billingWorkspaceEnabled) return;
+    if (authStatus !== "authenticated" || !billingWorkspaceEnabled) return;
     void fetchInvoicedBookingIds(completedAppointments.map((item) => item.id));
     // Only re-check when the set of completed bookings changes; invoice
     // creation also refreshes this map directly after a successful pull.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isEmbedMode, authStatus, billingWorkspaceEnabled, completedAppointments.map((item) => item.id).join(",")]);
+  }, [authStatus, billingWorkspaceEnabled, completedAppointments.map((item) => item.id).join(",")]);
 
   // Same idea for counter sales: which bookings were paid at the till. Separate
   // call so a POS failure can never break the invoice pull list. Runs over
   // payableAppointmentIds rather than completed ones so the Paid marker appears
   // on a lesson paid before it was marked completed.
   useEffect(() => {
-    if (isEmbedMode || authStatus !== "authenticated" || !billingWorkspaceEnabled) return;
+    if (authStatus !== "authenticated" || !billingWorkspaceEnabled) return;
     void fetchPosBookingPayments(payableAppointmentIds);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isEmbedMode, authStatus, billingWorkspaceEnabled, payableAppointmentIds.join(",")]);
+  }, [authStatus, billingWorkspaceEnabled, payableAppointmentIds.join(",")]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -17798,17 +16633,17 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   }
 
   useEffect(() => {
-    if (isEmbedMode || authStatus !== "authenticated" || !billingWorkspaceEnabled) return;
+    if (authStatus !== "authenticated" || !billingWorkspaceEnabled) return;
     void fetchRevenueReport(revenuePeriod);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isEmbedMode, authStatus, billingWorkspaceEnabled, revenuePeriod]);
+  }, [authStatus, billingWorkspaceEnabled, revenuePeriod]);
 
   useEffect(() => {
-    if (isEmbedMode || authStatus !== "authenticated" || !billingWorkspaceEnabled) return;
+    if (authStatus !== "authenticated" || !billingWorkspaceEnabled) return;
     if (expenseLoadState === "idle") return; // initial load already covered by loadBillingWorkspace()
     void fetchExpenses(expenseRangeFrom, expenseRangeTo);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isEmbedMode, authStatus, billingWorkspaceEnabled, expenseRangeFrom, expenseRangeTo]);
+  }, [authStatus, billingWorkspaceEnabled, expenseRangeFrom, expenseRangeTo]);
 
   async function fetchReportSummary(start: string, end: string, excluded: readonly string[] = reportExcludedCategories) {
     if (!start || !end) return;
@@ -17835,7 +16670,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   // Load (or reload) the report whenever the Reports tab is open and the
   // effective range changes. Other tabs don't pay for the fetch.
   useEffect(() => {
-    if (isEmbedMode || authStatus !== "authenticated" || !billingWorkspaceEnabled) return;
+    if (authStatus !== "authenticated" || !billingWorkspaceEnabled) return;
     if (billingSection !== "reports") return;
     // Debounced so toggling several categories (each a whole-report refetch)
     // coalesces into one request instead of firing per click.
@@ -17846,7 +16681,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    isEmbedMode,
     authStatus,
     billingWorkspaceEnabled,
     billingSection,
@@ -18121,7 +16955,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     // explicitly chosen from the client list.
     setInvoiceDraft((current) => ({
       ...current,
-      coachId: resolvedCalendarItemCoachId(item, service, coachProfiles, coachAccount),
+      coachId: resolvedCalendarItemCoachId(item, service, coachProfiles),
       lines: [
         ...current.lines.filter((line) => line.description.trim() || line.unitPrice > 0),
         {
@@ -19345,9 +18179,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setBookingStart(null);
       setOpenPublicBookingSection("appointment");
     }
-    if (selectedRescheduleMatch?.serviceId === service.id) {
-      setSelectedRescheduleId("");
-    }
     setPendingServiceAction(null);
     const packageSuffix =
       packageReferenceCount > 0
@@ -19374,9 +18205,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setBookingDaySelected(false);
       setBookingStart(null);
       setOpenPublicBookingSection("appointment");
-    }
-    if (selectedRescheduleMatch?.serviceId === service.id) {
-      setSelectedRescheduleId("");
     }
     setPendingServiceAction(null);
     setServiceListTab("archived");
@@ -19533,7 +18361,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   async function saveCoachAccount(draft = coachAccount): Promise<CoachAccount> {
     const clean = cleanCoachAccount(draft);
     setCoachAccount(clean);
-    setCoachAccountSaveState("saving");
     try {
       const response = await fetch("/api/coach-account", {
         method: "PUT",
@@ -19547,13 +18374,10 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       if (!response.ok) throw new Error(await readApiFailure(response, t("Coach account save failed")));
       const saved = (await response.json()) as Partial<CoachAccount>;
       applyCoachAccount(saved);
-      setCoachAccountSaveState("saved");
       setToast({ message: t("Coach account saved.") });
-      window.setTimeout(() => setCoachAccountSaveState("idle"), 1600);
       return cleanCoachAccount(saved);
     } catch (error) {
       setCoachAccount(draft);
-      setCoachAccountSaveState("idle");
       const message = error instanceof Error ? error.message : t("Could not save coach account.");
       setToast({ message });
       throw new Error(message);
@@ -19620,7 +18444,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         setPasswordChangeMessage(data.message || t("Could not change password."));
         return;
       }
-      if (data.email) setAdminEmail(data.email);
       setPasswordChangeForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
       setShowPasswordFields(false);
       setPasswordChangeState("saved");
@@ -19665,8 +18488,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     const saveVersion = ++settingsSaveVersionRef.current;
     beginAdminSave("settings");
     const isCurrentSave = () => settingsSaveVersionRef.current === saveVersion;
-    setSettingsSaveState("saving");
-    setSettingsSaveError("");
     try {
       const response = await fetch("/api/admin-settings", {
         method: "PUT",
@@ -19683,30 +18504,16 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       const settings = (await response.json()) as NotificationSettings;
       if (!isCurrentSave()) return draft;
       applyNotificationSettings(settings);
-      setSettingsSaveState("saved");
       setToast({ message: t("Notification and text settings saved.") });
-      window.setTimeout(() => {
-        if (isCurrentSave()) setSettingsSaveState("idle");
-      }, 1600);
       return settings;
     } catch (error) {
       if (!isCurrentSave()) return draft;
       const message = error instanceof Error ? error.message : t("Could not save notification settings.");
-      setSettingsSaveState("idle");
-      setSettingsSaveError(message);
       setToast({ message });
       throw new Error(message);
     } finally {
       endAdminSave("settings");
     }
-  }
-
-  function settingsSaveErrorNotice() {
-    return settingsSaveError ? (
-      <p className="workspace-save-error" role="alert">
-        {settingsSaveError}
-      </p>
-    ) : null;
   }
 
   // Google Calendar is per coach: every call names the coach whose profile is
@@ -19846,7 +18653,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   }
 
   async function refreshPortalPlayers() {
-    if (isEmbedMode || authStatus !== "authenticated") return;
+    if (authStatus !== "authenticated") return;
     try {
       const response = await fetch("/api/portal-players", {
         credentials: "same-origin",
@@ -20391,7 +19198,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     const nextBrand = cleanBrandSettings({ ...brandSettings, showLogo });
     setBrandSaveState("idle");
     setBrandSettings(nextBrand);
-    if (!isEmbedMode && authStatus === "authenticated") {
+    if (authStatus === "authenticated") {
       void saveBrandSettings(nextBrand, { silent: true });
     }
   }
@@ -21140,8 +19947,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   }
 
   async function confirmPublicBooking() {
-    if (bookingSubmitState === "saving") return;
-    if (!bookingTargetService || bookingStart === null) {
+    if (!selectedBookingService || bookingStart === null) {
       const message = t("Choose a lesson time before confirming.");
       setBookingSubmitError(message);
       setToast({ message });
@@ -21162,7 +19968,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setToast({ message });
       return;
     }
-    if (isCustomGroupBooking && customGroupAttendees.length < customGroupMinParticipants(bookingTargetService) - 1) {
+    if (isCustomGroupBooking && customGroupAttendees.length < customGroupMinParticipants(selectedBookingService) - 1) {
       const message = t("Add at least one other person before confirming.");
       setBookingSubmitError(message);
       setToast({ message });
@@ -21171,46 +19977,20 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
 
     // The coach and place the chosen time was offered with.
     const chosenSlot = bookingSlots.find((slot) => slot.day === bookingDay && slot.start === bookingStart);
-    const [firstOption] = serviceBookingOptions(bookingTargetService);
+    const [firstOption] = serviceBookingOptions(selectedBookingService);
     const chosenLocation = locationById(locations, chosenSlot?.locationId || firstOption.locationId);
     const selectedBooking = {
-      service: bookingTargetService,
+      service: selectedBookingService,
       week: activeWeek,
       day: bookingDay,
       start: bookingStart,
-      duration: bookingTargetService.duration,
+      duration: selectedBookingService.duration,
       location: chosenLocation
         ? locationSnapshot(chosenLocation)
-        : bookingLocationSnapshotFor(bookingTargetService, locations, coachAccount),
+        : bookingLocationSnapshotFor(selectedBookingService, locations, coachAccount),
       coachId: chosenSlot?.coachId || firstOption.coachId,
     };
     const selectedBookingCoach = bookingCoachSnapshotFor(selectedBooking.coachId, coachProfiles);
-    const fallbackAppointmentId = `fallback-appt-${Date.now()}`;
-    const localFallbackConfirmation = (): BookingConfirmation => ({
-      kind: "booking",
-      appointmentId: fallbackAppointmentId,
-      client,
-      service: selectedBooking.service.name,
-      week: selectedBooking.week,
-      day: selectedBooking.day,
-      start: selectedBooking.start,
-      duration: selectedBooking.duration,
-      dayLabel: weekDays[selectedBooking.day].label,
-      timeLabel: formatTime(selectedBooking.start),
-      email,
-      phone,
-      location: selectedBooking.location,
-      notifications: [],
-    });
-    const confirmWithLocalFallback = () => {
-      setBookingConfirmation(localFallbackConfirmation());
-      setEmailNoticeVisible(false);
-      setBookingSubmitError("");
-      clearPublicBookingSlotCache();
-      setBookingStart(null);
-      setCustomGroupAttendees([]);
-      setCustomGroupAttendeeDraft({ name: "", email: "" });
-    };
     const candidate = {
       week: selectedBooking.week,
       day: selectedBooking.day,
@@ -21218,7 +19998,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       duration: selectedBooking.duration,
     };
     if (
-      hasCollision(candidate, undefined, bookingTargetService, {
+      hasCollision(candidate, undefined, selectedBookingService, {
         candidateCoachId: selectedBooking.coachId,
         candidateLocationId: selectedBooking.location.locationId,
       })
@@ -21227,118 +20007,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       setBookingSubmitError(message);
       setOpenPublicBookingSection("information");
       setToast({ message });
-      return;
-    }
-
-    if (isEmbedMode) {
-      setBookingSubmitState("saving");
-      setEmailNoticeVisible(false);
-      const timer = startDiagnosticTimer({
-        system: "publicBooking",
-        action: "public_booking_create",
-        route: "POST /api/public-booking",
-        functionName: "submitBooking",
-        expectedAccountId: activeAccountId,
-        objectType: "booking",
-        objectId: fallbackAppointmentId,
-        details: {
-          serviceId: selectedBooking.service.id,
-          week: selectedBooking.week,
-          day: selectedBooking.day,
-          hasAttendees: isCustomGroupBooking,
-        },
-      });
-      try {
-        const controller = new AbortController();
-        const timeoutId = window.setTimeout(() => controller.abort(), 15000);
-        const response = await (async () => {
-          try {
-            return await fetch(publicApi("/api/public-booking"), {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              signal: controller.signal,
-              body: JSON.stringify({
-                serviceId: selectedBooking.service.id,
-                week: selectedBooking.week,
-                day: selectedBooking.day,
-                start: selectedBooking.start,
-                duration: selectedBooking.duration,
-                firstName,
-                lastName,
-                phone,
-                email,
-                coachId: selectedBooking.coachId,
-                locationId: selectedBooking.location.locationId,
-                coach: selectedBookingCoach,
-                location: selectedBooking.location,
-                attendees: isCustomGroupBooking ? customGroupAttendees.map((attendee) => ({
-                  name: attendee.name,
-                  email: attendee.email || "",
-                })) : undefined,
-              }),
-            });
-          } finally {
-            window.clearTimeout(timeoutId);
-          }
-        })();
-        const data = await readPublicBookingSubmitResponse(response);
-        if (data.state?.items && (!data.fallback || data.state.items.length)) setItems(data.state.items);
-        clearPublicBookingSlotCache();
-        const confirmationNotifications = data.notifications ?? [];
-        const confirmation = response.ok && data.appointment?.id
-          ? {
-              kind: "booking" as const,
-              appointmentId: data.appointment.id,
-              client,
-              service: selectedBooking.service.name,
-              week: selectedBooking.week,
-              day: selectedBooking.day,
-              start: selectedBooking.start,
-              duration: selectedBooking.duration,
-              dayLabel: weekDays[selectedBooking.day].label,
-              timeLabel: formatTime(selectedBooking.start),
-              email,
-              phone,
-              location: data.appointment.location ?? selectedBooking.location,
-              notifications: confirmationNotifications,
-            }
-          : localFallbackConfirmation();
-        if (!response.ok || !data.appointment?.id) {
-          console.warn("public_booking_submit_customer_confirmed_after_api_failure", {
-            status: response.status,
-            message: data.message || data.error || "",
-          });
-          finishDiagnosticTimer(timer, "warning", {
-            httpStatus: response.status,
-            errorCode: "BOOKING_CREATE_FAILED",
-            humanMessage: data.message || data.error || t("Public booking used local fallback confirmation."),
-          });
-        } else {
-          finishDiagnosticTimer(timer, "verified", {
-            httpStatus: response.status,
-            objectId: data.appointment.id,
-            details: {
-              notificationCount: confirmationNotifications.length,
-              clientEmailRequested: confirmationNotifications.some((result) => result.channel === "client"),
-            },
-          });
-        }
-        setBookingConfirmation(confirmation);
-        setEmailNoticeVisible(confirmationNotifications.some((result) => result.channel === "client" && result.sent));
-        setBookingSubmitError("");
-        setBookingStart(null);
-        setCustomGroupAttendees([]);
-        setCustomGroupAttendeeDraft({ name: "", email: "" });
-      } catch (error) {
-        console.warn("public_booking_submit_customer_confirmed_after_fetch_failure", error);
-        finishDiagnosticTimer(timer, "warning", {
-          errorCode: "BOOKING_CREATE_FAILED",
-          humanMessage: error instanceof Error ? error.message : t("Public booking fetch failed; local fallback confirmation shown."),
-        });
-        confirmWithLocalFallback();
-      } finally {
-        setBookingSubmitState("idle");
-      }
       return;
     }
 
@@ -21369,12 +20037,8 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         : {}),
     };
     setItems(carveBusyBlocksForAppointment([...items, item], itemSlot(item)));
-    if (isEmbedMode) {
-      closeCalendarDetails();
-    } else {
-      closeCalendarDetails();
-      setActiveView("calendar");
-    }
+    closeCalendarDetails();
+    setActiveView("calendar");
     setBookingStart(null);
     setCustomGroupAttendees([]);
     setCustomGroupAttendeeDraft({ name: "", email: "" });
@@ -21382,20 +20046,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     setBookingSubmitError("");
     setToast({
       message: t("{client} booked {name} on {short} at {start}.", { client, name: selectedBooking.service.name, short: weekDays[item.day].short, start: formatTime(item.start) }),
-    });
-  }
-
-  function copyEmbedCode() {
-    if (!navigator.clipboard) {
-      setToast({ message: t("Copy is not available in this browser. Select the iframe code manually.") });
-      return;
-    }
-    void navigator.clipboard.writeText(iframeCode).then(() => {
-      setCopiedEmbed(true);
-      setToast({ message: t("Squarespace iframe code copied.") });
-      window.setTimeout(() => setCopiedEmbed(false), 1600);
-    }, () => {
-      setToast({ message: t("Copy was blocked by the browser. Select the iframe code manually.") });
     });
   }
 
@@ -21437,10 +20087,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
     }, () => {
       setToast({ message: t("Copy was blocked by the browser. Select the sync value manually.") });
     });
-  }
-
-  function updateBookingScreenName(screenId: string, nextValue: string) {
-    setBookingScreenNames((previous) => ({ ...previous, [screenId]: nextValue }));
   }
 
   function regenerateSyncKey() {
@@ -21700,7 +20346,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       <div className="custom-group-summary">
         <span>{t("Attendees")}</span>
         <strong>
-          {customGroupParticipantCount} / {customGroupMaxParticipants(bookingTargetService)}
+          {customGroupParticipantCount} / {customGroupMaxParticipants(selectedBookingService)}
         </strong>
         <em>{formatMoney(customGroupCalculatedPrice)}</em>
       </div>
@@ -21752,7 +20398,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           </div>
         ))}
       </div>
-      {customGroupAttendees.length < customGroupMinParticipants(bookingTargetService) - 1 && (
+      {customGroupAttendees.length < customGroupMinParticipants(selectedBookingService) - 1 && (
         <p className="field-help">{t("Add at least one other person before confirming.")}</p>
       )}
     </div>
@@ -22889,7 +21535,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         .filter((item) => {
           if (itemWeek(item) !== week || item.day !== day) return false;
           if (item.syntheticGroupSlot || isInactiveForConflict(item) || isCancelledGroupSessionItem(item)) return false;
-          return calendarItemBelongsToCoach(item, coachId, itemService(item, services), coachProfiles, coachAccount);
+          return calendarItemBelongsToCoach(item, coachId, itemService(item, services), coachProfiles);
         })
         .sort((a, b) => a.start - b.start)
         .map((item): CoachWeekEntry => {
@@ -24040,7 +22686,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 <WeekSlots
                   week={activeWeek}
                   slots={visibleBookingSlots}
-                  placeholder={publicBookingSlotsLoading ? <Loading what={t("available times")} /> : null}
                   dayLabel={(day) => weekDays[day]?.isToday ? `${weekDays[day].label} · ${t("Today")}` : weekDays[day]?.label ?? ""}
                   slotLabel={(slot) =>
                     isGroupBookingTimeSelection
@@ -24160,7 +22805,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                 </button>
               )}
               {customGroupAttendeePanel}
-              {bookingSubmitState === "saving" && <div className="booking-save-progress" aria-label={t("Saving booking")} />}
               {bookingSubmitError && (
                 <div className="email-status failed" role="alert">
                   <X size={17} />
@@ -24169,11 +22813,11 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
               )}
               <button
                 className="primary-button confirm-booking"
-                disabled={!selectedBookingService || bookingStart === null || bookingSubmitState === "saving" || !isInformationStepComplete}
+                disabled={!selectedBookingService || bookingStart === null || !isInformationStepComplete}
                 onClick={confirmPublicBooking}
                 type="button"
               >
-                {bookingSubmitState === "saving" ? t("Confirming...") : t("Confirm Appointment")}
+                {t("Confirm Appointment")}
               </button>
             </div>
           ) : showCapturedCustomerDetailsSummary ? (
@@ -24987,7 +23631,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   // client it was opened on, which is a lot of state to carry for a gesture
   // nobody makes. A Forward onto such an entry simply rewrites it.
   useBackNavigation({
-    enabled: !isEmbedMode,
+    enabled: true,
     depth: (snapshot) => snapshot.layers.length,
     state: {
       view: activeView,
@@ -25034,14 +23678,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       </select>
     </label>
   );
-  const adminWorkspaceReady = isEmbedMode || adminWorkspaceLoadStatus === "loaded";
+  const adminWorkspaceReady = adminWorkspaceLoadStatus === "loaded";
   const adminWorkspaceLoading =
-    !isEmbedMode &&
     authStatus === "authenticated" &&
     adminWorkspaceLoadStatus !== "loaded" &&
     adminWorkspaceLoadStatus !== "error";
   const adminWorkspaceFailed =
-    !isEmbedMode && authStatus === "authenticated" && adminWorkspaceLoadStatus === "error";
+    authStatus === "authenticated" && adminWorkspaceLoadStatus === "error";
   const calendarSummaryText = adminWorkspaceLoading
     ? loadingLabel(t("calendar bookings"))
     : blocks === 1
@@ -25352,60 +23995,58 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   // when there is no session, and only mounts this component for a coach.
 
   return (
-    <div className={`app-shell theme-${themeMode} ${isEmbedMode ? "embed-mode" : ""}`} style={brandStyle}>
-      {!isEmbedMode && (
-      <aside className="sidebar">
-        <div className="brand">
-          <div className="brand-mark">
-            <img src="/assets/clarity-golf-logo-208.png" alt={t("Clarity Golf")} />
-          </div>
-          <div>
-            <strong>{t("Clarity Golf")}</strong>
-            <span>{t("Booking System")}</span>
-          </div>
+    <div className={`app-shell theme-${themeMode}`} style={brandStyle}>
+    <aside className="sidebar">
+      <div className="brand">
+        <div className="brand-mark">
+          <img src="/assets/clarity-golf-logo-208.png" alt={t("Clarity Golf")} />
         </div>
+        <div>
+          <strong>{t("Clarity Golf")}</strong>
+          <span>{t("Booking System")}</span>
+        </div>
+      </div>
 
-        <nav className="side-nav" aria-label={t("Admin sections")}>
-          {/* Home, and first. The workspaces below it — Clients, Player
-              Profiles, Video — are whole screens rather than sections, so they
-              are the one thing the coach profile cannot open over itself. This
-              is the way back from them, in the one place that is on screen in
-              every view. */}
-          <button
-            className={`nav-home${activeView === "profile" ? " active" : ""}`}
-            onClick={() => switchView("profile")}
-          >
-            <ClarityDashboardHome size={18} />
-            {hubLabel}
-          </button>
-          <button className={activeView === "calendar" ? "active" : ""} onClick={() => switchView("calendar")}>
-            <ClarityCalendar size={18} />{t("Calendar")}</button>
-          <button className={activeView === "clients" ? "active" : ""} onClick={() => switchView("clients")}>
-            <ClarityClientsPlayers size={18} />
-            {terms.customerPlural}
-          </button>
-          <button className={activeView === "players" ? "active" : ""} onClick={() => switchView("players")}>
-            <ClarityProfile size={18} />{t("{customerSingular} Profiles", { customerSingular: terms.customerSingular })}</button>
-          {billingWorkspaceEnabled && (
-            <button className={activeView === "sell" ? "active" : ""} onClick={() => switchView("sell")}>
-              <ClarityStore size={18} />{t("Sell")}</button>
-          )}
-          {billingWorkspaceEnabled && (
-            <button className={activeView === "billing" ? "active" : ""} onClick={() => switchView("billing")}>
-              <ClarityInvoices size={18} />{t("Billing")}</button>
-          )}
-          <button className={activeView === "settings" ? "active" : ""} onClick={() => switchView("settings")}>
-            <ClaritySettings size={18} />{t("Settings")}</button>
-          <button className="nav-logout" onClick={handleAdminLogout}>
-            <LogOut size={18} />{t("Logout")}</button>
-        </nav>
-      </aside>
-      )}
+      <nav className="side-nav" aria-label={t("Admin sections")}>
+        {/* Home, and first. The workspaces below it — Clients, Player
+            Profiles, Video — are whole screens rather than sections, so they
+            are the one thing the coach profile cannot open over itself. This
+            is the way back from them, in the one place that is on screen in
+            every view. */}
+        <button
+          className={`nav-home${activeView === "profile" ? " active" : ""}`}
+          onClick={() => switchView("profile")}
+        >
+          <ClarityDashboardHome size={18} />
+          {hubLabel}
+        </button>
+        <button className={activeView === "calendar" ? "active" : ""} onClick={() => switchView("calendar")}>
+          <ClarityCalendar size={18} />{t("Calendar")}</button>
+        <button className={activeView === "clients" ? "active" : ""} onClick={() => switchView("clients")}>
+          <ClarityClientsPlayers size={18} />
+          {terms.customerPlural}
+        </button>
+        <button className={activeView === "players" ? "active" : ""} onClick={() => switchView("players")}>
+          <ClarityProfile size={18} />{t("{customerSingular} Profiles", { customerSingular: terms.customerSingular })}</button>
+        {billingWorkspaceEnabled && (
+          <button className={activeView === "sell" ? "active" : ""} onClick={() => switchView("sell")}>
+            <ClarityStore size={18} />{t("Sell")}</button>
+        )}
+        {billingWorkspaceEnabled && (
+          <button className={activeView === "billing" ? "active" : ""} onClick={() => switchView("billing")}>
+            <ClarityInvoices size={18} />{t("Billing")}</button>
+        )}
+        <button className={activeView === "settings" ? "active" : ""} onClick={() => switchView("settings")}>
+          <ClaritySettings size={18} />{t("Settings")}</button>
+        <button className="nav-logout" onClick={handleAdminLogout}>
+          <LogOut size={18} />{t("Logout")}</button>
+      </nav>
+    </aside>
 
       <main className="main-panel">
         {/* Video analysis is the one destination that brings its own header
             and its own way back, so the global one would sit on top of it. */}
-        {!isEmbedMode && activeView !== "video" && (
+        {activeView !== "video" && (
         <header className="topbar">
           <div>
             <h1>{pageHeading.title}</h1>
@@ -25423,7 +24064,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         </header>
         )}
 
-        {!isEmbedMode && (adminWorkspaceLoading || adminWorkspaceFailed) && (
+        {(adminWorkspaceLoading || adminWorkspaceFailed) && (
         <section className="workspace">
           {adminWorkspaceFailed ? (
             <div className="empty-panel compact" role="alert">
@@ -25444,7 +24085,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         {/* Fixed to the corner rather than stacked under the calendar: it is a
             developer tool that is shut almost all of the time, and the summary
             bar for it was costing every admin a strip of the page. */}
-        {!isEmbedMode && adminWorkspaceReady && activeView === "calendar" && isAdminUser && (
+        {adminWorkspaceReady && activeView === "calendar" && isAdminUser && (
         <section className={`developer-diagnostics ${diagnosticsOpen ? "is-open" : ""}`}>
           <button
             className="developer-diagnostics-launcher"
@@ -25560,7 +24201,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         </section>
         )}
 
-        {!isEmbedMode && adminWorkspaceReady && activeView === "calendar" && (
+        {adminWorkspaceReady && activeView === "calendar" && (
         <div
           ref={dockRef}
           className={`appointment-dock ${dockBookings.length || flyingBooking ? "has-tiles" : ""} ${
@@ -25641,7 +24282,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         </div>
         )}
 
-        {!isEmbedMode && adminWorkspaceReady && activeView === "calendar" && (
+        {adminWorkspaceReady && activeView === "calendar" && (
         <section
           className={`workspace ${pointerSession?.mode === "place" || activeDockBooking ? "placing-from-dock" : ""}`}
         >
@@ -25915,7 +24556,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
                   // Day view draws one day; the rest are not on screen at all.
                   if (calendarDayColumns[item.day]?.hidden) return null;
                   const service = itemService(item, services);
-                  const resolvedItemCoachId = resolvedCalendarItemCoachId(item, service, coachProfiles, coachAccount);
+                  const resolvedItemCoachId = resolvedCalendarItemCoachId(item, service, coachProfiles);
                   const activeDraft =
                     draft && (draft.mode === "move" || draft.mode === "resize") && draft.itemId === item.id
                       ? draft
@@ -26429,7 +25070,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         </section>
         )}
 
-        {!isEmbedMode && adminWorkspaceReady && activeView === "calendar" && floatingDrag && floatingItem?.kind === "appointment" && (
+        {adminWorkspaceReady && activeView === "calendar" && floatingDrag && floatingItem?.kind === "appointment" && (
           <article
             className="calendar-item appointment floating-drag-tile"
             aria-hidden="true"
@@ -26451,7 +25092,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           </article>
         )}
 
-        {!isEmbedMode && adminWorkspaceReady && activeView === "calendar" && calendarHover && !pointerSession && (
+        {adminWorkspaceReady && activeView === "calendar" && calendarHover && !pointerSession && (
           <aside
             className="calendar-hover-card"
             style={{ left: calendarHover.x, top: calendarHover.y }}
@@ -26490,7 +25131,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           </aside>
         )}
 
-        {!isEmbedMode && adminWorkspaceReady && activeView === "clients" && (
+        {adminWorkspaceReady && activeView === "clients" && (
           <Suspense fallback={<Loading size="panel" what={t("clients")} />}>
             <ClientsPanel
               clients={clients}
@@ -26520,7 +25161,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           </Suspense>
         )}
 
-        {!isEmbedMode && adminWorkspaceReady && activeView === "players" && (
+        {adminWorkspaceReady && activeView === "players" && (
           <section className="module-page player-profiles-page">
             <div className="player-profiles-toolbar">
               <div className="player-profiles-heading">
@@ -27968,7 +26609,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           </section>
         )}
 
-        {!isEmbedMode && adminWorkspaceReady && showPlayerAddDialog && (
+        {adminWorkspaceReady && showPlayerAddDialog && (
           <div
             className="player-add-overlay"
             role="dialog"
@@ -28061,7 +26702,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           </div>
         )}
 
-        {!isEmbedMode && adminWorkspaceReady && activeView === "video" && (
+        {adminWorkspaceReady && activeView === "video" && (
           <section className="module-page video-analysis-page-host">
             <Suspense fallback={<Loading size="panel" what={t("video analysis")} />}>
               <VideoAnalysisPage
@@ -28094,7 +26735,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           </section>
         )}
 
-        {!isEmbedMode && adminWorkspaceReady && activeView === "sell" && (
+        {adminWorkspaceReady && activeView === "sell" && (
           <Suspense fallback={<Loading size="panel" what={t("the till")} />}>
             <SellScreen
               currency={invoiceSettings.currency}
@@ -28119,7 +26760,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           </Suspense>
         )}
 
-        {!isEmbedMode && adminWorkspaceReady && (activeView === "billing" || workspaceOverlay?.kind === "billing") && (
+        {adminWorkspaceReady && (activeView === "billing" || workspaceOverlay?.kind === "billing") && (
           <WorkspaceSurface
             overlay={workspaceOverlay?.kind === "billing"}
             title={workspaceOverlay?.title ?? ""}
@@ -30958,609 +29599,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           </WorkspaceSurface>
         )}
 
-        {isEmbedMode && activeView === "booking" && (
-          <section className={`public-booking booking-theme-${bookingCardScheme} module-page`}>
-            {/* No back control here: booking renders inside the Player
-                Terminal, and the terminal's own navigation owns the way out. */}
-            {isPlayerBooking && playerBookingIdentity && (
-              <div className="booking-player-bar">
-                <span className="booking-player-identity">{t("Booking as")}{" "}<strong>{playerBookingIdentity.name || playerBookingIdentity.email}</strong>
-                </span>
-              </div>
-            )}
-            <div className={`booking-brand ${showBookingBrandLogo ? "" : "booking-brand-subtle"}`}>
-              {showBookingBrandLogo && brandSettings.logoPreview ? (
-                <img src={brandSettings.logoPreview} alt={`${bookingBrandName} logo`} />
-              ) : showBookingBrandLogo ? (
-                <>
-                  <strong>{bookingBrandPrimary.toUpperCase()}</strong>
-                  {bookingBrandSecondary && <span>{bookingBrandSecondary.toUpperCase()}</span>}
-                </>
-              ) : (
-                <strong>{bookingBrandName}</strong>
-              )}
-              <em>{coachAccount.venueShortName}</em>
-            </div>
-
-            <div className="booking-toolbar" role="tablist" aria-label={t("Booking action")}>
-              <button
-                className={`booking-hero-action ${bookingMode === "book" ? "active" : ""}`}
-                onClick={() => changeBookingMode("book")}
-                type="button"
-              >
-                <ClarityCalendar size={16} />
-                <span>{t("Book a lesson")}</span>
-              </button>
-              {/* A signed-in player is not asked to sign in again: the same
-                  button goes straight to their existing bookings. */}
-              <button
-                className={`booking-login-trigger ${bookingMode === "reschedule" ? "active" : ""}`}
-                onClick={() => changeBookingMode("reschedule", !isPlayerBooking)}
-                type="button"
-              >
-                <ClarityAccessPermissions size={14} />
-                <span>{isPlayerBooking ? t("My bookings") : t("Sign in")}</span>
-              </button>
-            </div>
-
-            {bookingConfirmation ? (
-              <div className="booking-confirmed">
-                <span>
-                  {bookingConfirmation.kind === "booking"
-                    ? t("Appointment Confirmed")
-                    : bookingConfirmation.kind === "cancelled"
-                      ? t("Booking Cancelled")
-                      : t("Appointment Updated")}
-                </span>
-                <h2>
-                  {bookingConfirmation.kind === "booking"
-                    ? t("Booking confirmed")
-                    : bookingConfirmation.kind === "cancelled"
-                      ? t("Cancellation confirmed")
-                      : t("Reschedule confirmed")}
-                </h2>
-                <div className="booking-confirmed-summary">
-                  <strong>{bookingConfirmation.service}</strong>
-                  <em>
-                    {bookingConfirmation.dayLabel}, {bookingConfirmation.timeLabel}
-                  </em>
-                  <p>{bookingLocationDisplay(bookingConfirmation.location ?? selectedBookingLocation)}</p>
-                </div>
-                {bookingConfirmation.notifications.some((result) => result.channel === "client") && (
-                  <div className="email-status-list">
-                    {bookingConfirmation.notifications
-                      .filter((result) => result.channel === "client")
-                      .map((result, index) => {
-                        const tone = emailResultTone(result);
-                        return (
-                          <div className={`email-status ${tone}`} key={`client-${index}`}>
-                            {tone === "sent" ? <Check size={17} /> : tone === "failed" ? <X size={17} /> : <ClarityEmail size={17} />}
-                            <span>{t("Client email:")}{" "}{tone === "sent" ? t("Email Sent") : tone}
-                              {result.recipient ? ` to ${result.recipient}` : ""}
-                              {result.reason || result.error ? ` · ${(result.reason || result.error || "").replaceAll("_", " ")}` : ""}
-                            </span>
-                          </div>
-                        );
-                      })}
-                  </div>
-                )}
-                {bookingConfirmation.notice && (
-                  <div className="email-status pending">
-                    <ClarityEmail size={17} />
-                    <span>{bookingConfirmation.notice}</span>
-                  </div>
-                )}
-                {bookingConfirmation.kind !== "cancelled" && (
-                  <div className="calendar-add-actions">
-                    <a className="outline-button" href={googleCalendarUrl(bookingConfirmation)} target="_blank" rel="noreferrer">
-                      <ClarityCalendar size={16} />{t("Google Calendar")}</a>
-                    <button className="outline-button" onClick={() => downloadAppleCalendarInvite(bookingConfirmation)} type="button">
-                      <Download size={16} />{t("Apple Calendar")}</button>
-                    {bookingLoginUrl && (
-                      <a className="outline-button" href={bookingLoginUrl}>
-                        <ClarityAccessPermissions size={16} />{t("Manage / Reschedule")}</a>
-                    )}
-                  </div>
-                )}
-                <button
-                  className="primary-button confirm-booking"
-                  onClick={startAnotherPublicBooking}
-                  type="button"
-                >
-                  {bookingConfirmation.kind === "cancelled" ? t("Back to booking") : t("Book another lesson")}
-                </button>
-              </div>
-            ) : !publicBookingStateReady ? (
-              <div className="booking-columns booking-progressive-flow">
-                <div className="booking-card reschedule-link-state" role={publicBookingStateStatus === "error" ? "alert" : "status"}>
-                  <span>{t("Booking Calendar")}</span>
-                  <div className="booking-login-copy">
-                    <strong>
-                      {publicBookingStateStatus === "error" ? t("Booking unavailable") : loadingLabel()}
-                    </strong>
-                  </div>
-                </div>
-              </div>
-            ) : (
-            <div className="booking-columns booking-progressive-flow">
-              {bookingMode === "book" ? (
-                <>
-                  <section className={`booking-progressive-section ${isAppointmentSectionOpen ? "is-open" : ""} ${
-                    isAppointmentStepComplete ? "is-complete" : ""
-                  }`}>
-                    <button
-                      className="booking-progressive-title"
-                      onClick={() => setPublicBookingSection("appointment")}
-                      type="button"
-                    >
-                      <span className="booking-progressive-title-label">{t("1. Appointment")}{" "}<span className="booking-required-mark" aria-hidden="true">*</span>
-                      </span>
-                      <span className="booking-progressive-title-state">{isAppointmentStepComplete ? t("Done") : t("In progress")}</span>
-                    </button>
-                    {isAppointmentSectionOpen ? (
-                      <div className="booking-progressive-body">
-                        <div className="service-picker">
-                          {visiblePublicServices.length ? (
-                            visiblePublicServices.map((service) => (
-                              <button
-                                className={service.id === bookingServiceId ? "selected-service" : ""}
-                                key={service.id}
-                                onClick={() => handlePublicBookingServiceSelect(service.id)}
-                                type="button"
-                              >
-                                <strong>{service.name}</strong>
-                                <em>{t("{duration} minutes @ {service}", { duration: service.duration, service: servicePriceLabel(service) })}</em>
-                                {service.description && <small>{service.description}</small>}
-                                {(service.lessonNote || service.location) && <small>{service.lessonNote || service.location}</small>}
-                              </button>
-                            ))
-                          ) : (
-                            <p>{publicBookingEnabled ? t("No public lesson types are active.") : featureUnavailableMessage("publicBooking")}</p>
-                          )}
-                        </div>
-                      </div>
-                    ) : isAppointmentStepComplete ? (
-                      <button
-                      className="booking-summary booking-progressive-summary"
-                      onClick={() => setPublicBookingSection("appointment")}
-                      type="button"
-                    >
-                      <strong>{appointmentSummaryName}</strong>
-                      <span>{appointmentSummaryDuration}</span>
-                      {appointmentSummaryDescription ? <small>{appointmentSummaryDescription}</small> : null}
-                      {appointmentSummaryLessonNote ? <small>{appointmentSummaryLessonNote}</small> : null}
-                    </button>
-                  ) : (
-                      <button
-                        className="booking-progressive-summary booking-progressive-summary-empty"
-                        onClick={() => setPublicBookingSection("appointment")}
-                        type="button"
-                      >
-                        <strong>{t("Appointment not selected")}</strong>
-                        <span>{t("Pick a lesson to continue")}</span>
-                      </button>
-                    )}
-                  </section>
-
-                  <section className={`booking-progressive-section ${isDateTimeSectionOpen ? "is-open" : ""} ${
-                    isDateTimeStepComplete ? "is-complete" : ""
-                  }`}>
-                    <button
-                      className="booking-progressive-title"
-                      onClick={() => setPublicBookingSection("datetime")}
-                      type="button"
-                      disabled={!isAppointmentStepComplete}
-                    >
-                      <span className="booking-progressive-title-label">{t("2. Date & Time")}{" "}<span className="booking-required-mark" aria-hidden="true">*</span>
-                      </span>
-                      <span className="booking-progressive-title-state">
-                        {isDateTimeStepComplete ? t("Done") : isAppointmentStepComplete ? t("In progress") : t("Locked")}
-                      </span>
-                    </button>
-                    {isDateTimeSectionOpen ? (
-                      <div className="booking-progressive-body">
-                        <div className="booking-week-controls">
-                          <button onClick={() => moveWeek(-1)} type="button">
-                            <ArrowLeft size={15} />
-                            <span>{t("Previous week")}</span>
-                          </button>
-                          <strong>{weekTitle}</strong>
-                          <button onClick={() => moveWeek(1)} type="button">
-                            <span>{t("Next week")}</span>
-                            <ArrowRight size={15} />
-                          </button>
-                        </div>
-                        {selectedBookingService ? (
-                          <WeekSlots
-                            week={activeWeek}
-                            slots={visibleBookingSlots}
-                            placeholder={publicBookingSlotsLoading ? <Loading what={t("available times")} /> : null}
-                            dayLabel={(day) => weekDays[day]?.isToday ? `${weekDays[day].label} · ${t("Today")}` : weekDays[day]?.label ?? ""}
-                            slotLabel={(slot) =>
-                              isGroupBookingTimeSelection
-                                ? `${formatTime(slot.start)} · ${tn(slot.remainingSpots, "{count} spot left", "{count} spots left")}`
-                                : formatTime(slot.start)
-                            }
-                            isSelected={(slot) => bookingDaySelected && bookingDay === slot.day && bookingStart === slot.start}
-                            onSelect={handlePublicBookingTimeSelect}
-                            emptyLabel={isGroupBookingTimeSelection ? t("No upcoming group lesson times are available yet.") : t("No public times available this week.")}
-                          />
-                        ) : (
-                          <p>{t("Choose an appointment type first.")}</p>
-                        )}
-                      </div>
-                    ) : isDateTimeStepComplete ? (
-                      <button
-                      className="booking-summary booking-progressive-summary"
-                      onClick={() => setPublicBookingSection("datetime")}
-                      type="button"
-                    >
-                      <span>{dateTimeSummaryLine}</span>
-                      {dateTimeSummaryLocation ? <small>{dateTimeSummaryLocation}</small> : null}
-                    </button>
-                  ) : (
-                      <button
-                        className="booking-progressive-summary booking-progressive-summary-empty"
-                        onClick={() => setPublicBookingSection("datetime")}
-                        type="button"
-                        disabled={!isAppointmentStepComplete}
-                      >
-                        <strong>{isAppointmentStepComplete ? t("Date not selected") : t("Select appointment first")}</strong>
-                        <span>{isAppointmentStepComplete ? t("Choose day and time") : t("Complete appointment step")}</span>
-                      </button>
-                    )}
-                  </section>
-
-                  <section className={`booking-progressive-section ${isInformationSectionOpen ? "is-open" : ""} ${
-                    showCapturedCustomerDetailsSummary ? "is-complete" : ""
-                  }`}>
-                    <button
-                      className="booking-progressive-title"
-                      onClick={() => setPublicBookingSection("information")}
-                      type="button"
-                      disabled={!isDateTimeStepComplete}
-                    >
-                      <span className="booking-progressive-title-label">{t("3. Your Information")}</span>
-                      <span className="booking-progressive-title-state">
-              {showCapturedCustomerDetailsSummary ? t("Done") : isDateTimeStepComplete ? t("In progress") : t("Locked")}
-            </span>
-                    </button>
-                    {isInformationSectionOpen ? (
-                      <div className="booking-progressive-body">
-                        <div className="booking-form">
-                          <label className="booking-required-field w-name">
-                            <input
-                              value={bookingForm.firstName}
-                              aria-label={t("First name required")}
-                              aria-required="true"
-                              autoComplete="given-name"
-                              onChange={(event) => updateBookingForm("firstName", event.target.value)}
-                              onKeyDown={handleBookingMatchKeyDown}
-                              placeholder={t("First name")}
-                              required
-                            />
-                            <span className="booking-required-mark" aria-hidden="true">*</span>
-                          </label>
-                          <label className="booking-required-field w-name">
-                            <input
-                              value={bookingForm.lastName}
-                              aria-label={t("Last name required")}
-                              aria-required="true"
-                              autoComplete="family-name"
-                              onChange={(event) => updateBookingForm("lastName", event.target.value)}
-                              onKeyDown={handleBookingMatchKeyDown}
-                              placeholder={t("Last name")}
-                              required
-                            />
-                            <span className="booking-required-mark" aria-hidden="true">*</span>
-                          </label>
-                          <input
-                            className="w-name"
-                            value={bookingForm.phone}
-                            autoComplete="tel"
-                            inputMode="tel"
-                            onChange={(event) => updateBookingForm("phone", event.target.value)}
-                            onKeyDown={handleBookingMatchKeyDown}
-                            placeholder={t("Phone")}
-                            type="tel"
-                          />
-                          <label className="booking-required-field w-email">
-                            <input
-                              value={bookingForm.email}
-                              aria-label={t("Email required")}
-                              aria-required="true"
-                              autoComplete="email"
-                              inputMode="email"
-                              onChange={(event) => updateBookingForm("email", event.target.value)}
-                              onKeyDown={handleBookingMatchKeyDown}
-                              placeholder={t("Email")}
-                              required
-                              type="email"
-                            />
-                            <span className="booking-required-mark" aria-hidden="true">*</span>
-                          </label>
-                        </div>
-                        {bookingClientSuggestion && showBookingClientSuggestion && (
-                          <button
-                            className="client-match-prompt booking-client-match"
-                            onClick={() => applyBookingClient(bookingClientSuggestion)}
-                            type="button"
-                          >
-                            <ClarityProfile size={15} />
-                            <span>
-                              <strong>{bookingClientSuggestion.name}</strong>
-                              <em>{[bookingClientSuggestion.phone, bookingClientSuggestion.email].filter(Boolean).join(" · ")}</em>
-                            </span>
-                          </button>
-                        )}
-                        {customGroupAttendeePanel}
-                        {bookingSubmitState === "saving" && <div className="booking-save-progress" aria-label={t("Saving booking")} />}
-                        {bookingSubmitError && (
-                          <div className="email-status failed" role="alert">
-                            <X size={17} />
-                            <span>{bookingSubmitError}</span>
-                          </div>
-                        )}
-                        <button
-                          className="primary-button confirm-booking"
-                          disabled={!selectedBookingService || bookingStart === null || bookingSubmitState === "saving" || !isInformationStepComplete}
-                          onClick={confirmPublicBooking}
-                          type="button"
-                        >
-                          {bookingSubmitState === "saving" ? t("Confirming...") : t("Confirm Appointment")}
-                        </button>
-                      </div>
-                    ) : showCapturedCustomerDetailsSummary ? (
-                      <button
-                      className="booking-summary booking-progressive-summary"
-                      onClick={() => setPublicBookingSection("information")}
-                      type="button"
-                      disabled={!isDateTimeStepComplete}
-                    >
-                      <strong>{bookingCustomerSummaryName}</strong>
-                      <span>{bookingCustomerSummaryContact}</span>
-                    </button>
-                  ) : (
-                      <button
-                        className="booking-progressive-summary booking-progressive-summary-empty"
-                        onClick={() => setPublicBookingSection("information")}
-                        type="button"
-                        disabled={!isDateTimeStepComplete}
-                      >
-                        <strong>{isDateTimeStepComplete ? t("Customer details missing") : t("Complete time step first")}</strong>
-                        <span>{isDateTimeStepComplete ? t("Enter your details to confirm") : t("Lock a time first")}</span>
-                      </button>
-                    )}
-                  </section>
-                </>
-              ) : (
-                <>
-                  {rescheduleIdentityStep === "bookings" ? (
-                  <div className="booking-card">
-                    <span>{t("Your bookings")}</span>
-                    {rescheduleState === "checking" && !rescheduleMatches.length ? (
-                      <div className="booking-login-copy">
-                        <strong>{t("Loading your bookings…")}</strong>
-                      </div>
-                    ) : rescheduleMatches.length ? (
-                      <>
-                        <div className="booking-login-copy">
-                          <strong>{t("Choose the booking you want to move.")}</strong>
-                        </div>
-                        <div className="service-picker reschedule-list">
-                          {rescheduleMatches.map((match) => (
-                            <button
-                              className={selectedRescheduleId === match.id ? "selected-service" : ""}
-                              key={match.id}
-                              onClick={() => selectRescheduleMatch(match)}
-                              type="button"
-                            >
-                              <strong>{match.serviceName}</strong>
-                              <em>{describeRescheduleMatch(match)}</em>
-                              <small>{match.client}</small>
-                            </button>
-                          ))}
-                        </div>
-                      </>
-                    ) : (
-                      <div className="booking-login-copy">
-                        <strong>{t("Nothing booked to change yet.")}</strong>
-                        <em>{t("Book a lesson first and it will show up here.")}</em>
-                      </div>
-                    )}
-                  </div>
-                  ) : rescheduleIdentityStep === "sign-in" ? (
-                  <div className="booking-card">
-                    <span>{t("Sign In")}</span>
-                    <div className="booking-login-copy">
-                      <strong>{t("Sign in to see and change your bookings.")}</strong>
-                      <em>{t("Use the Clarity Golf login your coach set up for you.")}</em>
-                    </div>
-                    <div className="booking-form">
-                      <input
-                        value={bookingSignIn.email}
-                        autoComplete="email"
-                        inputMode="email"
-                        onChange={(event) =>
-                          setBookingSignIn((current) => ({ ...current, email: event.target.value }))
-                        }
-                        placeholder={t("Email")}
-                        type="email"
-                      />
-                      <input
-                        value={bookingSignIn.password}
-                        autoComplete="current-password"
-                        onChange={(event) =>
-                          setBookingSignIn((current) => ({ ...current, password: event.target.value }))
-                        }
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") void signInFromBooking();
-                        }}
-                        placeholder={t("Password")}
-                        type="password"
-                      />
-                    </div>
-                    {bookingSignInError && (
-                      <div className="booking-login-copy booking-login-error" role="alert">
-                        <em>{bookingSignInError}</em>
-                      </div>
-                    )}
-                    <button
-                      className="primary-button confirm-booking"
-                      disabled={bookingSignInState === "checking"}
-                      onClick={() => void signInFromBooking()}
-                      type="button"
-                    >
-                      {bookingSignInState === "checking" ? t("Signing in...") : t("Sign in")}
-                    </button>
-                    <div className="booking-login-copy">
-                      <em>{t("Booked as a guest? Use the manage-booking link in your confirmation email.")}</em>
-                    </div>
-                  </div>
-                  ) : (
-                    <div className="booking-card reschedule-link-state">
-                      <span>{t("Manage Booking")}</span>
-                      <div className="booking-login-copy">
-                        <strong>
-                          {selectedRescheduleMatch
-                            ? selectedRescheduleMatch.client
-                            : rescheduleState === "checking"
-                            ? t("Opening your booking...")
-                            : t("Booking link opened")}
-                        </strong>
-                        <em>
-                          {selectedRescheduleMatch
-                            ? describeRescheduleMatch(selectedRescheduleMatch)
-                            : t("Choose a new time below.")}
-                        </em>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="booking-card">
-                    <span>{t("New Date & Time")}</span>
-                    <div className="booking-week-controls">
-                      <button onClick={() => moveWeek(-1)} type="button">
-                        <ArrowLeft size={15} />
-                        <span>{t("Previous week")}</span>
-                      </button>
-                      <strong>{weekTitle}</strong>
-                      <button onClick={() => moveWeek(1)} type="button">
-                        <span>{t("Next week")}</span>
-                        <ArrowRight size={15} />
-                      </button>
-                    </div>
-                    <div className="booking-days">
-                      {weekDays.map((day, index) => (
-                        <button
-                          className={bookingDay === index ? "selected-day" : ""}
-                          disabled={!selectedRescheduleMatch}
-                          key={day.label}
-                          onClick={() => {
-                            setBookingDay(index);
-                            setBookingStart(null);
-                          }}
-                        >
-                          <strong>{day.short}</strong>
-                          <em>{day.date}</em>
-                        </button>
-                      ))}
-                    </div>
-                    <div className="time-slots">
-                      {selectedRescheduleMatch ? (
-                        publicBookingSlotsLoading ? (
-                          <Loading what={t("available times")} />
-                        ) : bookingSlots.length ? (
-                          bookingSlots.map((slot) => (
-                            <button
-                              className={bookingStart === slot.start ? "selected-time" : ""}
-                              key={`${slot.week}-${slot.day}-${slot.start}`}
-                              onClick={() => setBookingStart(slot.start)}
-                            >
-                              {formatTime(slot.start)}
-                            </button>
-                          ))
-                        ) : (
-                          <p>{t("No public times available for this day.")}</p>
-                        )
-                      ) : (
-                        <p>{t("Find your booking first, then choose a new time.")}</p>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="booking-card">
-                    <span>{t("Confirm Change")}</span>
-                    <div className="booking-summary">
-                      <strong>{selectedRescheduleMatch?.serviceName ?? t("No booking selected")}</strong>
-                      <span>
-                        {selectedRescheduleMatch
-                          ? t("Current: {selectedRescheduleMatch}", { selectedRescheduleMatch: describeRescheduleMatch(selectedRescheduleMatch) })
-                          : t("Use your original email and phone to find the booking.")}
-                      </span>
-                      <span>
-                        {bookingStart === null
-                          ? t("Choose a new time")
-                          : t("New: {label}, {bookingStart}", { label: weekDays[bookingDay].label, bookingStart: formatTime(bookingStart) })}
-                      </span>
-                    </div>
-                    <button
-                      className="primary-button confirm-booking"
-                      disabled={!selectedRescheduleMatch || bookingStart === null || rescheduleState === "saving"}
-                      onClick={confirmPublicReschedule}
-                      type="button"
-                    >
-                      {rescheduleState === "saving" ? t("Moving...") : t("Confirm Reschedule")}
-                    </button>
-                    <button
-                      className="danger-button public-cancel-booking"
-                      disabled={!selectedRescheduleMatch || rescheduleState === "saving"}
-                      onClick={confirmPublicCancellation}
-                      type="button"
-                    >
-                      {rescheduleState === "saving" ? t("Working...") : t("Cancel Booking")}
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-            )}
-
-            {!isEmbedMode && (
-              <div className="embed-panel">
-                <div className="embed-copy">
-                  <div>
-                    <span>{t("Squarespace Embed")}</span>
-                    <h2>{t("Booking widget iframe")}</h2>
-                  </div>
-                  <div className="embed-actions">
-                    <button className="outline-button" onClick={copyEmbedCode}>
-                      {copiedEmbed ? <Check size={16} /> : <Copy size={16} />}
-                      {copiedEmbed ? t("Copied") : t("Copy iframe")}
-                    </button>
-                    <a className="outline-button" href={bookingWidgetUrl} target="_blank" rel="noreferrer">
-                      <ExternalLink size={16} />{t("Open widget")}</a>
-                  </div>
-                </div>
-
-                <div className="embed-code">
-                  <ClarityAdmin size={18} />
-                  <code>{iframeCode}</code>
-                </div>
-
-                <div className="widget-preview">
-                  <div className="preview-bar">
-                    <strong>{t("Widget preview")}</strong>
-                    <span>{t("Same booking page, iframe mode")}</span>
-                  </div>
-                  <iframe src={bookingWidgetUrl} title={`${coachAccount.businessName} booking widget preview`} />
-                </div>
-              </div>
-            )}
-          </section>
-        )}
-
-        {!isEmbedMode && adminWorkspaceReady && activeView === "profile" && (
+        {adminWorkspaceReady && activeView === "profile" && (
           <section className="business-hub-page">
             <BusinessHubPanel
               profile={
@@ -31602,7 +29641,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
           </section>
         )}
 
-        {!isEmbedMode && adminWorkspaceReady && (activeView === "settings" || workspaceOverlay?.kind === "settings") && (
+        {adminWorkspaceReady && (activeView === "settings" || workspaceOverlay?.kind === "settings") && (
           <WorkspaceSurface
             overlay={workspaceOverlay?.kind === "settings"}
             title={workspaceOverlay?.title ?? ""}
@@ -33255,7 +31294,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         )}
       </main>
 
-      {!isEmbedMode && adminWorkspaceReady && activeView === "calendar" && selectedDetails && (
+      {adminWorkspaceReady && activeView === "calendar" && selectedDetails && (
         <div className="details-overlay" role="presentation" onPointerDown={closeCalendarDetails}>
           <aside
             className="details-panel details-modal"
@@ -33276,7 +31315,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         </div>
       )}
 
-      {!isEmbedMode && pendingService && pendingServiceAction && (
+      {pendingService && pendingServiceAction && (
         <div className="details-overlay" role="presentation" onPointerDown={closeServiceActionModal}>
           <aside
             className="details-panel details-modal service-delete-modal"
@@ -33316,7 +31355,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         </div>
       )}
 
-      {!isEmbedMode && clientMergeReview && (
+      {clientMergeReview && (
         <div className="details-overlay" role="presentation" onPointerDown={closeClientMergeReview}>
           <aside
             className="details-panel details-modal client-merge-modal"
@@ -33398,7 +31437,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         </div>
       )}
 
-      {!isEmbedMode && (selectedClient || isAddingClient) && (
+      {(selectedClient || isAddingClient) && (
         <div className="details-overlay" role="presentation" onPointerDown={closeClientModal}>
           <aside
             className="details-panel details-modal client-profile-modal"
@@ -33842,7 +31881,7 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
         </div>
       )}
 
-      {!isEmbedMode && posCheckout && (
+      {posCheckout && (
         <Suspense fallback={null}>
           <PosCheckoutModal
             context={posCheckout}
