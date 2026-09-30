@@ -5,6 +5,7 @@ import PublicSite, { type PublicPage } from "./modules/public-site/PublicSite";
 import { Loading } from "./modules/shared/Loading";
 import { fetchSession, guestSession, type Session } from "./modules/auth/session";
 import { isBookingEmbedMode, isPlayerBookingMode, isReviewShareMode, isVideoShareMode } from "./modules/shared/bookingHandoff";
+import { terminalCodeFromPath } from "./modules/clarity-terminal/terminalApi";
 import { lastVisitorWasCoach } from "./modules/shared/workspaceStorage";
 import { installOptixOriginFeedback } from "./optix-origin-feedback";
 import { installBoxAudit } from "./lib/boxAudit";
@@ -35,6 +36,7 @@ const PublicBookingManage = lazy(() => import("./modules/public-booking/PublicBo
 const PlayerPortal = lazy(() => import("./modules/player-portal/PlayerPortal"));
 const VideoSharePage = lazy(() => import("./modules/video-share/VideoSharePage"));
 const SwingReviewSharePage = lazy(() => import("./modules/review-share/SwingReviewSharePage"));
+const ClarityTerminalPage = lazy(() => import("./modules/clarity-terminal/ClarityTerminalPage"));
 // Not lazy: it is small, and a testing workspace that renders its warning a
 // beat after the workspace it warns about is a workspace someone acts in first.
 import SandboxBar from "./modules/sandbox/SandboxBar";
@@ -59,6 +61,9 @@ const videoShare = isVideoShareMode();
 // line above: the token is the credential, and a player who has never signed in
 // must not be stopped at a login screen on the way to their own review.
 const reviewShare = isReviewShareMode();
+// The camera computer in the bay, at /terminal/<code>. Nobody signs in on it:
+// the code is its credential, and the coach drives it from their laptop.
+const clarityTerminal = Boolean(terminalCodeFromPath());
 
 // Public verification/legal pages deliberately bypass authentication. Google,
 // a player, or anyone deciding whether to use Clarity must be able to read
@@ -83,7 +88,7 @@ const publicPage: PublicPage | null =
 // their workspace starts downloading now, alongside the session check, rather
 // than after it. The lazy import above reuses the same promise. A player or a
 // stranger never trips this: the hint is removed on logout.
-if (!publicPage && !publicBookingOnly && !videoShare && !reviewShare && lastVisitorWasCoach()) {
+if (!publicPage && !publicBookingOnly && !videoShare && !reviewShare && !clarityTerminal && lastVisitorWasCoach()) {
   void loadApp();
   // The client list too. It is the first thing Clients and Player Profiles
   // need, it is served by its own function, and nothing about the request
@@ -117,7 +122,7 @@ function Root() {
   useEffect(() => {
     // The share page never asks who is looking -- that is the whole point of
     // it -- so it must not make a session call either.
-    if (publicPage || publicBookingOnly || videoShare || reviewShare) return;
+    if (publicPage || publicBookingOnly || videoShare || reviewShare || clarityTerminal) return;
     let cancelled = false;
     void fetchSession().then((next) => {
       if (!cancelled) setSession(next);
@@ -149,6 +154,14 @@ function Root() {
 
   if (publicPage) {
     return <PublicSite page={publicPage} />;
+  }
+
+  if (clarityTerminal) {
+    return (
+      <Suspense fallback={<Loading size="screen" label="Clarity Terminal" />}>
+        <ClarityTerminalPage />
+      </Suspense>
+    );
   }
 
   if (videoShare) {

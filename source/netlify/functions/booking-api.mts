@@ -80,6 +80,8 @@ export const config: Config = {
     "/api/system-smoke",
     "/api/test-email",
     "/api/video-transfer/*",
+    "/api/camera-terminal",
+    "/api/camera-terminal/*",
     // Clarity's public API. Its own function: _shared/public-api/.
     "/api/v1",
     "/api/v1/*",

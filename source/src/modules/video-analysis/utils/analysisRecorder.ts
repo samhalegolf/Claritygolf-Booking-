@@ -30,8 +30,13 @@ export const getPreferredRecordingMimeType = () => {
     return "";
   }
   return (
+    // MP4 first: it plays everywhere a player might open it, older iPhones
+    // included, which WebM does not. Browsers disagree on how to spell H.264,
+    // so each spelling is asked for before settling for WebM.
     [
       "video/mp4;codecs=h264",
+      "video/mp4;codecs=avc1",
+      "video/mp4",
       "video/webm;codecs=vp9",
       "video/webm;codecs=vp8",
       "video/webm",

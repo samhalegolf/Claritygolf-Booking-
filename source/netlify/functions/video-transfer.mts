@@ -751,6 +751,130 @@ async function guestResidentBytes(accountId: string) {
   );
 }
 
+const terminalCodeHeaderName = "x-clarity-terminal-code";
+
+type TerminalTake = {
+  savedVideoId: string;
+  terminalId: string;
+  accountId: string;
+  playerId: string;
+  lessonId: string;
+  status: string;
+};
+
+/**
+ * A Clarity Terminal's credential is the code in its link. It buys exactly one
+ * thing here: uploading a take the coach started. The take row was written by
+ * the coach's Record press, so the terminal cannot pick the id it uploads
+ * under, the business it lands in, or the player it is filed under.
+ */
+async function readTerminalTake(req: Request, savedVideoId: string): Promise<TerminalTake | null> {
+  const code = cleanString(req.headers.get(terminalCodeHeaderName), "", 64).toLowerCase();
+  if (!code || !savedVideoId) return null;
+  const terminals = await supabase("camera_terminals", {
+    query: `select=id,account_id&code=eq.${encodeURIComponent(code)}&limit=1`,
+  }).catch(() => []);
+  const terminal = terminals[0];
+  if (!terminal) return null;
+  const takes = await supabase("camera_terminal_takes", {
+    query:
+      `select=saved_video_id,terminal_id,account_id,player_id,lesson_id,status` +
+      `&saved_video_id=eq.${encodeURIComponent(savedVideoId)}` +
+      `&terminal_id=eq.${encodeURIComponent(terminal.id)}` +
+      `&account_id=eq.${encodeURIComponent(terminal.account_id)}&limit=1`,
+  }).catch(() => []);
+  const take = takes[0];
+  if (!take) return null;
+  return {
+    savedVideoId: cleanString(take.saved_video_id, "", 160),
+    terminalId: cleanString(take.terminal_id, "", 80),
+    accountId: cleanString(take.account_id, "", 120),
+    playerId: cleanString(take.player_id, "", 160),
+    lessonId: cleanString(take.lesson_id, "", 160),
+    status: cleanString(take.status, "", 20),
+  };
+}
+
+/**
+ * The same request with the take's player and lesson written over whatever
+ * the terminal sent. Both the session and the finalize body carry them, and
+ * the finalize one is what the manifest -- and so the coach's import -- files
+ * the video under.
+ */
+async function requestForTake(req: Request, take: TerminalTake) {
+  const body = (await readJson(req)) as any;
+  const forced = { ...body, playerId: take.playerId, lessonId: take.lessonId || undefined };
+  return new Request(req.url, {
+    method: req.method,
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(forced),
+  });
+}
+
+async function handleTerminalVideoRoute(
+  req: Request,
+  sub: string[],
+  diagnostics: ProviderDiagnostics,
+) {
+  assertClarityCloudServerConfigured(req);
+  const savedVideoId = cleanString(sub[0], "", 160);
+  const take = await readTerminalTake(req, savedVideoId);
+  if (!take) return json({ error: "unauthorized", message: "This terminal cannot upload that video." }, 401);
+  if (take.status === "ready" && sub[1] !== "session") {
+    return json({ error: "conflict", message: "That take is already in Clarity Cloud." }, 409);
+  }
+  const accountId = take.accountId;
+  const settings = await readSettings(accountId);
+  const owned = await readTransferSession(accountId, savedVideoId);
+  // Only ever the coach's own kind of upload: a terminal is the coach's camera.
+  if (owned && owned.direction !== "coach-device") {
+    return json({ error: "not_found", message: "Video not found." }, 404);
+  }
+
+  if (req.method === "POST" && sub[1] === "session") {
+    const accessToken = await ensureDriveReady(accountId, diagnostics);
+    return await handleSession(
+      await requestForTake(req, take),
+      accountId,
+      accessToken,
+      settings,
+      googleDriveProviderAdapter(accessToken, settings, diagnostics),
+      savedVideoId,
+      diagnostics,
+    );
+  }
+  if (!owned) return json({ error: "not_found", message: "Video not found." }, 404);
+  if (req.method === "PUT" && (sub[1] === "chunk" || sub[1] === "upload")) {
+    return await handleChunk(req, accountId, savedVideoId, googleDriveProviderAdapter("", settings, diagnostics));
+  }
+  if (req.method === "POST" && sub[1] === "finalize") {
+    const accessToken = await ensureDriveReady(accountId, diagnostics);
+    const response = await handleFinalize(
+      await requestForTake(req, take),
+      accountId,
+      accessToken,
+      googleDriveProviderAdapter(accessToken, settings, diagnostics),
+      savedVideoId,
+    );
+    // The coach's laptop is watching this row to know when to bring the
+    // swing in. handleFinalize only answers ok once the bytes are verified.
+    if (response.ok) {
+      await supabase("camera_terminal_takes", {
+        method: "PATCH",
+        query: `saved_video_id=eq.${encodeURIComponent(savedVideoId)}&terminal_id=eq.${encodeURIComponent(take.terminalId)}`,
+        body: { status: "ready", message: null, updated_at: new Date().toISOString() },
+      }).catch((error) => {
+        console.warn("video_transfer:terminal_take_ready_failed", redactForLogs(error?.message || error));
+      });
+    }
+    return response;
+  }
+  if (req.method === "DELETE" && (sub[1] === "session" || !sub[1])) {
+    return await updateSessionStatus(accountId, savedVideoId, "cancelled", "Upload cancelled on the terminal.");
+  }
+  return json({ error: "not_found", message: "Terminal video route not found." }, 404);
+}
+
 function playerVideoBase64(value: string) {
   try {
     return Buffer.from(String(value ?? ""), "utf8").toString("base64");
@@ -4181,6 +4305,12 @@ async function routeVideoTransferRequest(
       const guestScope = await readGuestScope(req);
       if (!guestScope) return json({ error: "unauthorized", message: "Guest session required." }, 401);
       return await handleGuestVideoRoute(req, guestScope, parts.slice(1), diagnostics);
+    }
+
+    // A Clarity Terminal uploading a take the coach started. Its own
+    // credential again, checked per take, ahead of the admin gate.
+    if (parts[0] === "terminal") {
+      return await handleTerminalVideoRoute(req, parts.slice(1), diagnostics);
     }
 
     // The coach's emailed no-login link. Unauthenticated by design -- the token
