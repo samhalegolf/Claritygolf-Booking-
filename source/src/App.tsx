@@ -194,7 +194,6 @@ import {
   BASE_WEEK_START,
   BOOKING_EMBED_PARAM,
   BOOKING_EMBED_VALUE,
-  BOOKING_LOGIN_STORAGE_KEY,
   PUBLIC_BOOKING_HOST,
   isBookingEmbedMode,
   playerBookingUrl,
@@ -1658,8 +1657,6 @@ type RescheduleLookupCredentials = RescheduleForm & {
   appointmentId?: string;
 };
 
-type SavedBookingLogin = BookingForm;
-
 type ClientProfileTab = "bookings" | "notes" | "notifications" | "transactions" | "passes";
 
 // One row of a client's money history: a counter/Optix sale, or an invoice
@@ -2847,24 +2844,6 @@ function getInitialRescheduleLogin(): SavedRescheduleLogin | null {
     const parsed = JSON.parse(stored) as SavedRescheduleLogin;
     if (!parsed?.email || !parsed?.phone) return null;
     return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function getInitialBookingLogin(): SavedBookingLogin | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const stored = window.localStorage.getItem(BOOKING_LOGIN_STORAGE_KEY);
-    if (!stored) return null;
-    const parsed = JSON.parse(stored) as SavedBookingLogin;
-    if (!parsed?.firstName || !parsed?.lastName || !parsed?.email) return null;
-    return {
-      firstName: parsed.firstName,
-      lastName: parsed.lastName,
-      phone: parsed.phone || "",
-      email: parsed.email,
-    };
   } catch {
     return null;
   }
@@ -6372,17 +6351,13 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
   const [bookingDaySelected, setBookingDaySelected] = useState(false);
   const [bookingStart, setBookingStart] = useState<number | null>(null);
   const [openPublicBookingSection, setOpenPublicBookingSection] = useState<PublicBookingSection>("appointment");
-  const [bookingForm, setBookingForm] = useState<BookingForm>(
-    // A player's details come from their session, not from whatever this
-    // browser happens to have cached. The effect below fills them in.
-    () =>
-      (isPlayerBooking ? null : getInitialBookingLogin()) ?? {
-        firstName: "",
-        lastName: "",
-        phone: "",
-        email: "",
-      },
-  );
+  // A player's details come from their session. The effect below fills them in.
+  const [bookingForm, setBookingForm] = useState<BookingForm>({
+    firstName: "",
+    lastName: "",
+    phone: "",
+    email: "",
+  });
   const [playerBookingIdentity, setPlayerBookingIdentity] = useState<{ name: string; email: string } | null>(null);
   const [bookingSignIn, setBookingSignIn] = useState({ email: "", password: "" });
   const [bookingSignInState, setBookingSignInState] = useState<"idle" | "checking">("idle");
@@ -8129,24 +8104,6 @@ function App({ onSessionLost, session: entrySession, bookingEntry = "public" }: 
       window.localStorage.removeItem(RESCHEDULE_LOGIN_STORAGE_KEY);
     }
   }, [bookingMode, isPlayerBooking, rescheduleForm.email, rescheduleForm.phone, selectedRescheduleId]);
-
-  useEffect(() => {
-    // Player booking has no use for the cached copy: the session is the
-    // identity, and there is no reason to leave the player's details sitting in
-    // this browser once they can be asked for properly.
-    if (typeof window === "undefined" || !isEmbedMode || isPlayerBooking) return;
-    const hasBookingDetails = Boolean(bookingForm.firstName.trim() && bookingForm.lastName.trim() && bookingForm.email.trim());
-    if (!hasBookingDetails) return;
-    window.localStorage.setItem(
-      BOOKING_LOGIN_STORAGE_KEY,
-      JSON.stringify({
-        firstName: bookingForm.firstName.trim(),
-        lastName: bookingForm.lastName.trim(),
-        phone: bookingForm.phone.trim(),
-        email: bookingForm.email.trim(),
-      }),
-    );
-  }, [bookingForm.email, bookingForm.firstName, bookingForm.lastName, bookingForm.phone, isEmbedMode, isPlayerBooking]);
 
   // A signed-in player never asks to find their own bookings -- the session
   // already knows the details the old lookup form was collecting, so the

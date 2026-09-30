@@ -63,13 +63,6 @@ export function isReviewShareMode(): boolean {
 export const PUBLIC_BOOKING_HOST = "book.claritygolf.app";
 
 /**
- * Where the portal leaves the player's details for the booking embed to read
- * on mount. Same-origin localStorage rather than a query string, so personal
- * data never appears in a URL, a browser history entry, or a server log.
- */
-export const BOOKING_LOGIN_STORAGE_KEY = "clarity-booking-login";
-
-/**
  * The anchor Monday. `calendar_items` store `week` as an absolute offset from
  * this date, so turning a booking's (week, day, start) back into a real date
  * requires the same anchor everywhere.
