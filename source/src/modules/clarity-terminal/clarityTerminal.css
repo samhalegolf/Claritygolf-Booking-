@@ -336,6 +336,15 @@
   gap: 8px;
 }
 
+.terminal-online {
+  font-size: 0.85rem;
+  color: var(--c-text-soft);
+}
+
+.terminal-online.is-online {
+  color: var(--c-success-text);
+}
+
 .remote-camera-links code {
   flex: 1 1 220px;
   overflow-wrap: anywhere;
