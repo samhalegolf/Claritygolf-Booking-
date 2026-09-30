@@ -1156,7 +1156,9 @@ type View =
   | "profile"
   | "settings"
   | "video"
-  | "players";
+  | "players"
+  // Staff app only: the overhead-camera putting gate (native plugin).
+  | "putting-lab";
 type BillingSection =
   | "none"
   | "dashboard"
@@ -2710,6 +2712,8 @@ function sectionTitle(view: View, terms: BusinessTerminology = terminologyFor())
       return t("Video Analysis");
     case "players":
       return t("{customerSingular} Profiles", { customerSingular: terms.customerSingular });
+    case "putting-lab":
+      return t("Putting Lab");
     case "profile":
       return t("Business Hub");
     default:
@@ -24044,6 +24048,10 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
         </button>
         <button className={activeView === "players" ? "active" : ""} onClick={() => switchView("players")}>
           <ClarityProfile size={18} />{t("{customerSingular} Profiles", { customerSingular: terms.customerSingular })}</button>
+        {nativePuttingLab() && (
+          <button className={activeView === "putting-lab" ? "active" : ""} onClick={() => switchView("putting-lab")}>
+            <ClarityAssessments size={18} />{t("Putting Lab")}</button>
+        )}
         {billingWorkspaceEnabled && (
           <button className={activeView === "sell" ? "active" : ""} onClick={() => switchView("sell")}>
             <ClarityStore size={18} />{t("Sell")}</button>
@@ -26752,13 +26760,16 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
           </div>
         )}
 
+        {adminWorkspaceReady && activeView === "putting-lab" && nativePuttingLab() && (
+          <section className="module-page">
+            <Suspense fallback={<Loading size="panel" what={t("Putting Lab")} />}>
+              <PuttingLabLauncher />
+            </Suspense>
+          </section>
+        )}
+
         {adminWorkspaceReady && activeView === "video" && (
           <section className="module-page video-analysis-page-host">
-            {nativePuttingLab() && (
-              <Suspense fallback={null}>
-                <PuttingLabLauncher />
-              </Suspense>
-            )}
             <Suspense fallback={<Loading size="panel" what={t("video analysis")} />}>
               <VideoAnalysisPage
                 playerId={videoContext?.playerId}

@@ -20,7 +20,7 @@ native/clarity-putting-lab/
   ios/Tests/PuttingLabCoreTests/    synthetic-camera tests of the whole pipeline
 ../../public/putting-lab/calibration-template-a3.svg   the sheet coaches print
 ../../src/native/clarityPuttingLab.ts                   the page's typed bridge
-../../src/modules/putting-lab/PuttingLabLauncher.tsx    the "Open Putting Lab" strip
+../../src/modules/putting-lab/PuttingLabLauncher.tsx    the Putting Lab page (main menu, staff app only)
 ```
 
 **PuttingLabCore** knows nothing about cameras or screens. Feed it luma frames
