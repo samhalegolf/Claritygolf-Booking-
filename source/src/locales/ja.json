@@ -290,6 +290,8 @@
   "Choose a day": "日付を選択",
   "The lesson was moved, but its bay was not: {error}": "レッスンは移動しましたが、打席は移動できませんでした：{error}",
   "The lesson was moved, but its bay was not. Use Book bay on the booking card.": "レッスンは移動しましたが、打席は移動できませんでした。予約カードの「打席を予約」を使用してください。",
+  "The lesson was booked, but its bay was not: {error}": "レッスンは予約されましたが、ベイは予約されませんでした: {error}",
+  "The lesson was booked, but its bay was not. Use Book bay on the booking card.": "レッスンは予約されましたが、ベイは予約されませんでした。予約カードの「ベイを予約」を使ってください。",
   "Admin login expired. Sign in again before saving calendar changes.": "管理者ログインの有効期限が切れました。カレンダーの変更を保存する前に再度サインインしてください。",
   "Calendar change could not be saved.": "カレンダーの変更を保存できませんでした。",
   "Could not undo that change.": "変更を元に戻せませんでした。",

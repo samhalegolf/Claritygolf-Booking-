@@ -33,8 +33,12 @@ const SLOW_AFTER_MS = 8000;
 
 type Props = {
   calendarItemId: string;
-  /** Paints the calendar's orange outline without waiting for a hydration. */
-  onBooked: (resourceId: string) => void;
+  /**
+   * Every status read reports whether the lesson holds a bay, so the
+   * calendar's orange outline follows what the card says without waiting for
+   * a reload — including a bay held in the background when the lesson was made.
+   */
+  onBayStatus: (calendarItemId: string, bayBooked: boolean, resourceId: string) => void;
 };
 
 type SystemState = { provider: string; connected: boolean };
@@ -113,7 +117,7 @@ function holdsSomething(record: ResourceStatusRecord | null) {
   return Boolean(record && record.hasSyncRow && record.syncStatus && record.syncStatus !== "none");
 }
 
-export default function BookingResourcesPanel({ calendarItemId, onBooked }: Props) {
+export default function BookingResourcesPanel({ calendarItemId, onBayStatus }: Props) {
   const [load, setLoad] = useState<LoadState>({ kind: "loading" });
   const [attempt, setAttempt] = useState<ResourceOutcome | null>(null);
   const [busy, setBusy] = useState(false);
@@ -122,6 +126,10 @@ export default function BookingResourcesPanel({ calendarItemId, onBooked }: Prop
   // arrives after the coach has moved on must not be shown against the new
   // one. Every state write below is gated on this still being the same lesson.
   const shownId = useRef(calendarItemId);
+  // Held in a ref so a parent re-render (which a repaint itself causes) never
+  // looks like a reason to read the status again.
+  const reportBayStatus = useRef(onBayStatus);
+  reportBayStatus.current = onBayStatus;
 
   const readStatus = useCallback(async (id: string) => {
     try {
@@ -142,6 +150,9 @@ export default function BookingResourcesPanel({ calendarItemId, onBooked }: Prop
       }
       const system = payload.system && typeof payload.system === "object" ? (payload.system as SystemState) : null;
       if (system) rememberedSystem = system;
+      if (typeof payload.bayBooked === "boolean") {
+        reportBayStatus.current(id, payload.bayBooked, String(payload.record?.resourceId || ""));
+      }
       setLoad({ kind: "ready", record: (payload.record || null) as ResourceStatusRecord | null, system });
     } catch (error) {
       if (shownId.current !== id) return;
@@ -151,6 +162,14 @@ export default function BookingResourcesPanel({ calendarItemId, onBooked }: Prop
       });
     }
   }, []);
+
+  // The coach asked for a fresh answer, so the last attempt's message no longer
+  // gets to sit over it, and the card shows it is checking.
+  function reloadStatus() {
+    setAttempt(null);
+    setLoad({ kind: "loading" });
+    void readStatus(calendarItemId);
+  }
 
   useEffect(() => {
     shownId.current = calendarItemId;
@@ -194,9 +213,6 @@ export default function BookingResourcesPanel({ calendarItemId, onBooked }: Prop
       });
       const payload = await response.json().catch(() => ({}));
       result = describeBookAttempt({ kind: "response", status: response.status, payload }, system);
-      if (payload?.ok === true && shownId.current === id) {
-        onBooked(String(payload?.result?.resourceId || ""));
-      }
     } catch (error) {
       result = describeBookAttempt({ kind: "unreachable", error }, system);
     }
@@ -204,8 +220,8 @@ export default function BookingResourcesPanel({ calendarItemId, onBooked }: Prop
     setBusy(false);
     setSlow(false);
     // The attempt's own answer is what stays on screen. Re-reading the row
-    // afterwards keeps the times and ids below it current, but it does not get
-    // to overwrite what just happened.
+    // afterwards keeps the times and ids below it current and paints the
+    // calendar's outline, but it does not get to overwrite what just happened.
     setAttempt(result);
     void readStatus(id);
   }
@@ -273,7 +289,7 @@ export default function BookingResourcesPanel({ calendarItemId, onBooked }: Prop
               {busy ? t("Booking bay…") : bookLabel}
             </button>
           ) : null}
-          <button className="outline-button" type="button" onClick={() => void readStatus(calendarItemId)} disabled={busy}>
+          <button className="outline-button" type="button" onClick={reloadStatus} disabled={busy || load.kind === "loading"}>
             <RefreshCw size={16} />{t("Reload status")}</button>
         </div>
       </div>
