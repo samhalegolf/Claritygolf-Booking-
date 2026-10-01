@@ -331,7 +331,6 @@ import type {
   TouchEvent as ReactTouchEvent,
 } from "react";
 import { t, tn } from "./lib/i18n";
-import { nativePuttingLab } from "./native/clarityPuttingLab";
 
 // Video analysis and voice notes are heavy, coach-only features (together well
 // over a third of the client bundle). They never render on the public booking
@@ -341,9 +340,9 @@ import { nativePuttingLab } from "./native/clarityPuttingLab";
 const VideoAnalysisPage = lazy(() =>
   import("./modules/video-analysis/VideoAnalysisPage").then((module) => ({ default: module.VideoAnalysisPage })),
 );
-// Staff app only: the Putting Lab is a native plugin, so the launcher is not
-// even fetched in a browser (nativePuttingLab() is null there).
-const PuttingLabLauncher = lazy(() => import("./modules/putting-lab/PuttingLabLauncher"));
+// The overhead-camera putting gate. Camera, worker and engine load only when a
+// coach opens it.
+const PuttingLabPage = lazy(() => import("./modules/putting-lab/PuttingLabPage"));
 const ClarityVoiceTextPanel = lazy(() =>
   import("./modules/clarity-voice/ClarityVoiceTextPanel").then((module) => ({ default: module.ClarityVoiceTextPanel })),
 );
@@ -1157,7 +1156,7 @@ type View =
   | "settings"
   | "video"
   | "players"
-  // Staff app only: the overhead-camera putting gate (native plugin).
+  // The overhead-camera putting gate.
   | "putting-lab";
 type BillingSection =
   | "none"
@@ -24061,10 +24060,8 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
         </button>
         <button className={activeView === "players" ? "active" : ""} onClick={() => switchView("players")}>
           <ClarityProfile size={18} />{t("{customerSingular} Profiles", { customerSingular: terms.customerSingular })}</button>
-        {nativePuttingLab() && (
-          <button className={activeView === "putting-lab" ? "active" : ""} onClick={() => switchView("putting-lab")}>
-            <ClarityAssessments size={18} />{t("Putting Lab")}</button>
-        )}
+        <button className={activeView === "putting-lab" ? "active" : ""} onClick={() => switchView("putting-lab")}>
+          <ClarityAssessments size={18} />{t("Putting Lab")}</button>
         {billingWorkspaceEnabled && (
           <button className={activeView === "sell" ? "active" : ""} onClick={() => switchView("sell")}>
             <ClarityStore size={18} />{t("Sell")}</button>
@@ -26773,10 +26770,10 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
           </div>
         )}
 
-        {adminWorkspaceReady && activeView === "putting-lab" && nativePuttingLab() && (
+        {adminWorkspaceReady && activeView === "putting-lab" && (
           <section className="module-page">
             <Suspense fallback={<Loading size="panel" what={t("Putting Lab")} />}>
-              <PuttingLabLauncher />
+              <PuttingLabPage />
             </Suspense>
           </section>
         )}
