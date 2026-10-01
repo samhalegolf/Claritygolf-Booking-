@@ -3897,7 +3897,7 @@ export function VideoWorkspace({
               onPointerUp={() => undefined}
               overlayDimensions={overlayDimensions}
               onDimensionsChange={setOverlayDimensions}
-              visualPreset={visualPreset}
+              visualPreset={isPlayerVariant ? "original" : visualPreset}
             />
             {/* Record, Stop, and a way out. No camera picker: the source was
                 settled in Video Settings before the coach got here. */}
@@ -4038,7 +4038,7 @@ export function VideoWorkspace({
               setActiveSideInCompare(side);
               playPauseSide(side);
             }}
-            visualPreset={visualPreset}
+            visualPreset={isPlayerVariant ? "original" : visualPreset}
             underlay={
               showAnalysisRail ? (
                 <LivePoseLayer
