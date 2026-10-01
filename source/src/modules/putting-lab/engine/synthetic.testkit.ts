@@ -2,7 +2,7 @@
 // scene with known geometry, and putts with known face, path and start. Built
 // like a real camera (a rotation and a projection), so left/right and every
 // perspective effect are what a phone would see, not what the code under test
-// assumes. Mirrors the Swift test kit in native/clarity-putting-lab.
+// assumes.
 
 import { inverse3, mul3, normalized3, radians, RigidTransform, Vec2, type Mat3 } from "./geometry";
 import { makePlane, type LumaPlane } from "./luma";

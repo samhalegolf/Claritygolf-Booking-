@@ -3,7 +3,7 @@
 // Coordinates are millimetres with the ball centre at the origin, +y down the
 // target line and +x to its right: the world frame the lab measures in. The
 // printable sheet (public/putting-lab/calibration-template-a3.svg) is drawn
-// from the same layout; template.test.ts checks the two agree.
+// from the same layout by templateSVG(); engine.test.ts keeps the two equal.
 //
 // Six small black dots and one larger aim dot give the solve redundancy and
 // direction. A solid black disc where the ball goes is an eighth reference
@@ -140,4 +140,62 @@ export class TemplateDetector {
     if (!h) return null;
     return { imagePoints: image, worldPoints: world, imageToWorld: h, rmsMM: best.rms };
   }
+}
+
+/**
+ * The printable sheet as SVG at 1:1 millimetres (public/putting-lab/
+ * calibration-template-a3.svg is this, committed; engine.test.ts keeps them
+ * equal). Print at 100% ("actual size"), never "fit to page", and check the
+ * scale bar. Angles do not depend on print scale; the ball's measured
+ * diameter catches a badly scaled print.
+ */
+export function templateSVG() {
+  const { sheetMin, sheetMax, faceLineY, faceLineHalfLength } = TEMPLATE;
+  const w = sheetMax.x - sheetMin.x;
+  const h = sheetMax.y - sheetMin.y;
+  // SVG y runs down the page; template +y (target) runs up it.
+  const px = (p: Vec2): [number, number] => [p.x - sheetMin.x, sheetMax.y - p.y];
+  const f = (v: number) => v.toFixed(2);
+  let s = `<svg xmlns="http://www.w3.org/2000/svg" width="${f(w)}mm" height="${f(h)}mm" viewBox="0 0 ${f(w)} ${f(h)}">\n`;
+  s += `<rect x="0" y="0" width="${f(w)}" height="${f(h)}" fill="#ffffff"/>\n`;
+  const line = (a: Vec2, b: Vec2, colour: string, width: number, dash?: string) => {
+    const [x1, y1] = px(a);
+    const [x2, y2] = px(b);
+    const d = dash ? ` stroke-dasharray="${dash}"` : "";
+    s += `<line x1="${f(x1)}" y1="${f(y1)}" x2="${f(x2)}" y2="${f(y2)}" stroke="${colour}" stroke-width="${f(width)}"${d}/>\n`;
+  };
+  // Keep printed lines well clear of the dots: a line touching a dot would merge with it.
+  const gap = 8;
+  // Target line: from the ball disc to short of the aim dot.
+  line(new Vec2(0, ballDisc.radius + gap), new Vec2(0, aimDot.position.y - aimDot.radius - gap), "#9a9a9a", 0.6);
+  // Square line for the putter face.
+  line(new Vec2(-faceLineHalfLength, faceLineY), new Vec2(-ballDisc.radius - 2, faceLineY), "#8a8a8a", 0.5);
+  line(new Vec2(ballDisc.radius + 2, faceLineY), new Vec2(faceLineHalfLength, faceLineY), "#8a8a8a", 0.5);
+  // Validation fan: a face turned right (open) by a has its line rotated clockwise by a.
+  for (const deg of VALIDATION_FACE_ANGLES) {
+    const dir = new Vec2(1, 0).rotated(-(deg * Math.PI) / 180);
+    const c = new Vec2(0, faceLineY);
+    line(c.add(dir.mul(ballDisc.radius + 6)), c.add(dir.mul(faceLineHalfLength)), "#c4c4c4", 0.35, "2 1.5");
+    line(c.sub(dir.mul(ballDisc.radius + 6)), c.sub(dir.mul(faceLineHalfLength)), "#c4c4c4", 0.35, "2 1.5");
+    const [lx, ly] = px(c.add(dir.mul(faceLineHalfLength + 6)));
+    s += `<text x="${f(lx)}" y="${f(ly)}" font-family="Helvetica" font-size="3" fill="#9a9a9a" text-anchor="middle">${deg > 0 ? "+" : ""}${deg}°</text>\n`;
+  }
+  for (const r of TEMPLATE.references) {
+    const [cx, cy] = px(r.position);
+    s += `<circle cx="${f(cx)}" cy="${f(cy)}" r="${f(r.radius)}" fill="#000000"/>\n`;
+  }
+  // Ball outline guide inside the disc (white, so it never joins the disc's outline).
+  const [bx, by] = px(Vec2.zero);
+  s += `<circle cx="${f(bx)}" cy="${f(by)}" r="${f(BALL_RADIUS_MM)}" fill="none" stroke="#ffffff" stroke-width="0.3" stroke-dasharray="1.5 1.5"/>\n`;
+  // Scale bar: 100 mm, bottom left.
+  const sb0 = new Vec2(sheetMin.x + 15, sheetMin.y + 12);
+  line(sb0, sb0.add(new Vec2(100, 0)), "#6a6a6a", 0.5);
+  line(sb0.add(new Vec2(0, -2)), sb0.add(new Vec2(0, 2)), "#6a6a6a", 0.5);
+  line(sb0.add(new Vec2(100, -2)), sb0.add(new Vec2(100, 2)), "#6a6a6a", 0.5);
+  const [tx, ty] = px(sb0.add(new Vec2(50, 4)));
+  s += `<text x="${f(tx)}" y="${f(ty)}" font-family="Helvetica" font-size="3.5" fill="#6a6a6a" text-anchor="middle">100 mm: print at actual size and check this bar</text>\n`;
+  const [hx, hy] = px(new Vec2(0, sheetMax.y - 10));
+  s += `<text x="${f(hx)}" y="${f(hy)}" font-family="Helvetica" font-size="4" fill="#6a6a6a" text-anchor="middle">Clarity Putting Lab calibration: target this way</text>\n`;
+  s += "</svg>\n";
+  return s;
 }

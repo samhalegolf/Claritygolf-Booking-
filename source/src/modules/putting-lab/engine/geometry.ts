@@ -1,9 +1,5 @@
 // The 2D maths the Putting Lab stands on.
 //
-// This engine is the browser twin of native/clarity-putting-lab (Swift). The
-// two are kept rule-for-rule the same so a measurement means the same thing
-// in either; change one, change the other.
-//
 // Conventions everywhere:
 //   - World plane units are millimetres; image units are frame pixels.
 //   - The world plane is seen from above: +y runs down the physical target
