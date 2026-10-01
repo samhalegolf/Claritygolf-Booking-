@@ -23,6 +23,7 @@ export interface VideoAnalysisPageProps {
   pairedSavedVideoId?: string;
   persistence?: Partial<VideoAnalysisPersistenceLayer>;
   savedVideoLibrary?: SavedVideoLibraryStore | null;
+  libraryPlayers?: VideoWorkspaceProps["libraryPlayers"];
   onSavedVideoLibraryChange?: () => void;
   onNavigateBack?: (context: VideoWorkspaceNavigationContext) => void;
   onLocalSaveComplete?: (result: VideoWorkspaceSaveResult) => void | Promise<void>;

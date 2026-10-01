@@ -9391,6 +9391,19 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     );
   }, [clients, lessonNotePlayerIds, playerProfilesLocal.manualIds, portalPlayerIds, videoPlayerIds]);
 
+  // The video workspace's "From library" search: everyone with a saved video,
+  // with every id their videos are filed under.
+  const videoLibraryPlayers = useMemo(
+    () =>
+      playerProfiles
+        .map((client) => ({
+          playerName: client.name,
+          playerIds: [...profileIdsForClient(client)].filter((id) => videoPlayerIds.has(id)),
+        }))
+        .filter((player) => player.playerIds.length > 0),
+    [playerProfiles, videoPlayerIds],
+  );
+
   // Videos saved before the workspace asked whose they were. Device copies and
   // cloud-only copies both count, once each.
   const unassignedVideos = useMemo(() => {
@@ -26780,6 +26793,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
                 pairedSavedVideoId={videoContext?.pairedSavedVideoId}
                 autoStartLiveRecording={videoContext?.startRecording}
                 savedVideoLibrary={savedVideoLibraryRef.current}
+                libraryPlayers={videoLibraryPlayers}
                 onSavedVideoLibraryChange={refreshSavedVideoLibrary}
                 onNavigateBack={returnToPlayerProfileVideos}
                 onLocalSaveComplete={handleVideoAnalysisLocalSaveComplete}
