@@ -1,8 +1,10 @@
-import React from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { DrawingTool } from "../models/Drawing";
 import type { PhaseDetectionState } from "../hooks/useSwingPhaseMarkers";
 import {
+  IconFile,
   IconFocus,
+  IconLibrary,
   IconPause,
   IconPlay,
   IconSettings,
@@ -13,6 +15,7 @@ import {
   IconToolSelect,
   IconTrash,
   IconUndo,
+  IconUpload,
 } from "./VideoIcons";
 import { t } from "../../../lib/i18n";
 
@@ -252,6 +255,10 @@ const phaseTitle = (state: PhaseDetectionState) => {
 };
 
 export type AnalysisRailProps = {
+  /** Choose a file to put on this panel, replacing the clip on it. */
+  onUpload: () => void;
+  /** Unset where there is no saved-video library. */
+  onOpenLibrary?: () => void;
   /** Unset where the 3D lab cannot run (the native shell). */
   onOpen3D?: () => void;
   motionLabOpen: boolean;
@@ -271,6 +278,8 @@ export type AnalysisRailProps = {
  * away, and each is a state worth seeing at a glance.
  */
 export function AnalysisRail({
+  onUpload,
+  onOpenLibrary,
   onOpen3D,
   motionLabOpen,
   motionLabDisabled,
@@ -283,8 +292,49 @@ export function AnalysisRail({
 }: AnalysisRailProps) {
   const phaseLabel = phaseTitle(phaseState);
   const running = phaseState.kind === "running";
+  const [filesOpen, setFilesOpen] = useState(false);
+  const filesRef = useRef<HTMLDivElement>(null);
+  // The file menu closes on any press outside it, like any other menu.
+  useEffect(() => {
+    if (!filesOpen) return;
+    const close = (event: PointerEvent) => {
+      if (!filesRef.current?.contains(event.target as Node)) setFilesOpen(false);
+    };
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [filesOpen]);
+  const chooseFile = (action: () => void) => {
+    setFilesOpen(false);
+    action();
+  };
   return (
     <div className="va-analysis-rail" role="toolbar" aria-label={t("Body analysis")}>
+      {/* The other way in to a new clip: with a video already up, whatever
+          comes in through here replaces it. */}
+      <div className="va-rail-files" ref={filesRef}>
+        <button
+          type="button"
+          className={`va-rail-btn${filesOpen ? " is-active" : ""}`}
+          aria-label={t("Files")}
+          title={t("Files")}
+          aria-haspopup="menu"
+          aria-expanded={filesOpen}
+          onClick={() => (onOpenLibrary ? setFilesOpen((open) => !open) : onUpload())}
+        >
+          <IconFile />
+        </button>
+        {filesOpen && onOpenLibrary ? (
+          <div className="va-rail-menu" role="menu">
+            <button type="button" role="menuitem" onClick={() => chooseFile(onUpload)}>
+              <IconUpload />{t("From this device")}
+            </button>
+            <button type="button" role="menuitem" onClick={() => chooseFile(onOpenLibrary)}>
+              <IconLibrary />{t("From library")}
+            </button>
+          </div>
+        ) : null}
+      </div>
+      <span className="va-rail-rule" aria-hidden="true" />
       {onOpen3D ? (
         <>
           <button

@@ -452,23 +452,20 @@
   height: 17px;
 }
 
-.video-intake-actions .video-record-button {
-  border-color: var(--va-accent);
-  background-color: var(--va-panel-soft);
-  background-image: linear-gradient(155deg, var(--va-accent-glow), transparent);
-  font-weight: 700;
-}
-
 .video-intake-actions .upload-button.is-subtle {
   background: transparent;
   color: var(--va-muted);
 }
 
-/* Connect sits next to Record and does the smaller job of the two -- bring the
-   picture up -- so it keeps the plain button treatment and lets Record carry
-   the accent. Two accented buttons side by side is two primary actions. */
-.video-intake-actions .video-connect-button svg {
-  color: var(--va-accent);
+/* Upload and Connect are the two ways in. The one whose choices are showing
+   carries the accent, so the row underneath reads as belonging to it. */
+.video-intake-actions .upload-button.is-open {
+  border-color: var(--va-accent);
+  background-image: linear-gradient(155deg, var(--va-accent-glow), transparent);
+}
+
+.video-intake-choices {
+  margin-top: -2px;
 }
 
 .live-recording-toolbar {
@@ -2721,6 +2718,7 @@
   gap: 10px;
   min-height: 0;
   max-height: var(--va-video-max-height, 70vh);
+  overflow-y: auto;
   padding: 16px;
   border: 1px solid var(--va-border);
   border-radius: 16px;
@@ -2758,7 +2756,6 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  overflow-y: auto;
 }
 
 .library-clip-item {
@@ -2820,4 +2817,87 @@
   color: var(--va-accent);
   font-size: 0.72rem;
   font-weight: 600;
+}
+
+.library-clip-search {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--va-border);
+  border-radius: 10px;
+  background: var(--va-panel);
+  color: var(--va-text);
+  font: inherit;
+  font-size: 0.86rem;
+}
+
+.library-clip-section {
+  margin: 4px 0 0;
+  color: var(--va-muted);
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* A folder or a player: a place to look, not a clip to load. */
+.library-clip-folder {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px dashed var(--va-border);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--va-text);
+  font: inherit;
+  font-size: 0.86rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.library-clip-folder:hover {
+  border-color: var(--va-accent);
+}
+
+/* --- The rail's file menu ------------------------------------------------ */
+
+.va-rail-files {
+  position: relative;
+}
+
+.va-rail-menu {
+  position: absolute;
+  top: 0;
+  right: calc(100% + 10px);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 170px;
+  padding: 5px;
+  border-radius: 14px;
+  background: var(--va-scrim);
+  backdrop-filter: blur(8px);
+}
+
+.va-rail-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--va-text);
+  font: inherit;
+  font-size: 0.84rem;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.va-rail-menu button:hover {
+  background: var(--va-hover);
+}
+
+.va-rail-menu svg {
+  width: 17px;
+  height: 17px;
 }

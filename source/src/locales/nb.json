@@ -4057,5 +4057,14 @@
   "From library": "Fra biblioteket",
   "Loading the library…": "Laster inn biblioteket…",
   "No saved videos for this player yet.": "Ingen lagrede videoer for denne spilleren ennå.",
-  "Same swing": "Samme sving"
+  "Same swing": "Samme sving",
+  "Upload": "Last opp",
+  "From this device": "Fra denne enheten",
+  "Files": "Filer",
+  "Likely pairings": "Sannsynlige par",
+  "Unassigned": "Ikke tildelt",
+  "Search players": "Søk etter spillere",
+  "No players match.": "Ingen spillere samsvarer.",
+  "No saved videos here yet.": "Ingen lagrede videoer her ennå.",
+  "No other saved videos for this player.": "Ingen andre lagrede videoer for denne spilleren."
 }

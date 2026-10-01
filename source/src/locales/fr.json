@@ -4057,5 +4057,14 @@
   "From library": "Depuis la bibliothèque",
   "Loading the library…": "Chargement de la bibliothèque…",
   "No saved videos for this player yet.": "Aucune vidéo enregistrée pour ce joueur pour l’instant.",
-  "Same swing": "Même swing"
+  "Same swing": "Même swing",
+  "Upload": "Importer",
+  "From this device": "Depuis cet appareil",
+  "Files": "Fichiers",
+  "Likely pairings": "Paires probables",
+  "Unassigned": "Non attribuées",
+  "Search players": "Rechercher des joueurs",
+  "No players match.": "Aucun joueur ne correspond.",
+  "No saved videos here yet.": "Aucune vidéo enregistrée ici pour l'instant.",
+  "No other saved videos for this player.": "Aucune autre vidéo enregistrée pour ce joueur."
 }

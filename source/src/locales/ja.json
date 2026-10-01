@@ -4057,5 +4057,14 @@
   "From library": "ライブラリから",
   "Loading the library…": "ライブラリを読み込み中…",
   "No saved videos for this player yet.": "このプレーヤーの保存済み動画はまだありません。",
-  "Same swing": "同じスイング"
+  "Same swing": "同じスイング",
+  "Upload": "アップロード",
+  "From this device": "このデバイスから",
+  "Files": "ファイル",
+  "Likely pairings": "ペアの候補",
+  "Unassigned": "未割り当て",
+  "Search players": "プレーヤーを検索",
+  "No players match.": "一致するプレーヤーはいません。",
+  "No saved videos here yet.": "ここにはまだ保存された動画がありません。",
+  "No other saved videos for this player.": "このプレーヤーの他の保存動画はありません。"
 }

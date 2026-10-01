@@ -173,6 +173,13 @@ export const IconSettings = ({ className }: IconProps) => (
   </Svg>
 );
 
+export const IconFile = ({ className }: IconProps) => (
+  <Svg className={className}>
+    <path d="M14 3H7a1.5 1.5 0 0 0-1.5 1.5v15A1.5 1.5 0 0 0 7 21h10a1.5 1.5 0 0 0 1.5-1.5V7.5Z" />
+    <path d="M14 3v4.5h4.5" />
+  </Svg>
+);
+
 export const IconLibrary = ({ className }: IconProps) => (
   <Svg className={className}>
     <path d="M12 3v12M6 11l6 6 6-6" />

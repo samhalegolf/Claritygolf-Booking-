@@ -4057,5 +4057,14 @@
   "From library": "Kirjastosta",
   "Loading the library…": "Ladataan kirjastoa…",
   "No saved videos for this player yet.": "Tälle pelaajalle ei ole vielä tallennettuja videoita.",
-  "Same swing": "Sama svingi"
+  "Same swing": "Sama svingi",
+  "Upload": "Lataa",
+  "From this device": "Tästä laitteesta",
+  "Files": "Tiedostot",
+  "Likely pairings": "Todennäköiset parit",
+  "Unassigned": "Määrittämättä",
+  "Search players": "Hae pelaajia",
+  "No players match.": "Ei vastaavia pelaajia.",
+  "No saved videos here yet.": "Täällä ei ole vielä tallennettuja videoita.",
+  "No other saved videos for this player.": "Tällä pelaajalla ei ole muita tallennettuja videoita."
 }
