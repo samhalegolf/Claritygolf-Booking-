@@ -29,6 +29,16 @@ export const IconModeCompare = ({ className }: IconProps) => (
   </Svg>
 );
 
+/** One swing seen by two cameras, face-on from below and down the line from the side. */
+export const IconSecondAngle = ({ className }: IconProps) => (
+  <Svg className={className}>
+    <circle cx="14" cy="9.5" r="2.6" />
+    <rect x="11" y="17" width="6" height="4" rx="1" />
+    <rect x="2.5" y="6.5" width="4" height="6" rx="1" />
+    <path d="M14 17v-4.4M6.5 9.5h4.9" strokeDasharray="1.6 2" />
+  </Svg>
+);
+
 export const IconLinked = ({ className }: IconProps) => (
   <Svg className={className}>
     <path d="M9.5 8.5H8a4 4 0 0 0 0 8h2.2" />

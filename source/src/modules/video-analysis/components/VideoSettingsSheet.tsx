@@ -1,4 +1,3 @@
-import { WorkspaceMode } from "../utils/localPersistence";
 import {
   CameraDevice,
   PreferredCamera,
@@ -12,7 +11,6 @@ import {
   IconOrientation,
   IconLibrary,
   IconLinked,
-  IconModeCompare,
   IconRecord,
   IconSync,
   IconTrash,
@@ -22,8 +20,8 @@ import { t } from "../../../lib/i18n";
 import { VIDEO_VISUAL_PRESETS, type VideoVisualPresetId } from "../utils/videoVisualPreset";
 
 // Everything that used to sit in the coach's always-on toolbar and isn't
-// drawing or transport -- comparison mode, linked playback, sync, screen
-// recording, the permanent library save, diagnostics, and swapping the
+// drawing or transport -- linked playback, sync, screen recording,
+// the permanent library save, diagnostics, and swapping the
 // active clip -- lives here instead. One gear on the action bar opens it;
 // closing it (backdrop tap, Escape, or the gear again) puts it away. Nothing
 // here is a coach-only idea kept secret from the type: the player simply
@@ -47,8 +45,6 @@ const ORIENTATION_CHOICES: ReadonlyArray<{
 export type VideoSettingsSheetProps = {
   open: boolean;
   onClose: () => void;
-  mode: WorkspaceMode;
-  onModeChange: (mode: WorkspaceMode) => void;
   linkedPlayback: boolean;
   onLinkedPlaybackToggle: () => void;
   onSyncPlayheads: () => void;
@@ -89,8 +85,6 @@ export type VideoSettingsSheetProps = {
 export function VideoSettingsSheet({
   open,
   onClose,
-  mode,
-  onModeChange,
   linkedPlayback,
   onLinkedPlaybackToggle,
   onSyncPlayheads,
@@ -282,16 +276,6 @@ export function VideoSettingsSheet({
 
         <span className="va-sheet-divider" aria-hidden="true" />
 
-        <button
-          type="button"
-          className="va-sheet-row va-sheet-row-btn"
-          aria-pressed={mode === "compare"}
-          onClick={() => onModeChange(mode === "compare" ? "single" : "compare")}
-        >
-          <IconModeCompare />
-          <span>{t("Compare mode")}</span>
-          <span className={`va-sheet-toggle${mode === "compare" ? " is-on" : ""}`} aria-hidden="true" />
-        </button>
         <button
           type="button"
           className="va-sheet-row va-sheet-row-btn"
