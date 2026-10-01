@@ -1,3 +1,5 @@
+import { t } from "../../../lib/i18n";
+
 export type VideoVisualPresetId =
   | "original"
   | "brighten"
@@ -17,32 +19,32 @@ const STORAGE_KEY = "clarity.video.visualPreset";
 export const VIDEO_VISUAL_PRESETS: ReadonlyArray<VideoVisualPreset> = [
   {
     id: "original",
-    label: "Original",
-    description: "No visual enhancement.",
+    label: t("Original"),
+    description: t("No visual enhancement."),
     cssFilter: "none",
   },
   {
     id: "brighten",
-    label: "Brighten",
-    description: "A gentle lift for slightly dark clips.",
+    label: t("Brighten"),
+    description: t("A gentle lift for slightly dark clips."),
     cssFilter: "brightness(1.22) contrast(1.04) saturate(0.98)",
   },
   {
     id: "dark-indoor",
-    label: "Dark Indoor",
-    description: "Lifts dark indoor bays while keeping bright screens under control.",
+    label: t("Dark Indoor"),
+    description: t("Lifts dark indoor bays while keeping bright screens under control."),
     cssFilter: "brightness(1.38) contrast(0.94) saturate(0.92)",
   },
   {
     id: "backlit",
-    label: "Backlit",
-    description: "Pulls the golfer forward when the background is much brighter.",
+    label: t("Backlit"),
+    description: t("Pulls the golfer forward when the background is much brighter."),
     cssFilter: "brightness(1.30) contrast(0.88) saturate(0.90)",
   },
   {
     id: "detail",
-    label: "Detail",
-    description: "Adds restrained contrast for body and club edges.",
+    label: t("Detail"),
+    description: t("Adds restrained contrast for body and club edges."),
     cssFilter: "brightness(1.04) contrast(1.18) saturate(0.94)",
   },
 ];

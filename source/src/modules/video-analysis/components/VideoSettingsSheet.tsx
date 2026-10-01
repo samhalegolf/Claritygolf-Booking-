@@ -265,8 +265,8 @@ export function VideoSettingsSheet({
                     aria-hidden="true"
                   />
                   <span className="va-camera-name">
-                    <strong>{t(preset.label)}</strong>
-                    <span className="va-visual-preset-description">{t(preset.description)}</span>
+                    <strong>{preset.label}</strong>
+                    <span className="va-visual-preset-description">{preset.description}</span>
                   </span>
                 </button>
               );
