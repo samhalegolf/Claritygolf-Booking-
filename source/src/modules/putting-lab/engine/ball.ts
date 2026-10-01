@@ -1,6 +1,6 @@
 import { BlobDetector } from "./blobs";
 import type { PuttingCoordinateSystem } from "./coordinates";
-import { clampUnit, PolyFit, sum, Vec2 } from "./geometry";
+import { clampUnit, PolyFit, radians, sum, Vec2 } from "./geometry";
 import { bounds, histogram, IntRect, otsu, type LumaPlane } from "./luma";
 import { BALL_RADIUS_MM } from "./template";
 
@@ -77,10 +77,14 @@ export class BallDetector {
 
 export type BallStatus = "absent" | "settling" | "atRest" | "rolling" | "finished";
 
+/** Half the side of the square box, mm, about the calibrated spot (squared to the aim) that a ball must sit in. */
+export const BALL_BOX_HALF_MM = 30;
+
+/** Is a ball centre, in TARGET coordinates, inside the ball box? */
+export const inBallBox = (p: Vec2) => Math.abs(p.x) <= BALL_BOX_HALF_MM && Math.abs(p.y) <= BALL_BOX_HALF_MM;
+
 /** At rest near the start, then frame to frame along its predicted path. Never scans the frame. */
 export class BallTracker {
-  /** How far from the calibrated spot a ball may sit and still be "the ball". */
-  placementTolerance = 30;
   settleSeconds = 0.3;
   /** Movement from rest that means the ball has been struck. */
   departureThreshold = 2.5;
@@ -97,7 +101,6 @@ export class BallTracker {
   private detector = new BallDetector();
   private settleSamples: BallSample[] = [];
   private restNoise = 0.3;
-  private departureCount = 0;
   private departureSample: BallSample | null = null;
   private frameSpacing = 1 / 240;
   private lastFrame: number | null = null;
@@ -111,7 +114,6 @@ export class BallTracker {
     this.last = null;
     this.roll = [];
     this.settleSamples = [];
-    this.departureCount = 0;
     this.departureSample = null;
     this.misses = 0;
   }
@@ -171,7 +173,7 @@ export class BallTracker {
     const centreWorld = this.restPosition ?? c.surface.ballOrigin;
     // At rest the window must still catch a firmly struck ball two frames in,
     // however far apart the frames are (30 frames a second is ~50 mm a frame).
-    const searchMM = this.status === "atRest" ? Math.max(45, 2.2 * this.maxBallSpeed * this.frameSpacing) : this.placementTolerance;
+    const searchMM = this.status === "atRest" ? Math.max(45, 2.2 * this.maxBallSpeed * this.frameSpacing) : BALL_BOX_HALF_MM * Math.SQRT2;
     const centre = c.imageFromWorld(centreWorld);
     if (!centre) return null;
     this.lastSearch = { center: centre, radius: searchMM / mmpp };
@@ -187,20 +189,23 @@ export class BallTracker {
       }
       return null;
     }
-    this.misses = 0;
     const position = ballPosition(sample);
-    if (this.status !== "atRest" && position.distance(c.surface.ballOrigin) > this.placementTolerance + 5) {
+    if (this.status !== "atRest" && !inBallBox(c.targetFromWorld(position))) {
       this.reset();
       return null;
     }
     if (this.status === "atRest" && this.restPosition) {
       const rest = this.restPosition;
-      const moved = position.distance(rest);
-      if (moved > Math.max(this.departureThreshold, 4 * this.restNoise)) {
-        this.departureCount++;
+      const away = position.sub(rest);
+      if (away.length > Math.max(this.departureThreshold, 4 * this.restNoise)) {
         const firstMove = this.departureSample;
         this.departureSample = sample;
-        if (this.departureCount >= 2 && firstMove) {
+        // A struck ball leaves in a straight line: two sightings off the spot
+        // that do not line up are something else (the ball lifted away, a bright patch).
+        const firstAway = firstMove ? ballPosition(firstMove).sub(rest) : null;
+        const inLine = firstAway !== null && away.length > firstAway.length && away.dot(firstAway) > away.length * firstAway.length * Math.cos(radians(25));
+        if (firstMove && inLine) {
+          this.misses = 0;
           // Leave already moving: with frames far apart, a roll that starts
           // from standstill would search behind the ball.
           const dt = sample.timestamp - firstMove.timestamp;
@@ -213,8 +218,14 @@ export class BallTracker {
           this.last = sample;
           return sample;
         }
+        // Not a putt yet, and not the ball at rest either.
+        this.misses++;
+        if (this.misses > 3) {
+          this.reset();
+          return null;
+        }
       } else {
-        this.departureCount = 0;
+        this.misses = 0;
         this.departureSample = null;
         // Follow a slow creep, keep the rest position steady otherwise.
         this.restPosition = rest.add(position.sub(rest).mul(0.1));
@@ -222,6 +233,7 @@ export class BallTracker {
       this.last = sample;
       return sample;
     }
+    this.misses = 0;
     this.settleSamples.push(sample);
     this.settleSamples = this.settleSamples.filter((s) => s.timestamp >= t - this.settleSeconds - 0.05);
     this.status = "settling";
@@ -235,7 +247,7 @@ export class BallTracker {
         this.restNoise = Math.max(0.15, rms);
         this.restPosition = mean;
         this.status = "atRest";
-        this.departureCount = 0;
+        this.departureSample = null;
       }
     }
     this.last = sample;

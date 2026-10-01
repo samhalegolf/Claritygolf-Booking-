@@ -25,8 +25,21 @@ export type SurfaceCalibration = {
   timestamp: number;
 };
 
-/** Two virtual pegs straddling the aim line `distance` mm out, `width` mm apart. */
+/** Two virtual pegs straddling the start line `distance` mm out, `width` mm apart. */
 export type PracticeGate = { distance: number; width: number };
+
+export type PracticeLevel = "easy" | "medium" | "hard";
+
+/**
+ * Practice mode's offline gate, one per level: pegs 2 m out, which the ball
+ * must pass without touching. Read off the start line, that is about 2.3°
+ * either side of the aim on easy, 1.4° on medium and 0.8° on hard.
+ */
+export const PRACTICE_GATES: Record<PracticeLevel, PracticeGate> = {
+  easy: { distance: 2000, width: 200 },
+  medium: { distance: 2000, width: 140 },
+  hard: { distance: 2000, width: 100 },
+};
 
 /** The virtual aim: a rotation of the target line about the calibrated ball. */
 export type PracticeTarget = {

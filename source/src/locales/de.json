@@ -4084,7 +4084,7 @@
   "Could not see the face edge. Check the light on the putter.": "Die Kante der Schlagfläche ist nicht zu sehen. Prüf das Licht auf dem Putter.",
   "Calibration complete. Lift the template away.": "Kalibrierung abgeschlossen. Nimm die Vorlage weg.",
   "Camera moved. Recalibrate to keep measuring.": "Die Kamera wurde bewegt. Kalibriere neu, um weiter zu messen.",
-  "Place a ball on the spot.": "Leg einen Ball auf den Punkt.",
+  "Place a ball in the box.": "Leg einen Ball in das Feld.",
   "Ready. Set the putter behind the ball.": "Bereit. Setz den Putter hinter den Ball.",
   "Camera nudged. Results are flagged until it settles.": "Die Kamera wurde angestoßen. Ergebnisse werden markiert, bis sie wieder ruhig ist.",
   "The ball measures {mm} mm. Check the template printed at actual size.": "Der Ball misst {mm} mm. Prüf, ob die Vorlage in Originalgröße gedruckt wurde.",
@@ -4130,5 +4130,13 @@
   "Face on the {angle} line": "Schlagfläche auf der {angle}-Linie",
   "Ball along the calibration line": "Ball entlang der Kalibrierlinie",
   "Finish validation": "Validierung beenden",
-  "Debug overlay": "Debug-Overlay"
+  "Debug overlay": "Debug-Overlay",
+  "Easy": "Leicht",
+  "Medium": "Mittel",
+  "Hard": "Schwer",
+  "{inside} of {count} inside the gate": "{inside} von {count} im Tor",
+  "Speed (m/s)": "Geschwindigkeit (m/s)",
+  "Gate": "Tor",
+  "Practice: {level}": "Training: {level}",
+  "Practice mode sets an offline gate 2 m out along the aim. A start line inside it plays a positive sound, outside a negative one.": "Der Trainingsmodus setzt ein Abweichungstor 2 m entlang der Ziellinie. Eine Startlinie darin ergibt einen positiven Ton, außerhalb einen negativen."
 }

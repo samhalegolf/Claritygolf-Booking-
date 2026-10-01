@@ -4084,7 +4084,7 @@
   "Could not see the face edge. Check the light on the putter.": "De rand van de clubface is niet zichtbaar. Controleer het licht op de putter.",
   "Calibration complete. Lift the template away.": "Kalibratie klaar. Haal de mal weg.",
   "Camera moved. Recalibrate to keep measuring.": "De camera is verplaatst. Kalibreer opnieuw om verder te meten.",
-  "Place a ball on the spot.": "Leg een bal op de stip.",
+  "Place a ball in the box.": "Leg een bal in het vak.",
   "Ready. Set the putter behind the ball.": "Klaar. Zet de putter achter de bal.",
   "Camera nudged. Results are flagged until it settles.": "De camera is aangestoten. Resultaten worden gemarkeerd tot hij stil staat.",
   "The ball measures {mm} mm. Check the template printed at actual size.": "De bal meet {mm} mm. Controleer of de mal op ware grootte is geprint.",
@@ -4130,5 +4130,13 @@
   "Face on the {angle} line": "Clubface op de {angle}-lijn",
   "Ball along the calibration line": "Bal langs de kalibratielijn",
   "Finish validation": "Validatie afronden",
-  "Debug overlay": "Debug-overlay"
+  "Debug overlay": "Debug-overlay",
+  "Easy": "Makkelijk",
+  "Medium": "Gemiddeld",
+  "Hard": "Moeilijk",
+  "{inside} of {count} inside the gate": "{inside} van {count} binnen de poort",
+  "Speed (m/s)": "Snelheid (m/s)",
+  "Gate": "Poort",
+  "Practice: {level}": "Oefenen: {level}",
+  "Practice mode sets an offline gate 2 m out along the aim. A start line inside it plays a positive sound, outside a negative one.": "De oefenmodus zet een afwijkingspoort op 2 m langs de richtlijn. Een startlijn erbinnen geeft een positief geluid, erbuiten een negatief."
 }

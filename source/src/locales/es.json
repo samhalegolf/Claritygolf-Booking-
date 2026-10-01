@@ -4084,7 +4084,7 @@
   "Could not see the face edge. Check the light on the putter.": "No se ve el borde de la cara. Revisa la luz sobre el putter.",
   "Calibration complete. Lift the template away.": "Calibración completa. Retira la plantilla.",
   "Camera moved. Recalibrate to keep measuring.": "La cámara se ha movido. Vuelve a calibrar para seguir midiendo.",
-  "Place a ball on the spot.": "Coloca una bola en el punto.",
+  "Place a ball in the box.": "Coloca una bola en el recuadro.",
   "Ready. Set the putter behind the ball.": "Listo. Coloca el putter detrás de la bola.",
   "Camera nudged. Results are flagged until it settles.": "La cámara se ha movido un poco. Los resultados se marcan hasta que se estabilice.",
   "The ball measures {mm} mm. Check the template printed at actual size.": "La bola mide {mm} mm. Comprueba que la plantilla se imprimió a tamaño real.",
@@ -4130,5 +4130,13 @@
   "Face on the {angle} line": "Cara sobre la línea de {angle}",
   "Ball along the calibration line": "Bola por la línea de calibración",
   "Finish validation": "Terminar la validación",
-  "Debug overlay": "Capa de depuración"
+  "Debug overlay": "Capa de depuración",
+  "Easy": "Fácil",
+  "Medium": "Medio",
+  "Hard": "Difícil",
+  "{inside} of {count} inside the gate": "{inside} de {count} dentro de la puerta",
+  "Speed (m/s)": "Velocidad (m/s)",
+  "Gate": "Puerta",
+  "Practice: {level}": "Práctica: {level}",
+  "Practice mode sets an offline gate 2 m out along the aim. A start line inside it plays a positive sound, outside a negative one.": "El modo práctica pone una puerta de desvío a 2 m en la línea de la diana. Una salida dentro de ella suena positiva; fuera, negativa."
 }
