@@ -19,6 +19,7 @@ import {
   IconUpload,
 } from "./VideoIcons";
 import { t } from "../../../lib/i18n";
+import { VIDEO_VISUAL_PRESETS, type VideoVisualPresetId } from "../utils/videoVisualPreset";
 
 // Everything that used to sit in the coach's always-on toolbar and isn't
 // drawing or transport -- comparison mode, linked playback, sync, screen
@@ -81,6 +82,8 @@ export type VideoSettingsSheetProps = {
   /** Which way up the recording stage sits, and what the camera is asked for. */
   recordingOrientation: RecordingOrientation;
   onSelectOrientation: (orientation: RecordingOrientation) => void;
+  visualPreset: VideoVisualPresetId;
+  onSelectVisualPreset: (preset: VideoVisualPresetId) => void;
 };
 
 export function VideoSettingsSheet({
@@ -116,6 +119,8 @@ export function VideoSettingsSheet({
   onRequestCameraLabels,
   recordingOrientation,
   onSelectOrientation,
+  visualPreset,
+  onSelectVisualPreset,
 }: VideoSettingsSheetProps) {
   if (!open) return null;
 
@@ -230,6 +235,45 @@ export function VideoSettingsSheet({
                   />
                   <span className="va-camera-name">{choice.label}</span>
                   <span className="va-camera-ratio">{choice.ratio}</span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        <span className="va-sheet-divider" aria-hidden="true" />
+
+        <section className="va-sheet-group" aria-labelledby="va-visual-heading">
+          <h2 className="va-sheet-group-title" id="va-visual-heading">
+            <IconDiagnostics />
+            <span>{t("Visual enhancement")}</span>
+          </h2>
+          <p className="va-sheet-group-label" id="va-visual-label">
+            {t("Viewing filter")}
+          </p>
+          <p className="va-sheet-note">
+            {t("Changes the view only. The saved clip and motion analysis remain original.")}
+          </p>
+          <div role="radiogroup" aria-labelledby="va-visual-label">
+            {VIDEO_VISUAL_PRESETS.map((preset) => {
+              const selected = visualPreset === preset.id;
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  className={`va-camera-option va-camera-option-btn${selected ? " is-selected" : ""}`}
+                  role="radio"
+                  aria-checked={selected}
+                  onClick={() => onSelectVisualPreset(preset.id)}
+                >
+                  <span
+                    className={`va-camera-dot${selected ? " is-on" : ""}`}
+                    aria-hidden="true"
+                  />
+                  <span className="va-camera-name">
+                    <strong>{t(preset.label)}</strong>
+                    <span className="va-visual-preset-description">{t(preset.description)}</span>
+                  </span>
                 </button>
               );
             })}
