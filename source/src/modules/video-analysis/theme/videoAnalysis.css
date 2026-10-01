@@ -2362,6 +2362,24 @@
   min-width: 0;
 }
 
+.va-sheet .va-camera-name strong,
+.va-sheet .va-visual-preset-description {
+  display: block;
+}
+
+.va-sheet .va-camera-name strong {
+  color: var(--va-text);
+  font-size: 0.86rem;
+  font-weight: 650;
+}
+
+.va-sheet .va-visual-preset-description {
+  margin-top: 2px;
+  color: var(--va-muted);
+  font-size: 0.74rem;
+  line-height: 1.3;
+}
+
 .va-sheet .va-camera-ratio {
   flex: none;
   color: var(--va-muted);
