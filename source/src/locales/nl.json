@@ -4053,5 +4053,9 @@
   "Print the calibration template": "Kalibratiemal printen",
   "Last session: {count} putts": "Laatste sessie: {count} putts",
   "Average face {face}, path {path}, start {start}": "Gemiddeld: clubface {face}, baan {path}, start {start}",
-  "The Putting Lab could not open: {message}": "Putting Lab kon niet worden geopend: {message}"
+  "The Putting Lab could not open: {message}": "Putting Lab kon niet worden geopend: {message}",
+  "From library": "Uit bibliotheek",
+  "Loading the library…": "Bibliotheek laden…",
+  "No saved videos for this player yet.": "Nog geen opgeslagen video's voor deze speler.",
+  "Same swing": "Zelfde swing"
 }

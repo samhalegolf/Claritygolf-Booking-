@@ -4053,5 +4053,9 @@
   "Print the calibration template": "Tulosta kalibrointimalli",
   "Last session: {count} putts": "Edellinen harjoitus: {count} puttia",
   "Average face {face}, path {path}, start {start}": "Keskiarvo: lapa {face}, rata {path}, lähtö {start}",
-  "The Putting Lab could not open: {message}": "Putting Labia ei voitu avata: {message}"
+  "The Putting Lab could not open: {message}": "Putting Labia ei voitu avata: {message}",
+  "From library": "Kirjastosta",
+  "Loading the library…": "Ladataan kirjastoa…",
+  "No saved videos for this player yet.": "Tälle pelaajalle ei ole vielä tallennettuja videoita.",
+  "Same swing": "Sama svingi"
 }

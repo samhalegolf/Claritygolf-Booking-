@@ -4053,5 +4053,9 @@
   "Print the calibration template": "Wydrukuj szablon kalibracyjny",
   "Last session: {count} putts": "Ostatnia sesja: {count} puttów",
   "Average face {face}, path {path}, start {start}": "Średnio: główka {face}, tor {path}, start {start}",
-  "The Putting Lab could not open: {message}": "Nie udało się otworzyć Putting Lab: {message}"
+  "The Putting Lab could not open: {message}": "Nie udało się otworzyć Putting Lab: {message}",
+  "From library": "Z biblioteki",
+  "Loading the library…": "Wczytywanie biblioteki…",
+  "No saved videos for this player yet.": "Brak zapisanych filmów tego gracza.",
+  "Same swing": "Ten sam swing"
 }
