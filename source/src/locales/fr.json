@@ -290,6 +290,8 @@
   "Choose a day": "Choisissez un jour",
   "The lesson was moved, but its bay was not: {error}": "Le cours a été déplacé, mais pas son poste : {error}",
   "The lesson was moved, but its bay was not. Use Book bay on the booking card.": "Le cours a été déplacé, mais pas son poste. Utilisez Réserver un poste sur la fiche de réservation.",
+  "The lesson was booked, but its bay was not: {error}": "Le cours a été réservé, mais pas sa baie : {error}",
+  "The lesson was booked, but its bay was not. Use Book bay on the booking card.": "Le cours a été réservé, mais pas sa baie. Utilisez Réserver la baie sur la fiche de réservation.",
   "Admin login expired. Sign in again before saving calendar changes.": "Session admin expirée. Reconnectez-vous avant d’enregistrer les modifications du calendrier.",
   "Calendar change could not be saved.": "Impossible d’enregistrer la modification du calendrier.",
   "Could not undo that change.": "Impossible d’annuler cette modification.",

@@ -9229,7 +9229,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
 
   // Removed: a window CustomEvent listener that existed only so the injected
   // Optix panel could tell React a bay had been booked. BookingResourcesPanel
-  // is React, so it calls setItems through its onBooked prop instead.
+  // is React, so it calls setItems through its onBayStatus prop instead.
   // (bayBooked is derived server-side from optix_booking_sync, is never read
   // back off a PUT, and is not part of calendarItemsFingerprint — patching it
   // cannot trigger an autosave or be written back wrongly.)
@@ -10395,13 +10395,15 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     return before.size === after.size && [...before].every((id) => after.has(id));
   }
 
-  // Poll the Optix sync row while the deferred cancel-and-rebook runs after a
-  // reschedule (see deferOptixBayRebook in booking-core). Restores the orange
-  // outline once the new bay is booked; warns once if Optix refused. A 'synced'
-  // row older than the move is the pre-move state (the background task has not
-  // run yet), so it is skipped rather than repainting the ring for the old bay.
-  // Gives up silently after ~45s — the next hydration shows the true state.
-  async function watchBayRebook(itemId: string, movedAtMs: number) {
+  // Poll the Optix sync row while a bay is booked in the background: the
+  // cancel-and-rebook after a reschedule (deferOptixBayRebook in booking-core),
+  // or the Auto-book hold for a lesson just created (deferOptixAutoBook).
+  // Paints the orange outline once the bay is booked; warns once if Optix
+  // refused. A 'synced' row older than the change is the pre-move state (the
+  // background task has not run yet), so it is skipped rather than repainting
+  // the ring for the old bay. Gives up silently after ~45s — the next hydration
+  // shows the true state.
+  async function watchBayHold(itemId: string, changedAtMs: number, reason: "move" | "new") {
     for (let attempt = 0; attempt < 9; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 5000));
       try {
@@ -10415,7 +10417,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
         const record = data?.record && data.record.calendarItemId === itemId ? data.record : null;
         if (!record) continue;
         const rowUpdatedAtMs = Date.parse(String(record.updatedAt || "")) || 0;
-        if (rowUpdatedAtMs < movedAtMs - 15000) continue; // pre-move state; rebook still running
+        if (rowUpdatedAtMs < changedAtMs - 15000) continue; // pre-move state; rebook still running
         if (record.syncStatus === "synced") {
           setItems((current) =>
             current.map((entry) =>
@@ -10428,13 +10430,19 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
         }
         if (record.syncStatus === "failed" || record.syncStatus === "token_expired") {
           setToast({
-            message: record.errorMessage
-              ? t("The lesson was moved, but its bay was not: {error}", { error: record.errorMessage })
-              : t("The lesson was moved, but its bay was not. Use Book bay on the booking card."),
+            message:
+              reason === "new"
+                ? record.errorMessage
+                  ? t("The lesson was booked, but its bay was not: {error}", { error: record.errorMessage })
+                  : t("The lesson was booked, but its bay was not. Use Book bay on the booking card.")
+                : record.errorMessage
+                  ? t("The lesson was moved, but its bay was not: {error}", { error: record.errorMessage })
+                  : t("The lesson was moved, but its bay was not. Use Book bay on the booking card."),
           });
           return;
         }
-        // 'cancelled': old bay released, rebook still in flight — keep polling.
+        // 'pending': the hold is still queued. 'cancelled': old bay released,
+        // rebook still in flight. Either way, keep polling.
       } catch {
         // Transient fetch problem; the next attempt retries.
       }
@@ -10482,7 +10490,12 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
           previousVersion.duration !== item.duration)
       ) {
         setItems((current) => current.map((entry) => (entry.id === item.id ? { ...entry, bayBooked: false } : entry)));
-        void watchBayRebook(item.id, Date.now());
+        void watchBayHold(item.id, Date.now(), "move");
+      }
+      // A new lesson whose type has Auto-book ticked: the server queued its bay
+      // and books it after responding, so watch for it to land.
+      if (data.bayHoldQueued === true) {
+        void watchBayHold(item.id, Date.now(), "new");
       }
     } catch (error) {
       setItems(previousItems);
@@ -23380,11 +23393,11 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
       {selected.kind === "appointment" && (
         <BookingResourcesPanel
           calendarItemId={selected.id}
-          onBooked={(resourceId) =>
+          onBayStatus={(itemId, bayBooked, resourceId) =>
             setItems((current) =>
               current.map((item) =>
-                item.id === selected.id
-                  ? { ...item, bayBooked: true, bayResourceId: resourceId || item.bayResourceId }
+                item.id === itemId && (item.bayBooked !== bayBooked || (bayBooked && resourceId && item.bayResourceId !== resourceId))
+                  ? { ...item, bayBooked, bayResourceId: resourceId || item.bayResourceId }
                   : item,
               ),
             )

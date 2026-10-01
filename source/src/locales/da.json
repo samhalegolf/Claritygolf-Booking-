@@ -290,6 +290,8 @@
   "Choose a day": "Vælg en dag",
   "The lesson was moved, but its bay was not: {error}": "Lektionen blev flyttet, men dens bås blev ikke: {error}",
   "The lesson was moved, but its bay was not. Use Book bay on the booking card.": "Lektionen blev flyttet, men dens bås blev ikke. Brug Book bås på bookingkortet.",
+  "The lesson was booked, but its bay was not: {error}": "Lektionen blev booket, men dens bay blev ikke: {error}",
+  "The lesson was booked, but its bay was not. Use Book bay on the booking card.": "Lektionen blev booket, men dens bay blev ikke. Brug Book bay på bookingkortet.",
   "Admin login expired. Sign in again before saving calendar changes.": "Adminlogin er udløbet. Log ind igen, før du gemmer kalenderændringer.",
   "Calendar change could not be saved.": "Kalenderændringen kunne ikke gemmes.",
   "Could not undo that change.": "Kunne ikke fortryde ændringen.",

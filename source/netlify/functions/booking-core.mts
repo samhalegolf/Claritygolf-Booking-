@@ -6621,11 +6621,13 @@ function appointmentsWhoseBayFollows(previousItemsById: Map<any, any>, items: an
  */
 async function queueOptixAutoBook(accountId: string, appointments: any[]) {
   const pending = (appointments || []).filter(Boolean);
-  if (!pending.length) return;
-  if (pending.length > OPTIX_AUTO_BOOK_MAX_PER_SAVE) return;
+  const queuedIds: string[] = [];
+  if (!pending.length) return queuedIds;
+  if (pending.length > OPTIX_AUTO_BOOK_MAX_PER_SAVE) return queuedIds;
   for (const appointment of pending) {
-    await queueResourceHold(accountId, appointment.id, appointment.serviceId);
+    if (await queueResourceHold(accountId, appointment.id, appointment.serviceId)) queuedIds.push(appointment.id);
   }
+  return queuedIds;
 }
 
 /** True when a saved appointment occupies a different slot than before. */
@@ -10467,10 +10469,13 @@ export async function upsertCalendarItemForAccount(accountId, item, current, con
     context,
   );
   // A lesson created through this route (no previous row) is as new as
-  // one from a whole-calendar save, and gets the same Auto-book.
+  // one from a whole-calendar save, and gets the same Auto-book. The coach's
+  // calendar is told a bay is on its way so it can watch for the hold and
+  // ring the lesson when it lands, rather than only on the next reload.
+  let bayHoldQueued = false;
   if (!previousItem) {
     const created = newlyCreatedAutoBookableAppointments(previousById, [savedItem || item], current.services);
-    await queueOptixAutoBook(accountId, created);
+    bayHoldQueued = (await queueOptixAutoBook(accountId, created)).length > 0;
     deferOptixAutoBook(accountId, created, context);
   }
   // Keep Google Calendar in step with every single-booking change (drag
@@ -10497,7 +10502,7 @@ export async function upsertCalendarItemForAccount(accountId, item, current, con
       "Calendar saved, but booking alerts could not be processed.";
     console.error("calendar_state:notification_failed", error);
   }
-  return { savedItem, updatedAt, notificationResults, notificationWarning, googleCalendarSync };
+  return { savedItem, updatedAt, notificationResults, notificationWarning, googleCalendarSync, bayHoldQueued };
 }
 
 async function resolveBackendRequestContext(req, settings = null) {
@@ -13589,7 +13594,7 @@ async function routeBookingApiRequest(
         try {
           const previousItem = current.items.find((existing) => existing.id === item.id) || null;
           assertCanWriteCalendarItem(requestContext, item, previousItem, current);
-          const { savedItem, updatedAt, notificationResults, notificationWarning, googleCalendarSync } =
+          const { savedItem, updatedAt, notificationResults, notificationWarning, googleCalendarSync, bayHoldQueued } =
             await upsertCalendarItemForAccount(requestContext.accountId, item, current, context);
           const durationMs = Date.now() - startAt;
           console.info("upsert_item_saved", {
@@ -13604,6 +13609,7 @@ async function routeBookingApiRequest(
             updatedAt,
             notificationResults,
             googleCalendarSync,
+            bayHoldQueued,
             ...(notificationWarning ? { warnings: [notificationWarning] } : {}),
           });
         } catch (error) {

@@ -1,6 +1,7 @@
 import { getDatabase } from "@netlify/database";
 import type { Config } from "@netlify/functions";
 import { requireCoachActor } from "./_shared/coach-auth.mts";
+import { bayBookingMatchesSlot } from "./_shared/optix-reconcile.mts";
 import { chosenResourceProviderId } from "./_shared/resource-handler.mts";
 import { readResourceWebhookSettings } from "./_shared/resource-webhook-provider.mts";
 
@@ -21,6 +22,10 @@ import { readResourceWebhookSettings } from "./_shared/resource-webhook-provider
  * resource id being named always comes from the caller's own sync row, so this
  * names a bay the caller has already booked and nothing else.
  */
+function env(name: string, fallback = "") {
+  return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
+}
+
 function db() {
   return getDatabase();
 }
@@ -137,6 +142,32 @@ function toRecord(row: any, bayNames: Map<string, string>) {
 }
 
 /**
+ * Whether the calendar should ring this lesson as holding a bay. The same rule
+ * calendar-state's rowToItem applies on load (a live booking whose slot still
+ * matches the lesson), so the card can repaint the ring without a reload and
+ * can never paint one that a reload would then take away.
+ */
+function bayBookedFor(row: any) {
+  if (!(row.optix_booking_id && row.sync_status === "synced")) return false;
+  let location = row.location;
+  if (typeof location === "string") {
+    try {
+      location = JSON.parse(location);
+    } catch {
+      location = null;
+    }
+  }
+  // rowToItem only keeps a location snapshot that has a name, and only then
+  // reads its timezone.
+  const timezone = location && typeof location === "object" && location.name ? String(location.timezone || "") : "";
+  return bayBookingMatchesSlot(
+    { week: Number(row.week ?? 0), day: Number(row.day ?? 0), start: Number(row.start ?? 0), location: { timezone } },
+    Number(row.start_timestamp ?? 0),
+    env("CLARITY_TIMEZONE", "Pacific/Auckland"),
+  );
+}
+
+/**
  * Which system this business's bays are in, and whether it is connected. The
  * card hides itself when nothing is, and names the system when something is --
  * Optix only for a business that uses Optix.
@@ -175,8 +206,9 @@ export default async function handler(req: Request) {
   if (calendarItemId) {
     const rows = await db().sql`
       SELECT
-        c.id, c.client, c.title, c.service_id, c.week, c.day, c.start, c.duration,
+        c.id, c.client, c.title, c.service_id, c.week, c.day, c.start, c.duration, c.location,
         s.optix_booking_id, s.optix_booking_session_id, s.resource_id, s.resource_name, s.provider, s.sync_status,
+        s.start_timestamp,
         s.error_code, s.error_message, s.last_attempted_at, s.last_synced_at, s.updated_at
       FROM calendar_items c
       LEFT JOIN optix_booking_sync s ON s.calendar_item_id = c.id
@@ -190,7 +222,12 @@ export default async function handler(req: Request) {
     // tell them apart, because only one of them is worth a Book bay button.
     if (!rows[0]) return json({ found: false, record: null, system: await systemFor(accountId) });
     const bayNames = await bayNamesFor([String(rows[0].resource_id || "")]);
-    return json({ found: true, record: toRecord(rows[0], bayNames), system: await systemFor(accountId) });
+    return json({
+      found: true,
+      record: toRecord(rows[0], bayNames),
+      bayBooked: bayBookedFor(rows[0]),
+      system: await systemFor(accountId),
+    });
   }
 
   const rows = await db().sql`

@@ -290,6 +290,8 @@
   "Choose a day": "Kies een dag",
   "The lesson was moved, but its bay was not: {error}": "De les is verplaatst, maar de bay niet: {error}",
   "The lesson was moved, but its bay was not. Use Book bay on the booking card.": "De les is verplaatst, maar de bay niet. Gebruik Bay boeken op de boekingskaart.",
+  "The lesson was booked, but its bay was not: {error}": "De les is geboekt, maar de bay niet: {error}",
+  "The lesson was booked, but its bay was not. Use Book bay on the booking card.": "De les is geboekt, maar de bay niet. Gebruik Bay boeken op de boekingskaart.",
   "Admin login expired. Sign in again before saving calendar changes.": "Beheerderslogin verlopen. Log opnieuw in voordat je agendawijzigingen opslaat.",
   "Calendar change could not be saved.": "De agendawijziging kon niet worden opgeslagen.",
   "Could not undo that change.": "Die wijziging kon niet ongedaan worden gemaakt.",
