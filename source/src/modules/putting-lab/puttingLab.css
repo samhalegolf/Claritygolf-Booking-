@@ -239,3 +239,51 @@
   gap: 10px;
   font-size: 0.9rem;
 }
+
+/* Every putt this session, newest first. */
+.putting-lab-shots {
+  position: absolute;
+  top: calc(max(10px, env(safe-area-inset-top)) + 48px);
+  right: 12px;
+  max-width: calc(100% - 24px);
+  max-height: 38vh;
+  overflow-y: auto;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.55);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.putting-lab-shots p {
+  margin: 0 0 4px;
+  font-weight: 600;
+}
+
+.putting-lab-shots table {
+  border-collapse: collapse;
+}
+
+.putting-lab-shots th,
+.putting-lab-shots td {
+  padding: 2px 6px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.putting-lab-shots th {
+  font-weight: 600;
+  opacity: 0.7;
+}
+
+.putting-lab-shots td.faint {
+  opacity: 0.5;
+}
+
+.putting-lab-shots td.inside {
+  color: #32d74b;
+}
+
+.putting-lab-shots td.outside {
+  color: #ff453a;
+}

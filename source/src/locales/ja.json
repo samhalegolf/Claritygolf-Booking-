@@ -4084,7 +4084,7 @@
   "Could not see the face edge. Check the light on the putter.": "フェースのエッジが見えません。パターに当たる光を確認してください。",
   "Calibration complete. Lift the template away.": "キャリブレーションが完了しました。テンプレートを取り除いてください。",
   "Camera moved. Recalibrate to keep measuring.": "カメラが動きました。測定を続けるには再キャリブレーションしてください。",
-  "Place a ball on the spot.": "ボールを所定の位置に置いてください。",
+  "Place a ball in the box.": "ボックスにボールを置いてください。",
   "Ready. Set the putter behind the ball.": "準備完了。パターをボールの後ろに構えてください。",
   "Camera nudged. Results are flagged until it settles.": "カメラが少し動きました。安定するまで結果に注意マークが付きます。",
   "The ball measures {mm} mm. Check the template printed at actual size.": "ボールが {mm} mm と測定されました。テンプレートが実寸で印刷されているか確認してください。",
@@ -4130,5 +4130,13 @@
   "Face on the {angle} line": "{angle} のラインにフェースを合わせる",
   "Ball along the calibration line": "キャリブレーションラインに沿ってボールを転がす",
   "Finish validation": "検証を終了",
-  "Debug overlay": "デバッグ表示"
+  "Debug overlay": "デバッグ表示",
+  "Easy": "やさしい",
+  "Medium": "ふつう",
+  "Hard": "むずかしい",
+  "{inside} of {count} inside the gate": "{count}球中{inside}球がゲート内",
+  "Speed (m/s)": "速度 (m/s)",
+  "Gate": "ゲート",
+  "Practice: {level}": "練習: {level}",
+  "Practice mode sets an offline gate 2 m out along the aim. A start line inside it plays a positive sound, outside a negative one.": "練習モードでは狙いのライン上2 m先にゲートを置きます。打ち出しがゲート内なら成功音、外なら失敗音が鳴ります。"
 }

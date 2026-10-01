@@ -116,6 +116,9 @@ function impactWindows(putter: PutterSample[]) {
   };
 }
 
+/** The widest start line, radians either side of the aim, that takes the ball through a gate clean. */
+export const gateTolerance = (g: PracticeGate) => Math.atan2(g.width / 2 - BALL_RADIUS_MM, g.distance);
+
 export function analyseStroke(
   putter: PutterSample[],
   roll: BallSample[],
@@ -224,13 +227,12 @@ export function analyseStroke(
     }
   }
 
-  // Gates stand on the aim line through the calibrated ball (the world origin).
+  // Gates stand on the aim line through where the ball sat, so they judge the start line alone.
   const gates: GateResult[] = [];
   if (start) {
-    const restInTarget = ballRest.rotated(aim);
     for (const g of target.gates) {
-      const lateralAt = restInTarget.x + Math.tan(radians(start.value)) * g.distance;
-      gates.push({ gate: g, passed: Math.abs(lateralAt) <= g.width / 2 - r, lateral: lateralAt });
+      const lateralAt = Math.tan(radians(start.value)) * g.distance;
+      gates.push({ gate: g, passed: Math.abs(radians(start.value)) <= gateTolerance(g), lateral: lateralAt });
     }
   }
 

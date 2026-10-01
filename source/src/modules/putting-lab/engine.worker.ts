@@ -21,6 +21,8 @@ export type WorkerRequest =
 export type WorkerResponse =
   | { kind: "snapshot"; snapshot: PuttingLabEngine["snapshot"] }
   | { kind: "stroke"; stroke: PuttingLabEngine["strokes"][number] }
+  /** Every putt so far, re-read after the aim or the practice gates changed. */
+  | { kind: "strokes"; strokes: PuttingLabEngine["strokes"] }
   | { kind: "validation"; run: ValidationRun | null };
 
 type WorkerScope = {
@@ -51,6 +53,7 @@ scope.onmessage = ({ data }) => {
     }
     case "setTarget":
       engine.setTarget(data.target);
+      scope.postMessage({ kind: "strokes", strokes: engine.strokes });
       break;
     case "recalibrate":
       engine.recalibrate();

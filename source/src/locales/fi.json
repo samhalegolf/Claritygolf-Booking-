@@ -4084,7 +4084,7 @@
   "Could not see the face edge. Check the light on the putter.": "Lavan reunaa ei näkynyt. Tarkista putterin valaistus.",
   "Calibration complete. Lift the template away.": "Kalibrointi valmis. Nosta malli pois.",
   "Camera moved. Recalibrate to keep measuring.": "Kamera liikkui. Kalibroi uudelleen jatkaaksesi mittausta.",
-  "Place a ball on the spot.": "Aseta pallo merkkiin.",
+  "Place a ball in the box.": "Aseta pallo ruutuun.",
   "Ready. Set the putter behind the ball.": "Valmis. Aseta putteri pallon taakse.",
   "Camera nudged. Results are flagged until it settles.": "Kameraa tönäistiin. Tulokset merkitään, kunnes se asettuu.",
   "The ball measures {mm} mm. Check the template printed at actual size.": "Pallo on {mm} mm. Tarkista, että malli on tulostettu todelliseen kokoon.",
@@ -4130,5 +4130,13 @@
   "Face on the {angle} line": "Lapa {angle} viivalla",
   "Ball along the calibration line": "Pallo kalibrointiviivaa pitkin",
   "Finish validation": "Lopeta validointi",
-  "Debug overlay": "Vianetsintäkerros"
+  "Debug overlay": "Vianetsintäkerros",
+  "Easy": "Helppo",
+  "Medium": "Keskitaso",
+  "Hard": "Vaikea",
+  "{inside} of {count} inside the gate": "{inside}/{count} portin sisällä",
+  "Speed (m/s)": "Nopeus (m/s)",
+  "Gate": "Portti",
+  "Practice: {level}": "Harjoitus: {level}",
+  "Practice mode sets an offline gate 2 m out along the aim. A start line inside it plays a positive sound, outside a negative one.": "Harjoitustila asettaa poikkeamaportin 2 m päähän tähtäyslinjalle. Lähtölinja sen sisällä antaa myönteisen äänen, ulkopuolella kielteisen."
 }

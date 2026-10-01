@@ -4084,7 +4084,7 @@
   "Could not see the face edge. Check the light on the putter.": "Kanten av køllebladet er ikke synlig. Sjekk lyset på putteren.",
   "Calibration complete. Lift the template away.": "Kalibreringen er ferdig. Fjern malen.",
   "Camera moved. Recalibrate to keep measuring.": "Kameraet er flyttet. Kalibrer på nytt for å fortsette målingen.",
-  "Place a ball on the spot.": "Legg en ball på punktet.",
+  "Place a ball in the box.": "Legg en ball i ruten.",
   "Ready. Set the putter behind the ball.": "Klar. Sett putteren bak ballen.",
   "Camera nudged. Results are flagged until it settles.": "Kameraet ble dyttet borti. Resultatene flagges til det står stille.",
   "The ball measures {mm} mm. Check the template printed at actual size.": "Ballen måler {mm} mm. Sjekk at malen er skrevet ut i faktisk størrelse.",
@@ -4130,5 +4130,13 @@
   "Face on the {angle} line": "Kølleblad på {angle}-linjen",
   "Ball along the calibration line": "Ball langs kalibreringslinjen",
   "Finish validation": "Avslutt valideringen",
-  "Debug overlay": "Feilsøkingslag"
+  "Debug overlay": "Feilsøkingslag",
+  "Easy": "Lett",
+  "Medium": "Middels",
+  "Hard": "Vanskelig",
+  "{inside} of {count} inside the gate": "{inside} av {count} innenfor porten",
+  "Speed (m/s)": "Fart (m/s)",
+  "Gate": "Port",
+  "Practice: {level}": "Trening: {level}",
+  "Practice mode sets an offline gate 2 m out along the aim. A start line inside it plays a positive sound, outside a negative one.": "Treningsmodus setter en avviksport 2 m ut langs siktelinjen. En startlinje innenfor gir en positiv lyd, utenfor en negativ."
 }

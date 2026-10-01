@@ -17,7 +17,8 @@ anywhere in it.
 | `PuttingLabPage.tsx` | The page (main menu > Putting Lab): intro, then the full-screen live gate |
 | `capture.ts` | Rear camera (`getUserMedia`), motion sensors, and the frame pump |
 | `engine.worker.ts` | Runs the engine off the main thread, one frame at a time |
-| `overlay.ts` | Draws the aim line, ball spot, traces, face lines and the debug layers |
+| `overlay.ts` | Draws the aim line, ball box, practice gate, traces, face lines and the debug layers |
+| `sounds.ts` | The gate's tones (ball set, ball lifted, inside / outside the practice gate) |
 | `engine/` | The measuring engine. No browser APIs, so all of it runs under `npm test` |
 | `/public/putting-lab/calibration-template-a3.svg` | The sheet coaches print (made by `engine/template.ts`) |
 
@@ -49,7 +50,22 @@ Inside `engine/`:
    hold still. The lab learns this putter: its width, where its visible edge
    sits relative to the true face, its texture, and any stickers.
 4. **Lift the template.** The calibration stays.
-5. **Putt.** Ready -> putt -> Face / Path / Start with the trace -> Ready.
+5. **Putt.** Put a ball anywhere in the box drawn round the spot (60 mm
+   square, squared to the aim). It turns green with a tone once the ball is
+   set; lifting the ball back out plays another. Ready -> putt -> Face / Path /
+   Start with the trace -> Ready. Every putt joins the shots list (speed,
+   start line, face, path), newest first.
+
+Steps 2 and 3 are calibration; the box only appears once the lab is live.
+
+## Practice mode
+
+Easy, medium or hard puts an offline gate 2 m out along the aim (pegs 200,
+140 and 100 mm apart; `PRACTICE_GATES` in `engine/coordinates.ts`). It is
+judged from the start line alone, measured from wherever the ball sat in the
+box: about +/-2.3, 1.4 and 0.8 degrees. Through the gate plays a positive
+tone, outside a negative one, and the shots list keeps the score. The sounds
+are placeholders in `sounds.ts`.
 
 ## Conventions
 

@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import test from "node:test";
 
+import { PRACTICE_GATES } from "./coordinates";
 import { PuttingLabEngine } from "./engine";
 import { apply3, radians, RigidTransform, solveHomography, Vec2 } from "./geometry";
 import { CameraMovementTracker, type DeviceAttitude } from "./motion";
@@ -127,6 +128,12 @@ test("a putter with stickers switches to enhanced tracking and measures the putt
   assert.ok(Math.abs(after.path!.value - (before.path!.value - 2.5)) < 1e-6);
   assert.ok(Math.abs(after.start!.value - (before.start!.value - 2.5)) < 1e-6);
   assert.ok(Math.abs(after.faceToPath!.value - before.faceToPath!.value) < 1e-6);
+
+  // A practice gate judges the start line against the aim: -0.5° passes medium (±1.4°), -3.0° does not.
+  engine.setTarget({ aimOffset: 0, gates: [PRACTICE_GATES.medium] });
+  assert.equal(engine.strokes[engine.strokes.length - 1].metrics.gates[0].passed, true);
+  engine.setTarget({ aimOffset: radians(2.5), gates: [PRACTICE_GATES.medium] });
+  assert.equal(engine.strokes[engine.strokes.length - 1].metrics.gates[0].passed, false);
 });
 
 test("a plain black putter is tracked on its edge alone", () => {
@@ -191,4 +198,16 @@ test("slow sensor drift is not camera movement, a knock is", () => {
   assert.equal(result, "still");
   for (let i = 1; i <= 3; i++, t += 1 / 30) result = tracker.update(about(3 + i / 3), t);
   assert.equal(result, "moved");
+});
+
+test("a ball anywhere in the box is ready to putt, one outside it is not", () => {
+  const { engine, t: t0 } = calibratedEngine(new SyntheticPutt(), false);
+  let t = feed(engine, {}, t0, 0.5, 60);
+  assert.equal(engine.snapshot.gate, "waitingForBall");
+  // In a corner of the box: further from the spot than a circle of the same width allows.
+  t = feed(engine, { ball: new Vec2(28, 28) }, t, 1, 60);
+  assert.equal(engine.snapshot.gate, "ready");
+  t = feed(engine, {}, t, 0.5, 60);
+  feed(engine, { ball: new Vec2(45, 0) }, t, 1, 60);
+  assert.equal(engine.snapshot.gate, "waitingForBall");
 });

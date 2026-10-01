@@ -4084,7 +4084,7 @@
   "Could not see the face edge. Check the light on the putter.": "Nie widać krawędzi główki. Sprawdź oświetlenie puttera.",
   "Calibration complete. Lift the template away.": "Kalibracja zakończona. Zdejmij szablon.",
   "Camera moved. Recalibrate to keep measuring.": "Kamera się przesunęła. Skalibruj ponownie, aby dalej mierzyć.",
-  "Place a ball on the spot.": "Połóż piłkę na punkcie.",
+  "Place a ball in the box.": "Połóż piłkę w kwadracie.",
   "Ready. Set the putter behind the ball.": "Gotowe. Ustaw putter za piłką.",
   "Camera nudged. Results are flagged until it settles.": "Kamera została potrącona. Wyniki są oznaczane, dopóki się nie ustabilizuje.",
   "The ball measures {mm} mm. Check the template printed at actual size.": "Piłka ma {mm} mm. Sprawdź, czy szablon wydrukowano w rzeczywistym rozmiarze.",
@@ -4130,5 +4130,13 @@
   "Face on the {angle} line": "Główka na linii {angle}",
   "Ball along the calibration line": "Piłka wzdłuż linii kalibracji",
   "Finish validation": "Zakończ walidację",
-  "Debug overlay": "Nakładka debugowania"
+  "Debug overlay": "Nakładka debugowania",
+  "Easy": "Łatwy",
+  "Medium": "Średni",
+  "Hard": "Trudny",
+  "{inside} of {count} inside the gate": "{inside} z {count} w bramce",
+  "Speed (m/s)": "Prędkość (m/s)",
+  "Gate": "Bramka",
+  "Practice: {level}": "Trening: {level}",
+  "Practice mode sets an offline gate 2 m out along the aim. A start line inside it plays a positive sound, outside a negative one.": "Tryb treningu ustawia bramkę odchylenia 2 m wzdłuż linii celu. Linia startu w jej obrębie daje dźwięk pozytywny, poza nią negatywny."
 }

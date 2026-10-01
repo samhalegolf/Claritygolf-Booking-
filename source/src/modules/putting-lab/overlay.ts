@@ -4,8 +4,9 @@
 
 import type { Point, PuttingLabSnapshot } from "./engine/engine";
 import { apply3, radians, RigidTransform, Vec2 } from "./engine/geometry";
+import { BALL_BOX_HALF_MM } from "./engine/ball";
 import { faceLine, type PutterSource } from "./engine/putter";
-import { BALL_RADIUS_MM } from "./engine/template";
+import { gateTolerance } from "./engine/stroke";
 import type { PutterSample } from "./engine/tracker";
 
 export const DEBUG_LAYERS = [
@@ -95,15 +96,25 @@ export function drawOverlay(
   }
   if (layers.has("physicalAxis")) strokeLine([new Vec2(0, -150), new Vec2(0, 900)], "rgba(200,200,200,0.8)", 1, [4, 4]);
 
-  // The virtual aim line and the ball spot: always shown once calibrated.
+  // The virtual aim line: always shown once calibrated.
   strokeLine([origin.sub(aim.mul(150)), origin.add(aim.mul(1500))], "rgba(255,255,255,0.55)", 1.5);
-  const circle = Array.from({ length: 37 }, (_, i) => origin.add(Vec2.direction((i / 36) * 2 * Math.PI).mul(BALL_RADIUS_MM)));
-  strokeLine(circle, s.gate === "waitingForBall" ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.35)", 1.5, [3, 3]);
 
-  // Gates: two pegs either side of the aim line.
-  const across = new Vec2(aim.y, -aim.x);
-  for (const g of s.target.gates) {
-    for (const side of [-1, 1]) dot(fromWorld(origin.add(aim.mul(g.distance)).add(across.mul(side * (g.width / 2 + 4)))), 4, "#ff9f0a");
+  if (s.phase === "live") {
+    // The box the ball goes in, squared to the aim: white while empty, green once the ball is set.
+    const across = new Vec2(aim.y, -aim.x);
+    const h = BALL_BOX_HALF_MM;
+    const box = [[-1, -1], [1, -1], [1, 1], [-1, 1], [-1, -1]].map(([a, b]) => origin.add(across.mul(a * h)).add(aim.mul(b * h)));
+    const colour = s.gate === "ready" ? "#32d74b" : s.gate === "waitingForBall" ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.35)";
+    strokeLine(box, colour, 2);
+
+    // Practice gates: the start lines that pass clean, as a wedge from where the ball sits.
+    const from = s.ballRest ? v(s.ballRest) : origin;
+    for (const g of s.target.gates) {
+      const tolerance = gateTolerance(g);
+      for (const side of [-1, 1]) {
+        strokeLine([from, from.add(Vec2.direction(s.target.aimOffset + side * tolerance).mul(g.distance))], "rgba(255,159,10,0.8)", 1.5, [6, 4]);
+      }
+    }
   }
 
   if (layers.has("ballSearch") && s.ballSearch) {
