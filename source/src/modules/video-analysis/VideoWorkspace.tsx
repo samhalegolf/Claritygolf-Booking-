@@ -78,6 +78,7 @@ import {
   importSavedVideoFromClarityCloud,
   linkSavedVideoAngles,
   listClarityCloudImportTransfers,
+  LEGACY_UNASSIGNED_PLAYER_ID,
   pairSavedVideoAngles,
   refuseSavedVideoAngles,
   SavedVideoCloudError,
@@ -170,6 +171,7 @@ const SNAPSHOT_PREVIEW_HEIGHT = 50;
  * belongs to first.
  */
 const UNASSIGNED_WORKSPACE_ID = "unassigned";
+const NO_LIBRARY_PLAYERS: readonly VideoWorkspaceLibraryPlayer[] = [];
 /**
  * The box the freshly-captured frame shrinks into, in the composer.
  *
@@ -291,6 +293,15 @@ export interface VideoWorkspacePlayerChoice {
   playerName: string;
 }
 
+/**
+ * A player the "From library" search can find. One person's videos can be
+ * filed under several ids (client id, email, phone), so all of them are given.
+ */
+export interface VideoWorkspaceLibraryPlayer {
+  playerName: string;
+  playerIds: string[];
+}
+
 export interface VideoWorkspaceSaveResult extends VideoWorkspaceNavigationContext {
   savedItems: SavedVideoItem[];
   reason: "save" | "my-library-save";
@@ -316,6 +327,8 @@ export interface VideoWorkspaceProps {
   pairedSavedVideoId?: string;
   persistence?: Partial<VideoAnalysisPersistenceLayer>;
   savedVideoLibrary?: SavedVideoLibraryStore | null;
+  /** Players with saved videos, for the "From library" search. */
+  libraryPlayers?: readonly VideoWorkspaceLibraryPlayer[];
   onSavedVideoLibraryChange?: () => void;
   onNavigateBack?: (context: VideoWorkspaceNavigationContext) => void;
   onLocalSaveComplete?: (result: VideoWorkspaceSaveResult) => void | Promise<void>;
@@ -616,6 +629,7 @@ export function VideoWorkspace({
   pairedSavedVideoId,
   persistence,
   savedVideoLibrary,
+  libraryPlayers = NO_LIBRARY_PLAYERS,
   onSavedVideoLibraryChange,
   onNavigateBack,
   onLocalSaveComplete,
@@ -721,8 +735,19 @@ export function VideoWorkspace({
   const [liveStream, setLiveStream] = useState<MediaStream | null>(null);
   /** The side a Clarity Terminal panel is open on, if any. */
   const [remoteSide, setRemoteSide] = useState<ComparisonSide | null>(null);
-  // The side whose empty panel is showing the player's library.
+  // The side whose panel is showing the library -- an empty one, or a loaded
+  // one whose clip the pick will replace.
   const [librarySide, setLibrarySide] = useState<ComparisonSide | null>(null);
+  // Which of the empty stage's two groups -- Upload or Connect -- has its
+  // choices showing, and on which side.
+  const [intakeGroup, setIntakeGroup] = useState<{
+    side: ComparisonSide;
+    kind: "upload" | "connect";
+  } | null>(null);
+  const toggleIntakeGroup = (side: ComparisonSide, kind: "upload" | "connect") =>
+    setIntakeGroup((current) =>
+      current?.side === side && current.kind === kind ? null : { side, kind }
+    );
   // The workstation's default recording camera, chosen once in Video Settings.
   // Read on mount rather than taken from a prop: it belongs to this browser,
   // not to the player or lesson the workspace happens to be showing.
@@ -3618,9 +3643,9 @@ export function VideoWorkspace({
       // decide, which is safe because every attempt is pinned to the saved id.
       const deviceListIsInformative = cameraDeviceList.labelsAvailable;
       const cameraMissing = !needsSetup && deviceListIsInformative && !resolvedCamera;
-      const canRecord =
-        cameraDeviceList.supported && !needsSetup && !cameraMissing && !isConnecting && !isPending;
       const canConnect = cameraDeviceList.supported && !needsSetup && !isConnecting && !isPending;
+      const hasLibraryChoice = Boolean(savedVideoStore);
+      const openIntakeGroup = intakeGroup?.side === side ? intakeGroup.kind : null;
       // An attempt that just failed outranks the resting "Camera not connected"
       // -- it names which camera and why, and it is the only sign that the
       // button was pressed at all.
@@ -3668,69 +3693,102 @@ export function VideoWorkspace({
             ) : null}
           </div>
 
+          {/* Two ways in: bring a clip that already exists (Upload), or bring
+              a camera up (Connect). Each opens its own short row of choices;
+              where a group has only one choice the button just does it. */}
           <div className="video-intake-actions">
-            {/* The way to prod a camera the device list has not admitted to
-                yet -- a sleeping Continuity Camera iPhone, most often. It is
-                deliberately not gated on the camera resolving: that gate is
-                what made "Camera not connected" a dead end. */}
             <button
               type="button"
-              className="upload-button video-connect-button"
+              className={`upload-button${openIntakeGroup === "upload" ? " is-open" : ""}`}
+              aria-expanded={hasLibraryChoice ? openIntakeGroup === "upload" : undefined}
               onClick={(event) => {
                 event.stopPropagation();
-                void connectPreferredCamera(side);
+                if (hasLibraryChoice) {
+                  toggleIntakeGroup(side, "upload");
+                } else {
+                  openUpload(side);
+                }
               }}
-              disabled={!canConnect}
+            >
+              <IconUpload />{t("Upload")}</button>
+            {/* Connect is deliberately not gated on the camera resolving: it
+                is the way to prod a camera the device list has not admitted
+                to yet -- a sleeping Continuity Camera iPhone, most often. */}
+            <button
+              type="button"
+              className={`upload-button${openIntakeGroup === "connect" ? " is-open" : ""}`}
+              aria-expanded={playerId ? openIntakeGroup === "connect" : undefined}
+              onClick={(event) => {
+                event.stopPropagation();
+                if (playerId) {
+                  toggleIntakeGroup(side, "connect");
+                } else {
+                  void connectPreferredCamera(side);
+                }
+              }}
+              disabled={!playerId && !canConnect}
             >
               <IconCamera />{t("Connect")}</button>
-            <button
-              type="button"
-              className="upload-button video-record-button"
-              onClick={(event) => {
-                event.stopPropagation();
-                void startLiveRecording(side);
-              }}
-              disabled={!canRecord}
-            >
-              <IconRecord />{t("Record")}</button>
-            {/* The cameras on the bay's own computer, driven from here. */}
-            {playerId ? (
-              <button
-                type="button"
-                className="upload-button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  closeLiveRecording();
-                  setRemoteSide(side);
-                }}
-              >
-                <IconCamera />Clarity Terminal</button>
-            ) : null}
-            {/* Importing a clip is a different job from recording one, and it
-                still has to work: the stage takes a drop, this takes a click. */}
-            <button
-              type="button"
-              className="upload-button is-subtle"
-              onClick={(event) => {
-                event.stopPropagation();
-                openUpload(side);
-              }}
-            >
-              <IconUpload />{t("Upload a video")}</button>
-            {/* A video already saved -- on this device or in Clarity Cloud --
-                onto this side, without leaving the workspace. */}
-            {savedVideoStore && playerId ? (
+          </div>
+          {openIntakeGroup === "upload" ? (
+            <div className="video-intake-actions video-intake-choices">
+              {/* Importing a clip still has to work by click as well as by a
+                  drop on the stage. */}
               <button
                 type="button"
                 className="upload-button is-subtle"
                 onClick={(event) => {
                   event.stopPropagation();
+                  setIntakeGroup(null);
+                  openUpload(side);
+                }}
+              >
+                <IconUpload />{t("From this device")}</button>
+              {/* A video already saved -- on this device or in Clarity Cloud --
+                  onto this side, without leaving the workspace. */}
+              <button
+                type="button"
+                className="upload-button is-subtle"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setIntakeGroup(null);
                   closeLiveRecording();
                   setLibrarySide(side);
                 }}
               >
                 <IconLibrary />{t("From library")}</button>
-            ) : null}
+            </div>
+          ) : null}
+          {openIntakeGroup === "connect" ? (
+            <div className="video-intake-actions video-intake-choices">
+              {/* The saved camera opens as a live preview; Record is there. */}
+              <button
+                type="button"
+                className="upload-button is-subtle"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setIntakeGroup(null);
+                  void connectPreferredCamera(side);
+                }}
+                disabled={!canConnect}
+              >
+                <IconCamera />{t("Camera")}</button>
+              {/* The cameras on the bay's own computer, driven from here. */}
+              <button
+                type="button"
+                className="upload-button is-subtle"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setIntakeGroup(null);
+                  closeLiveRecording();
+                  setRemoteSide(side);
+                }}
+              >
+                <IconCamera />Clarity Terminal</button>
+            </div>
+          ) : null}
+
+          <div className="video-intake-actions">
             {/* The only route into Video Settings while the workspace is
                 empty -- the action bar's gear arrives with a clip. It is one
                 link, not a wizard: changing camera is a deliberate trip to
@@ -3769,7 +3827,11 @@ export function VideoWorkspace({
           onMouseDown={() => setActiveSideInCompare(side)}
         >
           <LibraryClipPanel
-            list={listLibraryForSide}
+            playerName={playerId ? resolvedPlayerName : undefined}
+            listThisPlayer={listThisPlayersLibrary}
+            listUnassigned={listUnassignedLibrary}
+            players={libraryPlayers}
+            listPlayer={listLibraryForSide}
             onPick={loadLibraryClipIntoSide}
             onClose={() => setLibrarySide(null)}
           />
@@ -4004,6 +4066,15 @@ export function VideoWorkspace({
           />
           {showAnalysisRail ? (
             <AnalysisRail
+              onUpload={() => openUpload(side)}
+              onOpenLibrary={
+                savedVideoStore
+                  ? () => {
+                      clearFocusSelection();
+                      setLibrarySide(side);
+                    }
+                  : undefined
+              }
               onOpen3D={MOTION_LAB_AVAILABLE ? () => void openMotionLab() : undefined}
               motionLabOpen={motionLabOpen}
               motionLabDisabled={saveBusy}
@@ -4166,22 +4237,26 @@ export function VideoWorkspace({
    * with the clip the library pairs with the swing first.
    */
   /**
-   * A player's library as a picker lists it: every saved video on this
-   * device, and every one in Clarity Cloud that is not. The clip the library
-   * pairs with `anchorId` (the clip already open) comes first, marked as the
-   * same swing; `exclude` leaves out clips that are already on screen.
-   * Shared by the empty panel's "From library" and the 3D second-angle picker.
+   * Saved videos as a picker lists them: every one on this device, and every
+   * one in Clarity Cloud that is not, for the given owner ids (one person can
+   * be filed under several). The clip the library pairs with `anchorId` (the
+   * clip already open) comes first, marked as the same swing; clips from this
+   * lesson are marked as likely too. `exclude` leaves out clips already on
+   * screen. Shared by the "From library" panel and the 3D second-angle picker.
    */
   const listPlayerLibrary = useCallback(
-    async (ownerId: string, anchorId: string | undefined, exclude: readonly string[]): Promise<LibraryClip[]> => {
-      if (!savedVideoStore) return [];
-      const items = await savedVideoStore.listItemsForPlayer(ownerId);
+    async (ownerIds: readonly string[], anchorId: string | undefined, exclude: readonly string[]): Promise<LibraryClip[]> => {
+      if (!savedVideoStore || !ownerIds.length) return [];
+      const owners = new Set(ownerIds);
+      const items = (await savedVideoStore.listItems()).filter((item) => owners.has(item.playerId));
       const partnerId = anchorId ? pairSavedVideoAngles(items).get(anchorId) : undefined;
       const skip = new Set(exclude);
+      const isThisLesson = (id?: string) => Boolean(lessonId && id === lessonId);
       const clips: (LibraryClip & { at: string })[] = items
         .filter((item) => !skip.has(item.savedVideoId))
         .map((item) => {
           const at = item.source.recordedAt || item.capturedAt || item.createdAt;
+          const sameSwing = item.savedVideoId === partnerId;
           return {
             id: item.savedVideoId,
             title: item.title || item.source.originalFileName || t("Saved video"),
@@ -4189,23 +4264,27 @@ export function VideoWorkspace({
               item.local.status === "available" ? t("On this device") : t("Clarity Cloud")
             }`,
             thumbnail: item.thumbnailDataUrl,
-            sameSwing: item.savedVideoId === partnerId,
+            sameSwing,
+            likely: sameSwing || isThisLesson(item.lessonId),
             at,
           };
         });
       const listed = new Set(items.map((item) => item.savedVideoId));
       try {
-        const transfers = await listClarityCloudImportTransfers(cloudScope, ownerId);
-        for (const transfer of transfers) {
+        const batches = await Promise.all(
+          [...owners].map((ownerId) => listClarityCloudImportTransfers(cloudScope, ownerId))
+        );
+        for (const transfer of batches.flat()) {
           const id = transfer.savedVideoId || transfer.savedVideo?.savedVideoId;
           if (!id || skip.has(id) || listed.has(id)) continue;
-          if (transfer.savedVideo?.playerId !== ownerId) continue;
+          if (!transfer.savedVideo || !owners.has(transfer.savedVideo.playerId)) continue;
           listed.add(id);
           const at = transfer.savedVideo.createdAt;
           clips.push({
             id,
             title: transfer.savedVideo.title || t("Saved video"),
             detail: `${describeClipDate(at)} · ${t("Clarity Cloud")}`,
+            likely: isThisLesson(transfer.savedVideo.lessonId),
             at,
           });
         }
@@ -4213,10 +4292,13 @@ export function VideoWorkspace({
         // Offline, or no cloud: the picker lists what is on this device.
       }
       return clips.sort(
-        (a, b) => Number(Boolean(b.sameSwing)) - Number(Boolean(a.sameSwing)) || b.at.localeCompare(a.at)
+        (a, b) =>
+          Number(Boolean(b.sameSwing)) - Number(Boolean(a.sameSwing)) ||
+          Number(Boolean(b.likely)) - Number(Boolean(a.likely)) ||
+          b.at.localeCompare(a.at)
       );
     },
-    [cloudScope, savedVideoStore]
+    [cloudScope, lessonId, savedVideoStore]
   );
 
   /** The player's library, as the lab's second-angle picker sees it. */
@@ -4224,24 +4306,35 @@ export function VideoWorkspace({
     if (!savedVideoStore || !motionLabPlayerId) return undefined;
     const swingId = motionLabSwing?.id;
     return {
-      list: () => listPlayerLibrary(motionLabPlayerId, swingId, swingId ? [swingId] : []),
+      list: () => listPlayerLibrary([motionLabPlayerId], swingId, swingId ? [swingId] : []),
       load: readSavedVideo,
     };
   }, [listPlayerLibrary, motionLabPlayerId, motionLabSwing?.id, readSavedVideo, savedVideoStore]);
 
   /**
-   * The empty panel's "From library": the player's saved videos, with the
-   * one the library pairs with the other side's clip first -- so the second
-   * angle of a swing already open is one tap away.
+   * "From library" lists for the side it was opened on. The clip on the other
+   * side anchors the same-swing match, and clips already on screen are left
+   * out, whichever folder is being looked through.
    */
-  const listLibraryForSide = useCallback(() => {
-    const side = librarySide ?? "left";
-    const otherId = currentSavedVideoIds[side === "left" ? "right" : "left"];
-    const onScreen = [currentSavedVideoIds.left, currentSavedVideoIds.right].filter(
-      (id): id is string => Boolean(id)
-    );
-    return listPlayerLibrary(resolvedPlayerId, otherId, onScreen);
-  }, [currentSavedVideoIds, librarySide, listPlayerLibrary, resolvedPlayerId]);
+  const listLibraryForSide = useCallback(
+    (ownerIds: readonly string[]) => {
+      const side = librarySide ?? "left";
+      const otherId = currentSavedVideoIds[side === "left" ? "right" : "left"];
+      const onScreen = [currentSavedVideoIds.left, currentSavedVideoIds.right].filter(
+        (id): id is string => Boolean(id)
+      );
+      return listPlayerLibrary(ownerIds, otherId, onScreen);
+    },
+    [currentSavedVideoIds, librarySide, listPlayerLibrary]
+  );
+  const listThisPlayersLibrary = useCallback(
+    () => listLibraryForSide(playerId ? [playerId] : []),
+    [listLibraryForSide, playerId]
+  );
+  const listUnassignedLibrary = useCallback(
+    () => listLibraryForSide([LEGACY_UNASSIGNED_PLAYER_ID]),
+    [listLibraryForSide]
+  );
 
   const loadLibraryClipIntoSide = useCallback(
     async (id: string) => {
@@ -4414,8 +4507,8 @@ export function VideoWorkspace({
           save, diagnostics, swapping the active clip -- lives behind the
           settings gear on the action bar below. */}
 
-      {/* The empty workspace is the capture stage and nothing else. Record
-          and Upload are inside the card -- there is no second row of buttons
+      {/* The empty workspace is the capture stage and nothing else. Upload
+          and Connect are inside the card -- there is no second row of buttons
           under it, because the card grew the ones it needs. */}
       {!workspaceHasVideo && !liveRecording ? (
         <section className="video-intake-panel" aria-label={t("Add video")}>
