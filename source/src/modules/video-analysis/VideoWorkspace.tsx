@@ -1170,6 +1170,23 @@ export function VideoWorkspace({
     apply: (next) => syncMarkersWithAnalysis("right", next),
   });
 
+  // Split View has one analysis rail for both panels, so its phase button
+  // snaps every clip on screen and shows whichever is still working.
+  const { snap: snapLeftPhases } = leftPhases;
+  const { snap: snapRightPhases } = rightPhases;
+  const snapAllPhases = useCallback(() => {
+    snapLeftPhases();
+    if (modeIsCompare) snapRightPhases();
+  }, [modeIsCompare, snapLeftPhases, snapRightPhases]);
+  const railPhaseState =
+    modeIsCompare && rightPhases.state.kind === "running" ? rightPhases.state : leftPhases.state;
+  // Which panel carries each rail: in Split View the drawing rail sits on the
+  // left-hand clip and the analysis rail on the right-hand one, falling back
+  // to whichever panel has a clip while the other is still empty.
+  const toolRailSide: ComparisonSide =
+    modeIsCompare && !playerVideoLeft && playerVideoRight ? "right" : "left";
+  const analysisRailSide: ComparisonSide = modeIsCompare && playerVideoRight ? "right" : "left";
+
   const playPauseSide = useCallback(
     (side: ComparisonSide) => {
       if (side === "left") {
@@ -4061,40 +4078,48 @@ export function VideoWorkspace({
             </div>
           ) : null}
           {renderCaptureLayer(side)}
-          <PlayerToolRailToggle
-            open={toolRailOpen}
-            onToggle={() => setToolRailOpen((previous) => !previous)}
-          />
-          <PlayerToolRail
-            open={toolRailOpen}
-            selectedTool={drawingState.selectedTool}
-            onToolChange={updateActiveDrawingTool}
-            onUndo={drawingState.undo}
-            canUndo={drawingState.canUndo}
-            onClear={clearActiveDrawing}
-            canClear={drawingState.objects.length > 0}
-            onFocusOpen={
-              isPlayerVariant ? undefined : () => setFocusPaletteOpen((previous) => !previous)
-            }
-            onCapture={isPlayerVariant ? undefined : captureSnapshot}
-            captureTooltip={
-              captureBox ? t("Screenshot the box (Space)") : t("Screenshot the frame (Space)")
-            }
-          />
-          {showAnalysisRail ? (
+          {/* Split View is one swing (or two) on one screen, so it gets one
+              set of chrome: the drawing rail on the left-hand clip, the
+              analysis rail on the right-hand one. Each acts on the active
+              panel, and the 3D button takes both clips. */}
+          {side === toolRailSide ? (
+            <>
+              <PlayerToolRailToggle
+                open={toolRailOpen}
+                onToggle={() => setToolRailOpen((previous) => !previous)}
+              />
+              <PlayerToolRail
+                open={toolRailOpen}
+                selectedTool={activeDrawing.selectedTool}
+                onToolChange={updateActiveDrawingTool}
+                onUndo={activeDrawing.undo}
+                canUndo={activeDrawing.canUndo}
+                onClear={clearActiveDrawing}
+                canClear={activeDrawing.objects.length > 0}
+                onFocusOpen={
+                  isPlayerVariant ? undefined : () => setFocusPaletteOpen((previous) => !previous)
+                }
+                onCapture={isPlayerVariant ? undefined : captureSnapshot}
+                captureTooltip={
+                  captureBox ? t("Screenshot the box (Space)") : t("Screenshot the frame (Space)")
+                }
+              />
+            </>
+          ) : null}
+          {showAnalysisRail && side === analysisRailSide ? (
             <AnalysisRail
-              onUpload={() => openUpload(side)}
+              onUpload={() => openUpload(effectiveActiveSide)}
               onOpenLibrary={
                 savedVideoStore
                   ? () => {
                       clearFocusSelection();
-                      setLibrarySide(side);
+                      setLibrarySide(effectiveActiveSide);
                     }
                   : undefined
               }
               splitView={modeIsCompare}
-              onToggleSplitView={() => toggleSplitView(side)}
-              onOpenSecondAngle={() => void openSecondAngle(side)}
+              onToggleSplitView={() => toggleSplitView(effectiveActiveSide)}
+              onOpenSecondAngle={() => void openSecondAngle(effectiveActiveSide)}
               secondAngleBusy={findingSecondAngle || saveBusy}
               onOpen3D={MOTION_LAB_AVAILABLE ? () => void openMotionLab() : undefined}
               motionLabOpen={motionLabOpen}
@@ -4103,8 +4128,8 @@ export function VideoWorkspace({
               onToggleMarkers={() => setShowBodyMarkers((previous) => !previous)}
               showGroundForce={showGroundForce}
               onToggleGroundForce={() => setShowGroundForce((previous) => !previous)}
-              onSnapPhases={swingPhasesEnabled ? (isLeft ? leftPhases : rightPhases).snap : undefined}
-              phaseState={(isLeft ? leftPhases : rightPhases).state}
+              onSnapPhases={swingPhasesEnabled ? snapAllPhases : undefined}
+              phaseState={railPhaseState}
             />
           ) : null}
           <div

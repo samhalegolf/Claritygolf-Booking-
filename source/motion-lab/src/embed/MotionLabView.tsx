@@ -46,7 +46,7 @@ import { ExtraClipButtons, type SecondAngleLibrary } from "../app/panels/ExtraCl
 export type { SecondAngleClip, SecondAngleLibrary } from "../app/panels/ExtraClipButtons";
 import { Timeline } from "../app/panels/Timeline";
 import { Transport } from "../app/panels/Transport";
-import { VideoPanel } from "../app/panels/VideoPanel";
+import { SourceVideos } from "../app/panels/SourceVideos";
 import { useLabKeyboard } from "../app/useLabKeyboard";
 import { usePlayback } from "../app/usePlayback";
 import { useVideoObservation } from "../app/useVideoObservation";
@@ -171,7 +171,7 @@ export function MotionLabView({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose, keysEnabled]);
 
-  const { status, result, videoUrl, secondAngleFileName } = video.state;
+  const { status, videoUrl, secondAngleFileName } = video.state;
 
   return (
     <div className="lab lab-embedded">
@@ -214,11 +214,9 @@ export function MotionLabView({
         <main className="lab-stage">
           <div className={videoUrl ? "lab-stage-split" : "lab-stage-single"}>
             {videoUrl && (
-              <VideoPanel
-                videoUrl={videoUrl}
+              <SourceVideos
+                state={video.state}
                 frame={rawFrame}
-                width={result?.info.width ?? 16}
-                height={result?.info.height ?? 9}
                 showLowConfidence={showLowConfidence}
                 layers={layers}
               />

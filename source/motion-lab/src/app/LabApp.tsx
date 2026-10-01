@@ -27,7 +27,7 @@ import { ObservationPanel } from "./panels/ObservationPanel";
 import { ExtraClipButtons } from "./panels/ExtraClipButtons";
 import { Timeline } from "./panels/Timeline";
 import { Transport } from "./panels/Transport";
-import { VideoPanel } from "./panels/VideoPanel";
+import { SourceVideos } from "./panels/SourceVideos";
 import { PIPELINE_MODES, SCENARIOS, type PipelineMode } from "./scenarios";
 import { useLabKeyboard } from "./useLabKeyboard";
 import { useSyntheticPipeline } from "./useSyntheticPipeline";
@@ -80,7 +80,7 @@ export function LabApp() {
 
   useLabKeyboard(playback, setCameraPreset);
 
-  const { status, result, videoUrl, fileName } = video.state;
+  const { status, videoUrl, fileName } = video.state;
 
   return (
     <div className="lab">
@@ -254,11 +254,9 @@ export function LabApp() {
         <main className="lab-stage">
           <div className={source === "video" && videoUrl ? "lab-stage-split" : "lab-stage-single"}>
             {source === "video" && videoUrl && (
-              <VideoPanel
-                videoUrl={videoUrl}
+              <SourceVideos
+                state={video.state}
                 frame={rawFrame}
-                width={result?.info.width ?? 16}
-                height={result?.info.height ?? 9}
                 showLowConfidence={showLowConfidence}
                 layers={layers}
               />

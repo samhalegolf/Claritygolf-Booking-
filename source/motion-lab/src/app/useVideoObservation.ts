@@ -24,6 +24,7 @@ import { calibrateFromStandingShot, type StandingCalibration } from "../motion/l
 import { MediaPipeDetector } from "../observe/mediapipe/MediaPipeDetector";
 import type { CameraObservationSequence, ObservationFrame } from "../observe/observation";
 import { observeVideo, type ObservationResult } from "../observe/runObservation";
+import type { VideoSourceInfo } from "../observe/videoFrames";
 import type { TwoViewReport } from "../motion/fuse/twoView";
 import { buildVideoSequences, type LevellingReadout } from "./videoSequences";
 
@@ -56,6 +57,14 @@ export interface VideoObservationState {
   /** What fusing the second angle found. Null with no second angle. */
   readonly fusion: TwoViewReport | null;
   readonly secondAngleFileName: string | null;
+  /**
+   * The second angle, to watch beside the swing. Shown whether or not it
+   * fused -- the coach should see what landed -- but only lined up with the
+   * swing when `fusion` measured how.
+   */
+  readonly secondVideoUrl: string | null;
+  readonly secondRaw: readonly ObservationFrame[];
+  readonly secondInfo: VideoSourceInfo | null;
 }
 
 const IDLE: VideoObservationState = {
@@ -73,12 +82,16 @@ const IDLE: VideoObservationState = {
   levelling: null,
   fusion: null,
   secondAngleFileName: null,
+  secondVideoUrl: null,
+  secondRaw: [],
+  secondInfo: null,
 };
 
 export const useVideoObservation = () => {
   const [state, setState] = useState<VideoObservationState>(IDLE);
   const abortRef = useRef<AbortController | null>(null);
   const urlRef = useRef<string | null>(null);
+  const secondUrlRef = useRef<string | null>(null);
   /*
    * The standing shot's OBSERVATIONS, not its verdict.
    *
@@ -92,12 +105,20 @@ export const useVideoObservation = () => {
   /** The second angle's observations. Belongs to one swing, so a new swing drops it. */
   const secondRef = useRef<CameraObservationSequence | null>(null);
 
+  const revokeSecond = useCallback(() => {
+    if (secondUrlRef.current) {
+      URL.revokeObjectURL(secondUrlRef.current);
+      secondUrlRef.current = null;
+    }
+  }, []);
+
   const revoke = useCallback(() => {
     if (urlRef.current) {
       URL.revokeObjectURL(urlRef.current);
       urlRef.current = null;
     }
-  }, []);
+    revokeSecond();
+  }, [revokeSecond]);
 
   // An object URL outlives the component unless it is revoked, and a few
   // hundred megabytes of video is not something to leak on a page the
@@ -307,12 +328,18 @@ export const useVideoObservation = () => {
 
         secondRef.current = shot.camera;
         const swing = swingRef.current;
+        revokeSecond();
+        const secondVideoUrl = URL.createObjectURL(file);
+        secondUrlRef.current = secondVideoUrl;
 
         setState((current) => ({
           ...current,
           status: swing ? "ready" : "idle",
           progress: null,
           secondAngleFileName: file.name,
+          secondVideoUrl,
+          secondRaw: shot.raw,
+          secondInfo: shot.info,
           ...(swing ? rebuild(swing) : {}),
         }));
       } catch (error) {
@@ -327,19 +354,23 @@ export const useVideoObservation = () => {
         if (abortRef.current === controller) abortRef.current = null;
       }
     },
-    [cancel, detect, rebuild]
+    [cancel, detect, rebuild, revokeSecond]
   );
 
   /** Drop the second angle and go back to the swing's own camera. */
   const clearSecondAngle = useCallback(() => {
     secondRef.current = null;
+    revokeSecond();
     const swing = swingRef.current;
     setState((current) => ({
       ...current,
       ...(swing ? rebuild(swing) : { fusion: null }),
       secondAngleFileName: null,
+      secondVideoUrl: null,
+      secondRaw: [],
+      secondInfo: null,
     }));
-  }, [rebuild]);
+  }, [rebuild, revokeSecond]);
 
   const reset = useCallback(() => {
     cancel();
