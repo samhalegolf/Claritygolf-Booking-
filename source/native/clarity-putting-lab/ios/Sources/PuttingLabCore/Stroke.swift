@@ -123,12 +123,17 @@ public struct PuttingStrokeMetrics: Codable, Sendable {
 }
 
 public enum PuttingStrokeAnalysis {
-    /// Frames either side of impact used to read the face and path.
-    public static let impactWindowBefore = 0.025
-    public static let impactWindowAfter = 0.008
-    /// Path is a direction of travel, which a longer run of positions reads more steadily.
-    public static let pathWindowBefore = 0.04
-    public static let pathWindowAfter = 0.015
+    /// Time either side of impact used to read the face, and (wider) the
+    /// path, which a longer run of positions reads more steadily. At least
+    /// these, and never fewer frames than a fit needs: the same rule as the
+    /// browser engine (src/modules/putting-lab/engine/stroke.ts).
+    static func impactWindows(_ putter: [PutterSample]) -> (face: (Double, Double), path: (Double, Double)) {
+        var gaps: [Double] = []
+        for i in putter.indices.dropFirst() { gaps.append(putter[i].timestamp - putter[i - 1].timestamp) }
+        gaps.sort()
+        let dt = gaps.isEmpty ? 1.0 / 240 : gaps[gaps.count / 2]
+        return ((max(0.025, 3.5 * dt), max(0.008, 1.5 * dt)), (max(0.04, 4.5 * dt), max(0.015, 2 * dt)))
+    }
 
     public static func analyse(putter: [PutterSample], roll: [BallSample], ballRest: Vec2, impact: ImpactEstimate,
                                target: PracticeTarget, handedness: Handedness, startedAt: Double) -> PuttingStrokeMetrics {
@@ -137,7 +142,8 @@ public enum PuttingStrokeAnalysis {
         let r = CalibrationTemplate.ballDiameterMM / 2
 
         // Face and path at impact, from a local fit through the surrounding frames.
-        let near = putter.filter { $0.timestamp >= ti - impactWindowBefore && $0.timestamp <= ti + impactWindowAfter && $0.confidence > 0.2 }
+        let windows = impactWindows(putter)
+        let near = putter.filter { $0.timestamp >= ti - windows.face.0 && $0.timestamp <= ti + windows.face.1 && $0.confidence > 0.2 }
         var face: Measured?, path: Measured?, rate: Measured?, strike: Measured?
         var faceAtImpactWorld: Double?
         if near.count >= 4 {
@@ -148,7 +154,7 @@ public enum PuttingStrokeAnalysis {
                 face = Measured(Angle.degrees(Angle.wrap(f.value(at: ti) - aim)), confidence: conf * impact.confidence)
                 rate = Measured(Angle.degrees(f.rate(at: ti)), confidence: conf)
             }
-            let wide = putter.filter { $0.timestamp >= ti - pathWindowBefore && $0.timestamp <= ti + pathWindowAfter && $0.confidence > 0.2 }
+            let wide = putter.filter { $0.timestamp >= ti - windows.path.0 && $0.timestamp <= ti + windows.path.1 && $0.confidence > 0.2 }
             let wt = wide.map(\.timestamp), ww = wide.map(\.confidence)
             if let fx = PolyFit.fit(t: wt, y: wide.map(\.x), weights: ww, degree: 2, about: ti),
                let fy = PolyFit.fit(t: wt, y: wide.map(\.y), weights: ww, degree: 2, about: ti) {

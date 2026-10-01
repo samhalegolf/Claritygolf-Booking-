@@ -1,6 +1,6 @@
 # Clarity Putting Lab
 
-An overhead-camera putting gate for the Clarity Booking staff app. A phone or
+An overhead-camera putting gate for Clarity Booking. A phone or
 iPad looks straight down at the ball; the lab measures the putter face, the
 putter path and the ball's start line on every putt, shows them straight away,
 and re-arms for the next putt with no taps in between.
@@ -10,31 +10,40 @@ aggressively once, then track a known shape in a known plane with prediction,
 small search windows and rigid-body maths. There is no machine-learning model
 anywhere in it.
 
+## Two versions, one set of rules
+
+The lab runs in two places, from the same design and the same rules:
+
+| | Browser (what coaches use today) | Native (a future Clarity app) |
+| --- | --- | --- |
+| Where | Main menu > **Putting Lab**, in the phone's browser | Opened through the Capacitor plugin |
+| Engine | `src/modules/putting-lab/engine/` (TypeScript, in a worker) | `ios/Sources/PuttingLabCore/` (Swift) |
+| Camera | `getUserMedia`, rear lens, 30-60 frames a second | AVFoundation, 120-240 frames a second, locked short shutter |
+| Tests | `src/modules/putting-lab/engine/engine.test.ts` (`npm test`) | `ios/Tests/PuttingLabCoreTests` (`swift test`) |
+
+The two engines are kept rule-for-rule the same: a change to one is made to
+the other, and both test suites play the same synthetic putts. The page opens
+the native lab when the plugin is present and the browser lab otherwise.
+
+The browser lab's limits come from the browser, not the maths: 30-60 frames a
+second instead of 240, no exposure lock (so motion blur depends on the light),
+and no camera intrinsics. The start line is reliable at 30 frames a second;
+face and path get coarser as the frame rate drops, and the screen says so.
+
 ## Layout
 
 ```
 native/clarity-putting-lab/
   Package.swift                     two targets, see below
-  ios/Sources/PuttingLabCore/       the measurement engine (Foundation only)
+  ios/Sources/PuttingLabCore/       the native measurement engine (Foundation only)
   ios/Sources/ClarityPuttingLabPlugin/  the iOS shell (AVFoundation, Core Motion, UIKit, Capacitor)
   ios/Tests/PuttingLabCoreTests/    synthetic-camera tests of the whole pipeline
+../../src/modules/putting-lab/engine/   the browser engine (the TypeScript twin) and its tests
+../../src/modules/putting-lab/PuttingLabPage.tsx  the page: camera, overlay, results, controls
+../../src/modules/putting-lab/engine.worker.ts    runs the engine off the main thread
 ../../public/putting-lab/calibration-template-a3.svg   the sheet coaches print
-../../src/native/clarityPuttingLab.ts                   the page's typed bridge
-../../src/modules/putting-lab/PuttingLabLauncher.tsx    the Putting Lab page (main menu, staff app only)
+../../src/native/clarityPuttingLab.ts                   the bridge to the native plugin
 ```
-
-**PuttingLabCore** knows nothing about cameras or screens. Feed it luma frames
-and timestamps, read snapshots and strokes. Every rule in it runs on any
-machine with a Swift toolchain, which is what lets it be tested properly.
-
-**ClarityPuttingLabPlugin** is thin on purpose: it captures, hands the core a
-pointer straight into each camera buffer (no copy, no colour conversion), and
-draws what the core says. It measures nothing itself.
-
-The page only opens the lab and hears back each measured putt
-(`strokeMeasured`) and the session when it closes (`closed`). Nothing is saved
-yet; joining putts to players, lessons and reports comes after the numbers have
-been validated on a real green.
 
 ## How a session runs
 
@@ -176,7 +185,14 @@ Release mode because the renderer draws a few thousand frames. If the template
 layout changes, regenerate the printable sheet with
 `PUTTING_LAB_WRITE_TEMPLATE=1 swift test -c release -Xswiftc -enable-testing --filter testCommittedTemplate`.
 
-## Running on a phone
+## Running it
+
+In the browser: sign in on the phone, open **Putting Lab** from the main menu
+and tap **Open Putting Lab**. The browser asks for the camera (and, on an
+iPhone, motion). Print the template at actual size from
+`/putting-lab/calibration-template-a3.svg` and check its 100 mm scale bar.
+
+The native version, once there is a Clarity app to carry it:
 
 ```bash
 cd booking-app
@@ -184,6 +200,4 @@ npm install
 npm run ios        # cap sync ios + open Xcode
 ```
 
-Then run on a device (the simulator has no camera). Print the template at
-actual size from `/putting-lab/calibration-template-a3.svg` and check its
-100 mm scale bar.
+Then run on a device (the simulator has no camera).

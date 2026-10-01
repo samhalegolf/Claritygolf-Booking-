@@ -1,0 +1,513 @@
+// The Putting Lab page (its own item in the main menu).
+//
+// In a browser the whole lab runs here: the phone's rear camera, the engine in
+// a worker (engine/, the twin of the native engine in native/clarity-putting-lab),
+// and a live gate screen. Inside a Clarity app that carries the native plugin,
+// the same button opens the native lab instead, which runs at up to 240 frames
+// a second.
+//
+// Putts are not saved anywhere yet: joining them to players, lessons and
+// reports is the next piece of work, once the measurements have been
+// validated on a real green.
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { t } from "../../lib/i18n";
+import { nativePuttingLab, PUTTING_LAB_TEMPLATE_URL } from "../../native/clarityPuttingLab";
+import { openRearCamera, pumpFrames, startMotion } from "./capture";
+import { defaultConfiguration, type PromptCode, type PuttingLabSnapshot, type WarningCode } from "./engine/engine";
+import { radians } from "./engine/geometry";
+import { consistency, summariseValidation, type Measured, type PuttingConsistency, type PuttingSpread, type PuttingStroke, type ValidationSummary } from "./engine/stroke";
+import { VALIDATION_FACE_ANGLES } from "./engine/template";
+import type { PutterSample } from "./engine/tracker";
+import type { WorkerRequest, WorkerResponse } from "./engine.worker";
+import { DEBUG_LAYERS, debugText, drawOverlay, type DebugLayer } from "./overlay";
+import "./puttingLab.css";
+
+/** The headline of the last session, from either lab (the native one reports absent spreads as undefined). */
+type Spreads = { [K in keyof PuttingConsistency]?: PuttingSpread | null };
+type Session = { count: number; consistency: Spreads };
+
+/** "0.4° R", "0.1° L", "0.0°" */
+function angle(deg: number) {
+  if (Math.abs(deg) < 0.05) return "0.0°";
+  const value = Math.abs(deg).toFixed(1);
+  return deg > 0 ? t("{angle}° R", { angle: value }) : t("{angle}° L", { angle: value });
+}
+
+function signedSpread(spread: PuttingSpread | null | undefined) {
+  if (!spread) return "–";
+  return `${spread.mean > 0 ? "+" : ""}${spread.mean.toFixed(1)}° ±${spread.standardDeviation.toFixed(1)}°`;
+}
+
+function promptText(code: PromptCode, value: number | null): string {
+  switch (code) {
+    case "tiltedTooFar":
+      return t("The camera is tilted too far. Point it straight down at the ball.");
+    case "layTemplate":
+      return t("Lay the calibration template down with the ball off the black disc.");
+    case "layTemplateTilted":
+      return t("Lay the calibration template down. The camera is tilted: straighter is better.");
+    case "templateHold":
+      return t("Template found. Hold still…");
+    case "placeBall":
+      return t("Put a ball in the black circle.");
+    case "centreBall":
+      return t("Centre the ball in the circle ({mm} mm off).", { mm: value ?? 0 });
+    case "placePutter":
+      return t("Set the putter face square on the line, touching the ball, and hold it still.");
+    case "holdPutter":
+      return t("Hold the putter still…");
+    case "putterNotOnLine":
+      return t("Put the putter face right on the line, behind the ball.");
+    case "faceTooNarrow":
+      return t("Could not see the whole face. Keep hands and shaft clear of the line.");
+    case "noEdge":
+      return t("Could not see the face edge. Check the light on the putter.");
+    case "calibrated":
+      return t("Calibration complete. Lift the template away.");
+    case "cameraMoved":
+      return t("Camera moved. Recalibrate to keep measuring.");
+    case "placeBallOnSpot":
+      return t("Place a ball on the spot.");
+    case "ready":
+      return t("Ready");
+    case "readyNoPutter":
+      return t("Ready. Set the putter behind the ball.");
+    case "inStroke":
+    case "result":
+      return "";
+  }
+}
+
+function warningText(code: WarningCode | null, value: number | null) {
+  if (code === "cameraNudged") return t("Camera nudged. Results are flagged until it settles.");
+  if (code === "ballScale") return t("The ball measures {mm} mm. Check the template printed at actual size.", { mm: value ?? 0 });
+  return "";
+}
+
+function layerLabel(layer: DebugLayer) {
+  switch (layer) {
+    case "calibrationPoints":
+      return t("Calibration points");
+    case "physicalAxis":
+      return t("Calibrated target axis");
+    case "worldAxes":
+      return t("World axes");
+    case "ballSearch":
+      return t("Ball search area");
+    case "ballCentre":
+      return t("Ball centre");
+    case "putterMarkers":
+      return t("Putter markers");
+    case "featurePoints":
+      return t("Tracked feature points");
+    case "edgePoints":
+      return t("Face edge points");
+    case "putterCentre":
+      return t("Putter centre");
+    case "confidence":
+      return t("Confidence values");
+    case "timing":
+      return t("Frame rate and latency");
+    case "impactTime":
+      return t("Impact timestamp");
+    case "keepTraces":
+      return t("Keep traces on screen");
+  }
+}
+
+function validationText(v: ValidationSummary) {
+  return t("{count} readings · bias {bias} · spread {spread} · worst {worst}", {
+    count: v.count,
+    bias: `${v.meanError >= 0 ? "+" : ""}${v.meanError.toFixed(2)}°`,
+    spread: `${v.standardDeviation.toFixed(2)}°`,
+    worst: `${v.maxAbsError.toFixed(2)}°`,
+  });
+}
+
+export default function PuttingLabPage() {
+  const plugin = nativePuttingLab();
+  const [lastSession, setLastSession] = useState<Session | null>(null);
+  const [error, setError] = useState("");
+  const [live, setLive] = useState<{ stream: MediaStream; motion: Awaited<ReturnType<typeof startMotion>> } | null>(null);
+  const [starting, setStarting] = useState(false);
+
+  useEffect(() => {
+    if (!plugin) return;
+    const listener = plugin.addListener("closed", ({ strokes, consistency: c }) => setLastSession({ count: strokes.length, consistency: c }));
+    return () => {
+      void Promise.resolve(listener).then((l) => l.remove());
+    };
+  }, [plugin]);
+
+  const open = async () => {
+    setError("");
+    if (plugin) {
+      plugin.open({}).catch((reason: unknown) => {
+        const message = reason instanceof Error ? reason.message : String(reason);
+        setError(t("The Putting Lab could not open: {message}", { message }));
+      });
+      return;
+    }
+    setStarting(true);
+    try {
+      // Both permission prompts must come from this tap.
+      const motion = await startMotion();
+      const { stream } = await openRearCamera();
+      setLive({ stream, motion });
+    } catch (reason) {
+      const name = reason instanceof Error ? reason.name || reason.message : "";
+      setError(
+        name === "NotAllowedError"
+          ? t("Camera access was refused. Allow the camera for this site in your browser settings.")
+          : name === "unsupported"
+            ? t("This browser cannot use the camera.")
+            : t("The Putting Lab could not open: {message}", { message: reason instanceof Error ? reason.message : String(reason) }),
+      );
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  if (live) {
+    return (
+      <PuttingLabLive
+        stream={live.stream}
+        motion={live.motion}
+        onClose={(strokes) => {
+          live.stream.getTracks().forEach((track) => track.stop());
+          live.motion.stop();
+          setLive(null);
+          if (strokes.length > 0) setLastSession({ count: strokes.length, consistency: consistency(strokes) });
+        }}
+      />
+    );
+  }
+
+  return (
+    <section className="putting-lab-launcher" aria-label={t("Putting Lab")}>
+      <div className="putting-lab-launcher-text">
+        <p>{t("Face, path and start line from an overhead camera. Calibrate once with the printed template, then putt.")}</p>
+        <p>{t("Fix the phone above the ball, looking straight down, about a metre up.")}</p>
+        {lastSession && lastSession.count > 0 && (
+          <p className="putting-lab-launcher-session">
+            {t("Last session: {count} putts", { count: lastSession.count })}
+            {" · "}
+            {t("Average face {face}, path {path}, start {start}", {
+              face: signedSpread(lastSession.consistency.face),
+              path: signedSpread(lastSession.consistency.path),
+              start: signedSpread(lastSession.consistency.start),
+            })}
+          </p>
+        )}
+        {error && (
+          <p className="putting-lab-launcher-error" role="alert">
+            {error}
+          </p>
+        )}
+      </div>
+      <div className="putting-lab-launcher-actions">
+        <button type="button" className="primary-button" onClick={() => void open()} disabled={starting}>
+          {t("Open Putting Lab")}
+        </button>
+        <a className="text-button" href={PUTTING_LAB_TEMPLATE_URL} target="_blank" rel="noreferrer">
+          {t("Print the calibration template")}
+        </a>
+      </div>
+    </section>
+  );
+}
+
+/** The live gate: camera, overlay, results and controls, full screen. */
+function PuttingLabLive({
+  stream,
+  motion,
+  onClose,
+}: {
+  stream: MediaStream;
+  motion: Awaited<ReturnType<typeof startMotion>>;
+  onClose: (strokes: PuttingStroke[]) => void;
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const workerRef = useRef<Worker | null>(null);
+  const snapshotRef = useRef<PuttingLabSnapshot | null>(null);
+  const frameSize = useRef({ width: 0, height: 0 });
+  const strokesRef = useRef<PuttingStroke[]>([]);
+  const keptTraces = useRef<PutterSample[][]>([]);
+  const layersRef = useRef<Set<DebugLayer>>(new Set());
+  const [view, setView] = useState<PuttingLabSnapshot | null>(null);
+  const [aim, setAim] = useState(0);
+  const [layers, setLayers] = useState<Set<DebugLayer>>(new Set());
+  const [panel, setPanel] = useState<"none" | "debug" | "validate">("none");
+  const [validationResult, setValidationResult] = useState<ValidationSummary | null>(null);
+
+  const send = useCallback((message: WorkerRequest) => workerRef.current?.postMessage(message), []);
+
+  const draw = useCallback(() => {
+    const canvas = canvasRef.current;
+    const s = snapshotRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
+    const ratio = window.devicePixelRatio || 1;
+    const cw = Math.round(canvas.clientWidth * ratio);
+    const ch = Math.round(canvas.clientHeight * ratio);
+    if (canvas.width !== cw || canvas.height !== ch) {
+      canvas.width = cw;
+      canvas.height = ch;
+    }
+    ctx.clearRect(0, 0, cw, ch);
+    const { width: fw, height: fh } = frameSize.current;
+    if (!s || fw === 0) return;
+    // The video is letterboxed (object-fit: contain); frame pixels map the same way.
+    const scale = Math.min(cw / fw, ch / fh);
+    const ox = (cw - fw * scale) / 2;
+    const oy = (ch - fh * scale) / 2;
+    drawOverlay(ctx, s, (p) => ({ x: ox + p.x * scale, y: oy + p.y * scale }), layersRef.current, keptTraces.current, ratio);
+  }, []);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.srcObject = stream;
+    void video.play().catch(() => undefined);
+
+    const worker = new Worker(new URL("./engine.worker.ts", import.meta.url), { type: "module" });
+    workerRef.current = worker;
+    worker.postMessage({ kind: "configure", configuration: defaultConfiguration() } satisfies WorkerRequest);
+    let lastView = 0;
+    worker.addEventListener("message", ({ data }: MessageEvent<WorkerResponse>) => {
+      if (data.kind === "snapshot") {
+        const previous = snapshotRef.current;
+        snapshotRef.current = data.snapshot;
+        draw();
+        // The panel only needs to change a few times a second, or on a new state.
+        const now = performance.now();
+        const changed =
+          !previous ||
+          previous.phase !== data.snapshot.phase ||
+          previous.gate !== data.snapshot.gate ||
+          previous.prompt !== data.snapshot.prompt ||
+          previous.lastStroke?.id !== data.snapshot.lastStroke?.id;
+        if (changed || now - lastView > 150) {
+          lastView = now;
+          setView(data.snapshot);
+        }
+      } else if (data.kind === "stroke") {
+        strokesRef.current = [...strokesRef.current, data.stroke];
+        if (layersRef.current.has("keepTraces")) {
+          keptTraces.current = [...keptTraces.current.slice(-11), data.stroke.putterSamples];
+        }
+      } else if (data.kind === "validation") {
+        setValidationResult(data.run ? summariseValidation(data.run) : null);
+      }
+    });
+    const stopPump = pumpFrames(video, worker, motion.read, (width, height) => {
+      frameSize.current = { width, height };
+    });
+
+    // Keep the screen awake through a practice session.
+    let wakeLock: { release: () => Promise<void> } | null = null;
+    const nav = navigator as Navigator & { wakeLock?: { request: (type: "screen") => Promise<{ release: () => Promise<void> }> } };
+    nav.wakeLock?.request("screen").then((lock) => (wakeLock = lock)).catch(() => undefined);
+    const onResize = () => draw();
+    window.addEventListener("resize", onResize);
+
+    return () => {
+      stopPump();
+      worker.terminate();
+      workerRef.current = null;
+      window.removeEventListener("resize", onResize);
+      void wakeLock?.release().catch(() => undefined);
+    };
+  }, [stream, motion, draw]);
+
+  useEffect(() => {
+    layersRef.current = layers;
+    if (!layers.has("keepTraces")) keptTraces.current = [];
+    draw();
+  }, [layers, draw]);
+
+  const changeAim = (delta: number) => {
+    const next = Math.max(-10, Math.min(10, Math.round((aim + delta) * 10) / 10));
+    setAim(next);
+    send({ kind: "setTarget", target: { aimOffset: radians(next), gates: [] } });
+  };
+
+  const s = view;
+  const stroke = s?.gate === "showingResult" ? s.lastStroke : null;
+  const m = stroke?.metrics;
+  const row = (label: string, value: Measured | null | undefined) => (
+    <div className="putting-lab-row">
+      <span>{label}</span>
+      <strong className={value && value.confidence >= 0.5 ? "" : "faint"}>{value ? angle(value.value) : "–"}</strong>
+    </div>
+  );
+  const details: string[] = [];
+  if (m?.faceToPath) details.push(t("Face to path {angle}", { angle: angle(m.faceToPath.value) }));
+  if (m?.ballSpeed && m.ballSpeed.confidence > 0.4) details.push(t("{speed} m/s", { speed: m.ballSpeed.value.toFixed(2) }));
+  if (m?.strikePoint && m.strikePoint.confidence > 0.5) {
+    const mm = Math.round(m.strikePoint.value);
+    details.push(
+      mm === 0
+        ? t("Centre strike")
+        : mm > 0
+          ? t("{mm} mm toward the toe", { mm })
+          : t("{mm} mm toward the heel", { mm: Math.abs(mm) }),
+    );
+  }
+  if (s?.consistency?.face && s.consistency.start) {
+    details.push(
+      t("{count} putts · spread face {face} start {start}", {
+        count: s.consistency.face.count,
+        face: `${s.consistency.face.standardDeviation.toFixed(1)}°`,
+        start: `${s.consistency.start.standardDeviation.toFixed(1)}°`,
+      }),
+    );
+  }
+  if (m && m.confidence < 0.5) details.push(t("Low confidence"));
+  const prompt = s ? promptText(s.prompt, s.promptValue) : "";
+  const warning = s ? warningText(s.warning, s.warningValue) : "";
+  const slowFPS = s && s.phase === "live" && s.inputFPS > 0 && s.inputFPS < 50 ? Math.round(s.inputFPS) : null;
+  const debugLines = s ? debugText(s, layers) : [];
+
+  return (
+    <div className="putting-lab-live" role="dialog" aria-label={t("Putting Lab")}>
+      <video ref={videoRef} className="putting-lab-video" playsInline muted autoPlay />
+      <canvas ref={canvasRef} className="putting-lab-canvas" />
+
+      <div className="putting-lab-top">
+        <button type="button" onClick={() => onClose(strokesRef.current)}>
+          {t("Close")}
+        </button>
+        <span className="putting-lab-mode">
+          {s?.trackingMode === "enhanced" ? t("Enhanced tracking") : s?.trackingMode === "markerless" ? t("Markerless tracking") : t("Calibrating")}
+        </span>
+        <span className="putting-lab-aim">
+          <button type="button" onClick={() => changeAim(-0.5)} aria-label="−">
+            −
+          </button>
+          <span>{t("Aim {angle}", { angle: angle(aim) })}</span>
+          <button type="button" onClick={() => changeAim(0.5)} aria-label="+">
+            +
+          </button>
+        </span>
+      </div>
+
+      {debugLines.length > 0 && <pre className="putting-lab-debug-text">{debugLines.join("\n")}</pre>}
+
+      <div className="putting-lab-bottom">
+        <div className="putting-lab-panel">
+          {prompt && <p className="putting-lab-prompt">{prompt}</p>}
+          {warning && <p className="putting-lab-warning">{warning}</p>}
+          {slowFPS !== null && (
+            <p className="putting-lab-warning">
+              {t("Camera at {fps} frames a second. The start line is reliable; face and path are approximate.", { fps: slowFPS })}
+            </p>
+          )}
+          {m && (
+            <div className="putting-lab-result">
+              {row(t("Face"), m.face)}
+              {row(t("Path"), m.path)}
+              {row(t("Start"), m.start)}
+            </div>
+          )}
+          {m && details.length > 0 && <p className="putting-lab-detail">{details.join("  ·  ")}</p>}
+          {s?.validation && <p className="putting-lab-detail">{validationText(s.validation)}</p>}
+          {validationResult && (
+            <p className="putting-lab-detail">
+              {t("Validation")}: {validationText(validationResult)}
+            </p>
+          )}
+          {s?.phase === "removeTemplate" && (
+            <button type="button" onClick={() => send({ kind: "startLive" })}>
+              {t("Practise with template down")}
+            </button>
+          )}
+        </div>
+        <div className="putting-lab-actions">
+          <button type="button" onClick={() => send({ kind: "recalibrate" })}>
+            {t("Recalibrate")}
+          </button>
+          <button type="button" onClick={() => setPanel(panel === "validate" ? "none" : "validate")}>
+            {t("Validate")}
+          </button>
+          <button type="button" onClick={() => setPanel(panel === "debug" ? "none" : "debug")}>
+            {t("Debug")}
+          </button>
+        </div>
+      </div>
+
+      {panel === "validate" && (
+        <div className="putting-lab-sheet">
+          <p>
+            {t(
+              "Measure against the printed lines. Face: set the putter on a line and hold it still; each hold is one reading. Start: roll balls along the calibration line.",
+            )}
+          </p>
+          {[0, ...VALIDATION_FACE_ANGLES].map((known) => (
+            <button
+              key={known}
+              type="button"
+              onClick={() => {
+                setValidationResult(null);
+                send({ kind: "beginValidation", validation: "faceAngle", known });
+                setPanel("none");
+              }}
+            >
+              {known === 0 ? t("Face on the square line") : t("Face on the {angle} line", { angle: `${known > 0 ? "+" : ""}${known}°` })}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => {
+              setValidationResult(null);
+              send({ kind: "beginValidation", validation: "startDirection", known: 0 });
+              setPanel("none");
+            }}
+          >
+            {t("Ball along the calibration line")}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              send({ kind: "endValidation" });
+              setPanel("none");
+            }}
+          >
+            {t("Finish validation")}
+          </button>
+          <button type="button" onClick={() => setPanel("none")}>
+            {t("Cancel")}
+          </button>
+        </div>
+      )}
+
+      {panel === "debug" && (
+        <div className="putting-lab-sheet">
+          <p>
+            <strong>{t("Debug overlay")}</strong>
+          </p>
+          {DEBUG_LAYERS.map((layer) => (
+            <label key={layer} className="putting-lab-toggle">
+              <input
+                type="checkbox"
+                checked={layers.has(layer)}
+                onChange={(event) => {
+                  const next = new Set(layers);
+                  if (event.target.checked) next.add(layer);
+                  else next.delete(layer);
+                  setLayers(next);
+                }}
+              />
+              {layerLabel(layer)}
+            </label>
+          ))}
+          <button type="button" onClick={() => setPanel("none")}>
+            {t("Done")}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}

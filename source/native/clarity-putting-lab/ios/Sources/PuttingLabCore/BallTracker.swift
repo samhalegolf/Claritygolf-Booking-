@@ -40,6 +40,8 @@ public final class BallTracker {
     public var settleSeconds = 0.3
     /// Movement from rest that means the ball has been struck.
     public var departureThreshold = 2.5
+    /// The fastest putt to follow, mm/s: sizes the search around a ball at rest.
+    public var maxBallSpeed = 2000.0
 
     public private(set) var status: Status = .absent
     public private(set) var restPosition: Vec2?
@@ -52,6 +54,9 @@ public final class BallTracker {
     private var settleSamples: [BallSample] = []
     private var restNoise = 0.3
     private var departureCount = 0
+    private var departureSample: BallSample?
+    private var frameSpacing = 1.0 / 240
+    private var lastFrame: Double?
     private var misses = 0
 
     public init(coordinates: PuttingCoordinateSystem) {
@@ -65,6 +70,7 @@ public final class BallTracker {
         roll = []
         settleSamples = []
         departureCount = 0
+        departureSample = nil
         misses = 0
     }
 
@@ -73,6 +79,8 @@ public final class BallTracker {
 
     @discardableResult
     public func update(_ plane: LumaPlane, timestamp t: Double) -> BallSample? {
+        if let last = lastFrame, t > last { frameSpacing = frameSpacing * 0.9 + (t - last) * 0.1 }
+        lastFrame = t
         let c = coordinates
         let mmpp = c.surface.mmPerPixelAtBall
         let expectedRadius = CalibrationTemplate.ballDiameterMM / 2 / mmpp
@@ -80,8 +88,9 @@ public final class BallTracker {
         switch status {
         case .absent, .settling, .atRest:
             let centreWorld = restPosition ?? c.surface.ballOrigin
-            // At rest the window must still catch a firmly struck ball two frames in at 120 fps.
-            let searchMM = status == .atRest ? 45.0 : placementTolerance
+            // At rest the window must still catch a firmly struck ball two frames in,
+            // however far apart the frames are.
+            let searchMM = status == .atRest ? max(45, 2.2 * maxBallSpeed * frameSpacing) : placementTolerance
             guard let centre = c.image(fromWorld: centreWorld) else { return nil }
             lastSearch = (centre, searchMM / mmpp)
             guard let o = detector.detect(plane, center: centre, expectedRadius: expectedRadius, searchRadius: searchMM / mmpp),
@@ -104,14 +113,24 @@ public final class BallTracker {
                 let moved = sample.position.distance(to: rest)
                 if moved > max(departureThreshold, 4 * restNoise) {
                     departureCount += 1
-                    if departureCount >= 2 {
+                    let firstMove = departureSample
+                    departureSample = sample
+                    if departureCount >= 2, let firstMove {
+                        // Leave already moving: a roll that starts from standstill searches behind the ball.
+                        var moving = sample
+                        let dt = sample.timestamp - firstMove.timestamp
+                        if dt > 0 {
+                            moving.velocityX = (sample.x - firstMove.x) / dt
+                            moving.velocityY = (sample.y - firstMove.y) / dt
+                        }
                         status = .rolling
-                        roll = [sample]
-                        last = sample
-                        return sample
+                        roll = [firstMove, moving]
+                        last = moving
+                        return moving
                     }
                 } else {
                     departureCount = 0
+                    departureSample = nil
                     // Follow a slow creep, keep the rest position steady otherwise.
                     restPosition = rest + (sample.position - rest) * 0.1
                 }
