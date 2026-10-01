@@ -5947,10 +5947,43 @@ button {
   cursor: pointer;
 }
 
+/* The app-wide switch (switches.css), coloured from the booking theme rather
+   than the app tokens: an outlined grey track when off so it reads on a white
+   card, and the same fill as the picked time and handedness when on. The
+   .booking-form input field rules skip checkboxes so they can't paint the
+   track white. */
 .app-shell .public-booking .booking-remember input {
-  min-height: 0;
+  width: 40px;
+  height: 24px;
   margin: 0;
-  accent-color: var(--coach-primary);
+  background: color-mix(in srgb, var(--booking-text) 14%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--booking-text) 32%, transparent);
+}
+
+.app-shell .public-booking .booking-remember input::after {
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+
+.app-shell .public-booking .booking-remember input:checked {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--card-vein) 42%, var(--coach-accent)), color-mix(in srgb, var(--card-vein) 22%, var(--coach-accent)));
+  box-shadow: none;
+}
+
+.app-shell .public-booking.booking-theme-light .booking-remember input:checked {
+  background: #111;
+}
+
+.app-shell .public-booking .booking-remember input:checked::after {
+  left: 19px;
+}
+
+.app-shell .public-booking .booking-remember input:focus-visible {
+  outline-color: var(--booking-text);
 }
 
 .app-shell .public-booking .booking-remembered {
@@ -6115,7 +6148,7 @@ button {
   }
 }
 
-.app-shell .public-booking .booking-form input,
+.app-shell .public-booking .booking-form input:not([type="checkbox"]),
 .app-shell .public-booking .booking-summary {
   border-color: color-mix(in srgb, var(--card-outline) 24%, var(--booking-border));
   background: var(--booking-input);
@@ -6284,7 +6317,7 @@ button {
   color: #deded8;
 }
 
-.app-shell .public-booking.booking-theme-light .booking-form input {
+.app-shell .public-booking.booking-theme-light .booking-form input:not([type="checkbox"]) {
   border-color: #deded8;
   background: #fff;
   color: #171717;
