@@ -70,6 +70,11 @@ import {
   type RecordingOrientation,
 } from "./utils/cameraPreference";
 import {
+  loadVideoVisualPreset,
+  saveVideoVisualPreset,
+  type VideoVisualPresetId,
+} from "./utils/videoVisualPreset";
+import {
   buildVideoSlotKey,
   requestPersistentStorage,
 } from "./utils/videoBlobStore";
@@ -757,6 +762,14 @@ export function VideoWorkspace({
   const [recordingOrientation, setRecordingOrientation] = useState<RecordingOrientation>(
     DEFAULT_RECORDING_ORIENTATION
   );
+  // View-only enhancement. Stored per workstation, never in the clip or analysis.
+  const [visualPreset, setVisualPreset] = useState<VideoVisualPresetId>(() =>
+    loadVideoVisualPreset()
+  );
+  const handleSelectVisualPreset = useCallback((preset: VideoVisualPresetId) => {
+    setVisualPreset(preset);
+    saveVideoVisualPreset(preset);
+  }, []);
   // Set when the camera hands back the other orientation from the one asked
   // for -- a Continuity Camera that only shoots landscape, say. The coach is
   // told rather than shown a preview that quietly disagrees with the file.
@@ -3884,6 +3897,7 @@ export function VideoWorkspace({
               onPointerUp={() => undefined}
               overlayDimensions={overlayDimensions}
               onDimensionsChange={setOverlayDimensions}
+              visualPreset={isPlayerVariant ? "original" : visualPreset}
             />
             {/* Record, Stop, and a way out. No camera picker: the source was
                 settled in Video Settings before the coach got here. */}
@@ -4024,6 +4038,7 @@ export function VideoWorkspace({
               setActiveSideInCompare(side);
               playPauseSide(side);
             }}
+            visualPreset={isPlayerVariant ? "original" : visualPreset}
             underlay={
               showAnalysisRail ? (
                 <LivePoseLayer
@@ -4641,6 +4656,8 @@ export function VideoWorkspace({
           onRequestCameraLabels={() => void cameraDeviceList.requestLabels()}
           recordingOrientation={recordingOrientation}
           onSelectOrientation={handleSelectOrientation}
+          visualPreset={visualPreset}
+          onSelectVisualPreset={handleSelectVisualPreset}
         />
       ) : null}
 

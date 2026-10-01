@@ -3,6 +3,7 @@ import { DrawingObject } from "../models/Drawing";
 import { Dimensions } from "../engines/DrawingEngine";
 import { DrawingPoint } from "../models/Drawing";
 import { t } from "../../../lib/i18n";
+import { getVideoVisualPreset, type VideoVisualPresetId } from "../utils/videoVisualPreset";
 
 export interface VideoCanvasProps {
   sourceUrl: string | null;
@@ -37,6 +38,8 @@ export interface VideoCanvasProps {
   onTogglePlay?: () => void;
   /** Drawn under the markings, inside the box that hugs the picture. */
   underlay?: React.ReactNode;
+  /** Non-destructive viewing enhancement. Never changes the source media. */
+  visualPreset?: VideoVisualPresetId;
 }
 
 const toPath = (points: DrawingPoint[], width: number, height: number) => {
@@ -119,6 +122,7 @@ export function VideoCanvas({
   onDimensionsChange,
   onTogglePlay,
   underlay,
+  visualPreset = "original",
 }: VideoCanvasProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const dimensionsRef = useRef(overlayDimensions);
@@ -332,6 +336,8 @@ export function VideoCanvas({
         playsInline
         preload="metadata"
         onLoadedMetadata={liveStream ? undefined : onLoadMetadata}
+        style={{ filter: getVideoVisualPreset(visualPreset).cssFilter }}
+        data-visual-preset={visualPreset}
       />
       <div className="video-overlay">
         {underlay}
