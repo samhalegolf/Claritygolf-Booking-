@@ -738,6 +738,8 @@ export function VideoWorkspace({
   // The side whose panel is showing the library -- an empty one, or a loaded
   // one whose clip the pick will replace.
   const [librarySide, setLibrarySide] = useState<ComparisonSide | null>(null);
+  // The rail's second-angle button, while it looks for the partner clip.
+  const [findingSecondAngle, setFindingSecondAngle] = useState(false);
   // Which of the empty stage's two groups -- Upload or Connect -- has its
   // choices showing, and on which side.
   const [intakeGroup, setIntakeGroup] = useState<{
@@ -4075,6 +4077,10 @@ export function VideoWorkspace({
                     }
                   : undefined
               }
+              splitView={modeIsCompare}
+              onToggleSplitView={() => toggleSplitView(side)}
+              onOpenSecondAngle={() => void openSecondAngle(side)}
+              secondAngleBusy={findingSecondAngle || saveBusy}
               onOpen3D={MOTION_LAB_AVAILABLE ? () => void openMotionLab() : undefined}
               motionLabOpen={motionLabOpen}
               motionLabDisabled={saveBusy}
@@ -4345,6 +4351,74 @@ export function VideoWorkspace({
     [librarySide, restoreSavedVideo]
   );
 
+  /**
+   * The rail's Split View button. Opening it focuses the new panel when it
+   * is empty, so its Upload / Connect choices are the next thing to press.
+   */
+  const toggleSplitView = useCallback(
+    (side: ComparisonSide) => {
+      if (modeIsCompare) {
+        setComparisonMode("single");
+        setActiveSide("left");
+        setLibrarySide((current) => (current === "right" ? null : current));
+        return;
+      }
+      setComparisonMode("compare");
+      setActiveSide(playerVideoRight ? side : "right");
+    },
+    [modeIsCompare, playerVideoRight]
+  );
+
+  /**
+   * The rail's second-angle button: the other camera's take of this same
+   * swing (see utils/sameSwingAngles), side by side with linked playback.
+   * When the library has no partner for this clip, its picker opens on the
+   * other panel instead -- it lists the likely partners first.
+   */
+  const openSecondAngle = useCallback(
+    async (side: ComparisonSide) => {
+      const otherSide: ComparisonSide = side === "left" ? "right" : "left";
+      const clip = side === "left" ? playerVideoLeft : playerVideoRight;
+      const savedId = currentSavedVideoIds[side];
+      setFindingSecondAngle(true);
+      try {
+        let partnerId: string | undefined;
+        if (clip && savedId && savedVideoStore) {
+          const items = await savedVideoStore.listItemsForPlayer(clip.playerId);
+          partnerId = pairSavedVideoAngles(items).get(savedId);
+        }
+        if (partnerId) {
+          await restoreSavedVideo(partnerId, { side: otherSide, pair: true });
+          return;
+        }
+        setComparisonMode("compare");
+        setActiveSide(otherSide);
+        if (savedVideoStore) {
+          closeLiveRecording();
+          setRemoteSide(null);
+          setLibrarySide(otherSide);
+        }
+      } catch (error) {
+        setSaveStatus("error");
+        setSaveMessage(
+          error instanceof SavedVideoLibraryError
+            ? error.message
+            : t("The second angle could not be loaded.")
+        );
+      } finally {
+        setFindingSecondAngle(false);
+      }
+    },
+    [
+      closeLiveRecording,
+      currentSavedVideoIds,
+      playerVideoLeft,
+      playerVideoRight,
+      restoreSavedVideo,
+      savedVideoStore,
+    ]
+  );
+
   /** The lab tried two library clips together: keep them paired, or stop pairing them. */
   const recordMotionLabVerdict = useCallback(
     (swingId: string, secondId: string, sameSwing: boolean) => {
@@ -4502,8 +4576,9 @@ export function VideoWorkspace({
 
       {/* The always-on console bar is gone. Drawing tools live on the rail
           over the video, opened by the pencil in the frame's top-left corner
-          (both rendered per panel above); everything else --
-          compare mode, linked playback, sync, screen recording, the library
+          (both rendered per panel above); Split View and the second angle
+          are on the analysis rail on the right; everything else --
+          linked playback, sync, screen recording, the library
           save, diagnostics, swapping the active clip -- lives behind the
           settings gear on the action bar below. */}
 
@@ -4591,8 +4666,6 @@ export function VideoWorkspace({
         <VideoSettingsSheet
           open={settingsOpen}
           onClose={() => setSettingsOpen(false)}
-          mode={comparisonMode}
-          onModeChange={updateMode}
           linkedPlayback={linkedPlayback}
           onLinkedPlaybackToggle={() => setLinkedPlayback((previous) => !previous)}
           onSyncPlayheads={syncPlayheads}

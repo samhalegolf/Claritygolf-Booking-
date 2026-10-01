@@ -5,7 +5,9 @@ import {
   IconFile,
   IconFocus,
   IconLibrary,
+  IconModeCompare,
   IconPause,
+  IconSecondAngle,
   IconPlay,
   IconSettings,
   IconToolAngle,
@@ -259,6 +261,12 @@ export type AnalysisRailProps = {
   onUpload: () => void;
   /** Unset where there is no saved-video library. */
   onOpenLibrary?: () => void;
+  /** Two clips side by side: on in Split View, off back to one. */
+  splitView: boolean;
+  onToggleSplitView: () => void;
+  /** Put the other camera's take of this same swing beside it. */
+  onOpenSecondAngle: () => void;
+  secondAngleBusy?: boolean;
   /** Unset where the 3D lab cannot run (the native shell). */
   onOpen3D?: () => void;
   motionLabOpen: boolean;
@@ -274,12 +282,16 @@ export type AnalysisRailProps = {
 
 /**
  * The drawing rail's mirror on the right edge: the reads of the body rather
- * than marks on the picture. Always out -- three buttons do not need putting
- * away, and each is a state worth seeing at a glance.
+ * than marks on the picture, and the way to a second video beside this one.
+ * Always out -- each is a state worth seeing at a glance.
  */
 export function AnalysisRail({
   onUpload,
   onOpenLibrary,
+  splitView,
+  onToggleSplitView,
+  onOpenSecondAngle,
+  secondAngleBusy,
   onOpen3D,
   motionLabOpen,
   motionLabDisabled,
@@ -334,6 +346,30 @@ export function AnalysisRail({
           </div>
         ) : null}
       </div>
+      <span className="va-rail-rule" aria-hidden="true" />
+      {/* A second video beside this one: any clip, or the same swing from
+          the other camera. */}
+      <button
+        type="button"
+        className={`va-rail-btn${splitView ? " is-active" : ""}`}
+        aria-label={t("Split screen compare")}
+        title={t("Split screen compare")}
+        aria-pressed={splitView}
+        onClick={onToggleSplitView}
+      >
+        <IconModeCompare />
+      </button>
+      <button
+        type="button"
+        className="va-rail-btn"
+        aria-label={t("Second angle, same swing")}
+        title={t("Second angle, same swing")}
+        aria-busy={secondAngleBusy}
+        disabled={secondAngleBusy}
+        onClick={onOpenSecondAngle}
+      >
+        <IconSecondAngle />
+      </button>
       <span className="va-rail-rule" aria-hidden="true" />
       {onOpen3D ? (
         <>
