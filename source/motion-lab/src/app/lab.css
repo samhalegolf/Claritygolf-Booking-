@@ -417,6 +417,26 @@
   min-height: 0;
 }
 
+/* The clips beside the 3D: one, or the second angle stacked under the
+   swing so both cameras share the column and the 3D keeps its half. */
+.lab-stage-videos {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.lab-stage-videos.has-second > .lab-video-stage {
+  flex: 1 1 0;
+  min-height: 0;
+  /* Each takes half the column; its own aspect ratio decides the width. */
+  width: auto;
+  max-width: 100%;
+  align-self: center;
+}
+
 .lab-video-stage {
   position: relative;
   background: #000;
