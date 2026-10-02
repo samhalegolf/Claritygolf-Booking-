@@ -47,6 +47,7 @@ import {
 import type { StripeCheckoutInput } from "./_shared/stripe.mts";
 import {
   posCardDueCents,
+  posChargeRefundAction,
   posStatusChangePlan,
   settlePosTransaction,
   type CardPayment,
@@ -4749,6 +4750,65 @@ export async function settleTerminalPaymentFromWebhook(accountId: string, paymen
     }
     throw error;
   }
+}
+
+/**
+ * A card payment refunded in the business's Stripe dashboard (charge.refunded).
+ *
+ * Finds the sale that payment settled and, when the whole card part has gone
+ * back, marks it refunded with the same effects as Refund in Clarity: stock
+ * back on the shelf, voucher value restored. The status flip is a
+ * compare-and-swap on status=paid, so a refund started from Clarity (which
+ * also fires this event) and Stripe's retries never apply the effects twice.
+ * See posChargeRefundAction for what counts.
+ */
+export async function refundPosSaleFromStripeCharge(accountId: string, charge: Record<string, unknown>) {
+  const intent = charge?.payment_intent;
+  const paymentIntentId = typeof intent === "string" ? intent : String((intent as { id?: unknown })?.id || "");
+  if (!/^pi_[A-Za-z0-9]+$/.test(paymentIntentId)) return { ignored: "no_payment_intent" };
+  const rows = (await supabase("billing_pos_transactions", {
+    query:
+      `select=*&account_id=eq.${encodeFilter(accountId)}` +
+      `&stripe_payment_intent_id=eq.${encodeFilter(paymentIntentId)}&limit=1`,
+  })) as Array<Record<string, unknown>>;
+  const row = rows[0];
+  // An invoice payment, a player-portal purchase: not a till sale.
+  if (!row) return { ignored: "not_a_pos_sale" };
+
+  const action = posChargeRefundAction(row, {
+    amount: Number(charge?.amount) || 0,
+    amountRefunded: Number(charge?.amount_refunded) || 0,
+  });
+  if (action === "already" || action === "partial") return { ignored: action, receipt: row.receipt_number };
+  if (action === "needs_attention") {
+    console.error("billing_api:stripe_refund_needs_attention", accountId, paymentIntentId, row.receipt_number, row.status);
+    return { needsAttention: "sale_not_paid", receipt: row.receipt_number };
+  }
+
+  // The charge Stripe sends here does not list its refunds, so ask for the one
+  // that was just made. Its id is what stops the sale being marked paid again.
+  const lookup = new URLSearchParams();
+  lookup.set("payment_intent", paymentIntentId);
+  lookup.set("limit", "1");
+  const refunds = await stripeRequestWith(await stripeFor(accountId), "refunds", { params: lookup });
+  const refundId = String((refunds?.data || [])[0]?.id || "");
+  if (!refundId) throw new Error(`Stripe listed no refund for ${paymentIntentId}.`);
+
+  const id = String(row.id ?? "");
+  const claimed = (await supabase("billing_pos_transactions", {
+    method: "PATCH",
+    query:
+      `id=eq.${encodeFilter(id)}&account_id=eq.${encodeFilter(accountId)}` +
+      `&status=eq.${action === "mark_refunded" ? "paid" : "refunded"}&stripe_refund_id=is.null`,
+    body: { status: "refunded", stripe_refund_id: refundId, refunded_at: nowIso(), updated_at: nowIso() },
+    prefer: "return=representation",
+  })) as Array<Record<string, unknown>>;
+  if (!claimed.length) return { ignored: "already", receipt: row.receipt_number };
+  if (action === "mark_refunded") {
+    await syncPosStock(accountId, id, "refunded");
+    await syncPosCoupon(accountId, claimed[0], "refunded");
+  }
+  return { refunded: id, receipt: row.receipt_number };
 }
 
 /**

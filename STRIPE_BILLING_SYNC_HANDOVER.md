@@ -95,4 +95,4 @@ Notes:
 - Invoices a business creates directly in Stripe carry no fee; only payments started from Clarity do.
 - Payment links emailed before this change carry no fee.
 - **Refund** on a Clarity Pay card sale (Billing › Transactions) sends the whole card payment back through Stripe and returns Clarity's fee with it. The sale can't then be marked paid again. A card-paid sale can't be voided or reopened either; it has to be refunded.
-- Refunds made from the business's Stripe dashboard don't return Clarity's fee automatically, and don't change the sale in Clarity; refund the fee from Connect › Collected fees if you want to.
+- A **full** refund made in the business's Stripe dashboard marks the till sale it paid for as refunded in Clarity (stock and voucher value go back), through the `charge.refunded` webhook. A part refund leaves the sale paid. Dashboard refunds don't return Clarity's fee automatically; refund it from Connect › Collected fees if you want to.

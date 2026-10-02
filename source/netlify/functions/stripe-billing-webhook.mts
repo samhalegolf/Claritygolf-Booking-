@@ -4,7 +4,7 @@ import { accountsForClarityPayAccount, syncClarityPay } from "./_shared/clarity-
 import { accountsForStripeAccount } from "./_shared/integration-credentials.mts";
 import { stripePlatform, STRIPE_CONNECTION_SETTING } from "./_shared/stripe.mts";
 import { getDatabase } from "./_shared/database.mts";
-import { settleTerminalPaymentFromWebhook } from "./billing-api.mts";
+import { refundPosSaleFromStripeCharge, settleTerminalPaymentFromWebhook } from "./billing-api.mts";
 import {
   deleteStripeInvoice,
   syncStripeCharge,
@@ -154,8 +154,14 @@ async function handleEvent(event: Record<string, any>, object: Record<string, an
     case "charge.succeeded":
     case "charge.updated":
     case "charge.captured":
-    case "charge.refunded":
       return syncStripeCharge(object, accountId);
+    case "charge.refunded":
+      // A refund made in the Stripe dashboard: the till sale it paid for
+      // follows, as well as the mirrored charge.
+      return {
+        charge: await syncStripeCharge(object, accountId),
+        sale: await refundPosSaleFromStripeCharge(accountId, object),
+      };
     case "payment_intent.succeeded":
       return settleTerminalPaymentFromWebhook(accountId, String(object?.id || ""));
     default:

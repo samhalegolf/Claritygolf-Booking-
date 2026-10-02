@@ -229,3 +229,35 @@ export function posStatusChangePlan(row: PosSaleRow, nextStatus: string): PosSta
     "POS_CARD_PAID",
   );
 }
+
+/**
+ * A card payment refunded outside Clarity -- in the business's Stripe
+ * dashboard -- and what it means for the sale it paid for.
+ *
+ * Only a full refund changes the sale: a part refund (a goodwill $10 back) is
+ * not the sale being undone, and Clarity has no "partly refunded" status to
+ * show it with, so the sale stays paid and Stripe keeps the detail.
+ *
+ *   mark_refunded     paid, and the whole card part has gone back
+ *   record_refund_id  already marked refunded by hand, without the card side
+ *   already           Clarity already sent this refund (or saw it before)
+ *   partial           only part of the card payment went back
+ *   needs_attention   the sale is not paid (pending, void): a person decides
+ */
+export type PosChargeRefundAction =
+  | "mark_refunded"
+  | "record_refund_id"
+  | "already"
+  | "partial"
+  | "needs_attention";
+
+export function posChargeRefundAction(
+  row: PosSaleRow,
+  charge: { amount: number; amountRefunded: number },
+): PosChargeRefundAction {
+  if (String(row.stripe_refund_id || "")) return "already";
+  if (!(charge.amount > 0) || charge.amountRefunded < charge.amount) return "partial";
+  if (row.status === "refunded") return "record_refund_id";
+  if (row.status === "paid") return "mark_refunded";
+  return "needs_attention";
+}
