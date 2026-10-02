@@ -211,3 +211,16 @@ test("a ball anywhere in the box is ready to putt, one outside it is not", () =>
   feed(engine, { ball: new Vec2(45, 0) }, t, 1, 60);
   assert.equal(engine.snapshot.gate, "waitingForBall");
 });
+
+test("an off-centre ball on the disc is seen, and the lab says how far to move it", () => {
+  const engine = new PuttingLabEngine();
+  let t = feed(engine, { templateDown: true }, 0, 2, 30, () => engine.phase !== "findingTemplate");
+  assert.equal(engine.phase, "placingBall", "template not found");
+  // 10 mm off: the ball overlaps the white paper round the disc.
+  t = feed(engine, { templateDown: true, ball: new Vec2(10, 0) }, t, 1, 30);
+  assert.equal(engine.phase, "placingBall");
+  assert.equal(engine.snapshot.prompt, "centreBall");
+  assert.ok(Math.abs((engine.snapshot.promptValue ?? 0) - 10) <= 1.5, `said ${engine.snapshot.promptValue} mm`);
+  feed(engine, { templateDown: true, ball: new Vec2(2, -1) }, t, 2, 30, () => engine.phase !== "placingBall");
+  assert.equal(engine.phase, "placingPutter");
+});

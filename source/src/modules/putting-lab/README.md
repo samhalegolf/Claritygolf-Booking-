@@ -45,7 +45,9 @@ Inside `engine/`:
    sightings. The motion sensors only warn about tilt; they never define the
    measurement frame.
 2. **Ball.** Put a ball on the disc. Its centre confirms the origin and its
-   measured size checks the print scale.
+   measured size checks the print scale. Only the disc is looked at, so the
+   white paper round it cannot hide an off-centre ball; one that reaches the
+   disc's rim (more than about 4 mm off) gets "Centre the ball (n mm off)".
 3. **Putter.** Set the face square on the printed line, touching the ball, and
    hold still. The lab learns this putter: its width, where its visible edge
    sits relative to the true face, its texture, and any stickers.

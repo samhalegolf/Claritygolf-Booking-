@@ -30,7 +30,7 @@ import {
   type ValidationRun,
   type ValidationSummary,
 } from "./stroke";
-import { BALL_DIAMETER_MM, TEMPLATE, TemplateDetector, type TemplateDetection } from "./template";
+import { BALL_DIAMETER_MM, TEMPLATE, TEMPLATE_DISC_RADIUS, TemplateDetector, type TemplateDetection } from "./template";
 import { PutterTracker, type PutterSample, type PutterStatus } from "./tracker";
 
 export type Point = { x: number; y: number };
@@ -385,6 +385,8 @@ export class PuttingLabEngine {
     this.movementTracker = this.lastAttitude ? new CameraMovementTracker(this.lastAttitude, t) : null;
     this.coordinates = new PuttingCoordinateSystem(this.surface, this.configuration.target);
     this.ballTracker = new BallTracker(this.coordinates);
+    // A millimetre in from the rim, clear of the edge where ink meets paper.
+    this.ballTracker.disc = TEMPLATE_DISC_RADIUS - 1;
     this.stableDetections = [];
     this.phase = "placingBall";
   }
@@ -398,14 +400,14 @@ export class PuttingLabEngine {
     s.ballStatus = ball.status;
     s.ballSearch = ball.lastSearch;
     s.prompt = "placeBall";
-    const rest = ball.restPosition;
-    if (ball.status !== "atRest" || !rest || !ball.last) return;
-    const offset = rest.length;
-    if (offset > 6) {
+    if (ball.offCentre !== null) {
       s.prompt = "centreBall";
-      s.promptValue = Math.round(offset);
+      s.promptValue = Math.round(ball.offCentre);
       return;
     }
+    // Seen whole inside the disc, so already within a few millimetres of its centre.
+    const rest = ball.restPosition;
+    if (ball.status !== "atRest" || !rest || !ball.last) return;
     // The ball is a known size: a second check on the solve and the print scale.
     const diameter = ball.last.radiusMM * 2;
     if (Math.abs(diameter / BALL_DIAMETER_MM - 1) > 0.1) this.ballScaleWarning = diameter;
@@ -471,6 +473,7 @@ export class PuttingLabEngine {
   }
 
   private goLive() {
+    if (this.ballTracker) this.ballTracker.disc = null;
     this.ballTracker?.rearm();
     this.putterTracker?.reset();
     this.gate = "waitingForBall";
