@@ -1162,7 +1162,7 @@ export function SellScreen({
                   <a className="outline-button" href={checkoutUrl} target="_blank" rel="noreferrer noopener">
                     <ExternalLink size={15} />{" "}{t("Pay on this device")}</a>
                   {tapToPay.ready && (
-                    <button className="outline-button" disabled={busy} onClick={() => setPayStage("tap")} type="button">{t("Tap card instead")}</button>
+                    <button className="outline-button" disabled={busy} onClick={() => setPayStage("tap")} type="button">{t("Tap to Pay on iPhone")}</button>
                   )}
                 </div>
               </>

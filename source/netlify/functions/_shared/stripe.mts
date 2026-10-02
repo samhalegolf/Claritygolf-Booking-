@@ -344,3 +344,39 @@ export async function retrieveStripeCheckoutSession(
     clientReferenceId: String(session?.client_reference_id || ""),
   };
 }
+
+/**
+ * Give a card payment back in full.
+ *
+ * The refund is made on the business's account, where the charge is. On
+ * Clarity Pay, Clarity's cut goes back too: a sale that did not happen should
+ * not cost the business Clarity's fee. Stripe's own card fee is Stripe's
+ * business, as with a refund made in the Stripe dashboard.
+ *
+ * The idempotency key makes a double-click, or a retry after a dropped
+ * connection, return the first refund instead of trying a second. A payment
+ * someone already refunded in Stripe is not an error here: the money is back,
+ * which is what was asked, so that refund is returned.
+ */
+export async function refundStripePayment(
+  credential: Pick<StripeCredential, "secret" | "account" | "route">,
+  paymentIntentId: string,
+  idempotencyKey: string,
+) {
+  const params = new URLSearchParams();
+  params.set("payment_intent", paymentIntentId);
+  if (credential.route === "clarity_pay") params.set("refund_application_fee", "true");
+  try {
+    const refund = await stripeRequest(credential, "refunds", { method: "POST", params, idempotencyKey });
+    return { id: String(refund?.id || ""), status: String(refund?.status || "") };
+  } catch (error) {
+    if (!String((error as Error)?.message || "").includes("charge_already_refunded")) throw error;
+    const lookup = new URLSearchParams();
+    lookup.set("payment_intent", paymentIntentId);
+    lookup.set("limit", "1");
+    const existing = await stripeRequest(credential, "refunds", { params: lookup });
+    const first = (existing?.data || [])[0] as Record<string, unknown> | undefined;
+    if (!first?.id) throw error;
+    return { id: String(first.id), status: String(first.status || "") };
+  }
+}

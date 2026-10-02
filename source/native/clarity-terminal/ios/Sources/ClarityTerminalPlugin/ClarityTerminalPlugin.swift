@@ -3,6 +3,7 @@ import CoreLocation
 import Foundation
 import ProximityReader
 import StripeTerminal
+import UIKit
 
 /// Tap to Pay on iPhone for Clarity Booking.
 ///
@@ -30,7 +31,8 @@ public class ClarityTerminalPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "collectPayment", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "cancel", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "disconnect", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "provideConnectionToken", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "provideConnectionToken", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "showHowToTap", returnType: CAPPluginReturnPromise)
     ]
 
     private let tokenBridge = TokenBridge()
@@ -211,6 +213,46 @@ public class ClarityTerminalPlugin: CAPPlugin, CAPBridgedPlugin {
             self.connectedLocationId = ""
             call.resolve()
         }
+    }
+
+    // MARK: - Merchant education
+
+    /// Apple's own "How to Tap" guide, which Apple requires an app to offer
+    /// before it passes Tap to Pay review. Apple writes it, keeps it current and
+    /// localises it, so the app only asks for it and shows it.
+    ///
+    /// iOS 18 and later only. On an older iPhone this resolves `shown: false`
+    /// and the page shows its own short instructions instead.
+    @objc func showHowToTap(_ call: CAPPluginCall) {
+        guard #available(iOS 18.0, *) else {
+            call.resolve(["shown": false])
+            return
+        }
+        Task { @MainActor in
+            guard let presenter = self.topViewController() else {
+                call.resolve(["shown": false])
+                return
+            }
+            do {
+                let discovery = ProximityReaderDiscovery()
+                let content = try await discovery.content(for: .payment(.howToTap))
+                try await discovery.presentContent(content, from: presenter)
+                call.resolve(["shown": true])
+            } catch {
+                self.reject(call, error, fallbackCode: "EDUCATION_UNAVAILABLE")
+            }
+        }
+    }
+
+    /// Apple presents its guide from whatever is on top right now; presenting
+    /// from a view controller that is itself covered fails.
+    @MainActor
+    private func topViewController() -> UIViewController? {
+        var top = bridge?.viewController
+        while let presented = top?.presentedViewController {
+            top = presented
+        }
+        return top
     }
 
     // MARK: - Connection tokens

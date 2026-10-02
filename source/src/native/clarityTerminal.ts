@@ -35,6 +35,8 @@ export type ClarityTerminalPlugin = {
   cancel(): Promise<{ cancelled: boolean }>;
   disconnect(): Promise<void>;
   provideConnectionToken(options: { requestId: string; secret?: string; error?: string }): Promise<void>;
+  /** Apple's "How to Tap" guide. `shown: false` before iOS 18: show our own words instead. */
+  showHowToTap(): Promise<{ shown: boolean }>;
   addListener(
     event: "connectionTokenRequest",
     handler: (data: { requestId: string }) => void,

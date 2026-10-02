@@ -32,10 +32,10 @@ No existing files were modified. Type-checked with the repo's `typecheck:functio
 - Stripe product deleted → row kept, marked inactive
 - Account id resolves the same way billing-api.mts does (settings → `CLARITY_COACH_ACCOUNT_ID` → `sam-hale-golf`)
 
-## Setup status (2026-09-28)
+## Setup status (2026-10-02)
 
 Done:
-- Live Connect webhook created on the Clarity Golf Systems platform account (`we_1UKSLNH9oVv8OMHYExJ4fIcF` → `https://claritygolf.app/api/stripe-billing-webhook`, all 16 events below).
+- Live Connect webhook created on the Clarity Golf Systems platform account (`we_1UKSLNH9oVv8OMHYExJ4fIcF` → `https://claritygolf.app/api/stripe-billing-webhook`, all 17 events below; `payment_intent.succeeded` added 2026-10-02 for Tap to Pay).
 - `STRIPE_CONNECT_WEBHOOK_SECRET` set in Netlify (clarity-golf-booking) to that endpoint's signing secret.
 - Unused `STRIPE_PRICE_DAY_PASS` and `STRIPE_PRICE_ROUND_PASS` removed from Netlify.
 
@@ -43,14 +43,14 @@ Still to do by hand:
 - Netlify: set `STRIPE_PLATFORM_SECRET_KEY` (platform account's live secret key) and `STRIPE_CONNECT_CLIENT_ID` (`ca_…` from Connect › Settings › OAuth). Neither can be read through the API.
 - Netlify: delete `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` (the old SAMHALEGOLF paste-your-keys setup; nothing reads them).
 - Old SAMHALEGOLF Stripe account: remove any webhook pointing at `/api/stripe-billing-webhook`. It is signed with the old secret, so it will now fail and Stripe will email about it.
-- Test mode: repeat the webhook in the platform's test mode and set `STRIPE_CONNECT_TEST_CLIENT_ID`, `STRIPE_PLATFORM_TEST_SECRET_KEY`, `STRIPE_CONNECT_TEST_WEBHOOK_SECRET`.
+- Test mode: repeat the webhook (all 17 events) in the platform's test mode and set `STRIPE_CONNECT_TEST_CLIENT_ID`, `STRIPE_PLATFORM_TEST_SECRET_KEY`, `STRIPE_CONNECT_TEST_WEBHOOK_SECRET`.
 - Stripe dashboard: complete the Connect platform profile and onboarding branding.
 - Redeploy, connect Sam Hale Golf from Settings › Billing › Card payments, then run the backfill (step 4).
 
 ## Setup after deploy
 
 1. Each business connects its own Stripe from Settings › Billing › Card payments (Stripe Connect sign-in). Requests use Clarity's platform key on that connected account.
-2. Once, on Clarity's platform Stripe account (Connect › Webhooks, "events on connected accounts"), add an endpoint at `https://YOUR-BOOKING-SITE/api/stripe-billing-webhook` with: `invoice.created`, `invoice.updated`, `invoice.finalized`, `invoice.sent`, `invoice.paid`, `invoice.payment_failed`, `invoice.payment_action_required`, `invoice.voided`, `invoice.marked_uncollectible`, `invoice.deleted`, `charge.succeeded`, `charge.updated`, `charge.captured`, `charge.refunded`, `account.application.deauthorized`, `account.updated`. Do the same in test mode.
+2. Once, on Clarity's platform Stripe account (Connect › Webhooks, "events on connected accounts"), add an endpoint at `https://YOUR-BOOKING-SITE/api/stripe-billing-webhook` with: `invoice.created`, `invoice.updated`, `invoice.finalized`, `invoice.sent`, `invoice.paid`, `invoice.payment_failed`, `invoice.payment_action_required`, `invoice.voided`, `invoice.marked_uncollectible`, `invoice.deleted`, `charge.succeeded`, `charge.updated`, `charge.captured`, `charge.refunded`, `account.application.deauthorized`, `account.updated`, `payment_intent.succeeded` (settles a Tap to Pay sale whose phone never heard the answer). Do the same in test mode.
 3. Set `STRIPE_CONNECT_WEBHOOK_SECRET` (and `STRIPE_CONNECT_TEST_WEBHOOK_SECRET`) in Netlify to those endpoints' signing secrets.
 4. Run the backfill while logged in as admin — from the browser console on the admin app:
 
@@ -94,4 +94,5 @@ Setup on Clarity's platform Stripe account:
 Notes:
 - Invoices a business creates directly in Stripe carry no fee; only payments started from Clarity do.
 - Payment links emailed before this change carry no fee.
-- Refunds made from the business's Stripe dashboard don't return Clarity's fee automatically; refund it from Connect › Collected fees if you want to.
+- **Refund** on a Clarity Pay card sale (Billing › Transactions) sends the whole card payment back through Stripe and returns Clarity's fee with it. The sale can't then be marked paid again. A card-paid sale can't be voided or reopened either; it has to be refunded.
+- Refunds made from the business's Stripe dashboard don't return Clarity's fee automatically, and don't change the sale in Clarity; refund the fee from Connect › Collected fees if you want to.

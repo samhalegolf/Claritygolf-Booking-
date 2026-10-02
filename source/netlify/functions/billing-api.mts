@@ -36,6 +36,7 @@ import { taxDefaultsForCountry } from "./_shared/region.mts";
 import {
   createStripeCheckoutSession as createStripeCheckoutSessionWith,
   applicationFeeCents,
+  refundStripePayment,
   requireStripeFeature,
   resolveStripeCredential,
   retrieveStripeCheckoutSession as retrieveStripeCheckoutSessionWith,
@@ -46,6 +47,7 @@ import {
 import type { StripeCheckoutInput } from "./_shared/stripe.mts";
 import {
   posCardDueCents,
+  posStatusChangePlan,
   settlePosTransaction,
   type CardPayment,
   type PosTender,
@@ -3324,6 +3326,9 @@ function posRowToApi(row: Record<string, unknown>) {
     // How the card part arrived (QR page, Tap to Pay). Empty for manual methods
     // and for sales settled before channels were recorded.
     paymentChannel: String(row.payment_channel ?? ""),
+    // True once the card money has gone back through Stripe (refunded from
+    // Clarity). A sale only marked refunded, with no card behind it, is false.
+    cardRefunded: Boolean(row.stripe_refund_id),
     paidAt: String(row.paid_at ?? ""),
     createdAt: String(row.created_at ?? ""),
     updatedAt: String(row.updated_at ?? ""),
@@ -3980,7 +3985,24 @@ export async function updatePosTransactionStatus(accountId: string, id: string, 
       });
     }
   }
+  const current = await posTransactionRow(accountId, id);
+  if (!current) throw Object.assign(new Error("Transaction not found."), { status: 404 });
   const patch: Record<string, unknown> = { status, updated_at: nowIso() };
+  // A sale a card paid for through Clarity Pay is refunded through Stripe
+  // before it says "refunded", so the receipt never claims money went back
+  // that did not. If Stripe refuses, nothing here changes.
+  const { refundPaymentIntentId } = posStatusChangePlan(current, status);
+  if (refundPaymentIntentId) {
+    const refund = await refundStripePayment(await stripeFor(accountId), refundPaymentIntentId, `pos-refund-${id}`);
+    if (!refund.id || refund.status === "failed" || refund.status === "canceled") {
+      throw Object.assign(new Error("Stripe could not refund this card payment. Check it in your Stripe dashboard."), {
+        status: 502,
+        code: "STRIPE_REFUND_FAILED",
+      });
+    }
+    patch.stripe_refund_id = refund.id;
+    patch.refunded_at = nowIso();
+  }
   if (status === "paid") patch.paid_at = nowIso();
   if (body?.note !== undefined) patch.note = cleanString(body?.note, "", 600) || null;
   const rows = await supabase("billing_pos_transactions", {

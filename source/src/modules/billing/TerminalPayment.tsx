@@ -9,12 +9,14 @@
 // "failed".
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, Loader2, Nfc, QrCode, RotateCcw, X } from "lucide-react";
+import { AlertTriangle, CircleHelp, Loader2, Nfc, QrCode, RotateCcw, X } from "lucide-react";
 import { nativeTerminal } from "../../native/clarityTerminal";
 import {
   canRetry,
+  connectThisIphone,
+  defaultTerminalLocationId,
   saveTerminalLocation,
-  savedTerminalLocation,
+  showHowToTap,
   stateAfterCollect,
   stateFromServer,
   terminalApi,
@@ -40,6 +42,30 @@ export type TerminalPaymentProps = {
   onStateChange?: (state: TapState) => void;
 };
 
+/**
+ * Apple's "How to Tap" guide, which Apple requires the app to offer. On an
+ * iPhone before iOS 18 Apple has no guide to show, so the same words are given
+ * here instead.
+ */
+export function HowToTap() {
+  const [fallback, setFallback] = useState(false);
+  return (
+    <>
+      <button
+        className="text-button"
+        onClick={() => void showHowToTap().then((shown) => setFallback(!shown))}
+        type="button"
+      >
+        <CircleHelp size={15} />{" "}{t("How to tap")}</button>
+      {fallback && (
+        <p className="field-help">
+          {t("The customer holds their card, phone or watch flat against the top of this iPhone and keeps it there until the check mark shows.")}
+        </p>
+      )}
+    </>
+  );
+}
+
 /** True while a card may be mid-charge: nothing may close or restart. */
 export function tapIsBusy(state: TapState | null) {
   return Boolean(state && ["reading", "processing", "unknown"].includes(state.kind));
@@ -57,13 +83,7 @@ export function TerminalPayment({
   onStateChange,
 }: TerminalPaymentProps) {
   const [state, setStateRaw] = useState<TapState>({ kind: "connecting" });
-  const [locationId, setLocationId] = useState(
-    () =>
-      status.locations.find((entry) => entry.id === savedTerminalLocation())?.id ||
-      status.locations.find((entry) => entry.isDefault)?.id ||
-      status.locations[0]?.id ||
-      "",
-  );
+  const [locationId, setLocationId] = useState(() => defaultTerminalLocationId(status));
   const alive = useRef(true);
   const stateRef = useRef<TapState>(state);
   const onPaidRef = useRef(onPaid);
@@ -113,8 +133,7 @@ export function TerminalPayment({
     setState({ kind: "connecting" });
     let started;
     try {
-      const location = await terminalApi.location(locationId);
-      await plugin.prepare({ stripeLocationId: location.stripeLocationId });
+      await connectThisIphone(locationId);
       started = await terminalApi.start(transactionId, locationId);
     } catch (error) {
       // Nothing has been tapped yet, so nothing can have been charged.
@@ -280,6 +299,7 @@ export function TerminalPayment({
             <X size={15} />{" "}{t("Stop")}</button>
         )}
       </div>
+      {state.kind === "ready_to_tap" && <HowToTap />}
     </div>
   );
 }
