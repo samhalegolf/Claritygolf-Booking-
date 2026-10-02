@@ -12,7 +12,7 @@ export class Blob {
     readonly mxx: number,
     readonly myy: number,
     readonly mxy: number,
-    /** Reached the edge of the region searched, so may be cut off. */
+    /** Reached the edge of the region searched (or of the clip circle), so may be cut off. */
     readonly touchesEdge: boolean,
   ) {}
 
@@ -40,6 +40,9 @@ export class Blob {
   }
 }
 
+/** Only pixels inside this circle (frame pixels) count. */
+export type BlobClip = { center: Vec2; radius: number };
+
 export type BlobThreshold =
   | { kind: "darkerThan"; value: number }
   | { kind: "brighterThan"; value: number }
@@ -56,9 +59,10 @@ export class BlobDetector {
   /**
    * Blobs in `roi`. With `step > 1` the region is sampled every `step` pixels;
    * positions still come back in full-frame pixels. Area limits are in
-   * sampled pixels.
+   * sampled pixels. With a `clip`, pixels outside the circle are background,
+   * and a blob reaching its rim counts as touching the edge.
    */
-  detect(plane: LumaPlane, roi: IntRect, threshold: BlobThreshold, step = 1, minArea = 1, maxArea = Infinity): Blob[] {
+  detect(plane: LumaPlane, roi: IntRect, threshold: BlobThreshold, step = 1, minArea = 1, maxArea = Infinity, clip?: BlobClip): Blob[] {
     const r = roi.clipped(bounds(plane));
     const s = Math.max(1, step);
     const w = Math.floor(r.width / s);
@@ -69,6 +73,18 @@ export class BlobDetector {
     if (this.labels.length < n) this.labels = new Int32Array(n);
     if (this.stack.length < n) this.stack = new Int32Array(n);
     this.buildMask(plane, r, s, w, h, threshold);
+    // Distance from the clip centre, squared, at each sampled pixel: outside is cleared, the rim is the edge.
+    const rimSq = (px: number, py: number) => {
+      if (!clip) return -1;
+      const dx = r.minX + (px + 0.5) * s - clip.center.x;
+      const dy = r.minY + (py + 0.5) * s - clip.center.y;
+      return dx * dx + dy * dy;
+    };
+    const outerSq = clip ? clip.radius * clip.radius : 0;
+    const innerSq = clip ? Math.max(0, clip.radius - 1.5 * s) ** 2 : 0;
+    if (clip) {
+      for (let py = 0; py < h; py++) for (let px = 0; px < w; px++) if (rimSq(px, py) > outerSq) this.mask[py * w + px] = 0;
+    }
 
     const mask = this.mask;
     const labels = this.labels;
@@ -106,7 +122,7 @@ export class BlobDetector {
         if (px > x1) x1 = px;
         if (py < y0) y0 = py;
         if (py > y1) y1 = py;
-        if (px === 0 || py === 0 || px === w - 1 || py === h - 1) edge = true;
+        if (px === 0 || py === 0 || px === w - 1 || py === h - 1 || (clip && rimSq(px, py) > innerSq)) edge = true;
         // 4-connected: diagonal touches do not merge separate dots.
         if (px > 0 && mask[i - 1] && !labels[i - 1]) {
           labels[i - 1] = next;

@@ -32,6 +32,35 @@ export class BallDetector {
   private blobs = new BlobDetector();
   private dotBlobs = new BlobDetector();
 
+  /**
+   * The ball on the template's black disc, looking only inside the disc: the
+   * white paper round it would otherwise join an off-centre ball into one big
+   * shape that is not a ball. A ball reaching the disc's rim is reported by how
+   * far off centre it sits, worked out from how much of it shows.
+   */
+  detectOnDisc(plane: LumaPlane, center: Vec2, expectedRadius: number, discRadius: number): BallObservation | { offCentre: number } | null {
+    const roi = IntRect.covering([center], discRadius + 2).clipped(bounds(plane));
+    if (roi.area <= 16) return null;
+    const { threshold, separability } = otsu(histogram(plane, roi, 1));
+    if (separability <= 0.3) return null;
+    const expectedArea = Math.PI * expectedRadius * expectedRadius;
+    const found = this.blobs
+      .detect(plane, roi, { kind: "brighterThan", value: threshold }, 1, Math.floor(expectedArea * 0.15), Math.floor(expectedArea * 1.6), {
+        center,
+        radius: discRadius,
+      })
+      .sort((a, b) => b.area - a.area);
+    const b = found[0];
+    if (!b) return null;
+    if (b.touchesEdge) return { offCentre: offsetFromVisibleArea(b.area, expectedRadius, discRadius) };
+    const radius = 2 * Math.sqrt(b.axes[1]);
+    const sizeMatch = 1 - Math.min(1, Math.abs(radius / expectedRadius - 1) * 2.5);
+    const roundness = 1 - Math.min(1, (b.elongation - 1) / 2);
+    const score = sizeMatch * 0.6 + roundness * 0.4;
+    if (score <= 0.45) return null;
+    return { imageCenter: b.centroid, imageRadius: radius, dots: [], confidence: clampUnit(score * Math.min(1, separability / 0.6)) };
+  }
+
   detect(plane: LumaPlane, center: Vec2, expectedRadius: number, searchRadius: number): BallObservation | null {
     const half = searchRadius + expectedRadius * 1.6;
     const roi = IntRect.covering([center], half).clipped(bounds(plane));
@@ -75,6 +104,28 @@ export class BallDetector {
   }
 }
 
+/**
+ * How far a ball (radius r) sits from the centre of a disc (radius R), from the
+ * area of it inside the disc: that overlap shrinks steadily as the ball moves out.
+ */
+export function offsetFromVisibleArea(area: number, r: number, R: number) {
+  const overlap = (d: number) => {
+    if (d <= Math.abs(R - r)) return Math.PI * Math.min(r, R) ** 2;
+    if (d >= R + r) return 0;
+    const a = r * r * Math.acos((d * d + r * r - R * R) / (2 * d * r));
+    const b = R * R * Math.acos((d * d + R * R - r * r) / (2 * d * R));
+    return a + b - 0.5 * Math.sqrt((-d + r + R) * (d + r - R) * (d - r + R) * (d + r + R));
+  };
+  let lo = Math.abs(R - r);
+  let hi = R + r;
+  for (let i = 0; i < 30; i++) {
+    const mid = (lo + hi) / 2;
+    if (overlap(mid) > area) lo = mid;
+    else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
 export type BallStatus = "absent" | "settling" | "atRest" | "rolling" | "finished";
 
 /** Half the side of the square box, mm, about the calibrated spot (squared to the aim) that a ball must sit in. */
@@ -97,6 +148,10 @@ export class BallTracker {
   /** Samples since the ball left its rest position. */
   roll: BallSample[] = [];
   lastSearch: { center: Vec2; radius: number } | null = null;
+  /** While set (mm), the ball is looked for only inside the template's black disc of this radius. */
+  disc: number | null = null;
+  /** The ball is on the disc but this far (mm) off its centre, too far to measure. */
+  offCentre: number | null = null;
 
   private detector = new BallDetector();
   private settleSamples: BallSample[] = [];
@@ -116,6 +171,7 @@ export class BallTracker {
     this.settleSamples = [];
     this.departureSample = null;
     this.misses = 0;
+    this.offCentre = null;
   }
 
   /** Forget the finished putt and look for the next ball at the start. */
@@ -168,6 +224,8 @@ export class BallTracker {
       this.last = sample;
       return sample;
     }
+
+    if (this.disc !== null && this.status !== "atRest") return this.updateOnDisc(plane, t, expectedRadius);
 
     // absent, settling or at rest
     const centreWorld = this.restPosition ?? c.surface.ballOrigin;
@@ -234,6 +292,29 @@ export class BallTracker {
       return sample;
     }
     this.misses = 0;
+    return this.settle(sample, t);
+  }
+
+  private updateOnDisc(plane: LumaPlane, t: number, expectedRadius: number): BallSample | null {
+    const c = this.coordinates;
+    const mmpp = c.surface.mmPerPixelAtBall;
+    const centre = c.imageFromWorld(c.surface.ballOrigin);
+    if (!centre || this.disc === null) return null;
+    this.lastSearch = { center: centre, radius: this.disc / mmpp };
+    const o = this.detector.detectOnDisc(plane, centre, expectedRadius, this.disc / mmpp);
+    if (!o || "offCentre" in o) {
+      this.reset();
+      if (o) this.offCentre = o.offCentre * mmpp;
+      return null;
+    }
+    const sample = this.makeSample(o, t);
+    if (!sample) return null;
+    this.offCentre = null;
+    return this.settle(sample, t);
+  }
+
+  /** A ball seen where it should be: once it has sat still long enough, it is at rest. */
+  private settle(sample: BallSample, t: number): BallSample {
     this.settleSamples.push(sample);
     this.settleSamples = this.settleSamples.filter((s) => s.timestamp >= t - this.settleSeconds - 0.05);
     this.status = "settling";
