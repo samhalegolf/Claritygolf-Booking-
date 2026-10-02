@@ -4,12 +4,17 @@ import PackageDescription
 // Tap to Pay on iPhone for Clarity Booking. Pulled into the staff app by
 // `npx cap sync ios` from booking-app/ (see booking-app/package.json); the
 // Player app never lists it, so it never ships there.
+//
+// The package and library are named the way Capacitor derives a plugin's name
+// from its npm name (@claritygolf/capacitor-terminal -> ClaritygolfCapacitorTerminal),
+// because `npx cap sync` writes exactly that name into the app's CapApp-SPM
+// package. Any other name and Xcode cannot find the product.
 let package = Package(
-    name: "ClarityTerminal",
+    name: "ClaritygolfCapacitorTerminal",
     platforms: [.iOS(.v15)],
     products: [
         .library(
-            name: "ClarityTerminal",
+            name: "ClaritygolfCapacitorTerminal",
             targets: ["ClarityTerminalPlugin"])
     ],
     dependencies: [
