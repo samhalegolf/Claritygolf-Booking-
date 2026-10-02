@@ -48,6 +48,51 @@ Apple's rules live in two places; read both before submitting, as they change:
 5. Screenshots or a short screen recording of that flow. Apple often asks for
    one with Tap to Pay apps.
 
+## Distribution permission (after development is approved)
+
+Apple grants Tap to Pay in two steps. The **development** permission (requested
+2026-10-03) lets the app run Tap to Pay on our own iPhones. The
+**distribution** permission is needed before TestFlight or the App Store. Apple
+only takes that request once the development build works on a real iPhone, and
+reviews a recording of the flow against its Tap to Pay checklist. Check the
+current form when it's time; Apple changes it.
+
+### Screen recording: what to film
+
+One continuous recording on a real iPhone, signed in as the reviewer, inside
+the sandbox. Start from a phone that has never used Tap to Pay with this
+account, so Apple's terms appear on camera:
+
+1. Billing › Settings › **Tap to Pay on iPhone** card. Tap **Set up this
+   iPhone**.
+2. Apple's Tap to Pay terms: sign in with the Apple ID and accept.
+3. Apple's **How to Tap** guide opens. Let it play through.
+4. Sell › add a product › Clarity Pay › **Complete sale**. The Tap to Pay
+   screen opens, showing the amount.
+5. Tap a card (Stripe's physical test card) and show the approved screen and
+   the receipt.
+6. A second sale with a card that's declined, or cancelled before tapping, to
+   show the app says "Not charged" and offers to try again.
+7. Billing › Transactions › **Refund** on the first sale.
+8. Back on the tap screen, tap **How to tap** to show the guide is always
+   reachable.
+
+Keep the recording short (2–4 minutes). Use iPhone screen recording (Control
+Centre) and turn on **Do Not Disturb** first.
+
+### Written answers
+
+| Apple asks | Answer |
+| --- | --- |
+| App name and bundle ID | Clarity Booking, `app.claritygolf.booking` |
+| Payment service provider | Stripe (Stripe Terminal iOS SDK) |
+| Who uses it | Golf coaches, academies and driving ranges (Clarity Golf business accounts) |
+| Where the checkout starts | Sell screen and checkout, button "Tap to Pay on iPhone" |
+| Merchant education | Apple's "How to Tap" guide (ProximityReaderDiscovery, iOS 18+), shown after setup and from "How to tap" on the tap screen and in Settings. Short written instructions before iOS 18 |
+| Terms acceptance | Settings › "Set up this iPhone", before the first sale |
+| Countries | As in the development request |
+| Test account | `appreview@claritygolf.app` (password in App Store Connect only), enter the sandbox first |
+
 ## Notes for the reviewer (App Store Connect › App Review Information)
 
 Fill in the login and paste this. Keep it short; reviewers follow steps.
