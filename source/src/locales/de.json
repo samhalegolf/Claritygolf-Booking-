@@ -2443,9 +2443,7 @@
   "Use pass": "Pass nutzen",
   "Pay {amount} with coupon": "{amount} mit Gutschein bezahlen",
   "Pay with coupon": "Mit Gutschein bezahlen",
-  "Tap card {amount}": "Karte auflegen {amount}",
   "Charge {amount}": "{amount} kassieren",
-  "Tap card": "Karte auflegen",
   "Charge": "Kassieren",
   "Record {amount} as owed": "{amount} als offen erfassen",
   "Record payment as owed": "Zahlung als offen erfassen",
@@ -2456,7 +2454,6 @@
   "Payment QR code": "Zahlungs-QR-Code",
   "Cancel sale": "Verkauf abbrechen",
   "Pay on this device": "Auf diesem Gerät bezahlen",
-  "Tap card instead": "Stattdessen Karte auflegen",
   "{value} of it paid by coupon": "{value} davon per Gutschein bezahlt",
   "Recorded as owed on {paymentMethodName}. Mark it paid from the POS list once it is settled.": "Als offen erfasst über {paymentMethodName}. Markiere es in der Kassenliste als bezahlt, sobald beglichen.",
   "Services": "Leistungen",
@@ -4156,5 +4153,14 @@
   "Practice mode sets an offline gate 2 m out along the aim. A start line inside it plays a positive sound, outside a negative one.": "Der Trainingsmodus setzt ein Abweichungstor 2 m entlang der Ziellinie. Eine Startlinie darin ergibt einen positiven Ton, außerhalb einen negativen.",
   "Refund {amount} to {customer}'s card? The money goes back through Stripe and this can't be undone.": "{amount} auf die Karte von {customer} erstatten? Das Geld geht über Stripe zurück, und das lässt sich nicht rückgängig machen.",
   "the customer": "dem Kunden",
-  "{receipt} refunded. The money usually reaches the card in 5–10 working days.": "{receipt} erstattet. Das Geld ist normalerweise innerhalb von 5–10 Werktagen auf der Karte."
+  "{receipt} refunded. The money usually reaches the card in 5–10 working days.": "{receipt} erstattet. Das Geld ist normalerweise innerhalb von 5–10 Werktagen auf der Karte.",
+  "Tap to Pay on iPhone · {amount}": "Tap to Pay auf dem iPhone · {amount}",
+  "Tap to Pay on iPhone": "Tap to Pay auf dem iPhone",
+  "On this iPhone": "Auf diesem iPhone",
+  "Take contactless cards, Apple Pay and other digital wallets on this iPhone. No extra hardware. Set it up once here, before your first sale: Apple asks you to accept its terms and gets this iPhone ready, which can take a minute or two.": "Kontaktlose Karten, Apple Pay und andere digitale Wallets direkt auf diesem iPhone annehmen. Keine zusätzliche Hardware. Richte es hier einmal vor deinem ersten Verkauf ein: Apple bittet dich, seine Bedingungen zu akzeptieren, und bereitet dieses iPhone vor. Das kann ein bis zwei Minuten dauern.",
+  "This iPhone is ready for Tap to Pay.": "Dieses iPhone ist bereit für Tap to Pay.",
+  "Setting up…": "Wird eingerichtet…",
+  "Set up this iPhone": "Dieses iPhone einrichten",
+  "How to tap": "So wird bezahlt",
+  "The customer holds their card, phone or watch flat against the top of this iPhone and keeps it there until the check mark shows.": "Die Kundin oder der Kunde hält Karte, Telefon oder Uhr flach an den oberen Rand dieses iPhones, bis das Häkchen erscheint."
 }

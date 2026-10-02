@@ -2443,9 +2443,7 @@
   "Use pass": "パスを使用",
   "Pay {amount} with coupon": "クーポンで{amount}を支払う",
   "Pay with coupon": "クーポンで支払う",
-  "Tap card {amount}": "カードタッチ {amount}",
   "Charge {amount}": "{amount}を請求",
-  "Tap card": "カードタッチ",
   "Charge": "請求",
   "Record {amount} as owed": "{amount}を未収として記録",
   "Record payment as owed": "支払いを未収として記録",
@@ -2456,7 +2454,6 @@
   "Payment QR code": "支払い用QRコード",
   "Cancel sale": "販売をキャンセル",
   "Pay on this device": "このデバイスで支払う",
-  "Tap card instead": "カードタッチに切り替え",
   "{value} of it paid by coupon": "うち{value}をクーポンで支払い",
   "Recorded as owed on {paymentMethodName}. Mark it paid from the POS list once it is settled.": "{paymentMethodName}で未収として記録しました。精算後、POS一覧から支払い済みにしてください。",
   "Services": "サービス",
@@ -4156,5 +4153,14 @@
   "Practice mode sets an offline gate 2 m out along the aim. A start line inside it plays a positive sound, outside a negative one.": "練習モードでは狙いのライン上2 m先にゲートを置きます。打ち出しがゲート内なら成功音、外なら失敗音が鳴ります。",
   "Refund {amount} to {customer}'s card? The money goes back through Stripe and this can't be undone.": "{customer}のカードに{amount}を返金しますか？返金はStripe経由で行われ、取り消すことはできません。",
   "the customer": "お客様",
-  "{receipt} refunded. The money usually reaches the card in 5–10 working days.": "{receipt}を返金しました。通常、5〜10営業日でカードに返金されます。"
+  "{receipt} refunded. The money usually reaches the card in 5–10 working days.": "{receipt}を返金しました。通常、5〜10営業日でカードに返金されます。",
+  "Tap to Pay on iPhone · {amount}": "iPhoneのタッチ決済 · {amount}",
+  "Tap to Pay on iPhone": "iPhoneのタッチ決済",
+  "On this iPhone": "このiPhone",
+  "Take contactless cards, Apple Pay and other digital wallets on this iPhone. No extra hardware. Set it up once here, before your first sale: Apple asks you to accept its terms and gets this iPhone ready, which can take a minute or two.": "このiPhoneで非接触型カード、Apple Pay、その他のデジタルウォレットを受け付けます。追加のハードウェアは不要です。最初の販売の前に、ここで一度設定してください。Appleの利用規約への同意とiPhoneの準備が行われ、1〜2分かかることがあります。",
+  "This iPhone is ready for Tap to Pay.": "このiPhoneでタッチ決済を使用できます。",
+  "Setting up…": "設定中…",
+  "Set up this iPhone": "このiPhoneを設定",
+  "How to tap": "支払い方法",
+  "The customer holds their card, phone or watch flat against the top of this iPhone and keeps it there until the check mark shows.": "お客様にカード、スマートフォン、または時計をこのiPhoneの上部に平らに当て、チェックマークが表示されるまでそのままにしてもらいます。"
 }

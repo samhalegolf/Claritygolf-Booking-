@@ -2443,9 +2443,7 @@
   "Use pass": "Strippenkaart gebruiken",
   "Pay {amount} with coupon": "{amount} betalen met kortingscode",
   "Pay with coupon": "Betalen met kortingscode",
-  "Tap card {amount}": "Kaart tikken {amount}",
   "Charge {amount}": "{amount} afrekenen",
-  "Tap card": "Kaart tikken",
   "Charge": "Afrekenen",
   "Record {amount} as owed": "{amount} vastleggen als openstaand",
   "Record payment as owed": "Betaling vastleggen als openstaand",
@@ -2456,7 +2454,6 @@
   "Payment QR code": "QR-code voor betaling",
   "Cancel sale": "Verkoop annuleren",
   "Pay on this device": "Betalen op dit apparaat",
-  "Tap card instead": "In plaats daarvan kaart tikken",
   "{value} of it paid by coupon": "{value} daarvan betaald met kortingscode",
   "Recorded as owed on {paymentMethodName}. Mark it paid from the POS list once it is settled.": "Vastgelegd als openstaand op {paymentMethodName}. Markeer het als betaald in de kassalijst zodra het is voldaan.",
   "Services": "Diensten",
@@ -4156,5 +4153,14 @@
   "Practice mode sets an offline gate 2 m out along the aim. A start line inside it plays a positive sound, outside a negative one.": "De oefenmodus zet een afwijkingspoort op 2 m langs de richtlijn. Een startlijn erbinnen geeft een positief geluid, erbuiten een negatief.",
   "Refund {amount} to {customer}'s card? The money goes back through Stripe and this can't be undone.": "{amount} terugbetalen op de kaart van {customer}? Het geld gaat terug via Stripe en dit kan niet ongedaan worden gemaakt.",
   "the customer": "de klant",
-  "{receipt} refunded. The money usually reaches the card in 5–10 working days.": "{receipt} terugbetaald. Het geld staat meestal binnen 5–10 werkdagen op de kaart."
+  "{receipt} refunded. The money usually reaches the card in 5–10 working days.": "{receipt} terugbetaald. Het geld staat meestal binnen 5–10 werkdagen op de kaart.",
+  "Tap to Pay on iPhone · {amount}": "Tap to Pay op iPhone · {amount}",
+  "Tap to Pay on iPhone": "Tap to Pay op iPhone",
+  "On this iPhone": "Op deze iPhone",
+  "Take contactless cards, Apple Pay and other digital wallets on this iPhone. No extra hardware. Set it up once here, before your first sale: Apple asks you to accept its terms and gets this iPhone ready, which can take a minute or two.": "Accepteer contactloze kaarten, Apple Pay en andere digitale wallets op deze iPhone. Geen extra hardware. Stel het hier één keer in vóór je eerste verkoop: Apple vraagt je de voorwaarden te accepteren en maakt deze iPhone klaar, wat een minuut of twee kan duren.",
+  "This iPhone is ready for Tap to Pay.": "Deze iPhone is klaar voor Tap to Pay.",
+  "Setting up…": "Bezig met instellen…",
+  "Set up this iPhone": "Deze iPhone instellen",
+  "How to tap": "Zo betaal je",
+  "The customer holds their card, phone or watch flat against the top of this iPhone and keeps it there until the check mark shows.": "De klant houdt de kaart, telefoon of watch plat tegen de bovenkant van deze iPhone tot het vinkje verschijnt."
 }

@@ -85,7 +85,9 @@ and Stripe lets an intent succeed only once.
   and UX guidelines (the checkout button wording, the tap screen, education
   for merchants). Stripe's Tap to Pay guide (linked from the Stripe docs page
   "Tap to Pay: iPhone") walks through Apple's checklist. Expect to supply a
-  demo account and a test-mode business for the reviewer.
+  demo account and a test-mode business for the reviewer. Where Clarity stands
+  on each point, and the notes to give the reviewer, are in
+  [tap-to-pay-apple-review.md](tap-to-pay-apple-review.md).
 
 ### 3. Devices
 

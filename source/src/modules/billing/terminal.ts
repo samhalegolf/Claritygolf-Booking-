@@ -196,6 +196,39 @@ export function saveTerminalLocation(locationId: string) {
   writeLocal(LOCATION_KEY, locationId);
 }
 
+/** The location this phone takes payments at: the one last used, else the business default. */
+export function defaultTerminalLocationId(status: Pick<TerminalStatus, "locations">) {
+  return (
+    status.locations.find((entry) => entry.id === savedTerminalLocation())?.id ||
+    status.locations.find((entry) => entry.isDefault)?.id ||
+    status.locations[0]?.id ||
+    ""
+  );
+}
+
+/**
+ * Connect this iPhone ahead of its first sale.
+ *
+ * The first connection is when Apple asks the business to accept its Tap to
+ * Pay terms and sets the phone up, which can take a minute or two. Doing it
+ * from Settings means a customer is never left waiting through that.
+ */
+export async function prepareThisIphone(locationId: string) {
+  const plugin = nativeTerminal();
+  if (!plugin) throw new Error(t("Tap to Pay isn't available on this device."));
+  const location = await terminalApi.location(locationId);
+  await plugin.prepare({ stripeLocationId: location.stripeLocationId });
+  saveTerminalLocation(locationId);
+}
+
+/** Apple's "How to Tap" guide. False when this iPhone is too old for it (before iOS 18). */
+export async function showHowToTap() {
+  const plugin = nativeTerminal();
+  if (!plugin?.showHowToTap) return false;
+  const result = await plugin.showHowToTap().catch(() => ({ shown: false }));
+  return result.shown;
+}
+
 // --- Availability -----------------------------------------------------------------
 
 type Availability = { ready: false } | { ready: true; status: TerminalStatus };

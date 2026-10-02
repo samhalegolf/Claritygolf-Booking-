@@ -2443,9 +2443,7 @@
   "Use pass": "Brug klippekort",
   "Pay {amount} with coupon": "Betal {amount} med rabatkode",
   "Pay with coupon": "Betal med rabatkode",
-  "Tap card {amount}": "Hold kort {amount}",
   "Charge {amount}": "Opkræv {amount}",
-  "Tap card": "Hold kort",
   "Charge": "Opkræv",
   "Record {amount} as owed": "Registrer {amount} som skyldigt",
   "Record payment as owed": "Registrer betaling som skyldig",
@@ -2456,7 +2454,6 @@
   "Payment QR code": "QR-kode til betaling",
   "Cancel sale": "Annuller salg",
   "Pay on this device": "Betal på denne enhed",
-  "Tap card instead": "Hold kort i stedet",
   "{value} of it paid by coupon": "{value} af det betalt med rabatkode",
   "Recorded as owed on {paymentMethodName}. Mark it paid from the POS list once it is settled.": "Registreret som skyldigt på {paymentMethodName}. Marker det som betalt fra kasselisten, når det er afregnet.",
   "Services": "Ydelser",
@@ -4156,5 +4153,14 @@
   "Practice mode sets an offline gate 2 m out along the aim. A start line inside it plays a positive sound, outside a negative one.": "Træningstilstand sætter en afvigelsesport 2 m ude langs sigtelinjen. En startlinje inden for giver en positiv lyd, uden for en negativ.",
   "Refund {amount} to {customer}'s card? The money goes back through Stripe and this can't be undone.": "Refundér {amount} til kortet tilhørende {customer}? Pengene sendes tilbage via Stripe, og det kan ikke fortrydes.",
   "the customer": "kunden",
-  "{receipt} refunded. The money usually reaches the card in 5–10 working days.": "{receipt} refunderet. Pengene når normalt kortet inden for 5–10 hverdage."
+  "{receipt} refunded. The money usually reaches the card in 5–10 working days.": "{receipt} refunderet. Pengene når normalt kortet inden for 5–10 hverdage.",
+  "Tap to Pay on iPhone · {amount}": "Tap to Pay på iPhone · {amount}",
+  "Tap to Pay on iPhone": "Tap to Pay på iPhone",
+  "On this iPhone": "På denne iPhone",
+  "Take contactless cards, Apple Pay and other digital wallets on this iPhone. No extra hardware. Set it up once here, before your first sale: Apple asks you to accept its terms and gets this iPhone ready, which can take a minute or two.": "Tag imod kontaktløse kort, Apple Pay og andre digitale tegnebøger på denne iPhone. Intet ekstra udstyr. Sæt det op én gang her før dit første salg: Apple beder dig acceptere sine vilkår og gør denne iPhone klar, hvilket kan tage et minut eller to.",
+  "This iPhone is ready for Tap to Pay.": "Denne iPhone er klar til Tap to Pay.",
+  "Setting up…": "Sætter op…",
+  "Set up this iPhone": "Sæt denne iPhone op",
+  "How to tap": "Sådan betaler man",
+  "The customer holds their card, phone or watch flat against the top of this iPhone and keeps it there until the check mark shows.": "Kunden holder sit kort, sin telefon eller sit ur fladt mod toppen af denne iPhone, indtil fluebenet vises."
 }

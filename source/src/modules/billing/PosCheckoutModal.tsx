@@ -900,10 +900,10 @@ export function PosCheckoutModal({
                       : selectedMethod?.kind === "clarity_pay"
                         ? amountValid
                           ? tapToPay.ready
-                            ? t("Tap card {amount}", { amount: formatMoney(dueNow, currency) })
+                            ? t("Tap to Pay on iPhone · {amount}", { amount: formatMoney(dueNow, currency) })
                             : t("Charge {amount}", { amount: formatMoney(dueNow, currency) })
                           : tapToPay.ready
-                            ? t("Tap card")
+                            ? t("Tap to Pay on iPhone")
                             : t("Charge")
                         : selectedMethod && !selectedMethod.settlesImmediately
                           ? amountValid
@@ -954,7 +954,7 @@ export function PosCheckoutModal({
               <a className="outline-button" href={checkoutUrl} target="_blank" rel="noreferrer noopener">
                 <ExternalLink size={15} />{" "}{t("Pay on this device")}</a>
               {tapToPay.ready && (
-                <button className="outline-button" disabled={busy} onClick={() => setStage("tap")} type="button">{t("Tap card instead")}</button>
+                <button className="outline-button" disabled={busy} onClick={() => setStage("tap")} type="button">{t("Tap to Pay on iPhone")}</button>
               )}
             </div>
           </>

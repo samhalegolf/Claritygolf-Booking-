@@ -284,6 +284,7 @@ import {
 } from "./modules/billing/invoiceSettings";
 import { computeInvoiceTotals, invoiceLineNet, invoiceLineGross, lineDiscountAmount } from "./modules/billing/invoiceMath";
 import { cardRefundAmount, isClarityPayCardSale, posMethodLabel } from "./modules/billing/terminal";
+import { TapToPaySetup } from "./modules/billing/TapToPaySetup";
 import type { CouponIssueValues, CouponScanResult, VoucherRepairResult } from "./modules/billing/CouponsPanel";
 import type { VoucherAmountRule } from "./modules/billing/types";
 import type { ProductFormValues, StockAdjustInput } from "./modules/billing/ProductsPanel";
@@ -29324,6 +29325,8 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
                     )}
                   </div>
                 </article>
+
+                {stripeStatus?.route === "clarity_pay" && <TapToPaySetup />}
 
                 {/* Repair, not import. Everything here has already been
                     pulled once; what this fixes is what was kept of it. */}
