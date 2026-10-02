@@ -206,6 +206,33 @@ export function defaultTerminalLocationId(status: Pick<TerminalStatus, "location
   );
 }
 
+const SET_UP_KEY = "clarity-terminal-set-up";
+
+// One connection attempt at a time. The plugin can only discover one reader at
+// once, and the background connect, Settings and a sale can all ask together.
+let connecting: Promise<void> = Promise.resolve();
+
+/**
+ * Connect this iPhone's Tap to Pay at a location. Quick when it is already
+ * connected there; otherwise it can take a few seconds, or a minute or two the
+ * very first time while Apple sets the phone up.
+ */
+export function connectThisIphone(locationId: string) {
+  const next = connecting
+    .catch(() => undefined)
+    .then(async () => {
+      const plugin = nativeTerminal();
+      if (!plugin) throw new Error(t("Tap to Pay isn't available on this device."));
+      const location = await terminalApi.location(locationId);
+      await plugin.prepare({ stripeLocationId: location.stripeLocationId });
+      // Apple's terms are accepted and the phone is set up: from now on it is
+      // safe to connect without asking.
+      writeLocal(SET_UP_KEY, "1");
+    });
+  connecting = next;
+  return next;
+}
+
 /**
  * Connect this iPhone ahead of its first sale.
  *
@@ -214,11 +241,39 @@ export function defaultTerminalLocationId(status: Pick<TerminalStatus, "location
  * from Settings means a customer is never left waiting through that.
  */
 export async function prepareThisIphone(locationId: string) {
-  const plugin = nativeTerminal();
-  if (!plugin) throw new Error(t("Tap to Pay isn't available on this device."));
-  const location = await terminalApi.location(locationId);
-  await plugin.prepare({ stripeLocationId: location.stripeLocationId });
+  await connectThisIphone(locationId);
   saveTerminalLocation(locationId);
+}
+
+/**
+ * Keep this iPhone connected so the first tap of a sale starts at once.
+ *
+ * Connects when the app opens and again whenever it comes back to the
+ * foreground (iOS drops the connection in the background). Only on a phone
+ * that has been set up before: the first connection is when Apple shows its
+ * terms, and that should happen when a coach asks for it, not out of nowhere.
+ * Failures are left for the sale to report; here there is nobody to tell.
+ *
+ * Returns the cleanup for an effect.
+ */
+export function keepTapToPayWarm() {
+  if (!nativeTerminal()) return () => undefined;
+  let stopped = false;
+  const warm = () => {
+    if (stopped || document.visibilityState !== "visible" || !readLocal(SET_UP_KEY)) return;
+    availabilityOnce ||= loadAvailability();
+    void availabilityOnce
+      .then((availability) => {
+        if (!stopped && availability.ready) return connectThisIphone(defaultTerminalLocationId(availability.status));
+      })
+      .catch(() => undefined);
+  };
+  warm();
+  document.addEventListener("visibilitychange", warm);
+  return () => {
+    stopped = true;
+    document.removeEventListener("visibilitychange", warm);
+  };
 }
 
 /** Apple's "How to Tap" guide. False when this iPhone is too old for it (before iOS 18). */

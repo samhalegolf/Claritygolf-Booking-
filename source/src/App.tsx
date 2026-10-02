@@ -283,7 +283,7 @@ import {
   printableInvoiceCustomFields,
 } from "./modules/billing/invoiceSettings";
 import { computeInvoiceTotals, invoiceLineNet, invoiceLineGross, lineDiscountAmount } from "./modules/billing/invoiceMath";
-import { cardRefundAmount, isClarityPayCardSale, posMethodLabel } from "./modules/billing/terminal";
+import { cardRefundAmount, isClarityPayCardSale, keepTapToPayWarm, posMethodLabel } from "./modules/billing/terminal";
 import { TapToPaySetup } from "./modules/billing/TapToPaySetup";
 import type { CouponIssueValues, CouponScanResult, VoucherRepairResult } from "./modules/billing/CouponsPanel";
 import type { VoucherAmountRule } from "./modules/billing/types";
@@ -5560,6 +5560,9 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   // here is the session going away underneath a running workspace -- an expired
   // or revoked cookie.
   const [authStatus, setAuthStatusState] = useState<AuthStatus>("authenticated");
+  // Inside the staff iPhone app, keep Tap to Pay connected so a sale's first
+  // tap starts at once. Does nothing in a browser.
+  useEffect(() => (authStatus === "authenticated" ? keepTapToPayWarm() : undefined), [authStatus]);
   // Every "the server said 401" path in this file calls setAuthStatus("guest").
   // The workspace no longer renders its own login form, so that has to hand
   // control back to the entry point, which does.

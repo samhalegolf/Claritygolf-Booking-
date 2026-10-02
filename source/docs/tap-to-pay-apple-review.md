@@ -20,7 +20,7 @@ Apple's rules live in two places; read both before submitting, as they change:
 | **Hidden where it can't work** (older iPhone, no entitlement, business not on Clarity Pay). | Done. Every Tap to Pay control is hidden unless the phone and the server both say yes. |
 | **Clear outcome for every tap**: success, declined, cancelled, still checking. | Done. The tap screen never says "failed" once a card may have been charged; it says **Checking payment… Do not charge again yet**. |
 | **Location permission explained.** | Done. `NSLocationWhenInUseUsageDescription` in `Info.plist`. |
-| **Short waits.** Connect in the background when the app opens and reconnect when it comes back to the foreground. | **Not done.** Today the phone connects when a sale starts (or from Settings). Worth adding before review: it is in Apple's and Stripe's best practices, and reviewers notice a slow first tap. |
+| **Short waits.** Connect in the background when the app opens and reconnect when it comes back to the foreground. | Done. Once a phone has been set up, it connects quietly when a coach opens the app and again whenever the app comes back to the front. A phone never set up is left alone, so Apple's terms only appear when the coach asks for them. |
 | **Apple's icon** for Tap to Pay on the checkout button. | **Check.** The app uses a generic contactless icon. Apple's guidelines point to its own symbol; if the reviewer asks, the native shell would need to supply it, since the web page can't use Apple's system symbols. |
 | **Localised name.** | **Check.** The button name is translated using the names Apple uses in each country (for example "Tap to Pay auf dem iPhone"). Compare them with Apple's marketing guidelines before launching in a new language. |
 

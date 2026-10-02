@@ -13,6 +13,7 @@ import { AlertTriangle, CircleHelp, Loader2, Nfc, QrCode, RotateCcw, X } from "l
 import { nativeTerminal } from "../../native/clarityTerminal";
 import {
   canRetry,
+  connectThisIphone,
   defaultTerminalLocationId,
   saveTerminalLocation,
   showHowToTap,
@@ -132,8 +133,7 @@ export function TerminalPayment({
     setState({ kind: "connecting" });
     let started;
     try {
-      const location = await terminalApi.location(locationId);
-      await plugin.prepare({ stripeLocationId: location.stripeLocationId });
+      await connectThisIphone(locationId);
       started = await terminalApi.start(transactionId, locationId);
     } catch (error) {
       // Nothing has been tapped yet, so nothing can have been charged.
