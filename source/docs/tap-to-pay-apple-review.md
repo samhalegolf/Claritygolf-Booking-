@@ -39,8 +39,9 @@ Apple's rules live in two places; read both before submitting, as they change:
      where the reviewer works. Stripe runs in test mode there;
    - the sandbox's Demo Range has a full street address, and it has three
      products (range bucket, glove, balls);
-   - still to do: **Set up Clarity Pay** inside the sandbox (Stripe's test
-     signup) so Tap to Pay shows.
+   - the sandbox is on the **Academy** plan, so Sell and Billing show;
+   - Clarity Pay is on in the sandbox, in test mode (connected account
+     `acct_1UMF6OHqIOoG4OpJ`). A QR sale and a refund have been tried there.
 4. Build and run on a real iPhone: **Set up this iPhone** → **How to tap** →
    a sale → **Tap to Pay on iPhone** → a Stripe test card → receipt →
    **Refund** in Billing › Transactions.
