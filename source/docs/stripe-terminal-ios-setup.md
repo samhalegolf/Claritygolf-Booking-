@@ -134,9 +134,10 @@ platform's live key serves it. Before the first live payment, check:
 
 - **Physical readers.** The data model (`terminal_reader` channel, locations,
   device on each attempt) is ready; the plugin only discovers Tap to Pay.
-- **Refunds from Clarity.** Refunding a Tap to Pay sale is done in Stripe, as
-  for QR payments today. The card tender records the PaymentIntent so a
-  refund flow can find it.
+- **Part refunds.** **Refund** in the transactions list returns the whole
+  card payment through Stripe (QR or tap), puts stock and any voucher value
+  back, and returns Clarity's fee to the business. Refunding part of a sale is
+  still done in the Stripe dashboard.
 - **Choosing another method after starting.** "Cancel sale" voids the pending
   Clarity Pay sale and the coach starts a new one on Cash etc. That spends a
   receipt number on the voided sale, as the QR flow already does.

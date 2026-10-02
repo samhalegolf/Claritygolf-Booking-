@@ -283,7 +283,7 @@ import {
   printableInvoiceCustomFields,
 } from "./modules/billing/invoiceSettings";
 import { computeInvoiceTotals, invoiceLineNet, invoiceLineGross, lineDiscountAmount } from "./modules/billing/invoiceMath";
-import { posMethodLabel } from "./modules/billing/terminal";
+import { cardRefundAmount, isClarityPayCardSale, posMethodLabel } from "./modules/billing/terminal";
 import type { CouponIssueValues, CouponScanResult, VoucherRepairResult } from "./modules/billing/CouponsPanel";
 import type { VoucherAmountRule } from "./modules/billing/types";
 import type { ProductFormValues, StockAdjustInput } from "./modules/billing/ProductsPanel";
@@ -16169,6 +16169,19 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   }
 
   async function setPosTransactionStatus(id: string, status: PosTransaction["status"]) {
+    const sale = posTransactions.find((entry) => entry.id === id);
+    const cardRefund = status === "refunded" && sale && isClarityPayCardSale(sale);
+    if (
+      cardRefund &&
+      !window.confirm(
+        t("Refund {amount} to {customer}'s card? The money goes back through Stripe and this can't be undone.", {
+          amount: formatMoney(cardRefundAmount(sale), sale.currency),
+          customer: sale.customerName || t("the customer"),
+        }),
+      )
+    ) {
+      return;
+    }
     try {
       const response = await fetch(`/api/billing/pos/transactions/${encodeURIComponent(id)}`, {
         method: "PATCH",
@@ -16179,7 +16192,11 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
       if (!response.ok) throw new Error(await readApiFailure(response, t("Could not update the transaction.")));
       const data = (await response.json()) as { transaction?: PosTransaction };
       if (data.transaction) handlePosSaleChanged(data.transaction);
-      setToast({ message: t("{receipt} marked {status}.", { receipt: data.transaction?.receiptNumber || t("Transaction"), status }) });
+      setToast({
+        message: data.transaction?.cardRefunded && status === "refunded"
+          ? t("{receipt} refunded. The money usually reaches the card in 5–10 working days.", { receipt: data.transaction.receiptNumber })
+          : t("{receipt} marked {status}.", { receipt: data.transaction?.receiptNumber || t("Transaction"), status }),
+      });
     } catch (error) {
       setToast({ message: error instanceof Error ? error.message : t("Could not update the transaction.") });
     }

@@ -4153,5 +4153,8 @@
   "Speed (m/s)": "速度 (m/s)",
   "Gate": "ゲート",
   "Practice: {level}": "練習: {level}",
-  "Practice mode sets an offline gate 2 m out along the aim. A start line inside it plays a positive sound, outside a negative one.": "練習モードでは狙いのライン上2 m先にゲートを置きます。打ち出しがゲート内なら成功音、外なら失敗音が鳴ります。"
+  "Practice mode sets an offline gate 2 m out along the aim. A start line inside it plays a positive sound, outside a negative one.": "練習モードでは狙いのライン上2 m先にゲートを置きます。打ち出しがゲート内なら成功音、外なら失敗音が鳴ります。",
+  "Refund {amount} to {customer}'s card? The money goes back through Stripe and this can't be undone.": "{customer}のカードに{amount}を返金しますか？返金はStripe経由で行われ、取り消すことはできません。",
+  "the customer": "お客様",
+  "{receipt} refunded. The money usually reaches the card in 5–10 working days.": "{receipt}を返金しました。通常、5〜10営業日でカードに返金されます。"
 }

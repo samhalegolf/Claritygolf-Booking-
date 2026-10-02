@@ -13,6 +13,7 @@ import test from "node:test";
 
 import {
   posCardDueCents,
+  posStatusChangePlan,
   posTenders,
   settlePosTransaction,
   type PosSaleRow,
@@ -183,4 +184,43 @@ test("a card payment on a sale a coach marked paid by hand is flagged", async ()
 test("an unknown sale is a 404", async () => {
   const { store } = memoryStore(sale());
   await assert.rejects(settlePosTransaction(store, "nope", tap(100)), { status: 404 });
+});
+
+// --- Refunds ---------------------------------------------------------------
+//
+// The mistake that costs money here is a receipt that disagrees with the bank:
+// a card sale voided with the money still taken, or one marked paid again after
+// the money went back.
+
+const cardSale: PosSaleRow = {
+  receipt_number: "R-0042",
+  status: "paid",
+  stripe_payment_intent_id: "pi_123",
+};
+
+test("refunding a card-paid sale sends the card money back", () => {
+  assert.deepEqual(posStatusChangePlan(cardSale, "refunded"), { refundPaymentIntentId: "pi_123" });
+});
+
+test("voiding or reopening a card-paid sale is refused, so the money is not left taken", () => {
+  for (const next of ["void", "pending"]) {
+    assert.throws(() => posStatusChangePlan(cardSale, next), { code: "POS_CARD_PAID" });
+  }
+});
+
+test("a sale whose card money went back cannot be marked paid again", () => {
+  const refunded = { ...cardSale, status: "refunded", stripe_refund_id: "re_1" };
+  assert.throws(() => posStatusChangePlan(refunded, "paid"), { code: "POS_CARD_REFUNDED" });
+  assert.throws(() => posStatusChangePlan(refunded, "void"), { code: "POS_CARD_REFUNDED" });
+  // Asking again is harmless: no second refund.
+  assert.deepEqual(posStatusChangePlan(refunded, "refunded"), { refundPaymentIntentId: null });
+});
+
+test("sales paid without a card keep their plain status changes", () => {
+  const cash: PosSaleRow = { receipt_number: "R-0043", status: "paid", stripe_payment_intent_id: null };
+  for (const next of ["refunded", "void", "pending", "paid"]) {
+    assert.deepEqual(posStatusChangePlan(cash, next), { refundPaymentIntentId: null });
+  }
+  const pending: PosSaleRow = { receipt_number: "R-0044", status: "pending" };
+  assert.deepEqual(posStatusChangePlan(pending, "void"), { refundPaymentIntentId: null });
 });

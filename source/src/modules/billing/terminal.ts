@@ -253,3 +253,16 @@ export function posMethodLabel(sale: Pick<PosTransaction, "paymentMethodName" | 
   const channel = CHANNEL_LABELS[sale.paymentChannel || ""];
   return channel ? `${sale.paymentMethodName} · ${channel}` : sale.paymentMethodName;
 }
+
+/**
+ * Did Clarity Pay take a card for this sale (QR or tap)? Refunding one sends
+ * the money back through Stripe, so the till asks before it does.
+ */
+export function isClarityPayCardSale(sale: Pick<PosTransaction, "paymentChannel">) {
+  return Object.hasOwn(CHANNEL_LABELS, sale.paymentChannel || "");
+}
+
+/** What a refund puts back on the card: the sale less any voucher part. */
+export function cardRefundAmount(sale: Pick<PosTransaction, "amount" | "couponAmount">) {
+  return Math.max(0, Math.round(((Number(sale.amount) || 0) - (Number(sale.couponAmount) || 0)) * 100) / 100);
+}

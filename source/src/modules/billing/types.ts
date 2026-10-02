@@ -385,6 +385,8 @@ export type PosTransaction = {
   // How the card part arrived: "stripe_checkout" (QR), "terminal_tap_to_pay".
   // Empty for manual methods and older sales.
   paymentChannel?: string;
+  // The card money went back through Stripe when it was refunded from Clarity.
+  cardRefunded?: boolean;
   paidAt: string;
   createdAt: string;
   updatedAt: string;

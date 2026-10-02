@@ -4153,5 +4153,8 @@
   "Speed (m/s)": "Hastighet (m/s)",
   "Gate": "Port",
   "Practice: {level}": "Träning: {level}",
-  "Practice mode sets an offline gate 2 m out along the aim. A start line inside it plays a positive sound, outside a negative one.": "Träningsläget sätter en avvikelseport 2 m ut längs siktlinjen. En startlinje innanför ger ett positivt ljud, utanför ett negativt."
+  "Practice mode sets an offline gate 2 m out along the aim. A start line inside it plays a positive sound, outside a negative one.": "Träningsläget sätter en avvikelseport 2 m ut längs siktlinjen. En startlinje innanför ger ett positivt ljud, utanför ett negativt.",
+  "Refund {amount} to {customer}'s card? The money goes back through Stripe and this can't be undone.": "Återbetala {amount} till kortet som tillhör {customer}? Pengarna skickas tillbaka via Stripe och det går inte att ångra.",
+  "the customer": "kunden",
+  "{receipt} refunded. The money usually reaches the card in 5–10 working days.": "{receipt} återbetald. Pengarna brukar nå kortet inom 5–10 arbetsdagar."
 }

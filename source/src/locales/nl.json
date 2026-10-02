@@ -4153,5 +4153,8 @@
   "Speed (m/s)": "Snelheid (m/s)",
   "Gate": "Poort",
   "Practice: {level}": "Oefenen: {level}",
-  "Practice mode sets an offline gate 2 m out along the aim. A start line inside it plays a positive sound, outside a negative one.": "De oefenmodus zet een afwijkingspoort op 2 m langs de richtlijn. Een startlijn erbinnen geeft een positief geluid, erbuiten een negatief."
+  "Practice mode sets an offline gate 2 m out along the aim. A start line inside it plays a positive sound, outside a negative one.": "De oefenmodus zet een afwijkingspoort op 2 m langs de richtlijn. Een startlijn erbinnen geeft een positief geluid, erbuiten een negatief.",
+  "Refund {amount} to {customer}'s card? The money goes back through Stripe and this can't be undone.": "{amount} terugbetalen op de kaart van {customer}? Het geld gaat terug via Stripe en dit kan niet ongedaan worden gemaakt.",
+  "the customer": "de klant",
+  "{receipt} refunded. The money usually reaches the card in 5–10 working days.": "{receipt} terugbetaald. Het geld staat meestal binnen 5–10 werkdagen op de kaart."
 }

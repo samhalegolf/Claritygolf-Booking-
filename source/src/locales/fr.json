@@ -4153,5 +4153,8 @@
   "Speed (m/s)": "Vitesse (m/s)",
   "Gate": "Porte",
   "Practice: {level}": "Entraînement : {level}",
-  "Practice mode sets an offline gate 2 m out along the aim. A start line inside it plays a positive sound, outside a negative one.": "Le mode entraînement place une porte de déviation à 2 m sur la ligne de visée. Un départ à l'intérieur donne un son positif, à l'extérieur un son négatif."
+  "Practice mode sets an offline gate 2 m out along the aim. A start line inside it plays a positive sound, outside a negative one.": "Le mode entraînement place une porte de déviation à 2 m sur la ligne de visée. Un départ à l'intérieur donne un son positif, à l'extérieur un son négatif.",
+  "Refund {amount} to {customer}'s card? The money goes back through Stripe and this can't be undone.": "Rembourser {amount} sur la carte de {customer} ? L'argent est renvoyé via Stripe et cette action est irréversible.",
+  "the customer": "le client",
+  "{receipt} refunded. The money usually reaches the card in 5–10 working days.": "{receipt} remboursé. L'argent arrive généralement sur la carte sous 5 à 10 jours ouvrés."
 }

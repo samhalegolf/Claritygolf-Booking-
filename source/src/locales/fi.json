@@ -4153,5 +4153,8 @@
   "Speed (m/s)": "Nopeus (m/s)",
   "Gate": "Portti",
   "Practice: {level}": "Harjoitus: {level}",
-  "Practice mode sets an offline gate 2 m out along the aim. A start line inside it plays a positive sound, outside a negative one.": "Harjoitustila asettaa poikkeamaportin 2 m päähän tähtäyslinjalle. Lähtölinja sen sisällä antaa myönteisen äänen, ulkopuolella kielteisen."
+  "Practice mode sets an offline gate 2 m out along the aim. A start line inside it plays a positive sound, outside a negative one.": "Harjoitustila asettaa poikkeamaportin 2 m päähän tähtäyslinjalle. Lähtölinja sen sisällä antaa myönteisen äänen, ulkopuolella kielteisen.",
+  "Refund {amount} to {customer}'s card? The money goes back through Stripe and this can't be undone.": "Palautetaanko {amount} kortille ({customer})? Rahat palautetaan Stripen kautta, eikä tätä voi perua.",
+  "the customer": "asiakas",
+  "{receipt} refunded. The money usually reaches the card in 5–10 working days.": "{receipt} hyvitetty. Rahat näkyvät kortilla yleensä 5–10 arkipäivän kuluessa."
 }

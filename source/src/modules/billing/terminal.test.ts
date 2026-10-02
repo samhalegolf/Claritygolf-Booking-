@@ -11,6 +11,8 @@ import test from "node:test";
 import {
   OPEN_ANSWERS_BEFORE_FAILED,
   canRetry,
+  cardRefundAmount,
+  isClarityPayCardSale,
   posMethodLabel,
   stateAfterCollect,
   stateFromServer,
@@ -78,4 +80,16 @@ test("history names the channel under the one payment method", () => {
     "Clarity Pay · Tap to Pay",
   );
   assert.equal(posMethodLabel({ paymentMethodName: "Cash", paymentChannel: "" }), "Cash");
+});
+
+test("only QR and Tap to Pay sales are refunded to a card", () => {
+  assert.equal(isClarityPayCardSale({ paymentChannel: "terminal_tap_to_pay" }), true);
+  assert.equal(isClarityPayCardSale({ paymentChannel: "stripe_checkout" }), true);
+  assert.equal(isClarityPayCardSale({ paymentChannel: "" }), false);
+  assert.equal(isClarityPayCardSale({ paymentChannel: "manual_cash" }), false);
+});
+
+test("the card gets back the sale less the voucher part", () => {
+  assert.equal(cardRefundAmount({ amount: 120, couponAmount: 50 }), 70);
+  assert.equal(cardRefundAmount({ amount: 80.1, couponAmount: 0 }), 80.1);
 });

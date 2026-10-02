@@ -4153,5 +4153,8 @@
   "Speed (m/s)": "Velocidad (m/s)",
   "Gate": "Puerta",
   "Practice: {level}": "Práctica: {level}",
-  "Practice mode sets an offline gate 2 m out along the aim. A start line inside it plays a positive sound, outside a negative one.": "El modo práctica pone una puerta de desvío a 2 m en la línea de la diana. Una salida dentro de ella suena positiva; fuera, negativa."
+  "Practice mode sets an offline gate 2 m out along the aim. A start line inside it plays a positive sound, outside a negative one.": "El modo práctica pone una puerta de desvío a 2 m en la línea de la diana. Una salida dentro de ella suena positiva; fuera, negativa.",
+  "Refund {amount} to {customer}'s card? The money goes back through Stripe and this can't be undone.": "¿Reembolsar {amount} a la tarjeta de {customer}? El dinero se devuelve a través de Stripe y no se puede deshacer.",
+  "the customer": "el cliente",
+  "{receipt} refunded. The money usually reaches the card in 5–10 working days.": "{receipt} reembolsado. El dinero suele llegar a la tarjeta en 5–10 días hábiles."
 }

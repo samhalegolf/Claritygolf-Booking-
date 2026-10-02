@@ -194,3 +194,38 @@ export async function settlePosTransaction(
   if (tenders.length) await store.recordTenders(posPurchaseRef(transactionId), tenders);
   return { transaction: row, issuedPasses, tenders, alreadyPaid };
 }
+
+/**
+ * What changing a sale's status means for money a card already paid.
+ *
+ * A sale Clarity Pay took a card for (QR or tap) carries its PaymentIntent.
+ * Refunding it from Clarity sends the money back through Stripe, so the screen
+ * and the bank agree. Every other way out of "paid" would leave the money taken
+ * against a sale that says otherwise, so it is refused:
+ *
+ *   - voiding or reopening a card-paid sale (refund it instead);
+ *   - marking a sale paid again once its card money has gone back (the
+ *     customer would have the goods and the money; start a new sale).
+ *
+ * Sales paid any other way (cash, bank, a pass) keep the status flip they have
+ * always had: there is nothing for Clarity to send back.
+ */
+export type PosStatusPlan = { refundPaymentIntentId: string | null };
+
+export function posStatusChangePlan(row: PosSaleRow, nextStatus: string): PosStatusPlan {
+  const paymentIntentId = String(row.stripe_payment_intent_id || "");
+  const refundedByCard = Boolean(String(row.stripe_refund_id || ""));
+  if (refundedByCard && nextStatus !== "refunded") {
+    conflict(
+      `The card payment for ${row.receipt_number} has already been refunded. Start a new sale instead.`,
+      "POS_CARD_REFUNDED",
+    );
+  }
+  if (row.status !== "paid" || !paymentIntentId) return { refundPaymentIntentId: null };
+  if (nextStatus === "refunded") return { refundPaymentIntentId: refundedByCard ? null : paymentIntentId };
+  if (nextStatus === "paid") return { refundPaymentIntentId: null };
+  conflict(
+    `${row.receipt_number} was paid by card. Refund it so the money goes back to the customer.`,
+    "POS_CARD_PAID",
+  );
+}
