@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Clarity Player</string>
+    <string name="title_activity_main">Clarity Player</string>
+    <string name="package_name">app.claritygolf.player</string>
+    <string name="custom_url_scheme">app.claritygolf.player</string>
+</resources>

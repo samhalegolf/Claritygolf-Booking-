@@ -14,7 +14,30 @@ npm run ios                 # build:app + cap sync ios + open Xcode
 ```
 
 Then pick a simulator in Xcode and press run. `npm run android` is the same
-for Android once you have `npx cap add android`.
+for Android: `android/` is committed, so there is no `cap add` step.
+
+## Android bundle for Google Play
+
+The **Android Player bundle** workflow (`.github/workflows/android-player-bundle.yml`)
+builds the `.aab`. Run it from the Actions tab and download the bundle from the
+run's artifacts; it is named `clarity-player-<version>-<build>`. Pull requests
+that touch `android/` build an unsigned bundle too, just to prove it still
+builds.
+
+- **Version.** `scripts/sync-app-version.mjs` writes
+  `android/app/version.properties` next to the iOS `Version.xcconfig`:
+  `versionName` is package.json's version, `versionCode` is the commit count.
+  Bump package.json to change what players see; the build number looks after
+  itself.
+- **Signing.** `android/app/build.gradle` signs a release bundle when
+  `ANDROID_KEYSTORE_PATH`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and
+  `ANDROID_KEY_PASSWORD` are set, and leaves it unsigned otherwise. The
+  workflow fills them from four repository secrets: the same three passwords
+  and alias, plus `ANDROID_KEYSTORE_BASE64` (`base64 -w0 upload.jks`). This is
+  the *upload* key — let Play App Signing hold the real one, so a lost upload
+  key can be reset rather than ending the app.
+- **No backups.** `allowBackup` is off so the player's session token is never
+  copied to another device by Android's cloud backup.
 
 `npm run build:app` on its own writes `dist-app/`. The web build is untouched:
 `npm run build` still writes `dist/` and Netlify still deploys that.
@@ -167,6 +190,10 @@ still gets the in-page recorder, since a file dialog there has no camera in it.
   1024px source is the usual route.
 - **Deep links are not wired.** A password-reset or portal-invite email opens
   the browser, not the app. That needs Universal Links / App Links.
-- **Nothing is signed.** Simulator only until there is a bundle ID in your
+- **iOS is not signed.** Simulator only until there is a bundle ID in your
   Apple Developer account. `app.claritygolf.player` is the placeholder in
-  `capacitor.config.ts`.
+  `capacitor.config.ts`, and it is also the Android application ID — once a
+  bundle is uploaded to Play, that ID can never change.
+- **The Android bundle is not uploaded for you.** The workflow stops at the
+  `.aab`; upload it in Play Console. Pushing straight to a Play track needs a
+  service account and is its own patch.
