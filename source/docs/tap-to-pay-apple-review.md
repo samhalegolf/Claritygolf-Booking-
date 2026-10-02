@@ -31,10 +31,16 @@ Apple's rules live in two places; read both before submitting, as they change:
 2. **Test mode is set up on Clarity's Stripe platform** (the test webhook and
    the three test keys in Netlify, see `STRIPE_BILLING_SYNC_HANDOVER.md`). The
    reviewer must be able to take a payment without real money moving.
-3. A **demo business** in test mode, on Clarity Pay, with:
-   - a location with a full street address (Settings › Locations);
-   - a couple of products, so a sale is two taps away;
-   - a demo coach login that only sees that business.
+3. A **demo business** in test mode, on Clarity Pay. Set up 2026-10-03:
+   - login `appreview@claritygolf.app` (password in App Store Connect only),
+     owner of **Clarity Demo Golf** (`clarity-demo-golf`), a live business that
+     takes no payments itself;
+   - its sandbox, **Demo Golf (Sandbox)** (`clarity-demo-golf-sandbox`), is
+     where the reviewer works. Stripe runs in test mode there;
+   - the sandbox's Demo Range has a full street address, and it has three
+     products (range bucket, glove, balls);
+   - still to do: **Set up Clarity Pay** inside the sandbox (Stripe's test
+     signup) so Tap to Pay shows.
 4. Build and run on a real iPhone: **Set up this iPhone** → **How to tap** →
    a sale → **Tap to Pay on iPhone** → a Stripe test card → receipt →
    **Refund** in Billing › Transactions.
@@ -51,7 +57,8 @@ Fill in the login and paste this. Keep it short; reviewers follow steps.
 > The demo account below is a test-mode business: no real money moves, and any
 > contactless card or wallet can be used.
 >
-> 1. Sign in with the demo account.
+> 1. Sign in with the demo account. If the bar at the top doesn't say
+>    "Sandbox", go to Settings › Sandbox and tap "Enter sandbox".
 > 2. Go to Billing › Settings. Under "Tap to Pay on iPhone", tap "Set up this
 >    iPhone". Accept Apple's Tap to Pay terms when asked. Apple's "How to Tap"
 >    guide then opens; it is also under "How to tap".
