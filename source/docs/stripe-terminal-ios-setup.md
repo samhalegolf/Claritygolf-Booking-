@@ -139,7 +139,8 @@ platform's live key serves it. Before the first live payment, check:
 - **Part refunds.** **Refund** in the transactions list returns the whole
   card payment through Stripe (QR or tap), puts stock and any voucher value
   back, and returns Clarity's fee to the business. Refunding part of a sale is
-  still done in the Stripe dashboard.
+  still done in the Stripe dashboard, and leaves the sale paid in Clarity. A
+  full refund made in the dashboard marks the sale refunded in Clarity too.
 - **Choosing another method after starting.** "Cancel sale" voids the pending
   Clarity Pay sale and the coach starts a new one on Cash etc. That spends a
   receipt number on the voided sale, as the QR flow already does.

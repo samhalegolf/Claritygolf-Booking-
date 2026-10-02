@@ -13,6 +13,7 @@ import test from "node:test";
 
 import {
   posCardDueCents,
+  posChargeRefundAction,
   posStatusChangePlan,
   posTenders,
   settlePosTransaction,
@@ -223,4 +224,30 @@ test("sales paid without a card keep their plain status changes", () => {
   }
   const pending: PosSaleRow = { receipt_number: "R-0044", status: "pending" };
   assert.deepEqual(posStatusChangePlan(pending, "void"), { refundPaymentIntentId: null });
+});
+
+// --- Refunds made in the Stripe dashboard ------------------------------------
+
+test("a full refund in Stripe marks a paid card sale refunded", () => {
+  assert.equal(posChargeRefundAction(cardSale, { amount: 7000, amountRefunded: 7000 }), "mark_refunded");
+});
+
+test("a part refund in Stripe leaves the sale paid", () => {
+  assert.equal(posChargeRefundAction(cardSale, { amount: 7000, amountRefunded: 1000 }), "partial");
+});
+
+test("a refund Clarity already sent is not applied a second time", () => {
+  const refunded = { ...cardSale, status: "refunded", stripe_refund_id: "re_1" };
+  assert.equal(posChargeRefundAction(refunded, { amount: 7000, amountRefunded: 7000 }), "already");
+});
+
+test("a sale marked refunded by hand just gets the card refund recorded", () => {
+  const byHand = { ...cardSale, status: "refunded" };
+  assert.equal(posChargeRefundAction(byHand, { amount: 7000, amountRefunded: 7000 }), "record_refund_id");
+});
+
+test("a refund for a sale that is not paid is left for a person", () => {
+  for (const status of ["pending", "void"]) {
+    assert.equal(posChargeRefundAction({ ...cardSale, status }, { amount: 7000, amountRefunded: 7000 }), "needs_attention");
+  }
 });
