@@ -4162,5 +4162,16 @@
   "Setting up…": "Configurando…",
   "Set up this iPhone": "Configurar este iPhone",
   "How to tap": "Cómo pagar",
-  "The customer holds their card, phone or watch flat against the top of this iPhone and keeps it there until the check mark shows.": "El cliente acerca su tarjeta, teléfono o reloj a la parte superior de este iPhone y lo mantiene ahí hasta que aparezca la marca de verificación."
+  "The customer holds their card, phone or watch flat against the top of this iPhone and keeps it there until the check mark shows.": "El cliente acerca su tarjeta, teléfono o reloj a la parte superior de este iPhone y lo mantiene ahí hasta que aparezca la marca de verificación.",
+  "Cards at the till, on invoices and in the player portal.": "Tarjetas en caja, en facturas y en el portal del jugador.",
+  "Take cards at the till, on invoices and in the player portal.": "Acepta tarjetas en caja, en facturas y en el portal del jugador.",
+  "Your setup isn't finished yet.": "Tu configuración aún no ha terminado.",
+  "Clarity Pay fee": "Comisión de Clarity Pay",
+  "Card payments now go straight to your account, and Stripe pays them out to your bank.": "Los pagos con tarjeta ahora van directamente a tu cuenta y Stripe los transfiere a tu banco.",
+  "Almost there": "Casi listo",
+  "Stripe is still checking your details, or needs a few more. Clarity Pay switches on by itself once Stripe is done.": "Stripe todavía está revisando tus datos o necesita algunos más. Clarity Pay se activará solo cuando Stripe termine.",
+  "Clarity Pay isn't set up": "Clarity Pay no está configurado",
+  "Clarity Pay setup is paused": "La configuración de Clarity Pay está en pausa",
+  "You left Stripe's signup before the end. Nothing is lost: carry on where you stopped whenever you're ready.": "Saliste del registro de Stripe antes de terminar. No se ha perdido nada: continúa donde lo dejaste cuando quieras.",
+  "Stripe's signup didn't finish. You can start it again now.": "El registro en Stripe no terminó. Puedes empezarlo de nuevo ahora."
 }

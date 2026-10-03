@@ -15003,6 +15003,58 @@ button {
   min-width: 0;
 }
 
+/* Back from Stripe's Clarity Pay signup: the outcome, once, on the page the
+   coach started from (the hub, or Billing › Settings). Green only when it is
+   actually on; "almost there" and a failed signup stay neutral. */
+.clarity-pay-return {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--c-space-4);
+  margin-bottom: var(--c-space-6);
+  padding: var(--c-space-5) var(--c-space-6);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-card);
+  background: var(--c-surface-soft);
+  color: var(--c-text-body);
+}
+
+.clarity-pay-return.is-on {
+  border-color: var(--c-success-text);
+  background: var(--c-success-wash);
+}
+
+.clarity-pay-return > div {
+  display: grid;
+  flex: 1;
+  gap: var(--c-space-1);
+  min-width: 0;
+}
+
+.clarity-pay-return > div > span {
+  color: var(--c-pencil);
+  font-size: var(--c-size-meta);
+}
+
+.clarity-pay-return-actions {
+  margin-top: var(--c-space-3);
+}
+
+.clarity-pay-return-icon {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--c-surface-soft);
+  color: var(--c-pencil);
+}
+
+.clarity-pay-return.is-on .clarity-pay-return-icon {
+  background: var(--c-success-text);
+  color: var(--c-surface);
+}
+
 .business-hub {
   display: grid;
   gap: var(--c-space-6);

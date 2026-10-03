@@ -4162,5 +4162,16 @@
   "Setting up…": "Sætter op…",
   "Set up this iPhone": "Sæt denne iPhone op",
   "How to tap": "Sådan betaler man",
-  "The customer holds their card, phone or watch flat against the top of this iPhone and keeps it there until the check mark shows.": "Kunden holder sit kort, sin telefon eller sit ur fladt mod toppen af denne iPhone, indtil fluebenet vises."
+  "The customer holds their card, phone or watch flat against the top of this iPhone and keeps it there until the check mark shows.": "Kunden holder sit kort, sin telefon eller sit ur fladt mod toppen af denne iPhone, indtil fluebenet vises.",
+  "Cards at the till, on invoices and in the player portal.": "Kort ved kassen, på fakturaer og i spillerportalen.",
+  "Take cards at the till, on invoices and in the player portal.": "Tag imod kort ved kassen, på fakturaer og i spillerportalen.",
+  "Your setup isn't finished yet.": "Din opsætning er ikke færdig endnu.",
+  "Clarity Pay fee": "Clarity Pay-gebyr",
+  "Card payments now go straight to your account, and Stripe pays them out to your bank.": "Kortbetalinger går nu direkte til din konto, og Stripe udbetaler dem til din bank.",
+  "Almost there": "Næsten færdig",
+  "Stripe is still checking your details, or needs a few more. Clarity Pay switches on by itself once Stripe is done.": "Stripe tjekker stadig dine oplysninger eller mangler lidt mere. Clarity Pay slår sig selv til, når Stripe er færdig.",
+  "Clarity Pay isn't set up": "Clarity Pay er ikke sat op",
+  "Clarity Pay setup is paused": "Opsætning af Clarity Pay er sat på pause",
+  "You left Stripe's signup before the end. Nothing is lost: carry on where you stopped whenever you're ready.": "Du forlod Stripes tilmelding før slutningen. Intet er tabt: fortsæt, hvor du slap, når du er klar.",
+  "Stripe's signup didn't finish. You can start it again now.": "Stripes tilmelding blev ikke færdig. Du kan starte forfra nu."
 }

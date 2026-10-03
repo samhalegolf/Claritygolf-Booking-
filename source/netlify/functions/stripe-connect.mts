@@ -2,11 +2,14 @@ import type { Config } from "@netlify/functions";
 import { randomBytes } from "node:crypto";
 
 import {
+  clarityPayOrigin,
+  clarityPayReturnPath,
   clarityPaySignupLink,
   deauthorizeOwnStripe,
   ensureClarityPayAccount,
   readClarityPayAccount,
   syncClarityPay,
+  type ClarityPayOrigin,
 } from "./_shared/clarity-pay.mts";
 import { requireCoachActor } from "./_shared/coach-auth.mts";
 import { getDatabase } from "./_shared/database.mts";
@@ -25,8 +28,10 @@ import {
  *
  * Clarity Pay, an account Clarity creates (see _shared/clarity-pay.mts):
  *
- *   POST /api/stripe-connect/clarity-pay/start  { url } of Stripe's signup
- *   GET  /api/stripe-connect/clarity-pay/return where Stripe's signup ends
+ *   POST /api/stripe-connect/clarity-pay/start  { url } of Stripe's signup;
+ *                                               body { from: "profile" | "billing" }
+ *   GET  /api/stripe-connect/clarity-pay/return where Stripe's signup ends;
+ *                                               redirects to the page in `from`
  *   GET  /api/stripe-connect/clarity-pay/refresh a fresh signup link, when
  *                                               the last one expired
  *
@@ -122,7 +127,7 @@ async function actorEmail(authUserId: string) {
  * Empty when there is nothing left to sign up for: an account Stripe already
  * approved, turned back on, is switched on here and needs no trip to Stripe.
  */
-async function clarityPaySignupUrl(req: Request) {
+async function clarityPaySignupUrl(req: Request, from: ClarityPayOrigin) {
   const actor = await requireCoachActor(req);
   if (!actor.isAdmin) throw forbidden();
   const livemode = await businessLivemode(actor.accountId);
@@ -131,24 +136,15 @@ async function clarityPaySignupUrl(req: Request) {
     email: await actorEmail(actor.authUserId),
   });
   if ((await syncClarityPay(actor.accountId, livemode)) === "active") return "";
-  return clarityPaySignupLink(account, livemode, new URL(req.url).origin);
+  return clarityPaySignupLink(account, livemode, new URL(req.url).origin, from);
 }
 
 /** Back from Stripe's signup: switch Clarity Pay on if Stripe is happy. */
-async function finishClarityPay(req: Request): Promise<{ title: string; message: string }> {
+async function finishClarityPay(req: Request): Promise<"on" | "pending" | "error"> {
   const actor = await requireCoachActor(req);
   const livemode = await businessLivemode(actor.accountId);
-  if (!(await readClarityPayAccount(actor.accountId, livemode))) {
-    return { title: "Clarity Pay not set up", message: "Start again from Settings." };
-  }
-  const setup = await syncClarityPay(actor.accountId, livemode);
-  return setup === "active"
-    ? { title: "Clarity Pay is on", message: "Card payments now go straight to your account, and Stripe pays them out to your bank." }
-    : {
-        title: "Almost there",
-        message:
-          "Stripe is still checking your details, or needs a few more. Clarity Pay switches on by itself once Stripe is done; you can finish any remaining steps from Settings.",
-      };
+  if (!(await readClarityPayAccount(actor.accountId, livemode))) return "error";
+  return (await syncClarityPay(actor.accountId, livemode)) === "active" ? "on" : "pending";
 }
 
 async function startConnect(req: Request) {
@@ -269,7 +265,7 @@ function resultPage(title: string, message: string) {
     <main>
       <h1>${escapeHtml(title)}</h1>
       <p>${escapeHtml(message)}</p>
-      <a href="/?view=settings">Back to Clarity Booking</a>
+      <a href="/login?view=settings">Back to Clarity Booking</a>
     </main>
   </body>
 </html>`;
@@ -284,18 +280,23 @@ export default async function handler(req: Request) {
   try {
     if (req.method === "GET" && action === "callback") return html(callbackPage(await finishConnect(req)));
     if (req.method === "GET" && action === "status") return json(await status(req));
-    if (req.method === "POST" && action === "clarity-pay/start") return json({ url: await clarityPaySignupUrl(req) });
+    if (req.method === "POST" && action === "clarity-pay/start") {
+      const body = (await req.json().catch(() => ({}))) as { from?: unknown };
+      return json({ url: await clarityPaySignupUrl(req, clarityPayOrigin(body?.from)) });
+    }
     if (req.method === "GET" && (action === "clarity-pay/return" || action === "clarity-pay/refresh")) {
-      // Stripe sends the browser here, so a failure is a page, not JSON.
+      // Stripe sends the browser here. Both ends go straight back into the
+      // app, on the page the coach started from, which shows how it went.
+      const from = clarityPayOrigin(new URL(req.url).searchParams.get("from"));
+      const redirect = (location: string) =>
+        new Response(null, { status: 302, headers: { Location: location, "Cache-Control": "no-store" } });
       try {
         if (action === "clarity-pay/refresh") {
-          const location = (await clarityPaySignupUrl(req)) || "/?view=settings";
-          return new Response(null, { status: 302, headers: { Location: location, "Cache-Control": "no-store" } });
+          return redirect((await clarityPaySignupUrl(req, from)) || clarityPayReturnPath(from, "on"));
         }
-        const result = await finishClarityPay(req);
-        return html(resultPage(result.title, result.message));
-      } catch (error) {
-        return html(resultPage("Clarity Pay not set up", error instanceof Error ? error.message : "Start again from Settings."));
+        return redirect(clarityPayReturnPath(from, await finishClarityPay(req)));
+      } catch {
+        return redirect(clarityPayReturnPath(from, "error"));
       }
     }
     if (req.method === "POST" && action === "connect") return json(await startConnect(req));
