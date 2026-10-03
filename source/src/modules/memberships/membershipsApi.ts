@@ -180,12 +180,24 @@ export function statusPillClass(status: MembershipStatus) {
   return "invoice-status-published";
 }
 
+/** Stored in English on the charge, so a report reads the same whoever recorded it; shown in the reader's language. */
+export const PAYMENT_METHODS = [
+  { value: "Cash", label: () => t("Cash") },
+  { value: "Bank transfer", label: () => t("Bank transfer") },
+  { value: "Card at the till", label: () => t("Card at the till") },
+  { value: "Other", label: () => t("Other") },
+];
+
+function paymentMethodLabel(value: string) {
+  return PAYMENT_METHODS.find((method) => method.value === value)?.label() ?? value;
+}
+
 export function chargeStatusLabel(charge: MembershipCharge) {
   switch (charge.status) {
     case "paid":
       if (charge.paidVia === "trial") return t("Trial");
       if (charge.paidVia === "free") return t("Free");
-      return charge.paidVia === "card" ? t("Paid by card") : t("Paid · {method}", { method: charge.paidVia });
+      return charge.paidVia === "card" ? t("Paid by card") : t("Paid · {method}", { method: paymentMethodLabel(charge.paidVia) });
     case "waived":
       return t("Waived");
     case "pending":

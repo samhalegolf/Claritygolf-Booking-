@@ -11,6 +11,7 @@ import {
   dateLabel,
   intervalLabel,
   membershipsApi,
+  PAYMENT_METHODS,
   statusLabel,
   statusPillClass,
   type Membership,
@@ -26,13 +27,6 @@ export type MembershipCardProps = {
   /** Shown in Billing, where the member is not otherwise named. */
   onOpenPerson?: (personId: string) => void;
 };
-
-const PAYMENT_METHODS = [
-  { value: "Cash", label: () => t("Cash") },
-  { value: "Bank transfer", label: () => t("Bank transfer") },
-  { value: "Card at the till", label: () => t("Card at the till") },
-  { value: "Other", label: () => t("Other") },
-];
 
 function owing(charge: MembershipCharge) {
   return charge.status === "pending" || charge.status === "failed" || charge.status === "requires_action";

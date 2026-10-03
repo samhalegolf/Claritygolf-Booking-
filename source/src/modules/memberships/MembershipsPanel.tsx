@@ -184,7 +184,7 @@ export function MembershipsPanel({ services, formatMoney, notify, onOpenPerson }
                   <span className="membership-meta">
                     {formatMoney(plan.priceCents / 100, plan.currency)} {intervalLabel(plan.interval, plan.intervalCount)}
                     {plan.termCycles ? ` · ${tn(plan.termCycles, "{count} payment", "{count} payments")}` : ""}
-                    {plan.trialDays ? ` · ${tn(plan.trialDays, "{count}-day trial", "{count}-day trial")}` : ""}
+                    {plan.trialDays ? ` · ${tn(plan.trialDays, "1-day trial", "{count}-day trial")}` : ""}
                   </span>
                   <span className="membership-meta">
                     {plan.entitlements
