@@ -32,6 +32,16 @@ import {
   reviewShareVideo,
   type ReviewSharePayload,
 } from "./_shared/swing-review-share.mts";
+import {
+  cleanDrillInput,
+  cleanReviewBlocks,
+  reviewBlockVideoIds,
+  visibleReviewBlocks,
+  type Drill,
+  type DrillInput,
+  type ReviewBlock,
+  type ReviewDocument,
+} from "./_shared/review-document.mts";
 import { canonicalPhoneKey, cleanPhoneCountry } from "./_shared/phone.mts";
 import { localeForCountry } from "./_shared/locale.mts";
 import { cleanMessageLanguage, messageText } from "./_shared/message-language.mts";
@@ -3503,6 +3513,10 @@ async function handlePlayerVideoRoute(
   // value left behind by whichever business this warm instance served last.
   const candidates = playerVideoIdCandidates(scope, settings.accountCountry);
 
+  if (req.method === "GET" && sub[0] === "reviews") {
+    return json({ ok: true, documents: await playerReviewDocuments(accountId, candidates) });
+  }
+
   if (req.method === "GET" && sub[0] === "imports") {
     const accessToken = await ensureDriveReady(accountId, diagnostics);
     const provider = googleDriveProviderAdapter(accessToken, settings, diagnostics);
@@ -3672,7 +3686,11 @@ async function handlePlayerVideoRoute(
 export default async function handler(
   req: Request,
   _context?: unknown,
-  options: { resolveAccountId?: (req: Request) => Promise<string> } = {},
+  options: {
+    resolveAccountId?: (req: Request) => Promise<string>;
+    /** Test seam beside resolveAccountId: the signed-in coach's auth user id. */
+    resolveAuthUserId?: (req: Request) => Promise<string>;
+  } = {},
 ) {
   const cors = corsHeaders(req);
   if (!cors) return routeVideoTransferRequest(req, options);
@@ -3999,8 +4017,23 @@ async function buildReviewSharePayload(
     }).catch(() => []),
   ]);
 
+  // The page, if the coach laid one out. Video blocks only for videos that
+  // were actually sent: a block pointing at footage that never left the coach's
+  // device would be an empty frame here, and a drill keeps its words either way.
+  const document = await readReviewDocument(share.accountId, share.lessonId);
+  const sent = new Set(videos.map((video) => video.savedVideoId));
+  const blocks = visibleReviewBlocks(document?.blocks || []).flatMap((block): ReviewBlock[] => {
+    if (block.type === "video") return sent.has(block.savedVideoId) ? [block] : [];
+    if (block.type === "drill" && block.savedVideoId && !sent.has(block.savedVideoId)) {
+      return [{ ...block, savedVideoId: "" }];
+    }
+    return [block];
+  });
+
   const identity = await reviewSenderIdentity(settings);
   return {
+    title: document?.title || "",
+    blocks,
     playerName: cleanString(people[0]?.name, "", 180),
     coachName: identity.coachName,
     businessName: identity.businessName,
@@ -4161,6 +4194,14 @@ async function handleReviewSend(req: Request, accountId: string, diagnostics: Pr
       ])
     : [[], []];
 
+  // What the page adds on top of the parts: notes, links and drills written
+  // into it. Counted with the notes, so a review that is all page still sends.
+  const document = target ? await readReviewDocument(accountId, lessonId) : null;
+  const pageNotes = visibleReviewBlocks(document?.blocks || []).filter((block) => block.type !== "video").length;
+  // With a page, a video the coach took off it is not part of what was sent.
+  const onPage = document ? new Set(reviewBlockVideoIds(document.blocks)) : null;
+  const videoCount = onPage ? sessions.filter((session) => onPage.has(session.savedVideoId)).length : sessions.length;
+
   const verdict = reviewSendVerdict({
     target: target
       ? {
@@ -4170,8 +4211,8 @@ async function handleReviewSend(req: Request, accountId: string, diagnostics: Pr
           name: target.playerName,
         }
       : null,
-    videoCount: sessions.length,
-    noteCount: notes.length,
+    videoCount,
+    noteCount: notes.length + pageNotes,
     practiceCount: practice.length,
   });
   if (verdict.ok === false) {
@@ -4214,6 +4255,18 @@ async function handleReviewSend(req: Request, accountId: string, diagnostics: Pr
     },
   });
 
+  // From now on the player sees the page, not just its parts.
+  if (document) {
+    await supabase(reviewDocumentTable, {
+      method: "PATCH",
+      prefer: "return=minimal",
+      query: `account_id=eq.${encodeURIComponent(accountId)}&lesson_id=eq.${encodeURIComponent(lessonId)}`,
+      body: { sent_at: new Date().toISOString() },
+    }).catch(() => {
+      console.warn("video_transfer:review_document_sent_stamp_failed", { lessonId });
+    });
+  }
+
   const settings = await readSettings(accountId);
   const identity = await reviewSenderIdentity(settings);
   const appUrl = (env("CLARITY_APP_URL", "") || env("URL") || env("DEPLOY_PRIME_URL") || "").replace(/\/$/, "");
@@ -4224,8 +4277,8 @@ async function handleReviewSend(req: Request, accountId: string, diagnostics: Pr
     shareUrl: reviewShareUrl(appUrl, token),
     portalUrl: appUrl,
     expiresAt,
-    videoCount: sessions.length,
-    noteCount: notes.length,
+    videoCount,
+    noteCount: notes.length + pageNotes,
     practiceCount: practice.length,
     language: settings.accountMessageLanguage,
   });
@@ -4267,15 +4320,266 @@ async function handleReviewSend(req: Request, accountId: string, diagnostics: Pr
     recipient: player.playerEmail,
     shareUrl: reviewShareUrl(appUrl, token),
     expiresAt,
-    videoCount: sessions.length,
-    noteCount: notes.length,
+    videoCount,
+    noteCount: notes.length + pageNotes,
     practiceCount: practice.length,
   });
 }
 
+/* --- The review's page, and the drill library ------------------------------
+ *
+ * A review's parts still find each other by lesson id. The page is the one
+ * thing they could not hold on their own: the order the coach laid them out
+ * in, and the blocks that are not parts at all -- a note written into the
+ * page, a link, a drill. See review-document.mts for the block shapes; every
+ * write goes through cleanReviewBlocks there.
+ *
+ * Neither needs Drive, so both run ahead of the Clarity Cloud configuration
+ * check: a coach without Clarity Cloud can still lay out a review of notes and
+ * links, and still keep a library of YouTube drills.
+ * ------------------------------------------------------------------------- */
+
+const reviewDocumentTable = "swing_review_documents";
+const drillTable = "coach_drills";
+
+function rowToReviewDocument(row: any): ReviewDocument {
+  return {
+    lessonId: cleanString(row?.lesson_id, "", 160),
+    playerId: cleanString(row?.player_id, "", 160),
+    title: cleanString(row?.title, "", 180),
+    blocks: cleanReviewBlocks(row?.blocks),
+    sentAt: cleanString(row?.sent_at, "", 40),
+    createdAt: cleanString(row?.created_at, "", 40),
+    updatedAt: cleanString(row?.updated_at, "", 40),
+  };
+}
+
+async function readReviewDocument(accountId: string, lessonId: string): Promise<ReviewDocument | null> {
+  const rows = await supabase(reviewDocumentTable, {
+    query:
+      `select=*&account_id=eq.${encodeURIComponent(accountId)}` +
+      `&lesson_id=eq.${encodeURIComponent(lessonId)}&limit=1`,
+  }).catch(() => []);
+  return rows[0] ? rowToReviewDocument(rows[0]) : null;
+}
+
+/** PostgREST's in.() list, quoted, for ids that are not under our control. */
+function postgrestInList(values: Iterable<string>) {
+  return [...values].map((value) => `"${value.replace(/["\\]/g, "")}"`).join(",");
+}
+
+async function handleReviewDocumentRoute(req: Request, accountId: string, actorId: string, url: URL) {
+  if (req.method === "GET" && url.pathname.endsWith("/docs")) {
+    const playerId = cleanString(url.searchParams.get("playerId"), "", 160);
+    if (!playerId) return json({ error: "invalid_request", message: "A player is required." }, 400);
+    const rows = await supabase(reviewDocumentTable, {
+      query:
+        `select=*&account_id=eq.${encodeURIComponent(accountId)}` +
+        `&player_id=eq.${encodeURIComponent(playerId)}&order=updated_at.desc&limit=200`,
+    });
+    return json({ ok: true, documents: (rows as any[]).map(rowToReviewDocument) });
+  }
+
+  if (req.method === "GET") {
+    const lessonId = cleanString(url.searchParams.get("lessonId"), "", 160);
+    if (!isSwingReviewLessonId(lessonId)) {
+      return json({ error: "invalid_request", message: "That is not a swing review." }, 400);
+    }
+    return json({ ok: true, document: await readReviewDocument(accountId, lessonId) });
+  }
+
+  if (req.method === "PUT") {
+    const body = (await readJson(req)) as any;
+    const lessonId = cleanString(body?.lessonId, "", 160);
+    const playerId = cleanString(body?.playerId, "", 160);
+    if (!isSwingReviewLessonId(lessonId) || !playerId) {
+      return json({ error: "invalid_request", message: "A review needs its lesson id and player." }, 400);
+    }
+    const title = cleanString(body?.title, "", 180);
+    const blocks = cleanReviewBlocks(body?.blocks);
+    const now = new Date().toISOString();
+    const existing = await readReviewDocument(accountId, lessonId);
+    if (existing && existing.playerId !== playerId) {
+      // A lesson id is one review about one player. Re-filing it under another
+      // player is a different operation, and not one a page save should do.
+      return json({ error: "conflict", message: "This review belongs to another player." }, 409);
+    }
+    const rows = existing
+      ? await supabase(reviewDocumentTable, {
+          method: "PATCH",
+          prefer: "return=representation",
+          query: `account_id=eq.${encodeURIComponent(accountId)}&lesson_id=eq.${encodeURIComponent(lessonId)}`,
+          body: { title, blocks, updated_at: now },
+        })
+      : await supabase(reviewDocumentTable, {
+          method: "POST",
+          prefer: "return=representation",
+          body: {
+            id: randomUUID(),
+            account_id: accountId,
+            lesson_id: lessonId,
+            player_id: playerId,
+            title,
+            blocks,
+            created_by: actorId,
+            created_at: now,
+            updated_at: now,
+          },
+        });
+    return json({ ok: true, document: rowToReviewDocument(rows[0]) });
+  }
+
+  // Discarding a review that was started and never used. Only an unsent page:
+  // once a player has been sent a review, it is theirs to keep.
+  if (req.method === "DELETE") {
+    const lessonId = cleanString(url.searchParams.get("lessonId"), "", 160);
+    if (!isSwingReviewLessonId(lessonId)) {
+      return json({ error: "invalid_request", message: "That is not a swing review." }, 400);
+    }
+    const existing = await readReviewDocument(accountId, lessonId);
+    if (existing?.sentAt) {
+      return json({ error: "conflict", message: "This review has been sent, so it stays." }, 409);
+    }
+    await supabase(reviewDocumentTable, {
+      method: "DELETE",
+      prefer: "return=minimal",
+      query:
+        `account_id=eq.${encodeURIComponent(accountId)}` +
+        `&lesson_id=eq.${encodeURIComponent(lessonId)}&sent_at=is.null`,
+    });
+    return json({ ok: true, deletedLessonId: lessonId });
+  }
+
+  return json({ error: "not_found", message: "Review route not found." }, 404);
+}
+
+function rowToDrill(row: any, actorId: string): Drill {
+  const end = row?.end_seconds === null || row?.end_seconds === undefined ? null : Number(row.end_seconds) || null;
+  return {
+    id: cleanString(row?.id, "", 120),
+    title: cleanString(row?.title, "", 180),
+    notes: cleanString(row?.notes, "", 8000),
+    youtubeId: cleanString(row?.youtube_id, "", 20),
+    start: Number(row?.start_seconds) || 0,
+    end,
+    savedVideoId: cleanString(row?.saved_video_id, "", 160),
+    thumbnailDataUrl: String(row?.thumbnail_data_url || ""),
+    authorName: cleanString(row?.author_name, "", 120),
+    mine: Boolean(actorId) && cleanString(row?.created_by, "", 120) === actorId,
+    createdAt: cleanString(row?.created_at, "", 40),
+    updatedAt: cleanString(row?.updated_at, "", 40),
+  };
+}
+
+function drillRowFields(input: DrillInput) {
+  return {
+    title: input.title,
+    notes: input.notes,
+    youtube_id: input.youtubeId,
+    start_seconds: input.start,
+    end_seconds: input.end,
+    saved_video_id: input.savedVideoId,
+    thumbnail_data_url: input.thumbnailDataUrl,
+  };
+}
+
+/**
+ * The drill library. Every coach in the business reads all of it; only the
+ * coach who made a drill may change or delete it. The check is against the
+ * signed-in coach's own auth user id, never anything in the request.
+ */
+async function handleDrillRoute(req: Request, accountId: string, actorId: string, drillId: string) {
+  if (req.method === "GET" && !drillId) {
+    const rows = await supabase(drillTable, {
+      query: `select=*&account_id=eq.${encodeURIComponent(accountId)}&order=updated_at.desc&limit=500`,
+    });
+    return json({ ok: true, drills: (rows as any[]).map((row) => rowToDrill(row, actorId)) });
+  }
+
+  if (!actorId) {
+    return json({ error: "membership_required", message: "Sign in as a coach to change drills." }, 403);
+  }
+
+  if (req.method === "POST" && !drillId) {
+    const input = cleanDrillInput(await readJson(req));
+    if (!input.title) return json({ error: "invalid_request", message: "A drill needs a name." }, 400);
+    const now = new Date().toISOString();
+    const rows = await supabase(drillTable, {
+      method: "POST",
+      prefer: "return=representation",
+      body: {
+        id: randomUUID(),
+        account_id: accountId,
+        created_by: actorId,
+        author_name: input.authorName,
+        ...drillRowFields(input),
+        created_at: now,
+        updated_at: now,
+      },
+    });
+    return json({ ok: true, drill: rowToDrill(rows[0], actorId) }, 201);
+  }
+
+  if (!drillId) return json({ error: "not_found", message: "Drill route not found." }, 404);
+  const existing = await supabase(drillTable, {
+    query:
+      `select=*&account_id=eq.${encodeURIComponent(accountId)}` +
+      `&id=eq.${encodeURIComponent(drillId)}&limit=1`,
+  });
+  const row = existing[0];
+  if (!row) return json({ error: "not_found", message: "That drill was not found." }, 404);
+  if (cleanString(row.created_by, "", 120) !== actorId) {
+    return json({ error: "forbidden", message: "Only the coach who made this drill can change it." }, 403);
+  }
+  const scope = `account_id=eq.${encodeURIComponent(accountId)}&id=eq.${encodeURIComponent(drillId)}`;
+
+  if (req.method === "PUT") {
+    const input = cleanDrillInput(await readJson(req));
+    if (!input.title) return json({ error: "invalid_request", message: "A drill needs a name." }, 400);
+    const rows = await supabase(drillTable, {
+      method: "PATCH",
+      prefer: "return=representation",
+      query: scope,
+      body: { ...drillRowFields(input), updated_at: new Date().toISOString() },
+    });
+    return json({ ok: true, drill: rowToDrill(rows[0], actorId) });
+  }
+
+  if (req.method === "DELETE") {
+    // Reviews hold copies, so deleting the original takes nothing from them.
+    await supabase(drillTable, { method: "DELETE", prefer: "return=minimal", query: scope });
+    return json({ ok: true, deletedId: drillId });
+  }
+
+  return json({ error: "not_found", message: "Drill route not found." }, 404);
+}
+
+/**
+ * The player's sent review pages. Only sent ones: until the coach sends it, a
+ * page is their working draft, and the parts the player can already see keep
+ * arriving the way they always have.
+ */
+async function playerReviewDocuments(accountId: string, candidates: Set<string>) {
+  if (!candidates.size) return [];
+  const rows = await supabase(reviewDocumentTable, {
+    query:
+      `select=*&account_id=eq.${encodeURIComponent(accountId)}` +
+      `&player_id=in.(${encodeURIComponent(postgrestInList(candidates))})` +
+      `&sent_at=not.is.null&order=updated_at.desc&limit=200`,
+  }).catch(() => []);
+  return (rows as any[]).map(rowToReviewDocument).map((document) => ({
+    ...document,
+    blocks: visibleReviewBlocks(document.blocks),
+  }));
+}
+
 async function routeVideoTransferRequest(
   req: Request,
-  options: { resolveAccountId?: (req: Request) => Promise<string> } = {},
+  options: {
+    resolveAccountId?: (req: Request) => Promise<string>;
+    /** Test seam beside resolveAccountId: the signed-in coach's auth user id. */
+    resolveAuthUserId?: (req: Request) => Promise<string>;
+  } = {},
 ) {
   const url = new URL(req.url);
   const parts = url.pathname
@@ -4326,9 +4630,17 @@ async function routeVideoTransferRequest(
     // Drive, folders and saved videos all belong to one business, so the coach
     // routes need the business the caller administers rather than "a session
     // exists". requireCoachActor throws 401/403 and the outer catch renders it.
-    const accountId = options.resolveAccountId
-      ? await options.resolveAccountId(req)
-      : (await requireCoachActor(req)).accountId;
+    const actor = options.resolveAccountId ? null : await requireCoachActor(req);
+    const accountId = actor ? actor.accountId : await options.resolveAccountId!(req);
+    const actorId = actor?.authUserId || (await options.resolveAuthUserId?.(req)) || "";
+    // The review's page and the drill library. No Drive in either, so they
+    // answer before the Clarity Cloud check below.
+    if (parts[0] === "review" && (parts[1] === "doc" || parts[1] === "docs")) {
+      return await handleReviewDocumentRoute(req, accountId, actorId, url);
+    }
+    if (parts[0] === "drills") {
+      return await handleDrillRoute(req, accountId, actorId, cleanString(parts[1], "", 120));
+    }
     if (req.method === "GET" && parts[0] === "diagnostics") {
       return json(getSafeClarityCloudGoogleRuntimeDiagnostic(req));
     }

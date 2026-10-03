@@ -26,6 +26,10 @@
  */
 
 import { t } from "../../lib/i18n";
+import {
+  visibleReviewBlocks,
+  type ReviewBlock,
+} from "../../../netlify/functions/_shared/review-document.mts";
 import type {
   ClarityCloudImportTransfer,
   SavedVideoItem,
@@ -92,7 +96,16 @@ export type SwingReviewAnalysisNote = {
   id: string;
   text: string;
   time: number;
+  savedVideoId: string;
   videoTitle: string;
+};
+
+/** A sent review's page, as /player/reviews returns it. */
+export type ReviewPage = {
+  lessonId: string;
+  title: string;
+  blocks: ReviewBlock[];
+  updatedAt: string;
 };
 
 export type SwingReview<
@@ -110,6 +123,9 @@ export type SwingReview<
   practice: TPractice[];
   screenshots: SwingReviewScreenshot[];
   analysisNotes: SwingReviewAnalysisNote[];
+  /** The page the coach laid out, once sent. Absent for a review sent before
+   *  pages existed, which then reads part by part as it always did. */
+  page: ReviewPage | null;
   /** The note the coach attached when they sent a video back, if they did. */
   coachMessage: string;
   /** Holds a returned video this player has not opened yet. */
@@ -127,6 +143,8 @@ export type SwingReviewSources<
   practice: TPractice[];
   /** Screenshots on cloud-only videos, keyed by saved video id. */
   cloudSnapshots?: Record<string, CloudReviewSnapshot[]>;
+  /** Sent review pages, keyed by lesson id. */
+  pages?: Record<string, ReviewPage>;
 };
 
 /**
@@ -147,6 +165,7 @@ export function groupSwingReviews<
   notes,
   practice,
   cloudSnapshots = {},
+  pages = {},
 }: SwingReviewSources<TNote, TPractice>): SwingReview<TNote, TPractice>[] {
   const reviewVideos = savedVideos.filter((video) => isSwingReviewLessonId(video.lessonId));
 
@@ -165,6 +184,8 @@ export function groupSwingReviews<
       ...reviewVideos.map((video) => video.lessonId),
       ...reviewCloudVideos.map((transfer) => transfer.savedVideo?.lessonId),
       ...notes.filter((note) => isSwingReviewLessonId(note.lessonId)).map((note) => note.lessonId),
+      // A page can hold a review on its own: one that is all notes and links.
+      ...Object.keys(pages).filter((id) => isSwingReviewLessonId(id)),
     ].filter((id): id is string => Boolean(id)),
   );
 
@@ -193,6 +214,7 @@ export function groupSwingReviews<
           ...videos.map((video) => video.capturedAt || video.createdAt),
           ...reviewCloud.map((transfer) => transfer.savedVideo?.createdAt || ""),
           ...reviewNotes.map((note) => note.updatedAt || note.createdAt || ""),
+          pages[id]?.updatedAt || "",
         ]
           .filter(Boolean)
           .sort()
@@ -226,9 +248,13 @@ export function groupSwingReviews<
           id: note.id,
           text: note.text,
           time: note.time,
+          savedVideoId: video.savedVideoId,
           videoTitle: video.title,
         })),
       );
+
+      const page = pages[id] || null;
+      const pageBlocks = page ? visibleReviewBlocks(page.blocks).filter((block) => block.type !== "video").length : 0;
 
       const returned = reviewCloud.find((transfer) => transfer.direction === "coach-return");
 
@@ -241,6 +267,7 @@ export function groupSwingReviews<
         practice: reviewPractice,
         screenshots,
         analysisNotes,
+        page,
         coachMessage: returned?.coachMessage || "",
         unseen: reviewCloud.some(
           (transfer) => transfer.direction === "coach-return" && !transfer.playerSeenAt,
@@ -251,7 +278,8 @@ export function groupSwingReviews<
           reviewNotes.length +
           reviewPractice.length +
           screenshots.length +
-          analysisNotes.length,
+          analysisNotes.length +
+          pageBlocks,
       };
     })
     // Newest first, and the id breaks a tie -- two reviews made the same day

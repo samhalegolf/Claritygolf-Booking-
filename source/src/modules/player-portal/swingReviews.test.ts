@@ -302,3 +302,28 @@ test("a screenshot on a downloaded video keeps where in the frame it was taken",
   assert.equal(review.screenshots[0].captureKind, "area");
   assert.deepEqual(review.screenshots[0].cropRect, { x: 0.1, y: 0.1, width: 0.2, height: 0.2 });
 });
+
+test("a sent page brings its review along even with nothing else in it, and counts its blocks", () => {
+  const reviews = groupSwingReviews({
+    savedVideos: [],
+    cloudVideos: [],
+    notes: [],
+    practice: [],
+    pages: {
+      [REVIEW]: {
+        lessonId: REVIEW,
+        title: "Grip and setup",
+        updatedAt: "2026-09-15T00:00:00.000Z",
+        blocks: [
+          { id: "n1", type: "note", title: "Grip", body: "Weaker left hand" },
+          { id: "n2", type: "note", title: "", body: "" },
+          { id: "l1", type: "link", url: "https://example.com/", label: "Read this" },
+        ],
+      },
+    },
+  });
+  assert.equal(reviews.length, 1);
+  assert.equal(reviews[0].page?.title, "Grip and setup");
+  assert.equal(reviews[0].at, "2026-09-15T00:00:00.000Z");
+  assert.equal(reviews[0].itemCount, 2, "the empty note is the coach's unfinished work, not an item");
+});

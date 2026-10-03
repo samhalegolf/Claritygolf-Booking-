@@ -1,0 +1,722 @@
+/* The swing review page and the drill library.
+   Same visual language as the invoice template (.it-*): a sheet on a mat,
+   dashed for anything the coach still has to write. */
+
+.srs {
+  display: grid;
+  gap: var(--c-space-4);
+  min-width: 0;
+}
+
+.srs input,
+.srs textarea {
+  font: inherit;
+  color: inherit;
+}
+
+.srs-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--c-space-4);
+  flex-wrap: wrap;
+}
+
+.srs-dashed-key {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--c-space-2);
+  height: 28px;
+  padding: 0 var(--c-space-4);
+  border-radius: var(--c-radius-pill);
+  background: var(--c-active);
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+  font-weight: 600;
+}
+
+.srs-dashed-swatch {
+  width: 11px;
+  height: 8px;
+  border: 1px dashed var(--c-pencil);
+}
+
+.srs-save {
+  margin-left: auto;
+  font-size: var(--c-size-meta);
+  color: var(--c-muted);
+}
+
+.srs-save.is-error {
+  color: var(--c-danger, #b42318);
+}
+
+.srs-sheet {
+  width: min(720px, 100%);
+  margin: 0 auto;
+  padding: var(--c-space-6);
+  display: grid;
+  gap: var(--c-space-3);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  min-width: 0;
+}
+
+.srs-head {
+  display: flex;
+  gap: var(--c-space-5);
+  align-items: center;
+  flex-wrap: wrap;
+  padding-bottom: var(--c-space-4);
+  border-bottom: 1px solid var(--c-border-soft);
+}
+
+.srs-logo {
+  width: 48px;
+  height: 48px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: var(--c-radius-control);
+  overflow: hidden;
+  color: var(--c-pencil);
+}
+
+.srs-logo.is-empty {
+  border: 1px dashed var(--c-border);
+  background: var(--c-surface-soft);
+}
+
+.srs-logo img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.srs-from {
+  flex: 1 1 180px;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.srs-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--c-space-2);
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.srs-meta {
+  display: grid;
+  gap: 2px;
+  justify-items: end;
+  text-align: right;
+}
+
+.srs-meta strong {
+  font-size: 17px;
+}
+
+.srs-meta span {
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+}
+
+/* Inputs that read as the page: no box until they are empty or focused. */
+.srs-title,
+.srs-note-title,
+.srs-note-body,
+.srs-link-url {
+  width: 100%;
+  min-width: 0;
+  padding: var(--c-space-2) var(--c-space-3);
+  border: 1px solid transparent;
+  border-radius: var(--c-radius-control);
+  background: transparent;
+}
+
+.srs-title {
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.srs-note-title {
+  font-weight: 700;
+}
+
+.srs-note-body {
+  resize: vertical;
+  line-height: 1.55;
+}
+
+.srs-title.is-empty,
+.srs-note-title.is-empty,
+.srs-note-body.is-empty,
+.srs-link-url.is-empty {
+  border: 1px dashed var(--c-border);
+}
+
+.srs-title:focus,
+.srs-note-title:focus,
+.srs-note-body:focus,
+.srs-link-url:focus {
+  outline: none;
+  border: 1px solid var(--c-accent);
+  background: var(--c-surface);
+}
+
+/* The + between blocks: a hairline with a button on it. */
+.srs-insert {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  padding: var(--c-space-1) 0;
+}
+
+.srs-insert::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  border-top: 1px dashed var(--c-border-soft);
+}
+
+.srs-insert.is-open::before {
+  display: none;
+}
+
+.srs-plus {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--c-border);
+  border-radius: 50%;
+  background: var(--c-surface);
+  color: var(--c-text-soft);
+  cursor: pointer;
+}
+
+.srs-plus:hover,
+.srs-plus:focus-visible {
+  border-color: var(--c-accent);
+  color: var(--c-accent);
+}
+
+.srs-insert.is-open {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--c-space-2);
+  align-items: start;
+}
+
+.srs-insert-close {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: none;
+  color: var(--c-muted);
+  cursor: pointer;
+}
+
+.srs-choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--c-space-2);
+}
+
+.srs-choice {
+  display: flex;
+  gap: var(--c-space-3);
+  align-items: flex-start;
+  padding: var(--c-space-3) var(--c-space-4);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  color: var(--c-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.srs-choice:hover,
+.srs-choice:focus-visible {
+  border-color: var(--c-accent);
+}
+
+.srs-choice span {
+  display: grid;
+  gap: 2px;
+}
+
+.srs-choice small {
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+  line-height: 1.35;
+}
+
+.srs-start {
+  display: grid;
+  gap: var(--c-space-4);
+  justify-items: center;
+  padding: var(--c-space-6) var(--c-space-4);
+  border: 1px dashed var(--c-border);
+  border-radius: var(--c-radius-control);
+  text-align: center;
+}
+
+.srs-start .srs-choices {
+  width: 100%;
+}
+
+.srs-start p {
+  margin: 0;
+  color: var(--c-text-soft);
+}
+
+.srs-start-plus {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--c-active);
+  color: var(--c-accent);
+}
+
+.srs-block {
+  position: relative;
+  display: grid;
+  gap: var(--c-space-2);
+  min-width: 0;
+  padding-right: 34px;
+}
+
+.srs-block-tools {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: grid;
+  gap: 2px;
+  opacity: 0.55;
+}
+
+.srs-block:hover .srs-block-tools,
+.srs-block:focus-within .srs-block-tools {
+  opacity: 1;
+}
+
+.srs-block-tools button {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--c-radius-control);
+  background: none;
+  color: var(--c-text-soft);
+  cursor: pointer;
+}
+
+.srs-block-tools button:hover:not(:disabled) {
+  background: var(--c-active);
+}
+
+.srs-block-tools button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.srs-missing,
+.srs-hint {
+  margin: 0;
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+}
+
+.srs-warn {
+  color: var(--c-danger, #b42318);
+  font-size: var(--c-size-meta);
+}
+
+.srs-link {
+  display: grid;
+  gap: var(--c-space-2);
+}
+
+.srs-link-open {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--c-space-2);
+  justify-self: start;
+  font-size: var(--c-size-meta);
+  font-weight: 600;
+}
+
+/* A video: the frame, the marker strip, the snapshots, the moments. */
+.srs-video {
+  display: grid;
+  gap: var(--c-space-3);
+  min-width: 0;
+}
+
+.srs-video-frame {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  padding: 0;
+  border: 0;
+  border-radius: var(--c-radius-control);
+  overflow: hidden;
+  background: #0d0f12;
+  color: #fff;
+  cursor: pointer;
+}
+
+.srs-video-frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.srs-video-open {
+  position: absolute;
+  right: var(--c-space-3);
+  bottom: var(--c-space-3);
+  padding: 4px 10px;
+  border-radius: var(--c-radius-pill);
+  background: rgba(0, 0, 0, 0.66);
+  color: #fff;
+  font-size: var(--c-size-meta);
+  font-weight: 600;
+}
+
+.srs-video-title {
+  font-size: 15px;
+}
+
+.srs-markers {
+  position: relative;
+  height: 14px;
+  border-radius: var(--c-radius-pill);
+  background: var(--c-surface-soft);
+  border: 1px solid var(--c-border-soft);
+}
+
+.srs-marker {
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
+  transform: translateY(-50%);
+  padding: 0;
+  border: 2px solid var(--c-surface);
+  border-radius: 50%;
+  background: var(--c-accent);
+  cursor: pointer;
+}
+
+.srs-marker.is-note {
+  width: 8px;
+  height: 8px;
+  margin-left: -4px;
+  background: var(--c-pencil);
+  cursor: default;
+}
+
+.srs-shots {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--c-space-3);
+}
+
+.srs-shot {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.srs-shot img,
+.srs-shot-blank {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface-soft);
+}
+
+.srs-shot-blank {
+  display: grid;
+  place-items: center;
+  color: var(--c-pencil);
+}
+
+.srs-shot em,
+.srs-moments em {
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+  color: var(--c-muted);
+}
+
+.srs-shot small {
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+}
+
+.srs-moments {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--c-space-2);
+}
+
+.srs-moments li {
+  display: grid;
+  grid-template-columns: 3.2em 1fr auto;
+  gap: var(--c-space-3);
+  align-items: baseline;
+}
+
+.srs-moment-remove {
+  border: 0;
+  background: none;
+  color: var(--c-muted);
+  cursor: pointer;
+}
+
+.srs-drill {
+  display: grid;
+  gap: var(--c-space-2);
+  padding: var(--c-space-4);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface-soft);
+}
+
+.srs-make-copy {
+  display: flex;
+  gap: var(--c-space-3);
+  align-items: flex-start;
+  padding: var(--c-space-4);
+  border: 1px dashed var(--c-accent);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  color: var(--c-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.srs-make-copy span {
+  display: grid;
+  gap: 2px;
+}
+
+.srs-make-copy small {
+  color: var(--c-muted);
+}
+
+.srs-youtube {
+  display: grid;
+  gap: var(--c-space-3);
+}
+
+.srs-embed {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--c-radius-control);
+  overflow: hidden;
+  background: #000;
+}
+
+.srs-embed iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.srs-crop,
+.srs-marker-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--c-space-2);
+  align-items: center;
+  font-size: var(--c-size-meta);
+}
+
+.srs-marker-add input:not(.srs-clock) {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.srs-clock {
+  width: 5.5em;
+  font-variant-numeric: tabular-nums;
+}
+
+.srs-session {
+  display: grid;
+  gap: var(--c-space-3);
+  padding-top: var(--c-space-4);
+  border-top: 1px solid var(--c-border-soft);
+}
+
+.srs-session-row {
+  display: grid;
+  gap: 2px;
+}
+
+.srs-session-row p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.srs-session-row span {
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+}
+
+.srs-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--c-space-3);
+  padding-top: var(--c-space-4);
+  border-top: 1px solid var(--c-border-soft);
+}
+
+@media (max-width: 560px) {
+  .srs-sheet {
+    padding: var(--c-space-4);
+  }
+
+  .srs-meta {
+    justify-items: start;
+    text-align: left;
+  }
+}
+
+/* --- Drill library --------------------------------------------------------- */
+
+.drill-library {
+  display: grid;
+  gap: var(--c-space-4);
+  min-width: 0;
+}
+
+.drill-library-top {
+  display: flex;
+  gap: var(--c-space-3);
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.drill-library-top input[type="search"] {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.drill-list {
+  display: grid;
+  gap: var(--c-space-2);
+}
+
+.drill-row {
+  display: grid;
+  grid-template-columns: 72px 1fr auto;
+  gap: var(--c-space-3);
+  align-items: center;
+  padding: var(--c-space-2);
+  border: 1px solid var(--c-border-soft);
+  border-radius: var(--c-radius-control);
+}
+
+.drill-thumb {
+  width: 72px;
+  aspect-ratio: 16 / 9;
+  display: grid;
+  place-items: center;
+  border-radius: var(--c-radius-control);
+  overflow: hidden;
+  background: var(--c-surface-soft);
+  color: var(--c-pencil);
+}
+
+.drill-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.drill-row-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.drill-row-main span {
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drill-row-actions {
+  display: flex;
+  gap: var(--c-space-2);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.drill-editor {
+  display: grid;
+  gap: var(--c-space-3);
+}
+
+.drill-editor label {
+  display: grid;
+  gap: var(--c-space-1);
+  font-size: var(--c-size-meta);
+  font-weight: 600;
+}
+
+.drill-editor textarea {
+  resize: vertical;
+}
+
+.drill-video-kind {
+  display: flex;
+  gap: var(--c-space-2);
+  flex-wrap: wrap;
+}
+
+.drill-editor-actions {
+  display: flex;
+  gap: var(--c-space-3);
+  flex-wrap: wrap;
+}
+
+.drill-empty {
+  margin: 0;
+  color: var(--c-muted);
+}
