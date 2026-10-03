@@ -255,9 +255,24 @@ export type BusinessHubPanelProps = {
   onOpen: (target: ProfileTarget, label: string) => void;
   /** Connections shown elsewhere on the hub (your Google Calendar is on your profile). */
   hiddenIntegrationIds?: string[];
+  /** Clarity Pay, which leads Accounting ahead of the Stripe connection. */
+  clarityPay?: ClarityPayCard;
 };
 
-export function BusinessHubPanel({ profile, internalJobs, onOpen, hiddenIntegrationIds = [] }: BusinessHubPanelProps) {
+/**
+ * Clarity Pay: card payments through an account Clarity runs. It is neither
+ * an outside connection nor a plain setting, so it brings its own state.
+ * Billing › Settings owns it, as it owns the Stripe choice it replaces.
+ */
+export type ClarityPayCard = {
+  state: "on" | "pending" | "off";
+  summary: string;
+  facts: Array<[string, string]>;
+  path: string;
+  target: ProfileTarget;
+};
+
+export function BusinessHubPanel({ profile, internalJobs, onOpen, hiddenIntegrationIds = [], clarityPay }: BusinessHubPanelProps) {
   // One shared integration resource for the whole workspace. Settings and the
   // profile now join the same in-flight request and reuse the same cached
   // snapshot instead of mounting their own independent fetch lifecycle.
@@ -349,6 +364,53 @@ export function BusinessHubPanel({ profile, internalJobs, onOpen, hiddenIntegrat
                   </span>
                 </div>
                 <p className="bh-cell-summary">{t("Checking connection…")}</p>
+              </article>
+            ) : null}
+
+            {section.name === "Accounting" && clarityPay ? (
+              <article className="bh-cell" key="clarity-pay">
+                <div className="bh-cell-head">
+                  <span className="bh-mark is-logo" title={t("Clarity Pay")}>
+                    <img src="/assets/integrations/clarity-pay.png" alt="" />
+                  </span>
+                  <span className="bh-cell-title">
+                    <strong>{t("Clarity Pay")}</strong>
+                  </span>
+                  <span className="bh-cell-actions">
+                    {detailToggle("clarity-pay", clarityPay.facts.length > 0)}
+                    {clarityPay.state === "on" && (
+                      <span className="bh-chip is-ok" title={t("Clarity Pay is on")}>
+                        <ClarityIntegrations size={15} />
+                      </span>
+                    )}
+                    {clarityPay.state === "pending" && (
+                      <span className="bh-chip is-bad" title={t("Your setup isn't finished yet.")}>
+                        <AlertCircle size={15} />
+                      </span>
+                    )}
+                    {clarityPay.state === "on" ? (
+                      <button
+                        className="bh-gear"
+                        onClick={() => onOpen(clarityPay.target, t("Clarity Pay"))}
+                        title={t("Manage — {path}", { path: clarityPay.path })}
+                        type="button"
+                      >
+                        <ClaritySettings size={16} />
+                      </button>
+                    ) : (
+                      <button
+                        className="bh-setup"
+                        onClick={() => onOpen(clarityPay.target, t("Clarity Pay"))}
+                        title={t("Set up {job}", { job: t("Clarity Pay") })}
+                        type="button"
+                      >
+                        <Plus size={16} />
+                      </button>
+                    )}
+                  </span>
+                </div>
+                <p className="bh-cell-summary">{clarityPay.summary}</p>
+                {facts("clarity-pay", clarityPay.facts, clarityPay.path)}
               </article>
             ) : null}
 

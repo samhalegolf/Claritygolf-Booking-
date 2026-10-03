@@ -29,6 +29,25 @@ import {
 /** The Clarity Pay account made for this business, live or not. */
 export const CLARITY_PAY_ACCOUNT_SETTING = "clarityPayAccount";
 
+/** The page a coach started Clarity Pay setup from, and goes back to. */
+export type ClarityPayOrigin = "profile" | "billing";
+
+export function clarityPayOrigin(value: unknown): ClarityPayOrigin {
+  return value === "profile" ? "profile" : "billing";
+}
+
+/**
+ * Where the browser goes after Stripe's signup: the signed-in app, on the page
+ * the coach came from, with `clarityPay` saying how it went. /login, not /,
+ * because / is the public home page and would make a signed-in coach sign in.
+ */
+export function clarityPayReturnPath(from: ClarityPayOrigin, outcome?: "on" | "pending" | "error") {
+  const params = new URLSearchParams({ view: from });
+  if (from === "billing") params.set("billing", "settings");
+  if (outcome) params.set("clarityPay", outcome);
+  return `/login?${params.toString()}`;
+}
+
 /** Where Clarity Pay stands for a business. */
 export type ClarityPaySetup = "none" | "pending" | "active";
 
@@ -134,12 +153,18 @@ export async function ensureClarityPayAccount(
  * Links expire within minutes and can only be opened once, so one is made
  * each time the business clicks, never stored or emailed.
  */
-export async function clarityPaySignupLink(account: string, livemode: boolean, origin: string) {
+export async function clarityPaySignupLink(
+  account: string,
+  livemode: boolean,
+  origin: string,
+  from: ClarityPayOrigin = "billing",
+) {
   const params = new URLSearchParams();
   params.set("account", account);
   params.set("type", "account_onboarding");
-  params.set("refresh_url", `${origin}/api/stripe-connect/clarity-pay/refresh`);
-  params.set("return_url", `${origin}/api/stripe-connect/clarity-pay/return`);
+  // `from` rides along so the trip back lands on the page the coach left.
+  params.set("refresh_url", `${origin}/api/stripe-connect/clarity-pay/refresh?from=${from}`);
+  params.set("return_url", `${origin}/api/stripe-connect/clarity-pay/return?from=${from}`);
   const link = await stripeRequest(platformCredential(livemode), "account_links", { method: "POST", params });
   if (!link?.url) throw Object.assign(new Error("Stripe did not return a signup link."), { status: 502 });
   return String(link.url);
