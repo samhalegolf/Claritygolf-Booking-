@@ -380,6 +380,12 @@ const PassInboxPanel = lazy(() =>
 const PassesPanel = lazy(() =>
   import("./modules/passes/PassesPanel").then((module) => ({ default: module.PassesPanel })),
 );
+const MembershipsPanel = lazy(() =>
+  import("./modules/memberships/MembershipsPanel").then((module) => ({ default: module.MembershipsPanel })),
+);
+const PersonMemberships = lazy(() =>
+  import("./modules/memberships/PersonMemberships").then((module) => ({ default: module.PersonMemberships })),
+);
 const IssuedPassesPanel = lazy(() =>
   import("./modules/passes/IssuedPassesPanel").then((module) => ({ default: module.IssuedPassesPanel })),
 );
@@ -1171,6 +1177,7 @@ type BillingSection =
   | "reports"
   | "transactions"
   | "passes"
+  | "memberships"
   | "settings";
 
 // Every Billing section, as values. BILLING_SECTION_LABELS below is keyed by
@@ -1186,6 +1193,7 @@ const BILLING_SECTIONS: Exclude<BillingSection, "none">[] = [
   "reports",
   "transactions",
   "passes",
+  "memberships",
   "settings",
 ];
 
@@ -1213,6 +1221,7 @@ const BILLING_SECTION_LABELS: Record<Exclude<BillingSection, "none">, string> = 
   reports: t("Reports"),
   transactions: t("Transaction History"),
   passes: t("Passes"),
+  memberships: t("Memberships"),
   settings: t("Settings"),
 };
 
@@ -27117,6 +27126,14 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
                 {passInboxCount > 0 && <span className="tab-count">{passInboxCount}</span>}
               </button>
               <button
+                className={billingSection === "memberships" ? "active" : ""}
+                onClick={() => setBillingSection("memberships")}
+                role="tab"
+                aria-selected={billingSection === "memberships"}
+                type="button"
+              >
+                <RefreshCw size={16} />{t("Memberships")}</button>
+              <button
                 className={billingSection === "reports" ? "active" : ""}
                 onClick={() => setBillingSection("reports")}
                 role="tab"
@@ -29214,6 +29231,23 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
                   </Suspense>
                 </article>
               </div>
+            )}
+
+            {billingSection === "memberships" && (
+              <Suspense fallback={<Loading what={t("memberships")} />}>
+                <MembershipsPanel
+                  services={services
+                    .filter((service) => service.lessonFormat !== "package" && service.active !== false)
+                    .map((service) => ({ id: service.id, name: service.name }))}
+                  formatMoney={formatMoney}
+                  notify={(message) => setToast({ message })}
+                  onOpenPerson={(personId) => {
+                    const linked = clients.find((entry) => entry.id === personId);
+                    if (linked) openClientProfile(linked);
+                    else setToast({ message: t("That client is not in the list yet. Try again after it loads.") });
+                  }}
+                />
+              </Suspense>
             )}
 
             {billingSection === "transactions" && (
@@ -31978,6 +32012,14 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
                       <p>{t("Save this booking contact as a client before giving them a pass.")}</p>
                     ) : (
                       <Suspense fallback={<Loading what={t("passes")} />}>
+                        {selectedClient ? (
+                          <PersonMemberships
+                            personId={selectedClient.id}
+                            formatMoney={formatMoney}
+                            notify={(message) => setToast({ message })}
+                            onPassesChanged={() => void fetchClientPasses(selectedClient.id)}
+                          />
+                        ) : null}
                         <PassesPanel
                           passes={clientPasses}
                           invoicedLines={clientInvoicedLines}

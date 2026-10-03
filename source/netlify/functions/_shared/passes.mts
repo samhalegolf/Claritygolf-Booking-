@@ -41,7 +41,9 @@ export type PassSource =
   | "clarity_checkout"
   | "optix"
   | "stripe_subscription"
-  | "promotion";
+  | "promotion"
+  /** A recurring pass topped up by a paid membership period -- see memberships.mts. */
+  | "membership";
 
 const PASS_SOURCES: PassSource[] = [
   "manual",
@@ -51,6 +53,7 @@ const PASS_SOURCES: PassSource[] = [
   "optix",
   "stripe_subscription",
   "promotion",
+  "membership",
 ];
 
 export type PassAllocationView = {

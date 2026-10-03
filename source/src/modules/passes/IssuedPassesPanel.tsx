@@ -67,6 +67,7 @@ function sourceLabel(source: string) {
   if (source === "clarity_pos" || source === "pos") return t("Point of sale");
   if (source === "clarity_invoice" || source === "invoice") return t("Invoice");
   if (source === "manual") return t("Given");
+  if (source === "membership") return t("Membership");
   return source || "-";
 }
 
