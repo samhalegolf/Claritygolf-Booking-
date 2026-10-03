@@ -29,6 +29,9 @@ export interface VideoAnalysisPageProps {
   onLocalSaveComplete?: (result: VideoWorkspaceSaveResult) => void | Promise<void>;
   onSaveAndSend?: (result: VideoWorkspaceSaveResult) => Promise<void>;
   onOpenCloudSettings?: () => void;
+  storage?: VideoWorkspaceProps["storage"];
+  onConnectLocalFolder?: VideoWorkspaceProps["onConnectLocalFolder"];
+  onConnectCloud?: VideoWorkspaceProps["onConnectCloud"];
   onChoosePlayerForSave?: VideoWorkspaceProps["onChoosePlayerForSave"];
   onSaveNote?: (text: string) => boolean | void | Promise<boolean | void>;
   autoStartLiveRecording?: boolean;

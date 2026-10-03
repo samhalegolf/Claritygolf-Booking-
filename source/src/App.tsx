@@ -209,6 +209,7 @@ import type {
   VideoWorkspaceNavigationContext,
   VideoWorkspacePlayerChoice,
   VideoWorkspaceSaveResult,
+  VideoWorkspaceStorage,
 } from "./modules/video-analysis";
 import {
   createIndexedDbVideoStore,
@@ -7556,6 +7557,16 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   const googleCalendarSyncEnabled = canUseFeature(activeAccount, "googleCalendarSync");
   const localStorageHealth = getLocalStorageHealth(managedLocalLibraryStatus);
   const clarityCloudHealth = getClarityCloudHealth(googleDriveTransfer);
+  const videoWorkspaceStorage: VideoWorkspaceStorage = {
+    cloudConnected: isClarityCloudOperational(clarityCloudHealth),
+    localFolder: !managedLocalLibraryStatus.supported
+      ? "unsupported"
+      : !managedLocalLibraryStatus.configured
+        ? "not-chosen"
+        : managedLocalLibraryStatus.health === "healthy"
+          ? "connected"
+          : "reconnect",
+  };
   const localStoragePrimaryAction = "action" in localStorageHealth ? localStorageHealth.action : undefined;
   const clarityCloudPrimaryAction = "action" in clarityCloudHealth ? clarityCloudHealth.action : undefined;
   const automaticCloudUploadCandidates = useMemo(() => {
@@ -12747,7 +12758,12 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
       });
       return;
     }
-    setToast({ message: t("Saved safely on this device. Clarity will upload it when Cloud is available.") });
+    setToast({
+      message:
+        result.reason === "my-library-save"
+          ? t("Saved permanently to My Library.")
+          : t("Saved safely on this device. Clarity will upload it when Cloud is available."),
+    });
   }
 
   async function renameSavedVideo(item: SavedVideoItem) {
@@ -13232,6 +13248,14 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     } finally {
       refreshSavedVideoLibrary();
     }
+  }
+
+  /** Video Analysis asked for a My Library folder before saving. True once it is usable. */
+  async function connectMyLibraryForVideoSave() {
+    await runManagedLibraryAction(managedLocalLibraryStatus.health === "permission-lost" ? "reconnect" : "choose");
+    const status = await getManagedLocalVideoLibraryStatus().catch(() => defaultManagedLocalLibraryStatus);
+    setManagedLocalLibraryStatus(status);
+    return status.health === "healthy";
   }
 
   async function runLocalStorageHealthAction(action?: LocalStorageAction) {
@@ -27082,6 +27106,9 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
                   setActiveView("settings");
                   setSettingsTab(isPlatformAdmin ? "admin" : "developer");
                 }}
+                storage={videoWorkspaceStorage}
+                onConnectLocalFolder={connectMyLibraryForVideoSave}
+                onConnectCloud={() => void connectGoogleDriveTransfer()}
                 onChoosePlayerForSave={chooseVideoSavePlayer}
               />
             </Suspense>
