@@ -22,6 +22,7 @@
 
 import { publicSnapshots, type PublicSnapshot } from "./swing-review-snapshots.mts";
 import { cleanMessageLanguage, messageText } from "./message-language.mts";
+import type { ReviewBlock } from "./review-document.mts";
 
 const text = (value: unknown, max = 600) => String(value ?? "").trim().slice(0, max);
 
@@ -126,6 +127,11 @@ export type ReviewShareVideo = {
 };
 
 export type ReviewSharePayload = {
+  /** The page's own title, when the coach gave it one. */
+  title: string;
+  /** The page as the coach laid it out. Empty for a review sent before pages
+   *  existed, which the share page then shows part by part as it always did. */
+  blocks: ReviewBlock[];
   playerName: string;
   coachName: string;
   businessName: string;

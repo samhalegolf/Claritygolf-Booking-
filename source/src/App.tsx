@@ -82,6 +82,7 @@ import type { IconComponent } from "./modules/shared/ClarityIcons";
 import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "./modules/auth/apiFetch";
 import { SnapshotFrameViewer, type FrameViewerShot } from "./modules/shared/SnapshotFrameViewer";
+import type { SheetVideo } from "./modules/swing-review/SwingReviewSheet";
 import type { Session } from "./modules/auth/session";
 import type { TillLesson } from "./modules/billing/tillLessons";
 import { WORKSPACE_ACCOUNTS_STORAGE_KEY } from "./modules/shared/workspaceStorage";
@@ -185,6 +186,24 @@ import {
 } from "../netlify/functions/_shared/notification-templates.mts";
 import type { NotificationTemplates } from "../netlify/functions/_shared/notification-templates.mts";
 import { cleanMessageLanguage } from "../netlify/functions/_shared/message-language.mts";
+import {
+  drillToBlock,
+  reviewBlockVideoIds,
+  type ReviewBlock,
+  type ReviewDocument,
+  type ReviewDrillBlock,
+} from "../netlify/functions/_shared/review-document.mts";
+import {
+  DRILL_LESSON_PREFIX,
+  DRILL_LIBRARY_PLAYER_ID,
+  discardReviewDocument,
+  fetchDrills,
+  fetchReviewDocuments,
+  newBlockId,
+  saveDrill,
+  saveReviewDocument,
+  type Drill,
+} from "./modules/swing-review/reviewDocumentApi";
 import {
   cleanPlayerBookingEmbedHeight,
   cleanPlayerBookingEmbedIntro,
@@ -351,6 +370,13 @@ import { t, tn } from "./lib/i18n";
 // /book-a-lesson page and the initial admin paint from downloading them.
 const VideoAnalysisPage = lazy(() =>
   import("./modules/video-analysis/VideoAnalysisPage").then((module) => ({ default: module.VideoAnalysisPage })),
+);
+// A swing review's page, and the drill library it draws on.
+const SwingReviewSheet = lazy(() =>
+  import("./modules/swing-review/SwingReviewSheet").then((module) => ({ default: module.SwingReviewSheet })),
+);
+const DrillLibrary = lazy(() =>
+  import("./modules/swing-review/DrillLibrary").then((module) => ({ default: module.DrillLibrary })),
 );
 // The overhead-camera putting gate. Camera, worker and engine load only when a
 // coach opens it.
@@ -5844,6 +5870,28 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   /** The Practice tab lists blocks; this flips it to the module's own composer. */
   const [playerPracticeComposer, setPlayerPracticeComposer] = useState(false);
   const [openSwingReviewId, setOpenSwingReviewId] = useState<string | null>(null);
+  /* A review's laid-out page, by lesson id. Kept here rather than in the sheet
+   * because the page is edited from outside it too: a video saved in the
+   * workspace lands on it, and so does a drill picked from the library. */
+  const [reviewDocuments, setReviewDocuments] = useState<Record<string, ReviewDocument>>({});
+  const reviewDocumentsRef = useRef(reviewDocuments);
+  reviewDocumentsRef.current = reviewDocuments;
+  const [reviewSaveStates, setReviewSaveStates] = useState<Record<string, "idle" | "saving" | "saved" | "error">>({});
+  const reviewSaveTimers = useRef<Record<string, { timer: number; save: () => Promise<void> }>>({});
+  /** Where the next video saved for a review goes: a position on its page, or
+   *  into a drill block as that drill's own copy. */
+  const reviewInsertRef = useRef<{ lessonId: string; index: number; drillBlockId?: string } | null>(null);
+  /** A review to open once the player profile has switched to its player. */
+  const reviewToOpenRef = useRef<string | null>(null);
+  const [drillLibraryOpen, setDrillLibraryOpen] = useState<{ lessonId?: string; index?: number; editId?: string } | null>(null);
+  /** The drill whose video is being recorded, and where to come back to. */
+  const drillVideoRef = useRef<{
+    drill: Drill;
+    returnTo: Pick<Person, "id" | "name"> | null;
+    lessonId?: string;
+    index?: number;
+  } | null>(null);
+  const drillCacheRef = useRef<Map<string, Drill>>(new Map());
   /** The screenshot being looked at in its video, and the review it belongs to. */
   const [snapshotFrameView, setSnapshotFrameView] = useState<{ reviewId: string; key: string } | null>(null);
   // The review currently being sent, and the link the last send produced. The
@@ -5878,6 +5926,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     startRecording?: boolean;
     lessonId?: string;
     lessonTitle?: string;
+    initialVideoFile?: File;
   } | null>(null);
   const [playerProfilesLocal, setPlayerProfilesLocal] = useState<PlayerProfilesLocalState>(() => ({
     manualIds: [],
@@ -9894,6 +9943,11 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
       ...notesWorkspaceLessonNotes
         .map((note) => note.lessonId)
         .filter((id) => id.startsWith("swing-review-")),
+      // A page can exist before anything else does: a review just started, or
+      // one that is all notes and links.
+      ...Object.values(reviewDocuments)
+        .filter((document) => notesWorkspaceClient && document.playerId === notesWorkspaceClient.id)
+        .map((document) => document.lessonId),
     ]);
     return [...reviewIds]
       .filter(Boolean)
@@ -9909,7 +9963,8 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
           ...videos.map((video) => video.capturedAt || video.createdAt),
           ...cloudVideos.map((video) => video.savedVideo?.createdAt || ""),
           ...notes.map((note) => note.createdAt),
-        ].filter(Boolean).sort().at(-1) || "";
+          reviewDocuments[id]?.updatedAt || "",
+        ].filter(Boolean).sort().at(-1) || new Date(Number(id.slice("swing-review-".length)) || 0).toISOString();
         return {
           id,
           at,
@@ -9930,7 +9985,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
         };
       })
       .sort((left, right) => right.at.localeCompare(left.at));
-  }, [notesWorkspaceLessonNotes, playerPracticeBlocks, playerToolCloudVideos, playerToolVideos]);
+  }, [notesWorkspaceClient, notesWorkspaceLessonNotes, playerPracticeBlocks, playerToolCloudVideos, playerToolVideos, reviewDocuments]);
 
   /* Opening a review fills in pictures this copy is missing: a video imported
    * from the cloud before pictures travelled with it arrived with captions and
@@ -12625,6 +12680,8 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     startRecording?: boolean;
     lessonId?: string;
     lessonTitle?: string;
+    /** A video to load as a new clip, e.g. a drill's video being copied into a review. */
+    initialVideoFile?: File;
   }) {
     setVideoContext({
       playerId: client.id,
@@ -12634,6 +12691,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
       startRecording: client.startRecording,
       lessonId: client.lessonId,
       lessonTitle: client.lessonTitle,
+      initialVideoFile: client.initialVideoFile,
     });
     setActiveView("video");
     closeClientModal();
@@ -12641,14 +12699,271 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     closeCalendarDetails();
   }
 
+  /* --- Swing review pages ---------------------------------------------------
+   *
+   * A review starts as an empty page on the player's profile, laid out like
+   * the finished thing, with a + to choose what comes first. Videos, notes,
+   * links and drills are added from there; see modules/swing-review.
+   * ----------------------------------------------------------------------- */
+
+  function reviewLessonTitle(lessonId: string) {
+    const title = reviewDocumentsRef.current[lessonId]?.title;
+    const stamp = Number(lessonId.slice("swing-review-".length));
+    return title || `${t("Swing review")} · ${new Date(stamp || Date.now()).toLocaleDateString(activeLocale())}`;
+  }
+
+  /** Change a review's page now, and save it a moment later. Typing does not
+   *  send a request per keystroke; the last edit in a burst is the one saved. */
+  function updateReviewDocument(
+    lessonId: string,
+    playerId: string,
+    next: { title: string; blocks: ReviewBlock[] },
+    options: { immediate?: boolean } = {},
+  ) {
+    const previous = reviewDocumentsRef.current[lessonId];
+    const now = new Date().toISOString();
+    const document: ReviewDocument = {
+      lessonId,
+      playerId,
+      title: next.title,
+      blocks: next.blocks,
+      sentAt: previous?.sentAt || "",
+      createdAt: previous?.createdAt || now,
+      updatedAt: now,
+    };
+    reviewDocumentsRef.current = { ...reviewDocumentsRef.current, [lessonId]: document };
+    setReviewDocuments(reviewDocumentsRef.current);
+    setReviewSaveStates((current) => ({ ...current, [lessonId]: "saving" }));
+    const pending = reviewSaveTimers.current[lessonId];
+    if (pending) window.clearTimeout(pending.timer);
+    const save = async () => {
+      delete reviewSaveTimers.current[lessonId];
+      try {
+        await saveReviewDocument({ lessonId, playerId, title: next.title, blocks: next.blocks });
+        setReviewSaveStates((current) => ({ ...current, [lessonId]: "saved" }));
+      } catch {
+        setReviewSaveStates((current) => ({ ...current, [lessonId]: "error" }));
+      }
+    };
+    reviewSaveTimers.current[lessonId] = {
+      timer: window.setTimeout(() => void save(), options.immediate ? 0 : 700),
+      save,
+    };
+  }
+
+  /** Save a waiting edit straight away -- before sending, the page the player
+   *  gets has to be the page on screen. */
+  async function flushReviewDocument(lessonId: string) {
+    const pending = reviewSaveTimers.current[lessonId];
+    if (!pending) return;
+    window.clearTimeout(pending.timer);
+    await pending.save();
+  }
+
+  /** The page as the sheet shows it. A review from before pages existed has
+   *  none, so its videos are laid out in turn until the coach first edits it;
+   *  from then on the page is the coach's, and a video taken off it stays off. */
+  function reviewDisplayBlocks(lessonId: string, savedVideoIds: string[]): ReviewBlock[] {
+    const document = reviewDocumentsRef.current[lessonId];
+    if (document) return document.blocks;
+    return savedVideoIds
+      .filter(Boolean)
+      .map((savedVideoId): ReviewBlock => ({ id: `v-${savedVideoId}`, type: "video", savedVideoId }));
+  }
+
   function startSwingReviewForClient(client: Pick<Person, "id" | "name" | "email" | "phone">) {
-    const startedAt = new Date();
+    const lessonId = `swing-review-${Date.now()}`;
+    updateReviewDocument(lessonId, client.id, { title: "", blocks: [] }, { immediate: true });
+    if (notesContext?.playerId === client.id) setOpenSwingReviewId(lessonId);
+    else reviewToOpenRef.current = lessonId;
+    selectPlayerProfileTool(client, "reviews");
+    setActiveView("players");
+    closeClientModal();
+    setQuickCreate(null);
+    closeCalendarDetails();
+  }
+
+  /** A review started and left empty goes, rather than sitting in the list. */
+  async function discardEmptyReview(lessonId: string) {
+    const pending = reviewSaveTimers.current[lessonId];
+    if (pending) {
+      window.clearTimeout(pending.timer);
+      delete reviewSaveTimers.current[lessonId];
+    }
+    try {
+      await discardReviewDocument(lessonId);
+      const { [lessonId]: _discarded, ...rest } = reviewDocumentsRef.current;
+      reviewDocumentsRef.current = rest;
+      setReviewDocuments(rest);
+      setOpenSwingReviewId(null);
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : t("Could not discard this review.") });
+    }
+  }
+
+  /** Record or pick a video for a review. It lands at `index` on the page once saved. */
+  function addVideoToReview(lessonId: string, client: Pick<Person, "id" | "name" | "email" | "phone">, index: number) {
+    reviewInsertRef.current = { lessonId, index };
     openVideoAnalysisForClient({
       id: preferredVideoPlayerId(client, videoPlayerIds),
       name: client.name,
-      lessonId: `swing-review-${startedAt.getTime()}`,
-      lessonTitle: `Swing review · ${startedAt.toLocaleDateString(activeLocale())}`,
+      lessonId,
+      lessonTitle: reviewLessonTitle(lessonId),
     });
+  }
+
+  /** Videos just saved under a review, placed on its page. */
+  function placeSavedVideosInReview(lessonId: string, savedItems: SavedVideoItem[]) {
+    const target = reviewInsertRef.current?.lessonId === lessonId ? reviewInsertRef.current : null;
+    reviewInsertRef.current = null;
+    const document = reviewDocumentsRef.current[lessonId];
+    // No page yet: an older review, which shows every video it holds anyway.
+    if (!document) return;
+    const blocks = [...document.blocks];
+    const placed = new Set(reviewBlockVideoIds(blocks));
+    const fresh = savedItems.map((item) => item.savedVideoId).filter((id) => !placed.has(id));
+    if (!fresh.length) return;
+    if (target?.drillBlockId) {
+      // The drill's own copy: it fills the drill block it was made for.
+      const at = blocks.findIndex((block) => block.id === target.drillBlockId);
+      const drill = blocks[at];
+      if (at >= 0 && drill.type === "drill") {
+        blocks[at] = { ...drill, savedVideoId: fresh.shift() || "" };
+      }
+    }
+    // Saved without a + to place it (a second angle, say): it goes at the end.
+    const index = target && target.index >= 0 ? Math.min(target.index, blocks.length) : blocks.length;
+    blocks.splice(
+      index,
+      0,
+      ...fresh.map((savedVideoId): ReviewBlock => ({ id: newBlockId(), type: "video", savedVideoId })),
+    );
+    updateReviewDocument(lessonId, document.playerId, { title: document.title, blocks }, { immediate: true });
+  }
+
+  async function findDrill(drillId: string): Promise<Drill | null> {
+    const cached = drillCacheRef.current.get(drillId);
+    if (cached) return cached;
+    const drills = await fetchDrills().catch(() => [] as Drill[]);
+    drills.forEach((drill) => drillCacheRef.current.set(drill.id, drill));
+    return drillCacheRef.current.get(drillId) || null;
+  }
+
+  /** A drill picked from the library, dropped onto the page as the review's
+   *  own copy. A drill with its own video goes straight into the workspace so
+   *  the coach can snapshot it for this player. */
+  function placeDrillInReview(lessonId: string, client: Pick<Person, "id" | "name" | "email" | "phone">, index: number, drill: Drill) {
+    drillCacheRef.current.set(drill.id, drill);
+    setDrillLibraryOpen(null);
+    const document = reviewDocumentsRef.current[lessonId];
+    const blocks = [...(document?.blocks || [])];
+    const block = drillToBlock(drill, newBlockId());
+    blocks.splice(Math.min(index, blocks.length), 0, block);
+    updateReviewDocument(lessonId, client.id, { title: document?.title || "", blocks }, { immediate: true });
+    if (!drill.youtubeId && drill.savedVideoId) void makeDrillCopy(lessonId, client, block);
+  }
+
+  async function makeDrillCopy(
+    lessonId: string,
+    client: Pick<Person, "id" | "name" | "email" | "phone">,
+    block: ReviewDrillBlock,
+  ) {
+    const drill = await findDrill(block.drillId);
+    if (!drill?.savedVideoId) {
+      setToast({ message: t("This drill has no video of its own.") });
+      return;
+    }
+    setToast({ message: t("Opening the drill video…") });
+    let blob = await savedVideoLibraryRef.current?.getBlob(drill.savedVideoId).catch(() => null);
+    if (!blob) {
+      const response = await apiFetch(`/api/video-transfer/${encodeURIComponent(drill.savedVideoId)}/download`).catch(() => null);
+      blob = response?.ok ? await response.blob().catch(() => null) : null;
+    }
+    if (!blob) {
+      setToast({ message: t("The drill's video is not on this device or in Clarity Cloud yet.") });
+      return;
+    }
+    const type = blob.type && blob.type.startsWith("video/") ? blob.type : "video/mp4";
+    const file = new File([blob], `${drill.title || t("Drill")}.${type.includes("quicktime") ? "mov" : type.split("/")[1] || "mp4"}`, { type });
+    reviewInsertRef.current = { lessonId, index: -1, drillBlockId: block.id };
+    openVideoAnalysisForClient({
+      id: preferredVideoPlayerId(client, videoPlayerIds),
+      name: client.name,
+      lessonId,
+      lessonTitle: reviewLessonTitle(lessonId),
+      initialVideoFile: file,
+    });
+  }
+
+  /** Record or upload a library drill's own video, filed outside any player. */
+  function recordDrillVideo(drill: Drill) {
+    drillVideoRef.current = {
+      drill,
+      returnTo: notesWorkspaceClient ? { id: notesWorkspaceClient.id, name: notesWorkspaceClient.name } : null,
+      lessonId: drillLibraryOpen?.lessonId,
+      index: drillLibraryOpen?.index,
+    };
+    setDrillLibraryOpen(null);
+    openVideoAnalysisForClient({
+      id: DRILL_LIBRARY_PLAYER_ID,
+      name: t("Drill library"),
+      lessonId: `${DRILL_LESSON_PREFIX}${drill.id}`,
+      lessonTitle: drill.title,
+    });
+  }
+
+  /** Back from recording a drill's video: to the review (or profile) it was
+   *  started from, with the library open again on that drill. */
+  function returnFromDrillVideo(drillId: string) {
+    const origin = drillVideoRef.current;
+    drillVideoRef.current = null;
+    setVideoContext(null);
+    if (origin?.returnTo) {
+      if (origin.lessonId) {
+        if (notesContext?.playerId === origin.returnTo.id) setOpenSwingReviewId(origin.lessonId);
+        else reviewToOpenRef.current = origin.lessonId;
+      }
+      selectPlayerProfileTool(origin.returnTo, "reviews");
+    }
+    setActiveView("players");
+    setDrillLibraryOpen({ lessonId: origin?.lessonId, index: origin?.index, editId: drillId });
+  }
+
+  async function handleDrillVideoSaved(result: VideoWorkspaceSaveResult) {
+    const drillId = (result.lessonId || "").slice(DRILL_LESSON_PREFIX.length);
+    const item = result.savedItems[0];
+    const drill = drillVideoRef.current?.drill.id === drillId ? drillVideoRef.current.drill : await findDrill(drillId);
+    setSavedVideoItems((current) => mergeSavedVideoItems(current, result.savedItems));
+    refreshSavedVideoLibrary();
+    if (drill && item) {
+      try {
+        const saved = await saveDrill(
+          {
+            title: drill.title,
+            notes: drill.notes,
+            youtubeUrl: "",
+            start: 0,
+            end: null,
+            savedVideoId: item.savedVideoId,
+            thumbnailDataUrl: item.thumbnailDataUrl || "",
+            authorName: drill.authorName || coachAccount.coachName,
+          },
+          drill.id,
+        );
+        drillCacheRef.current.set(saved.id, saved);
+      } catch (error) {
+        setToast({ message: error instanceof Error ? error.message : t("Could not save this drill.") });
+      }
+    }
+    returnFromDrillVideo(drillId);
+    if (isClarityCloudOperational(clarityCloudHealth)) {
+      void startSavedVideoCloudTransfers(result.savedItems).catch(() => {
+        // The transfer helper surfaces its own feedback; the device copy is safe.
+      });
+      setToast({ message: t("Drill video saved. Uploading to Clarity Cloud so the team can use it.") });
+    } else {
+      setToast({ message: t("Drill video saved on this device. Connect Clarity Cloud so the rest of the team can use it.") });
+    }
   }
 
   // Straight from a booking into a fresh camera recording for that player.
@@ -12722,14 +13037,26 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   }
 
   function returnToPlayerProfileVideos(context: VideoWorkspaceNavigationContext) {
+    if (context.lessonId?.startsWith(DRILL_LESSON_PREFIX)) {
+      returnFromDrillVideo(context.lessonId.slice(DRILL_LESSON_PREFIX.length));
+      return;
+    }
+    // Backing out without saving places nothing.
+    if (context.reason === "toolbar-back") reviewInsertRef.current = null;
     setVideoContext(null);
     setQuickCreate(null);
     closeClientModal();
     closeCalendarDetails();
     if (context.hasPlayerContext && context.playerId) {
+      const reviewId = context.lessonId?.startsWith("swing-review-") ? context.lessonId : "";
+      // Back to the review it came from, open.
+      if (reviewId) {
+        if (notesContext?.playerId === context.playerId) setOpenSwingReviewId(reviewId);
+        else reviewToOpenRef.current = reviewId;
+      }
       selectPlayerProfileTool(
         { id: context.playerId, name: context.playerName || context.playerId },
-        context.lessonId?.startsWith("swing-review-") ? "reviews" : "videos",
+        reviewId ? "reviews" : "videos",
       );
       setActiveView("players");
       return;
@@ -12743,6 +13070,11 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   }
 
   async function handleVideoAnalysisLocalSaveComplete(result: VideoWorkspaceSaveResult) {
+    if (result.lessonId?.startsWith(DRILL_LESSON_PREFIX)) {
+      await handleDrillVideoSaved(result);
+      return;
+    }
+    if (result.lessonId?.startsWith("swing-review-")) placeSavedVideosInReview(result.lessonId, result.savedItems);
     setSavedVideoItems((current) => mergeSavedVideoItems(current, result.savedItems));
     refreshSavedVideoLibrary();
     returnToPlayerProfileVideos(result);
@@ -13031,13 +13363,19 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     );
     if (note === null) return;
     const message = note.trim();
+    // The page the player gets is the page on screen, and a video taken off
+    // the page is not sent.
+    await flushReviewDocument(review.id);
+    const page = reviewDocumentsRef.current[review.id];
+    const onPage = page ? new Set(reviewBlockVideoIds(page.blocks)) : null;
+    const videos = onPage ? review.videos.filter((video) => onPage.has(video.savedVideoId)) : review.videos;
 
     setSendingSwingReviewId(review.id);
     try {
       let picturesPending = 0;
       let analysisPending = false;
-      for (const video of review.videos) {
-        setToast({ message: review.videos.length > 1 ? t("Sending videos…") : t("Sending video…") });
+      for (const video of videos) {
+        setToast({ message: videos.length > 1 ? t("Sending videos…") : t("Sending video…") });
         const sent = await saveSavedVideoToCloud(video.savedVideoId, store, {
           onProgress: () => refreshSavedVideoLibrary(),
           returnToPlayer: true,
@@ -13081,6 +13419,13 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
         throw new Error(result.message || t("Could not send this review."));
       }
       setSentSwingReviewLink(result.shareUrl ? { id: review.id, url: result.shareUrl } : null);
+      if (page) {
+        reviewDocumentsRef.current = {
+          ...reviewDocumentsRef.current,
+          [review.id]: { ...page, sentAt: new Date().toISOString() },
+        };
+        setReviewDocuments(reviewDocumentsRef.current);
+      }
       setToast({
         message:
           (result.emailed
@@ -19972,8 +20317,35 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     setPlayerPracticeLoadState("idle");
     setPlayerTransactions([]);
     setPlayerTransactionsLoadState("idle");
-    setOpenSwingReviewId(null);
+    setOpenSwingReviewId(reviewToOpenRef.current);
+    reviewToOpenRef.current = null;
   }, [notesContext?.playerId]);
+
+  // The review pages for whoever the profile is open on. A page with an edit
+  // still waiting to save keeps the local copy: the server's is older.
+  useEffect(() => {
+    const playerId = notesWorkspaceClient?.id;
+    if (!playerId || playerProfileTool !== "reviews") return;
+    let cancelled = false;
+    fetchReviewDocuments(playerId)
+      .then((documents) => {
+        if (cancelled) return;
+        setReviewDocuments((current) => {
+          const next = { ...current };
+          for (const document of documents) {
+            if (!reviewSaveTimers.current[document.lessonId]) next[document.lessonId] = document;
+          }
+          return next;
+        });
+      })
+      .catch(() => {
+        // The parts still show without their page; the sheet lays them out
+        // in their default order until the next load works.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [notesWorkspaceClient?.id, playerProfileTool]);
 
   // A customer cell that opens the client's profile when the transaction is
   // linked to a real client, and falls back to plain text when it is not.
@@ -25757,12 +26129,16 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
                                       <strong><ClarityAssessments size={16} />{t("Swing reviews")}</strong>
                                       <span>{tn(playerSwingReviewGroups.length, "{count} review · videos, screenshot notes and practice", "{count} reviews · videos, screenshot notes and practice")}</span>
                                     </div>
-                                    <button
-                                      type="button"
-                                      className="primary-button"
-                                      onClick={() => startSwingReviewForClient(notesWorkspaceClient)}
-                                    >
-                                      <ImagePlus size={15} />{t("New swing review")}</button>
+                                    <span className="swing-review-header-actions">
+                                      <button type="button" className="outline-button" onClick={() => setDrillLibraryOpen({})}>
+                                        <ClarityLessonsProgrammes size={15} />{t("Drill library")}</button>
+                                      <button
+                                        type="button"
+                                        className="primary-button"
+                                        onClick={() => startSwingReviewForClient(notesWorkspaceClient)}
+                                      >
+                                        <ImagePlus size={15} />{t("New swing review")}</button>
+                                    </span>
                                   </div>
                                   {playerPracticeLoadState === "loading" ? (
                                     <Loading what={t("swing reviews")} className="player-tool-card-empty" />
@@ -25775,7 +26151,9 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
                                         review.notes.length +
                                         review.analysisNotes.length +
                                         review.screenshots.length +
-                                        review.practice.length;
+                                        review.practice.length +
+                                        (reviewDocuments[review.id]?.blocks.filter((block) => block.type !== "video").length || 0);
+                                      const reviewTitle = reviewDocuments[review.id]?.title || "";
                                       return (
                                         <article className={`swing-review-record${expanded ? " is-expanded" : ""}`} key={review.id}>
                                           <button
@@ -25789,146 +26167,164 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
                                               {profileWhenParts(review.at).time ? <><br /><span>{profileWhenParts(review.at).time}</span></> : null}
                                             </span>
                                             <span className="player-tool-row-main">
-                                              <strong>{t("Swing review")}</strong>
+                                              <strong>{reviewTitle || t("Swing review")}</strong>
                                               <span>{tn(totalItems, "{count} item in this review file", "{count} items in this review file")}</span>
                                             </span>
                                             {expanded ? <ChevronUp size={17} /> : <ChevronDown size={17} />}
                                           </button>
-                                          {expanded ? (
-                                            <div className="swing-review-record-body">
-                                              {review.videos.map((video) => (
-                                                <button
-                                                  type="button"
-                                                  className="swing-review-video"
-                                                  key={video.savedVideoId}
-                                                  onClick={() => openVideoAnalysisForClient({
-                                                    id: preferredVideoPlayerId(notesWorkspaceClient, videoPlayerIds),
-                                                    name: notesWorkspaceClient.name,
-                                                    savedVideoId: video.savedVideoId,
-                                                    lessonId: review.id,
-                                                    lessonTitle: "Swing review",
-                                                  })}
-                                                >
-                                                  {video.thumbnailDataUrl ? <img src={video.thumbnailDataUrl} alt="" /> : <ClarityVideoAnalysis size={22} />}
-                                                  <span><strong>{video.title}</strong><small>{t("Review video")}</small></span>
-                                                </button>
-                                              ))}
-                                              {review.cloudVideos.map((video) => (
-                                                <button
-                                                  type="button"
-                                                  className="swing-review-video"
-                                                  key={video.savedVideoId || video.savedVideo?.savedVideoId}
-                                                  onClick={() => openVideoAnalysisForClient({
-                                                    id: preferredVideoPlayerId(notesWorkspaceClient, videoPlayerIds),
-                                                    name: notesWorkspaceClient.name,
-                                                    savedVideoId: video.savedVideoId || video.savedVideo?.savedVideoId,
-                                                    lessonId: review.id,
-                                                    lessonTitle: "Swing review",
-                                                  })}
-                                                >
-                                                  <Cloud size={22} />
-                                                  <span><strong>{video.savedVideo?.title || t("Cloud video")}</strong><small>{t("Clarity Cloud")}</small></span>
-                                                </button>
-                                              ))}
-                                              {review.screenshots.length ? (
-                                                <div className="swing-review-screenshots">
-                                                  {review.screenshots.map((snapshot) => (
-                                                    <figure key={`${snapshot.savedVideoId}-${snapshot.id}`}>
-                                                      <button
-                                                        type="button"
-                                                        className="swing-review-screenshot-open"
-                                                        onClick={() =>
-                                                          setSnapshotFrameView({
-                                                            reviewId: review.id,
-                                                            key: `${snapshot.savedVideoId}-${snapshot.id}`,
-                                                          })
-                                                        }
-                                                        aria-label={t("Show {title} in the video", { title: snapshot.title })}
-                                                      >
-                                                        {snapshot.imageDataUrl ? <img src={snapshot.imageDataUrl} alt={snapshot.title} /> : <div className="swing-review-image-missing"><ImagePlus size={20} /></div>}
-                                                        <span className="swing-review-screenshot-jump">
-                                                          <ClarityVideoAnalysis size={13} />{t("View in video · {currentTime}s", { currentTime: snapshot.currentTime.toFixed(2) })}</span>
-                                                      </button>
-                                                      <figcaption>
-                                                        <strong>{snapshot.title}</strong>
-                                                        <span>{snapshot.note || t("Captured at {currentTime}s", { currentTime: snapshot.currentTime.toFixed(2) })}</span>
-                                                      </figcaption>
-                                                    </figure>
-                                                  ))}
-                                                </div>
-                                              ) : null}
-                                              {snapshotFrameView?.reviewId === review.id ? (
-                                                <SnapshotFrameViewer
-                                                  shots={review.screenshots.map((snapshot): FrameViewerShot => ({
-                                                    key: `${snapshot.savedVideoId}-${snapshot.id}`,
-                                                    savedVideoId: snapshot.savedVideoId,
-                                                    videoTitle: snapshot.videoTitle,
-                                                    title: snapshot.title,
-                                                    note: snapshot.note,
-                                                    currentTime: snapshot.currentTime,
-                                                    captureKind: snapshot.captureKind,
-                                                    cropRect: snapshot.cropRect,
-                                                    imageUrl: snapshot.imageDataUrl || undefined,
-                                                  }))}
-                                                  initialKey={snapshotFrameView.key}
-                                                  resolveVideoUrl={resolveReviewVideoUrl}
-                                                  onClose={() => setSnapshotFrameView(null)}
-                                                />
-                                              ) : null}
-                                              {[...review.notes.map((note) => ({ id: note.id, text: note.body, label: note.title })), ...review.analysisNotes.map((note) => ({ id: note.id, text: note.text, label: note.videoTitle }))].map((note) => (
-                                                <div className="swing-review-note" key={note.id}>
-                                                  <ClarityBookingPages size={15} />
-                                                  <div><strong>{note.label || t("Review note")}</strong><p>{note.text}</p></div>
-                                                </div>
-                                              ))}
-                                              {review.practice.map((block) => (
-                                                <div className="swing-review-note is-practice" key={block.id}>
-                                                  <ClarityLessonsProgrammes size={15} />
-                                                  <div><strong>{block.title}</strong><p>{block.content}</p><span>{block.status} · {block.dose}</span></div>
-                                                </div>
-                                              ))}
-                                              {/* What a coach does when the review is finished. It
-                                                * lives at the bottom of the open record rather than
-                                                * on the collapsed row, because sending is the last
-                                                * thing you do and the row is the thing you scan. */}
-                                              <div className="swing-review-record-actions">
-                                                <button
-                                                  type="button"
-                                                  className="primary-button"
-                                                  disabled={sendingSwingReviewId === review.id}
-                                                  onClick={() =>
-                                                    void sendSwingReviewToPlayer(review, notesWorkspaceClient)
-                                                  }
-                                                >
-                                                  <Send size={15} />
-                                                  {sendingSwingReviewId === review.id
-                                                    ? t("Sending…")
-                                                    : sentSwingReviewLink?.id === review.id
-                                                      ? t("Send again")
-                                                      : t("Send to player")}
-                                                </button>
-                                                {/* Only after a send, and only for that review: the
-                                                  * raw token exists in the send's response and
-                                                  * nowhere else, so there is no link to copy until
-                                                  * one has been minted in this session. */}
-                                                {sentSwingReviewLink?.id === review.id ? (
-                                                  <button
-                                                    type="button"
-                                                    className="outline-button"
-                                                    onClick={() => {
-                                                      void navigator.clipboard
-                                                        ?.writeText(sentSwingReviewLink.url)
-                                                        .then(() => setToast({ message: t("Viewing link copied.") }))
-                                                        .catch(() =>
-                                                          setToast({ message: t("Could not copy the link.") }),
-                                                        );
+                                          {expanded ? (() => {
+                                            const client = notesWorkspaceClient;
+                                            const savedIds = [
+                                              ...review.videos.map((video) => video.savedVideoId),
+                                              ...review.cloudVideos.map((video) => video.savedVideoId || video.savedVideo?.savedVideoId || ""),
+                                            ];
+                                            const document = reviewDocuments[review.id];
+                                            const displayBlocks = reviewDisplayBlocks(review.id, savedIds);
+                                            // A position on the page has to mean the same thing
+                                            // to the sheet and to whatever lands there later, so
+                                            // videos it was only showing are written in first.
+                                            const settlePage = () => {
+                                              if (!document) {
+                                                updateReviewDocument(review.id, client.id, { title: "", blocks: displayBlocks }, { immediate: true });
+                                              }
+                                            };
+                                            const sheetVideos: Record<string, SheetVideo> = {};
+                                            for (const video of review.videos) {
+                                              sheetVideos[video.savedVideoId] = {
+                                                savedVideoId: video.savedVideoId,
+                                                title: video.title,
+                                                thumbnailDataUrl: video.thumbnailDataUrl,
+                                                duration: video.source.duration,
+                                                snapshots: (video.analysisSnapshot.focusSnapshots || []).map((snapshot) => ({
+                                                  id: snapshot.id,
+                                                  title: snapshot.title,
+                                                  note: snapshot.note,
+                                                  currentTime: snapshot.currentTime,
+                                                  imageDataUrl: snapshot.imageDataUrl || undefined,
+                                                })),
+                                                notes: (video.analysisSnapshot.notes || []).map((note) => ({ id: note.id, text: note.text, time: note.time })),
+                                              };
+                                            }
+                                            for (const video of review.cloudVideos) {
+                                              const id = video.savedVideoId || video.savedVideo?.savedVideoId || "";
+                                              if (!id || sheetVideos[id]) continue;
+                                              sheetVideos[id] = {
+                                                savedVideoId: id,
+                                                title: video.savedVideo?.title || t("Cloud video"),
+                                                cloudOnly: true,
+                                                snapshots: [],
+                                                notes: [],
+                                              };
+                                            }
+                                            return (
+                                              <div className="swing-review-record-body">
+                                                <Suspense fallback={<Loading what={t("swing review")} />}>
+                                                  <SwingReviewSheet
+                                                    businessName={coachAccount.businessName}
+                                                    logoUrl={brandSettings.showLogo ? brandSettings.logoPreview : ""}
+                                                    coachName={coachAccount.coachName}
+                                                    playerName={client.name}
+                                                    reviewAt={review.at}
+                                                    title={document?.title || ""}
+                                                    blocks={displayBlocks}
+                                                    onChange={(next) => updateReviewDocument(review.id, client.id, next)}
+                                                    saveState={reviewSaveStates[review.id] || "idle"}
+                                                    videos={sheetVideos}
+                                                    sessionNotes={review.notes.map((note) => ({ id: note.id, label: note.title || t("Review note"), text: note.body }))}
+                                                    practice={review.practice.map((block) => ({
+                                                      id: block.id,
+                                                      title: block.title,
+                                                      content: block.content,
+                                                      meta: [block.status, block.dose].filter(Boolean).join(" · "),
+                                                    }))}
+                                                    onAddVideo={(index) => {
+                                                      settlePage();
+                                                      addVideoToReview(review.id, client, index);
                                                     }}
-                                                  >
-                                                    <ClarityIntegrations size={15} />{t("Copy viewing link")}</button>
+                                                    onAddDrill={(index) => {
+                                                      settlePage();
+                                                      setDrillLibraryOpen({ lessonId: review.id, index });
+                                                    }}
+                                                    onOpenVideo={(savedVideoId) => {
+                                                      reviewInsertRef.current = null;
+                                                      openVideoAnalysisForClient({
+                                                        id: preferredVideoPlayerId(client, videoPlayerIds),
+                                                        name: client.name,
+                                                        savedVideoId,
+                                                        lessonId: review.id,
+                                                        lessonTitle: reviewLessonTitle(review.id),
+                                                      });
+                                                    }}
+                                                    onOpenSnapshot={(savedVideoId, snapshotId) =>
+                                                      setSnapshotFrameView({ reviewId: review.id, key: `${savedVideoId}-${snapshotId}` })
+                                                    }
+                                                    onMakeDrillCopy={(block) => void makeDrillCopy(review.id, client, block)}
+                                                    actions={
+                                                      displayBlocks.length === 0 && !review.notes.length && !review.practice.length && !document?.sentAt ? (
+                                                        <button type="button" className="text-button" onClick={() => void discardEmptyReview(review.id)}>
+                                                          <Trash2 size={14} />{t("Discard this empty review")}</button>
+                                                      ) : (
+                                                        <>
+                                                          <button
+                                                            type="button"
+                                                            className="primary-button"
+                                                            disabled={sendingSwingReviewId === review.id}
+                                                            onClick={() =>
+                                                              void sendSwingReviewToPlayer(review, notesWorkspaceClient)
+                                                            }
+                                                          >
+                                                            <Send size={15} />
+                                                            {sendingSwingReviewId === review.id
+                                                              ? t("Sending…")
+                                                              : sentSwingReviewLink?.id === review.id || document?.sentAt
+                                                                ? t("Send again")
+                                                                : t("Send to player")}
+                                                          </button>
+                                                          {/* Only after a send, and only for that review: the
+                                                            * raw token exists in the send's response and
+                                                            * nowhere else, so there is no link to copy until
+                                                            * one has been minted in this session. */}
+                                                          {sentSwingReviewLink?.id === review.id ? (
+                                                            <button
+                                                              type="button"
+                                                              className="outline-button"
+                                                              onClick={() => {
+                                                                void navigator.clipboard
+                                                                  ?.writeText(sentSwingReviewLink.url)
+                                                                  .then(() => setToast({ message: t("Viewing link copied.") }))
+                                                                  .catch(() =>
+                                                                    setToast({ message: t("Could not copy the link.") }),
+                                                                  );
+                                                              }}
+                                                            >
+                                                              <ClarityIntegrations size={15} />{t("Copy viewing link")}</button>
+                                                          ) : null}
+                                                        </>
+                                                      )
+                                                    }
+                                                  />
+                                                </Suspense>
+                                                {snapshotFrameView?.reviewId === review.id ? (
+                                                  <SnapshotFrameViewer
+                                                    shots={review.screenshots.map((snapshot): FrameViewerShot => ({
+                                                      key: `${snapshot.savedVideoId}-${snapshot.id}`,
+                                                      savedVideoId: snapshot.savedVideoId,
+                                                      videoTitle: snapshot.videoTitle,
+                                                      title: snapshot.title,
+                                                      note: snapshot.note,
+                                                      currentTime: snapshot.currentTime,
+                                                      captureKind: snapshot.captureKind,
+                                                      cropRect: snapshot.cropRect,
+                                                      imageUrl: snapshot.imageDataUrl || undefined,
+                                                    }))}
+                                                    initialKey={snapshotFrameView.key}
+                                                    resolveVideoUrl={resolveReviewVideoUrl}
+                                                    onClose={() => setSnapshotFrameView(null)}
+                                                  />
                                                 ) : null}
                                               </div>
-                                            </div>
-                                          ) : null}
+                                            );
+                                          })() : null}
                                         </article>
                                       );
                                     })
@@ -27088,6 +27484,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
                 savedVideoId={videoContext?.savedVideoId}
                 pairedSavedVideoId={videoContext?.pairedSavedVideoId}
                 autoStartLiveRecording={videoContext?.startRecording}
+                initialVideoFile={videoContext?.initialVideoFile}
                 savedVideoLibrary={savedVideoLibraryRef.current}
                 libraryPlayers={videoLibraryPlayers}
                 onSavedVideoLibraryChange={refreshSavedVideoLibrary}
@@ -31749,6 +32146,23 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
             {selectedDetails}
           </aside>
         </div>
+      )}
+
+      {adminWorkspaceReady && drillLibraryOpen && (
+        <Suspense fallback={null}>
+          <DrillLibrary
+            authorName={coachAccount.coachName}
+            initialEditId={drillLibraryOpen.editId}
+            onClose={() => setDrillLibraryOpen(null)}
+            onRecordVideo={recordDrillVideo}
+            onPick={
+              drillLibraryOpen.lessonId && notesWorkspaceClient
+                ? (drill) =>
+                    placeDrillInReview(drillLibraryOpen.lessonId!, notesWorkspaceClient, drillLibraryOpen.index ?? 0, drill)
+                : undefined
+            }
+          />
+        </Suspense>
       )}
 
       {pendingService && pendingServiceAction && (

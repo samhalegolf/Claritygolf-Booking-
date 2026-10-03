@@ -3,6 +3,8 @@ import { useCallback, useEffect, useState } from "react";
 import { SnapshotFrameViewer, type FrameViewerShot } from "../shared/SnapshotFrameViewer";
 
 import { reviewShareToken } from "../shared/bookingHandoff";
+import { ReviewBlocksView } from "../swing-review/ReviewBlockViews";
+import type { ReviewBlock } from "../../../netlify/functions/_shared/review-document.mts";
 import { t, readerLocale } from "../../lib/i18n";
 
 // The player's view of a swing review their coach sent them.
@@ -44,6 +46,9 @@ type ReviewVideo = {
 type ReviewResponse = {
   ok?: boolean;
   review?: {
+    /** The page as the coach laid it out; empty for reviews sent before pages. */
+    title?: string;
+    blocks?: ReviewBlock[];
     playerName: string;
     coachName: string;
     businessName: string;
@@ -128,6 +133,28 @@ const shotLinkStyle: React.CSSProperties = {
   textDecoration: "underline",
 };
 
+const markerStripStyle: React.CSSProperties = {
+  position: "relative",
+  height: 14,
+  borderRadius: 999,
+  background: "var(--c-surface-soft)",
+  border: "1px solid var(--c-border)",
+};
+
+const markerStyle: React.CSSProperties = {
+  position: "absolute",
+  top: "50%",
+  width: 12,
+  height: 12,
+  marginLeft: -6,
+  transform: "translateY(-50%)",
+  padding: 0,
+  border: "2px solid var(--c-surface)",
+  borderRadius: "50%",
+  background: "var(--c-accent)",
+  cursor: "pointer",
+};
+
 const stampStyle: React.CSSProperties = {
   fontVariantNumeric: "tabular-nums",
   opacity: 0.65,
@@ -197,12 +224,125 @@ export default function SwingReviewSharePage() {
     })),
   );
 
+  // With a page, the page decides what is shown and where. A review sent
+  // before pages existed has none, and shows its videos in turn.
+  const blocks = review.blocks || [];
+  const looseVideos = blocks.length ? [] : review.videos;
+
+  /* One video: the swing, then everything the coach said about moments in
+   * it, in the order they happen. */
+  const renderVideoCard = (video: ReviewVideo) => (
+    <section key={video.savedVideoId} style={cardStyle}>
+      <strong>{video.title}</strong>
+      {/* preload="metadata" rather than "auto": these are phone-recorded
+       *  swings of 20-150 MB and a review can hold three of them. The
+       *  <video> element issues its own Range requests once played. */}
+      <video
+        controls
+        playsInline
+        preload="metadata"
+        src={videoUrl(token, video.savedVideoId)}
+        style={{ width: "100%", borderRadius: 9, background: "#000" }}
+      />
+      {video.screenshots.length ? (
+        /* Where the coach stopped the swing, along its length. Each marker
+         * opens the frame viewer at that moment. */
+        <div style={markerStripStyle} aria-label={t("Snapshot markers")}>
+          {video.screenshots.map((snapshot) => {
+            const length =
+              video.durationSeconds ||
+              Math.max(1, ...video.screenshots.map((shot) => shot.currentTime), ...video.notes.map((note) => note.time)) + 0.5;
+            return (
+              <button
+                key={snapshot.id}
+                type="button"
+                onClick={() => setFrameViewKey(`${video.savedVideoId}-${snapshot.id}`)}
+                style={{ ...markerStyle, left: `${Math.min(100, (snapshot.currentTime / length) * 100)}%` }}
+                aria-label={t("Show {title} in the video", { title: snapshot.title })}
+                title={`${formatClock(snapshot.currentTime)} ${snapshot.title}`}
+              />
+            );
+          })}
+        </div>
+      ) : null}
+      {(() => {
+        /* One timeline, not two lists.
+         *
+         * A typed note and a screenshot caption are the same thing to the
+         * player -- something the coach said about a moment in this swing
+         * -- and they arrive as separate arrays. Rendering them as
+         * separate blocks made the timestamps run 0:01, 0:04, then 0:03,
+         * 0:06 down the page, which reads as a bug rather than as two
+         * kinds of note. Merged and sorted, they read as the commentary
+         * they are, and each stamp says where to scrub the video above.
+         *
+         * A screenshot also carries its picture, when it has one, and
+         * opens the frame viewer: the video wound to that instant with a
+         * box where the coach cropped. */
+        const moments = [
+          ...video.notes.map((note) => ({
+            key: `note-${note.id}`,
+            time: note.time,
+            title: "",
+            text: note.text,
+            shotKey: "",
+            image: "",
+          })),
+          ...video.screenshots.map((snapshot) => ({
+            key: `snapshot-${snapshot.id}`,
+            time: snapshot.currentTime,
+            title: snapshot.title,
+            text: snapshot.note,
+            shotKey: `${video.savedVideoId}-${snapshot.id}`,
+            image: snapshot.hasImage ? snapshotUrl(token, video.savedVideoId, snapshot.id) : "",
+          })),
+        ].sort((left, right) => left.time - right.time);
+        if (!moments.length) return null;
+        return (
+          <div style={{ display: "grid", gap: 8 }}>
+            {moments.map((moment) =>
+              moment.shotKey ? (
+                <button
+                  type="button"
+                  key={moment.key}
+                  onClick={() => setFrameViewKey(moment.shotKey)}
+                  style={shotButtonStyle}
+                  aria-label={t("Show {title} in the video", { title: moment.title })}
+                >
+                  {moment.image ? (
+                    <img src={moment.image} alt="" style={shotImageStyle} loading="lazy" />
+                  ) : null}
+                  <span style={noteStyle}>
+                    <span style={stampStyle}>{formatClock(moment.time)}</span>
+                    <span>
+                      <strong>{moment.title}</strong>
+                      {moment.text ? ` — ${moment.text}` : ""}
+                      <span style={shotLinkStyle}>{t("View in video ›")}</span>
+                    </span>
+                  </span>
+                </button>
+              ) : (
+                <div key={moment.key} style={noteStyle}>
+                  <span style={stampStyle}>{formatClock(moment.time)}</span>
+                  <span>{moment.text}</span>
+                </div>
+              ),
+            )}
+          </div>
+        );
+      })()}
+    </section>
+  );
+
   return (
     <main className="login-shell">
       <div className="login-card" style={{ display: "grid", gap: 18, maxWidth: 640 }}>
         <div>
           <p className="eyebrow">{t("Swing review")}</p>
-          <h1>{review.playerName ? t("{playerName}'s swing review", { playerName: review.playerName }) : t("Your swing review")}</h1>
+          <h1>
+            {review.title ||
+              (review.playerName ? t("{playerName}'s swing review", { playerName: review.playerName }) : t("Your swing review"))}
+          </h1>
           <p>
             {sentBy ? t("From {sentBy}.", { sentBy }) : ""}
             {formatDate(review.reviewAt) ? ` ${formatDate(review.reviewAt)}.` : ""}
@@ -216,87 +356,17 @@ export default function SwingReviewSharePage() {
           </div>
         )}
 
-        {review.videos.map((video) => (
-          <section key={video.savedVideoId} style={cardStyle}>
-            <strong>{video.title}</strong>
-            {/* preload="metadata" rather than "auto": these are phone-recorded
-             *  swings of 20-150 MB and a review can hold three of them. The
-             *  <video> element issues its own Range requests once played. */}
-            <video
-              controls
-              playsInline
-              preload="metadata"
-              src={videoUrl(token, video.savedVideoId)}
-              style={{ width: "100%", borderRadius: 9, background: "#000" }}
-            />
-            {(() => {
-              /* One timeline, not two lists.
-               *
-               * A typed note and a screenshot caption are the same thing to the
-               * player -- something the coach said about a moment in this swing
-               * -- and they arrive as separate arrays. Rendering them as
-               * separate blocks made the timestamps run 0:01, 0:04, then 0:03,
-               * 0:06 down the page, which reads as a bug rather than as two
-               * kinds of note. Merged and sorted, they read as the commentary
-               * they are, and each stamp says where to scrub the video above.
-               *
-               * A screenshot also carries its picture, when it has one, and
-               * opens the frame viewer: the video wound to that instant with a
-               * box where the coach cropped. */
-              const moments = [
-                ...video.notes.map((note) => ({
-                  key: `note-${note.id}`,
-                  time: note.time,
-                  title: "",
-                  text: note.text,
-                  shotKey: "",
-                  image: "",
-                })),
-                ...video.screenshots.map((snapshot) => ({
-                  key: `snapshot-${snapshot.id}`,
-                  time: snapshot.currentTime,
-                  title: snapshot.title,
-                  text: snapshot.note,
-                  shotKey: `${video.savedVideoId}-${snapshot.id}`,
-                  image: snapshot.hasImage ? snapshotUrl(token, video.savedVideoId, snapshot.id) : "",
-                })),
-              ].sort((left, right) => left.time - right.time);
-              if (!moments.length) return null;
-              return (
-                <div style={{ display: "grid", gap: 8 }}>
-                  {moments.map((moment) =>
-                    moment.shotKey ? (
-                      <button
-                        type="button"
-                        key={moment.key}
-                        onClick={() => setFrameViewKey(moment.shotKey)}
-                        style={shotButtonStyle}
-                        aria-label={t("Show {title} in the video", { title: moment.title })}
-                      >
-                        {moment.image ? (
-                          <img src={moment.image} alt="" style={shotImageStyle} loading="lazy" />
-                        ) : null}
-                        <span style={noteStyle}>
-                          <span style={stampStyle}>{formatClock(moment.time)}</span>
-                          <span>
-                            <strong>{moment.title}</strong>
-                            {moment.text ? ` — ${moment.text}` : ""}
-                            <span style={shotLinkStyle}>{t("View in video ›")}</span>
-                          </span>
-                        </span>
-                      </button>
-                    ) : (
-                      <div key={moment.key} style={noteStyle}>
-                        <span style={stampStyle}>{formatClock(moment.time)}</span>
-                        <span>{moment.text}</span>
-                      </div>
-                    ),
-                  )}
-                </div>
-              );
-            })()}
-          </section>
-        ))}
+        {/* The page in the coach's order. */}
+        {blocks.length ? (
+          <ReviewBlocksView
+            blocks={blocks}
+            renderVideo={(savedVideoId) => {
+              const video = review.videos.find((entry) => entry.savedVideoId === savedVideoId);
+              return video ? renderVideoCard(video) : null;
+            }}
+          />
+        ) : null}
+        {looseVideos.map((video) => renderVideoCard(video))}
 
         {review.notes.map((note) => (
           <section key={note.id} style={cardStyle}>

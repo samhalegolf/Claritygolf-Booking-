@@ -1,0 +1,88 @@
+/* A sent review's notes, links and drills, read-only. Shared by the emailed
+   review page and the player portal. */
+
+.rbv-card {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--c-border);
+  border-radius: 12px;
+  color: inherit;
+  min-width: 0;
+}
+
+.rbv-text {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.55;
+}
+
+.rbv-link {
+  text-decoration: none;
+}
+
+.rbv-link span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--c-muted);
+  font-size: 0.85em;
+}
+
+.rbv-link:hover,
+.rbv-link:focus-visible {
+  border-color: var(--c-accent);
+}
+
+.rbv-drill {
+  background: var(--c-surface-soft);
+}
+
+.rbv-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--c-muted);
+  font-size: 0.78em;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.rbv-embed {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 9px;
+  overflow: hidden;
+  background: #000;
+}
+
+.rbv-embed iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.rbv-moments {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+.rbv-moments li {
+  display: grid;
+  grid-template-columns: 3.2em 1fr;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.rbv-moments em {
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.65;
+}

@@ -41,7 +41,8 @@ import {
 } from "./PlayerBookingEmbed";
 import { formatClock, formatDate } from "./format";
 import { PlayerMemberships, type PlayerMembership, type PlayerMembershipPlan } from "./PlayerMemberships";
-import { groupSwingReviews, type CloudReviewSnapshot } from "./swingReviews";
+import { groupSwingReviews, type CloudReviewSnapshot, type ReviewPage } from "./swingReviews";
+import { ReviewBlocksView } from "../swing-review/ReviewBlockViews";
 import { SnapshotFrameViewer, type FrameViewerShot } from "../shared/SnapshotFrameViewer";
 import { SwingReviewFlow, type ReviewOffer, type SwingReviewDraft } from "./SwingReviewFlow";
 import { stashReviewDraft, takeReviewDraft } from "./reviewDraftStore";
@@ -391,6 +392,8 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   // any -- a guest can put bytes into the coach's Drive and can never read one
   // back out -- so the portal does not ask on their behalf.
   const [cloudVideos, setCloudVideos] = useState<ClarityCloudImportTransfer[]>([]);
+  /** Sent review pages, by lesson id: the order the coach laid each review out in. */
+  const [reviewPages, setReviewPages] = useState<Record<string, ReviewPage>>({});
   const [cloudLoading, setCloudLoading] = useState(false);
   const [downloadingIds, setDownloadingIds] = useState<Set<string>>(() => new Set());
 
@@ -613,6 +616,23 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   useEffect(() => {
     void refreshCloudVideos();
   }, [refreshCloudVideos]);
+
+  useEffect(() => {
+    if (isGuest) return;
+    let cancelled = false;
+    void apiFetch("/api/video-transfer/player/reviews")
+      .then((response) => (response.ok ? response.json() : { documents: [] }))
+      .then((body: { documents?: ReviewPage[] }) => {
+        if (cancelled) return;
+        setReviewPages(Object.fromEntries((body.documents || []).map((page) => [page.lessonId, page])));
+      })
+      .catch(() => {
+        // Without its page a review still reads part by part, as it always did.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isGuest]);
 
   // A cloud row is only worth showing while this device has no copy.
   const missingCloudVideos = useMemo(() => {
@@ -1301,8 +1321,15 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
     () =>
       isGuest
         ? []
-        : groupSwingReviews({ savedVideos, cloudVideos, notes, practice, cloudSnapshots: cloudReviewSnapshots }),
-    [cloudReviewSnapshots, cloudVideos, isGuest, notes, practice, savedVideos],
+        : groupSwingReviews({
+            savedVideos,
+            cloudVideos,
+            notes,
+            practice,
+            cloudSnapshots: cloudReviewSnapshots,
+            pages: reviewPages,
+          }),
+    [cloudReviewSnapshots, cloudVideos, isGuest, notes, practice, reviewPages, savedVideos],
   );
 
   /* Opening a review fetches the screenshots its videos are missing: all of
@@ -2346,7 +2373,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                               onClick={() => setOpenReviewId(expanded ? "" : review.id)}
                             >
                               <span className="player-portal-review-head">
-                                <strong>{t("Swing review")}{review.unseen && (
+                                <strong>{review.page?.title || t("Swing review")}{review.unseen && (
                                     <span
                                       className="player-portal-review-dot"
                                       aria-label={t("Not opened yet")}
@@ -2373,80 +2400,116 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                                   </p>
                                 )}
 
-                                {review.videos.map((video) => (
-                                  <button
-                                    type="button"
-                                    className="player-portal-review-video"
-                                    key={video.savedVideoId}
-                                    onClick={() => openVideo(video.savedVideoId)}
-                                  >
-                                    {video.thumbnailDataUrl ? (
-                                      <img src={video.thumbnailDataUrl} alt="" />
-                                    ) : (
-                                      <span className="player-portal-review-video-blank" />
-                                    )}
-                                    <span>
-                                      <strong>{video.title}</strong>
-                                      <small>{t("Watch")}</small>
-                                    </span>
-                                  </button>
-                                ))}
-
-                                {/* In the cloud, not on this phone. Pulling it
-                                    down is also what clears its dot -- the same
-                                    gesture the Videos shelf treats as seen. */}
-                                {review.cloudVideos.map((transfer) => (
-                                  <button
-                                    type="button"
-                                    className="player-portal-review-video is-cloud"
-                                    key={transfer.savedVideoId}
-                                    disabled={downloadingIds.has(transfer.savedVideoId)}
-                                    onClick={() => void downloadFromCloud(transfer.savedVideoId)}
-                                  >
-                                    <span className="player-portal-review-video-blank" />
-                                    <span>
-                                      <strong>{transfer.savedVideo?.title || t("Video")}</strong>
-                                      <small>
-                                        {downloadingIds.has(transfer.savedVideoId)
-                                          ? t("Downloading…")
-                                          : t("Download to watch")}
-                                      </small>
-                                    </span>
-                                  </button>
-                                ))}
-
-                                {/* A screenshot the coach marked up. The picture
-                                    is stripped on upload, so one that came over
-                                    the cloud arrives as its words and the second
-                                    it was taken at -- which the video above can
-                                    still be wound to. */}
-                                {review.screenshots.length > 0 && (
-                                  <ul className="player-portal-review-shots">
-                                    {review.screenshots.map((shot) => (
-                                      <li key={`${shot.savedVideoId}-${shot.id}`}>
-                                        <button
-                                          type="button"
-                                          className="player-portal-review-shot"
-                                          onClick={() => setFrameViewKey(`${shot.savedVideoId}-${shot.id}`)}
-                                          aria-label={t("Show {title} in the video", { title: shot.title })}
-                                        >
-                                          {shot.imageDataUrl ? (
-                                            <img src={shot.imageDataUrl} alt="" />
-                                          ) : (
-                                            <span className="player-portal-review-shot-time">
-                                              {formatClock(shot.currentTime)}
+                                {(() => {
+                                  /* One video and what the coach marked on it:
+                                     the swing, its snapshots, its timestamped
+                                     notes. Drawn wherever the page puts it. */
+                                  const renderVideo = (savedVideoId: string) => {
+                                    const video = review.videos.find((entry) => entry.savedVideoId === savedVideoId);
+                                    const transfer = video
+                                      ? undefined
+                                      : review.cloudVideos.find((entry) => entry.savedVideoId === savedVideoId);
+                                    if (!video && !transfer) return null;
+                                    const shots = review.screenshots.filter((shot) => shot.savedVideoId === savedVideoId);
+                                    const moments = review.analysisNotes.filter((note) => note.savedVideoId === savedVideoId);
+                                    return (
+                                      <>
+                                        {video ? (
+                                          <button
+                                            type="button"
+                                            className="player-portal-review-video"
+                                            onClick={() => openVideo(video.savedVideoId)}
+                                          >
+                                            {video.thumbnailDataUrl ? (
+                                              <img src={video.thumbnailDataUrl} alt="" />
+                                            ) : (
+                                              <span className="player-portal-review-video-blank" />
+                                            )}
+                                            <span>
+                                              <strong>{video.title}</strong>
+                                              <small>{t("Watch")}</small>
                                             </span>
-                                          )}
-                                          <div>
-                                            <strong>{shot.title}</strong>
-                                            {shot.note && <p>{shot.note}</p>}
-                                            <span className="player-portal-review-shot-link">{t("View in video ›")}</span>
+                                          </button>
+                                        ) : transfer ? (
+                                          /* In the cloud, not on this phone. Pulling
+                                             it down is also what clears its dot --
+                                             the same gesture the Videos shelf treats
+                                             as seen. */
+                                          <button
+                                            type="button"
+                                            className="player-portal-review-video is-cloud"
+                                            disabled={downloadingIds.has(transfer.savedVideoId)}
+                                            onClick={() => void downloadFromCloud(transfer.savedVideoId)}
+                                          >
+                                            <span className="player-portal-review-video-blank" />
+                                            <span>
+                                              <strong>{transfer.savedVideo?.title || t("Video")}</strong>
+                                              <small>
+                                                {downloadingIds.has(transfer.savedVideoId)
+                                                  ? t("Downloading…")
+                                                  : t("Download to watch")}
+                                              </small>
+                                            </span>
+                                          </button>
+                                        ) : null}
+                                        {/* A screenshot the coach marked up. One
+                                            that came over the cloud without its
+                                            picture arrives as its words and the
+                                            second it was taken at. */}
+                                        {shots.length > 0 && (
+                                          <ul className="player-portal-review-shots">
+                                            {shots.map((shot) => (
+                                              <li key={`${shot.savedVideoId}-${shot.id}`}>
+                                                <button
+                                                  type="button"
+                                                  className="player-portal-review-shot"
+                                                  onClick={() => setFrameViewKey(`${shot.savedVideoId}-${shot.id}`)}
+                                                  aria-label={t("Show {title} in the video", { title: shot.title })}
+                                                >
+                                                  {shot.imageDataUrl ? (
+                                                    <img src={shot.imageDataUrl} alt="" />
+                                                  ) : (
+                                                    <span className="player-portal-review-shot-time">
+                                                      {formatClock(shot.currentTime)}
+                                                    </span>
+                                                  )}
+                                                  <div>
+                                                    <strong>{shot.title}</strong>
+                                                    {shot.note && <p>{shot.note}</p>}
+                                                    <span className="player-portal-review-shot-link">{t("View in video ›")}</span>
+                                                  </div>
+                                                </button>
+                                              </li>
+                                            ))}
+                                          </ul>
+                                        )}
+                                        {moments.map((note) => (
+                                          <div className="player-portal-review-note" key={note.id}>
+                                            <strong>{formatClock(note.time)}</strong>
+                                            <p>{note.text}</p>
                                           </div>
-                                        </button>
-                                      </li>
-                                    ))}
-                                  </ul>
-                                )}
+                                        ))}
+                                      </>
+                                    );
+                                  };
+                                  // With a page, the page decides what is shown
+                                  // and where; without one, every video in turn.
+                                  const blocks = review.page?.blocks || [];
+                                  const loose = blocks.length
+                                    ? []
+                                    : [
+                                        ...review.videos.map((video) => video.savedVideoId),
+                                        ...review.cloudVideos.map((transfer) => transfer.savedVideoId),
+                                      ];
+                                  return (
+                                    <>
+                                      {blocks.length ? <ReviewBlocksView blocks={blocks} renderVideo={renderVideo} /> : null}
+                                      {loose.map((id) => (
+                                        <div key={id}>{renderVideo(id)}</div>
+                                      ))}
+                                    </>
+                                  );
+                                })()}
                                 {frameViewKey && (
                                   <SnapshotFrameViewer
                                     shots={review.screenshots.map(
@@ -2467,13 +2530,6 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                                     onClose={() => setFrameViewKey("")}
                                   />
                                 )}
-
-                                {review.analysisNotes.map((note) => (
-                                  <div className="player-portal-review-note" key={note.id}>
-                                    <strong>{formatClock(note.time)}</strong>
-                                    <p>{note.text}</p>
-                                  </div>
-                                ))}
 
                                 {review.notes.map((note) => (
                                   <div className="player-portal-review-note" key={note.id}>
