@@ -319,6 +319,15 @@ interface LiveRecordingSession {
   startedAt: number | null;
 }
 
+/**
+ * Where this workspace can keep saved videos. `localFolder` is My Library, the
+ * folder on this computer; "unsupported" is a browser that cannot use one.
+ */
+export interface VideoWorkspaceStorage {
+  cloudConnected: boolean;
+  localFolder: "connected" | "not-chosen" | "reconnect" | "unsupported";
+}
+
 export interface VideoWorkspaceProps {
   playerId?: string;
   playerName?: string;
@@ -339,6 +348,16 @@ export interface VideoWorkspaceProps {
   onLocalSaveComplete?: (result: VideoWorkspaceSaveResult) => void | Promise<void>;
   onSaveAndSend?: (result: VideoWorkspaceSaveResult) => Promise<void>;
   onOpenCloudSettings?: () => void;
+  /**
+   * Left out, saving and the library work as they always have (the player
+   * app). Given, the library is only offered once Clarity Cloud or My Library
+   * is connected, and Save without Clarity Cloud goes to My Library -- asking
+   * for a folder first when there is none.
+   */
+  storage?: VideoWorkspaceStorage;
+  /** Choose (or reconnect) the My Library folder. Resolves true once it is ready. */
+  onConnectLocalFolder?: () => Promise<boolean>;
+  onConnectCloud?: () => void;
   /**
    * Asked on save when the workspace was opened without a player. Resolve with
    * the player the video belongs to, or null if the coach backed out.
@@ -640,6 +659,9 @@ export function VideoWorkspace({
   onLocalSaveComplete,
   onSaveAndSend,
   onOpenCloudSettings,
+  storage,
+  onConnectLocalFolder,
+  onConnectCloud,
   onChoosePlayerForSave,
   onSaveNote,
   autoStartLiveRecording,
@@ -659,6 +681,10 @@ export function VideoWorkspace({
   const persistenceLayer = useMemo(() => createVideoAnalysisPersistence(persistence), [persistence]);
   const defaultSavedVideoLibrary = useMemo(() => createIndexedDbSavedVideoLibrary(), []);
   const savedVideoStore = savedVideoLibrary === undefined ? defaultSavedVideoLibrary : savedVideoLibrary;
+  const cloudConnected = !storage || storage.cloudConnected;
+  const localFolderConnected = storage?.localFolder === "connected";
+  // Nothing to look through until a video has somewhere to live.
+  const libraryAvailable = Boolean(savedVideoStore) && (cloudConnected || localFolderConnected);
   const workspaceContext = useMemo<WorkspacePersistenceContext>(
     () => ({
       playerId: resolvedPlayerId,
@@ -679,6 +705,9 @@ export function VideoWorkspace({
   const [leftMountedSource, setLeftMountedSource] = useState<string | null>(null);
   const [rightMountedSource, setRightMountedSource] = useState<string | null>(null);
   const [cloudUploadFailure, setCloudUploadFailure] = useState<CloudUploadFailureFeedback | null>(null);
+  // Save had nowhere to put the video yet: no Clarity Cloud, no My Library folder.
+  const [storagePromptOpen, setStoragePromptOpen] = useState(false);
+  const [connectingFolder, setConnectingFolder] = useState(false);
   const [leftOverlayDimensions, setLeftOverlayDimensions] = useState({
     width: 1,
     height: 1,
@@ -1561,8 +1590,10 @@ export function VideoWorkspace({
       }
       setActiveSideInCompare(side);
 
+      // Filed under this workspace's slot, the same one an upload uses, so
+      // Save finds it here even when the clip came from another player or lesson.
       persistenceLayer.videoStore
-        ?.putVideo(buildVideoSlotKey(item.playerId, side, item.lessonId), restoredVideo, blob)
+        ?.putVideo(buildVideoSlotKey(resolvedPlayerId, side, lessonId), restoredVideo, blob)
         .catch(() => {
           // Saved library stays intact even if the recovery copy cannot be rebuilt.
         });
@@ -1574,7 +1605,9 @@ export function VideoWorkspace({
       isPlayerVariant,
       leftPlayback,
       leftStore,
+      lessonId,
       persistenceLayer.videoStore,
+      resolvedPlayerId,
       rightPlayback,
       rightStore,
       savedVideoStore,
@@ -3211,6 +3244,8 @@ export function VideoWorkspace({
             : t("Saved {length} videos permanently to My Library.", { length: savedItems.length })
           : options.archiveToMyLibrary
             ? t("Saved safely on this device. Reconnect My Library when available.")
+          : !cloudConnected
+            ? t("Saved safely on this device.")
           : savedItems.length === 1
             ? t("Saved safely on this device. Preparing Clarity Cloud.")
             : t("Saved {length} videos safely on this device. Preparing Clarity Cloud.", { length: savedItems.length })
@@ -3242,6 +3277,7 @@ export function VideoWorkspace({
     buildNavigationContext,
     canManualSave,
     captureSideThumbnail,
+    cloudConnected,
     currentSavedVideoIds,
     leftStore,
     lessonId,
@@ -3276,7 +3312,7 @@ export function VideoWorkspace({
     [isPlayerVariant, onLocalSaveComplete, resetWorkspaceAfterDurableSave]
   );
 
-  const handleManualSave = useCallback(async () => {
+  const saveToDevice = useCallback(async () => {
     const result = await performDurableSave("save");
     if (!result) return;
     await completeSuccessfulSave(
@@ -3287,11 +3323,36 @@ export function VideoWorkspace({
     );
   }, [completeSuccessfulSave, isPlayerVariant, performDurableSave]);
 
-  const handleMyLibrarySave = useCallback(async () => {
+  const saveToMyLibrary = useCallback(async () => {
     const result = await performDurableSave("my-library-save", { archiveToMyLibrary: true });
     if (!result) return;
     await completeSuccessfulSave(result, t("Saved permanently to My Library."));
   }, [completeSuccessfulSave, performDurableSave]);
+
+  // Without Clarity Cloud, Save goes to the My Library folder -- asking for
+  // one first if there is none.
+  const handleManualSave = useCallback(async () => {
+    if (cloudConnected) return saveToDevice();
+    if (localFolderConnected) return saveToMyLibrary();
+    setStoragePromptOpen(true);
+  }, [cloudConnected, localFolderConnected, saveToDevice, saveToMyLibrary]);
+
+  const handleMyLibrarySave = useCallback(async () => {
+    if (storage && !localFolderConnected) {
+      setStoragePromptOpen(true);
+      return;
+    }
+    await saveToMyLibrary();
+  }, [localFolderConnected, saveToMyLibrary, storage]);
+
+  const connectFolderAndSave = useCallback(async () => {
+    if (!onConnectLocalFolder) return;
+    setConnectingFolder(true);
+    const connected = await onConnectLocalFolder().finally(() => setConnectingFolder(false));
+    if (!connected) return;
+    setStoragePromptOpen(false);
+    await saveToMyLibrary();
+  }, [onConnectLocalFolder, saveToMyLibrary]);
 
   const handleSaveAndSend = useCallback(async () => {
     const result = await performDurableSave("save");
@@ -3676,7 +3737,7 @@ export function VideoWorkspace({
       const deviceListIsInformative = cameraDeviceList.labelsAvailable;
       const cameraMissing = !needsSetup && deviceListIsInformative && !resolvedCamera;
       const canConnect = cameraDeviceList.supported && !needsSetup && !isConnecting && !isPending;
-      const hasLibraryChoice = Boolean(savedVideoStore);
+      const hasLibraryChoice = libraryAvailable;
       const openIntakeGroup = intakeGroup?.side === side ? intakeGroup.kind : null;
       // An attempt that just failed outranks the resting "Camera not connected"
       // -- it names which camera and why, and it is the only sign that the
@@ -4110,7 +4171,7 @@ export function VideoWorkspace({
             <AnalysisRail
               onUpload={() => openUpload(effectiveActiveSide)}
               onOpenLibrary={
-                savedVideoStore
+                libraryAvailable
                   ? () => {
                       clearFocusSelection();
                       setLibrarySide(effectiveActiveSide);
@@ -4316,26 +4377,28 @@ export function VideoWorkspace({
           };
         });
       const listed = new Set(items.map((item) => item.savedVideoId));
-      try {
-        const batches = await Promise.all(
-          [...owners].map((ownerId) => listClarityCloudImportTransfers(cloudScope, ownerId))
-        );
-        for (const transfer of batches.flat()) {
-          const id = transfer.savedVideoId || transfer.savedVideo?.savedVideoId;
-          if (!id || skip.has(id) || listed.has(id)) continue;
-          if (!transfer.savedVideo || !owners.has(transfer.savedVideo.playerId)) continue;
-          listed.add(id);
-          const at = transfer.savedVideo.createdAt;
-          clips.push({
-            id,
-            title: transfer.savedVideo.title || t("Saved video"),
-            detail: `${describeClipDate(at)} · ${t("Clarity Cloud")}`,
-            likely: isThisLesson(transfer.savedVideo.lessonId),
-            at,
-          });
+      if (cloudConnected) {
+        try {
+          const batches = await Promise.all(
+            [...owners].map((ownerId) => listClarityCloudImportTransfers(cloudScope, ownerId))
+          );
+          for (const transfer of batches.flat()) {
+            const id = transfer.savedVideoId || transfer.savedVideo?.savedVideoId;
+            if (!id || skip.has(id) || listed.has(id)) continue;
+            if (!transfer.savedVideo || !owners.has(transfer.savedVideo.playerId)) continue;
+            listed.add(id);
+            const at = transfer.savedVideo.createdAt;
+            clips.push({
+              id,
+              title: transfer.savedVideo.title || t("Saved video"),
+              detail: `${describeClipDate(at)} · ${t("Clarity Cloud")}`,
+              likely: isThisLesson(transfer.savedVideo.lessonId),
+              at,
+            });
+          }
+        } catch {
+          // Offline, or no cloud: the picker lists what is on this device.
         }
-      } catch {
-        // Offline, or no cloud: the picker lists what is on this device.
       }
       return clips.sort(
         (a, b) =>
@@ -4344,18 +4407,18 @@ export function VideoWorkspace({
           b.at.localeCompare(a.at)
       );
     },
-    [cloudScope, lessonId, savedVideoStore]
+    [cloudConnected, cloudScope, lessonId, savedVideoStore]
   );
 
   /** The player's library, as the lab's second-angle picker sees it. */
   const motionLabLibrary = useMemo<SecondAngleLibrary | undefined>(() => {
-    if (!savedVideoStore || !motionLabPlayerId) return undefined;
+    if (!libraryAvailable || !motionLabPlayerId) return undefined;
     const swingId = motionLabSwing?.id;
     return {
       list: () => listPlayerLibrary([motionLabPlayerId], swingId, swingId ? [swingId] : []),
       load: readSavedVideo,
     };
-  }, [listPlayerLibrary, motionLabPlayerId, motionLabSwing?.id, readSavedVideo, savedVideoStore]);
+  }, [libraryAvailable, listPlayerLibrary, motionLabPlayerId, motionLabSwing?.id, readSavedVideo]);
 
   /**
    * "From library" lists for the side it was opened on. The clip on the other
@@ -4433,7 +4496,7 @@ export function VideoWorkspace({
         }
         setComparisonMode("compare");
         setActiveSide(otherSide);
-        if (savedVideoStore) {
+        if (libraryAvailable) {
           closeLiveRecording();
           setRemoteSide(null);
           setLibrarySide(otherSide);
@@ -4452,6 +4515,7 @@ export function VideoWorkspace({
     [
       closeLiveRecording,
       currentSavedVideoIds,
+      libraryAvailable,
       playerVideoLeft,
       playerVideoRight,
       restoreSavedVideo,
@@ -4698,6 +4762,59 @@ export function VideoWorkspace({
             isPlayerVariant ? undefined : () => setSettingsOpen((previous) => !previous)
           }
         />
+      ) : null}
+
+      {storagePromptOpen && storage ? (
+        <section className="save-destination-prompt" role="dialog" aria-label={t("Where to save")}>
+          <div className="save-destination-copy">
+            <strong>{t("Where should this video go?")}</strong>
+            <span>
+              {storage.localFolder === "unsupported"
+                ? t("This browser can't save to a folder. Connect Clarity Cloud, or keep it on this device for now.")
+                : storage.localFolder === "reconnect"
+                  ? t("Clarity can't reach your My Library folder right now. Choose it again to carry on.")
+                  : cloudConnected
+                    ? t("Choose a folder on this computer for My Library.")
+                    : t("Clarity Cloud isn't connected. Choose a folder on this computer for My Library, or connect Clarity Cloud.")}
+            </span>
+          </div>
+          <div className="save-destination-actions">
+            {storage.localFolder !== "unsupported" && onConnectLocalFolder ? (
+              <button
+                type="button"
+                className="upload-button"
+                onClick={() => void connectFolderAndSave()}
+                disabled={connectingFolder || saveBusy}
+              >
+                {storage.localFolder === "reconnect" ? t("Reconnect folder and save") : t("Choose folder and save")}
+              </button>
+            ) : null}
+            {storage.localFolder === "unsupported" ? (
+              <button
+                type="button"
+                className="upload-button"
+                onClick={() => {
+                  setStoragePromptOpen(false);
+                  void saveToDevice();
+                }}
+                disabled={saveBusy}
+              >{t("Save on this device")}</button>
+            ) : null}
+            {!cloudConnected && onConnectCloud ? (
+              <button
+                type="button"
+                className="upload-button is-subtle"
+                onClick={onConnectCloud}
+                disabled={connectingFolder}
+              >{t("Connect Clarity Cloud")}</button>
+            ) : null}
+            <button
+              type="button"
+              className="upload-button is-subtle"
+              onClick={() => setStoragePromptOpen(false)}
+            >{t("Cancel")}</button>
+          </div>
+        </section>
       ) : null}
 
       {/* Not gated on having a video: choosing the recording camera lives in
