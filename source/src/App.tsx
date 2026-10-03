@@ -1,4 +1,5 @@
 import {
+  AlertCircle,
   AlertTriangle,
   Archive,
   ArrowLeft,
@@ -165,7 +166,7 @@ import { CoachAvatar, CoachProfilePanel, type CoachWeekDay, type CoachWeekEntry 
 import { RegionSettings, TimeZoneSelect, type RegionValues } from "./modules/settings/RegionSettings";
 import { LanguageSelect } from "./modules/settings/LanguageSettings";
 import { syncPushLanguage } from "./modules/notifications/browserPush";
-import type { ProfileInternalJob, ProfileTarget } from "./modules/business-hub/BusinessHubPanel";
+import type { ClarityPayCard, ProfileInternalJob, ProfileTarget } from "./modules/business-hub/BusinessHubPanel";
 import {
   cleanNotificationTemplates,
   DEFAULT_MAP_LINK_LABEL,
@@ -2734,6 +2735,67 @@ function getInitialView(): View {
   if (requestedView === "video") return "video";
   if (requestedView === "profile") return "profile";
   return "calendar";
+}
+
+/**
+ * How Stripe's Clarity Pay signup went, when the browser has just come back
+ * from it. The server sends the coach to the page they started on with
+ * `clarityPay=on|pending|error` (stripe-connect.mts); the page shows it once.
+ */
+type ClarityPayReturn = "on" | "pending" | "error" | "paused";
+
+function getClarityPayReturn(): ClarityPayReturn | null {
+  if (typeof window === "undefined") return null;
+  const value = new URLSearchParams(window.location.search).get("clarityPay");
+  return value === "on" || value === "pending" || value === "error" ? value : null;
+}
+
+/**
+ * "paused" never comes from the server: it is the coach coming back to Clarity
+ * (the Back button, usually) before finishing Stripe's signup. Nothing is lost
+ * by that — the account Stripe started is kept — so it says so calmly and
+ * offers the way back in.
+ */
+function ClarityPayReturnBanner({
+  outcome,
+  onDismiss,
+  onContinue,
+  busy,
+}: {
+  outcome: ClarityPayReturn;
+  onDismiss: () => void;
+  onContinue: () => void;
+  busy: boolean;
+}) {
+  const [title, message] =
+    outcome === "on"
+      ? [t("Clarity Pay is on"), t("Card payments now go straight to your account, and Stripe pays them out to your bank.")]
+      : outcome === "pending"
+        ? [t("Almost there"), t("Stripe is still checking your details, or needs a few more. Clarity Pay switches on by itself once Stripe is done.")]
+        : outcome === "paused"
+          ? [t("Clarity Pay setup is paused"), t("You left Stripe's signup before the end. Nothing is lost: carry on where you stopped whenever you're ready.")]
+          : [t("Clarity Pay isn't set up"), t("Stripe's signup didn't finish. You can start it again now.")];
+  return (
+    <div className={`clarity-pay-return is-${outcome}`} role="status">
+      <span className="clarity-pay-return-icon" aria-hidden="true">
+        {outcome === "on" ? <Check size={18} /> : <AlertCircle size={18} />}
+      </span>
+      <div>
+        <strong>{title}</strong>
+        <span>{message}</span>
+        {outcome !== "on" && (
+          <div className="clarity-pay-return-actions">
+            <button className="primary-button" disabled={busy} onClick={onContinue} type="button">
+              {busy ? t("Opening…") : outcome === "error" ? t("Set up Clarity Pay") : t("Finish Clarity Pay setup")}
+            </button>
+          </div>
+        )}
+      </div>
+      <button className="icon-button" onClick={onDismiss} title={t("Dismiss")} aria-label={t("Dismiss")} type="button">
+        <X size={16} />
+      </button>
+    </div>
+  );
 }
 
 function getBookingScreenPublicUrl(path: string, showLogo: boolean) {
@@ -5678,6 +5740,11 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   } | null>(null);
   /* A Clarity Pay account started but not yet approved by Stripe. */
   const [clarityPaySetup, setClarityPaySetup] = useState<"none" | "pending" | "active">("none");
+  /* Just back from Stripe's Clarity Pay signup: shown once, on that page. */
+  const [clarityPayReturn, setClarityPayReturn] = useState<ClarityPayReturn | null>(() => getClarityPayReturn());
+  /* Set just before the browser is sent to Stripe, so a page the browser
+     restores from its back/forward cache knows it was left mid-signup. */
+  const leftForStripeRef = useRef<"" | "clarity-pay" | "own-stripe">("");
   const [stripeSaving, setStripeSaving] = useState(false);
   const [voucherRules, setVoucherRules] = useState<VoucherAmountRule[]>([]);
   const [stripeResyncing, setStripeResyncing] = useState(false);
@@ -5844,7 +5911,11 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("none");
   // Products first: adding something you sell is the most common reason to open
   // Billing, and it is the one screen that is useless if you have to find it.
-  const [billingSection, setBillingSection] = useState<BillingSection>("products");
+  const [billingSection, setBillingSection] = useState<BillingSection>(() =>
+    typeof window !== "undefined" && new URLSearchParams(window.location.search).get("billing") === "settings"
+      ? "settings"
+      : "products",
+  );
   const [invoiceDraft, setInvoiceDraft] = useState<InvoiceDraft>(() =>
     emptyInvoiceDraft(getStoredCoachAccount().invoiceSettings),
   );
@@ -19485,15 +19556,17 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   const passInboxCount =
     passInbox.waitingToIssue.length + passInbox.waitingForOwner.length;
 
-  async function fetchStripeStatus() {
+  async function fetchStripeStatus(): Promise<typeof clarityPaySetup | null> {
     try {
       const response = await fetch("/api/stripe-connect/status", { credentials: "same-origin" });
-      if (!response.ok) return;
+      if (!response.ok) return null;
       const data = (await response.json()) as { stripe?: typeof stripeStatus; clarityPay?: typeof clarityPaySetup };
       if (data.stripe) setStripeStatus(data.stripe);
       setClarityPaySetup(data.clarityPay || "none");
+      return data.clarityPay || "none";
     } catch {
       // A settings card that cannot read its own status is not worth a toast.
+      return null;
     }
   }
 
@@ -19508,6 +19581,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
       if (!response.ok) throw new Error(await readApiFailure(response, t("Could not start the Stripe sign-in.")));
       const data = (await response.json()) as { authUrl?: string };
       if (!data.authUrl) throw new Error(t("Could not start the Stripe sign-in."));
+      leftForStripeRef.current = "own-stripe";
       window.location.assign(data.authUrl);
     } catch (error) {
       setStripeSaving(false);
@@ -19521,11 +19595,15 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
       const response = await fetch("/api/stripe-connect/clarity-pay/start", {
         method: "POST",
         credentials: "same-origin",
-        headers: { Accept: "application/json" },
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        // Stripe's signup comes back to wherever this was started: the hub
+        // (Billing › Settings opened over it) or Billing itself.
+        body: JSON.stringify({ from: activeView === "profile" ? "profile" : "billing" }),
       });
       if (!response.ok) throw new Error(await readApiFailure(response, t("Could not start Clarity Pay setup.")));
       const data = (await response.json()) as { url?: string };
       if (data.url) {
+        leftForStripeRef.current = "clarity-pay";
         window.location.assign(data.url);
         return;
       }
@@ -23986,6 +24064,71 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     catalogItems,
     terms,
   ]);
+
+  /**
+   * Clarity Pay on the hub, read from the same status Billing › Settings shows.
+   * Hidden where Billing is, and for coach-level accounts that cannot change it.
+   */
+  const profileClarityPay = useMemo<ClarityPayCard | undefined>(() => {
+    if (!billingWorkspaceEnabled || !isAdminUser) return undefined;
+    const state = stripeStatus?.route === "clarity_pay" ? "on" : clarityPaySetup === "pending" ? "pending" : "off";
+    const summary =
+      state === "on"
+        ? t("Cards at the till, on invoices and in the player portal.")
+        : state === "pending"
+          ? t("Your setup isn't finished yet.")
+          : t("Take cards at the till, on invoices and in the player portal.");
+    const facts: Array<[string, string]> = [
+      [t("Status"), state === "on" ? t("On") : state === "pending" ? t("In progress") : t("Not set up")],
+    ];
+    if (state === "on" && stripeStatus?.account) facts.push([t("Account"), stripeStatus.account]);
+    if (stripeStatus) facts.push([t("Clarity Pay fee"), clarityPayFeeLabel(stripeStatus.fee)]);
+    return {
+      state,
+      summary,
+      facts,
+      path: t("Billing › Settings"),
+      target: { kind: "billing", section: "settings" },
+    };
+  }, [billingWorkspaceEnabled, isAdminUser, stripeStatus, clarityPaySetup]);
+
+  useEffect(() => {
+    // Back from Stripe without finishing: the browser hands back this page as
+    // it was left, button still saying "Opening…" and nothing to say why. Undo
+    // that, ask where the signup got to, and say it plainly.
+    function onPageShow(event: PageTransitionEvent) {
+      const left = leftForStripeRef.current;
+      if (!event.persisted && !left) return;
+      leftForStripeRef.current = "";
+      setStripeSaving(false);
+      if (left !== "clarity-pay") return;
+      void fetchStripeStatus().then((setup) => setClarityPayReturn(setup === "active" ? "on" : "paused"));
+    }
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!clarityPayReturn) return;
+    // Fresh status for the cards behind the banner, and a clean address so a
+    // reload or a bookmark does not announce the signup a second time. The
+    // status call asks Stripe itself, so it can only improve on the redirect:
+    // a return that lost the session ("error") can still turn out finished.
+    void fetchStripeStatus().then((setup) => {
+      if (setup === "active") setClarityPayReturn("on");
+      else if (setup === "pending" && clarityPayReturn === "error") setClarityPayReturn("paused");
+    });
+    const url = new URL(window.location.href);
+    for (const key of ["clarityPay", "billing", "view"]) url.searchParams.delete(key);
+    window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (activeView === "profile" && profileClarityPay && !stripeStatus) void fetchStripeStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeView, Boolean(profileClarityPay)]);
 
   // Owners and admins run a business from the hub; a coach-level account's
   // version of the same screen is their own profile.
@@ -29261,6 +29404,14 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
 
             {billingSection === "settings" && (
               <div className="billing-dashboard">
+                {clarityPayReturn && (activeView === "billing" || workspaceOverlay?.kind === "billing") && (
+                  <ClarityPayReturnBanner
+                    outcome={clarityPayReturn}
+                    busy={stripeSaving}
+                    onContinue={() => void setUpClarityPay()}
+                    onDismiss={() => setClarityPayReturn(null)}
+                  />
+                )}
                 <article className="data-card">
                   <div className="data-card-header">
                     <div>
@@ -29715,6 +29866,14 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
 
         {adminWorkspaceReady && activeView === "profile" && (
           <section className="business-hub-page">
+            {clarityPayReturn && workspaceOverlay?.kind !== "billing" && (
+              <ClarityPayReturnBanner
+                outcome={clarityPayReturn}
+                busy={stripeSaving}
+                onContinue={() => void setUpClarityPay()}
+                onDismiss={() => setClarityPayReturn(null)}
+              />
+            )}
             <BusinessHubPanel
               profile={
                 ownCoachProfile ? (
@@ -29750,6 +29909,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
               // Your own Google Calendar is managed on your profile above, so
               // it is not listed a second time among the connections.
               hiddenIntegrationIds={ownCoachProfile ? ["google-calendar"] : []}
+              clarityPay={profileClarityPay}
               onOpen={(target, label) => openProfileTarget(target, label)}
             />
           </section>

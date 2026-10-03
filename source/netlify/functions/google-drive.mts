@@ -311,7 +311,7 @@ function callbackPage(ok: boolean, message: string) {
     <main>
       <h1>${ok ? "Clarity Cloud connected" : "Clarity Cloud not connected"}</h1>
       <p>${escaped}</p>
-      <a href="/?view=settings">Back to Clarity Booking</a>
+      <a href="/login?view=settings">Back to Clarity Booking</a>
     </main>
   </body>
 </html>`;

@@ -54,7 +54,7 @@ function callbackPage(ok: boolean, message: string) {
     <main>
       <h1>${ok ? "Google Calendar connected" : "Google Calendar not connected"}</h1>
       <p>${escaped}</p>
-      <a href="/?view=profile">Back to Clarity Booking</a>
+      <a href="/login?view=profile">Back to Clarity Booking</a>
     </main>
   </body>
 </html>`;

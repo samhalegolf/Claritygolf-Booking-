@@ -4162,5 +4162,16 @@
   "Setting up…": "設定中…",
   "Set up this iPhone": "このiPhoneを設定",
   "How to tap": "支払い方法",
-  "The customer holds their card, phone or watch flat against the top of this iPhone and keeps it there until the check mark shows.": "お客様にカード、スマートフォン、または時計をこのiPhoneの上部に平らに当て、チェックマークが表示されるまでそのままにしてもらいます。"
+  "The customer holds their card, phone or watch flat against the top of this iPhone and keeps it there until the check mark shows.": "お客様にカード、スマートフォン、または時計をこのiPhoneの上部に平らに当て、チェックマークが表示されるまでそのままにしてもらいます。",
+  "Cards at the till, on invoices and in the player portal.": "レジ、請求書、プレーヤーポータルでカード決済。",
+  "Take cards at the till, on invoices and in the player portal.": "レジ、請求書、プレーヤーポータルでカード決済を受け付けます。",
+  "Your setup isn't finished yet.": "設定はまだ完了していません。",
+  "Clarity Pay fee": "Clarity Pay 手数料",
+  "Card payments now go straight to your account, and Stripe pays them out to your bank.": "カード決済はあなたのアカウントに直接入金され、Stripe から銀行口座に振り込まれます。",
+  "Almost there": "あと少しです",
+  "Stripe is still checking your details, or needs a few more. Clarity Pay switches on by itself once Stripe is done.": "Stripe がまだ情報を確認中か、追加の情報が必要です。Stripe の確認が終わると Clarity Pay は自動的にオンになります。",
+  "Clarity Pay isn't set up": "Clarity Pay は設定されていません",
+  "Clarity Pay setup is paused": "Clarity Pay の設定は一時停止中です",
+  "You left Stripe's signup before the end. Nothing is lost: carry on where you stopped whenever you're ready.": "Stripe の登録を途中で離れました。何も失われていません。準備ができたら、中断したところから続けてください。",
+  "Stripe's signup didn't finish. You can start it again now.": "Stripe の登録が完了しませんでした。今すぐもう一度始められます。"
 }
