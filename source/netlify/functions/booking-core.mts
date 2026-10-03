@@ -66,6 +66,12 @@ import {
   playerShopItems,
 } from "./_shared/player-shop.mts";
 import {
+  createCardCheckout,
+  enrolMembership,
+  membershipAction,
+  readPlayerMemberships,
+} from "./_shared/memberships.mts";
+import {
   createStripeCheckoutSession,
   requireStripeFeature,
   resolveStripeCredential,
@@ -9967,6 +9973,22 @@ async function readPlayerProfile(session) {
     shop,
     review,
     bookingEmbed,
+    // Their memberships, and the plans they could join. Joining needs a saved
+    // card, which needs Clarity Pay, so a business without it sells none here
+    // -- the coach can still enrol members by hand.
+    ...(await readPlayerMemberships(
+      accountId,
+      session.personId || "",
+      new Map(serviceList.map((service) => [service.id, service.name])),
+      stripeStatus.features.portal,
+    ).then(
+      ({ memberships, plans }) => ({ memberships, membershipPlans: plans }),
+      (error) => {
+        // A membership read must not take the whole portal down with it.
+        console.error("player_profile:memberships_failed", error instanceof Error ? error.message : error);
+        return { memberships: [], membershipPlans: [] };
+      },
+    )),
     terminology: terminologyFor(safeJsonParse(settingsMap.accountTerminologyJson, {})),
   };
 }
@@ -13220,6 +13242,58 @@ async function routeBookingApiRequest(
         throw error;
       }
       return json({ url: checkout.url, sessionId: checkout.sessionId });
+    }
+
+    /* Memberships, the member's side. The engine is _shared/memberships.mts;
+     * all three routes act only on the signed-in player's own person id, and
+     * the plan's price and terms come from the server, never the request.
+     *
+     *   join    start a membership and get the card form for it
+     *   cancel  cancel at the end of the period (or undo that), honouring the
+     *           plan's minimum commitment
+     *   card    a card form to change the card a membership is charged to
+     */
+    if (req.method === "POST" && pathname.startsWith("/api/player/memberships/")) {
+      const session = await readPlayerSession(playerSessionTokenFromRequest(req));
+      if (!session) return json({ error: "unauthorized", message: "Player login required." }, 401);
+      if (!session.personId) {
+        return json(
+          { error: "no_profile", message: "Your coach needs to finish setting up your profile before you can join." },
+          409,
+        );
+      }
+      const accountId = cleanSlug(session.accountId, "");
+      if (!accountId) throw missingAccountScope("player_memberships");
+      const body = await parseBody(req);
+      const actor = { accountId, actorId: session.personId };
+      const origin = new URL(req.url).origin;
+
+      if (pathname === "/api/player/memberships/join") {
+        const membership = await enrolMembership(
+          { personId: session.personId, planId: body?.planId, collection: "card" },
+          actor,
+          { onlineOnly: true },
+        );
+        return json({ url: await createCardCheckout(accountId, membership.id, origin, "portal") });
+      }
+      const membershipId = cleanString(body?.membershipId, "", 120);
+      if (pathname === "/api/player/memberships/cancel") {
+        await membershipAction(membershipId, body?.undo === true ? "undo_cancel" : "cancel_at_period_end", actor, {
+          byMember: true,
+          personId: session.personId,
+        });
+        return json({ ok: true, ...(await readPlayerProfile(session)) });
+      }
+      if (pathname === "/api/player/memberships/card") {
+        const owned = await db().sql`
+          SELECT id FROM public.memberships
+          WHERE id = ${membershipId} AND account_id = ${accountId} AND person_id = ${session.personId}
+          LIMIT 1
+        `;
+        if (!owned.length) return json({ error: "not_found", message: "That membership was not found." }, 404);
+        return json({ url: await createCardCheckout(accountId, membershipId, origin, "portal") });
+      }
+      return json({ error: "not_found" }, 404);
     }
 
     if (req.method === "POST" && pathname === "/api/player/checkout/cancel") {
