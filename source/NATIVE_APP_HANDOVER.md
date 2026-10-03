@@ -36,6 +36,12 @@ builds.
   and alias, plus `ANDROID_KEYSTORE_BASE64` (`base64 -w0 upload.jks`). This is
   the *upload* key — let Play App Signing hold the real one, so a lost upload
   key can be reset rather than ending the app.
+- **Icon and splash.** Both are made from the iOS app icon
+  (`ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png`) so the
+  two stores match: the logo badge on Clarity green (`#01632F`) for the
+  launcher icon, and on the logo black for the splash. If the logo changes,
+  regenerate the `mipmap-*` and `drawable*/splash.png` files from the new one
+  and update the Play Store listing icon to match.
 - **No backups.** `allowBackup` is off so the player's session token is never
   copied to another device by Android's cloud backup.
 
@@ -186,8 +192,6 @@ still gets the in-page recorder, since a file dialog there has no camera in it.
   live `driveVideoFileId`, so those rows vanish rather than offering a download
   that would 404 — but nobody has decided whether a player *should* lose access
   at that point. Worth a product answer, not just a filter.
-- **No icon or splash screen yet.** `npx @capacitor/assets generate` from a
-  1024px source is the usual route.
 - **Deep links are not wired.** A password-reset or portal-invite email opens
   the browser, not the app. That needs Universal Links / App Links.
 - **iOS is not signed.** Simulator only until there is a bundle ID in your
