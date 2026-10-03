@@ -13,6 +13,12 @@
 import { defaultCalendarSlug, legacyOriginalWorkspaceId, slugify } from "./account.mts";
 import { terminologyFor } from "./business-terminology.mts";
 import { currencyForAccountSettings } from "./locale.mts";
+import {
+  cleanMarketConfig,
+  DEFAULT_ACCOUNT_MARKET_CONFIG,
+  marketConfigFromSettings,
+  marketProfileFor,
+} from "./market-profile.mts";
 import { cleanMessageLanguage } from "./message-language.mts";
 import { cleanPhoneCountry, FALLBACK_PHONE_COUNTRY } from "./phone.mts";
 import { taxDefaultsForCountry } from "./region.mts";
@@ -132,6 +138,7 @@ export function neutralCoachAccount(accountId) {
     calendarSlug: slugify(accountId, ""),
     caddyWorkspaceUrl: env("CLARITY_CADDY_WORKSPACE_URL", "https://caddy.claritygolf.app"),
     terminology: terminologyFor(),
+    market: { ...DEFAULT_ACCOUNT_MARKET_CONFIG },
     invoiceSettings: neutralInvoiceSettings(),
   };
 }
@@ -157,6 +164,7 @@ export function defaultCoachAccount() {
     calendarSlug: defaultCalendarSlug(),
     caddyWorkspaceUrl: env("CLARITY_CADDY_WORKSPACE_URL", "https://caddy.claritygolf.app"),
     terminology: terminologyFor(),
+    market: { ...DEFAULT_ACCOUNT_MARKET_CONFIG },
     invoiceSettings: defaultInvoiceSettings,
   };
 }
@@ -284,6 +292,10 @@ function cleanInvoiceSettings(settings = {}, country = FALLBACK_PHONE_COUNTRY) {
 
 export function cleanCoachAccount(account) {
   const defaults = defaultCoachAccount();
+  // Read-only here: writeCoachAccount does not write it back. The market
+  // config is owned by /api/market-profile, so a stale account draft saved
+  // from another block cannot revert a profile or capability change.
+  const market = cleanMarketConfig(account?.market);
   const businessName = cleanString(
     account?.businessName,
     defaults.businessName,
@@ -313,7 +325,10 @@ export function cleanCoachAccount(account) {
       account?.caddyWorkspaceUrl,
       defaults.caddyWorkspaceUrl,
     ),
-    terminology: terminologyFor(account?.terminology),
+    // Words the business has not set come from its market profile, so a
+    // salon reads "Chair" where a golf business reads "Bay".
+    terminology: terminologyFor(account?.terminology, marketProfileFor(market.profileId).terminology),
+    market,
     invoiceSettings: cleanInvoiceSettings(
       account?.invoiceSettings,
       cleanPhoneCountry(account?.country, defaults.country),
@@ -379,7 +394,8 @@ export function coachAccountFromSettings(settings, accountId = "") {
     caddyWorkspaceUrl:
       settingValue(settings, "accountCaddyWorkspaceUrl") ||
       defaults.caddyWorkspaceUrl,
-    terminology: parseSettingJson(settings, "accountTerminologyJson", defaults.terminology),
+    terminology: parseSettingJson(settings, "accountTerminologyJson", {}),
+    market: marketConfigFromSettings(settings),
     invoiceSettings: parseSettingJson(
       settings,
       "accountInvoiceSettingsJson",

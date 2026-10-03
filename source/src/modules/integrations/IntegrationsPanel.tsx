@@ -71,8 +71,15 @@ function statusOf(card: Card) {
 
 export default function IntegrationsPanel({
   audience = "integration",
+  unofferedIds = [],
 }: {
   audience?: "admin" | "integration";
+  /**
+   * Integrations whose module the business has switched off (market
+   * capabilities): not offered to add. One already connected stays listed,
+   * so switching a module off never hides a connection that is still running.
+   */
+  unofferedIds?: string[];
 }) {
   const copy = COPY[audience];
   const store = integrationsStore(audience);
@@ -112,7 +119,7 @@ export default function IntegrationsPanel({
   }
 
   const configured = cards.filter((card) => card.configured);
-  const available = cards.filter((card) => !card.configured);
+  const available = cards.filter((card) => !card.configured && !unofferedIds.includes(card.id));
   const sort = (list: Card[]) =>
     [...list].sort((a, b) => (KIND_ORDER[a.kinds[0]] ?? 9) - (KIND_ORDER[b.kinds[0]] ?? 9) || a.label.localeCompare(b.label));
 

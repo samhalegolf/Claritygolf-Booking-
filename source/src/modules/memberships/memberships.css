@@ -1,0 +1,450 @@
+/* Memberships: Billing › Memberships and the client profile's block.
+ *
+ * Every rule is scoped two classes deep because these mount inside .data-card,
+ * whose `.data-card span` / `.data-card p` (0-1-1) would otherwise repaint a
+ * single-class rule. Colours read --c-* tokens, so both themes follow. */
+
+.memberships-panel,
+.person-memberships {
+  display: grid;
+  gap: var(--c-space-3);
+}
+
+.memberships-panel button,
+.memberships-panel input,
+.memberships-panel select,
+.memberships-panel textarea,
+.person-memberships button,
+.person-memberships input,
+.person-memberships select,
+.person-memberships textarea {
+  font: inherit;
+}
+
+/* --- Summary tiles ------------------------------------------------------- */
+
+.memberships-panel .membership-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: var(--c-space-2);
+}
+
+.memberships-panel .membership-tile {
+  display: grid;
+  gap: 2px;
+  padding: var(--c-space-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-card);
+  background: var(--c-surface);
+}
+
+.memberships-panel .membership-tile span {
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+}
+
+.memberships-panel .membership-tile strong {
+  color: var(--c-text);
+  font-size: var(--c-size-card-heading);
+  font-variant-numeric: tabular-nums;
+}
+
+.memberships-panel .membership-tile em {
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+  font-style: normal;
+}
+
+.memberships-panel .membership-tile.needs-attention {
+  border-color: var(--c-danger);
+  background: var(--c-danger-wash);
+}
+
+/* --- Plans ---------------------------------------------------------------- */
+
+.memberships-panel .membership-plans {
+  display: grid;
+  gap: var(--c-space-2);
+}
+
+.memberships-panel .membership-plan {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--c-space-3);
+  padding: var(--c-space-3);
+  border: 1px solid var(--c-border-soft);
+  border-radius: var(--c-radius-control);
+}
+
+.memberships-panel .membership-plan > div:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.memberships-panel .membership-plan-actions {
+  display: flex;
+  gap: var(--c-space-2);
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.memberships-panel .membership-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--c-space-1);
+}
+
+.memberships-panel .membership-tags em {
+  padding: 1px 8px;
+  border-radius: var(--c-radius-pill);
+  background: var(--c-surface-soft);
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+  font-style: normal;
+}
+
+/* --- Members table -------------------------------------------------------- */
+
+.memberships-panel .membership-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--c-space-2);
+}
+
+.memberships-panel .membership-toolbar input,
+.memberships-panel .membership-toolbar select {
+  height: var(--c-h-control);
+  padding: 0 var(--c-space-2);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  color: var(--c-text);
+}
+
+.memberships-panel .membership-toolbar input {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.memberships-panel .membership-row.selected td {
+  background: var(--c-surface-soft);
+}
+
+.memberships-panel .membership-row-detail td {
+  padding: var(--c-space-2) 0 var(--c-space-3);
+}
+
+/* --- One membership ------------------------------------------------------- */
+
+.membership-card {
+  display: grid;
+  gap: var(--c-space-2);
+  padding: var(--c-space-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-card);
+  background: var(--c-surface);
+}
+
+.membership-card .membership-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--c-space-2);
+}
+
+.membership-card .membership-card-head > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.membership-card .membership-plan-name,
+.memberships-panel .membership-plan strong {
+  color: var(--c-text);
+  font-size: var(--c-size-body);
+}
+
+.membership-card .membership-meta,
+.memberships-panel .membership-meta {
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+}
+
+.membership-card .membership-person {
+  justify-self: start;
+  font-weight: 700;
+}
+
+.membership-card .membership-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--c-space-2) var(--c-space-4);
+  margin: 0;
+}
+
+.membership-card .membership-facts div {
+  display: grid;
+  gap: 2px;
+}
+
+.membership-card .membership-facts dt {
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+}
+
+.membership-card .membership-facts dd {
+  margin: 0;
+  color: var(--c-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.membership-card .membership-facts .membership-owing {
+  color: var(--c-error-text);
+  font-weight: 700;
+}
+
+.membership-card .membership-entitlements {
+  margin: 0;
+  color: var(--c-text-body);
+  font-size: var(--c-size-meta);
+  font-weight: 700;
+}
+
+.membership-card .membership-warning,
+.memberships-panel .membership-warning {
+  margin: 0;
+  padding: var(--c-space-2);
+  border-radius: var(--c-radius-control);
+  background: var(--c-danger-wash);
+  color: var(--c-error-text);
+  font-size: var(--c-size-meta);
+}
+
+.membership-card .membership-actions,
+.memberships-panel .membership-actions,
+.person-memberships .membership-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--c-space-2);
+  align-items: center;
+}
+
+.membership-card .membership-actions button,
+.membership-card .membership-pay-form button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.membership-card .membership-due-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--c-space-2);
+  padding: var(--c-space-2);
+  border: 1px dashed var(--c-border);
+  border-radius: var(--c-radius-control);
+}
+
+.membership-card .membership-due-row > div:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.membership-card .membership-due-row span {
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+}
+
+.membership-card .membership-pay-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--c-space-2);
+  align-items: center;
+}
+
+.membership-card .membership-pay-form select {
+  height: var(--c-h-control);
+  padding: 0 var(--c-space-2);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  color: var(--c-text);
+}
+
+.membership-card .membership-history {
+  display: grid;
+  gap: var(--c-space-2);
+  justify-items: start;
+}
+
+.membership-card .membership-charges {
+  justify-self: stretch;
+}
+
+.membership-card .membership-card-link input,
+.person-memberships .membership-card-link input {
+  font-size: var(--c-size-meta);
+}
+
+/* --- Forms ---------------------------------------------------------------- */
+
+.membership-plan-editor {
+  display: grid;
+  gap: var(--c-space-3);
+}
+
+.membership-plan-editor h3,
+.person-memberships h3 {
+  margin: 0;
+  color: var(--c-text);
+  font-size: var(--c-size-card-heading);
+}
+
+.membership-plan-editor .membership-form-grid,
+.person-memberships .membership-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--c-space-2) var(--c-space-3);
+  align-items: end;
+}
+
+.membership-plan-editor .membership-span {
+  grid-column: 1 / -1;
+}
+
+.membership-plan-editor textarea {
+  padding: var(--c-space-2) 10px;
+  resize: vertical;
+}
+
+.membership-plan-editor .membership-fieldset {
+  display: grid;
+  gap: var(--c-space-2);
+  margin: 0;
+  padding: var(--c-space-3);
+  border: 1px solid var(--c-border-soft);
+  border-radius: var(--c-radius-card);
+}
+
+.membership-plan-editor .membership-fieldset legend {
+  padding: 0 var(--c-space-1);
+  color: var(--c-text);
+  font-weight: 800;
+}
+
+.membership-plan-editor .membership-inline {
+  display: flex;
+  gap: var(--c-space-1);
+}
+
+.membership-plan-editor .membership-inline select {
+  flex: 1;
+  min-width: 0;
+}
+
+.membership-plan-editor .membership-number {
+  width: 64px;
+}
+
+.membership-plan-editor .membership-check,
+.person-memberships .membership-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--c-space-1);
+  color: var(--c-text-body);
+}
+
+.membership-plan-editor .membership-check span {
+  color: var(--c-text-body);
+  font-size: var(--c-size-secondary);
+  text-transform: none;
+  font-weight: 400;
+}
+
+.membership-plan-editor .membership-entitlement {
+  display: grid;
+  gap: var(--c-space-2);
+  padding: var(--c-space-2) 0;
+  border-bottom: 1px solid var(--c-border-soft);
+}
+
+.membership-plan-editor .membership-services {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--c-space-1) var(--c-space-3);
+  align-items: center;
+}
+
+.membership-plan-editor .membership-services-label {
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.membership-plan-editor .link-button,
+.membership-plan-editor .outline-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  justify-self: start;
+}
+
+/* --- Client profile ------------------------------------------------------- */
+
+.person-memberships {
+  margin-bottom: var(--c-space-4);
+  padding-bottom: var(--c-space-3);
+  border-bottom: 1px solid var(--c-border-soft);
+}
+
+.person-memberships .person-memberships-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--c-space-2);
+}
+
+.person-memberships .person-memberships-head button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.person-memberships .membership-enrol {
+  display: grid;
+  gap: var(--c-space-2);
+  padding: var(--c-space-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-card);
+  background: var(--c-surface-soft);
+}
+
+@media (max-width: 640px) {
+  .memberships-panel .membership-plan {
+    flex-direction: column;
+  }
+
+  .memberships-panel .membership-table th:nth-child(3),
+  .memberships-panel .membership-table td:nth-child(3) {
+    display: none;
+  }
+}
+
+/* Grid cells shrink below a select's intrinsic width only when told to. */
+.membership-plan-editor .settings-field,
+.person-memberships .settings-field {
+  min-width: 0;
+}
+
+.membership-plan-editor .settings-field select,
+.membership-plan-editor .settings-field input,
+.person-memberships .settings-field select,
+.person-memberships .settings-field input {
+  min-width: 0;
+  max-width: 100%;
+}

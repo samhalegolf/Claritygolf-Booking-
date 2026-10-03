@@ -126,6 +126,15 @@ import {
   type BusinessTerminology,
   type BusinessTerminologyPreset,
 } from "../netlify/functions/_shared/business-terminology.mts";
+import {
+  cleanMarketConfig,
+  DEFAULT_ACCOUNT_MARKET_CONFIG,
+  marketProfileFor,
+  resolveMarket,
+  type AccountMarketConfig,
+  type CapabilityKey,
+} from "../netlify/functions/_shared/market-profile.mts";
+import { publishActiveMarket } from "./lib/activeMarket";
 import { ResourceSystemPanel } from "./modules/integrations/ResourceSystemPanel";
 import { availabilityConflicts, type AvailabilityConflict } from "./availabilityConflicts";
 import {
@@ -379,6 +388,12 @@ const PassInboxPanel = lazy(() =>
 );
 const PassesPanel = lazy(() =>
   import("./modules/passes/PassesPanel").then((module) => ({ default: module.PassesPanel })),
+);
+const MembershipsPanel = lazy(() =>
+  import("./modules/memberships/MembershipsPanel").then((module) => ({ default: module.MembershipsPanel })),
+);
+const PersonMemberships = lazy(() =>
+  import("./modules/memberships/PersonMemberships").then((module) => ({ default: module.PersonMemberships })),
 );
 const IssuedPassesPanel = lazy(() =>
   import("./modules/passes/IssuedPassesPanel").then((module) => ({ default: module.IssuedPassesPanel })),
@@ -1171,6 +1186,7 @@ type BillingSection =
   | "reports"
   | "transactions"
   | "passes"
+  | "memberships"
   | "settings";
 
 // Every Billing section, as values. BILLING_SECTION_LABELS below is keyed by
@@ -1186,6 +1202,7 @@ const BILLING_SECTIONS: Exclude<BillingSection, "none">[] = [
   "reports",
   "transactions",
   "passes",
+  "memberships",
   "settings",
 ];
 
@@ -1213,6 +1230,7 @@ const BILLING_SECTION_LABELS: Record<Exclude<BillingSection, "none">, string> = 
   reports: t("Reports"),
   transactions: t("Transaction History"),
   passes: t("Passes"),
+  memberships: t("Memberships"),
   settings: t("Settings"),
 };
 
@@ -1659,6 +1677,21 @@ const SECONDARY_PLAYER_TOOL_TABS = [
   { id: "passes", label: t("Passes"), Icon: ClarityPassesCredits },
   { id: "portals", label: t("Portals"), Icon: ClarityIntegrations },
 ] as const satisfies ReadonlyArray<{ id: PlayerProfileTool; label: string; Icon: IconComponent }>;
+
+// The module each client-profile tool belongs to; unlisted tools are part of
+// every business. Same mapping the client portal uses for its own tabs.
+const PLAYER_TOOL_CAPABILITY: Partial<Record<PlayerProfileTool, CapabilityKey>> = {
+  reviews: "swingReview",
+  videos: "videoAnalysis",
+  practice: "practice",
+  passes: "passes",
+  portals: "portal",
+};
+
+function playerToolAllowed(tool: PlayerProfileTool, capabilities: Record<CapabilityKey, boolean>) {
+  const capability = PLAYER_TOOL_CAPABILITY[tool];
+  return !capability || capabilities[capability];
+}
 
 /** The five that only appear once the tab bar is opened out. */
 const SECONDARY_PLAYER_TOOLS: ReadonlySet<PlayerProfileTool> = new Set<PlayerProfileTool>(
@@ -2120,6 +2153,12 @@ type CoachAccount = {
   calendarSlug: string;
   caddyWorkspaceUrl: string;
   terminology: BusinessTerminology;
+  /**
+   * Which market profile the business started from and which modules it has
+   * switched away from that profile's defaults. Read here, written only by
+   * /api/market-profile -- see _shared/market-profile.mts.
+   */
+  market: AccountMarketConfig;
   invoiceSettings: InvoiceSettings;
 };
 
@@ -2721,6 +2760,21 @@ function sectionTitle(view: View, terms: BusinessTerminology = terminologyFor())
       return t("Calendar");
 
   }
+}
+
+// The capability each sidebar view belongs to. A view not listed is part of
+// every business (Clients, Settings, the hub).
+const VIEW_CAPABILITY: Partial<Record<View, CapabilityKey>> = {
+  calendar: "calendar",
+  video: "videoAnalysis",
+  "putting-lab": "puttingLab",
+  sell: "billing",
+  billing: "billing",
+};
+
+function viewAllowedByCapabilities(view: View, capabilities: Record<CapabilityKey, boolean>) {
+  const capability = VIEW_CAPABILITY[view];
+  return !capability || capabilities[capability];
 }
 
 function getInitialView(): View {
@@ -3345,6 +3399,7 @@ const defaultCoachAccount: CoachAccount = {
   calendarSlug: "",
   caddyWorkspaceUrl: CADDY_APP_URL,
   terminology: terminologyFor(),
+  market: { ...DEFAULT_ACCOUNT_MARKET_CONFIG },
   invoiceSettings: defaultInvoiceSettings,
 };
 
@@ -3447,7 +3502,11 @@ function cleanCoachAccount(account?: Partial<CoachAccount>): CoachAccount {
     bookingUrl: cleanUrl(account?.bookingUrl, defaultCoachAccount.bookingUrl),
     calendarSlug: cleanSlug(account?.calendarSlug, cleanSlug(businessName, defaultCoachAccount.calendarSlug)),
     caddyWorkspaceUrl: cleanUrl(account?.caddyWorkspaceUrl, defaultCoachAccount.caddyWorkspaceUrl),
-    terminology: terminologyFor(account?.terminology),
+    terminology: terminologyFor(
+      account?.terminology,
+      marketProfileFor(cleanMarketConfig(account?.market).profileId).terminology,
+    ),
+    market: cleanMarketConfig(account?.market),
     invoiceSettings: cleanInvoiceSettings(
       account?.invoiceSettings,
       cleanPhoneCountry(account?.country, defaultCoachAccount.country),
@@ -5580,7 +5639,20 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   // overwrites all of it when it answers.
   const [bootstrap] = useState(() => workspaceBootstrapFromSession(entrySession));
   const [coachAccount, setCoachAccount] = useState<CoachAccount>(() => bootstrap?.account ?? getStoredCoachAccount());
-  const terms = useMemo(() => terminologyFor(coachAccount), [coachAccount.terminology]);
+  // The business's words and the modules it shows. Everything below asks
+  // `capabilities.x` and reads `terms.x`; nothing asks which industry it is.
+  const market = useMemo(
+    () => resolveMarket(coachAccount.market, coachAccount.terminology),
+    [coachAccount.market, coachAccount.terminology],
+  );
+  const terms = market.terminology;
+  const capabilities = market.capabilities;
+  useEffect(() => {
+    publishActiveMarket(market);
+  }, [market]);
+  useEffect(() => {
+    document.title = market.product.documentTitle;
+  }, [market.product.documentTitle]);
   const settingsSections = useMemo(
     () =>
       SETTINGS_SECTIONS.map((section) =>
@@ -5759,6 +5831,9 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   const [clientTransactionsLoadState, setClientTransactionsLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   const [notesContext, setNotesContext] = useState<{ playerId: string; playerName: string } | null>(null);
   const [playerProfileTool, setPlayerProfileTool] = useState<PlayerProfileTool>("bookings");
+  useEffect(() => {
+    if (!playerToolAllowed(playerProfileTool, capabilities)) setPlayerProfileTool("bookings");
+  }, [playerProfileTool, capabilities]);
   const [playerToolExpanded, setPlayerToolExpanded] = useState(true);
   /** Whether the tab bar is showing the five record tabs as well as the three. */
   const [playerToolTabsExpanded, setPlayerToolTabsExpanded] = useState(false);
@@ -5788,6 +5863,12 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   const [personDeleteBusyId, setPersonDeleteBusyId] = useState("");
   const [selectedGroupSession, setSelectedGroupSession] = useState<GroupSession | null>(null);
   const [activeView, setActiveView] = useState<View>(() => getInitialView());
+  // A view whose module is switched off is not reachable by a bookmark, a
+  // ?view= link or a stale button somewhere else in the app either: it falls
+  // back to the hub. The sidebar hides the link; this closes the door.
+  useEffect(() => {
+    if (!viewAllowedByCapabilities(activeView, capabilities)) setActiveView("profile");
+  }, [activeView, capabilities]);
   const [videoContext, setVideoContext] = useState<{
     playerId: string;
     playerName: string;
@@ -21373,7 +21454,10 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
                   </button>
                 ))}
               </div>
-              {locationEditor.kind !== "online" ? (
+              {/* A business with resources switched off is not offered them --
+                  unless this place already has some, which the server still
+                  enforces, so they stay editable (and removable) here. */}
+              {locationEditor.kind !== "online" && (capabilities.resources || (locationEditor.resources?.length ?? 0) > 0) ? (
                 <div className="location-resources">
                   <div className="location-resources-header">
                     <div>
@@ -21642,6 +21726,10 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
               ["customerPlural", "Customer — plural"],
               ["serviceSingular", "Service — singular"],
               ["servicePlural", "Service — plural"],
+              ["resourceSingular", "Resource — singular"],
+              ["resourcePlural", "Resource — plural"],
+              ["assignmentPlural", "Practice module"],
+              ["assignmentSingular", "Practice item"],
             ] as Array<[keyof BusinessTerminology, string]>).map(([field, label]) => (
               <label className="settings-field" key={field}>
                 <span>{label}</span>
@@ -23489,7 +23577,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
           They used to share one: the Optix panel was injected underneath the
           email records because that was the only anchor an outside-React script
           could find by name. */}
-      {selected.kind === "appointment" && (
+      {selected.kind === "appointment" && capabilities.resources && (
         <BookingResourcesPanel
           calendarItemId={selected.id}
           onBayStatus={(itemId, bayBooked, resourceId) =>
@@ -24207,11 +24295,15 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     <div className={`app-shell theme-${themeMode}`} style={brandStyle}>
     <aside className="sidebar">
       <div className="brand">
-        <div className="brand-mark">
-          <img src="/assets/clarity-golf-logo-208.png" alt={t("Clarity Golf")} />
-        </div>
+        {/* Product identity (the platform), not business identity -- the
+            business's own name and logo live in Branding. */}
+        {market.product.logoSrc ? (
+          <div className="brand-mark">
+            <img src={market.product.logoSrc} alt={market.product.name} />
+          </div>
+        ) : null}
         <div>
-          <strong>{t("Clarity Golf")}</strong>
+          <strong>{market.product.name}</strong>
           <span>{t("Booking System")}</span>
         </div>
       </div>
@@ -24229,21 +24321,25 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
           <ClarityDashboardHome size={18} />
           {hubLabel}
         </button>
-        <button className={activeView === "calendar" ? "active" : ""} onClick={() => switchView("calendar")}>
-          <ClarityCalendar size={18} />{t("Calendar")}</button>
+        {capabilities.calendar && (
+          <button className={activeView === "calendar" ? "active" : ""} onClick={() => switchView("calendar")}>
+            <ClarityCalendar size={18} />{t("Calendar")}</button>
+        )}
         <button className={activeView === "clients" ? "active" : ""} onClick={() => switchView("clients")}>
           <ClarityClientsPlayers size={18} />
           {terms.customerPlural}
         </button>
         <button className={activeView === "players" ? "active" : ""} onClick={() => switchView("players")}>
           <ClarityProfile size={18} />{t("{customerSingular} Profiles", { customerSingular: terms.customerSingular })}</button>
-        <button className={activeView === "putting-lab" ? "active" : ""} onClick={() => switchView("putting-lab")}>
-          <ClarityAssessments size={18} />{t("Putting Lab")}</button>
-        {billingWorkspaceEnabled && (
+        {capabilities.puttingLab && (
+          <button className={activeView === "putting-lab" ? "active" : ""} onClick={() => switchView("putting-lab")}>
+            <ClarityAssessments size={18} />{t("Putting Lab")}</button>
+        )}
+        {billingWorkspaceEnabled && capabilities.billing && (
           <button className={activeView === "sell" ? "active" : ""} onClick={() => switchView("sell")}>
             <ClarityStore size={18} />{t("Sell")}</button>
         )}
-        {billingWorkspaceEnabled && (
+        {billingWorkspaceEnabled && capabilities.billing && (
           <button className={activeView === "billing" ? "active" : ""} onClick={() => switchView("billing")}>
             <ClarityInvoices size={18} />{t("Billing")}</button>
         )}
@@ -25388,15 +25484,17 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
                 >
                   <Plus size={18} />
                 </button>
-                <button
-                  type="button"
-                  className="icon-button"
-                  onClick={() => switchView("video")}
-                  title={t("Open video analysis")}
-                  aria-label={t("Open video analysis")}
-                >
-                  <ClarityVideoAnalysis size={18} />
-                </button>
+                {capabilities.videoAnalysis && (
+                  <button
+                    type="button"
+                    className="icon-button"
+                    onClick={() => switchView("video")}
+                    title={t("Open video analysis")}
+                    aria-label={t("Open video analysis")}
+                  >
+                    <ClarityVideoAnalysis size={18} />
+                  </button>
+                )}
               </div>
             </div>
 
@@ -25515,7 +25613,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
                                 role="tablist"
                                 aria-label={t("Player profile tools")}
                               >
-                                {PRIMARY_PLAYER_TOOL_TABS.map((tab) => (
+                                {PRIMARY_PLAYER_TOOL_TABS.filter((tab) => playerToolAllowed(tab.id, capabilities)).map((tab) => (
                                   <button
                                     type="button"
                                     key={tab.id}
@@ -25525,7 +25623,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
                                     aria-selected={playerProfileTool === tab.id}
                                   >
                                     <tab.Icon size={15} />
-                                    {tab.label}
+                                    {tab.id === "practice" ? terms.assignmentPlural : tab.label}
                                     {tab.id === "videos" && playerUnseenSubmissions ? (
                                       <span className="player-tool-tab-count">{playerUnseenSubmissions}</span>
                                     ) : null}
@@ -25534,7 +25632,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
                                 {playerToolTabsExpanded && (
                                   <>
                                     <span className="player-tool-tab-divider" aria-hidden="true" />
-                                    {SECONDARY_PLAYER_TOOL_TABS.map((tab) => (
+                                    {SECONDARY_PLAYER_TOOL_TABS.filter((tab) => playerToolAllowed(tab.id, capabilities)).map((tab) => (
                                       <button
                                         type="button"
                                         key={tab.id}
@@ -27116,6 +27214,14 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
                     opens. */}
                 {passInboxCount > 0 && <span className="tab-count">{passInboxCount}</span>}
               </button>
+              <button
+                className={billingSection === "memberships" ? "active" : ""}
+                onClick={() => setBillingSection("memberships")}
+                role="tab"
+                aria-selected={billingSection === "memberships"}
+                type="button"
+              >
+                <RefreshCw size={16} />{t("Memberships")}</button>
               <button
                 className={billingSection === "reports" ? "active" : ""}
                 onClick={() => setBillingSection("reports")}
@@ -29216,6 +29322,23 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
               </div>
             )}
 
+            {billingSection === "memberships" && (
+              <Suspense fallback={<Loading what={t("memberships")} />}>
+                <MembershipsPanel
+                  services={services
+                    .filter((service) => service.lessonFormat !== "package" && service.active !== false)
+                    .map((service) => ({ id: service.id, name: service.name }))}
+                  formatMoney={formatMoney}
+                  notify={(message) => setToast({ message })}
+                  onOpenPerson={(personId) => {
+                    const linked = clients.find((entry) => entry.id === personId);
+                    if (linked) openClientProfile(linked);
+                    else setToast({ message: t("That client is not in the list yet. Try again after it loads.") });
+                  }}
+                />
+              </Suspense>
+            )}
+
             {billingSection === "transactions" && (
               <div className="billing-dashboard billing-pos">
                 <article className="data-card">
@@ -29969,7 +30092,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
               ) : null}
               {settingsTab === "developer" ? (
                 <Suspense fallback={<Loading what={t("your connections")} />}>
-                  <IntegrationsPanel audience="integration" />
+                  <IntegrationsPanel audience="integration" unofferedIds={capabilities.optix ? [] : ["optix"]} />
                 </Suspense>
               ) : null}
               {/* Own tab only: it reads keys and webhook endpoints on mount. */}
@@ -29984,7 +30107,11 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
               {isAdminUser && settingsTab === "sandbox" ? (
                 <SettingsGroup id="sandbox" icon={FlaskConical} section="sandbox" title={t("Sandbox workspace")}>
                   <Suspense fallback={<Loading what={t("the sandbox")} />}>
-                    <SandboxPanel />
+                    <SandboxPanel
+                      onMarketChange={(market, terminology) =>
+                        setCoachAccount((current) => cleanCoachAccount({ ...current, market, terminology }))
+                      }
+                    />
                   </Suspense>
                 </SettingsGroup>
               ) : null}
@@ -29994,7 +30121,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
                   land on the platform panel. */}
               {settingsTab === "admin" && isPlatformAdmin ? (
                 <Suspense fallback={<Loading what={t("platform services")} />}>
-                  <IntegrationsPanel audience="admin" />
+                  <IntegrationsPanel audience="admin" unofferedIds={capabilities.optix ? [] : ["optix"]} />
                 </Suspense>
               ) : null}
               {/* Mounted on its own tab only: it asks the browser about push
@@ -31978,6 +32105,14 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
                       <p>{t("Save this booking contact as a client before giving them a pass.")}</p>
                     ) : (
                       <Suspense fallback={<Loading what={t("passes")} />}>
+                        {selectedClient ? (
+                          <PersonMemberships
+                            personId={selectedClient.id}
+                            formatMoney={formatMoney}
+                            notify={(message) => setToast({ message })}
+                            onPassesChanged={() => void fetchClientPasses(selectedClient.id)}
+                          />
+                        ) : null}
                         <PassesPanel
                           passes={clientPasses}
                           invoicedLines={clientInvoicedLines}

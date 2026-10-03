@@ -3079,7 +3079,6 @@
   "Book a {serviceSingular} or a swing review": "Boek een {serviceSingular} of een swingreview",
   "Nothing set": "Niets ingesteld",
   "Your {staffSingular} adds these after a {serviceSingular}.": "Je {staffSingular} voegt deze toe na een {serviceSingular}.",
-  "Open Practice": "Oefenen openen",
   "Nothing yet": "Nog niets",
   "From your coach": "Van je coach",
   "Tap to download": "Tik om te downloaden",
@@ -3176,7 +3175,6 @@
   "Request account deletion": "Accountverwijdering aanvragen",
   "Home": "Home",
   "Lessons": "Lessen",
-  "Player Terminal": "Spelersterminal",
   "Balance": "Saldo",
   "Switch to light": "Naar licht",
   "Switch to dark": "Naar donker",
@@ -4173,5 +4171,8 @@
   "Clarity Pay isn't set up": "Clarity Pay is niet ingesteld",
   "Clarity Pay setup is paused": "Instellen van Clarity Pay is gepauzeerd",
   "You left Stripe's signup before the end. Nothing is lost: carry on where you stopped whenever you're ready.": "Je hebt de aanmelding bij Stripe verlaten voordat die klaar was. Er is niets verloren: ga verder waar je gebleven was wanneer je wilt.",
-  "Stripe's signup didn't finish. You can start it again now.": "De aanmelding bij Stripe is niet afgerond. Je kunt nu opnieuw beginnen."
+  "Stripe's signup didn't finish. You can start it again now.": "De aanmelding bij Stripe is niet afgerond. Je kunt nu opnieuw beginnen.",
+  "{customerSingular} Portal": "{customerSingular}portal",
+  "Open {assignmentPlural}": "{assignmentPlural} openen",
+  "This booking page is not available.": "Deze boekingspagina is niet beschikbaar."
 }

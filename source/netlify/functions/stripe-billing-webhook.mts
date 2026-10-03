@@ -10,6 +10,7 @@ import {
   syncStripeCharge,
   syncStripeInvoice,
 } from "./_shared/stripe-billing.mts";
+import { handleMembershipStripeEvent } from "./_shared/memberships.mts";
 
 // Stripe webhook: keeps billing_invoices / billing_invoice_items live-mirrored
 // from Stripe. All operations are idempotent upserts keyed on Stripe ids, so
@@ -38,6 +39,13 @@ import {
 // payment_intent.succeeded settles a Tap to Pay sale whose phone never heard
 // the answer (app closed, signal lost). The phone settles the same payment
 // itself when it can; whichever gets there second finds it already done.
+//
+// Memberships (see _shared/memberships.mts) also listen here, and need
+// checkout.session.completed added to the endpoint's events: it banks a saved
+// card when the member closes the tab before Stripe's return page loads. A
+// renewal's payment_intent.succeeded settles a charge whose off-session
+// confirm timed out. Both carry clarity_membership_* metadata, which is how
+// they are told apart from till sales and portal purchases.
 
 function json(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), {
@@ -138,6 +146,8 @@ export default async function handler(req: Request) {
 }
 
 async function handleEvent(event: Record<string, any>, object: Record<string, any>, accountId: string) {
+  const membership = await handleMembershipStripeEvent(accountId, String(event?.type || ""), object);
+  if (membership) return membership;
   switch (event?.type) {
     case "invoice.created":
     case "invoice.updated":

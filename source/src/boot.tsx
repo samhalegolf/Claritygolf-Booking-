@@ -40,6 +40,8 @@ const ClarityTerminalPage = lazy(() => import("./modules/clarity-terminal/Clarit
 // Not lazy: it is small, and a testing workspace that renders its warning a
 // beat after the workspace it warns about is a workspace someone acts in first.
 import SandboxBar from "./modules/sandbox/SandboxBar";
+// Sandbox only, and inert until switched on in Settings › Sandbox.
+const IndustryLeakDetector = lazy(() => import("./modules/sandbox/IndustryLeakDetector"));
 import { t } from "./lib/i18n";
 
 // The booking embed is public by design -- it is the widget clients book
@@ -200,7 +202,12 @@ function Root() {
             real one -- this is the only thing on screen that knows the player
             looking at it is not the player. */}
         {session.accountKind === "sandbox" && session.viewingAs ? (
-          <SandboxBar viewingAs={session.viewingAs} />
+          <>
+            <SandboxBar viewingAs={session.viewingAs} />
+            <Suspense fallback={null}>
+              <IndustryLeakDetector />
+            </Suspense>
+          </>
         ) : null}
         <Suspense fallback={<Loading size="screen" what={t("your profile")} />}>
           <PlayerPortal session={session} onSignedOut={handleSessionLost} />
@@ -227,7 +234,12 @@ function Root() {
             player terminal both get the same bar without either layout having to
             make room for it. */}
         {session.accountKind === "sandbox" ? (
-          <SandboxBar liveAccountId={session.liveAccountId || ""} />
+          <>
+            <SandboxBar liveAccountId={session.liveAccountId || ""} />
+            <Suspense fallback={null}>
+              <IndustryLeakDetector />
+            </Suspense>
+          </>
         ) : null}
         <Suspense fallback={<Loading size="screen" what={t("your workspace")} />}>
           <App onSessionLost={handleSessionLost} session={session} />

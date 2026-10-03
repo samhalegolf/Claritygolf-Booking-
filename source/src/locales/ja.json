@@ -3079,7 +3079,6 @@
   "Book a {serviceSingular} or a swing review": "{serviceSingular}またはスイングレビューを予約",
   "Nothing set": "未設定",
   "Your {staffSingular} adds these after a {serviceSingular}.": "{serviceSingular}の後に{staffSingular}が追加します。",
-  "Open Practice": "練習を開く",
   "Nothing yet": "まだありません",
   "From your coach": "コーチから",
   "Tap to download": "タップしてダウンロード",
@@ -3176,7 +3175,6 @@
   "Request account deletion": "アカウントの削除をリクエスト",
   "Home": "ホーム",
   "Lessons": "レッスン",
-  "Player Terminal": "プレーヤーターミナル",
   "Balance": "残高",
   "Switch to light": "ライトに切り替え",
   "Switch to dark": "ダークに切り替え",
@@ -4173,5 +4171,8 @@
   "Clarity Pay isn't set up": "Clarity Pay は設定されていません",
   "Clarity Pay setup is paused": "Clarity Pay の設定は一時停止中です",
   "You left Stripe's signup before the end. Nothing is lost: carry on where you stopped whenever you're ready.": "Stripe の登録を途中で離れました。何も失われていません。準備ができたら、中断したところから続けてください。",
-  "Stripe's signup didn't finish. You can start it again now.": "Stripe の登録が完了しませんでした。今すぐもう一度始められます。"
+  "Stripe's signup didn't finish. You can start it again now.": "Stripe の登録が完了しませんでした。今すぐもう一度始められます。",
+  "{customerSingular} Portal": "{customerSingular}ポータル",
+  "Open {assignmentPlural}": "{assignmentPlural}を開く",
+  "This booking page is not available.": "この予約ページはご利用いただけません。"
 }

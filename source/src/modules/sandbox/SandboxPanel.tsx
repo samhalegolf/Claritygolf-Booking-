@@ -10,7 +10,10 @@
 // their smallest customers actually run into, which is the class of bug that
 // otherwise reaches someone who is paying.
 
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
+
+import type { AccountMarketConfig } from "../../../netlify/functions/_shared/market-profile.mts";
+import type { BusinessTerminology } from "../../../netlify/functions/_shared/business-terminology.mts";
 
 import {
   createSandbox,
@@ -24,6 +27,9 @@ import {
 import "./sandbox.css";
 import { t } from "../../lib/i18n";
 
+// Only inside the sandbox, so a live workspace never downloads it.
+const MarketProfileBuilder = lazy(() => import("./MarketProfileBuilder"));
+
 const PLAN_LABELS: Record<SandboxPlanKey, string> = {
   solo: t("Solo — 1 coach, 1 location, 10 lesson types"),
   studio: t("Studio — 5 coaches, 3 locations, invoicing, branding"),
@@ -32,7 +38,11 @@ const PLAN_LABELS: Record<SandboxPlanKey, string> = {
   founder: t("Founder — everything, no practical limits"),
 };
 
-export default function SandboxPanel() {
+export type SandboxPanelProps = {
+  onMarketChange?: (config: AccountMarketConfig, terminology: BusinessTerminology) => void;
+};
+
+export default function SandboxPanel({ onMarketChange }: SandboxPanelProps = {}) {
   const [status, setStatus] = useState<SandboxStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -104,6 +114,13 @@ export default function SandboxPanel() {
             </label>
           </div>
           <p className="sandbox-panel__note">{t("Everyone on this business shares this one sandbox. Dropping to a smaller plan keeps anything already over its limit and refuses the next one — the same thing a coach who downgrades sees.")}</p>
+          {/* The industry builder edits the account it runs in, so it is only
+              offered from inside the sandbox -- never against the live one. */}
+          {status.inSandbox ? (
+            <Suspense fallback={null}>
+              <MarketProfileBuilder onMarketChange={onMarketChange} />
+            </Suspense>
+          ) : null}
         </>
       ) : (
         <>

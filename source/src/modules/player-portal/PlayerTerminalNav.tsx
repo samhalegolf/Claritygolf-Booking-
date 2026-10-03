@@ -10,6 +10,7 @@
 // way in is the card on the home route -- a permanent link in the bar would put
 // "leave here" next to every screen in the terminal.
 import { terminologyFor, type BusinessTerminology } from "../../../netlify/functions/_shared/business-terminology.mts";
+import type { CapabilityKey, MarketCapabilities } from "../../../netlify/functions/_shared/market-profile.mts";
 import {
   ClarityAssessments,
   ClarityBookingPages,
@@ -72,6 +73,24 @@ const GUEST_HIDDEN: ReadonlySet<PlayerTerminalDestination> = new Set([
   "practice",
 ]);
 
+// The module each destination belongs to. A business with that module off has
+// no link to it -- not a locked one. Home, lessons, notes and booking belong to
+// every business.
+export const DESTINATION_CAPABILITY: Partial<Record<PlayerTerminalDestination, CapabilityKey>> = {
+  reviews: "swingReview",
+  passes: "passes",
+  practice: "practice",
+  videos: "videoAnalysis",
+};
+
+export function destinationAllowed(
+  destination: PlayerTerminalDestination,
+  capabilities: MarketCapabilities | null | undefined,
+) {
+  const capability = DESTINATION_CAPABILITY[destination];
+  return !capability || !capabilities || capabilities[capability];
+}
+
 export type PlayerTerminalNavProps = {
   /** Null while a child workspace owns the screen, so no link reads as current. */
   active: PlayerTerminalDestination | null;
@@ -98,6 +117,10 @@ export type PlayerTerminalNavProps = {
   balance?: { credits: number } | null;
   onOpenBalance?: () => void;
   terminology?: BusinessTerminology;
+  /** Which modules the business shows. Absent means all of them, as before. */
+  capabilities?: MarketCapabilities;
+  /** The platform's name, beside the portal's name. */
+  productName?: string;
 };
 
 export function PlayerTerminalNav({
@@ -114,12 +137,19 @@ export function PlayerTerminalNav({
   balance,
   onOpenBalance,
   terminology,
+  capabilities,
+  productName = "Clarity Golf",
 }: PlayerTerminalNavProps) {
   const terms = terminologyFor(terminology);
-  const namedLinks = NAV_LINKS.map((link) =>
-    link.id === "lessons" ? { ...link, label: terms.servicePlural } : link,
+  const namedLinks = NAV_LINKS.filter((link) => destinationAllowed(link.id, capabilities)).map((link) =>
+    link.id === "lessons"
+      ? { ...link, label: terms.servicePlural }
+      : link.id === "practice"
+        ? { ...link, label: terms.assignmentPlural }
+        : link,
   );
   const baseLinks = guest ? namedLinks.filter((link) => !GUEST_HIDDEN.has(link.id)) : namedLinks;
+  const canRecord = !capabilities || capabilities.videoAnalysis;
 
   // Last in the bar, and only when there is one. A guest never gets it either:
   // the config arrives with the player profile, and a guest has no account to
@@ -144,13 +174,16 @@ export function PlayerTerminalNav({
             </button>
           ) : (
             <div className="player-portal-brand">
-              <strong>{t("Clarity Golf")}</strong>
-              <span>{t("Player Portal")}</span>
+              <strong>{productName}</strong>
+              <span>{t("{customerSingular} Portal", { customerSingular: terms.customerSingular })}</span>
             </div>
           )}
         </div>
 
-        <nav className="player-terminal-nav-links" aria-label={t("Player Terminal")}>
+        <nav
+          className="player-terminal-nav-links"
+          aria-label={t("{customerSingular} Portal", { customerSingular: terms.customerSingular })}
+        >
           {visibleLinks.map((link) => (
             <button
               key={link.id}
@@ -190,7 +223,7 @@ export function PlayerTerminalNav({
           >
             <span aria-hidden="true">{theme === "dark" ? "\u2600" : "\u263D"}</span>
           </button>
-          {!back && (
+          {!back && canRecord && (
             <button
               type="button"
               className="player-terminal-nav-record"

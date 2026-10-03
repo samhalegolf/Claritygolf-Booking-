@@ -3079,7 +3079,6 @@
   "Book a {serviceSingular} or a swing review": "Book en {serviceSingular} eller en swinganalyse",
   "Nothing set": "Ingenting satt opp",
   "Your {staffSingular} adds these after a {serviceSingular}.": "{staffSingular} legger til disse etter en {serviceSingular}.",
-  "Open Practice": "Åpne Trening",
   "Nothing yet": "Ingenting ennå",
   "From your coach": "Fra coachen din",
   "Tap to download": "Trykk for å laste ned",
@@ -3176,7 +3175,6 @@
   "Request account deletion": "Be om sletting av konto",
   "Home": "Hjem",
   "Lessons": "Timer",
-  "Player Terminal": "Spillerterminal",
   "Balance": "Saldo",
   "Switch to light": "Bytt til lyst",
   "Switch to dark": "Bytt til mørkt",
@@ -4173,5 +4171,8 @@
   "Clarity Pay isn't set up": "Clarity Pay er ikke satt opp",
   "Clarity Pay setup is paused": "Oppsett av Clarity Pay er satt på pause",
   "You left Stripe's signup before the end. Nothing is lost: carry on where you stopped whenever you're ready.": "Du forlot registreringen hos Stripe før slutten. Ingenting er tapt: fortsett der du slapp når du er klar.",
-  "Stripe's signup didn't finish. You can start it again now.": "Registreringen hos Stripe ble ikke fullført. Du kan starte på nytt nå."
+  "Stripe's signup didn't finish. You can start it again now.": "Registreringen hos Stripe ble ikke fullført. Du kan starte på nytt nå.",
+  "{customerSingular} Portal": "{customerSingular}portal",
+  "Open {assignmentPlural}": "Åpne {assignmentPlural}",
+  "This booking page is not available.": "Denne bookingsiden er ikke tilgjengelig."
 }

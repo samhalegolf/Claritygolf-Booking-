@@ -3079,7 +3079,6 @@
   "Book a {serviceSingular} or a swing review": "Prenota una {serviceSingular} o un'analisi dello swing",
   "Nothing set": "Niente di impostato",
   "Your {staffSingular} adds these after a {serviceSingular}.": "Il tuo {staffSingular} li aggiunge dopo una {serviceSingular}.",
-  "Open Practice": "Apri Pratica",
   "Nothing yet": "Ancora niente",
   "From your coach": "Dal tuo coach",
   "Tap to download": "Tocca per scaricare",
@@ -3176,7 +3175,6 @@
   "Request account deletion": "Richiedi eliminazione account",
   "Home": "Home",
   "Lessons": "Lezioni",
-  "Player Terminal": "Player Terminal",
   "Balance": "Saldo",
   "Switch to light": "Passa al tema chiaro",
   "Switch to dark": "Passa al tema scuro",
@@ -4173,5 +4171,8 @@
   "Clarity Pay isn't set up": "Clarity Pay non è configurato",
   "Clarity Pay setup is paused": "La configurazione di Clarity Pay è in pausa",
   "You left Stripe's signup before the end. Nothing is lost: carry on where you stopped whenever you're ready.": "Hai lasciato la registrazione a Stripe prima della fine. Non si è perso nulla: riprendi da dove avevi interrotto quando vuoi.",
-  "Stripe's signup didn't finish. You can start it again now.": "La registrazione a Stripe non è stata completata. Puoi ricominciarla ora."
+  "Stripe's signup didn't finish. You can start it again now.": "La registrazione a Stripe non è stata completata. Puoi ricominciarla ora.",
+  "{customerSingular} Portal": "Portale {customerSingular}",
+  "Open {assignmentPlural}": "Apri {assignmentPlural}",
+  "This booking page is not available.": "Questa pagina di prenotazione non è disponibile."
 }

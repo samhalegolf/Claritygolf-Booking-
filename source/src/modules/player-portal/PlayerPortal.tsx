@@ -29,6 +29,7 @@ import { hasGuestToken, NATIVE } from "../auth/apiFetch";
 import { isPlayerBookingMode, slotDate } from "../shared/bookingHandoff";
 import { useBackNavigation } from "../shared/backNavigation";
 import {
+  destinationAllowed,
   PlayerTerminalNav,
   type PlayerTerminalDestination,
 } from "./PlayerTerminalNav";
@@ -39,6 +40,7 @@ import {
   type PlayerBookingEmbedConfig,
 } from "./PlayerBookingEmbed";
 import { formatClock, formatDate } from "./format";
+import { PlayerMemberships, type PlayerMembership, type PlayerMembershipPlan } from "./PlayerMemberships";
 import { groupSwingReviews, type CloudReviewSnapshot } from "./swingReviews";
 import { SnapshotFrameViewer, type FrameViewerShot } from "../shared/SnapshotFrameViewer";
 import { SwingReviewFlow, type ReviewOffer, type SwingReviewDraft } from "./SwingReviewFlow";
@@ -88,6 +90,8 @@ import type {
 } from "../video-analysis/VideoWorkspace";
 import { deleteGuestNote, listGuestNotes, saveGuestNote, type GuestNote } from "./guestNotesStore";
 import { terminologyFor, type BusinessTerminology } from "../../../netlify/functions/_shared/business-terminology.mts";
+import { resolvedMarketFromWire, type ResolvedMarket } from "../../../netlify/functions/_shared/market-profile.mts";
+import { publishActiveMarket } from "../../lib/activeMarket";
 import { t, tn, readerLocale } from "../../lib/i18n";
 
 // The player's own app. It is chosen by the entry point from the session role,
@@ -315,6 +319,8 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   const [flexibleValueCents, setFlexibleValueCents] = useState(0);
   const [passCurrency, setPassCurrency] = useState("");
   const [shop, setShop] = useState<ShopItem[]>([]);
+  const [memberships, setMemberships] = useState<PlayerMembership[]>([]);
+  const [membershipPlans, setMembershipPlans] = useState<PlayerMembershipPlan[]>([]);
   /** Which item is mid-purchase, so only its own button goes quiet. */
   const [buyingId, setBuyingId] = useState("");
   const [reviewOffer, setReviewOffer] = useState<ReviewOffer | null>(null);
@@ -352,6 +358,13 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   // which is what keeps the tab out of the nav.
   const [bookingEmbed, setBookingEmbed] = useState<PlayerBookingEmbedConfig | null>(null);
   const [terms, setTerms] = useState<BusinessTerminology>(() => terminologyFor());
+  // Which modules this business shows (market-profile.mts). Golf -- everything
+  // on -- until the profile lands, which is what the portal has always shown.
+  const [market, setMarket] = useState<ResolvedMarket>(() => resolvedMarketFromWire(null));
+  const cap = market.capabilities;
+  useEffect(() => {
+    publishActiveMarket(market);
+  }, [market]);
 
   // Videos live on this device first. Nothing leaves it until the player
   // presses Send to coach.
@@ -434,9 +447,12 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
         flexibleValueCents?: number;
         passCurrency?: string;
         shop?: ShopItem[];
+        memberships?: PlayerMembership[];
+        membershipPlans?: PlayerMembershipPlan[];
         review?: ReviewOffer | null;
         bookingEmbed?: PlayerBookingEmbedConfig;
         terminology?: BusinessTerminology;
+        market?: unknown;
       };
       if (!res.ok) throw new Error(data?.message || t("We couldn't load your profile."));
       setBookings(Array.isArray(data.bookings) ? data.bookings : []);
@@ -454,6 +470,9 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
       // The App Store build is a companion to the coach's service. Existing
       // passes work here, but this binary never sells or links out to buy one.
       setShop(__CLARITY_NATIVE__ ? [] : Array.isArray(data.shop) ? data.shop : []);
+      setMemberships(Array.isArray(data.memberships) ? data.memberships : []);
+      // Same rule as the shop: the App Store build never sells.
+      setMembershipPlans(__CLARITY_NATIVE__ ? [] : Array.isArray(data.membershipPlans) ? data.membershipPlans : []);
       // Null when the coach sells no video review, or sells more than one and
       // the catalogue cannot say which is "the" review.
       setReviewOffer(
@@ -462,7 +481,9 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
           : null,
       );
       setBookingEmbed(isPlayerBookingEmbedConfigured(data.bookingEmbed) ? data.bookingEmbed : null);
-      setTerms(terminologyFor(data.terminology));
+      const nextMarket = resolvedMarketFromWire(data.market, data.terminology);
+      setMarket(nextMarket);
+      setTerms(nextMarket.terminology);
       if (data.player?.email) setPlayerEmail(data.player.email);
       if (data.player?.name) setPlayerName(data.player.name);
       if (data.player?.phone) setPlayerPhone(data.player.phone);
@@ -747,6 +768,26 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
    *
    * The URL is cleaned either way: a session id left in the address bar is
    * something a player can bookmark, share, or re-trigger by reloading. */
+  /* Coming back from a membership's card form. The server has already banked
+   * it on the way through (/api/memberships/checkout/return); this only says
+   * how it went and cleans the URL. */
+  useEffect(() => {
+    if (__CLARITY_NATIVE__ || isGuest) return;
+    const outcome = new URLSearchParams(window.location.search).get("membership");
+    if (!outcome) return;
+    window.history.replaceState(window.history.state, "", window.location.pathname);
+    setTab("passes");
+    setPurchaseNote(
+      outcome === "joined"
+        ? t("You're in. Your membership is active and your card is saved.")
+        : outcome === "pending"
+          ? t("Your bank is still confirming. Your membership starts as soon as it does.")
+          : outcome === "cancelled"
+            ? t("No card was saved and nothing was charged.")
+            : t("We could not confirm that card. Nothing extra was charged — your coach can help."),
+    );
+  }, [isGuest]);
+
   useEffect(() => {
     if (__CLARITY_NATIVE__ || isGuest) return;
     const params = new URLSearchParams(window.location.search);
@@ -1444,7 +1485,10 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
     // deep link or a stale tab could still land on it; home is the honest
     // answer rather than an empty screen with no way out of it.
     if (tab === "reviews" && isGuest) setTab("home");
-  }, [bookingEmbed, isGuest, tab]);
+    // A module the business has switched off has no link in the bar; a deep
+    // link or a tab restored from before the switch lands home instead.
+    if (tab !== "home" && tab !== "book" && !destinationAllowed(tab, cap)) setTab("home");
+  }, [bookingEmbed, isGuest, tab, cap]);
 
   // Every screen in the terminal wears the same bar, including the ones that
   // take the whole viewport.
@@ -1466,6 +1510,8 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
       balance={isGuest || !spendableCredits ? null : { credits: spendableCredits }}
       onOpenBalance={() => navigateTerminal("passes")}
       terminology={terms}
+      capabilities={cap}
+      productName={market.product.name}
     />
   );
 
@@ -1676,9 +1722,10 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
 
                       <div className="player-portal-panels">
                         <div className="player-portal-panel-column">
+                          {cap.practice && (
                           <section className="player-portal-panel">
                             <div className="player-portal-panel-head">
-                              <h2>{t("Practice")}</h2>
+                              <h2>{terms.assignmentPlural}</h2>
                               <span>
                                 {activePractice.length
                                   ? `${activePractice.length} to work on`
@@ -1700,9 +1747,11 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                               className="player-portal-panel-more"
                               type="button"
                               onClick={() => navigateTerminal("practice")}
-                            >{t("Open Practice")}</button>
+                            >{t("Open {assignmentPlural}", { assignmentPlural: terms.assignmentPlural })}</button>
                           </section>
+                          )}
 
+                          {cap.videoAnalysis && (
                           <section className="player-portal-panel">
                             <div className="player-portal-panel-head">
                               <h2>{t("Videos")}</h2>
@@ -1760,6 +1809,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                               onClick={() => navigateTerminal("videos")}
                             >{t("Open Videos")}</button>
                           </section>
+                          )}
                         </div>
 
                         <section className="player-portal-panel">
@@ -1810,6 +1860,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                           <span className="player-portal-home-card-title"><ClarityBookingPages size={18} />{t("Notes")}</span>
                           <span className="player-portal-home-card-sub">{t("Quick notes for yourself")}</span>
                         </button>
+                        {cap.videoAnalysis && (
                         <button
                           type="button"
                           className="player-portal-home-card"
@@ -1820,6 +1871,8 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                             {savedVideos.length ? `${savedVideos.length} saved` : t("Saved on this device")}
                           </span>
                         </button>
+                        )}
+                        {cap.videoAnalysis && (
                         <button
                           type="button"
                           className="player-portal-home-card player-portal-home-card-wide"
@@ -1828,6 +1881,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                           <span className="player-portal-home-card-title"><ClarityVideoAnalysis size={18} />{t("Record a video")}</span>
                           <span className="player-portal-home-card-sub">{recordCardSub}</span>
                         </button>
+                        )}
                       </>
                     ) : (
                       <>
@@ -1849,7 +1903,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                             reading "no passes" is clutter on every home screen
                             in the business for the sake of the few who buy
                             them. */}
-                        {passes.length > 0 && (
+                        {passes.length > 0 && cap.passes && (
                           <button
                             type="button"
                             className="player-portal-home-card"
@@ -1863,6 +1917,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                             </span>
                           </button>
                         )}
+                        {cap.swingReview && (
                         <button
                           type="button"
                           className="player-portal-home-card"
@@ -1881,12 +1936,14 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                                   : t("Nothing reviewed yet")}
                           </span>
                         </button>
+                        )}
+                        {cap.practice && (
                         <button
                           type="button"
                           className="player-portal-home-card"
                           onClick={() => navigateTerminal("practice")}
                         >
-                          <span className="player-portal-home-card-title"><ClarityLessonsProgrammes size={18} />{t("Practice")}</span>
+                          <span className="player-portal-home-card-title"><ClarityLessonsProgrammes size={18} />{terms.assignmentPlural}</span>
                           <span className="player-portal-home-card-sub">
                             {profileLoading && !practice.length
                               ? t("Loading…")
@@ -1897,6 +1954,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                                 : t("Nothing set yet")}
                           </span>
                         </button>
+                        )}
                         <button
                           type="button"
                           className="player-portal-home-card"
@@ -1909,6 +1967,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                               : t("{serviceSingular} notes", { serviceSingular: terms.serviceSingular })}
                           </span>
                         </button>
+                        {cap.videoAnalysis && (
                         <button
                           type="button"
                           className="player-portal-home-card"
@@ -1925,6 +1984,8 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                                   : t("No videos yet")}
                           </span>
                         </button>
+                        )}
+                        {cap.videoAnalysis && (
                         <button
                           type="button"
                           className="player-portal-home-card player-portal-home-card-wide"
@@ -1933,6 +1994,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                           <span className="player-portal-home-card-title"><ClarityVideoAnalysis size={18} />{t("Record a video")}</span>
                           <span className="player-portal-home-card-sub">{recordCardSub}</span>
                         </button>
+                        )}
                       </>
                     )}
                   </div>
@@ -2135,7 +2197,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                   {/* Caddy is its own product with its own billing. The portal
                       shows where the player stands and opens the door --
                       nothing more, and only from the Lessons tab. */}
-                  {caddy?.appUrl && (
+                  {cap.caddy && caddy?.appUrl && (
                     <section className="player-portal-section player-portal-caddy">
                       <h2>{t("Clarity Caddy")}</h2>
                       <div className="player-portal-caddy-row">
@@ -2216,7 +2278,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                 </section>
               )}
 
-              {tab === "reviews" && !isGuest && (
+              {tab === "reviews" && !isGuest && cap.swingReview && (
                 <>
                   {/* The hero is asking for a new one, not reading old ones.
                       A player opens this tab far more often to send a swing
@@ -2455,7 +2517,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                 </>
               )}
 
-              {tab === "passes" && !isGuest && (
+              {tab === "passes" && !isGuest && cap.passes && (
                 <>
                   {/* What they hold and what they can get, on one screen.
                       They are the same subject -- "what am I able to book" --
@@ -2469,6 +2531,13 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                       that has run out or timed out is the answer to "why can't
                       I book on my pass" -- hiding it turns that into a message
                       to the coach. */}
+                  <PlayerMemberships
+                    memberships={memberships}
+                    plans={membershipPlans}
+                    canBuy={!__CLARITY_NATIVE__}
+                    onChanged={() => void loadProfile()}
+                  />
+
                   {(passes.length > 0 || flexibleValueCents > 0) && (
                     <section className="player-portal-section">
                       <h2>{t("Your passes")}</h2>
@@ -2550,7 +2619,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                       Absent entirely when the business has not set up card
                       payments: the server sends an empty shop, and a "Buy"
                       button that cannot take money is worse than no button. */}
-                  {!__CLARITY_NATIVE__ && shop.length > 0 && (
+                  {!__CLARITY_NATIVE__ && cap.products && shop.length > 0 && (
                     <section className="player-portal-section">
                       <h2>{passes.length ? t("Buy more") : t("Buy {servicePlural} or a review", { servicePlural: terms.servicePlural.toLowerCase() })}</h2>
                       <p className="player-portal-lead">{t("Paid for here, straight onto your account. Book it whenever you like.")}</p>
@@ -2582,13 +2651,13 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                     </section>
                   )}
 
-                  {!passes.length && !shop.length && (
+                  {!passes.length && !shop.length && !memberships.length && !membershipPlans.length && (
                     <p className="player-portal-empty">{t("Nothing here yet. Passes added to your account show up on this screen.")}</p>
                   )}
                 </>
               )}
 
-              {tab === "practice" && !isGuest && (
+              {tab === "practice" && !isGuest && cap.practice && (
                 <section className="player-portal-section">
                   <h2>{t("Practice")}</h2>
                   {/* The wall, not a list. Every block the coach has ever set,
@@ -2721,7 +2790,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                 </section>
               )}
 
-              {tab === "videos" && (
+              {tab === "videos" && cap.videoAnalysis && (
                 <section className="player-portal-section">
                   <h2>{t("Your videos")}</h2>
                   <p className="player-portal-lead">

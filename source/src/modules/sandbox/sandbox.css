@@ -151,3 +151,221 @@ body.has-sandbox-bar {
   margin: var(--c-space-4) 0 0;
   color: var(--c-error-text);
 }
+
+/* --- Industry profile builder (Settings › Sandbox) ------------------------ */
+
+/* Scoped under .market-builder throughout: the panel sits inside a .data-card,
+   whose descendant span/p rules outrank a bare single class. */
+.market-builder {
+  margin-top: var(--c-space-6);
+  padding-top: var(--c-space-6);
+  border-top: 1px solid var(--c-border-soft);
+}
+
+.market-builder .market-builder__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--c-space-4);
+}
+
+.market-builder .market-builder__heading {
+  margin: var(--c-space-6) 0 var(--c-space-3);
+  font-size: var(--c-size-group);
+  color: var(--c-text);
+}
+
+.market-builder .market-builder__product {
+  margin: 0;
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+}
+
+.market-builder .market-builder__words {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--c-space-3) var(--c-space-4);
+  margin-bottom: var(--c-space-4);
+}
+
+.market-builder input,
+.market-builder select,
+.market-builder button {
+  font: inherit;
+}
+
+.market-builder .market-builder__capabilities {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--c-space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.market-builder .market-builder__capabilities li {
+  display: flex;
+  flex-direction: column;
+  gap: var(--c-space-1);
+  padding: var(--c-space-3);
+  border: 1px solid var(--c-border-soft);
+  border-radius: var(--c-radius-control);
+}
+
+.market-builder .market-builder__capabilities li.is-changed {
+  border-color: var(--c-sandbox);
+}
+
+.market-builder .market-builder__capabilities label {
+  display: flex;
+  align-items: center;
+  gap: var(--c-space-2);
+  color: var(--c-text);
+  font-weight: 600;
+}
+
+.market-builder .market-builder__capability-name em {
+  color: var(--c-sandbox);
+  font-style: normal;
+  font-weight: 500;
+  font-size: var(--c-size-meta);
+}
+
+.market-builder .market-builder__capabilities small {
+  color: var(--c-muted);
+  font-size: var(--c-size-meta);
+}
+
+.market-builder .market-builder__presets {
+  display: flex;
+  flex-direction: column;
+  gap: var(--c-space-2);
+  margin: var(--c-space-4) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.market-builder .market-builder__presets li {
+  display: flex;
+  align-items: center;
+  gap: var(--c-space-4);
+  color: var(--c-text);
+}
+
+.market-builder .market-builder__presets span {
+  flex: 1 1 auto;
+  color: var(--c-text-soft);
+}
+
+.market-builder .market-builder__detector {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--c-space-2);
+  color: var(--c-text-soft);
+}
+
+.market-builder .market-builder__detector span {
+  color: var(--c-text-soft);
+}
+
+/* --- Industry leak detector (sandbox only) -------------------------------- */
+
+.industry-leak-flag {
+  outline: 2px dashed var(--c-danger);
+  outline-offset: 2px;
+}
+
+.industry-leak-panel {
+  position: fixed;
+  right: var(--c-space-4);
+  bottom: var(--c-space-4);
+  z-index: 2147482999;
+  width: min(420px, calc(100vw - 2 * var(--c-space-4)));
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--c-surface);
+  color: var(--c-text);
+  border: 2px solid var(--c-sandbox);
+  border-radius: var(--c-radius-card);
+  box-shadow: 0 8px 24px var(--c-scrim-soft);
+  font-family: var(--c-font);
+  font-size: 13px;
+  overflow: hidden;
+}
+
+.industry-leak-panel button {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.industry-leak-panel__toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--c-space-2);
+  padding: var(--c-space-3) var(--c-space-4);
+  background: var(--c-sandbox) !important;
+  color: var(--c-on-sandbox) !important;
+}
+
+.industry-leak-panel__toggle span {
+  margin-left: auto;
+}
+
+.industry-leak-panel__body {
+  overflow: auto;
+  padding: var(--c-space-3) var(--c-space-4);
+}
+
+.industry-leak-panel__meta {
+  margin: 0 0 var(--c-space-3);
+  color: var(--c-text-soft);
+}
+
+.industry-leak-panel ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--c-space-2);
+}
+
+.industry-leak-panel li button {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: var(--c-space-2);
+  border-radius: var(--c-radius-control);
+  border-left: 3px solid var(--c-danger);
+}
+
+.industry-leak-panel li.is-capability button {
+  border-left-color: var(--c-sandbox);
+}
+
+.industry-leak-panel li button:hover {
+  background: var(--c-hover);
+}
+
+.industry-leak-panel__kind {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--c-text-soft);
+}
+
+.industry-leak-panel__expected {
+  font-weight: 600;
+}
+
+.industry-leak-panel__source {
+  color: var(--c-muted);
+  font-size: 11px;
+  word-break: break-word;
+}

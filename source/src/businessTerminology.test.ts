@@ -19,6 +19,10 @@ test("terminology resolves either an account or the terminology object itself", 
     customerPlural: "Clients",
     serviceSingular: "Treatment",
     servicePlural: "Treatments",
+    resourceSingular: "Room",
+    resourcePlural: "Rooms",
+    assignmentPlural: "Aftercare",
+    assignmentSingular: "Routine",
   };
   assert.deepEqual(terminologyFor(custom), custom);
   assert.deepEqual(terminologyFor({ terminology: custom }), custom);
@@ -40,8 +44,28 @@ test("terminology sanitises saved values and fills missing fields", () => {
       customerPlural: "Players",
       serviceSingular: "Lesson",
       servicePlural: "Lessons",
+      resourceSingular: "Bay",
+      resourcePlural: "Bays",
+      assignmentPlural: "Practice",
+      assignmentSingular: "Drill",
     },
   );
+});
+
+test("words saved before resources and assignments existed fill from the base, not golf", () => {
+  const savedLastMonth = {
+    staffSingular: "Stylist",
+    staffPlural: "Stylists",
+    customerSingular: "Client",
+    customerPlural: "Clients",
+    serviceSingular: "Service",
+    servicePlural: "Services",
+  };
+  const terms = terminologyFor(savedLastMonth, terminologyPreset("hair-beauty"));
+  assert.equal(terms.resourceSingular, "Chair");
+  assert.equal(terms.assignmentPlural, "Aftercare");
+  // Still matches its preset, though it never saved the newer words.
+  assert.equal(matchingTerminologyPreset(savedLastMonth), "hair-beauty");
 });
 
 test("presets populate values without introducing an application mode", () => {

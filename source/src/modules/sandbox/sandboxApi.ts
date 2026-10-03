@@ -7,6 +7,15 @@
 
 import { apiFetch } from "../auth/apiFetch";
 import { t } from "../../lib/i18n";
+import type {
+  AccountMarketConfig,
+  CapabilityDefinition,
+  CustomMarketPreset,
+  MarketCapabilities,
+  MarketProfileId,
+  ResolvedMarket,
+} from "../../../netlify/functions/_shared/market-profile.mts";
+import type { BusinessTerminology } from "../../../netlify/functions/_shared/business-terminology.mts";
 
 export type SandboxSummary = {
   id: string;
@@ -109,4 +118,66 @@ export async function switchWorkspace(accountId: string): Promise<void> {
     }),
   );
   window.location.assign("/");
+}
+
+// --- Market profile builder -------------------------------------------------
+//
+// The account's market profile, capability overrides and words. The server
+// resolves and returns the whole picture after every write, so the builder
+// never has to work out what the server decided.
+
+
+export type MarketProfileSummary = {
+  id: MarketProfileId;
+  label: string;
+  product: string;
+  terminology: BusinessTerminology;
+  capabilities: MarketCapabilities;
+};
+
+export type MarketProfileState = {
+  inSandbox: boolean;
+  config: AccountMarketConfig;
+  market: ResolvedMarket;
+  profiles: MarketProfileSummary[];
+  capabilities: CapabilityDefinition[];
+  customPresets: CustomMarketPreset[];
+};
+
+const JSON_HEADERS = { "Content-Type": "application/json" };
+
+export async function fetchMarketProfile(): Promise<MarketProfileState> {
+  return (await readJson(await apiFetch("/api/market-profile"))) as MarketProfileState;
+}
+
+export async function saveMarketProfile(body: {
+  config?: AccountMarketConfig;
+  terminology?: BusinessTerminology;
+  applyProfileId?: MarketProfileId;
+  applyPresetId?: string;
+}): Promise<MarketProfileState> {
+  return (await readJson(
+    await apiFetch("/api/market-profile", { method: "PUT", headers: JSON_HEADERS, body: JSON.stringify(body) }),
+  )) as MarketProfileState;
+}
+
+export async function saveCustomMarketPreset(preset: {
+  name: string;
+  baseProfileId: MarketProfileId;
+  terminology: BusinessTerminology;
+  capabilities: MarketCapabilities;
+}): Promise<MarketProfileState> {
+  return (await readJson(
+    await apiFetch("/api/market-profile/presets", {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ preset }),
+    }),
+  )) as MarketProfileState;
+}
+
+export async function deleteCustomMarketPreset(id: string): Promise<MarketProfileState> {
+  return (await readJson(
+    await apiFetch(`/api/market-profile/presets?id=${encodeURIComponent(id)}`, { method: "DELETE" }),
+  )) as MarketProfileState;
 }

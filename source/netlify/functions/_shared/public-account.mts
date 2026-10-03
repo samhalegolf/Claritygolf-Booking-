@@ -8,7 +8,7 @@
 // This is an allow-list on purpose. A field added to the account later stays
 // private until someone decides the booking page needs it.
 
-import { terminologyFor } from "./business-terminology.mts";
+import { resolveMarket } from "./market-profile.mts";
 
 type AccountLike = {
   id?: unknown;
@@ -22,6 +22,7 @@ type AccountLike = {
   calendarSlug?: unknown;
   caddyWorkspaceUrl?: unknown;
   terminology?: unknown;
+  market?: unknown;
   invoiceSettings?: {
     currency?: unknown;
     taxName?: unknown;
@@ -32,6 +33,7 @@ type AccountLike = {
 
 export function publicCoachAccount(account: AccountLike | null | undefined) {
   const invoice = account?.invoiceSettings ?? {};
+  const market = resolveMarket(account?.market as never, account?.terminology);
   return {
     id: account?.id,
     coachName: account?.coachName,
@@ -43,7 +45,15 @@ export function publicCoachAccount(account: AccountLike | null | undefined) {
     bookingUrl: account?.bookingUrl,
     calendarSlug: account?.calendarSlug,
     caddyWorkspaceUrl: account?.caddyWorkspaceUrl,
-    terminology: terminologyFor(account),
+    terminology: market.terminology,
+    // Which modules this business shows, and the product it runs on. The
+    // booking page reads capabilities rather than asking what industry it is.
+    market: {
+      profileId: market.profileId,
+      capabilities: market.capabilities,
+      presentation: market.presentation,
+      product: { key: market.product.key, name: market.product.name },
+    },
     // Only what a price needs: its currency, and the tax to name beside it.
     invoiceSettings: {
       currency: invoice.currency,

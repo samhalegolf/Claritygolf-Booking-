@@ -66,6 +66,12 @@ import {
   playerShopItems,
 } from "./_shared/player-shop.mts";
 import {
+  createCardCheckout,
+  enrolMembership,
+  membershipAction,
+  readPlayerMemberships,
+} from "./_shared/memberships.mts";
+import {
   createStripeCheckoutSession,
   requireStripeFeature,
   resolveStripeCredential,
@@ -124,7 +130,21 @@ import type { CoachActor } from "./_shared/coach-auth.mts";
 import { authSessionResponse, type WorkspaceBootstrap } from "./_shared/auth-contract.mts";
 import { currencyForAccountSettings, localeForCountry } from "./_shared/locale.mts";
 import { publicCoachAccount } from "./_shared/public-account.mts";
-import { terminologyFor } from "./_shared/business-terminology.mts";
+import {
+  applyCustomPreset,
+  applyMarketProfile,
+  CAPABILITY_DEFINITIONS,
+  capabilitiesFor,
+  cleanCustomPresets,
+  cleanMarketConfig,
+  isMarketProfileId,
+  MARKET_PROFILES,
+  marketConfigFromSettings,
+  marketConfigSettingsRows,
+  marketTerminologyFor,
+  resolveMarket,
+  upsertCustomPreset,
+} from "./_shared/market-profile.mts";
 import {
   caddyAppUrl,
   caddyConfigured,
@@ -9967,7 +9987,41 @@ async function readPlayerProfile(session) {
     shop,
     review,
     bookingEmbed,
-    terminology: terminologyFor(safeJsonParse(settingsMap.accountTerminologyJson, {})),
+    // Their memberships, and the plans they could join. Joining needs a saved
+    // card, which needs Clarity Pay, so a business without it sells none here
+    // -- the coach can still enrol members by hand.
+    ...(await readPlayerMemberships(
+      accountId,
+      session.personId || "",
+      new Map(serviceList.map((service) => [service.id, service.name])),
+      stripeStatus.features.portal,
+    ).then(
+      ({ memberships, plans }) => ({ memberships, membershipPlans: plans }),
+      (error) => {
+        // A membership read must not take the whole portal down with it.
+        console.error("player_profile:memberships_failed", error instanceof Error ? error.message : error);
+        return { memberships: [], membershipPlans: [] };
+      },
+    )),
+    // The business's words and the modules it shows, resolved the same way
+    // the coach workspace resolves them (market-profile.mts).
+    ...portalMarket(settingsMap),
+  };
+}
+
+function portalMarket(settingsMap) {
+  const market = resolveMarket(
+    marketConfigFromSettings(settingsMap),
+    safeJsonParse(settingsMap.accountTerminologyJson, {}),
+  );
+  return {
+    terminology: market.terminology,
+    market: {
+      profileId: market.profileId,
+      capabilities: market.capabilities,
+      presentation: market.presentation,
+      product: { key: market.product.key, name: market.product.name },
+    },
   };
 }
 
@@ -11255,6 +11309,16 @@ export async function createPublicBooking(
   const state = await readFastPublicCalendarState(accountId);
   const workspaceAccount = publicWorkspaceAccount(state);
   assertAccountFeature(workspaceAccount, "publicBooking");
+  // The plan says the business may take public bookings; its market config
+  // says whether it does. A business that switched the module off is not
+  // bookable through a stale link or embed either. A signed-in client booking
+  // from their portal (personId) is not the public page and is let through.
+  if (!options.personId && !capabilitiesFor(state.account?.market).publicBooking) {
+    throw Object.assign(new Error("This booking page is not available."), {
+      status: 404,
+      code: "public_booking_off",
+    });
+  }
   const accountState = {
     ...state,
     items: (state.items || []).filter((item) => recordBelongsToAccount(item, workspaceAccount.id)),
@@ -11444,8 +11508,10 @@ export async function createPublicBooking(
     email,
     // Handedness leads the note: the Optix bay picker reads it from there (see
     // _shared/handedness.mts) and it is the first thing the coach sees.
+    // Only for a business that asks (the handedness capability); a salon's
+    // bookings should not open on a golf bay-allocation line.
     note: [
-      handednessNoteLine(handedness),
+      capabilitiesFor(accountState.account?.market).handedness ? handednessNoteLine(handedness) : "",
       reviewDue
         ? `Video review booked from ${bookedVia}. Due back ${formatBookingDate(reviewDue.week, reviewDue.day)}.`
         : `Booked from ${bookedVia}.`,
@@ -13222,6 +13288,58 @@ async function routeBookingApiRequest(
       return json({ url: checkout.url, sessionId: checkout.sessionId });
     }
 
+    /* Memberships, the member's side. The engine is _shared/memberships.mts;
+     * all three routes act only on the signed-in player's own person id, and
+     * the plan's price and terms come from the server, never the request.
+     *
+     *   join    start a membership and get the card form for it
+     *   cancel  cancel at the end of the period (or undo that), honouring the
+     *           plan's minimum commitment
+     *   card    a card form to change the card a membership is charged to
+     */
+    if (req.method === "POST" && pathname.startsWith("/api/player/memberships/")) {
+      const session = await readPlayerSession(playerSessionTokenFromRequest(req));
+      if (!session) return json({ error: "unauthorized", message: "Player login required." }, 401);
+      if (!session.personId) {
+        return json(
+          { error: "no_profile", message: "Your coach needs to finish setting up your profile before you can join." },
+          409,
+        );
+      }
+      const accountId = cleanSlug(session.accountId, "");
+      if (!accountId) throw missingAccountScope("player_memberships");
+      const body = await parseBody(req);
+      const actor = { accountId, actorId: session.personId };
+      const origin = new URL(req.url).origin;
+
+      if (pathname === "/api/player/memberships/join") {
+        const membership = await enrolMembership(
+          { personId: session.personId, planId: body?.planId, collection: "card" },
+          actor,
+          { onlineOnly: true },
+        );
+        return json({ url: await createCardCheckout(accountId, membership.id, origin, "portal") });
+      }
+      const membershipId = cleanString(body?.membershipId, "", 120);
+      if (pathname === "/api/player/memberships/cancel") {
+        await membershipAction(membershipId, body?.undo === true ? "undo_cancel" : "cancel_at_period_end", actor, {
+          byMember: true,
+          personId: session.personId,
+        });
+        return json({ ok: true, ...(await readPlayerProfile(session)) });
+      }
+      if (pathname === "/api/player/memberships/card") {
+        const owned = await db().sql`
+          SELECT id FROM public.memberships
+          WHERE id = ${membershipId} AND account_id = ${accountId} AND person_id = ${session.personId}
+          LIMIT 1
+        `;
+        if (!owned.length) return json({ error: "not_found", message: "That membership was not found." }, 404);
+        return json({ url: await createCardCheckout(accountId, membershipId, origin, "portal") });
+      }
+      return json({ error: "not_found" }, 404);
+    }
+
     if (req.method === "POST" && pathname === "/api/player/checkout/cancel") {
       const session = await readPlayerSession(playerSessionTokenFromRequest(req));
       if (!session) return json({ error: "unauthorized", message: "Player login required." }, 401);
@@ -14048,6 +14166,102 @@ async function routeBookingApiRequest(
       return json({ ok: true, planKey });
     }
 
+    // The business's market profile: which words it uses and which modules it
+    // shows. See _shared/market-profile.mts.
+    //
+    // Always the caller's own account -- the request never names one. Reading
+    // is open to anyone on the business, since every screen needs the answer;
+    // changing it is owners and admins only. Saved custom presets are the
+    // sandbox builder's: they live on the sandbox account and can only be
+    // written from inside it.
+    if (pathname === "/api/market-profile" || pathname.startsWith("/api/market-profile/")) {
+      const state = await readSettingsState(await currentAccountId(req));
+      const requestContext = await resolveBackendRequestContext(req, state);
+      const accountId = requestContext.accountId;
+      const inSandbox = Boolean(requestContext.actor?.sandboxOfAccountId);
+
+      const describe = async () => {
+        const settings = await readSettingsMap(accountId);
+        const config = marketConfigFromSettings(settings);
+        const market = resolveMarket(config, parseSettingJson(settings, "accountTerminologyJson", {}));
+        return {
+          inSandbox,
+          config,
+          market,
+          profiles: MARKET_PROFILES.map((profile) => ({
+            id: profile.id,
+            label: profile.label,
+            product: profile.product,
+            terminology: profile.terminology,
+            capabilities: profile.capabilities,
+          })),
+          capabilities: CAPABILITY_DEFINITIONS,
+          customPresets: cleanCustomPresets(parseSettingJson(settings, "marketCustomPresetsJson", [])),
+        };
+      };
+
+      if (req.method === "GET" && pathname === "/api/market-profile") {
+        return json(await describe());
+      }
+
+      assertAccountAdminContext(requestContext, "You do not have permission to change the market profile.");
+
+      // Save the profile, the capability overrides and the words in one write,
+      // so the three never disagree on screen. Applying a preset by id is the
+      // same write with the preset's values.
+      if (req.method === "PUT" && pathname === "/api/market-profile") {
+        const body = await parseBody(req);
+        let config = cleanMarketConfig(body?.config);
+        let terminology = marketTerminologyFor(config, body?.terminology);
+        if (body?.applyProfileId && isMarketProfileId(body.applyProfileId)) {
+          ({ config, terminology } = applyMarketProfile(body.applyProfileId));
+        } else if (typeof body?.applyPresetId === "string") {
+          const presets = cleanCustomPresets(
+            parseSettingJson(await readSettingsMap(accountId), "marketCustomPresetsJson", []),
+          );
+          const preset = presets.find((candidate) => candidate.id === body.applyPresetId);
+          if (!preset) return json({ error: "unknown_preset", message: "That preset no longer exists." }, 404);
+          ({ config, terminology } = applyCustomPreset(preset));
+        }
+        await setSettingsBulk(accountId, {
+          ...marketConfigSettingsRows(config),
+          accountTerminologyJson: JSON.stringify(terminology),
+          updatedAt: nowIso(),
+        });
+        return json(await describe());
+      }
+
+      if (!inSandbox) {
+        return json(
+          { error: "sandbox_required", message: "Custom presets are saved from inside the sandbox." },
+          403,
+        );
+      }
+
+      if (req.method === "POST" && pathname === "/api/market-profile/presets") {
+        const body = await parseBody(req);
+        if (!cleanString(body?.preset?.name, "", 60)) {
+          return json({ error: "name_required", message: "Give the preset a name." }, 400);
+        }
+        const settings = await readSettingsMap(accountId);
+        const next = upsertCustomPreset(parseSettingJson(settings, "marketCustomPresetsJson", []), body.preset);
+        await setSettingsBulk(accountId, { marketCustomPresetsJson: JSON.stringify(next), updatedAt: nowIso() });
+        return json(await describe());
+      }
+
+      if (req.method === "DELETE" && pathname === "/api/market-profile/presets") {
+        const id = cleanString(new URL(req.url).searchParams.get("id"), "", 60);
+        const settings = await readSettingsMap(accountId);
+        const next = cleanCustomPresets(parseSettingJson(settings, "marketCustomPresetsJson", [])).filter(
+          (preset) => preset.id !== id,
+        );
+        await setSettingsBulk(accountId, { marketCustomPresetsJson: JSON.stringify(next), updatedAt: nowIso() });
+        return json(await describe());
+      }
+
+      return json({ error: "not_found", message: "Unknown market profile route." }, 404);
+    }
+
     // Point this session at another of the user's businesses.
     //
     // The account id in the body names a choice, it does not grant one:
@@ -14074,7 +14288,10 @@ async function routeBookingApiRequest(
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAccountAdminContext(requestContext, "You do not have permission to change business account settings.");
       if (body?.invoiceSettings?.enabled) assertAccountFeature(requestContext.account, "invoicing");
-      return json(await writeCoachAccount(await currentAccountId(req), body));
+      // The market config is not written here (see /api/market-profile), so
+      // answer with the stored one rather than echoing a possibly stale draft.
+      const storedMarket = cleanMarketConfig(state.account?.market);
+      return json({ ...(await writeCoachAccount(await currentAccountId(req), { ...body, market: storedMarket })), market: storedMarket });
     }
 
     if (req.method === "GET" && pathname === "/api/services") {
