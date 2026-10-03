@@ -1613,6 +1613,27 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* --- Memberships ----------------------------------------------------------
+   A membership row reuses the pass row; only its buttons and the failed-
+   payment line are new. */
+.player-portal-membership-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.player-portal-pass .player-portal-membership-alert {
+  color: var(--pt-error-text);
+}
+
+.player-portal-subhead {
+  margin: 14px 0 8px;
+  font-size: 14px;
+  color: var(--pt-text-soft);
+}
+
 /* Where a player lands coming back from Stripe, so it sits at the top of the
    card rather than inside whichever section they happened to leave from. */
 .player-portal-purchase-note {

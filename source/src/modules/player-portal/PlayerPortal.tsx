@@ -39,6 +39,7 @@ import {
   type PlayerBookingEmbedConfig,
 } from "./PlayerBookingEmbed";
 import { formatClock, formatDate } from "./format";
+import { PlayerMemberships, type PlayerMembership, type PlayerMembershipPlan } from "./PlayerMemberships";
 import { groupSwingReviews, type CloudReviewSnapshot } from "./swingReviews";
 import { SnapshotFrameViewer, type FrameViewerShot } from "../shared/SnapshotFrameViewer";
 import { SwingReviewFlow, type ReviewOffer, type SwingReviewDraft } from "./SwingReviewFlow";
@@ -315,6 +316,8 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   const [flexibleValueCents, setFlexibleValueCents] = useState(0);
   const [passCurrency, setPassCurrency] = useState("");
   const [shop, setShop] = useState<ShopItem[]>([]);
+  const [memberships, setMemberships] = useState<PlayerMembership[]>([]);
+  const [membershipPlans, setMembershipPlans] = useState<PlayerMembershipPlan[]>([]);
   /** Which item is mid-purchase, so only its own button goes quiet. */
   const [buyingId, setBuyingId] = useState("");
   const [reviewOffer, setReviewOffer] = useState<ReviewOffer | null>(null);
@@ -434,6 +437,8 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
         flexibleValueCents?: number;
         passCurrency?: string;
         shop?: ShopItem[];
+        memberships?: PlayerMembership[];
+        membershipPlans?: PlayerMembershipPlan[];
         review?: ReviewOffer | null;
         bookingEmbed?: PlayerBookingEmbedConfig;
         terminology?: BusinessTerminology;
@@ -454,6 +459,9 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
       // The App Store build is a companion to the coach's service. Existing
       // passes work here, but this binary never sells or links out to buy one.
       setShop(__CLARITY_NATIVE__ ? [] : Array.isArray(data.shop) ? data.shop : []);
+      setMemberships(Array.isArray(data.memberships) ? data.memberships : []);
+      // Same rule as the shop: the App Store build never sells.
+      setMembershipPlans(__CLARITY_NATIVE__ ? [] : Array.isArray(data.membershipPlans) ? data.membershipPlans : []);
       // Null when the coach sells no video review, or sells more than one and
       // the catalogue cannot say which is "the" review.
       setReviewOffer(
@@ -747,6 +755,26 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
    *
    * The URL is cleaned either way: a session id left in the address bar is
    * something a player can bookmark, share, or re-trigger by reloading. */
+  /* Coming back from a membership's card form. The server has already banked
+   * it on the way through (/api/memberships/checkout/return); this only says
+   * how it went and cleans the URL. */
+  useEffect(() => {
+    if (__CLARITY_NATIVE__ || isGuest) return;
+    const outcome = new URLSearchParams(window.location.search).get("membership");
+    if (!outcome) return;
+    window.history.replaceState(window.history.state, "", window.location.pathname);
+    setTab("passes");
+    setPurchaseNote(
+      outcome === "joined"
+        ? t("You're in. Your membership is active and your card is saved.")
+        : outcome === "pending"
+          ? t("Your bank is still confirming. Your membership starts as soon as it does.")
+          : outcome === "cancelled"
+            ? t("No card was saved and nothing was charged.")
+            : t("We could not confirm that card. Nothing extra was charged — your coach can help."),
+    );
+  }, [isGuest]);
+
   useEffect(() => {
     if (__CLARITY_NATIVE__ || isGuest) return;
     const params = new URLSearchParams(window.location.search);
@@ -2469,6 +2497,13 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                       that has run out or timed out is the answer to "why can't
                       I book on my pass" -- hiding it turns that into a message
                       to the coach. */}
+                  <PlayerMemberships
+                    memberships={memberships}
+                    plans={membershipPlans}
+                    canBuy={!__CLARITY_NATIVE__}
+                    onChanged={() => void loadProfile()}
+                  />
+
                   {(passes.length > 0 || flexibleValueCents > 0) && (
                     <section className="player-portal-section">
                       <h2>{t("Your passes")}</h2>
@@ -2582,7 +2617,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                     </section>
                   )}
 
-                  {!passes.length && !shop.length && (
+                  {!passes.length && !shop.length && !memberships.length && !membershipPlans.length && (
                     <p className="player-portal-empty">{t("Nothing here yet. Passes added to your account show up on this screen.")}</p>
                   )}
                 </>
