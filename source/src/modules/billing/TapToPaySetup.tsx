@@ -1,6 +1,7 @@
 // Tap to Pay on this iPhone, from Settings.
 //
-// Only shows inside the staff iPhone app, for a business on Clarity Pay. It is
+// Only shows inside the staff iPhone app, for a business on Clarity Pay; when
+// Tap to Pay can't be used there it says why instead of hiding. It is
 // where a coach meets Tap to Pay before a customer is waiting: setting the
 // phone up here is when Apple asks the business to accept its terms and does
 // its one-off setup, and Apple's "How to Tap" guide is a tap away. Apple's
@@ -16,7 +17,16 @@ export function TapToPaySetup() {
   const tapToPay = useTapToPay();
   const [state, setState] = useState<"idle" | "working" | "ready">("idle");
   const [error, setError] = useState("");
-  if (!tapToPay.ready) return null;
+  if (!tapToPay.ready) {
+    // Say why Tap to Pay is off rather than leaving the coach to guess.
+    if (!tapToPay.reason) return null;
+    return (
+      <article className="data-card">
+        <TapToPayHeader />
+        <p className="field-help">{tapToPay.reason}</p>
+      </article>
+    );
+  }
   const { status } = tapToPay;
 
   async function setUp() {
@@ -35,13 +45,7 @@ export function TapToPaySetup() {
 
   return (
     <article className="data-card">
-      <div className="data-card-header">
-        <div>
-          <span>{t("On this iPhone")}</span>
-          <h2>{t("Tap to Pay on iPhone")}</h2>
-        </div>
-        <Nfc size={24} />
-      </div>
+      <TapToPayHeader />
       <p className="field-help">
         {t("Take contactless cards, Apple Pay and other digital wallets on this iPhone. No extra hardware. Set it up once here, before your first sale: Apple asks you to accept its terms and gets this iPhone ready, which can take a minute or two.")}
       </p>
@@ -55,5 +59,17 @@ export function TapToPaySetup() {
         <HowToTap />
       </div>
     </article>
+  );
+}
+
+function TapToPayHeader() {
+  return (
+    <div className="data-card-header">
+      <div>
+        <span>{t("On this iPhone")}</span>
+        <h2>{t("Tap to Pay on iPhone")}</h2>
+      </div>
+      <Nfc size={24} />
+    </div>
   );
 }

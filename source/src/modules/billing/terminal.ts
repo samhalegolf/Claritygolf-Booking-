@@ -286,18 +286,22 @@ export async function showHowToTap() {
 
 // --- Availability -----------------------------------------------------------------
 
-type Availability = { ready: false } | { ready: true; status: TerminalStatus };
+// `reason` says why not, for the Settings card. Empty outside the staff app,
+// where Tap to Pay is simply not a thing, and while still asking.
+type Availability = { ready: false; reason: string } | { ready: true; status: TerminalStatus };
 
 let availabilityOnce: Promise<Availability> | null = null;
 
 async function loadAvailability(): Promise<Availability> {
   const plugin = nativeTerminal();
-  if (!plugin) return { ready: false };
+  if (!plugin) return { ready: false, reason: "" };
   const [device, status] = await Promise.all([
     plugin.isSupported().catch(() => ({ supported: false, reason: "" })),
-    terminalApi.status().catch(() => null),
+    terminalApi.status().catch((error: unknown) => (error instanceof Error ? error.message : t("Tap to Pay could not reach Clarity."))),
   ]);
-  if (!device.supported || !status?.available) return { ready: false };
+  if (!device.supported) return { ready: false, reason: t("This iPhone cannot take Tap to Pay.") };
+  if (typeof status === "string") return { ready: false, reason: status };
+  if (!status.available) return { ready: false, reason: status.reason };
   installConnectionTokenBridge(plugin, () => terminalApi.connectionToken(savedTerminalLocation()));
   return { ready: true, status };
 }
@@ -309,7 +313,7 @@ async function loadAvailability(): Promise<Availability> {
  * has.
  */
 export function useTapToPay(): Availability {
-  const [availability, setAvailability] = useState<Availability>({ ready: false });
+  const [availability, setAvailability] = useState<Availability>({ ready: false, reason: "" });
   useEffect(() => {
     if (!nativeTerminal()) return;
     let cancelled = false;
