@@ -4443,5 +4443,16 @@
   "Up next": "Seuraavaksi",
   "{total} booked · {done} done · {remaining} to go": "{total} varattu · {done} valmis · {remaining} jäljellä",
   "Nothing booked today": "Ei varauksia tänään",
-  "Open booking": "Avaa varaus"
+  "Open booking": "Avaa varaus",
+  "Phone notifications": "Puhelinilmoitukset",
+  "Alerts on this phone when a client books, moves or cancels a lesson, and when a booking arrives from a system you've connected. Turn them on separately on each phone you want alerted.": "Ilmoitukset tähän puhelimeen, kun asiakas varaa, siirtää tai peruu tunnin, ja kun varaus saapuu yhdistämästäsi järjestelmästä. Ota ne käyttöön erikseen jokaisessa puhelimessa, johon haluat ilmoitukset.",
+  "Checking this phone…": "Tarkistetaan tätä puhelinta…",
+  "Phone notifications are not set up on the server yet.": "Puhelinilmoituksia ei ole vielä määritetty palvelimelle.",
+  "On for this phone": "Käytössä tässä puhelimessa",
+  "Off for this phone": "Pois käytöstä tässä puhelimessa",
+  "Notifications are blocked for this app. Allow them in the phone's Settings, then try again.": "Ilmoitukset on estetty tältä sovellukselta. Salli ne puhelimen asetuksista ja yritä uudelleen.",
+  "Turn off on this phone": "Poista käytöstä tässä puhelimessa",
+  "Turn on for this phone": "Ota käyttöön tässä puhelimessa",
+  "This phone did not answer. Check it has a connection, then try again.": "Puhelin ei vastannut. Tarkista yhteys ja yritä uudelleen.",
+  "This phone could not be registered for notifications.": "Tätä puhelinta ei voitu rekisteröidä ilmoituksia varten."
 }

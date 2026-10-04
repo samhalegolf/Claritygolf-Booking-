@@ -148,6 +148,7 @@ import { CoachAvatar, CoachProfilePanel, type CoachWeekDay, type CoachWeekEntry 
 import { RegionSettings, TimeZoneSelect, type RegionValues } from "./modules/settings/RegionSettings";
 import { LanguageSelect } from "./modules/settings/LanguageSettings";
 import { syncPushLanguage } from "./modules/notifications/browserPush";
+import { startNativePush } from "./native/nativePush";
 import type { ClarityPayCard, ProfileInternalJob, ProfileTarget } from "./modules/business-hub/BusinessHubPanel";
 import {
   cleanNotificationTemplates,
@@ -1943,6 +1944,8 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   // the coach has switched language since turning them on.
   useEffect(() => {
     void syncPushLanguage().catch(() => undefined);
+    // Inside the staff app: tapped alerts, and keeping this phone's token current.
+    startNativePush();
   }, []);
   const [brandSaveState, setBrandSaveState] = useState<"idle" | "saving" | "saved">("idle");
   // The entry point only mounts this component for a coach session or the

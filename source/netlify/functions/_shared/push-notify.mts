@@ -2,6 +2,7 @@ import { getDatabase } from "./database.mts";
 import { randomUUID } from "node:crypto";
 
 import { cleanMessageLanguage } from "./message-language.mts";
+import { sendNativeCoachPush } from "./native-push.mts";
 import { trimmedEnv } from "./values.mts";
 
 /**
@@ -211,15 +212,34 @@ async function loadWebPush() {
 }
 
 /**
- * Send one message to every browser the coach has enabled, each in its own
- * language: `compose` is asked once per language in use. A browser that never
- * said which language it reads gets `fallbackLanguage` (the business's).
+ * Send one message to every browser and staff-app phone the business has
+ * enabled, each in its own language: `compose` is asked once per language in
+ * use. A device that never said which language it reads gets
+ * `fallbackLanguage` (the business's). Phones go through native-push.mts.
  *
  * Never throws. A pop-up is a courtesy on top of the email that already went
  * out; nothing in the booking path should fail because a push service was
  * having a bad afternoon.
  */
 export async function sendCoachPush(
+  accountId: string,
+  compose: (language: string) => CoachPushMessage,
+  fallbackLanguage = "en",
+): Promise<CoachPushResult> {
+  const [browsers, phones] = await Promise.all([
+    sendBrowserPush(accountId, compose, fallbackLanguage),
+    sendNativeCoachPush(accountId, compose, fallbackLanguage),
+  ]);
+  const reachedPhones = phones.sent + phones.failed + phones.pruned > 0;
+  return {
+    sent: browsers.sent + phones.sent,
+    failed: browsers.failed + phones.failed,
+    pruned: browsers.pruned + phones.pruned,
+    ...(browsers.skipped && !reachedPhones ? { skipped: browsers.skipped } : {}),
+  };
+}
+
+async function sendBrowserPush(
   accountId: string,
   compose: (language: string) => CoachPushMessage,
   fallbackLanguage = "en",

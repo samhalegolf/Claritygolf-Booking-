@@ -4443,5 +4443,16 @@
   "Up next": "Næste",
   "{total} booked · {done} done · {remaining} to go": "{total} booket · {done} færdige · {remaining} tilbage",
   "Nothing booked today": "Intet booket i dag",
-  "Open booking": "Åbn booking"
+  "Open booking": "Åbn booking",
+  "Phone notifications": "Telefonnotifikationer",
+  "Alerts on this phone when a client books, moves or cancels a lesson, and when a booking arrives from a system you've connected. Turn them on separately on each phone you want alerted.": "Besked på denne telefon, når en klient booker, flytter eller aflyser en lektion, og når en booking kommer fra et system, du har forbundet. Slå dem til separat på hver telefon, der skal have besked.",
+  "Checking this phone…": "Tjekker denne telefon…",
+  "Phone notifications are not set up on the server yet.": "Telefonnotifikationer er ikke sat op på serveren endnu.",
+  "On for this phone": "Slået til på denne telefon",
+  "Off for this phone": "Slået fra på denne telefon",
+  "Notifications are blocked for this app. Allow them in the phone's Settings, then try again.": "Notifikationer er blokeret for denne app. Tillad dem i telefonens Indstillinger, og prøv igen.",
+  "Turn off on this phone": "Slå fra på denne telefon",
+  "Turn on for this phone": "Slå til på denne telefon",
+  "This phone did not answer. Check it has a connection, then try again.": "Telefonen svarede ikke. Tjek, at den har forbindelse, og prøv igen.",
+  "This phone could not be registered for notifications.": "Telefonen kunne ikke registreres til notifikationer."
 }

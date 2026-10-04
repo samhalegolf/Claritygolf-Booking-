@@ -9,9 +9,9 @@ import type { CapacitorConfig } from "@capacitor/cli";
  * There is no second way into the admin API -- no bearer token, no CORS
  * exception -- to secure and keep secure.
  *
- * What the app adds is native: the Stripe Terminal plugin for Tap to Pay. The
- * page finds it at window.Capacitor.Plugins.ClarityTerminal and hides Tap to
- * Pay everywhere else.
+ * What the app adds is native: the Stripe Terminal plugin for Tap to Pay, and
+ * push notifications. The page finds them at window.Capacitor.Plugins
+ * (ClarityTerminal, PushNotifications) and hides both everywhere else.
  *
  * www/ is only what shows when the site cannot be reached.
  */
@@ -25,6 +25,13 @@ const config: CapacitorConfig = {
   },
   ios: {
     contentInset: "never",
+  },
+  plugins: {
+    // A booking alert that arrives while the app is open still shows as a
+    // banner, rather than being swallowed because the app was in front.
+    PushNotifications: {
+      presentationOptions: ["badge", "sound", "alert"],
+    },
   },
 };
 

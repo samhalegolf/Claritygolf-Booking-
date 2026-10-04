@@ -4443,5 +4443,16 @@
   "Up next": "Następne",
   "{total} booked · {done} done · {remaining} to go": "{total} zarezerwowane · {done} zakończone · {remaining} pozostało",
   "Nothing booked today": "Brak rezerwacji na dziś",
-  "Open booking": "Otwórz rezerwację"
+  "Open booking": "Otwórz rezerwację",
+  "Phone notifications": "Powiadomienia na telefonie",
+  "Alerts on this phone when a client books, moves or cancels a lesson, and when a booking arrives from a system you've connected. Turn them on separately on each phone you want alerted.": "Powiadomienia na tym telefonie, gdy klient rezerwuje, przesuwa lub odwołuje lekcję, oraz gdy przychodzi rezerwacja z połączonego systemu. Włącz je osobno na każdym telefonie, który ma dostawać powiadomienia.",
+  "Checking this phone…": "Sprawdzanie tego telefonu…",
+  "Phone notifications are not set up on the server yet.": "Powiadomienia na telefonie nie są jeszcze skonfigurowane na serwerze.",
+  "On for this phone": "Włączone na tym telefonie",
+  "Off for this phone": "Wyłączone na tym telefonie",
+  "Notifications are blocked for this app. Allow them in the phone's Settings, then try again.": "Powiadomienia są zablokowane dla tej aplikacji. Zezwól na nie w Ustawieniach telefonu i spróbuj ponownie.",
+  "Turn off on this phone": "Wyłącz na tym telefonie",
+  "Turn on for this phone": "Włącz na tym telefonie",
+  "This phone did not answer. Check it has a connection, then try again.": "Telefon nie odpowiedział. Sprawdź połączenie i spróbuj ponownie.",
+  "This phone could not be registered for notifications.": "Nie udało się zarejestrować tego telefonu do powiadomień."
 }

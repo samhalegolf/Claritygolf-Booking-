@@ -4443,5 +4443,16 @@
   "Up next": "Neste",
   "{total} booked · {done} done · {remaining} to go": "{total} booket · {done} ferdige · {remaining} igjen",
   "Nothing booked today": "Ingenting booket i dag",
-  "Open booking": "Åpne booking"
+  "Open booking": "Åpne booking",
+  "Phone notifications": "Telefonvarsler",
+  "Alerts on this phone when a client books, moves or cancels a lesson, and when a booking arrives from a system you've connected. Turn them on separately on each phone you want alerted.": "Varsler på denne telefonen når en kunde booker, flytter eller avlyser en time, og når en booking kommer fra et system du har koblet til. Slå dem på separat på hver telefon som skal varsles.",
+  "Checking this phone…": "Sjekker denne telefonen…",
+  "Phone notifications are not set up on the server yet.": "Telefonvarsler er ikke satt opp på serveren ennå.",
+  "On for this phone": "På for denne telefonen",
+  "Off for this phone": "Av for denne telefonen",
+  "Notifications are blocked for this app. Allow them in the phone's Settings, then try again.": "Varsler er blokkert for denne appen. Tillat dem i telefonens Innstillinger, og prøv igjen.",
+  "Turn off on this phone": "Slå av på denne telefonen",
+  "Turn on for this phone": "Slå på for denne telefonen",
+  "This phone did not answer. Check it has a connection, then try again.": "Telefonen svarte ikke. Sjekk at den har forbindelse, og prøv igjen.",
+  "This phone could not be registered for notifications.": "Telefonen kunne ikke registreres for varsler."
 }

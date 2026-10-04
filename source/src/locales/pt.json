@@ -4443,5 +4443,16 @@
   "Up next": "A seguir",
   "{total} booked · {done} done · {remaining} to go": "{total} reservadas · {done} concluídas · {remaining} por fazer",
   "Nothing booked today": "Nada reservado hoje",
-  "Open booking": "Abrir reserva"
+  "Open booking": "Abrir reserva",
+  "Phone notifications": "Notificações no telemóvel",
+  "Alerts on this phone when a client books, moves or cancels a lesson, and when a booking arrives from a system you've connected. Turn them on separately on each phone you want alerted.": "Alertas neste telemóvel quando um cliente reserva, muda ou cancela uma aula, e quando chega uma reserva de um sistema que ligou. Ative-as separadamente em cada telemóvel que quer alertar.",
+  "Checking this phone…": "A verificar este telemóvel…",
+  "Phone notifications are not set up on the server yet.": "As notificações no telemóvel ainda não estão configuradas no servidor.",
+  "On for this phone": "Ativadas neste telemóvel",
+  "Off for this phone": "Desativadas neste telemóvel",
+  "Notifications are blocked for this app. Allow them in the phone's Settings, then try again.": "As notificações estão bloqueadas para esta app. Permita-as nas Definições do telemóvel e tente novamente.",
+  "Turn off on this phone": "Desativar neste telemóvel",
+  "Turn on for this phone": "Ativar neste telemóvel",
+  "This phone did not answer. Check it has a connection, then try again.": "O telemóvel não respondeu. Verifique a ligação e tente novamente.",
+  "This phone could not be registered for notifications.": "Não foi possível registar este telemóvel para notificações."
 }

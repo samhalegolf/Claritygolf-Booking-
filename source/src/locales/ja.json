@@ -4443,5 +4443,16 @@
   "Up next": "次の予定",
   "{total} booked · {done} done · {remaining} to go": "予約 {total} 件 · 完了 {done} 件 · 残り {remaining} 件",
   "Nothing booked today": "本日の予約はありません",
-  "Open booking": "予約を開く"
+  "Open booking": "予約を開く",
+  "Phone notifications": "スマートフォン通知",
+  "Alerts on this phone when a client books, moves or cancels a lesson, and when a booking arrives from a system you've connected. Turn them on separately on each phone you want alerted.": "お客様がレッスンを予約・変更・キャンセルしたときや、連携したシステムから予約が届いたときに、このスマートフォンに通知します。通知を受け取るスマートフォンごとにオンにしてください。",
+  "Checking this phone…": "このスマートフォンを確認しています…",
+  "Phone notifications are not set up on the server yet.": "スマートフォン通知はまだサーバーで設定されていません。",
+  "On for this phone": "このスマートフォンでオン",
+  "Off for this phone": "このスマートフォンでオフ",
+  "Notifications are blocked for this app. Allow them in the phone's Settings, then try again.": "このアプリの通知はブロックされています。スマートフォンの設定で許可してから、もう一度お試しください。",
+  "Turn off on this phone": "このスマートフォンでオフにする",
+  "Turn on for this phone": "このスマートフォンでオンにする",
+  "This phone did not answer. Check it has a connection, then try again.": "スマートフォンから応答がありません。接続を確認して、もう一度お試しください。",
+  "This phone could not be registered for notifications.": "このスマートフォンを通知に登録できませんでした。"
 }
