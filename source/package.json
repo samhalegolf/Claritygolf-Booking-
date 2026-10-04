@@ -25,7 +25,6 @@
     "@capacitor/core": "^8.5.0",
     "@capacitor/preferences": "^8.0.1",
     "@mediapipe/tasks-vision": "^1.0.1",
-    "@netlify/database": "file:netlify/functions/local-db",
     "@netlify/functions": "^5.3.0",
     "@vitejs/plugin-react": "^5.1.1",
     "libphonenumber-js": "^1.11.17",

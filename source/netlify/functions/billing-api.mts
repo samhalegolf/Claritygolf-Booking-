@@ -71,8 +71,8 @@ import { json } from "./_shared/http.mts";
 // Billing is a new, isolated top-level app section. This function owns its
 // own tables (billing_products_services, billing_invoices,
 // billing_invoice_items, billing_booking_invoice_links) and its own Supabase
-// REST helper below. It deliberately does not import booking-core.mts or the
-// local-db adapter: it reads calendar_items (completed bookings) and the
+// REST helper below. It deliberately does not import booking-core.mts or
+// _shared/database.mts: it reads calendar_items (completed bookings) and the
 // shared settings table directly and read-only, and otherwise must not
 // depend on booking/calendar code, per the billing build plan's "protected
 // rules" (billing may read completed bookings/account settings, but does not

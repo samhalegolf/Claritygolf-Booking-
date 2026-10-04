@@ -18,8 +18,7 @@
 // `netlify/database/migrations/` is Netlify DB's reserved path: the platform
 // scans it during the *Deploying* phase and applies anything pending to the
 // Netlify-provisioned Postgres. This project's schema does not live there -- it
-// lives in Supabase, which is what DATABASE_URL points at and what the
-// @netlify/database shim in package.json actually forwards to.
+// lives in Supabase, which is what DATABASE_URL points at.
 //
 // While the files sat in that path, both consumers read them. A new migration
 // applied here during Building, then failed in Netlify DB during Deploying with
