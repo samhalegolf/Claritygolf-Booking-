@@ -11,13 +11,12 @@ import { getDatabase } from "@netlify/database";
 import {
   createPublicBooking,
   readCalendarState,
-  readPeople,
   readPublicSlotContext,
   publicBookingSlots,
   reschedulePublicBooking,
-  updatePerson,
   upsertCalendarItemForAccount,
 } from "../../booking-core.mts";
+import { readPeople, updatePerson } from "../clients.mts";
 import { primaryServiceLocationId } from "../service-scope.mts";
 import {
   ApiError,

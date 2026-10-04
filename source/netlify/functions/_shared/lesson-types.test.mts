@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { publicBookableServices } from "../booking-core.mts";
 import {
   countManagedActiveServices,
   isReservedExternalBookingService,
   managedServicesForStorage,
   normalizeServices,
-  publicBookableServices,
-} from "../booking-core.mts";
+} from "./services.mts";
 
 function lessonType(overrides = {}) {
   return {
