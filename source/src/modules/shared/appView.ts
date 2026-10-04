@@ -3,6 +3,8 @@
 // "availability" group under Booking), reached by switchView("settings") plus a
 // settings tab, so they are not views any more.
 export type View =
+  // The phone layout's first screen: today's bookings. Not in the sidebar.
+  | "today"
   | "calendar"
   | "clients"
   | "sell"

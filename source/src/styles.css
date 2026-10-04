@@ -6494,83 +6494,6 @@ button {
     padding: 12px;
   }
 
-  /* A sticky strip like the player portal's nav, not a stacked block: a
-     coach who came here to check the calendar shouldn't spend the top of
-     the phone on a brand row and a grid of buttons before seeing it. */
-  .sidebar {
-    position: sticky;
-    top: 0;
-    z-index: 30;
-    width: 100%;
-    min-width: 0;
-    min-height: 0;
-    flex-direction: row;
-    align-items: center;
-    gap: 10px;
-    /* max() clears a notch; everywhere else this is the same 10px as before. */
-    padding: max(10px, env(safe-area-inset-top)) 10px 10px;
-    border-right: 0;
-    border-bottom: 1px solid var(--border);
-    background: #fbfbf9;
-    overflow: visible;
-  }
-
-  .brand {
-    flex-shrink: 0;
-    min-width: 0;
-    gap: 8px;
-  }
-
-  .brand-mark {
-    width: 30px;
-    height: 30px;
-  }
-
-  /* The wordmark repeats what the page title already says; the mark alone
-     is enough to say "this is Clarity" without spending scroll-row width.
-     (:not(.brand-mark) because that's a div too, and needs to stay.) */
-  .brand > div:not(.brand-mark) {
-    display: none;
-  }
-
-  .side-nav {
-    display: flex;
-    flex-wrap: nowrap;
-    flex: 1;
-    min-width: 0;
-    gap: 2px;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-
-  .side-nav::-webkit-scrollbar {
-    display: none;
-  }
-
-  .side-nav button {
-    height: 36px;
-    flex-shrink: 0;
-    padding: 0 12px;
-    border-radius: 999px;
-    min-width: 0;
-    justify-content: center;
-    white-space: nowrap;
-    font-size: 13px;
-  }
-
-  /* The label is raw text in the button, not a separate element, so it
-     can't be hidden the way an icon-only bar usually hides it -- shrinking
-     the icon instead keeps every destination legible without wrapping. */
-  .side-nav button svg {
-    width: 16px;
-    height: 16px;
-    flex-shrink: 0;
-  }
-
-  .side-nav button.nav-logout {
-    color: var(--c-text-soft, #76736d);
-  }
-
   .topbar,
   .calendar-toolbar {
     align-items: flex-start;
@@ -17124,4 +17047,376 @@ button {
 
 .resource-system .resource-system-test.is-failed {
   color: var(--c-error-text);
+}
+
+/* ---- Phone layout ----------------------------------------------------------
+   Below 760px (PHONE_LAYOUT_QUERY in modules/phone/phoneLayout.ts) the
+   workspace swaps the sidebar for a tab bar along the bottom: Today, Calendar,
+   Clients, Book, and More for the rest. .is-phone is set from the same query,
+   so these rules and the component never disagree about which layout is on. */
+
+.app-shell.is-phone .sidebar {
+  display: none;
+}
+
+.app-shell.is-phone .main-panel {
+  /* Room for the tab bar, so the last row of any screen can scroll above it. */
+  padding-bottom: calc(76px + env(safe-area-inset-bottom));
+}
+
+/* Quick-create and the toast are fixed to the viewport; on a phone they would
+   otherwise sit under the tab bar. */
+.app-shell.is-phone .quick-create {
+  z-index: 50;
+}
+
+.app-shell.is-phone .toast {
+  bottom: calc(76px + env(safe-area-inset-bottom));
+}
+
+.phone-tab-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  padding: 6px 4px max(6px, env(safe-area-inset-bottom));
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+  box-shadow: 0 -6px 18px rgba(17, 17, 17, 0.06);
+}
+
+.phone-tab-bar button {
+  min-width: 0;
+  min-height: 52px;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 3px;
+  padding: 4px 2px;
+  border: 0;
+  border-radius: var(--c-radius-control);
+  background: transparent;
+  color: var(--c-text-soft, #76736d);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.phone-tab-bar button span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.phone-tab-bar button.active {
+  color: var(--coach-primary, #01632f);
+}
+
+.phone-more-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  display: flex;
+  align-items: flex-end;
+  background: var(--c-scrim-soft, rgba(17, 17, 17, 0.28));
+}
+
+.phone-more-sheet {
+  width: 100%;
+  display: grid;
+  gap: 2px;
+  padding: 12px 12px calc(84px + env(safe-area-inset-bottom));
+  border-radius: var(--c-radius-page) var(--c-radius-page) 0 0;
+  background: var(--panel);
+}
+
+.phone-more-sheet button {
+  min-height: var(--c-h-touch, 48px);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--c-radius-control);
+  background: transparent;
+  color: var(--text);
+  font-size: 15px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.phone-more-sheet button.active {
+  background: var(--c-active, #eeeeea);
+}
+
+/* ---- Today ---------------------------------------------------------------- */
+
+.today-page {
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+}
+
+.today-header {
+  display: grid;
+  gap: 2px;
+}
+
+.today-header strong {
+  font-size: 20px;
+}
+
+.today-header span {
+  color: var(--c-text-soft, #76736d);
+  font-size: 13px;
+}
+
+.today-featured {
+  display: grid;
+  gap: 6px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--c-radius-card);
+  background: color-mix(in srgb, var(--panel) 92%, var(--coach-primary, #01632f) 8%);
+}
+
+.today-featured strong {
+  font-size: 22px;
+}
+
+.today-featured > span:not(.today-featured-label) {
+  color: var(--c-text-body, #4f4d49);
+}
+
+.today-featured-label {
+  color: var(--coach-primary, #01632f);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.today-featured .primary-button {
+  justify-self: start;
+  margin-top: 6px;
+}
+
+.today-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.today-actions .outline-button {
+  min-height: var(--c-h-touch, 48px);
+  justify-content: center;
+}
+
+.today-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.today-row {
+  width: 100%;
+  min-height: 60px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--c-radius-card);
+  background: var(--panel);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.today-row-time {
+  color: var(--c-text-soft, #76736d);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.today-row-who {
+  min-width: 0;
+  display: grid;
+}
+
+.today-row-who strong,
+.today-row-who span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.today-row-who span {
+  color: var(--c-text-soft, #76736d);
+  font-size: 13px;
+}
+
+.today-row-state {
+  color: var(--coach-primary, #01632f);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.today-row.is-done {
+  opacity: 0.6;
+}
+
+.today-row.is-done .today-row-state {
+  color: var(--c-text-soft, #76736d);
+}
+
+/* ---- Billing (and Settings) on the phone ---------------------------------- */
+
+/* iPhone zooms the page into any text box set smaller than 16px the moment it
+   is tapped, and leaves it zoomed. The phone layout's fields are 16px so a
+   coach typing an invoice line or a bank search keeps the whole screen. */
+.app-shell.is-phone input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+.app-shell.is-phone select,
+.app-shell.is-phone textarea {
+  font-size: 16px;
+}
+
+/* Billing's and Settings' sections: one row that scrolls sideways. Below
+   820px the side column already turns into a top strip, but it wrapped, and
+   Billing's ten sections took four rows before any of the section showed. */
+.app-shell.is-phone .settings-subnav {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding: 8px 12px;
+  scrollbar-width: none;
+}
+
+.app-shell.is-phone .settings-subnav::-webkit-scrollbar {
+  display: none;
+}
+
+.app-shell.is-phone .settings-subnav button {
+  flex: none;
+  white-space: nowrap;
+}
+
+.app-shell.is-phone .billing-pane {
+  padding: 12px;
+}
+
+/* Every Billing table keeps its columns and scrolls sideways inside its card,
+   rather than squeezing seven columns into a phone's width until each cell
+   wraps a word per line. The cells tighten and stay on one line. */
+.app-shell.is-phone .recent-invoices-table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.app-shell.is-phone .recent-invoices-table th,
+.app-shell.is-phone .recent-invoices-table td {
+  padding: 8px 6px;
+  white-space: nowrap;
+}
+
+.app-shell.is-phone .bank-toolbar {
+  padding: 8px;
+}
+
+.app-shell.is-phone .bank-search-field {
+  flex: 1 1 100%;
+}
+
+.app-shell.is-phone .bank-search-field input {
+  flex: 1;
+  width: auto;
+}
+
+/* ---- Sell on the phone ----------------------------------------------------- */
+
+/* Below 900px the till is one column, catalogue first, so on a phone the
+   docket and its Pay button sit under every tile. This bar carries the sale
+   and Pay above the tab bar until the docket's own Pay scrolls into view
+   (SellScreen hides it then). */
+.sell-phone-bar {
+  display: none;
+}
+
+.app-shell.is-phone .sell-phone-bar {
+  position: fixed;
+  left: 8px;
+  right: 8px;
+  bottom: calc(70px + env(safe-area-inset-bottom));
+  z-index: 39;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: 0 8px 24px rgba(17, 17, 17, 0.14);
+}
+
+.sell-phone-bar-sale {
+  min-width: 0;
+  display: grid;
+  padding: 4px 6px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sell-phone-bar-sale strong {
+  font-size: 14px;
+}
+
+.sell-phone-bar-sale span {
+  color: var(--c-text-soft, #76736d);
+  font-size: 12px;
+}
+
+.app-shell.is-phone .sell-phone-bar .sell-pay-button {
+  padding: 12px 18px;
+  font-size: 16px;
+}
+
+/* The catalogue's tabs: one row that scrolls sideways, as everywhere else in
+   the phone layout, so the tiles start on the first screen. */
+.app-shell.is-phone .sell-tabs {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.app-shell.is-phone .sell-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.app-shell.is-phone .sell-tabs button {
+  flex: none;
+  min-height: 40px;
+  white-space: nowrap;
+}
+
+.app-shell.is-phone .sell-screen {
+  padding: 0;
+}
+
+.app-shell.is-phone .sell-catalog,
+.app-shell.is-phone .sell-docket {
+  padding: 12px;
 }

@@ -6,5 +6,9 @@
 	     will sign: see docs/stripe-terminal-ios-setup.md. -->
 	<key>com.apple.developer.proximity-reader.payment.acceptance</key>
 	<true/>
+	<!-- Push notifications (booking alerts). Xcode signs a release build with
+	     "production"; see docs/staff-app-push-setup.md. -->
+	<key>aps-environment</key>
+	<string>development</string>
 </dict>
 </plist>

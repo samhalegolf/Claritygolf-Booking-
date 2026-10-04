@@ -12,6 +12,16 @@ import {
   updatePushSubscriptionLanguage,
 } from "./_shared/push-notify.mts";
 import { messageText } from "./_shared/message-language.mts";
+import {
+  apnsConfigured,
+  cleanNativePlatform,
+  countNativePushDevices,
+  deleteNativePushDevice,
+  fcmConfigured,
+  hasNativePushDevice,
+  nativePushConfigured,
+  saveNativePushDevice,
+} from "./_shared/native-push.mts";
 import { cleanString } from "./_shared/values.mts";
 import { json } from "./_shared/http.mts";
 
@@ -23,6 +33,12 @@ import { json } from "./_shared/http.mts";
  * POST   -> { test: true } sends a pop-up to every registered browser
  * POST   -> { endpoint, language } this browser now reads another language
  * DELETE -> forget this browser
+ *
+ * The staff app's phones use the same route with a push token instead of a
+ * browser subscription (see _shared/native-push.mts):
+ * GET    ?nativeToken=  -> also { native: { ios, android }, nativeRegistered }
+ * POST   { native: { platform, token, language } } -> save this phone
+ * DELETE { nativeToken } -> forget this phone
  */
 export default async function handler(req: Request) {
   // A push subscription belongs to one coach in one business: it is how that
@@ -47,16 +63,22 @@ export default async function handler(req: Request) {
   }
 
   if (req.method === "GET") {
-    const endpoint = cleanString(new URL(req.url).searchParams.get("endpoint"), "", 600);
+    const params = new URL(req.url).searchParams;
+    const endpoint = cleanString(params.get("endpoint"), "", 600);
+    const nativeToken = cleanString(params.get("nativeToken"), "", 600);
     try {
       return json({
         configured: pushConfigured(),
+        // Which halves of phone push the server can send, so the app only
+        // offers alerts on a phone the server can actually reach.
+        native: { ios: apnsConfigured(), android: fcmConfigured() },
+        nativeRegistered: nativeToken ? await hasNativePushDevice(accountId, nativeToken) : false,
         publicKey: pushPublicKey(),
         // The browser asks "do you still know about me?" with its own
         // endpoint, so a wiped database or a subscription the coach removed
         // elsewhere shows as off rather than as a toggle that lies.
         subscribed: endpoint ? await hasPushSubscription(accountId, endpoint) : false,
-        deviceCount: await countPushSubscriptions(accountId),
+        deviceCount: (await countPushSubscriptions(accountId)) + (await countNativePushDevices(accountId)),
       });
     } catch (error) {
       console.error("push_subscriptions:status_failed", error);
@@ -73,7 +95,7 @@ export default async function handler(req: Request) {
     }
 
     if (body?.test === true) {
-      if (!pushConfigured()) {
+      if (!pushConfigured() && !nativePushConfigured()) {
         return json(
           { error: "not_configured", message: "Browser notifications are not set up on the server yet." },
           503,
@@ -89,6 +111,28 @@ export default async function handler(req: Request) {
         };
       });
       return json({ ok: result.sent > 0, ...result }, result.sent > 0 ? 200 : 207);
+    }
+
+    if (body?.native) {
+      const platform = cleanNativePlatform(body.native.platform);
+      const token = cleanString(body.native.token, "", 600);
+      if (!platform || !token) {
+        return json({ error: "invalid_device", message: "The app did not supply a usable push token." }, 400);
+      }
+      try {
+        await saveNativePushDevice({
+          accountId,
+          userId,
+          platform,
+          token,
+          language: body.native.language,
+          label: cleanString(body?.label, "", 200) || cleanString(req.headers.get("user-agent"), "", 200),
+        });
+        return json({ ok: true });
+      } catch (error) {
+        console.error("push_subscriptions:native_save_failed", error);
+        return json({ error: "save_failed", message: "Could not save this phone." }, 500);
+      }
     }
 
     if (body?.language && body?.endpoint && !body?.subscription) {
@@ -131,6 +175,15 @@ export default async function handler(req: Request) {
       body = await req.json();
     } catch {
       body = null;
+    }
+    const nativeToken = cleanString(body?.nativeToken, "", 600);
+    if (nativeToken) {
+      try {
+        return json({ ok: true, removed: await deleteNativePushDevice(accountId, nativeToken) });
+      } catch (error) {
+        console.error("push_subscriptions:native_delete_failed", error);
+        return json({ error: "delete_failed", message: "Could not remove this phone." }, 500);
+      }
     }
     const endpoint = cleanString(body?.endpoint, "", 600);
     if (!endpoint) return json({ error: "invalid_endpoint" }, 400);

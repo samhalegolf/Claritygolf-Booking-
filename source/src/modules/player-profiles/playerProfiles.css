@@ -1167,10 +1167,6 @@
 /* 720px is this file's existing "one column" breakpoint -- see the
    .player-video-card block above. */
 @media (max-width: 720px) {
-  .player-video-shelf-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
   .player-tool-row {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -1185,4 +1181,71 @@
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+}
+
+/* ---- Phone layout ------------------------------------------------------------
+   .is-phone is set by modules/phone/phoneLayout.ts below 760px, when the
+   workspace swaps its sidebar for the tab bar. A profile on a phone opens under
+   its row inside the list, so every inset here is taken out of a 360px-ish
+   column twice over: page, list, panel. */
+
+.app-shell.is-phone .player-profiles-page {
+  padding: 12px;
+}
+
+.app-shell.is-phone .player-profiles-toolbar {
+  margin-bottom: 12px;
+}
+
+.app-shell.is-phone .player-profile-tool-panel {
+  gap: 12px;
+  padding: 12px;
+}
+
+/* One row that scrolls sideways, not a pill that wraps into a lozenge: with
+   the record-keeping tabs opened out, nine tabs wrapped to three rows and
+   pushed the tab's content off the first screen. */
+.app-shell.is-phone .player-tool-tabs,
+.app-shell.is-phone .player-tool-tabs.is-expanded {
+  flex-wrap: nowrap;
+  justify-self: stretch;
+  overflow-x: auto;
+  padding: 4px;
+  border-radius: 999px;
+  scrollbar-width: none;
+}
+
+.app-shell.is-phone .player-tool-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.app-shell.is-phone .player-tool-tabs button {
+  min-height: 40px;
+}
+
+.app-shell.is-phone .player-tool-tabs .player-tool-tab-toggle {
+  width: 40px;
+}
+
+.app-shell.is-phone .player-tool-card-header {
+  flex-wrap: wrap;
+}
+
+/* The review record kept its 96px date column after every other row on this
+   screen stacked; the date goes over the title instead, the chevron stays
+   beside it. */
+.app-shell.is-phone .swing-review-record-toggle {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 10px;
+}
+
+.app-shell.is-phone .swing-review-record-toggle .player-tool-row-when {
+  grid-column: 1 / -1;
+}
+
+/* The 1120px rule's two thumbnails across now hold on a phone too, as on its
+   own photo grid; one column made each clip the width of the screen and a
+   shelf of eight a long scroll. Only the gap tightens. */
+.app-shell.is-phone .player-video-shelf-grid {
+  gap: 10px;
 }
