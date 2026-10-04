@@ -204,6 +204,18 @@ export function SellScreen({
   const [issuedPasses, setIssuedPasses] = useState<string[]>([]);
 
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const docketRef = useRef<HTMLDivElement | null>(null);
+  const docketActionsRef = useRef<HTMLDivElement | null>(null);
+  // On a phone the docket sits under the whole catalogue. A bar above the tab
+  // bar carries the total and Pay while the docket's own Pay is off screen.
+  const [docketPayInView, setDocketPayInView] = useState(false);
+  useEffect(() => {
+    const target = docketActionsRef.current;
+    if (!target || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(([entry]) => setDocketPayInView(entry.isIntersecting));
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, []);
 
   const total = sellTotal(lines);
   const taxIncluded = sellTaxIncluded(lines);
@@ -789,7 +801,7 @@ export function SellScreen({
       </div>
 
       {/* --- Docket ---------------------------------------------------------- */}
-      <div className="sell-docket">
+      <div className="sell-docket" ref={docketRef}>
         <div className="sell-docket-head">
           <h2>{t("Current sale")}</h2>
           {lines.length > 0 && (
@@ -978,7 +990,7 @@ export function SellScreen({
           <p className="field-help">{t("A package puts credits on a profile - add the customer before taking payment.")}</p>
         )}
 
-        <div className="sell-actions">
+        <div className="sell-actions" ref={docketActionsRef}>
           <button
             className="outline-button"
             disabled={!lines.length}
@@ -1013,6 +1025,21 @@ export function SellScreen({
           </div>
         )}
       </div>
+
+      {/* Phone only (hidden by the stylesheet everywhere else). */}
+      {lines.length > 0 && !docketPayInView && (
+        <div className="sell-phone-bar">
+          <button
+            className="sell-phone-bar-sale"
+            onClick={() => docketRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            type="button"
+          >
+            <strong>{t("Current sale")}</strong>
+            <span>{tn(itemCount, "{count} item", "{count} items")}</span>
+          </button>
+          <button className="sell-pay-button" onClick={openPayment} type="button">{t("Pay {dueNow}", { dueNow: formatMoney(dueNow, currency) })}</button>
+        </div>
+      )}
 
       {/* --- Payment --------------------------------------------------------- */}
       {payStage !== "closed" && (

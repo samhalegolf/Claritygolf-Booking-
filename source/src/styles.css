@@ -17340,3 +17340,83 @@ button {
   flex: 1;
   width: auto;
 }
+
+/* ---- Sell on the phone ----------------------------------------------------- */
+
+/* Below 900px the till is one column, catalogue first, so on a phone the
+   docket and its Pay button sit under every tile. This bar carries the sale
+   and Pay above the tab bar until the docket's own Pay scrolls into view
+   (SellScreen hides it then). */
+.sell-phone-bar {
+  display: none;
+}
+
+.app-shell.is-phone .sell-phone-bar {
+  position: fixed;
+  left: 8px;
+  right: 8px;
+  bottom: calc(70px + env(safe-area-inset-bottom));
+  z-index: 39;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: 0 8px 24px rgba(17, 17, 17, 0.14);
+}
+
+.sell-phone-bar-sale {
+  min-width: 0;
+  display: grid;
+  padding: 4px 6px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sell-phone-bar-sale strong {
+  font-size: 14px;
+}
+
+.sell-phone-bar-sale span {
+  color: var(--c-text-soft, #76736d);
+  font-size: 12px;
+}
+
+.app-shell.is-phone .sell-phone-bar .sell-pay-button {
+  padding: 12px 18px;
+  font-size: 16px;
+}
+
+/* The catalogue's tabs: one row that scrolls sideways, as everywhere else in
+   the phone layout, so the tiles start on the first screen. */
+.app-shell.is-phone .sell-tabs {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.app-shell.is-phone .sell-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.app-shell.is-phone .sell-tabs button {
+  flex: none;
+  min-height: 40px;
+  white-space: nowrap;
+}
+
+.app-shell.is-phone .sell-screen {
+  padding: 0;
+}
+
+.app-shell.is-phone .sell-catalog,
+.app-shell.is-phone .sell-docket {
+  padding: 12px;
+}
