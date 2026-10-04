@@ -16868,6 +16868,11 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
    * over a screen (popovers, sheets, overlays) close with their own X, which
    * is sized for a thumb on a phone.
    */
+  // On a phone a player's profile is a page of its own over the list, rather
+  // than opening under its row; closing it keeps the player picked, so the
+  // swipe forward can open them again.
+  const phonePlayerOpen = phoneLayout && activeView === "players" && Boolean(notesWorkspaceClient) && playerToolExpanded;
+  const playerProfilesTitle = t("{customerSingular} Profiles", { customerSingular: terms.customerSingular });
   const phoneBackStep: PhoneStep | null = !phoneLayout
     ? null
     : activeView === "settings" && settingsTab !== "none" && workspaceOverlay?.kind !== "settings"
@@ -16876,7 +16881,9 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
         ? { label: t("Billing"), go: () => setBillingSection("none") }
         : activeView === "book" && quickCreate
           ? { label: t("Book"), go: () => setQuickCreate(null) }
-          : null;
+          : phonePlayerOpen
+            ? { label: playerProfilesTitle, go: () => setPlayerToolExpanded(false) }
+            : null;
   // And forward, for the swipe only: from a menu, back into the section you
   // last had open there. A new invoice is never reopened this way -- it would
   // start another one.
@@ -16893,7 +16900,9 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
         }
       : activeView === "billing" && billingSection === "none" && lastBillingSection !== "none"
         ? { label: billingSectionLabel(lastBillingSection), go: () => switchBillingSection(lastBillingSection) }
-        : null;
+        : activeView === "players" && notesWorkspaceClient && !playerToolExpanded
+          ? { label: notesWorkspaceClient.name, go: () => setPlayerToolExpanded(true) }
+          : null;
 
   // Browser Back moves between the screens the coach has actually been on,
   // rather than leaving the app: it closes whatever is open over the workspace
@@ -16911,7 +16920,8 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     depth: (snapshot) =>
       snapshot.layers.length +
       (phoneLayout &&
-      ((snapshot.view === "settings" && snapshot.settingsTab !== "none") ||
+      (snapshot.playerOpen ||
+        (snapshot.view === "settings" && snapshot.settingsTab !== "none") ||
         (snapshot.view === "billing" && snapshot.billingSection !== "none"))
         ? 1
         : 0),
@@ -16922,6 +16932,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
       settingsGroup: requestedSettingsGroup,
       overlay: workspaceOverlay,
       layers: backLayerIds,
+      playerOpen: phonePlayerOpen,
     },
     restore: (snapshot) => {
       // Topmost first, so a confirm standing over a modal goes before it.
@@ -16938,6 +16949,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
       setSettingsTab(snapshot.settingsTab);
       setBillingSection(snapshot.billingSection);
       setRequestedSettingsGroup(snapshot.settingsGroup);
+      if (phoneLayout && snapshot.view === "players") setPlayerToolExpanded(Boolean(snapshot.playerOpen));
       // Only when the overlay is staying: closing it is the layer's job above,
       // and doing it here as well would skip that unsaved-edit question.
       if (wanted.has("workspace-overlay")) setWorkspaceOverlay(snapshot.overlay);
@@ -17857,7 +17869,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
         )}
 
         {adminWorkspaceReady && activeView === "players" && (
-          <section className="module-page player-profiles-page">
+          <section className={`module-page player-profiles-page${phonePlayerOpen ? " is-phone-detail" : ""}`}>
             <div className="player-profiles-toolbar">
               <div className="player-profiles-heading">
                 <p>{t("{customerPlural} with {serviceSingular} notes or video, plus anyone you add.", { customerPlural: terms.customerPlural, serviceSingular: terms.serviceSingular.toLowerCase() })}</p>

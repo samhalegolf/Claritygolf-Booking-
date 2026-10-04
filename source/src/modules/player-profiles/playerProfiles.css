@@ -1197,6 +1197,15 @@
   margin-bottom: 12px;
 }
 
+/* An open profile is a page of its own on a phone (is-phone-detail, App.tsx):
+   the list, the toolbar and the unassigned videos step out of the way, and the
+   topbar's Back or a swipe right brings them back. */
+.app-shell.is-phone .player-profiles-page.is-phone-detail > :not(.player-profiles-layout),
+.app-shell.is-phone .player-profiles-page.is-phone-detail .player-profile-entry:not(.is-expanded),
+.app-shell.is-phone .player-profiles-page.is-phone-detail .player-profiles-empty {
+  display: none;
+}
+
 .app-shell.is-phone .player-profile-tool-panel {
   gap: 12px;
   padding: 12px;
