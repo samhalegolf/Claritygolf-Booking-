@@ -473,7 +473,7 @@ function cleanService(service, index = 0, accountId = "") {
 
 // Every inbound external booking (Optix) files under this reserved lesson
 // type. The id must match EXTERNAL_BOOKING_SERVICE_ID in _shared/integrations/ingest.mts.
-const EXTERNAL_BOOKING_SERVICE_ID = "external-booking";
+export const EXTERNAL_BOOKING_SERVICE_ID = "external-booking";
 
 export function isReservedExternalBookingService(service) {
   return cleanSlug(service?.id, "") === EXTERNAL_BOOKING_SERVICE_ID;

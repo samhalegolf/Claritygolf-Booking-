@@ -140,7 +140,6 @@ import {
   cleanPlayerBookingEmbedLabel,
   cleanPlayerBookingEmbedUrl,
   playerBookingEmbedForPortal,
-  playerBookingEmbedFromSettings,
 } from "./_shared/player-booking-embed.mts";
 import {
   guestRegistrationsPerAccountPerDay,
@@ -172,7 +171,6 @@ import {
   cleanCustomGroupAttendee,
   conflictItemSummary,
   currentWeekOffset,
-  filterCalendarStateForContext,
   filterNotificationsForContext,
   findCollision,
   hasCollision,
@@ -242,7 +240,6 @@ import {
   normalizeServices,
   serviceBelongsToContext,
   serviceLocation,
-  servicesFromSettings,
 } from "./_shared/services.mts";
 import {
   db,
@@ -264,7 +261,6 @@ import {
   nowIso,
   safeJsonParse,
   safeJsonStringify,
-  timeToMinutes,
 } from "./_shared/values.mts";
 import {
   accountTimeZoneFor,
@@ -280,8 +276,25 @@ import {
   normalizeCoachProfiles,
   normalizeLocations,
   normalizeWorkspaceAccounts,
-  ownCoachIdFor,
 } from "./_shared/workspace.mts";
+import {
+  adminSettingsFromSettings,
+  adminStateFromSettings,
+  appUsersFromSettings,
+  brandSettingsFromSettings,
+  cleanCalendarColors,
+  cleanReminderLeadMinutes,
+  coachProfilesFromSettings,
+  coachUserForMembership,
+  defaultAvailability,
+  defaultEmailTemplates,
+  locationsFromSettings,
+  modernClientEmailFooter,
+  normalizeAvailability,
+  publicCalendarState,
+  stateFromSettings,
+  workspaceAccountsFromSettings,
+} from "./_shared/workspace-state.mts";
 
 const sessionCookieName = "clarity_session";
 const sessionDays = 7;
@@ -293,27 +306,6 @@ let authReadyPromise = null;
 let authReady = false;
 let authReadyConfigSignature = "";
 let seedReadyPromise = null;
-const defaultEmailTemplates = {
-  clientEmailSubject: "Your {{service}} is confirmed",
-  clientEmailIntro:
-    "Thanks {{firstName}}, your booking with {{coach}} is confirmed.",
-  clientEmailFooter: "We look forward to seeing you.",
-  adminEmailSubject: "New booking: {{client}}",
-  adminEmailIntro: "{{client}} booked {{service}} for {{date}} at {{time}}.",
-};
-
-const defaultAvailability = [
-  [{ start: timeToMinutes(16, 30), end: timeToMinutes(20, 0) }],
-  [],
-  [{ start: timeToMinutes(14, 0), end: timeToMinutes(20, 0) }],
-  [
-    { start: timeToMinutes(7, 0), end: timeToMinutes(11, 0) },
-    { start: timeToMinutes(14, 0), end: timeToMinutes(16, 30) },
-  ],
-  [{ start: timeToMinutes(14, 0), end: timeToMinutes(16, 0) }],
-  [],
-  [{ start: timeToMinutes(15, 0), end: timeToMinutes(18, 0) }],
-];
 
 function json(value, status = 200, extraHeaders = {}) {
   const headers = new Headers({
@@ -381,72 +373,6 @@ function servicePriceLabel(service) {
 function cleanLogoPreview(value) {
   if (typeof value !== "string" || !value.startsWith("data:image/")) return "";
   return value.slice(0, 180_000);
-}
-
-function normalizeAvailability(availability) {
-  const source = Array.isArray(availability)
-    ? availability
-    : defaultAvailability;
-  const dayStartMinutes = 0;
-  const dayEndMinutes = (24 * 60) - 15;
-  return Array.from({ length: 7 }, (_, day) => {
-    const windows = Array.isArray(source[day]) ? source[day] : [];
-    return windows
-      .map((window) => {
-        const rawStart = Number.isFinite(Number(window?.start))
-          ? Number(window.start)
-          : timeToMinutes(7, 0);
-        const rawEnd = Number.isFinite(Number(window?.end))
-          ? Number(window.end)
-          : rawStart + 60;
-        const start = Math.max(
-          dayStartMinutes,
-          Math.min(dayEndMinutes, Math.round(rawStart / 15) * 15),
-        );
-        const end = Math.max(
-          start + 15,
-          Math.min(dayEndMinutes, Math.round(rawEnd / 15) * 15),
-        );
-        const coachId = cleanSlug(window?.coachId, defaultCoachProfileFromAccount().id);
-        // Keep the owning business on the window. Every account filter is
-        // strict now, so a window that loses its accountId here is dropped
-        // from the public slot calculation and the booking page shows no
-        // times at all.
-        const accountId = cleanSlug(window?.accountId, "");
-        // Where the coach is working in this window. Empty means "wherever the
-        // lesson type is" -- every window saved before locations existed.
-        const locationId = cleanSlug(window?.locationId, "");
-        if (end <= start) return null;
-        return {
-          start,
-          end,
-          coachId,
-          ...(accountId ? { accountId } : {}),
-          ...(locationId ? { locationId } : {}),
-        };
-      })
-      .filter(Boolean)
-      .sort(
-        (a, b) =>
-          (a.coachId || "").localeCompare(b.coachId || "") ||
-          (a.locationId || "").localeCompare(b.locationId || "") ||
-          a.start - b.start,
-      )
-      .reduce((merged, window) => {
-        const previous = merged.at(-1);
-        if (
-          previous &&
-          previous.coachId === window.coachId &&
-          (previous.locationId || "") === (window.locationId || "") &&
-          window.start < previous.end
-        ) {
-          previous.end = Math.max(previous.end, window.end);
-        } else {
-          merged.push({ ...window });
-        }
-        return merged;
-      }, []);
-  });
 }
 
 function availabilityWindowBelongsToContext(window, context, fallbackCoachId) {
@@ -2834,138 +2760,6 @@ async function readStateSettingsSnapshot(accountId: string) {
   return { settings, syncKey, updatedAt };
 }
 
-// Reminder lead time: 1 hour to 14 days before the lesson, default 24 hours.
-// Mirrors admin-settings.mts, which owns the /api/admin-settings write path.
-function cleanReminderLeadMinutes(value, fallback = 24 * 60) {
-  const minutes = Number(value === "" || value === undefined || value === null ? fallback : value);
-  return Number.isFinite(minutes) ? Math.max(60, Math.min(14 * 24 * 60, Math.round(minutes))) : fallback;
-}
-
-function adminSettingsFromSettings(settings) {
-  const delaySeconds = Number(settingValue(settings, "notificationDelaySeconds") || 30);
-  return {
-    emailNotificationsEnabled: settingValue(settings, "emailNotificationsEnabled") !== "false",
-    notificationEmail: settingValue(settings, "notificationEmail"),
-    coachEmail: settingValue(settings, "coachEmail"),
-    replyToEmail: settingValue(settings, "replyToEmail"),
-    notificationDelaySeconds: Number.isFinite(delaySeconds)
-      ? Math.max(30, Math.min(3600, delaySeconds))
-      : 30,
-    sendClientEmail: settingValue(settings, "sendClientEmail") !== "false",
-    sendCoachEmail: settingValue(settings, "sendCoachEmail") !== "false",
-    sendAdminEmail: settingValue(settings, "sendAdminEmail") !== "false",
-    sendLessonTypeChangeEmail: settingValue(settings, "sendLessonTypeChangeEmail") === "true",
-    reminderEnabled: settingValue(settings, "reminderEnabled") === "true",
-    reminderLeadMinutes: cleanReminderLeadMinutes(settingValue(settings, "reminderLeadMinutes")),
-    clientEmailSubject:
-      settingValue(settings, "clientEmailSubject") ||
-      defaultEmailTemplates.clientEmailSubject,
-    clientEmailIntro:
-      settingValue(settings, "clientEmailIntro") ||
-      defaultEmailTemplates.clientEmailIntro,
-    clientEmailFooter: modernClientEmailFooter(
-      settingValue(settings, "clientEmailFooter") ||
-        defaultEmailTemplates.clientEmailFooter,
-    ),
-    adminEmailSubject:
-      settingValue(settings, "adminEmailSubject") ||
-      defaultEmailTemplates.adminEmailSubject,
-    adminEmailIntro:
-      settingValue(settings, "adminEmailIntro") ||
-      defaultEmailTemplates.adminEmailIntro,
-    smsProviderName: settingValue(settings, "smsProviderName"),
-    smsWebhookUrl: settingValue(settings, "smsWebhookUrl"),
-    smsFromNumber: settingValue(settings, "smsFromNumber"),
-    sendClientSms: settingValue(settings, "sendClientSms") === "true",
-    sendAdminSms: settingValue(settings, "sendAdminSms") === "true",
-    ...playerBookingEmbedFromSettings(settings),
-  };
-}
-
-/**
- * The two outlines a booking card can wear: a border once the lesson is done,
- * and a ring while a bay is held for it. The fill is not here — that is the
- * lesson type's own colour, stored on the service in servicesJson.
- */
-const defaultCalendarColors = {
-  statusCompleted: "#7f8a80",
-  statusBayBooked: "#e08a2e",
-};
-
-function cleanCalendarColors(colors) {
-  const cleaned = {};
-  for (const [key, fallback] of Object.entries(defaultCalendarColors)) {
-    cleaned[key] = cleanHexColor(colors?.[key], fallback);
-  }
-  return cleaned;
-}
-
-function brandSettingsFromSettings(settings, account) {
-  return {
-    coachName: settingValue(settings, "coachName") || account.businessName,
-    logoName: settingValue(settings, "brandLogoName"),
-    logoPreview: settingValue(settings, "brandLogoPreview"),
-    showLogo: settingValue(settings, "brandShowLogo") === "true",
-    neutral: settingValue(settings, "brandNeutral") || "#ffffff",
-    primary: settingValue(settings, "brandPrimary") || "#1fd36d",
-    secondary: settingValue(settings, "brandSecondary") || "#d7b06b",
-    accent: settingValue(settings, "brandAccent") || "#07100a",
-    bookingTheme:
-      settingValue(settings, "brandBookingTheme") === "light" ? "light" : "dark",
-    calendarColors: cleanCalendarColors(
-      parseSettingJson(settings, "brandCalendarColorsJson", defaultCalendarColors),
-    ),
-  };
-}
-
-function workspaceAccountsFromSettings(settings, account) {
-  return normalizeWorkspaceAccounts(
-    parseSettingJson(settings, "workspaceAccountsJson", []),
-    account,
-  );
-}
-
-function coachProfilesFromSettings(settings, account) {
-  return normalizeCoachProfiles(
-    parseSettingJson(settings, "coachProfilesJson", null),
-    account,
-  );
-}
-
-function appUsersFromSettings(settings, account) {
-  const users = parseSettingJson(settings, "appUsersJson", []);
-  return Array.isArray(users) && users.length ? users : [defaultAppUserFromAccount(account)];
-}
-
-function locationsFromSettings(settings, account) {
-  return normalizeLocations(
-    parseSettingJson(settings, "locationsJson", []),
-    account,
-  );
-}
-
-/**
- * A business's bookable hours.
- *
- * defaultAvailability is the original coach's actual working week, so a new
- * business starts closed rather than advertising somebody else's evenings.
- */
-export function availabilityFromSettings(settings, accountId = "") {
-  const scopedAccountId = cleanSlug(settingValue(settings, "accountId") || accountId, "");
-  const seed =
-    !scopedAccountId || isOriginalWorkspace(scopedAccountId) ? defaultAvailability : [[], [], [], [], [], [], []];
-  // availabilityJson is a per-account settings row, so every window in it
-  // belongs to the business whose row was read. Windows saved before accountId
-  // was stamped on write (and the seeded defaults) carry no accountId; file
-  // them under that account so the strict account filters keep them.
-  const ownerAccountId = cleanSlug(accountId, "") || scopedAccountId;
-  return normalizeAvailability(parseSettingJson(settings, "availabilityJson", seed)).map((dayWindows) =>
-    dayWindows.map((window) =>
-      window.accountId || !ownerAccountId ? window : { ...window, accountId: ownerAccountId },
-    ),
-  );
-}
-
 async function readAdminSettings(accountId: string, settingsMap = null) {
   await ensureSeeded();
   return adminSettingsFromSettings(settingsMap || (await readSettingsMap(accountId)));
@@ -3213,18 +3007,7 @@ async function readWorkspaceBootstrap(membership: CoachActor): Promise<Workspace
       workspaceAccounts: workspaceAccountsFromSettings(settingsMap, account),
       account,
       coaches,
-      // Mirrors the calendar shell's currentUser exactly: the app-user
-      // vocabulary, and permissions from the membership rather than settings.
-      currentUser: {
-        id: membership.authUserId,
-        accountId: membership.accountId,
-        name: coachName,
-        role: appUserRoleForMembership(membership.role),
-        coachId: ownCoachIdFor(membership, coaches, membership.accountId) || undefined,
-        permissions: membership.isAdmin
-          ? { bookings: "all", services: "all", availability: "all", locations: "all", clients: "all", settings: "all" }
-          : { bookings: "own", services: "own", availability: "own", locations: "none", clients: "own", settings: "none" },
-      },
+      currentUser: coachUserForMembership(membership, coaches, coachName),
     };
   } catch (error) {
     console.warn("workspace_bootstrap_unavailable", {
@@ -3237,7 +3020,6 @@ async function readWorkspaceBootstrap(membership: CoachActor): Promise<Workspace
 
 export async function readCalendarState(accountId: string) {
   const { settings: settingsMap, syncKey, updatedAt } = await readStateSettingsSnapshot(accountId);
-  const account = coachAccountFromSettings(settingsMap, accountId);
   // No Google Calendar status here: it is per coach, read by the coach
   // profile, and a connected one costs a Google API call -- which every read
   // of the calendar used to pay.
@@ -3250,18 +3032,9 @@ export async function readCalendarState(accountId: string) {
     syncKey,
     updatedAt,
     items,
-    services: servicesFromSettings(settingsMap, accountId),
-    workspaceAccounts: workspaceAccountsFromSettings(settingsMap, account),
-    coaches: coachProfilesFromSettings(settingsMap, account),
-    currentUser: appUsersFromSettings(settingsMap, account)[0],
-    locations: locationsFromSettings(settingsMap, account),
-    availability: availabilityFromSettings(settingsMap, accountId),
+    ...adminStateFromSettings(settingsMap, accountId),
     people,
     notifications,
-    settings: adminSettingsFromSettings(settingsMap),
-    brand: brandSettingsFromSettings(settingsMap, account),
-    accountId,
-    account,
   };
 }
 
@@ -3279,124 +3052,26 @@ export async function readCalendarState(accountId: string) {
  */
 async function readSettingsState(accountId: string) {
   const { settings: settingsMap, syncKey, updatedAt } = await readStateSettingsSnapshot(accountId);
-  const account = coachAccountFromSettings(settingsMap, accountId);
   return {
     syncKey,
     updatedAt,
     items: [],
-    services: servicesFromSettings(settingsMap, accountId),
-    workspaceAccounts: workspaceAccountsFromSettings(settingsMap, account),
-    coaches: coachProfilesFromSettings(settingsMap, account),
-    currentUser: appUsersFromSettings(settingsMap, account)[0],
-    locations: locationsFromSettings(settingsMap, account),
-    availability: availabilityFromSettings(settingsMap, accountId),
+    ...adminStateFromSettings(settingsMap, accountId),
     people: [],
     notifications: [],
-    settings: adminSettingsFromSettings(settingsMap),
-    brand: brandSettingsFromSettings(settingsMap, account),
-    accountId,
-    account,
   };
 }
 
 async function readLessonCompleteState(accountId: string, itemId) {
   const { settings: settingsMap, syncKey, updatedAt } = await readStateSettingsSnapshot(accountId);
-  const account = coachAccountFromSettings(settingsMap, accountId);
   const item = await readCalendarItemById(accountId, itemId);
   return {
     syncKey,
     updatedAt,
     items: item ? [item] : [],
-    services: servicesFromSettings(settingsMap, accountId),
-    workspaceAccounts: workspaceAccountsFromSettings(settingsMap, account),
-    coaches: coachProfilesFromSettings(settingsMap, account),
-    currentUser: appUsersFromSettings(settingsMap, account)[0],
-    locations: locationsFromSettings(settingsMap, account),
-    availability: availabilityFromSettings(settingsMap, accountId),
+    ...adminStateFromSettings(settingsMap, accountId),
     people: [],
     notifications: [],
-    settings: adminSettingsFromSettings(settingsMap),
-    brand: brandSettingsFromSettings(settingsMap, account),
-    accountId,
-    account,
-  };
-}
-
-async function readAdminCalendarShellState(accountId: string) {
-  const startedAt = Date.now();
-  console.info("CALENDAR_SHELL_STATE_LOAD_STARTED", {
-    route: "/api/calendar-state",
-    routeUsed: "shell",
-  });
-
-  const { settings: settingsMap, syncKey, updatedAt } = await readStateSettingsSnapshot(accountId);
-  const account = coachAccountFromSettings(settingsMap, accountId);
-  const items = await readItems(accountId);
-  const shellLoadDurationMs = Date.now() - startedAt;
-  const deferred = {
-    people: true,
-    notifications: true,
-    googleSyncStatus: true,
-  };
-
-  console.info("PEOPLE_LOAD_DEFERRED", {
-    route: "/api/calendar-state",
-    routeUsed: "shell",
-  });
-  console.info("NOTIFICATION_HISTORY_DEFERRED", {
-    route: "/api/calendar-state",
-    routeUsed: "shell",
-  });
-  console.info("GOOGLE_SYNC_STATUS_DEFERRED", {
-    route: "/api/calendar-state",
-    routeUsed: "shell",
-  });
-  console.info("NON_CRITICAL_DATA_DEFERRED", {
-    route: "/api/calendar-state",
-    routeUsed: "shell",
-    peopleDeferred: deferred.people,
-    notificationsDeferred: deferred.notifications,
-    googleSyncStatusDeferred: deferred.googleSyncStatus,
-  });
-  console.info("CALENDAR_SHELL_STATE_LOAD_COMPLETED", {
-    route: "/api/calendar-state",
-    routeUsed: "shell",
-    shellLoadDurationMs,
-    itemCount: items.length,
-    peopleDeferred: deferred.people,
-    notificationsDeferred: deferred.notifications,
-    googleSyncStatusDeferred: deferred.googleSyncStatus,
-  });
-
-  return {
-    syncKey,
-    updatedAt,
-    items,
-    services: servicesFromSettings(settingsMap, accountId),
-    workspaceAccounts: workspaceAccountsFromSettings(settingsMap, account),
-    coaches: coachProfilesFromSettings(settingsMap, account),
-    currentUser: appUsersFromSettings(settingsMap, account)[0],
-    locations: locationsFromSettings(settingsMap, account),
-    availability: availabilityFromSettings(settingsMap, accountId),
-    people: [],
-    notifications: [],
-    settings: adminSettingsFromSettings(settingsMap),
-    brand: brandSettingsFromSettings(settingsMap, account),
-    accountId,
-    account,
-    // No googleCalendar here on purpose: this route does not read the Google
-    // status. The placeholder it used to send said configured: false, which the
-    // client applied over the real status and greyed out Connect Google.
-    diagnostics: {
-      calendarState: {
-        routeUsed: "shell",
-        shellLoadDurationMs,
-        itemCount: items.length,
-        peopleDeferred: deferred.people,
-        notificationsDeferred: deferred.notifications,
-        googleSyncStatusDeferred: deferred.googleSyncStatus,
-      },
-    },
   };
 }
 
@@ -3420,19 +3095,11 @@ async function readPublicCalendarState(accountId: string) {
   // them in sequence cost a full extra round trip for nothing.
   const [snapshot, items] = await Promise.all([readStateSettingsSnapshot(accountId), readItems(accountId)]);
   const { settings: settingsMap, syncKey, updatedAt } = snapshot;
-  const account = coachAccountFromSettings(settingsMap, accountId);
   return {
     syncKey,
     updatedAt,
     items,
-    services: servicesFromSettings(settingsMap, accountId),
-    workspaceAccounts: workspaceAccountsFromSettings(settingsMap, account),
-    coaches: coachProfilesFromSettings(settingsMap, account),
-    locations: locationsFromSettings(settingsMap, account),
-    availability: availabilityFromSettings(settingsMap, accountId),
-    brand: brandSettingsFromSettings(settingsMap, account),
-    accountId,
-    account,
+    ...stateFromSettings(settingsMap, accountId),
   };
 }
 
@@ -3445,19 +3112,11 @@ export async function readPublicSlotContext({ accountId, serviceId, week } = {},
   const settingsMap = snapshot.settings || {};
   const syncKey = snapshot.syncKey || settingValue(settingsMap, "syncKey") || "";
   const updatedAt = snapshot.updatedAt || settingValue(settingsMap, "updatedAt") || nowIso();
-  const account = coachAccountFromSettings(settingsMap, accountId);
   const state = {
-    accountId,
     syncKey,
     updatedAt,
     items: [],
-    services: servicesFromSettings(settingsMap, accountId),
-    workspaceAccounts: workspaceAccountsFromSettings(settingsMap, account),
-    coaches: coachProfilesFromSettings(settingsMap, account),
-    locations: locationsFromSettings(settingsMap, account),
-    availability: availabilityFromSettings(settingsMap, accountId),
-    brand: brandSettingsFromSettings(settingsMap, account),
-    account,
+    ...stateFromSettings(settingsMap, accountId),
     // Booking page › Look busy. Offers only the times that butt up against the
     // day's edges or an existing booking, so lessons pack together.
     lookBusy: settingValue(settingsMap, "publicBookingLookBusy") === "true",
@@ -3520,36 +3179,20 @@ export async function readPublicSlotContext({ accountId, serviceId, week } = {},
 
 export async function readPublicCatalogState(accountId: string) {
   const { settings: settingsMap, syncKey, updatedAt } = await readStateSettingsSnapshot(accountId);
-  const account = coachAccountFromSettings(settingsMap, accountId);
   return {
-    accountId,
     syncKey,
     updatedAt,
-    services: servicesFromSettings(settingsMap, accountId),
-    workspaceAccounts: workspaceAccountsFromSettings(settingsMap, account),
-    coaches: coachProfilesFromSettings(settingsMap, account),
-    locations: locationsFromSettings(settingsMap, account),
-    availability: availabilityFromSettings(settingsMap, accountId),
-    brand: brandSettingsFromSettings(settingsMap, account),
-    account,
+    ...stateFromSettings(settingsMap, accountId),
   };
 }
 
 async function readFastPublicCalendarState(accountId: string) {
   const { settings: settingsMap, syncKey, updatedAt } = await readStateSettingsSnapshot(accountId);
-  const account = coachAccountFromSettings(settingsMap, accountId);
   return {
-    accountId,
     syncKey,
     updatedAt,
     items: await readItems(accountId),
-    services: servicesFromSettings(settingsMap, accountId),
-    workspaceAccounts: workspaceAccountsFromSettings(settingsMap, account),
-    coaches: coachProfilesFromSettings(settingsMap, account),
-    locations: locationsFromSettings(settingsMap, account),
-    availability: availabilityFromSettings(settingsMap, accountId),
-    brand: brandSettingsFromSettings(settingsMap, account),
-    account,
+    ...stateFromSettings(settingsMap, accountId),
   };
 }
 
@@ -4682,27 +4325,6 @@ async function writePublicBookingAppointment(accountId: string, currentState: Re
   };
 }
 
-function publicCalendarState(state) {
-  return {
-    syncKey: state.syncKey,
-    updatedAt: state.updatedAt,
-    items: state.items,
-    services: state.services || [],
-    workspaceAccounts: state.workspaceAccounts || [],
-    currentUser: state.currentUser || null,
-    coaches: state.coaches || [],
-    locations: state.locations || [],
-    availability: state.availability || [],
-    people: state.people || [],
-    notifications: state.notifications || [],
-    settings: state.settings,
-    brand: state.brand,
-    account: state.account,
-    googleCalendarSync: state.googleCalendarSync,
-    diagnostics: state.diagnostics,
-  };
-}
-
 export function publicBookingState(state) {
   const workspaceAccount = publicWorkspaceAccount(state);
   assertAccountFeature(workspaceAccount, "publicBooking");
@@ -5619,18 +5241,6 @@ function customGroupInviteEmail({ appointment, attendee, service, account, coach
       mt("Confirmation is helpful, but the booking is already in place."),
     ].filter(Boolean).join("\n"),
   };
-}
-
-function modernClientEmailFooter(value, language = "en") {
-  const mt = messageText(language);
-  const footer = cleanString(value, "", 900);
-  const legacyChangeFooter =
-    /need to (move|change)|reply to this email.*(move|change|reschedul)|email.*(move|change|reschedul)/i.test(
-      footer,
-    );
-  return footer && !legacyChangeFooter
-    ? footer
-    : mt("We look forward to seeing you.");
 }
 
 // Coach emails used to go to a single global `settings.coachEmail`, ignoring the coach who
@@ -10775,12 +10385,6 @@ async function routeBookingApiRequest(
     // carries the status the outer handler renders.
     if (pathname.startsWith("/api/")) {
       await requireAdmin(req);
-    }
-
-    if (req.method === "GET" && pathname === "/api/calendar-state") {
-      const state = await readAdminCalendarShellState(await currentAccountId(req));
-      const requestContext = await resolveBackendRequestContext(req, state);
-      return json(publicCalendarState(filterCalendarStateForContext(state, requestContext)));
     }
 
     if (req.method === "PUT" && pathname === "/api/calendar-state") {

@@ -33,19 +33,34 @@ test("the account carries the business's own country, currency and tax", () => {
   assert.equal(account.invoiceSettings.taxInclusive, false);
 });
 
-test("the calendar shell decides what a coach may see with the shared rule", () => {
-  // The shell answers every calendar load. It used to carry its own copy of
-  // this filter, and a copy is free to drift from the rule every save is
-  // checked against.
+test("the calendar shell builds its state from the shared modules", () => {
+  // The shell answers every calendar load. It used to carry its own copies of
+  // the visibility filter, the booking row reader and the settings cleaners,
+  // and they drifted from the ones booking-core uses: a business with no
+  // lesson types was shown the original workspace's, and availability saved
+  // before accountId was stamped vanished on load.
   const source = readFileSync(join(here, "../calendar-state.mts"), "utf8");
-  assert.doesNotMatch(source, /^\s*function filterCalendarStateForContext\b/m, "calendar-state defines its own visibility filter");
-  assert.match(source, /import \{ filterCalendarStateForContext \} from "\.\/_shared\/bookings\.mts"/);
+  for (const name of [
+    "filterCalendarStateForContext",
+    "rowToItem",
+    "readItems",
+    "normalizeServices",
+    "normalizeAvailability",
+    "normalizeCoachProfiles",
+    "normalizeLocations",
+    "adminSettingsFromSettings",
+    "brandSettingsFromSettings",
+    "coachAccountFromSettings",
+  ]) {
+    assert.doesNotMatch(source, new RegExp(`^\\s*(export\\s+)?(async\\s+)?function ${name}\\b`, "m"), `calendar-state defines its own ${name}`);
+  }
+  assert.doesNotMatch(source, /^const default(Services|Availability)\b/m, "calendar-state keeps its own defaults");
+  assert.match(source, /from "\.\/_shared\/workspace-state\.mts"/);
+  assert.match(source, /from "\.\/_shared\/bookings\.mts"/);
 });
 
-test("the calendar shell and booking-core build the account from the one shared copy", () => {
-  for (const file of ["../calendar-state.mts", "../booking-core.mts"]) {
-    const source = readFileSync(join(here, file), "utf8");
-    assert.doesNotMatch(source, /^\s*(export\s+)?function coachAccountFromSettings\b/m, `${file} defines its own account builder`);
-    assert.match(source, /from "\.\/_shared\/coach-account\.mts"/, `${file} does not use the shared account builder`);
-  }
+test("booking-core builds the account from the one shared copy", () => {
+  const source = readFileSync(join(here, "../booking-core.mts"), "utf8");
+  assert.doesNotMatch(source, /^\s*(export\s+)?function coachAccountFromSettings\b/m, "booking-core defines its own account builder");
+  assert.match(source, /from "\.\/_shared\/coach-account\.mts"/, "booking-core does not use the shared account builder");
 });

@@ -44,12 +44,12 @@ import { currencyForCountry, localeForCountry } from "./locale.mts";
 import * as phoneModule from "./phone.mts";
 import * as localeModule from "./locale.mts";
 import {
-  availabilityFromSettings,
   publicAppointmentContactQuery,
   publicAppointmentReadQuery,
   publicSlotCalendarItemsQuery,
   handleBookingApiRoute,
 } from "../booking-core.mts";
+import { availabilityFromSettings } from "./workspace-state.mts";
 import {
   calendarItemBelongsToAccount,
   calendarItemParams,
