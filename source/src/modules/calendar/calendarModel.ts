@@ -311,7 +311,7 @@ export type GroupSession = {
   duration: number;
 };
 
-type WeekDay = {
+export type WeekDay = {
   short: string;
   label: string;
   date: number;
@@ -945,3 +945,43 @@ export function isCancelledGroupSessionMatch(item: CalendarItem, serviceId: stri
     item.start === start
   );
 }
+
+export type Draft =
+  | {
+      mode: "move";
+      itemId: string;
+      week: number;
+      day: number;
+      start: number;
+      duration: number;
+      valid: boolean;
+    }
+  | {
+      mode: "resize";
+      itemId: string;
+      week: number;
+      day: number;
+      start: number;
+      duration: number;
+      valid: boolean;
+    }
+  | {
+      mode: "block";
+      week: number;
+      day: number;
+      start: number;
+      duration: number;
+      valid: boolean;
+    }
+  | {
+      mode: "place";
+      week: number;
+      day: number;
+      start: number;
+      duration: number;
+      valid: boolean;
+    };
+
+export type CalendarFeedStatus = "checking" | "connected" | "offline";
+
+export type CalendarSaveStatus = "idle" | "saving" | "saved" | "failed";
