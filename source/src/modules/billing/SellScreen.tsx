@@ -16,6 +16,7 @@ import { Loading } from "../shared/Loading";
 import { createElement, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
+  ArrowLeft,
   Check,
   ChevronDown,
   ExternalLink,
@@ -35,6 +36,8 @@ import {
   ClarityStore,
   type IconComponent,
 } from "../shared/ClarityIcons";
+import { usePhoneLayout } from "../phone/phoneLayout";
+import { PhoneStepSwipe } from "../phone/PhoneStepSwipe";
 import type { BillingCatalogItem, BillingCatalogKind, BillingCoupon, PosPaymentMethod, PosTransaction } from "./types";
 import { couponApplyAmount, remainingAfterCoupon } from "./couponMath";
 import { CouponPicker, useSpendableCoupons } from "./CouponPicker";
@@ -87,6 +90,11 @@ export type SellScreenProps = {
   // A receipt emailed to an address the client did not have yet saved it to
   // their profile; App updates its copy so the till and the list agree.
   onClientEmailSaved: (clientId: string, email: string) => void;
+  // On a phone the current sale is a page of its own over the catalogue. App
+  // holds which one is showing, because its topbar Back and the swipe step
+  // between them.
+  phoneSaleOpen: boolean;
+  onPhoneSaleOpenChange: (open: boolean) => void;
 };
 
 type TabKey = "all" | BillingCatalogKind;
@@ -155,7 +163,11 @@ export function SellScreen({
   lessons,
   onOpenClientProfile,
   onClientEmailSaved,
+  phoneSaleOpen,
+  onPhoneSaleOpenChange,
 }: SellScreenProps) {
+  const phoneLayout = usePhoneLayout();
+  const payPanelRef = useRef<HTMLElement>(null);
   const [methods, setMethods] = useState<PosPaymentMethod[]>([]);
 
   const [lines, setLines] = useState<SellLine[]>([]);
@@ -204,18 +216,6 @@ export function SellScreen({
   const [issuedPasses, setIssuedPasses] = useState<string[]>([]);
 
   const searchRef = useRef<HTMLInputElement | null>(null);
-  const docketRef = useRef<HTMLDivElement | null>(null);
-  const docketActionsRef = useRef<HTMLDivElement | null>(null);
-  // On a phone the docket sits under the whole catalogue. A bar above the tab
-  // bar carries the total and Pay while the docket's own Pay is off screen.
-  const [docketPayInView, setDocketPayInView] = useState(false);
-  useEffect(() => {
-    const target = docketActionsRef.current;
-    if (!target || typeof IntersectionObserver === "undefined") return;
-    const observer = new IntersectionObserver(([entry]) => setDocketPayInView(entry.isIntersecting));
-    observer.observe(target);
-    return () => observer.disconnect();
-  }, []);
 
   const total = sellTotal(lines);
   const taxIncluded = sellTaxIncluded(lines);
@@ -331,6 +331,8 @@ export function SellScreen({
     setIssuedCoupons([]);
     setTenders([]);
     setPayStage("closed");
+    // A new sale starts at the catalogue on a phone.
+    onPhoneSaleOpenChange(false);
     searchRef.current?.focus();
   }
 
@@ -635,10 +637,23 @@ export function SellScreen({
     setPayStage("closed");
   }
 
+  // The payment's steps on a phone, for its Back arrow and swipe: a cash or
+  // coupon step goes back to choosing how to pay, which goes back to the sale.
+  // Card and QR are in flight and have their own way out; a finished sale's
+  // Back is Done.
+  const payBackStep =
+    payStage === "cash" || payStage === "coupon"
+      ? { label: "", go: () => setPayStage("method") }
+      : payStage === "method"
+        ? { label: "", go: () => setPayStage("closed") }
+        : payStage === "done"
+          ? { label: "", go: resetSale }
+          : null;
+
   const qrMarkup = useMemo(() => (checkoutUrl ? renderQrSvg(checkoutUrl) : ""), [checkoutUrl]);
 
   return (
-    <section className="sell-screen">
+    <section className={`sell-screen${phoneSaleOpen ? " is-phone-sale" : ""}`}>
       {/* --- Catalog --------------------------------------------------------- */}
       <div className="sell-catalog">
         <div className="sell-search">
@@ -801,7 +816,7 @@ export function SellScreen({
       </div>
 
       {/* --- Docket ---------------------------------------------------------- */}
-      <div className="sell-docket" ref={docketRef}>
+      <div className="sell-docket">
         <div className="sell-docket-head">
           <h2>{t("Current sale")}</h2>
           {lines.length > 0 && (
@@ -990,7 +1005,7 @@ export function SellScreen({
           <p className="field-help">{t("A package puts credits on a profile - add the customer before taking payment.")}</p>
         )}
 
-        <div className="sell-actions" ref={docketActionsRef}>
+        <div className="sell-actions">
           <button
             className="outline-button"
             disabled={!lines.length}
@@ -1026,28 +1041,34 @@ export function SellScreen({
         )}
       </div>
 
-      {/* Phone only (hidden by the stylesheet everywhere else). */}
-      {lines.length > 0 && !docketPayInView && (
+      {/* Phone only (hidden by the stylesheet everywhere else): on the
+          catalogue page, the sale so far and Pay, above the tab bar. Tapping
+          the sale opens it as its own page; Back or a swipe right returns. */}
+      {!phoneSaleOpen && (
         <div className="sell-phone-bar">
-          <button
-            className="sell-phone-bar-sale"
-            onClick={() => docketRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
-            type="button"
-          >
+          <button className="sell-phone-bar-sale" onClick={() => onPhoneSaleOpenChange(true)} type="button">
             <strong>{t("Current sale")}</strong>
             <span>{tn(itemCount, "{count} item", "{count} items")}</span>
           </button>
-          <button className="sell-pay-button" onClick={openPayment} type="button">{t("Pay {dueNow}", { dueNow: formatMoney(dueNow, currency) })}</button>
+          <button className="sell-pay-button" disabled={!lines.length} onClick={openPayment} type="button">{t("Pay {dueNow}", { dueNow: formatMoney(dueNow, currency) })}</button>
         </div>
       )}
 
       {/* --- Payment --------------------------------------------------------- */}
       {payStage !== "closed" && (
         <div className="details-overlay sell-pay-overlay" role="presentation">
-          <aside className="details-panel details-modal sell-pay-panel" role="dialog" aria-modal="true">
+          {phoneLayout && payBackStep ? (
+            <PhoneStepSwipe panelRef={payPanelRef} back={payBackStep} forward={null} paper={false} />
+          ) : null}
+          <aside className="details-panel details-modal sell-pay-panel" role="dialog" aria-modal="true" ref={payPanelRef}>
             <div className="panel-header">
+              {phoneLayout && payBackStep ? (
+                <button type="button" className="phone-back-button" onClick={payBackStep.go} aria-label={t("Back")}>
+                  <ArrowLeft size={22} />
+                </button>
+              ) : null}
               <span>{t("Payment")}</span>
-              {payStage !== "qr" && payStage !== "tap" && (
+              {!phoneLayout && payStage !== "qr" && payStage !== "tap" && (
                 <button
                   className="icon-button small"
                   onClick={() => (payStage === "done" ? resetSale() : setPayStage("closed"))}

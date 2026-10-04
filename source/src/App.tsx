@@ -2268,6 +2268,8 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   // The Billing list an open invoice came from, for the phone's Back.
   const [invoiceReturnSection, setInvoiceReturnSection] = useState<BillingSection>("none");
   const mainPanelRef = useRef<HTMLElement>(null);
+  // Sell on a phone: the current sale open as its own page over the catalogue.
+  const [sellSaleOpen, setSellSaleOpen] = useState(false);
   // Products first: adding something you sell is the most common reason to open
   // Billing, and it is the one screen that is useless if you have to find it.
   const [billingSection, setBillingSection] = useState<BillingSection>(() =>
@@ -6195,6 +6197,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     // opens straight onto one.
     if (view === "settings") setSettingsTab(phoneLayout ? "none" : "services");
     if (view === "billing") setBillingSection(phoneLayout ? "none" : "products");
+    if (view === "sell") setSellSaleOpen(false);
     // Opening Video from the nav is the general workspace (no player context).
     if (view === "video") setVideoContext(null);
     if (view !== "calendar") closeCalendarDetails();
@@ -16882,6 +16885,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   // than opening under its row; closing it keeps the player picked, so the
   // swipe forward can open them again.
   const phonePlayerOpen = phoneLayout && activeView === "players" && Boolean(notesWorkspaceClient) && playerToolExpanded;
+  const phoneSellSaleOpen = phoneLayout && activeView === "sell" && sellSaleOpen;
   const playerProfilesTitle = t("{customerSingular} Profiles", { customerSingular: terms.customerSingular });
   // The invoice editor's one main action, for the bar a phone pins along the
   // bottom with the total: the same button the action bar leads with.
@@ -16925,7 +16929,9 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
           ? { label: t("Book"), go: () => setQuickCreate(null) }
           : phonePlayerOpen
             ? { label: playerProfilesTitle, go: () => setPlayerToolExpanded(false) }
-            : null;
+            : phoneSellSaleOpen
+              ? { label: t("Sell"), go: () => setSellSaleOpen(false) }
+              : null;
   // And forward, for the swipe only: from a menu, back into the section you
   // last had open there. The invoice editor is resumed rather than reopened,
   // so a swipe back by mistake never costs the invoice on it; the list an
@@ -16951,6 +16957,8 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
         ? { label: billingSectionLabel(lastBillingSection), go: () => switchBillingSection(lastBillingSection) }
         : activeView === "billing" && invoiceReturnList && billingSection === invoiceReturnList
         ? resumeInvoice
+        : activeView === "sell" && !sellSaleOpen
+        ? { label: t("Current sale"), go: () => setSellSaleOpen(true) }
         : activeView === "players" && notesWorkspaceClient && !playerToolExpanded
           ? { label: notesWorkspaceClient.name, go: () => setPlayerToolExpanded(true) }
           : null;
@@ -16972,6 +16980,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
       snapshot.layers.length +
       (phoneLayout &&
       (snapshot.playerOpen ||
+        snapshot.sellSale ||
         (snapshot.view === "settings" && snapshot.settingsTab !== "none") ||
         (snapshot.view === "billing" && snapshot.billingSection !== "none"))
         ? 1
@@ -16988,6 +16997,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
       overlay: workspaceOverlay,
       layers: backLayerIds,
       playerOpen: phonePlayerOpen,
+      sellSale: phoneSellSaleOpen,
       // Only while the editor is open, so a list reads the same before an
       // invoice is opened from it and after Back returns to it.
       invoiceFrom: billingSection === "new-invoice" ? invoiceReturnSection : "none",
@@ -17008,6 +17018,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
       setBillingSection(snapshot.billingSection);
       setRequestedSettingsGroup(snapshot.settingsGroup);
       if (phoneLayout && snapshot.view === "players") setPlayerToolExpanded(Boolean(snapshot.playerOpen));
+      if (phoneLayout && snapshot.view === "sell") setSellSaleOpen(Boolean(snapshot.sellSale));
       if (snapshot.billingSection === "new-invoice") setInvoiceReturnSection(snapshot.invoiceFrom ?? "none");
       // Only when the overlay is staying: closing it is the layer's job above,
       // and doing it here as well would skip that unsaved-edit question.
@@ -19596,6 +19607,8 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                 else setToast({ message: t("That client's profile could not be found.") });
               }}
               onClientEmailSaved={handleClientEmailSaved}
+              phoneSaleOpen={phoneLayout && sellSaleOpen}
+              onPhoneSaleOpenChange={setSellSaleOpen}
             />
           </Suspense>
         )}

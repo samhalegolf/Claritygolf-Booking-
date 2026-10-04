@@ -17320,14 +17320,16 @@ button {
    the sheet underneath; the Back arrow or a swipe right slides the page off.
    The entrance only animates in (fill backwards), so it never holds a
    transform over the one the swipe writes. */
-.app-shell.is-phone .client-profile-overlay {
+.app-shell.is-phone .client-profile-overlay,
+.app-shell.is-phone .sell-pay-overlay {
   place-items: stretch;
   padding: 0;
   background: rgba(7, 16, 10, 0.12);
   backdrop-filter: none;
 }
 
-.app-shell.is-phone .client-profile-overlay .client-profile-modal {
+.app-shell.is-phone .client-profile-overlay .client-profile-modal,
+.app-shell.is-phone .sell-pay-overlay .sell-pay-panel {
   width: auto;
   max-height: none;
   height: 100dvh;
@@ -17341,7 +17343,8 @@ button {
   animation: phone-page-in 200ms ease backwards;
 }
 
-.app-shell.is-phone .client-profile-modal .panel-header {
+.app-shell.is-phone .client-profile-modal .panel-header,
+.app-shell.is-phone .sell-pay-panel .panel-header {
   justify-content: flex-start;
   gap: 4px;
 }
@@ -17991,10 +17994,24 @@ button {
 
 /* ---- Sell on the phone ----------------------------------------------------- */
 
-/* Below 900px the till is one column, catalogue first, so on a phone the
-   docket and its Pay button sit under every tile. This bar carries the sale
-   and Pay above the tab bar until the docket's own Pay scrolls into view
-   (SellScreen hides it then). */
+/* On a phone the till is two pages: the catalogue, and the current sale laid
+   over it (is-phone-sale, held by App so the topbar's Back and the swipe step
+   between them). On the catalogue this bar carries the sale and Pay above the
+   tab bar; tapping the sale opens its page. The payment steps are a page over
+   that, with the same Back arrow and swipe. */
+.app-shell.is-phone .sell-screen:not(.is-phone-sale) .sell-docket,
+.app-shell.is-phone .sell-screen.is-phone-sale .sell-catalog {
+  display: none;
+}
+
+.app-shell.is-phone .sell-screen:not(.is-phone-sale) {
+  padding-bottom: 72px;
+}
+
+.app-shell.is-phone .sell-screen.is-phone-sale .sell-docket {
+  animation: phone-page-in 200ms ease backwards;
+}
+
 .sell-phone-bar {
   display: none;
 }
