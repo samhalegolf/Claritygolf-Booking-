@@ -165,7 +165,7 @@ const SET_FROM_JS: Array<{ name: string; setBy: string }> = [
 /**
  * The calendar colours a coach picks, published as `--<field>-set` names.
  *
- * Built by interpolation in calendarColorVariables() (App.tsx), so no source
+ * Built by interpolation in calendarColorVariables() (workspaceModel.ts), so no source
  * file contains the literal name and the check below cannot look for one.
  * Matched by shape instead.
  */
@@ -455,10 +455,10 @@ test("every connection archetype has two integrations, or a stated reason", () =
  * became one. Both directions are checked here.
  */
 test("every settings tab has a panel that can show, and vice versa", () => {
-  const app = readFileSync(path.join(SRC, "App.tsx"), "utf8");
-  const block = app.slice(app.indexOf("const SETTINGS_SECTIONS"), app.indexOf("type SettingsTab"));
+  const layout = readFileSync(path.join(SRC, "modules", "settings", "SettingsLayout.tsx"), "utf8");
+  const block = layout.slice(layout.indexOf("const SETTINGS_SECTIONS"), layout.indexOf("type SettingsTab"));
   const tabs = [...block.matchAll(/key:\s*"([a-z-]+)"/g)].map((match) => match[1]);
-  assert.ok(tabs.length >= 5, "SETTINGS_SECTIONS not found — has App.tsx been restructured?");
+  assert.ok(tabs.length >= 5, "SETTINGS_SECTIONS not found — has SettingsLayout.tsx been restructured?");
 
   const css = read(path.join(SRC, "styles.css"));
   const shown = new Set(

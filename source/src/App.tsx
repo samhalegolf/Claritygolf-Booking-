@@ -41,7 +41,6 @@ import {
   Upload,
   X,
   FlaskConical,
-  Webhook,
 } from "lucide-react";
 import {
   ClarityAccessPermissions,
@@ -80,7 +79,7 @@ import {
   ClarityVideoAnalysis,
 } from "./modules/shared/ClarityIcons";
 import type { IconComponent } from "./modules/shared/ClarityIcons";
-import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "./modules/auth/apiFetch";
 import { SnapshotFrameViewer, type FrameViewerShot } from "./modules/shared/SnapshotFrameViewer";
 import type { SheetVideo } from "./modules/swing-review/SwingReviewSheet";
@@ -89,7 +88,7 @@ import type { TillLesson } from "./modules/billing/tillLessons";
 import { WORKSPACE_ACCOUNTS_STORAGE_KEY } from "./modules/shared/workspaceStorage";
 import { useBackNavigation } from "./modules/shared/backNavigation";
 import { Loading, loadingLabel } from "./modules/shared/Loading";
-import { cleanPeople as cleanPeopleWith, type PeopleImportDiagnostic, type Person } from "./modules/clients/clientsModel";
+import { type PeopleImportDiagnostic, type Person } from "./modules/clients/clientsModel";
 import { isManagedService } from "./serviceCatalog";
 import { isUnauthorizedClientsError, loadClients, replaceClients, resetClients, useClientsState } from "./modules/clients/clientsStore";
 import type { ClientsPanel as ClientsPanelComponent } from "./modules/clients/ClientsPanel";
@@ -128,50 +127,23 @@ import {
   type BusinessTerminology,
   type BusinessTerminologyPreset,
 } from "../netlify/functions/_shared/business-terminology.mts";
-import {
-  cleanMarketConfig,
-  DEFAULT_ACCOUNT_MARKET_CONFIG,
-  marketProfileFor,
-  resolveMarket,
-  type AccountMarketConfig,
-  type CapabilityKey,
-} from "../netlify/functions/_shared/market-profile.mts";
+import { resolveMarket, type CapabilityKey } from "../netlify/functions/_shared/market-profile.mts";
 import { publishActiveMarket } from "./lib/activeMarket";
 import { ResourceSystemPanel } from "./modules/integrations/ResourceSystemPanel";
 import { availabilityConflicts, type AvailabilityConflict } from "./availabilityConflicts";
 import {
-  cleanLocationKind,
-  cleanLocationResources,
-  cleanResourceSource,
   cleanResourceType,
-  cleanServiceResourceIds,
-  cleanServiceResourceTypes,
   resourceSelectionId,
   resourceTypeKey,
-  serviceResourceMode,
-  type LocationKind,
   type LocationResource,
   type ResourceHandedness,
   type ResourceMode,
   type ResourceSource,
 } from "../netlify/functions/_shared/resources.mts";
-import {
-  cleanScopeIds,
-  primaryServiceCoachId,
-  primaryServiceLocationId,
-  serviceCoachIds,
-  serviceIncludesCoach,
-  serviceLocationIds,
-} from "../netlify/functions/_shared/service-scope.mts";
+import { serviceIncludesCoach } from "../netlify/functions/_shared/service-scope.mts";
 // The country itself is held per page here, not in the shared module -- see
 // that file for why the server cannot have one.
-import {
-  activeCurrency,
-  activeLocale,
-  canonicalPhoneKey as sharedCanonicalPhoneKey,
-  dialCodeFor,
-  setActiveRegion,
-} from "./lib/activeCountry";
+import { activeLocale, setActiveRegion } from "./lib/activeCountry";
 import { BusinessHubPanel, OwnerIdentityCard } from "./modules/business-hub/BusinessHubPanel";
 import { CoachAvatar, CoachProfilePanel, type CoachWeekDay, type CoachWeekEntry } from "./modules/business-hub/CoachProfilePanel";
 import { RegionSettings, TimeZoneSelect, type RegionValues } from "./modules/settings/RegionSettings";
@@ -186,7 +158,6 @@ import {
   NOTIFICATION_VARIANTS,
 } from "../netlify/functions/_shared/notification-templates.mts";
 import type { NotificationTemplates } from "../netlify/functions/_shared/notification-templates.mts";
-import { cleanMessageLanguage } from "../netlify/functions/_shared/message-language.mts";
 import {
   drillToBlock,
   reviewBlockVideoIds,
@@ -216,13 +187,6 @@ import {
   PLAYER_BOOKING_EMBED_MIN_HEIGHT,
 } from "../netlify/functions/_shared/player-booking-embed.mts";
 import { prefetchIntegrations } from "./modules/integrations/integrationsStore";
-import {
-  BASE_WEEK_START,
-  BOOKING_EMBED_PARAM,
-  BOOKING_EMBED_VALUE,
-  PUBLIC_BOOKING_HOST,
-} from "./modules/shared/bookingHandoff";
-import { currentPublicBookingScreenId, publicBookingPath } from "./modules/public-booking/bookingScreen";
 import { WeekSlots } from "./modules/public-booking/WeekSlots";
 import { lookBusyStarts } from "../netlify/functions/_shared/look-busy.mts";
 import type {
@@ -308,11 +272,7 @@ import type {
   BillingCoupon,
   CouponRedemption,
 } from "./modules/billing/types";
-import {
-  defaultInvoiceSettings,
-  cleanInvoiceSettings,
-  printableInvoiceCustomFields,
-} from "./modules/billing/invoiceSettings";
+import { defaultInvoiceSettings, printableInvoiceCustomFields } from "./modules/billing/invoiceSettings";
 import { computeInvoiceTotals, invoiceLineNet, invoiceLineGross, lineDiscountAmount } from "./modules/billing/invoiceMath";
 import { cardRefundAmount, isClarityPayCardSale, keepTapToPayWarm, posMethodLabel, tapToPayName } from "./modules/billing/terminal";
 import { TapToPaySetup } from "./modules/billing/TapToPaySetup";
@@ -350,7 +310,7 @@ import {
 } from "./calendar-axis";
 import type { CalendarAxisMode } from "./calendar-axis";
 import { clamp } from "./lib/number";
-import { dateInputValue } from "./lib/date";
+import { dateInputValue, timeToMinutes } from "./lib/date";
 import BookingResourcesPanel from "./BookingResourcesPanel";
 import type {
   ChangeEvent,
@@ -359,10 +319,265 @@ import type {
   MouseEvent as ReactMouseEvent,
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
-  ReactNode,
   TouchEvent as ReactTouchEvent,
 } from "react";
 import { t, tn } from "./lib/i18n";
+import {
+  clarityPayFeeLabel,
+  currencySymbol,
+  formatMoney,
+  parseDraftNumber,
+  parseMoneyInput,
+  parseQuantityInput,
+} from "./lib/money";
+import { safeText } from "./lib/text";
+import {
+  ARMED_TOUCH_DRAG_THRESHOLD,
+  AvailabilityWindow,
+  BookingCoachSnapshot,
+  BookingSlot,
+  BookingStatus,
+  CANCELLED_GROUP_SESSION_NOTE,
+  CANCELLED_GROUP_SESSION_TITLE,
+  COMPLETED_LESSON_MOVE_WARNING,
+  CalendarHoverPreview,
+  CalendarItem,
+  CalendarPerspective,
+  CalendarViewMode,
+  CustomGroupAttendee,
+  DAY_END_MINUTES,
+  DAY_START_MINUTES,
+  DEFAULT_CALENDAR_END_MINUTES,
+  DEFAULT_CALENDAR_START_MINUTES,
+  DockFlight,
+  EDGE_NAV_ZONE,
+  FloatingDrag,
+  GroupSession,
+  LAST_TIME_SLOT_MINUTES,
+  LOCATION_BAND_HUES,
+  MOUSE_DRAG_THRESHOLD,
+  PAST_ADMIN_LESSON_WARNING,
+  PendingBooking,
+  PlacementAnimation,
+  PointerSession,
+  QuickCreateState,
+  SNAP_MINUTES,
+  SlotCandidate,
+  TOUCH_DRAG_THRESHOLD,
+  TOUCH_HOLD_MS,
+  TOUCH_HOLD_TOLERANCE,
+  adminCustomGroupAttendee,
+  availabilityForCoach,
+  availabilityWindowCoversLocation,
+  baseWeekDays,
+  baseWeekStart,
+  bookingCoachSnapshotFor,
+  bookingLocationDisplay,
+  bookingLocationShortDisplay,
+  bookingLocationSnapshotFor,
+  buildWeekDays,
+  businessNow,
+  calendarDateUtcTime,
+  calendarItemBelongsToCoach,
+  calendarItemCoach,
+  calendarItemCoachColumnId,
+  calendarItemLocation,
+  calendarItemsEquivalent,
+  calendarLessonColor,
+  calendarStateFingerprint,
+  cleanAvailability,
+  cleanBookingLocationSnapshot,
+  customGroupBookerAttendee,
+  customGroupStatusLabel,
+  dateForSlot,
+  defaultAvailability,
+  externalProviderLabel,
+  externalRescheduleMessage,
+  formatRange,
+  formatTime,
+  formatWeekTitle,
+  fullDayNames,
+  getCurrentWeekOffset,
+  inputTimeToMinutes,
+  isAppointmentConflict,
+  isCancelledGroupSessionItem,
+  isCancelledGroupSessionMatch,
+  isCoachLocationBlock,
+  isCoachOnlyBlock,
+  isExternallyOwned,
+  isInactiveForConflict,
+  isLocationOnlyBlock,
+  isSlotInPast,
+  itemService,
+  itemSlot,
+  itemWeek,
+  locationSnapshot,
+  mergeCalendarItemsAfterConflict,
+  minutesToInputTime,
+  newCalendarItemId,
+  overlaps,
+  resolvedCalendarItemCoachId,
+  resolvedCalendarItemLocationId,
+  sameSlot,
+  serviceLocation,
+  setBusinessTimeZone,
+  snap,
+  startOfCalendarWeek,
+} from "./modules/calendar/calendarModel";
+import {
+  ClientEditor,
+  ClientMergeFieldKey,
+  ClientMergeReview,
+  ClientProfileTab,
+  ClientSummary,
+  ClientTransactionRow,
+  PEOPLE_IMPORT_ENDPOINT,
+  PeopleImportResult,
+  PeopleUpdateResult,
+  appointmentsForPerson,
+  bookingInputName,
+  buildPeopleImportDiagnostic,
+  caddyProfileUrl,
+  cleanPeople,
+  clientKey,
+  clientMatchesSearchTerm,
+  editorFromClient,
+  emptyClientEditor,
+  findClientMatch,
+  hasAnyProfileId,
+  hasClientMatchInput,
+  normalizeMatchText,
+  notificationsForPerson,
+  parsePeopleImport,
+  phoneValuesMatch,
+  preferredVideoPlayerId,
+  profileIdsForClient,
+  profileNotesText,
+  splitClientName,
+} from "./modules/clients/clientMatching";
+import {
+  EmailSendResult,
+  NotificationRecord,
+  cleanNotificationRecords,
+  notificationKindLabel,
+  notificationStatusLabel,
+  notificationTimeLabel,
+  notificationTone,
+} from "./modules/notifications/notificationModel";
+import {
+  BOOKING_SCREENS,
+  bookingScreenPathsFor,
+  formatBookingScreenLabels,
+  getBookingScreenId,
+  getBookingScreenIframeCode,
+  getBookingScreenPublicUrl,
+  isBookingLogoHiddenByUrl,
+} from "./modules/public-booking/bookingScreens";
+import {
+  DEFAULT_CUSTOM_GROUP_BASE_PARTICIPANTS,
+  DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS,
+  DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS,
+  DEFAULT_REVIEW_TURNAROUND_DAYS,
+  GroupServiceSchedule,
+  MAX_GROUP_OCCURRENCE_COUNT,
+  MAX_REVIEW_TURNAROUND_DAYS,
+  PendingServiceAction,
+  PriceMode,
+  SERVICE_NUMBER_LIMITS,
+  Service,
+  ServiceEditor,
+  ServiceEditorFormat,
+  ServiceListTab,
+  ServiceNumberField,
+  calculateCustomGroupPrice,
+  cleanGroupSchedule,
+  cleanService,
+  cleanServices,
+  customGroupBaseParticipants,
+  customGroupBasePrice,
+  customGroupExtraPersonPrice,
+  customGroupMaxParticipants,
+  customGroupMinParticipants,
+  defaultGroupSchedule,
+  defaultServiceColor,
+  emptyServiceEditor,
+  generateServiceDraftId,
+  hasCustomGroupFlag,
+  isAppointmentStyleService,
+  isCustomGroupService,
+  isScheduledGroupService,
+  serviceEditorFormat,
+  serviceFormatLabel,
+  servicePriceLabel,
+} from "./modules/services/serviceModel";
+import {
+  EditableSettingsBlock,
+  SETTINGS_SECTIONS,
+  SettingsGroup,
+  SettingsGroups,
+  SettingsTab,
+  WorkspaceSurface,
+  useEditableBlock,
+} from "./modules/settings/SettingsLayout";
+import {
+  AccountLimits,
+  AppUser,
+  BRAND_STORAGE_KEY,
+  BrandSettings,
+  CADDY_APP_URL,
+  COACH_ACCOUNT_STORAGE_KEY,
+  CoachAccount,
+  CoachProfile,
+  Location,
+  SUBSCRIPTION_STATUS_LABEL,
+  THEME_STORAGE_KEY,
+  ThemeMode,
+  UNLIMITED_ACCOUNT_LIMIT,
+  WorkspaceAccount,
+  accountById,
+  accountEntitlements,
+  accountFeatureKeys,
+  accountFeatureLabel,
+  accountLimit,
+  activeLocations,
+  blankCoachProfile,
+  calendarColorFields,
+  calendarColorVariables,
+  canCreateWithinLimit,
+  canUseFeature,
+  cleanAppUser,
+  cleanBrandSettings,
+  cleanCoachAccount,
+  cleanCoachProfile,
+  cleanCoachProfiles,
+  cleanLocation,
+  cleanLocations,
+  cleanUrl,
+  cleanWorkspaceAccounts,
+  coachById,
+  defaultAccountId,
+  defaultAppUserFromCoachAccount,
+  defaultBrandSettings,
+  defaultCalendarColors,
+  defaultCoachAccount,
+  defaultCoachProfileFromAccount,
+  defaultLocationFromCoachAccount,
+  defaultLocationId,
+  defaultWorkspaceAccountFromCoachAccount,
+  featureUnavailableMessage,
+  filterRecordsForAccount,
+  firstCoachId,
+  getStoredBrandSettings,
+  getStoredCoachAccount,
+  getStoredTheme,
+  getStoredWorkspaceAccounts,
+  isAccountActive,
+  limitReachedMessage,
+  locationById,
+  recordBelongsToAccount,
+  serviceBelongsToAccount,
+  userBelongsToAccount,
+} from "./modules/workspace/workspaceModel";
 
 // Video analysis and voice notes are heavy, coach-only features (together well
 // over a third of the client bundle). They never render on the public booking
@@ -515,611 +730,11 @@ function workspaceBootstrapFromSession(session?: Session) {
   };
 }
 
-type EditableBlockStatus = "idle" | "editing" | "saving" | "saved" | "error";
-type EditableBlockState = {
-  status: EditableBlockStatus;
-  dirty: boolean;
-  errorMessage: string | null;
-};
-
-const editableBlockSavedDelayMs = 1600;
-
-function cloneEditableValue<T>(value: T): T {
-  if (typeof structuredClone === "function") return structuredClone(value);
-  return JSON.parse(JSON.stringify(value)) as T;
-}
-
-function defaultEditableEqual<T>(a: T, b: T) {
-  return JSON.stringify(a) === JSON.stringify(b);
-}
-
-function useEditableBlock<T>({
-  value,
-  onSave,
-  isEqual = defaultEditableEqual,
-}: {
-  value: T;
-  onSave: (draft: T) => Promise<T>;
-  isEqual?: (a: T, b: T) => boolean;
-}) {
-  const [savedValue, setSavedValue] = useState<T>(() => cloneEditableValue(value));
-  const [draftValue, setDraftValueState] = useState<T>(() => cloneEditableValue(value));
-  const [state, setState] = useState<EditableBlockState>({
-    status: "idle",
-    dirty: false,
-    errorMessage: null,
-  });
-  const savedTimeoutRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    setSavedValue(cloneEditableValue(value));
-    setState((current) => {
-      if (current.dirty || current.status === "editing" || current.status === "saving" || current.status === "error") {
-        return current;
-      }
-      setDraftValueState(cloneEditableValue(value));
-      return { ...current, status: current.status === "saved" ? "saved" : "idle", errorMessage: null };
-    });
-  }, [value]);
-
-  useEffect(
-    () => () => {
-      if (savedTimeoutRef.current !== null) window.clearTimeout(savedTimeoutRef.current);
-    },
-    [],
-  );
-
-  function edit() {
-    if (savedTimeoutRef.current !== null) window.clearTimeout(savedTimeoutRef.current);
-    setDraftValueState(cloneEditableValue(savedValue));
-    setState({ status: "editing", dirty: false, errorMessage: null });
-  }
-
-  function cancel() {
-    if (savedTimeoutRef.current !== null) window.clearTimeout(savedTimeoutRef.current);
-    setDraftValueState(cloneEditableValue(savedValue));
-    setState({ status: "idle", dirty: false, errorMessage: null });
-  }
-
-  function setDraftValue(next: T | ((current: T) => T)) {
-    setDraftValueState((current) => {
-      const nextValue = typeof next === "function" ? (next as (current: T) => T)(current) : next;
-      setState((currentState) => ({
-        status: currentState.status === "error" ? "editing" : currentState.status,
-        dirty: !isEqual(nextValue, savedValue),
-        errorMessage: currentState.status === "error" ? null : currentState.errorMessage,
-      }));
-      return nextValue;
-    });
-  }
-
-  async function save() {
-    if (state.status === "saving" || !state.dirty) return false;
-    if (savedTimeoutRef.current !== null) window.clearTimeout(savedTimeoutRef.current);
-    setState((current) => ({ ...current, status: "saving", errorMessage: null }));
-    try {
-      const saved = await onSave(cloneEditableValue(draftValue));
-      const cleanSaved = cloneEditableValue(saved);
-      setSavedValue(cleanSaved);
-      setDraftValueState(cleanSaved);
-      setState({ status: "saved", dirty: false, errorMessage: null });
-      savedTimeoutRef.current = window.setTimeout(() => {
-        setState((current) => (current.status === "saved" ? { ...current, status: "idle" } : current));
-      }, editableBlockSavedDelayMs);
-      return true;
-    } catch (error) {
-      setState({
-        status: "error",
-        dirty: true,
-        errorMessage: error instanceof Error ? error.message : t("Could not save these settings."),
-      });
-      return false;
-    }
-  }
-
-  return {
-    savedValue,
-    draftValue,
-    status: state.status,
-    dirty: state.dirty,
-    errorMessage: state.errorMessage,
-    edit,
-    cancel,
-    setDraftValue,
-    save,
-  };
-}
-
-function EditableSettingsBlock({
-  id,
-  title,
-  status,
-  dirty,
-  errorMessage,
-  onEdit,
-  onCancel,
-  onSave,
-  children,
-}: {
-  id: string;
-  title: string;
-  status: EditableBlockStatus;
-  dirty: boolean;
-  errorMessage: string | null;
-  onEdit: () => void;
-  onCancel: () => void;
-  onSave: () => void;
-  children: ReactNode;
-}) {
-  const isEditing = status === "editing" || status === "error";
-  const isSaving = status === "saving";
-  const isError = status === "error";
-  return (
-    <section
-      className={`editable-settings-block is-${status}${isEditing ? " is-editing" : ""}${isSaving ? " is-saving" : ""}${isError ? " is-error" : ""}`}
-      id={id}
-    >
-      <div className="editable-settings-block-header">
-        <div>
-          <span>{title}</span>
-          {dirty ? <em>{t("Unsaved changes")}</em> : status === "saved" ? <em aria-live="polite">{t("Saved")}</em> : null}
-        </div>
-        <div className="editable-settings-block-actions">
-          {status === "idle" || status === "saved" ? (
-            <button className="outline-button" onClick={onEdit} type="button">
-              <Pencil size={15} />{t("Edit")}</button>
-          ) : (
-            <>
-              <button className="outline-button" disabled={isSaving} onClick={onCancel} type="button">{t("Cancel")}</button>
-              <button className="primary-button" disabled={!dirty || isSaving} onClick={onSave} type="button">
-                {isSaving ? t("Saving...") : isError ? t("Try Again") : t("Save")}
-              </button>
-            </>
-          )}
-          {status === "saved" ? (
-            <span className="editable-settings-saved" aria-live="polite">
-              <Check size={15} />{t("Saved")}</span>
-          ) : null}
-        </div>
-      </div>
-      <div className="editable-settings-block-body">{children}</div>
-      {errorMessage ? (
-        <p className="workspace-save-error" role="alert">
-          {errorMessage}
-        </p>
-      ) : null}
-    </section>
-  );
-}
-
-type LessonFormat = "private" | "group" | "package" | "video-review";
-type GroupServiceSchedule = {
-  dayOfWeek: number;
-  startMinutes: number;
-  occurrenceCount: number;
-  active: boolean;
-};
-type PriceMode = "session" | "per-person";
-type PackageCoverageMode = "upfront" | "lesson-by-lesson";
-type BookingStatus = "booked" | "completed" | "cancelled" | "no_show";
-type ServiceEditorFormat = "private" | "group" | "custom-group" | "package" | "video-review";
-
-type Service = {
-  id: string;
-  accountId?: string;
-  /** Every coach who teaches it, in the order a booking tries them. */
-  coachIds: string[];
-  name: string;
-  duration: number;
-  price: number;
-  description: string;
-  visibility: "public" | "private";
-  active: boolean;
-  capacity: number;
-  minParticipants: number;
-  lessonFormat: LessonFormat;
-  priceMode: PriceMode;
-  /** Fill for this lesson type's cards on the calendar. Hex, from settings. */
-  color?: string;
-  /** Every place it runs, in the order a booking tries them. */
-  locationIds: string[];
-  /** Whether a booking must hold one of the location's resources, or takes one only when free. */
-  resourceMode?: ResourceMode;
-  /** Whole resource types it may take, by name. With resourceIds empty too, any resource. */
-  resourceTypes?: string[];
-  /** Single resources it may take, as "locationId/resourceId". */
-  resourceIds?: string[];
-  lessonNote?: string;
-  location: string;
-  groupSchedule?: GroupServiceSchedule;
-  packageAllowance?: number;
-  packageCoverageMode?: PackageCoverageMode;
-  packageCoversServiceId?: string;
-  /** Packages only: purchased units may fund other eligible services by value. */
-  crossRedeemable?: boolean;
-  /** Services only: may be funded by value from a cross-redeemable pass. */
-  acceptsCrossRedemption?: boolean;
-  /** Video reviews only: days between booking and the clip being owed back. */
-  reviewTurnaroundDays?: number;
-  bookingScreenIds?: string[];
-  customGroup?: boolean;
-  customGroupEnabled?: boolean;
-  baseParticipants?: number;
-  basePrice?: number;
-  extraPersonPrice?: number;
-  archived?: boolean;
-};
-
-type CustomGroupAttendeeStatus = "booker" | "manual" | "invited" | "confirmed";
-
-type CustomGroupAttendee = {
-  id: string;
-  name: string;
-  email?: string;
-  status: CustomGroupAttendeeStatus;
-  token?: string;
-};
-
-type ServiceListTab = "active" | "archived";
-type PendingServiceAction =
-  | { serviceId: string; mode: "archive" }
-  | { serviceId: string; mode: "delete" }
-  | null;
-
-type CalendarItem = {
-  id: string;
-  kind: "appointment" | "block";
-  accountId?: string;
-  coachId?: string;
-  locationId?: string;
-  week?: number;
-  day: number;
-  start: number;
-  duration: number;
-  groupSlot?: boolean;
-  syntheticGroupSlot?: boolean;
-  serviceId?: string;
-  readOnly?: boolean;
-  client?: string;
-  title: string;
-  phone?: string;
-  email?: string;
-  // Stable link to a people/client row, set by the backend once a booking is
-  // matched or created. Carry it through on every edit (it just needs to
-  // survive object-spread updates) so a later correction to name/email/phone
-  // never loses the connection to the client's real profile.
-  personId?: string;
-  note?: string;
-  location?: BookingLocationSnapshot;
-  coach?: BookingCoachSnapshot;
-  status?: BookingStatus;
-  // Booking ownership, supplied by the backend and never written back. "clarity"
-  // means Clarity owns the lesson; anything else means an external system does
-  // and Clarity is mirroring it.
-  origin?: string;
-  externalProvider?: string;
-  externalBookingId?: string;
-  /** The Clarity resource this lesson holds. Server-owned, never written back. */
-  resourceId?: string;
-  /** A live Optix bay is held for this lesson. Backend-supplied, never written back. */
-  bayBooked?: boolean;
-  bayResourceId?: string;
-  updatedAt?: string;
-  completedAt?: string;
-  customGroup?: true;
-  attendees?: CustomGroupAttendee[];
-  calculatedPrice?: number;
-};
-
-/**
- * True when an outside system owns this booking and Clarity is only mirroring
- * it. Clarity must not move such a lesson on its own: the external system is
- * the source of truth for when it happens, and a change made only here would
- * leave the two silently disagreeing.
- */
-function isExternallyOwned(item: Pick<CalendarItem, "origin" | "externalProvider">) {
-  const origin = (item.origin || "clarity").trim().toLowerCase();
-  return origin !== "" && origin !== "clarity";
-}
-
-function externalProviderLabel(item: Pick<CalendarItem, "origin" | "externalProvider">) {
-  const provider = (item.externalProvider || item.origin || "").trim();
-  if (!provider) return t("the booking system it came from");
-  return provider.toLowerCase() === "optix" ? "Optix" : provider;
-}
-
-function externalRescheduleMessage(item: Pick<CalendarItem, "origin" | "externalProvider">) {
-  const provider = externalProviderLabel(item);
-  return t("{provider} owns this lesson, so move it there — changing it only in Clarity would leave the two out of step. You can also remove it from Clarity from the booking card.", { provider });
-}
-
-type Location = {
-  id: string;
-  accountId?: string;
-  name: string;
-  shortName: string;
-  address: string;
-  mapUrl?: string;
-  arrivalInstructions?: string;
-  publicNotes?: string;
-  timezone: string;
-  /** Physical, or online (no address, no resources, no limit). */
-  kind?: LocationKind;
-  /** Who keeps the resources' availability: Clarity, or another system. */
-  resourceSource?: ResourceSource;
-  resources?: LocationResource[];
-  active: boolean;
-  archived?: boolean;
-  isDefault?: boolean;
-  sortOrder?: number;
-};
-
-type BookingLocationSnapshot = {
-  locationId?: string;
-  name: string;
-  shortName?: string;
-  address?: string;
-  mapUrl?: string;
-  arrivalInstructions?: string;
-  publicNotes?: string;
-  timezone?: string;
-};
-
-type BookingCoachSnapshot = {
-  coachId?: string;
-  name: string;
-  displayName?: string;
-  email?: string;
-  phone?: string;
-};
-
-type PendingBooking = {
-  id: string;
-  accountId?: string;
-  client: string;
-  title: string;
-  serviceId: string;
-  coachId?: string;
-  duration: number;
-  phone?: string;
-  email?: string;
-  note?: string;
-  sourceItemId?: string;
-  customGroup?: true;
-  attendees?: CustomGroupAttendee[];
-  calculatedPrice?: number;
-};
-
-type PlacementAnimation = {
-  itemId: string;
-  fromX: number;
-  fromY: number;
-};
-
-type CalendarViewMode = "full" | "am" | "pm";
-type CalendarPerspective = "all" | "coach" | "location";
-
-type DockFlight = PendingBooking & {
-  fromX?: number;
-  fromY?: number;
-};
-
-type FloatingDrag = {
-  itemId: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-};
-
-type CalendarHoverPreview = {
-  itemId: string;
-  x: number;
-  y: number;
-  kind: "group-session" | "appointment" | "blocked";
-  client: string;
-  service: string;
-  time: string;
-  venue: string;
-  phone: string;
-  email: string;
-  clientEmailStatus: string;
-  coachEmailStatus: string;
-  adminEmailStatus: string;
-};
-
-type ClientSummary = Person & {
-  count: number;
-  next: CalendarItem | null;
-  last: CalendarItem | null;
-};
-
-type ClientMergeFieldKey = "name" | "email" | "phone" | "notes";
-
-type ClientMergeReview = {
-  survivor: ClientSummary;
-  loser: ClientSummary;
-  fields: Record<ClientMergeFieldKey, string>;
-};
-
-
-function safeText(value: unknown, fallback = "") {
-  return typeof value === "string" ? value : value == null ? fallback : String(value);
-}
-
-function hasCustomGroupFlag(service?: Partial<Service> | null) {
-  return service?.customGroup === true || service?.customGroupEnabled === true;
-}
-
-function isCustomGroupService(service?: Partial<Service> | null) {
-  return Boolean(hasCustomGroupFlag(service));
-}
-
-function isScheduledGroupService(service?: Partial<Service> | null) {
-  return Boolean(service?.lessonFormat === "group" && !isCustomGroupService(service));
-}
-
-const DEFAULT_REVIEW_TURNAROUND_DAYS = 3;
-const MAX_REVIEW_TURNAROUND_DAYS = 30;
-
-function isAppointmentStyleService(service?: Partial<Service> | null) {
-  return Boolean(service && service.lessonFormat !== "package" && !isScheduledGroupService(service));
-}
-
-function serviceEditorFormat(service?: Partial<Service> | null): ServiceEditorFormat {
-  if (service?.lessonFormat === "package") return "package";
-  if (service?.lessonFormat === "video-review") return "video-review";
-  if (isCustomGroupService(service)) return "custom-group";
-  if (service?.lessonFormat === "group") return "group";
-  return "private";
-}
-
-function serviceFormatLabel(service?: Partial<Service> | null) {
-  const format = serviceEditorFormat(service);
-  if (format === "package") return t("Package");
-  if (format === "video-review") return t("Video review");
-  if (format === "custom-group") return t("Custom group");
-  if (format === "group") return t("Group");
-  return t("Private");
-}
-
-function customGroupBaseParticipants(service?: Partial<Service> | null) {
-  const raw = Number(service?.baseParticipants ?? DEFAULT_CUSTOM_GROUP_BASE_PARTICIPANTS);
-  return Number.isFinite(raw)
-    ? clamp(Math.round(raw), customGroupMinParticipants(service), customGroupMaxParticipants(service))
-    : DEFAULT_CUSTOM_GROUP_BASE_PARTICIPANTS;
-}
-
-function customGroupBasePrice(service?: Partial<Service> | null) {
-  const raw = Number(service?.basePrice ?? service?.price ?? DEFAULT_CUSTOM_GROUP_BASE_PRICE);
-  return Number.isFinite(raw) ? Math.max(0, Math.round(raw)) : DEFAULT_CUSTOM_GROUP_BASE_PRICE;
-}
-
-function customGroupExtraPersonPrice(service?: Partial<Service> | null) {
-  const raw = Number(service?.extraPersonPrice ?? DEFAULT_CUSTOM_GROUP_EXTRA_PERSON_PRICE);
-  return Number.isFinite(raw) ? Math.max(0, Math.round(raw)) : DEFAULT_CUSTOM_GROUP_EXTRA_PERSON_PRICE;
-}
-
-function customGroupMinParticipants(service?: Partial<Service> | null) {
-  const raw = Number(service?.minParticipants ?? DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS);
-  return Number.isFinite(raw) ? clamp(Math.round(raw), 2, DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS) : DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS;
-}
-
-function customGroupMaxParticipants(service?: Partial<Service> | null) {
-  const raw = Number(service?.capacity ?? DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS);
-  return Number.isFinite(raw) ? clamp(Math.round(raw), customGroupMinParticipants(service), DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS) : DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS;
-}
-
-function calculateCustomGroupPrice(service: Partial<Service> | null | undefined, participantCount: number) {
-  const baseParticipants = customGroupBaseParticipants(service);
-  const basePrice = customGroupBasePrice(service);
-  const extraPersonPrice = customGroupExtraPersonPrice(service);
-  const extraPeople = Math.max(0, Math.round(participantCount) - baseParticipants);
-  return basePrice + extraPeople * extraPersonPrice;
-}
-
-function customGroupStatusLabel(status: CustomGroupAttendeeStatus) {
-  if (status === "booker") return t("Booked");
-  if (status === "manual") return t("Manual");
-  if (status === "confirmed") return t("Confirmed");
-  return t("Invited");
-}
-
-// Calendar item ids must be globally unique: two items created in the same millisecond used
-// to share an id, and a retried save could not tell its own landed write from someone else's row.
-function newCalendarItemId(prefix: "appt" | "block") {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return `${prefix}-${crypto.randomUUID()}`;
-  }
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function newCustomGroupAttendeeId(prefix = "attendee") {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return `${prefix}-${crypto.randomUUID()}`;
-  }
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function customGroupAttendeeToken() {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
-}
-
-function customGroupBookerAttendee(name: string, email = ""): CustomGroupAttendee {
-  return {
-    id: "booker",
-    name: name.trim() || "Booker",
-    email: email.trim() || undefined,
-    status: "booker",
-  };
-}
-
-function adminCustomGroupAttendee(name: string, email = ""): CustomGroupAttendee | null {
-  const cleanName = name.trim();
-  const cleanEmail = email.trim().toLowerCase();
-  if (!cleanName) return null;
-  return {
-    id: newCustomGroupAttendeeId(),
-    name: cleanName,
-    email: cleanEmail || undefined,
-    status: cleanEmail ? "invited" : "manual",
-    token: cleanEmail ? customGroupAttendeeToken() : undefined,
-  };
-}
-
-function cleanPeople(people: unknown[]): Person[] {
-  return cleanPeopleWith(people, defaultWorkspaceAccountFromCoachAccount().id);
-}
-
-function cleanNotificationRecord(notification: Partial<NotificationRecord> & { id?: unknown } = {}): NotificationRecord {
-  return {
-    id: safeText(notification.id),
-    accountId: safeText(notification.accountId) || defaultWorkspaceAccountFromCoachAccount().id,
-    personKey: safeText(notification.personKey),
-    calendarItemId: safeText(notification.calendarItemId),
-    recipient: safeText(notification.recipient),
-    subject: safeText(notification.subject),
-    kind: safeText(notification.kind),
-    status: safeText(notification.status),
-    provider: safeText(notification.provider),
-    providerId: safeText(notification.providerId),
-    notificationJobId: safeText(notification.notificationJobId),
-    error: safeText(notification.error),
-    createdAt: safeText(notification.createdAt),
-  };
-}
-
-function cleanNotificationRecords(notifications: unknown[]): NotificationRecord[] {
-  return notifications.map((notification) => cleanNotificationRecord((notification ?? {}) as Partial<NotificationRecord>));
-}
-
 // The note normaliser lives in modules/player-profiles/lessonNotesModel. This
 // keeps the workspace's fallback account on any note that arrives without one.
 function cleanLessonNotes(notes: unknown[]): LessonNote[] {
   return cleanLessonNotesWith(notes, defaultWorkspaceAccountFromCoachAccount().id);
 }
-
-type PeopleImportResult = {
-  ok?: boolean;
-  imported?: number;
-  created?: number;
-  updated?: number;
-  skipped?: number;
-  failed?: number;
-  errors?: Array<{ rowNumber?: string | number; name?: string; message?: string; reason?: string }>;
-  people?: Person[];
-};
-
-type PeopleUpdateResult = {
-  person: Person;
-  people: Person[];
-};
-
-
-type ClientEditor = Pick<Person, "id" | "name" | "email" | "phone" | "notes" | "caddyProfileId" | "caddyProfileUrl">;
 
 type Draft =
   | {
@@ -1156,29 +771,6 @@ type Draft =
       duration: number;
       valid: boolean;
     };
-
-type PointerSession =
-  | {
-      mode: "move";
-      itemId: string;
-      offsetMinutes: number;
-      origin: CalendarItem;
-    }
-  | {
-      mode: "resize";
-      itemId: string;
-      origin: CalendarItem;
-    }
-  | {
-      mode: "block";
-      day: number;
-      start: number;
-    }
-  | {
-      mode: "place";
-      booking: PendingBooking;
-    }
-  | null;
 
 type Toast = {
   message: string;
@@ -1357,249 +949,6 @@ function bankCandidateSortText(value: string | null | undefined) {
   return (value || "").trim().toLowerCase();
 }
 
-/**
- * Settings sections, in the order they appear in the sub-nav.
- *
- * Was eleven tabs, several of which were the same screen under two names —
- * "Customer Experience" and "Coach Branding" showed an identical set of four
- * panels, because every one of them was classed onto both. These six are what
- * is left once each panel is filed once.
- *
- * Missing on purpose: Payments. Invoicing defaults, tax and payment terms all
- * live inside the Account panel today, and pulling them out is a job
- * about that panel rather than about the filing.
- */
-/**
- * A collapsible settings group.
- *
- * Settings used to show everything at once: eleven tabs, and every panel on the
- * open one expanded. Six sections fixed half of that; this fixes the rest.
- *
- * The header holds a title and a caret and nothing else — no summary line, no
- * count. A count in a header is information you cannot act on, placed where you
- * click, and it makes every header a different width.
- *
- * `inert` while closed is the part that is easy to leave out and expensive to
- * omit: without it a collapsed Account section keeps a tabbable Change
- * Password, Export and Close account in the DOM, so a keyboard user tabs
- * through controls nobody can see.
- */
-const SettingsGroupContext = createContext<{
-  openGroup: string;
-  setOpenGroup: (id: string) => void;
-  /** When set, only this group renders — see SettingsGroups. */
-  focusOnly: string;
-  /** The open tab. A group filed under another tab is not mounted at all. */
-  activeTab: string;
-} | null>(null);
-
-function SettingsGroups({
-  children,
-  requestedGroup = "",
-  focusOnly = "",
-  activeTab = "",
-}: {
-  children: ReactNode;
-  requestedGroup?: string;
-  /**
-   * The tab on screen. Every group used to mount on every visit -- fourteen
-   * cards, their editors and their DOM -- and the stylesheet hid all but the
-   * open tab's. Now a group filed under another tab is simply not rendered,
-   * which is most of what made Settings slow to open.
-   */
-  activeTab?: string;
-  /**
-   * Render one group and nothing else.
-   *
-   * Coach profile opens a settings section over itself rather than navigating
-   * to it, and what it opens is this same subtree — the real group, with the
-   * real editor and the real save. Focusing it here rather than hiding the
-   * others in CSS means the overlay mounts one group, not thirty with
-   * twenty-nine display:none.
-   */
-  focusOnly?: string;
-}) {
-  // One value. Which group is open and which header is highlighted are the same
-  // fact, so they cannot disagree.
-  const [openGroup, setOpenGroup] = useState("");
-  // Coach profile sends a coach here pointed at one card, so the section it
-  // named opens on arrival. Everything else still arrives shut - this only
-  // fires when somebody asked for a specific group by name.
-  useEffect(() => {
-    if (requestedGroup) setOpenGroup(requestedGroup);
-  }, [requestedGroup]);
-  const value = useMemo(() => ({ openGroup, setOpenGroup, focusOnly, activeTab }), [openGroup, focusOnly, activeTab]);
-  return <SettingsGroupContext.Provider value={value}>{children}</SettingsGroupContext.Provider>;
-}
-
-/**
- * The settings screen, as a page or as an overlay over whatever you were doing.
- *
- * Coach profile files the workspace by job ("lessons into my diary"); Settings
- * files it by category (Business, Booking, Notifications) and Billing by its
- * own sections. Two indexes, one filing cabinet — so opening a section from the
- * profile must not be a second copy of that section. It is this same subtree,
- * mounted in a modal instead of a page, with the same editors and the same save.
- */
-function WorkspaceSurface({
-  overlay,
-  title,
-  pageClassName,
-  onClose,
-  children,
-}: {
-  overlay: boolean;
-  /** What the overlay says it is showing, in the coach's words. */
-  title: string;
-  /** The class this surface wears as a page — settings-page or billing-page. */
-  pageClassName: string;
-  onClose: () => void;
-  children: ReactNode;
-}) {
-  // Escape closes, like every other dismissable layer in the app.
-  useEffect(() => {
-    if (!overlay) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [overlay, onClose]);
-
-  if (!overlay) return <section className={`module-page ${pageClassName}`}>{children}</section>;
-
-  return (
-    <div className="workspace-overlay" role="dialog" aria-modal="true" aria-label={title}>
-      {/* Clicking the backdrop closes. The dialog itself stops the click, so a
-          drag that ends outside a field does not dismiss an unsaved edit. */}
-      <div className="workspace-overlay-scrim" onClick={onClose} />
-      <div className="workspace-overlay-panel">
-        <header className="workspace-overlay-head">
-          <div>
-            <span>{t("Settings")}</span>
-            <strong>{title}</strong>
-          </div>
-          <button className="icon-button" onClick={onClose} type="button" aria-label={t("Close settings")}>
-            <X size={18} />
-          </button>
-        </header>
-        <div className={`workspace-overlay-body ${pageClassName}`}>{children}</div>
-      </div>
-    </div>
-  );
-}
-
-function SettingsGroup({
-  id,
-  section,
-  title,
-  icon: Icon,
-  className = "",
-  children,
-}: {
-  id: string;
-  section: string;
-  title: string;
-  icon: IconComponent;
-  className?: string;
-  children: ReactNode;
-}) {
-  const context = useContext(SettingsGroupContext);
-  // A focused mount is one section on its own, so the others are not rendered
-  // at all rather than rendered and hidden.
-  if (context?.focusOnly && context.focusOnly !== id) return null;
-  // Filed under a tab that is not open: not mounted, rather than mounted and
-  // hidden. The focused case above wins, because an overlay opens one group
-  // by name whatever tab was last on screen.
-  if (context && !context.focusOnly && context.activeTab && context.activeTab !== section) return null;
-  // Every section arrives shut. A tab that opens with one section already
-  // expanded pushes the rest below the fold and makes that one look like the
-  // screen rather than one choice among several. The exception is a section
-  // opened on its own: it is the only thing there, so a collapsed header would
-  // just be a second click on the thing already asked for.
-  const open = context ? context.focusOnly === id || context.openGroup === id : true;
-  return (
-    <article
-      className={`data-card settings-section settings-${section} settings-group${open ? " is-open" : ""}${className ? ` ${className}` : ""}`}
-    >
-      <button
-        className="settings-group-header"
-        aria-expanded={open}
-        onClick={() => context?.setOpenGroup(open ? "" : id)}
-        type="button"
-      >
-        <span className="settings-group-title">
-          <Icon size={18} />
-          {title}
-        </span>
-        <span className="settings-group-caret" aria-hidden="true">▾</span>
-      </button>
-      <div className={`disclosure-wrap${open ? " is-open" : ""}`} inert={!open}>
-        <div className="disclosure-body settings-group-body">{children}</div>
-      </div>
-    </article>
-  );
-}
-
-/**
- * The sub-nav, as data.
- *
- * One list drives the rows, the highlight and the admin gating, so a section
- * cannot exist in the nav and nowhere else — which is how "Customer
- * Experience" and "Coach Branding" both survived pointing at the same panels.
- */
-const SETTINGS_SECTIONS: Array<{
-  key: Exclude<SettingsTab, "none">;
-  label: string;
-  icon: IconComponent;
-  adminOnly?: boolean;
-  /** Platform staff only. Not a business owner, however senior. */
-  platformOnly?: boolean;
-}> = [
-  { key: "business", label: t("Business"), icon: ClarityFacilitiesRooms, adminOnly: true },
-  { key: "booking", label: t("Booking"), icon: ClarityCalendar },
-  { key: "services", label: t("Lesson types"), icon: ClarityServices },
-  { key: "practice", label: t("Practice"), icon: ClarityLessonsProgrammes },
-  // Two questions, two sections. Notifications is "what do we say" — the
-  // wording of every client-facing message, in one place. Email / SMS is "how
-  // do we send it" — addresses, provider wiring and send rules. They used to be
-  // one tab holding four cards, two of which were both called a template.
-  { key: "notifications", label: t("Notifications"), icon: ClarityNotifications, adminOnly: true },
-  { key: "email-sms", label: t("Email / SMS"), icon: ClarityEmail, adminOnly: true },
-  { key: "account", label: t("Account"), icon: ClarityProfile, adminOnly: true },
-  // Two lists, two questions. Integrations is "what have I plugged in" — the
-  // coach's own accounts. Admin is "what is this software made of" — the
-  // services Clarity runs on, which a coach never picks.
-  { key: "developer", label: t("Integrations"), icon: ClarityIntegrations, adminOnly: true },
-  // The other direction: not what this business has plugged in, but what may
-  // plug into it -- API keys and webhooks for other software.
-  { key: "api", label: t("API & webhooks"), icon: Webhook, adminOnly: true },
-  // Platform-only, not account-admin. Its own description says these are "the
-  // services Clarity itself runs on, not things a coach picks" -- shared
-  // infrastructure whose state belongs to the platform, not to any one
-  // business. Gated on adminOnly it was visible to every business owner, so a
-  // brand new workspace could see the platform's Resend, Drive and Stripe
-  // wiring and read another business's Google connection as its own.
-  { key: "admin", label: t("Admin"), icon: ClarityAdmin, platformOnly: true },
-  // Last on purpose. It is the one section that is not about configuring this
-  // business -- it is about standing up a second, disposable copy of it.
-  { key: "sandbox", label: t("Sandbox"), icon: FlaskConical, adminOnly: true },
-];
-
-type SettingsTab =
-  | "none"
-  | "business"
-  | "booking"
-  | "services"
-  | "practice"
-  | "notifications"
-  | "email-sms"
-  | "account"
-  | "developer"
-  | "api"
-  | "admin"
-  | "sandbox";
-
 type BookingForm = {
   firstName: string;
   lastName: string;
@@ -1608,46 +957,6 @@ type BookingForm = {
 };
 
 type PublicBookingSection = "appointment" | "datetime" | "information";
-
-type NotificationRecord = {
-  id: string;
-  accountId?: string;
-  personKey: string;
-  calendarItemId: string;
-  recipient: string;
-  subject: string;
-  kind: string;
-  status: string;
-  provider: string;
-  providerId: string;
-  notificationJobId: string;
-  error: string;
-  createdAt: string;
-};
-
-type EmailSendResult = {
-  channel: string;
-  sent?: boolean;
-  id?: string;
-  reason?: string;
-  error?: string;
-  recipient?: string;
-  subject?: string;
-  kind?: string;
-  status?: string;
-};
-
-type ClientProfileTab = "bookings" | "notes" | "notifications" | "transactions" | "passes";
-
-// One row of a client's money history: a counter/Optix sale, or an invoice
-// they were billed on (or included in, for a bulk invoice).
-type ClientTransactionRow =
-  | { kind: "sale"; date: string; sale: PosTransaction }
-  | { kind: "invoice"; date: string; invoice: BillingInvoiceRecord }
-  // A gift voucher is on this list for a reason the other two are not: it is
-  // usually bought by somebody who will never spend it, so the buyer's name is
-  // the only thing anybody remembers when a card turns up without its code.
-  | { kind: "coupon"; date: string; coupon: BillingCoupon };
 /* The nine sections of a player profile. The first four are the coach's
  * daily reads and sit on the bar; the last five are the record and live behind
  * its toggle -- see .player-tool-tabs.is-expanded. */
@@ -1985,84 +1294,6 @@ type PortalPlayer = {
   invitedAt?: string | null;
   lastLoginAt?: string | null;
 };
-type ThemeMode = "light" | "dark";
-type PermissionScope = "own" | "assigned" | "all";
-type SubscriptionStatus =
-  | "trialing"
-  | "active"
-  | "past_due"
-  | "paused"
-  | "cancelled"
-  | "comped"
-  | "internal";
-type AccountPlanKey = "solo" | "studio" | "academy" | "enterprise" | "founder";
-type AccountFeatureKey =
-  | "publicBooking"
-  | "coachCalendar"
-  | "locationCalendar"
-  | "multiCoach"
-  | "multiLocation"
-  | "services"
-  | "groupLessons"
-  | "packages"
-  | "clients"
-  | "notifications"
-  | "googleCalendarSync"
-  | "invoicing"
-  | "checkout"
-  | "customBranding"
-  | "customDomains"
-  | "staffUsers"
-  | "advancedPermissions";
-type AccountLimits = {
-  maxCoaches: number;
-  maxLocations: number;
-  maxUsers: number;
-  maxServices: number;
-  maxBookingScreens: number;
-};
-type AccountEntitlements = {
-  features: Record<AccountFeatureKey, boolean>;
-  limits: AccountLimits;
-};
-type AccountEntitlementsOverride = {
-  features?: Partial<Record<AccountFeatureKey, boolean>>;
-  limits?: Partial<AccountLimits>;
-};
-type WorkspaceAccount = {
-  id: string;
-  name: string;
-  slug: string;
-  planKey: AccountPlanKey;
-  subscriptionStatus: SubscriptionStatus;
-  ownerUserId?: string;
-  billingProvider?: "stripe" | "manual" | "none";
-  billingCustomerId?: string;
-  billingSubscriptionId?: string;
-  trialEndsAt?: string;
-  currentPeriodEndsAt?: string;
-  entitlementsOverride?: AccountEntitlementsOverride;
-  active: boolean;
-  createdAt?: string;
-  updatedAt?: string;
-};
-
-type AppUser = {
-  id: string;
-  accountId?: string;
-  email: string;
-  name: string;
-  role: "admin" | "account_admin" | "coach" | "staff" | "platform_admin";
-  coachId?: string;
-  permissions: {
-    bookings: PermissionScope;
-    services: PermissionScope;
-    availability: PermissionScope;
-    locations: PermissionScope;
-    clients: PermissionScope;
-    settings: PermissionScope;
-  };
-};
 
 type PasswordChangeForm = {
   currentPassword: string;
@@ -2119,89 +1350,6 @@ type NotificationSettings = {
   playerBookingEmbedHeight: number;
 };
 
-type ServiceEditor = Omit<Service, "id"> & {
-  id?: string;
-};
-
-type AvailabilityWindow = {
-  accountId?: string;
-  coachId?: string;
-  /** Where the coach works in this window. Empty covers every location (pre-location data). */
-  locationId?: string;
-  start: number;
-  end: number;
-};
-
-/**
- * The two outlines a booking card can wear. The fill is not here: that is the
- * lesson type's own colour, set on the service, because the lesson types are
- * whatever this coach sells rather than a fixed list.
- *
- * Only two states get an outline. Everything else a booking can be is either
- * the normal case or already said better elsewhere, and an outline for each
- * turned the week into a key you had to learn before you could read it.
- */
-type CalendarColorSettings = {
-  statusCompleted: string;
-  statusBayBooked: string;
-};
-
-type BrandSettings = {
-  coachName: string;
-  logoName: string;
-  logoPreview: string;
-  showLogo: boolean;
-  neutral: string;
-  primary: string;
-  secondary: string;
-  accent: string;
-  bookingTheme: ThemeMode;
-  calendarColors: CalendarColorSettings;
-};
-
-type CoachAccount = {
-  id: string;
-  coachName: string;
-  businessName: string;
-  venueName: string;
-  venueShortName: string;
-  timezone: string;
-  /** ISO 3166-1 alpha-2. The workspace's home country. */
-  country: string;
-  /** The language the business's emails and texts go out in. */
-  messageLanguage: string;
-  contactEmail: string;
-  bookingUrl: string;
-  calendarSlug: string;
-  caddyWorkspaceUrl: string;
-  terminology: BusinessTerminology;
-  /**
-   * Which market profile the business started from and which modules it has
-   * switched away from that profile's defaults. Read here, written only by
-   * /api/market-profile -- see _shared/market-profile.mts.
-   */
-  market: AccountMarketConfig;
-  invoiceSettings: InvoiceSettings;
-};
-
-type CoachProfile = {
-  id: string;
-  accountId?: string;
-  name: string;
-  displayName: string;
-  shortName?: string;
-  email: string;
-  phone?: string;
-  bio?: string;
-  photoUrl?: string;
-  active: boolean;
-  archived?: boolean;
-  bookable: boolean;
-  assignedLocationIds?: string[];
-  defaultLocationId?: string;
-  sortOrder?: number;
-};
-
 type WorkspaceConfigRecord = {
   id?: string;
   accountId?: string;
@@ -2229,256 +1377,11 @@ type WorkspaceApiFailureDetail = {
   statusText?: string;
 };
 
-type SlotCandidate = {
-  week: number;
-  day: number;
-  start: number;
-  duration: number;
-};
-
-type BookingSlot = {
-  week: number;
-  day: number;
-  start: number;
-  remainingSpots: number;
-  coachId?: string;
-  locationId?: string;
-};
-
-type QuickCreateState = {
-  week: number;
-  day: number;
-  start: number;
-  x: number;
-  y: number;
-  coachId?: string;
-  locationId?: string;
-  serviceId: string;
-  phone: string;
-  email: string;
-  note: string;
-  attendees: CustomGroupAttendee[];
-  attendeeName: string;
-  attendeeEmail: string;
-  error: string;
-};
-
-type GroupSession = {
-  serviceId: string;
-  week: number;
-  day: number;
-  start: number;
-  duration: number;
-};
-
-type WeekDay = {
-  short: string;
-  label: string;
-  date: number;
-  isToday: boolean;
-};
-
-const DAY_START_MINUTES = 0;
-const DAY_END_MINUTES = 24 * 60;
-const DEFAULT_CALENDAR_START_HOUR = 7;
-const DEFAULT_CALENDAR_END_HOUR = 20;
-const DEFAULT_CALENDAR_START_MINUTES = DEFAULT_CALENDAR_START_HOUR * 60;
-const DEFAULT_CALENDAR_END_MINUTES = DEFAULT_CALENDAR_END_HOUR * 60;
-const SNAP_MINUTES = 15;
-const LAST_TIME_SLOT_MINUTES = DAY_END_MINUTES - SNAP_MINUTES;
-const MAX_GROUP_OCCURRENCE_COUNT = 52;
-const MOUSE_DRAG_THRESHOLD = 10;
-const TOUCH_DRAG_THRESHOLD = 16;
-// A finger that lands on a lesson is usually scrolling the week, not
-// rescheduling. Touch drags therefore arm on a deliberate hold instead of on
-// contact: hold still for TOUCH_HOLD_MS and the card lifts; move more than
-// TOUCH_HOLD_TOLERANCE before then and the hold is abandoned and the touch goes
-// back to being an ordinary scroll. A distance threshold alone could not tell
-// those two apart, which is why any swipe starting on a card used to pick it up.
-const TOUCH_HOLD_MS = 500;
-const TOUCH_HOLD_TOLERANCE = 10;
-// Post-hold, intent is settled, so the card follows the finger almost at once
-// rather than making the coach drag through the accident threshold twice.
-const ARMED_TOUCH_DRAG_THRESHOLD = 6;
-const EDGE_NAV_ZONE = 26;
-const BOOKING_LOGO_PARAM = "logo";
-const CLARITY_BOOKING_HOSTS = new Set(["claritygolf.app", "booking.claritygolf.app", PUBLIC_BOOKING_HOST]);
-const CANCELLED_GROUP_SESSION_TITLE = "Cancelled group session";
-const CANCELLED_GROUP_SESSION_NOTE = "__cancelled_group_session__";
-type BookingScreenDefinition = {
-  id: string;
-  label: string;
-  path: string;
-};
-const BOOKING_SCREENS = [
-  { id: "main", label: t("Main booking screen") },
-  { id: "group-lessons", label: t("Group Lessons") },
-  { id: "private-lessons", label: t("Private Lessons") },
-] as const;
-// A screen's public path is /<business>/<screen>, so it is worked out per
-// account -- see publicBookingPath. It used to be a constant, which is how the
-// original workspace's slug ended up in every tenant's embed code.
-function bookingScreenPathsFor(business: string): BookingScreenDefinition[] {
-  return BOOKING_SCREENS.map((screen) => ({ ...screen, path: publicBookingPath(business, screen.id) }));
-}
-const CADDY_APP_URL = "https://caddy.claritygolf.app";
-const THEME_STORAGE_KEY = "clarity-booking-theme";
-const BRAND_STORAGE_KEY = "clarity-booking-brand";
-const COACH_ACCOUNT_STORAGE_KEY = "clarity-booking-coach-account";
-const PAST_ADMIN_LESSON_WARNING =
-  t("This lesson is in the past. It will be saved for records only and no emails will be sent.");
-// A completed card is a record, and a click that drifts into a drag should not
-// rewrite it. One completed lesson was nudged a row and back in September 2026
-// and Optix received two booking changes for a bay used a week earlier.
-const COMPLETED_LESSON_MOVE_WARNING =
-  t("This lesson is already marked completed. Move it anyway? Its bay booking will stay where it was.");
-
-const baseWeekDays = [t("Mon"), t("Tue"), t("Wed"), t("Thu"), t("Fri"), t("Sat"), t("Sun")];
-const fullDayNames = [t("Monday"), t("Tuesday"), t("Wednesday"), t("Thursday"), t("Friday"), t("Saturday"), t("Sunday")];
-// Shared with the player portal -- see modules/shared/bookingHandoff.
-const baseWeekStart = BASE_WEEK_START;
-
-const defaultServices: Service[] = [
-  {
-    id: "lesson-30",
-    coachIds: [],
-    locationIds: [],
-    name: "30min Lesson",
-    duration: 30,
-    price: 100,
-    description: "Price Includes Bay Hire",
-    visibility: "public",
-    active: true,
-    capacity: 1,
-    minParticipants: 1,
-    lessonFormat: "private",
-    priceMode: "session",
-    lessonNote: "Bay hire included",
-    location: "Bay hire included",
-  },
-  {
-    id: "lesson-60",
-    coachIds: [],
-    locationIds: [],
-    name: "1 Hour Golf Lesson",
-    duration: 60,
-    price: 180,
-    description: "Price Includes Bay Hire",
-    visibility: "public",
-    active: true,
-    capacity: 1,
-    minParticipants: 1,
-    lessonFormat: "private",
-    priceMode: "session",
-    lessonNote: "Bay hire included",
-    location: "Bay hire included",
-  },
-  {
-    id: "lesson-pair",
-    coachIds: [],
-    locationIds: [],
-    name: "2 Person Golf Lesson",
-    duration: 60,
-    price: 200,
-    description: "Two-player coaching session",
-    visibility: "public",
-    active: true,
-    capacity: 2,
-    minParticipants: 1,
-    lessonFormat: "private",
-    priceMode: "session",
-    lessonNote: "Bay hire included",
-    location: "Bay hire included",
-  },
-  {
-    id: "group-clinic",
-    coachIds: [],
-    locationIds: [],
-    name: "Group Golf Clinic",
-    duration: 90,
-    price: 55,
-    description: "Small-group coaching session with shared practice goals",
-    visibility: "public",
-    active: true,
-    capacity: 6,
-    minParticipants: 3,
-    lessonFormat: "group",
-    priceMode: "per-person",
-    groupSchedule: {
-      dayOfWeek: 2,
-      startMinutes: timeToMinutes(18, 0),
-      occurrenceCount: 8,
-      active: true,
-    },
-    lessonNote: "Group coaching bay",
-    location: "Group coaching bay",
-  },
-  {
-    id: "member-30",
-    coachIds: [],
-    locationIds: [],
-    name: "30min Golf Lesson (Range 24/7 Member)",
-    duration: 30,
-    price: 90,
-    description: "Bay hire is deducted from membership account",
-    visibility: "public",
-    active: true,
-    capacity: 1,
-    minParticipants: 1,
-    lessonFormat: "private",
-    priceMode: "session",
-    lessonNote: "Bay hire deducted from membership account",
-    location: "Range 24/7 member bay",
-  },
-  {
-    id: "member-60",
-    coachIds: [],
-    locationIds: [],
-    name: "1 Hour Golf Lesson (Range 24/7 Member)",
-    duration: 60,
-    price: 160,
-    description: "Bay hire is deducted from membership account",
-    visibility: "public",
-    active: true,
-    capacity: 1,
-    minParticipants: 1,
-    lessonFormat: "private",
-    priceMode: "session",
-    lessonNote: "Bay hire deducted from membership account",
-    location: "Range 24/7 member bay",
-  },
-  {
-    id: "package-60",
-    coachIds: [],
-    locationIds: [],
-    name: "1 hour Lesson - 5 Lesson Package",
-    duration: 60,
-    price: 650,
-    description: "Five one-hour lessons tracked as a package.",
-    visibility: "private",
-    active: true,
-    capacity: 1,
-    minParticipants: 1,
-    lessonFormat: "package",
-    priceMode: "session",
-    lessonNote: "Package allowance",
-    location: "Package allowance",
-    packageAllowance: 5,
-    packageCoverageMode: "upfront",
-    packageCoversServiceId: "lesson-60",
-  },
-];
-
 const initialItems: CalendarItem[] = [];
 
 const DEFAULT_MIN_BOOKING_NOTICE_MINUTES = 240;
 const MAX_MIN_BOOKING_NOTICE_MINUTES = 7 * 24 * 60;
 const MIN_BOOKING_NOTICE_PRESETS_HOURS = [0, 1, 2, 4, 24] as const;
-const DEFAULT_CUSTOM_GROUP_BASE_PARTICIPANTS = 3;
-const DEFAULT_CUSTOM_GROUP_BASE_PRICE = 200;
-const DEFAULT_CUSTOM_GROUP_EXTRA_PERSON_PRICE = 20;
-const DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS = 2;
-const DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS = 5;
 const NOTIFICATION_SUBJECT_TOKENS = [
   "{{service}}",
   "{{coach}}",
@@ -2487,27 +1390,6 @@ const NOTIFICATION_SUBJECT_TOKENS = [
   "{{time}}",
   "{{action}}",
 ] as const;
-
-const defaultAvailability: AvailabilityWindow[][] = [
-  [{ start: timeToMinutes(16, 30), end: timeToMinutes(20, 0) }],
-  [],
-  [{ start: timeToMinutes(14, 0), end: timeToMinutes(20, 0) }],
-  [
-    { start: timeToMinutes(7, 0), end: timeToMinutes(11, 0) },
-    { start: timeToMinutes(14, 0), end: timeToMinutes(16, 30) },
-  ],
-  [{ start: timeToMinutes(14, 0), end: timeToMinutes(16, 0) }],
-  [],
-  [{ start: timeToMinutes(15, 0), end: timeToMinutes(18, 0) }],
-];
-
-function timeToMinutes(hour: number, minute: number) {
-  return hour * 60 + minute;
-}
-
-function snap(value: number) {
-  return Math.round(value / SNAP_MINUTES) * SNAP_MINUTES;
-}
 
 function cleanMinBookingNoticeMinutes(value: number) {
   return Number.isFinite(value) ? clamp(Math.round(value), 0, MAX_MIN_BOOKING_NOTICE_MINUTES) : DEFAULT_MIN_BOOKING_NOTICE_MINUTES;
@@ -2539,225 +1421,8 @@ function formatBookingNoticeLabel(minutes: number) {
   return t("{normalized} minutes", { normalized });
 }
 
-function formatTime(minutes: number) {
-  const normalized = ((Math.round(minutes) % DAY_END_MINUTES) + DAY_END_MINUTES) % DAY_END_MINUTES;
-  const hour24 = Math.floor(normalized / 60);
-  const mins = normalized % 60;
-  const period = hour24 >= 12 ? "PM" : "AM";
-  const hour = hour24 % 12 || 12;
-  return `${hour}:${String(mins).padStart(2, "0")} ${period}`;
-}
-
-function minutesToInputTime(minutes: number) {
-  const hour = Math.floor(minutes / 60);
-  const minute = minutes % 60;
-  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-}
-
-function inputTimeToMinutes(value: string, fallback: number) {
-  const match = /^(\d{1,2}):(\d{2})$/.exec(value);
-  if (!match) return fallback;
-  const hour = Number(match[1]);
-  const minute = Number(match[2]);
-  if (!Number.isInteger(hour) || !Number.isInteger(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
-    return fallback;
-  }
-  return hour * 60 + minute;
-}
-
-function formatRange(start: number, duration: number) {
-  return `${formatTime(start)}-${formatTime(start + duration)}`;
-}
-
 function renderTemplate(template: string, variables: Record<string, string>) {
   return template.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, key: string) => variables[key] ?? "");
-}
-
-
-function itemService(item: CalendarItem, serviceCatalog = defaultServices): Service | undefined {
-  const service = serviceCatalog.find((candidate) => candidate.id === item.serviceId);
-  if (service) return service;
-  if (!item.serviceId) return undefined;
-  const fallbackService: Service = {
-    ...defaultServices[0],
-    id: item.serviceId,
-    name: item.title?.trim() || "Deleted lesson type",
-    description: "",
-    visibility: "private",
-    active: false,
-    archived: true,
-    lessonFormat: "private",
-    packageAllowance: undefined,
-    packageCoverageMode: undefined,
-    packageCoversServiceId: undefined,
-    groupSchedule: undefined,
-    bookingScreenIds: ["main"],
-  };
-  return fallbackService;
-}
-
-/**
- * The fill a booking's card gets: the colour set on its lesson type.
- *
- * It comes off the service rather than a fixed list of categories, because the
- * lesson types are whatever this coach actually sells — a workspace with six
- * kinds of lesson should be able to tell all six apart, not squeeze them into
- * four names someone else chose. A booking with no service left (deleted
- * lesson type) falls back to the neutral fill in styles.css.
- */
-function calendarLessonColor(service: Service | undefined) {
-  return service?.color || undefined;
-}
-
-function itemWeek(item: CalendarItem) {
-  return item.week ?? 0;
-}
-
-function sameSlot(a: CalendarItem, b: SlotCandidate) {
-  return itemWeek(a) === b.week && a.day === b.day && a.start === b.start && a.duration === b.duration;
-}
-
-function overlaps(a: SlotCandidate, b: SlotCandidate) {
-  return a.week === b.week && a.day === b.day && a.start < b.start + b.duration && a.start + a.duration > b.start;
-}
-
-function itemSlot(item: CalendarItem): SlotCandidate {
-  return { week: itemWeek(item), day: item.day, start: item.start, duration: item.duration };
-}
-
-function defaultGroupSchedule(): GroupServiceSchedule {
-  return {
-    dayOfWeek: 2,
-    startMinutes: timeToMinutes(18, 0),
-    occurrenceCount: 8,
-    active: true,
-  };
-}
-
-function cleanGroupSchedule(
-  value: unknown,
-  fallback: GroupServiceSchedule = defaultGroupSchedule(),
-): GroupServiceSchedule {
-  const source = typeof value === "object" && value !== null ? value : {};
-  const rawDay = Number.isFinite(Number((source as Partial<GroupServiceSchedule>).dayOfWeek))
-    ? Number((source as Partial<GroupServiceSchedule>).dayOfWeek)
-    : fallback.dayOfWeek;
-  const rawStart = Number.isFinite(Number((source as Partial<GroupServiceSchedule>).startMinutes))
-    ? Number((source as Partial<GroupServiceSchedule>).startMinutes)
-    : fallback.startMinutes;
-  const rawOccurrence = Number.isFinite(Number((source as Partial<GroupServiceSchedule>).occurrenceCount))
-    ? Number((source as Partial<GroupServiceSchedule>).occurrenceCount)
-    : fallback.occurrenceCount;
-  return {
-    dayOfWeek: clamp(Math.round(rawDay), 0, 6),
-    startMinutes: Math.round(rawStart),
-    occurrenceCount: clamp(Math.round(rawOccurrence), 1, MAX_GROUP_OCCURRENCE_COUNT),
-    active: (source as Partial<GroupServiceSchedule>).active !== false,
-  };
-}
-
-/**
- * The business's clock. Stored lessons are wall-clock times in the business's
- * time zone (the server reads them that way), so "today", the now line and
- * what counts as past have to come from that zone too, not from whichever
- * zone the browser happens to be in. Set from the account on every render.
- */
-let businessTimeZone = "";
-
-function setBusinessTimeZone(timeZone: string | undefined) {
-  businessTimeZone = timeZone || "";
-}
-
-/** Today (as a local-midnight Date, like the grid's) and the minute of the day, in the business's zone. */
-function businessNow(): { date: Date; minutes: number } {
-  const now = new Date();
-  if (businessTimeZone) {
-    try {
-      const parts = Object.fromEntries(
-        new Intl.DateTimeFormat("en-GB", {
-          timeZone: businessTimeZone,
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-          hour: "2-digit",
-          minute: "2-digit",
-          hourCycle: "h23",
-        })
-          .formatToParts(now)
-          .map((part) => [part.type, part.value]),
-      );
-      return {
-        date: new Date(Number(parts.year), Number(parts.month) - 1, Number(parts.day)),
-        minutes: Number(parts.hour) * 60 + Number(parts.minute),
-      };
-    } catch {
-      // An unknown zone falls back to the browser's clock below.
-    }
-  }
-  return {
-    date: new Date(now.getFullYear(), now.getMonth(), now.getDate()),
-    minutes: now.getHours() * 60 + now.getMinutes(),
-  };
-}
-
-function startOfCalendarWeek(value = new Date()) {
-  const date = new Date(value);
-  date.setHours(0, 0, 0, 0);
-  const day = date.getDay();
-  const mondayOffset = day === 0 ? -6 : 1 - day;
-  date.setDate(date.getDate() + mondayOffset);
-  return date;
-}
-
-function calendarDateUtcTime(date: Date) {
-  return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
-}
-
-function isSameCalendarDay(a: Date, b: Date) {
-  return (
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
-  );
-}
-
-function getCurrentWeekOffset() {
-  const weekMs = 7 * 24 * 60 * 60 * 1000;
-  const currentWeekStart = startOfCalendarWeek(businessNow().date);
-  return Math.round((calendarDateUtcTime(currentWeekStart) - calendarDateUtcTime(baseWeekStart)) / weekMs);
-}
-
-function buildWeekDays(week: number): WeekDay[] {
-  const today = businessNow().date;
-  return baseWeekDays.map((short, index) => {
-    const date = new Date(baseWeekStart);
-    date.setDate(baseWeekStart.getDate() + week * 7 + index);
-    return {
-      short,
-      label: new Intl.DateTimeFormat(activeLocale(), { weekday: "long", month: "short", day: "numeric" }).format(date),
-      date: date.getDate(),
-      isToday: isSameCalendarDay(date, today),
-    };
-  });
-}
-
-function dateForSlot(week: number, day: number) {
-  const date = new Date(baseWeekStart);
-  date.setDate(baseWeekStart.getDate() + week * 7 + day);
-  return date;
-}
-
-function isSlotInPast(slot: Pick<SlotCandidate, "week" | "day" | "start">) {
-  const now = businessNow();
-  const slotDay = calendarDateUtcTime(dateForSlot(slot.week, slot.day));
-  const today = calendarDateUtcTime(now.date);
-  return slotDay < today || (slotDay === today && slot.start < now.minutes);
-}
-
-function formatWeekTitle(week: number) {
-  const date = new Date(baseWeekStart);
-  date.setDate(baseWeekStart.getDate() + week * 7);
-  return t("Week of {date}", { date: new Intl.DateTimeFormat(activeLocale(), { month: "long", day: "numeric", year: "numeric" }).format(date) });
 }
 
 function sectionTitle(view: View, terms: BusinessTerminology = terminologyFor()) {
@@ -2874,74 +1539,6 @@ function ClarityPayReturnBanner({
   );
 }
 
-function getBookingScreenPublicUrl(path: string, showLogo: boolean) {
-  if (typeof window === "undefined") return "";
-  const url = new URL(window.location.href);
-  if (CLARITY_BOOKING_HOSTS.has(url.hostname)) {
-    url.protocol = "https:";
-    url.hostname = PUBLIC_BOOKING_HOST;
-    url.pathname = normalizeBookingPath(path);
-  } else {
-    url.pathname = normalizeBookingPath(path);
-  }
-  url.searchParams.set(BOOKING_EMBED_PARAM, BOOKING_EMBED_VALUE);
-  if (showLogo) {
-    url.searchParams.delete(BOOKING_LOGO_PARAM);
-  } else {
-    url.searchParams.set(BOOKING_LOGO_PARAM, "0");
-  }
-  return url.toString();
-}
-
-function getBookingScreenIframeCode(path: string, businessName: string, screenName: string, showLogo: boolean) {
-  const bookingScreenUrl = getBookingScreenPublicUrl(path, showLogo);
-  return `<iframe src="${bookingScreenUrl}" title="${businessName} ${screenName} booking" width="100%" height="760" style="border:0;max-width:100%;border-radius:18px;overflow:hidden;background:transparent;" loading="lazy"></iframe>`;
-}
-
-function isBookingLogoHiddenByUrl() {
-  if (typeof window === "undefined") return false;
-  return new URLSearchParams(window.location.search).get(BOOKING_LOGO_PARAM) === "0";
-}
-
-function normalizeBookingPath(pathname = "") {
-  const cleaned = pathname.trim().toLowerCase();
-  if (!cleaned || cleaned === "/") return "/";
-  return `/${cleaned.replace(/^\/+/, "").replace(/\/+$/, "").replace(/\/+/g, "/")}`;
-}
-
-function getBookingScreenId(pathname = "") {
-  return currentPublicBookingScreenId(pathname);
-}
-
-/**
- * The booking screens a lesson type appears on.
- *
- * Unrecognised ids are KEPT. Mirrors cleanBookingScreenIds in booking-core.mts,
- * and for the same reason: this runs on load as well as save, so filtering
- * against the known-screen list meant a load-and-save round trip quietly
- * deleted any id this build did not recognise -- and the lesson type dropped
- * off the public booking page with nothing reported.
- *
- * Filtering belongs at render, where the page already matches on the screen it
- * is showing and an unknown id simply never matches.
- *
- * A missing field means legacy data, which defaults to the main screen. An
- * explicit empty list means "show on no booking screens" and is preserved.
- */
-function normalizeBookingScreenIds(value: unknown): string[] {
-  if (!Array.isArray(value)) return ["main"];
-  const cleaned = value
-    .map((candidate) => (typeof candidate === "string" ? candidate.trim().slice(0, 80) : ""))
-    .filter((candidate) => candidate.length > 0);
-  return Array.from(new Set(cleaned)).slice(0, 24);
-}
-
-function formatBookingScreenLabels(screenIds: string[] = []) {
-  return screenIds
-    .map((screenId) => BOOKING_SCREENS.find((screen) => screen.id === screenId)?.label || screenId)
-    .filter(Boolean);
-}
-
 function getDefaultSyncBaseUrl() {
   if (typeof window === "undefined") return "https://booking.yourdomain.co.nz";
   if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
@@ -2950,1626 +1547,11 @@ function getDefaultSyncBaseUrl() {
   return window.location.origin;
 }
 
-type ClientMatchInput = {
-  name?: string;
-  firstName?: string;
-  lastName?: string;
-  email?: string;
-  phone?: string;
-};
-
-type MatchableClient = Pick<Person, "name" | "email" | "phone">;
-
-function normalizeMatchText(value: unknown = "") {
-  return safeText(value).toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
-function normalizePhoneDigits(value: unknown = "") {
-  return safeText(value).replace(/\D/g, "");
-}
-
-// Identity. Must agree with the server exactly — when these two disagreed about
-// whether "+64274637700" and "0274637700" were the same person, the server
-// created a duplicate contact and the resulting unique-index collision failed
-// the coach's whole calendar save. Both sides now call the same function.
-// This was hardcoded to New Zealand ("64"); it is now country-aware.
-function canonicalPhoneKey(value: unknown = "") {
-  return sharedCanonicalPhoneKey(safeText(value));
-}
-
-// Fuzzy search, not identity. Deliberately generous: it powers type-ahead over
-// the client list, where a coach may type any fragment of a number in any
-// format. Seeded with the canonical key so the international and national
-// spellings of a number always find each other.
-function phoneVariants(value: unknown = "") {
-  const digits = normalizePhoneDigits(value);
-  const variants = new Set<string>();
-  const canonical = normalizePhoneDigits(canonicalPhoneKey(value));
-  if (canonical) variants.add(canonical);
-  if (digits) variants.add(digits);
-  const callingCode = normalizePhoneDigits(dialCodeFor());
-  if (callingCode && digits.startsWith(callingCode) && digits.length > callingCode.length) {
-    variants.add(`0${digits.slice(callingCode.length)}`);
-    variants.add(digits.slice(callingCode.length));
-  }
-  if (digits.startsWith("0") && digits.length > 1) {
-    if (callingCode) variants.add(`${callingCode}${digits.slice(1)}`);
-    variants.add(digits.slice(1));
-  }
-  if (digits.length > 8) variants.add(digits.slice(-8));
-  if (digits.length > 7) variants.add(digits.slice(-7));
-  return Array.from(variants).filter(Boolean);
-}
-
-function matchesSequentialValue(source: string, query: string) {
-  if (!source || !query) return false;
-  if (source.includes(query) || query.includes(source)) return true;
-  let queryIndex = 0;
-  for (const char of source) {
-    if (char === query[queryIndex]) queryIndex += 1;
-    if (queryIndex === query.length) return true;
-  }
-  return false;
-}
-
-function phoneValuesMatch(source = "", query = "", exact = false) {
-  const sourceVariants = phoneVariants(source);
-  const queryVariants = phoneVariants(query);
-  if (!sourceVariants.length || !queryVariants.length) return false;
-
-  return sourceVariants.some((sourceValue) =>
-    queryVariants.some((queryValue) => {
-      if (!sourceValue || !queryValue) return false;
-      if (exact) {
-        if (sourceValue === queryValue) return true;
-        const tailLength = Math.min(sourceValue.length, queryValue.length, 8);
-        return tailLength >= 7 && sourceValue.slice(-tailLength) === queryValue.slice(-tailLength);
-      }
-      return queryValue.length >= 4 && matchesSequentialValue(sourceValue, queryValue);
-    }),
-  );
-}
-
-function bookingInputName(input: ClientMatchInput) {
-  return safeText(input.name ?? [input.firstName, input.lastName].filter(Boolean).join(" ")).trim();
-}
-
-function splitClientName(name: string) {
-  const parts = safeText(name).trim().split(/\s+/).filter(Boolean);
-  return {
-    firstName: parts[0] ?? "",
-    lastName: parts.slice(1).join(" "),
-  };
-}
-
-function hasClientMatchInput(input: ClientMatchInput) {
-  return (
-    normalizeMatchText(bookingInputName(input)).length >= 2 ||
-    normalizeMatchText(input.email ?? "").length >= 3 ||
-    normalizePhoneDigits(input.phone ?? "").length >= 4
-  );
-}
-
-function clientMatchesInput(client: MatchableClient, input: ClientMatchInput, exact = false) {
-  const clientName = normalizeMatchText(client.name);
-  const clientEmail = normalizeMatchText(client.email);
-  const inputName = normalizeMatchText(bookingInputName(input));
-  const inputEmail = normalizeMatchText(input.email ?? "");
-
-  if (exact) {
-    return (
-      (inputEmail.length > 0 && clientEmail === inputEmail) ||
-      phoneValuesMatch(client.phone, input.phone ?? "", true) ||
-      (inputName.length > 0 && clientName === inputName)
-    );
-  }
-
-  return (
-    (inputEmail.length >= 3 && matchesSequentialValue(clientEmail, inputEmail)) ||
-    phoneValuesMatch(client.phone, input.phone ?? "") ||
-    (inputName.length >= 2 && matchesSequentialValue(clientName, inputName))
-  );
-}
-
-function findClientMatch<T extends MatchableClient>(clients: T[], input: ClientMatchInput, exact = false) {
-  if (!hasClientMatchInput(input)) return null;
-  const exactMatch = clients.find((client) => clientMatchesInput(client, input, true));
-  if (exact || exactMatch) return exactMatch ?? null;
-  return clients.find((client) => clientMatchesInput(client, input)) ?? null;
-}
-
-function clientMatchesSearchTerm(client: Pick<Person, "name" | "email" | "phone" | "notes" | "source">, term: string) {
-  const rawTerm = safeText(term).trim().toLowerCase();
-  if (!rawTerm) return true;
-  return clientSearchText(client).includes(rawTerm) || clientMatchesInput(client, { name: term, email: term, phone: term });
-}
-
-function clientKey(name = "", email = "", phone = "") {
-  const normalizedEmail = normalizeMatchText(email);
-  if (normalizedEmail) return `email:${normalizedEmail}`;
-  return `name:${normalizeMatchText(name)}|phone:${canonicalPhoneKey(phone)}`;
-}
-
-function clientNotificationKeys(name = "", email = "", phone = "") {
-  return new Set(
-    [
-      normalizeMatchText(email) ? `email:${normalizeMatchText(email)}` : "",
-      canonicalPhoneKey(phone) ? `phone:${canonicalPhoneKey(phone)}` : "",
-      normalizeMatchText(name) ? `name:${normalizeMatchText(name)}` : "",
-    ].filter(Boolean),
-  );
-}
-
-/* The two "everything belonging to this person" filters.
- *
- * They live out here, taking their inputs, because two screens need the same
- * answer: the client profile modal and the player profile's tab bar. Written
- * once so the modal and the profile can never disagree about which bookings
- * are whose.
- */
-function appointmentsForPerson(
-  person: Pick<Person, "id" | "name" | "email" | "phone">,
-  items: CalendarItem[],
-  inCoachScope: (item: CalendarItem) => boolean,
-) {
-  const key = clientKey(person.name, person.email, person.phone);
-  return items
-    .filter((item) => item.kind === "appointment")
-    .filter(inCoachScope)
-    .filter((item) =>
-      item.personId
-        ? item.personId === person.id
-        : clientKey(item.client || item.title, item.email ?? "", item.phone ?? "") === key,
-    )
-    .sort((a, b) => itemWeek(a) - itemWeek(b) || a.day - b.day || a.start - b.start);
-}
-
-function notificationsForPerson(
-  person: Pick<Person, "name" | "email" | "phone">,
-  notifications: NotificationRecord[],
-  personAppointments: CalendarItem[],
-) {
-  const keys = clientNotificationKeys(person.name, person.email, person.phone);
-  const appointmentIds = new Set(personAppointments.map((appointment) => appointment.id));
-  const personEmail = safeText(person.email).trim().toLowerCase();
-  return notifications
-    .filter((notification) => {
-      const isClientFacing =
-        notification.kind.includes("client") ||
-        Boolean(personEmail && safeText(notification.recipient).toLowerCase() === personEmail);
-      if (!isClientFacing || notification.kind.includes("admin")) return false;
-      return (
-        keys.has(notification.personKey) ||
-        appointmentIds.has(notification.calendarItemId) ||
-        Boolean(personEmail && safeText(notification.recipient).toLowerCase() === personEmail)
-      );
-    })
-    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
-}
-
-function browserBase64(value: string) {
-  try {
-    return window.btoa(value);
-  } catch {
-    return "";
-  }
-}
-
-function profileIdsForClient(client: Pick<Person, "id" | "email" | "phone">) {
-  const ids = new Set<string>();
-  const id = safeText(client.id).trim();
-  const email = safeText(client.email).trim().toLowerCase();
-  const phone = canonicalPhoneKey(client.phone);
-  if (id) ids.add(id);
-  if (email) {
-    ids.add(email);
-    const encodedEmail = browserBase64(email);
-    if (encodedEmail) ids.add(`email-${encodedEmail}`);
-  }
-  if (phone) ids.add(`phone-${phone}`);
-  return ids;
-}
-
-function hasAnyProfileId(ids: Set<string>, client: Pick<Person, "id" | "email" | "phone">) {
-  for (const id of profileIdsForClient(client)) {
-    if (ids.has(id)) return true;
-  }
-  return false;
-}
-
-function preferredVideoPlayerId(client: Pick<Person, "id" | "email" | "phone">, videoIds: Set<string>) {
-  for (const id of profileIdsForClient(client)) {
-    if (videoIds.has(id)) return id;
-  }
-  return safeText(client.id);
-}
-
-function caddyProfileUrl(
-  person: Pick<Person, "name" | "email" | "caddyProfileUrl" | "caddyProfileId">,
-  workspaceUrl = CADDY_APP_URL,
-) {
-  const caddyProfileUrlValue = safeText(person.caddyProfileUrl).trim();
-  const caddyProfileIdValue = safeText(person.caddyProfileId).trim();
-  const emailValue = safeText(person.email).trim();
-  const nameValue = safeText(person.name).trim();
-  if (caddyProfileUrlValue) return caddyProfileUrlValue;
-  const url = new URL(workspaceUrl || CADDY_APP_URL);
-  if (caddyProfileIdValue) url.searchParams.set("profile", caddyProfileIdValue);
-  if (emailValue) url.searchParams.set("email", emailValue);
-  if (nameValue) url.searchParams.set("name", nameValue);
-  return url.toString();
-}
-
-function isBookingGeneratedProfileNote(client: Pick<Person, "notes" | "source">) {
-  const note = safeText(client.notes).trim().toLowerCase().replace(/\.+$/, "");
-  const source = safeText(client.source).toLowerCase();
-  return note === "booked from public booking page" && source.includes("appointment");
-}
-
-function profileNotesText(client: Pick<Person, "notes" | "source">) {
-  return isBookingGeneratedProfileNote(client) ? "" : safeText(client.notes);
-}
-
-function clientSearchText(client: Pick<Person, "name" | "email" | "phone" | "notes" | "source">) {
-  return [client.name, client.email, client.phone, profileNotesText(client)]
-    .map((value) => safeText(value))
-    .join(" ")
-    .toLowerCase();
-}
-
-function editorFromClient(client: ClientSummary): ClientEditor {
-  return {
-    id: client.id,
-    name: client.name,
-    email: client.email,
-    phone: client.phone,
-    notes: profileNotesText(client),
-    caddyProfileId: client.caddyProfileId,
-    caddyProfileUrl: client.caddyProfileUrl,
-  };
-}
-
-function parseDelimitedLine(line: string) {
-  const cells: string[] = [];
-  let cell = "";
-  let quoted = false;
-  const delimiter = line.includes("\t") ? "\t" : ",";
-
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index];
-    const next = line[index + 1];
-    if (char === '"' && quoted && next === '"') {
-      cell += '"';
-      index += 1;
-    } else if (char === '"') {
-      quoted = !quoted;
-    } else if (char === delimiter && !quoted) {
-      cells.push(cell.trim());
-      cell = "";
-    } else {
-      cell += char;
-    }
-  }
-
-  cells.push(cell.trim());
-  return cells;
-}
-
-function normalizeImportHeader(header: string) {
-  return header.toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
-function parsePeopleImport(text: string): Person[] {
-  const rows = text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map(parseDelimitedLine);
-  if (!rows.length) return [];
-
-  const headerKeys = new Map([
-    ["name", "name"],
-    ["fullname", "name"],
-    ["client", "name"],
-    ["firstname", "firstName"],
-    ["first", "firstName"],
-    ["lastname", "lastName"],
-    ["last", "lastName"],
-    ["email", "email"],
-    ["emailaddress", "email"],
-    ["phone", "phone"],
-    ["mobile", "phone"],
-    ["notes", "notes"],
-    ["note", "notes"],
-    ["caddyprofileid", "caddyProfileId"],
-    ["caddyid", "caddyProfileId"],
-    ["caddyprofileurl", "caddyProfileUrl"],
-    ["caddyurl", "caddyProfileUrl"],
-  ]);
-  const firstRowKeys = rows[0].map((cell) => headerKeys.get(normalizeImportHeader(cell)) || "");
-  const hasHeader = firstRowKeys.some(Boolean);
-  const headings = hasHeader ? firstRowKeys : ["name", "email", "phone", "notes", "caddyProfileUrl", "caddyProfileId"];
-  const bodyRows = hasHeader ? rows.slice(1) : rows;
-
-  return bodyRows
-    .map((row, index) => {
-      const record = Object.fromEntries(headings.map((heading, cellIndex) => [heading, row[cellIndex] || ""]));
-      const joinedName = [record.firstName, record.lastName].filter(Boolean).join(" ");
-      const name = String(record.name || joinedName).trim();
-      const email = String(record.email || "").trim().toLowerCase();
-      if (!name && !email) return null;
-      return {
-        id: `import-${Date.now()}-${index}`,
-        name: name || email,
-        email,
-        phone: String(record.phone || "").trim(),
-        notes: String(record.notes || "").trim(),
-        source: "manual_import",
-        caddyProfileId: String(record.caddyProfileId || "").trim(),
-        caddyProfileUrl: String(record.caddyProfileUrl || "").trim(),
-      };
-    })
-    .filter(Boolean) as Person[];
-}
-
-const PEOPLE_IMPORT_ENDPOINT = "/api/people/import-lite";
-
-function importNumber(value: unknown) {
-  const number = Number(value);
-  return Number.isFinite(number) ? Math.max(0, Math.round(number)) : 0;
-}
-
-function importErrorMessages(result: PeopleImportResult) {
-  return Array.isArray(result.errors)
-    ? result.errors
-        .map((error) =>
-          [
-            error.rowNumber !== undefined ? t("Row {rowNumber}", { rowNumber: error.rowNumber }) : error.name,
-            error.message || error.reason,
-          ].filter(Boolean).join(": "),
-        )
-        .filter(Boolean)
-        .slice(0, 4)
-    : [];
-}
-
-function buildPeopleImportDiagnostic(
-  endpoint: string,
-  status: number,
-  ok: boolean,
-  result: PeopleImportResult,
-  fallbackMessage: string,
-): PeopleImportDiagnostic {
-  const imported = importNumber(result.imported ?? result.created);
-  const updated = importNumber(result.updated);
-  const skipped = importNumber(result.skipped);
-  const errors = importErrorMessages(result);
-  const failed = importNumber(result.failed ?? errors.length);
-  const summary = `${imported} imported, ${updated} updated, ${skipped} skipped${failed ? `, ${failed} failed` : ""}`;
-  return {
-    endpoint,
-    status,
-    ok,
-    imported,
-    updated,
-    skipped,
-    failed,
-    errors,
-    message: ok ? summary : errors[0] || fallbackMessage,
-  };
-}
-
 function generateSyncKey() {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return `cg_${crypto.randomUUID().replaceAll("-", "")}`;
   }
   return `cg_${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
-}
-
-/** Matches the --lesson-* / --status-* fallbacks in styles.css. */
-const defaultCalendarColors: CalendarColorSettings = {
-  statusCompleted: "#7f8a80",
-  statusBayBooked: "#e08a2e",
-};
-
-const calendarColorFields: { key: keyof CalendarColorSettings; label: string; hint: string }[] = [
-  { key: "statusCompleted", label: t("Completed"), hint: t("Card border") },
-  { key: "statusBayBooked", label: t("Bay booked"), hint: t("Outer ring") },
-];
-
-const defaultBrandSettings: BrandSettings = {
-  // Empty, not the original business's name. This is the "from" name on a
-  // workspace's emails.
-  coachName: "",
-  logoName: "",
-  logoPreview: "",
-  showLogo: false,
-  neutral: "#ffffff",
-  primary: "#1fd36d",
-  secondary: "#d7b06b",
-  accent: "#07100a",
-  bookingTheme: "dark",
-  calendarColors: defaultCalendarColors,
-};
-
-// The shape a coach account takes before the server has said anything, and the
-// fallback for any field that arrives empty.
-//
-// It used to hold the original business's real details -- "Sam Hale", "Sam Hale
-// Golf", "The Range 24/7 - Three Kings" -- which meant the client quietly wrote
-// them back into any account whose settings left a field blank. A second
-// business's availability screen was headed "The Range 24/7 - Three Kings" and
-// its booking emails were signed by Sam Hale, even though the server had
-// correctly sent empty strings for both. The server has neutral defaults now
-// (see neutralCoachAccount in booking-core.mts); this is the other half of
-// that, and the two must stay in step.
-//
-// Only genuinely product-level values remain: Clarity's own URLs, and a
-// platform timezone/country guess for a workspace that has not chosen one.
-// Everything identifying starts empty and is filled in during setup.
-const defaultCoachAccount: CoachAccount = {
-  id: "",
-  coachName: "",
-  businessName: "",
-  venueName: "",
-  venueShortName: "",
-  timezone: "Pacific/Auckland",
-  country: "NZ",
-  messageLanguage: "en",
-  contactEmail: "",
-  bookingUrl: "https://book.claritygolf.app",
-  calendarSlug: "",
-  caddyWorkspaceUrl: CADDY_APP_URL,
-  terminology: terminologyFor(),
-  market: { ...DEFAULT_ACCOUNT_MARKET_CONFIG },
-  invoiceSettings: defaultInvoiceSettings,
-};
-
-/**
- * Starting fills for lesson types, handed out by position so a workspace that
- * has never opened the colour picker still reads as several kinds of lesson
- * rather than one wall of the same colour. Dark enough to carry white text at
- * the size a calendar card actually gets.
- */
-const serviceColorPalette = [
-  "#2b2233",
-  "#1c3348",
-  "#14342a",
-  "#3f3320",
-  "#2f2438",
-  "#123043",
-  "#1a3b2f",
-  "#402b28",
-];
-
-function defaultServiceColor(index: number) {
-  return serviceColorPalette[Math.abs(index) % serviceColorPalette.length];
-}
-
-function cleanHexColor(value: unknown, fallback: string) {
-  if (typeof value !== "string") return fallback;
-  const trimmed = value.trim();
-  return /^#[0-9a-f]{6}$/i.test(trimmed) ? trimmed : fallback;
-}
-
-function cleanSlug(value: unknown, fallback: string) {
-  if (typeof value !== "string") return fallback;
-  const slug = value
-    .trim()
-    .toLowerCase()
-    .replace(/&/g, " and ")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80);
-  return slug || fallback;
-}
-
-function cleanUrl(value: unknown, fallback: string) {
-  if (typeof value !== "string" || !value.trim()) return fallback;
-  try {
-    const url = new URL(value.trim());
-    if (url.protocol !== "http:" && url.protocol !== "https:") return fallback;
-    return url.toString().replace(/\/$/, "");
-  } catch {
-    return fallback;
-  }
-}
-
-// A coach photo: either a link, or a small image uploaded from the coach
-// profile screen and kept as a data URL beside the coach (like the logo).
-const COACH_PHOTO_DATA_URL = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$/;
-function cleanCoachPhoto(value: unknown) {
-  if (typeof value === "string" && value.startsWith("data:image/")) {
-    return value.length <= 200_000 && COACH_PHOTO_DATA_URL.test(value) ? value : "";
-  }
-  return cleanUrl(value, "");
-}
-
-function cleanEmail(value: unknown, fallback: string) {
-  if (typeof value !== "string") return fallback;
-  const email = value.trim().toLowerCase().slice(0, 180);
-  return email.includes("@") ? email : fallback;
-}
-
-function cleanCoachAccount(account?: Partial<CoachAccount>): CoachAccount {
-  const businessName =
-    typeof account?.businessName === "string" && account.businessName.trim()
-      ? account.businessName.trim().slice(0, 100)
-      : defaultCoachAccount.businessName;
-  const coachName =
-    typeof account?.coachName === "string" && account.coachName.trim()
-      ? account.coachName.trim().slice(0, 100)
-      : defaultCoachAccount.coachName;
-  const venueName =
-    typeof account?.venueName === "string" && account.venueName.trim()
-      ? account.venueName.trim().slice(0, 140)
-      : defaultCoachAccount.venueName;
-  const venueShortName =
-    typeof account?.venueShortName === "string" && account.venueShortName.trim()
-      ? account.venueShortName.trim().slice(0, 80)
-      : venueName;
-  return {
-    id: cleanSlug(account?.id, defaultCoachAccount.id),
-    coachName,
-    businessName,
-    venueName,
-    venueShortName,
-    timezone:
-      typeof account?.timezone === "string" && account.timezone.trim()
-        ? account.timezone.trim().slice(0, 80)
-        : defaultCoachAccount.timezone,
-    country: cleanPhoneCountry(account?.country, defaultCoachAccount.country),
-    messageLanguage: cleanMessageLanguage(account?.messageLanguage),
-    contactEmail: cleanEmail(account?.contactEmail, defaultCoachAccount.contactEmail),
-    bookingUrl: cleanUrl(account?.bookingUrl, defaultCoachAccount.bookingUrl),
-    calendarSlug: cleanSlug(account?.calendarSlug, cleanSlug(businessName, defaultCoachAccount.calendarSlug)),
-    caddyWorkspaceUrl: cleanUrl(account?.caddyWorkspaceUrl, defaultCoachAccount.caddyWorkspaceUrl),
-    terminology: terminologyFor(
-      account?.terminology,
-      marketProfileFor(cleanMarketConfig(account?.market).profileId).terminology,
-    ),
-    market: cleanMarketConfig(account?.market),
-    invoiceSettings: cleanInvoiceSettings(
-      account?.invoiceSettings,
-      cleanPhoneCountry(account?.country, defaultCoachAccount.country),
-    ),
-  };
-}
-
-const accountFeatureKeys: AccountFeatureKey[] = [
-  "publicBooking",
-  "coachCalendar",
-  "locationCalendar",
-  "multiCoach",
-  "multiLocation",
-  "services",
-  "groupLessons",
-  "packages",
-  "clients",
-  "notifications",
-  "googleCalendarSync",
-  "invoicing",
-  "checkout",
-  "customBranding",
-  "customDomains",
-  "staffUsers",
-  "advancedPermissions",
-];
-
-// What the Account screen calls each part of a plan. Staff and service words
-// follow the business's own terminology, so a physio clinic never reads "Coach".
-function accountFeatureLabel(feature: AccountFeatureKey, terms: BusinessTerminology) {
-  const labels: Record<AccountFeatureKey, string> = {
-    publicBooking: t("Online booking page"),
-    coachCalendar: t("{staffSingular} calendar", { staffSingular: terms.staffSingular }),
-    locationCalendar: t("Location calendar"),
-    multiCoach: t("Multiple {staffPlural}", { staffPlural: terms.staffPlural.toLowerCase() }),
-    multiLocation: t("Multiple locations"),
-    services: t("{serviceSingular} types", { serviceSingular: terms.serviceSingular }),
-    groupLessons: t("Group {servicePlural}", { servicePlural: terms.servicePlural.toLowerCase() }),
-    packages: t("Packages"),
-    clients: t("{customerSingular} records", { customerSingular: terms.customerSingular }),
-    notifications: t("Email and SMS notifications"),
-    googleCalendarSync: t("Google Calendar sync"),
-    invoicing: t("Invoicing"),
-    checkout: t("Online checkout"),
-    customBranding: t("Custom branding"),
-    customDomains: t("Custom domains"),
-    staffUsers: t("Team logins"),
-    advancedPermissions: t("Advanced permissions"),
-  };
-  return labels[feature];
-}
-
-const SUBSCRIPTION_STATUS_LABEL: Record<SubscriptionStatus, string> = {
-  trialing: t("Trial"),
-  active: t("Active"),
-  past_due: t("Payment overdue"),
-  paused: t("Paused"),
-  cancelled: t("Cancelled"),
-  comped: t("Complimentary"),
-  internal: t("Internal"),
-};
-
-// Plans at or above this are sold as unlimited; the catalogue stores 999
-// because a limit has to be a number.
-const UNLIMITED_ACCOUNT_LIMIT = 999;
-
-function accountFeatures(enabled: AccountFeatureKey[]): Record<AccountFeatureKey, boolean> {
-  return accountFeatureKeys.reduce(
-    (features, feature) => ({ ...features, [feature]: enabled.includes(feature) }),
-    {} as Record<AccountFeatureKey, boolean>,
-  );
-}
-
-const allAccountFeatures = accountFeatures(accountFeatureKeys);
-
-const accountPlanCatalog: Record<AccountPlanKey, AccountEntitlements> = {
-  solo: {
-    features: accountFeatures([
-      "publicBooking",
-      "coachCalendar",
-      "services",
-      "groupLessons",
-      "packages",
-      "clients",
-      "notifications",
-      "googleCalendarSync",
-    ]),
-    limits: { maxCoaches: 1, maxLocations: 1, maxUsers: 1, maxServices: 10, maxBookingScreens: 1 },
-  },
-  studio: {
-    features: accountFeatures([
-      "publicBooking",
-      "coachCalendar",
-      "locationCalendar",
-      "multiCoach",
-      "multiLocation",
-      "services",
-      "groupLessons",
-      "packages",
-      "clients",
-      "notifications",
-      "googleCalendarSync",
-      "invoicing",
-      "customBranding",
-      "staffUsers",
-    ]),
-    limits: { maxCoaches: 5, maxLocations: 3, maxUsers: 8, maxServices: 40, maxBookingScreens: 4 },
-  },
-  academy: {
-    features: allAccountFeatures,
-    limits: { maxCoaches: 20, maxLocations: 10, maxUsers: 30, maxServices: 120, maxBookingScreens: 12 },
-  },
-  enterprise: {
-    features: allAccountFeatures,
-    limits: { maxCoaches: 999, maxLocations: 999, maxUsers: 999, maxServices: 999, maxBookingScreens: 999 },
-  },
-  founder: {
-    features: allAccountFeatures,
-    limits: { maxCoaches: 999, maxLocations: 999, maxUsers: 999, maxServices: 999, maxBookingScreens: 999 },
-  },
-};
-
-function mergeEntitlementOverrides(
-  base: AccountEntitlements,
-  override?: AccountEntitlementsOverride,
-): AccountEntitlements {
-  return {
-    features: { ...base.features, ...(override?.features ?? {}) },
-    limits: { ...base.limits, ...(override?.limits ?? {}) },
-  };
-}
-
-function accountEntitlements(account: WorkspaceAccount): AccountEntitlements {
-  return mergeEntitlementOverrides(accountPlanCatalog[account.planKey] ?? accountPlanCatalog.solo, account.entitlementsOverride);
-}
-
-function accountHasFeature(account: WorkspaceAccount, feature: AccountFeatureKey) {
-  return accountEntitlements(account).features[feature] === true;
-}
-
-function accountLimit(account: WorkspaceAccount, limit: keyof AccountLimits) {
-  return accountEntitlements(account).limits[limit];
-}
-
-function isAccountActive(account: WorkspaceAccount) {
-  return account.active && ["trialing", "active", "comped", "internal"].includes(account.subscriptionStatus);
-}
-
-function defaultWorkspaceAccountFromCoachAccount(account: Partial<CoachAccount> = defaultCoachAccount): WorkspaceAccount {
-  const cleanAccount = cleanCoachAccount(account);
-  // No fallback to the original workspace: a shell built for a business that
-  // has not named itself yet stays unnamed rather than borrowing.
-  const slug = cleanSlug(cleanAccount.calendarSlug || cleanAccount.businessName, "");
-  return {
-    id: slug,
-    name: cleanAccount.businessName,
-    slug,
-    planKey: "solo",
-    subscriptionStatus: "trialing",
-    billingProvider: "none",
-    active: true,
-  };
-}
-
-function cleanWorkspaceAccount(
-  raw?: Partial<WorkspaceAccount>,
-  fallback: WorkspaceAccount = defaultWorkspaceAccountFromCoachAccount(),
-): WorkspaceAccount {
-  const name =
-    typeof raw?.name === "string" && raw.name.trim()
-      ? raw.name.trim().slice(0, 120)
-      : fallback.name;
-  const slug = cleanSlug(raw?.slug || raw?.id || name, fallback.slug);
-  const planKey: AccountPlanKey =
-    raw?.planKey && raw.planKey in accountPlanCatalog ? raw.planKey : fallback.planKey;
-  const subscriptionStatus: SubscriptionStatus =
-    raw?.subscriptionStatus && ["trialing", "active", "past_due", "paused", "cancelled", "comped", "internal"].includes(raw.subscriptionStatus)
-      ? raw.subscriptionStatus
-      : fallback.subscriptionStatus;
-  return {
-    id: cleanSlug(raw?.id, slug),
-    name,
-    slug,
-    planKey,
-    subscriptionStatus,
-    ownerUserId: typeof raw?.ownerUserId === "string" && raw.ownerUserId.trim() ? raw.ownerUserId.trim().slice(0, 120) : fallback.ownerUserId,
-    billingProvider: raw?.billingProvider === "stripe" || raw?.billingProvider === "manual" || raw?.billingProvider === "none" ? raw.billingProvider : fallback.billingProvider,
-    billingCustomerId: typeof raw?.billingCustomerId === "string" && raw.billingCustomerId.trim() ? raw.billingCustomerId.trim().slice(0, 160) : undefined,
-    billingSubscriptionId: typeof raw?.billingSubscriptionId === "string" && raw.billingSubscriptionId.trim() ? raw.billingSubscriptionId.trim().slice(0, 160) : undefined,
-    trialEndsAt: typeof raw?.trialEndsAt === "string" && raw.trialEndsAt.trim() ? raw.trialEndsAt.trim() : undefined,
-    currentPeriodEndsAt: typeof raw?.currentPeriodEndsAt === "string" && raw.currentPeriodEndsAt.trim() ? raw.currentPeriodEndsAt.trim() : undefined,
-    entitlementsOverride:
-      raw?.entitlementsOverride && typeof raw.entitlementsOverride === "object"
-        ? {
-            features: raw.entitlementsOverride.features,
-            limits: raw.entitlementsOverride.limits,
-          }
-        : undefined,
-    active: raw?.active !== false,
-    createdAt: typeof raw?.createdAt === "string" ? raw.createdAt : fallback.createdAt,
-    updatedAt: typeof raw?.updatedAt === "string" ? raw.updatedAt : fallback.updatedAt,
-  };
-}
-
-function cleanWorkspaceAccounts(rawAccounts?: Partial<WorkspaceAccount>[], account?: Partial<CoachAccount>): WorkspaceAccount[] {
-  const fallback = defaultWorkspaceAccountFromCoachAccount(account ?? defaultCoachAccount);
-  const source = Array.isArray(rawAccounts) && rawAccounts.length ? rawAccounts : [fallback];
-  const seen = new Set<string>();
-  return source.map((raw, index) => {
-    const clean = cleanWorkspaceAccount(raw, index === 0 ? fallback : defaultWorkspaceAccountFromCoachAccount(account ?? defaultCoachAccount));
-    let id = clean.id;
-    let suffix = 2;
-    while (seen.has(id)) {
-      id = `${clean.id}-${suffix}`;
-      suffix += 1;
-    }
-    seen.add(id);
-    return { ...clean, id, active: clean.active || index === 0 };
-  });
-}
-
-function activeWorkspaceAccounts(accounts: WorkspaceAccount[]) {
-  return accounts.filter((account) => account.active);
-}
-
-function defaultAccountId(accounts: WorkspaceAccount[]) {
-  return activeWorkspaceAccounts(accounts)[0]?.id || accounts[0]?.id || defaultWorkspaceAccountFromCoachAccount().id;
-}
-
-function accountById(accounts: WorkspaceAccount[], id?: string) {
-  if (!id) return undefined;
-  return accounts.find((account) => account.id === id);
-}
-
-function resolvedRecordAccountId(record: { accountId?: string } | undefined, fallbackAccountId = defaultWorkspaceAccountFromCoachAccount().id) {
-  return record?.accountId || fallbackAccountId;
-}
-
-function recordBelongsToAccount(record: { accountId?: string } | undefined, accountId: string) {
-  return resolvedRecordAccountId(record, accountId) === accountId;
-}
-
-function filterRecordsForAccount<T extends { accountId?: string }>(records: T[], accountId: string) {
-  return records.filter((record) => recordBelongsToAccount(record, accountId));
-}
-
-function serviceBelongsToAccount(service: Partial<Service> | undefined, accountId: string) {
-  return recordBelongsToAccount(service, accountId);
-}
-
-function userBelongsToAccount(user: Partial<AppUser> | undefined, accountId: string) {
-  return recordBelongsToAccount(user, accountId);
-}
-
-function canUseFeature(account: WorkspaceAccount, feature: AccountFeatureKey) {
-  return isAccountActive(account) && accountHasFeature(account, feature);
-}
-
-function canCreateWithinLimit(account: WorkspaceAccount, currentUsage: number, limitName: keyof AccountLimits) {
-  return currentUsage < accountLimit(account, limitName);
-}
-
-function featureUnavailableMessage(feature: AccountFeatureKey) {
-  return t("{feature} is not included in this workspace plan.", { feature });
-}
-
-function limitReachedMessage(limitName: keyof AccountLimits, limit: number) {
-  return t("This workspace plan allows {limit} {limitName}.", { limit, limitName: limitName.replace(/^max/, "").toLowerCase() });
-
-}
-
-function defaultLocationFromCoachAccount(account: Partial<CoachAccount> = defaultCoachAccount): Location {
-  const cleanAccount = cleanCoachAccount(account);
-  const workspaceAccount = defaultWorkspaceAccountFromCoachAccount(cleanAccount);
-  return {
-    id: "default-location",
-    accountId: workspaceAccount.id,
-    name: cleanAccount.venueName,
-    shortName: cleanAccount.venueShortName || cleanAccount.venueName,
-    address: "",
-    timezone: cleanAccount.timezone,
-    active: true,
-    archived: false,
-    isDefault: true,
-    sortOrder: 0,
-  };
-}
-
-function defaultCoachProfileFromAccount(account: Partial<CoachAccount> = defaultCoachAccount): CoachProfile {
-  const cleanAccount = cleanCoachAccount(account);
-  const workspaceAccount = defaultWorkspaceAccountFromCoachAccount(cleanAccount);
-  return {
-    id: cleanAccount.id,
-    accountId: workspaceAccount.id,
-    name: cleanAccount.coachName,
-    displayName: cleanAccount.coachName || cleanAccount.businessName,
-    shortName: cleanAccount.coachName.split(/\s+/)[0] || "",
-    email: cleanAccount.contactEmail,
-    active: true,
-    archived: false,
-    bookable: true,
-    assignedLocationIds: ["default-location"],
-    defaultLocationId: "default-location",
-    sortOrder: 0,
-  };
-}
-
-function defaultAppUserFromCoachAccount(account: Partial<CoachAccount> = defaultCoachAccount): AppUser {
-  const coach = defaultCoachProfileFromAccount(account);
-  const workspaceAccount = defaultWorkspaceAccountFromCoachAccount(account);
-  return {
-    id: `${coach.id}-admin`,
-    accountId: workspaceAccount.id,
-    email: coach.email,
-    name: coach.displayName,
-    role: "admin",
-    coachId: coach.id,
-    permissions: {
-      bookings: "all",
-      services: "all",
-      availability: "all",
-      locations: "all",
-      clients: "all",
-      settings: "all",
-    },
-  };
-}
-
-function cleanAppUser(raw?: Partial<AppUser>, fallback = defaultAppUserFromCoachAccount(), accountId = fallback.accountId): AppUser {
-  const role =
-    raw?.role === "account_admin" || raw?.role === "coach" || raw?.role === "staff" || raw?.role === "platform_admin"
-      ? raw.role
-      : raw?.role === "admin"
-        ? "admin"
-        : fallback.role;
-  const permissions = typeof raw?.permissions === "object" && raw.permissions ? raw.permissions : fallback.permissions;
-  return {
-    id: cleanSlug(raw?.id, fallback.id),
-    accountId: cleanSlug(raw?.accountId, accountId || defaultWorkspaceAccountFromCoachAccount().id),
-    email: cleanEmail(raw?.email, fallback.email),
-    name: typeof raw?.name === "string" && raw.name.trim() ? raw.name.trim().slice(0, 120) : fallback.name,
-    role,
-    coachId: cleanSlug(raw?.coachId, fallback.coachId || "") || undefined,
-    permissions: {
-      bookings: permissions.bookings === "own" || permissions.bookings === "assigned" ? permissions.bookings : "all",
-      services: permissions.services === "own" || permissions.services === "assigned" ? permissions.services : "all",
-      availability: permissions.availability === "own" || permissions.availability === "assigned" ? permissions.availability : "all",
-      locations: permissions.locations === "own" || permissions.locations === "assigned" ? permissions.locations : "all",
-      clients: permissions.clients === "own" || permissions.clients === "assigned" ? permissions.clients : "all",
-      settings: permissions.settings === "own" || permissions.settings === "assigned" ? permissions.settings : "all",
-    },
-  };
-}
-
-function blankCoachProfile(accountId = ""): CoachProfile {
-  return {
-    id: "",
-    accountId,
-    name: "",
-    displayName: "",
-    shortName: "",
-    email: "",
-    active: true,
-    archived: false,
-    bookable: true,
-    assignedLocationIds: ["default-location"],
-    defaultLocationId: "default-location",
-    sortOrder: 0,
-  };
-}
-
-function cleanCoachProfile(raw?: Partial<CoachProfile>, fallback?: CoachProfile, index = 0): CoachProfile {
-  const base = fallback ?? blankCoachProfile(defaultWorkspaceAccountFromCoachAccount().id);
-  const name =
-    typeof raw?.name === "string" && raw.name.trim()
-      ? raw.name.trim().slice(0, 120)
-      : base.name;
-  return {
-    id: cleanSlug(raw?.id, cleanSlug(name, `coach-${index + 1}`)),
-    accountId: cleanSlug(raw?.accountId, base.accountId || defaultWorkspaceAccountFromCoachAccount().id),
-    name,
-    displayName:
-      typeof raw?.displayName === "string" && raw.displayName.trim()
-        ? raw.displayName.trim().slice(0, 120)
-        : name,
-    shortName:
-      typeof raw?.shortName === "string" && raw.shortName.trim()
-        ? raw.shortName.trim().slice(0, 60)
-        : name.split(/\s+/).map((part) => part[0]).join("").slice(0, 4).toUpperCase(),
-    email: cleanEmail(raw?.email, base.email),
-    phone: typeof raw?.phone === "string" && raw.phone.trim() ? raw.phone.trim().slice(0, 80) : undefined,
-    bio: typeof raw?.bio === "string" && raw.bio.trim() ? raw.bio.trim().slice(0, 600) : undefined,
-    photoUrl: cleanCoachPhoto(raw?.photoUrl) || undefined,
-    active: raw?.active !== false,
-    archived: raw?.archived === true,
-    bookable: raw?.bookable !== false,
-    assignedLocationIds: Array.isArray(raw?.assignedLocationIds)
-      ? raw.assignedLocationIds.map((id) => cleanSlug(id, "")).filter(Boolean)
-      : base.assignedLocationIds,
-    defaultLocationId: cleanSlug(raw?.defaultLocationId, raw?.assignedLocationIds?.[0] || base.assignedLocationIds?.[0] || "") || undefined,
-    sortOrder: Number.isFinite(Number(raw?.sortOrder)) ? Math.round(Number(raw?.sortOrder)) : index,
-  };
-}
-
-/**
- * Mirrors normalizeCoachProfiles in booking-core: only a list that was never
- * saved is seeded with the owner's coach. An empty list is a business whose
- * owner doesn't coach, and stays empty.
- */
-function cleanCoachProfiles(rawProfiles?: Partial<CoachProfile>[], account?: Partial<CoachAccount>): CoachProfile[] {
-  const seeded = !Array.isArray(rawProfiles);
-  const seed = defaultCoachProfileFromAccount(account ?? defaultCoachAccount);
-  const source = seeded ? [seed] : rawProfiles;
-  const seen = new Set<string>();
-  const cleaned = source.map((raw, index) => {
-    const profile = cleanCoachProfile(raw, seeded ? seed : blankCoachProfile(seed.accountId), index);
-    let id = profile.id;
-    let suffix = 2;
-    while (seen.has(id)) {
-      id = `${profile.id}-${suffix}`;
-      suffix += 1;
-    }
-    seen.add(id);
-    return { ...profile, id };
-  });
-  return cleaned.sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.displayName.localeCompare(b.displayName));
-}
-
-/**
- * The coach a record that names none belongs to: the first active coach in
- * the business's list. There is no "default coach" setting -- lesson types,
- * bookings and availability all name their coach -- so this only decides
- * where rows saved before that are shown. Mirrors firstCoachId in booking-core.
- */
-function firstCoachId(coaches: CoachProfile[]) {
-  return coaches.find((coach) => coach.active && !coach.archived)?.id || coaches[0]?.id || "";
-}
-
-function coachById(coaches: CoachProfile[], id?: string) {
-  if (!id) return undefined;
-  return coaches.find((coach) => coach.id === id);
-}
-
-function coachSnapshot(profile: CoachProfile): BookingCoachSnapshot {
-  return {
-    coachId: profile.id,
-    name: profile.name,
-    displayName: profile.displayName,
-    email: profile.email,
-    phone: profile.phone,
-  };
-}
-
-function bookingCoachSnapshotFor(coachId: string | undefined, coaches: CoachProfile[]): BookingCoachSnapshot | undefined {
-  const profile = coachById(coaches, coachId) ?? coachById(coaches, firstCoachId(coaches));
-  return profile ? coachSnapshot(profile) : undefined;
-}
-
-function cleanBookingCoachSnapshot(
-  raw?: Partial<BookingCoachSnapshot>,
-  fallback?: BookingCoachSnapshot,
-): BookingCoachSnapshot | undefined {
-  const source = raw?.name ? raw : fallback;
-  if (!source?.name) return undefined;
-  return {
-    coachId: typeof source.coachId === "string" ? cleanSlug(source.coachId, "") || undefined : undefined,
-    name: String(source.name).trim().slice(0, 120),
-    displayName:
-      typeof source.displayName === "string" && source.displayName.trim()
-        ? source.displayName.trim().slice(0, 120)
-        : undefined,
-    email: cleanEmail(source.email, "") || undefined,
-    phone: typeof source.phone === "string" && source.phone.trim() ? source.phone.trim().slice(0, 80) : undefined,
-  };
-}
-
-function calendarItemCoach(
-  item: Partial<CalendarItem> | undefined,
-  coaches: CoachProfile[],
-): BookingCoachSnapshot | undefined {
-  return (
-    cleanBookingCoachSnapshot(item?.coach) ??
-    bookingCoachSnapshotFor(item?.coachId, coaches)
-  );
-}
-
-function resolvedCalendarItemCoachId(
-  item: Partial<CalendarItem> | undefined,
-  service: Partial<Service> | undefined,
-  coaches: CoachProfile[],
-) {
-  return item?.coachId || item?.coach?.coachId || primaryServiceCoachId(service) || calendarItemCoach(item, coaches)?.coachId || firstCoachId(coaches);
-}
-
-function calendarItemBelongsToCoach(
-  item: Partial<CalendarItem> | undefined,
-  coachId: string | undefined,
-  service: Partial<Service> | undefined,
-  coaches: CoachProfile[],
-) {
-  if (!coachId) return false;
-  return resolvedCalendarItemCoachId(item, service, coaches) === coachId;
-}
-
-function cleanLocation(raw?: Partial<Location>, fallback?: Location, index = 0): Location {
-  const base = fallback ?? defaultLocationFromCoachAccount();
-  const name =
-    typeof raw?.name === "string" && raw.name.trim()
-      ? raw.name.trim().slice(0, 140)
-      : base.name;
-  const shortName =
-    typeof raw?.shortName === "string" && raw.shortName.trim()
-      ? raw.shortName.trim().slice(0, 80)
-      : name;
-  const id = cleanSlug(raw?.id, cleanSlug(name, `location-${index + 1}`));
-  return {
-    id,
-    accountId: cleanSlug(raw?.accountId, base.accountId || defaultWorkspaceAccountFromCoachAccount().id),
-    name,
-    shortName,
-    address: typeof raw?.address === "string" ? raw.address.trim().slice(0, 240) : base.address,
-    mapUrl: cleanUrl(raw?.mapUrl, "") || undefined,
-    arrivalInstructions:
-      typeof raw?.arrivalInstructions === "string" && raw.arrivalInstructions.trim()
-        ? raw.arrivalInstructions.trim().slice(0, 500)
-        : undefined,
-    publicNotes:
-      typeof raw?.publicNotes === "string" && raw.publicNotes.trim()
-        ? raw.publicNotes.trim().slice(0, 500)
-        : undefined,
-    timezone:
-      typeof raw?.timezone === "string" && raw.timezone.trim()
-        ? raw.timezone.trim().slice(0, 80)
-        : base.timezone,
-    // Kept through every clean: the server's normaliser mirrors these, and a
-    // location that loses them here saves back with no resources.
-    kind: cleanLocationKind(raw?.kind),
-    resourceSource: cleanResourceSource(raw?.resourceSource),
-    resources: cleanLocationResources(raw?.resources),
-    active: raw?.active !== false,
-    archived: raw?.archived === true,
-    isDefault: raw?.isDefault === true || base.isDefault === true,
-    sortOrder: Number.isFinite(Number(raw?.sortOrder)) ? Math.round(Number(raw?.sortOrder)) : index,
-  };
-}
-
-function cleanLocations(rawLocations?: Partial<Location>[], account?: Partial<CoachAccount>): Location[] {
-  const fallback = defaultLocationFromCoachAccount(account ?? defaultCoachAccount);
-  const source = Array.isArray(rawLocations) && rawLocations.length ? rawLocations : [fallback];
-  const seen = new Set<string>();
-  const cleaned = source.map((raw, index) => {
-    const location = cleanLocation(raw, index === 0 ? fallback : undefined, index);
-    let id = location.id;
-    let suffix = 2;
-    while (seen.has(id)) {
-      id = `${location.id}-${suffix}`;
-      suffix += 1;
-    }
-    seen.add(id);
-    return { ...location, id };
-  });
-  const active = cleaned.filter((location) => location.active && !location.archived);
-  if (!active.length) {
-    cleaned[0] = { ...cleaned[0], active: true, archived: false };
-  }
-  const defaultIndex = cleaned.findIndex((location) => location.isDefault && location.active && !location.archived);
-  const nextDefaultIndex = defaultIndex >= 0 ? defaultIndex : cleaned.findIndex((location) => location.active && !location.archived);
-  return cleaned
-    .map((location, index) => ({ ...location, isDefault: index === nextDefaultIndex }))
-    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name));
-}
-
-function activeLocations(locations: Location[]) {
-  return locations.filter((location) => location.active && !location.archived);
-}
-
-function defaultLocationId(locations: Location[]) {
-  return (
-    activeLocations(locations).find((location) => location.isDefault)?.id ??
-    activeLocations(locations)[0]?.id ??
-    locations[0]?.id ??
-    ""
-  );
-}
-
-function locationById(locations: Location[], id?: string) {
-  if (!id) return undefined;
-  return locations.find((location) => location.id === id);
-}
-
-function locationSnapshot(location: Location): BookingLocationSnapshot {
-  return {
-    locationId: location.id,
-    name: location.name,
-    shortName: location.shortName,
-    address: location.address || undefined,
-    mapUrl: location.mapUrl,
-    arrivalInstructions: location.arrivalInstructions,
-    publicNotes: location.publicNotes,
-    timezone: location.timezone,
-  };
-}
-
-function serviceLocation(service: Partial<Service> | undefined, locations: Location[], account: Partial<CoachAccount>) {
-  const cleanAccount = cleanCoachAccount(account);
-  return (
-    locationById(locations, primaryServiceLocationId(service)) ??
-    locationById(locations, defaultLocationId(locations)) ??
-    defaultLocationFromCoachAccount(cleanAccount)
-  );
-}
-
-function bookingLocationSnapshotFor(
-  service: Partial<Service> | undefined,
-  locations: Location[],
-  account: Partial<CoachAccount>,
-): BookingLocationSnapshot {
-  return locationSnapshot(serviceLocation(service, locations, account));
-}
-
-function cleanBookingLocationSnapshot(
-  raw?: Partial<BookingLocationSnapshot>,
-  fallback?: BookingLocationSnapshot,
-): BookingLocationSnapshot | undefined {
-  const source = raw?.name ? raw : fallback;
-  if (!source?.name) return undefined;
-  return {
-    locationId: typeof source.locationId === "string" ? source.locationId.trim().slice(0, 120) : undefined,
-    name: String(source.name).trim().slice(0, 140),
-    shortName: typeof source.shortName === "string" && source.shortName.trim() ? source.shortName.trim().slice(0, 80) : undefined,
-    address: typeof source.address === "string" && source.address.trim() ? source.address.trim().slice(0, 240) : undefined,
-    mapUrl: cleanUrl(source.mapUrl, "") || undefined,
-    arrivalInstructions:
-      typeof source.arrivalInstructions === "string" && source.arrivalInstructions.trim()
-        ? source.arrivalInstructions.trim().slice(0, 500)
-        : undefined,
-    publicNotes:
-      typeof source.publicNotes === "string" && source.publicNotes.trim()
-        ? source.publicNotes.trim().slice(0, 500)
-        : undefined,
-    timezone: typeof source.timezone === "string" && source.timezone.trim() ? source.timezone.trim().slice(0, 80) : undefined,
-  };
-}
-
-function calendarItemLocation(
-  item: Partial<CalendarItem> | undefined,
-  service: Partial<Service> | undefined,
-  locations: Location[],
-  account: Partial<CoachAccount>,
-): BookingLocationSnapshot {
-  return (
-    cleanBookingLocationSnapshot(item?.location) ??
-    cleanBookingLocationSnapshot(
-      item?.locationId ? locationSnapshot(locationById(locations, item.locationId) ?? serviceLocation(service, locations, account)) : undefined,
-    ) ??
-    bookingLocationSnapshotFor(service, locations, account)
-  );
-}
-
-function resolvedCalendarItemLocationId(
-  item: Partial<CalendarItem> | undefined,
-  service: Partial<Service> | undefined,
-  locations: Location[],
-  account: Partial<CoachAccount>,
-) {
-  return item?.locationId || item?.location?.locationId || primaryServiceLocationId(service) || calendarItemLocation(item, service, locations, account).locationId || defaultLocationId(locations);
-}
-
-function calendarItemCoachColumnId(
-  item: Partial<CalendarItem> | undefined,
-  service: Partial<Service> | undefined,
-  coaches: CoachProfile[],
-) {
-  return resolvedCalendarItemCoachId(item, service, coaches);
-}
-
-function isLocationOnlyBlock(item: Partial<CalendarItem> | undefined) {
-  return item?.kind === "block" && Boolean(item.locationId || item.location?.locationId) && !item.coachId && !item.coach?.coachId;
-}
-
-function isCoachOnlyBlock(item: Partial<CalendarItem> | undefined) {
-  return item?.kind === "block" && Boolean(item.coachId || item.coach?.coachId) && !item.locationId && !item.location?.locationId;
-}
-
-function isCoachLocationBlock(item: Partial<CalendarItem> | undefined) {
-  return item?.kind === "block" && Boolean(item.coachId || item.coach?.coachId) && Boolean(item.locationId || item.location?.locationId);
-}
-
-function isInactiveForConflict(item: Partial<CalendarItem> | undefined) {
-  return item?.status === "cancelled" || item?.status === "no_show";
-}
-
-type SchedulingConflictContext = {
-  candidateService?: Partial<Service>;
-  existingService?: Partial<Service>;
-  candidateCoachId?: string;
-  candidateLocationId?: string;
-  coaches: CoachProfile[];
-  locations: Location[];
-  account: Partial<CoachAccount>;
-};
-
-function isCoachConflict(
-  candidate: Partial<CalendarItem>,
-  existing: Partial<CalendarItem>,
-  context: SchedulingConflictContext,
-) {
-  if (isInactiveForConflict(existing)) return false;
-  const candidateCoachId =
-    context.candidateCoachId ??
-    resolvedCalendarItemCoachId(candidate, context.candidateService, context.coaches);
-  const existingCoachId = resolvedCalendarItemCoachId(existing, context.existingService, context.coaches);
-  if (!candidateCoachId || !existingCoachId || candidateCoachId !== existingCoachId) return false;
-  if (isLocationOnlyBlock(existing)) return false;
-  return existing.kind === "appointment" || existing.kind === "block";
-}
-
-function isLocationConflict(
-  candidate: Partial<CalendarItem>,
-  existing: Partial<CalendarItem>,
-  context: SchedulingConflictContext,
-) {
-  if (isInactiveForConflict(existing)) return false;
-  const candidateLocationId =
-    context.candidateLocationId ??
-    resolvedCalendarItemLocationId(candidate, context.candidateService, context.locations, context.account);
-  const existingLocationId = resolvedCalendarItemLocationId(existing, context.existingService, context.locations, context.account);
-  if (!candidateLocationId || !existingLocationId || candidateLocationId !== existingLocationId) return false;
-  if (isLocationOnlyBlock(existing)) return true;
-  if (isCoachOnlyBlock(existing)) return false;
-  if (isCoachLocationBlock(existing)) {
-    return isCoachConflict(candidate, existing, context);
-  }
-  return candidate.kind === "block" && isLocationOnlyBlock(candidate);
-}
-
-function isAppointmentConflict(
-  candidate: Partial<CalendarItem>,
-  existing: Partial<CalendarItem>,
-  context: SchedulingConflictContext,
-) {
-  if (isInactiveForConflict(existing)) return false;
-  return isCoachConflict(candidate, existing, context) || isLocationConflict(candidate, existing, context);
-}
-
-function bookingLocationDisplay(location: Partial<BookingLocationSnapshot> | undefined) {
-  return [location?.name, location?.address].filter(Boolean).join(" · ");
-}
-
-function bookingLocationShortDisplay(location: Partial<BookingLocationSnapshot> | undefined) {
-  return location?.shortName || location?.name || "";
-}
-
-function cleanEditableServiceText(value: unknown, fallback: string, maxLength: number) {
-  if (typeof value === "string") return value.trim().slice(0, maxLength);
-  return fallback;
-}
-
-// The per-field fallback for a service.
-//
-// This used to be defaultServices[index] -- the original coach's real lesson
-// list -- so a service arriving with a missing name, price or note had that
-// coach's name, price and "Bay hire included" written into it. Structural
-// defaults (a duration, a capacity of one) are product-level and stay; anything
-// a coach would recognise as *theirs* does not.
-const neutralServiceFallback: Service = {
-  ...defaultServices[0],
-  id: "",
-  name: "",
-  description: "",
-  lessonNote: "",
-  location: "",
-  price: 0,
-};
-
-// Whether a booking takes one of the location's resources, and which types or
-// single resources it may take. A review is not at a location at all.
-function cleanServiceResourceUse(service: Partial<Service> | undefined, canUseResources: boolean) {
-  const resourceMode = canUseResources ? serviceResourceMode(service) : "none";
-  if (resourceMode === "none") return {};
-  return {
-    resourceMode,
-    resourceTypes: cleanServiceResourceTypes(service?.resourceTypes),
-    // Unqualified ids are from when a lesson type had one location.
-    resourceIds: cleanServiceResourceIds(service?.resourceIds, primaryServiceLocationId(service)),
-  };
-}
-
-function cleanService(service?: Partial<Service>, index = 0): Service {
-  const fallback = neutralServiceFallback;
-  const descriptionFallback = service ? "" : fallback.description;
-  const locationFallback = service ? "" : fallback.location;
-  const lessonNoteFallback = service ? service.location || "" : fallback.lessonNote || fallback.location || "";
-  const name =
-    typeof service?.name === "string" && service.name.trim()
-      ? service.name.trim().slice(0, 120)
-      : fallback.name;
-  const duration = Number.isFinite(Number(service?.duration)) ? Number(service?.duration) : fallback.duration;
-  const price = Number.isFinite(Number(service?.price)) ? Number(service?.price) : fallback.price;
-  const capacity = Number.isFinite(Number(service?.capacity)) ? Number(service?.capacity) : fallback.capacity || 1;
-  // The chosen lesson format is authoritative. Legacy rows that predate the
-  // lessonFormat field are still detected by their "package-" id prefix, but a
-  // service name is never used to infer the format.
-  const looksLikePackage =
-    service?.lessonFormat === "package" ||
-    (!service?.lessonFormat && String(service?.id || "").startsWith("package-"));
-  const lessonFormat: LessonFormat =
-    looksLikePackage
-      ? "package"
-      : service?.lessonFormat === "group"
-        ? "group"
-        : service?.lessonFormat === "video-review"
-          ? "video-review"
-          : "private";
-  const videoReview = lessonFormat === "video-review";
-  const customGroup = lessonFormat === "group" && hasCustomGroupFlag(service);
-  const cleanCapacity = videoReview
-    ? 1
-    : customGroup
-      ? clamp(Math.round(capacity || DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS), DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS, DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS)
-      : clamp(Math.round(capacity), lessonFormat === "group" ? 2 : 1, 24);
-  const rawMinParticipants = Number.isFinite(Number(service?.minParticipants))
-    ? Number(service?.minParticipants)
-    : customGroup
-      ? DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS
-      : lessonFormat === "group"
-      ? Math.min(2, cleanCapacity)
-      : 1;
-  const minParticipants =
-    lessonFormat === "group" ? clamp(Math.round(rawMinParticipants), 2, cleanCapacity) : 1;
-  const baseParticipants = customGroupBaseParticipants({ ...service, capacity: cleanCapacity });
-  const basePrice = customGroupBasePrice(service);
-  const extraPersonPrice = customGroupExtraPersonPrice(service);
-  const priceMode: PriceMode =
-    lessonFormat === "group" && service?.priceMode === "per-person" && !customGroup ? "per-person" : "session";
-  const packageAllowance = Number.isFinite(Number(service?.packageAllowance))
-    ? clamp(Math.round(Number(service?.packageAllowance)), 1, 100)
-    : Math.max(1, fallback.packageAllowance ?? 5);
-  const packageCoverageMode: PackageCoverageMode =
-    service?.packageCoverageMode === "lesson-by-lesson" ? "lesson-by-lesson" : "upfront";
-  const groupSchedule = lessonFormat === "group" && !customGroup ? cleanGroupSchedule(service?.groupSchedule, fallback.groupSchedule) : undefined;
-  const bookingScreenIds = normalizeBookingScreenIds(service?.bookingScreenIds);
-  return {
-    id: cleanSlug(service?.id, cleanSlug(name, `service-${Date.now()}-${index}`)),
-    accountId: cleanSlug(service?.accountId, fallback.accountId || defaultWorkspaceAccountFromCoachAccount().id),
-    coachIds: cleanScopeIds(serviceCoachIds(service)),
-    name,
-    duration: clamp(Math.round(duration), 15, 240),
-    price: Math.max(0, Math.round(price)),
-    description: cleanEditableServiceText(service?.description, descriptionFallback, 240),
-    visibility: lessonFormat === "package" || service?.visibility === "private" ? "private" : "public",
-    active: service?.active !== false,
-    capacity: cleanCapacity,
-    minParticipants,
-    lessonFormat,
-    priceMode,
-    color: cleanHexColor(service?.color, defaultServiceColor(index)),
-    locationIds: cleanScopeIds(serviceLocationIds(service)),
-    ...cleanServiceResourceUse(service, !videoReview && lessonFormat !== "package"),
-    lessonNote: cleanEditableServiceText(service?.lessonNote, lessonNoteFallback, 180),
-    location: cleanEditableServiceText(service?.location, locationFallback, 160),
-    packageAllowance: lessonFormat === "package" ? packageAllowance : undefined,
-    packageCoverageMode: lessonFormat === "package" ? packageCoverageMode : undefined,
-    packageCoversServiceId:
-      lessonFormat === "package" && typeof service?.packageCoversServiceId === "string"
-        ? service.packageCoversServiceId.trim().slice(0, 120)
-        : undefined,
-    crossRedeemable: lessonFormat === "package" ? service?.crossRedeemable === true : undefined,
-    acceptsCrossRedemption:
-      lessonFormat !== "package" ? service?.acceptsCrossRedemption !== false : undefined,
-    reviewTurnaroundDays: videoReview
-      ? clamp(
-          Math.round(
-            Number(service?.reviewTurnaroundDays ?? fallback.reviewTurnaroundDays ?? DEFAULT_REVIEW_TURNAROUND_DAYS) ||
-              DEFAULT_REVIEW_TURNAROUND_DAYS,
-          ),
-          1,
-          MAX_REVIEW_TURNAROUND_DAYS,
-        )
-      : undefined,
-    groupSchedule,
-    bookingScreenIds,
-    customGroup: customGroup || undefined,
-    customGroupEnabled: customGroup || undefined,
-    baseParticipants: customGroup ? baseParticipants : undefined,
-    basePrice: customGroup ? basePrice : undefined,
-    extraPersonPrice: customGroup ? extraPersonPrice : undefined,
-    archived: service?.archived === true,
-  };
-}
-
-function cleanServices(serviceList?: Partial<Service>[]): Service[] {
-  // Only seed the demo lesson types when there is no services data at all.
-  // An explicit empty list means the coach deleted them and must stay empty.
-  const source = Array.isArray(serviceList) ? serviceList : defaultServices;
-  const seen = new Set<string>();
-  return source.map((service, index) => {
-    const clean = cleanService(service, index);
-    let id = clean.id;
-    let suffix = 2;
-    while (seen.has(id)) {
-      id = `${clean.id}-${suffix}`;
-      suffix += 1;
-    }
-    seen.add(id);
-    return { ...clean, id };
-  });
-}
-
-function calendarItemsFingerprint(itemList?: Partial<CalendarItem>[]) {
-  if (!Array.isArray(itemList)) return "";
-  return JSON.stringify(
-    itemList
-      .map((item) => ({
-        id: item.id || "",
-        kind: item.kind || "",
-        week: Number(item.week ?? 0),
-        day: Number(item.day ?? 0),
-        start: Number(item.start ?? 0),
-        duration: Number(item.duration ?? 0),
-        coachId: item.coachId || "",
-        locationId: item.locationId || "",
-        serviceId: item.serviceId || "",
-        client: item.client || "",
-        title: item.title || "",
-        phone: item.phone || "",
-        email: (item.email || "").toLowerCase(),
-        note: item.note || "",
-        location: item.location || null,
-        coach: item.coach || null,
-        status: item.status || "booked",
-        customGroup: item.customGroup === true,
-        attendees: Array.isArray(item.attendees) ? item.attendees : [],
-        calculatedPrice: Number(item.calculatedPrice ?? 0),
-      }))
-      .sort((first, second) => first.id.localeCompare(second.id)),
-  );
-}
-
-function calendarStateFingerprint(itemList: Partial<CalendarItem>[] | undefined, syncKey: string) {
-  return JSON.stringify({ items: calendarItemsFingerprint(itemList), syncKey });
-}
-
-function calendarItemsEquivalent(first?: Partial<CalendarItem>[], second?: Partial<CalendarItem>[]) {
-  return calendarItemsFingerprint(first) === calendarItemsFingerprint(second);
-}
-
-function calendarItemEquivalent(first?: Partial<CalendarItem>, second?: Partial<CalendarItem>) {
-  if (!first && !second) return true;
-  if (!first || !second) return false;
-  return calendarItemsEquivalent([first], [second]);
-}
-
-function calendarItemsById(itemList: CalendarItem[] = []) {
-  return new Map(itemList.filter((item) => item.id).map((item) => [item.id, item]));
-}
-
-function mergeCalendarItemsAfterConflict(
-  latestItems: CalendarItem[],
-  baselineItems: CalendarItem[],
-  desiredItems: CalendarItem[],
-) {
-  const latestById = calendarItemsById(latestItems);
-  const baselineById = calendarItemsById(baselineItems);
-  const desiredById = calendarItemsById(desiredItems);
-  const candidateIds = new Set([...baselineById.keys(), ...desiredById.keys()]);
-  const changedIds = new Set<string>();
-
-  candidateIds.forEach((id) => {
-    if (!calendarItemEquivalent(baselineById.get(id), desiredById.get(id))) changedIds.add(id);
-  });
-  if (!changedIds.size) return latestItems;
-
-  for (const id of changedIds) {
-    const baselineItem = baselineById.get(id);
-    const latestItem = latestById.get(id);
-    const desiredItem = desiredById.get(id);
-    // The live row already matches what we want (our earlier attempt landed, or the response
-    // was lost to a timeout and we retried). Not a conflict — nothing to resolve.
-    if (calendarItemEquivalent(latestItem, desiredItem)) continue;
-    // We are creating this id and it already exists live. Calendar item ids are client-generated
-    // UUIDs, so this can only be our own write landing before its response reached us — the
-    // server just echoes it back normalised (coach/location snapshots, default status). Keep our
-    // version rather than failing the save and telling the coach nothing was saved.
-    if (!baselineItem && latestItem && desiredItem) continue;
-    if (!baselineItem && latestItem) return null;
-    if (baselineItem && latestItem && !calendarItemEquivalent(latestItem, baselineItem)) return null;
-    if (baselineItem && !latestItem && desiredItem) return null;
-  }
-
-  const merged = latestItems.filter((item) => !changedIds.has(item.id));
-  desiredItems.forEach((item) => {
-    if (changedIds.has(item.id)) merged.push(item);
-  });
-  return merged;
-}
-
-function servicePriceLabel(service?: (Pick<Service, "price" | "priceMode"> & Partial<Service>) | null) {
-  if (!service) return t("No charge");
-  if (isCustomGroupService(service)) {
-    return t("{price} up to {count}", { price: formatMoney(customGroupBasePrice(service)), count: customGroupBaseParticipants(service) });
-  }
-  return service.priceMode === "per-person" ? t("{price} pp", { price: formatMoney(service.price) }) : formatMoney(service.price);
-}
-
-function notificationKindLabel(kind = "") {
-  if (kind.includes("coach")) return t("Coach notification");
-  if (kind.includes("admin")) return t("Admin notification");
-  if (kind.includes("client")) return t("Client email");
-  if (kind.includes("reschedule")) return t("Reschedule email");
-  if (kind.includes("test")) return t("Test email");
-  return t("Email receipt");
-}
-
-function notificationStatusLabel(notification: Pick<NotificationRecord, "status" | "error">) {
-  if (notification.status === "delivered") return t("Delivered");
-  if (notification.status === "opened") return t("Opened");
-  if (notification.status === "clicked") return t("Clicked");
-  if (notification.status === "sent") return t("Sent to provider");
-  if (notification.status === "delayed") return notification.error ? t("Delayed · {error}", { error: notification.error.replaceAll("_", " ") }) : t("Delayed");
-  if (notification.status === "bounced") return notification.error ? t("Bounced · {error}", { error: notification.error.replaceAll("_", " ") }) : t("Bounced");
-  if (notification.status === "suppressed") return notification.error ? t("Suppressed · {error}", { error: notification.error.replaceAll("_", " ") }) : t("Suppressed");
-  if (notification.status === "complained") return notification.error ? t("Complained · {error}", { error: notification.error.replaceAll("_", " ") }) : t("Complained");
-  if (notification.status === "skipped") return notification.error ? t("Skipped · {error}", { error: notification.error.replaceAll("_", " ") }) : t("Skipped");
-  if (notification.status === "failed") return notification.error ? t("Failed · {error}", { error: notification.error.replaceAll("_", " ") }) : t("Failed");
-  return notification.status || t("Pending");
-}
-
-function notificationTone(status = "") {
-  if (["delivered", "opened", "clicked"].includes(status)) return "delivered";
-  if (status === "sent") return "sent";
-  if (["bounced", "failed", "complained", "suppressed"].includes(status)) return "failed";
-  if (status === "skipped") return "skipped";
-  if (status === "delayed") return "delayed";
-  return "pending";
-}
-
-function notificationTimeLabel(createdAt = "") {
-  if (!createdAt) return "";
-  const time = new Date(createdAt);
-  return Number.isNaN(time.getTime()) ? "" : time.toLocaleString(activeLocale());
 }
 
 function profileRecordDateLabel(createdAt = "") {
@@ -4922,98 +1904,6 @@ function isoDateDiffDays(laterIso: string, earlierIso: string) {
   return Math.round((toUtcMillis(laterIso) - toUtcMillis(earlierIso)) / 86400000);
 }
 
-// --- Bank CSV import (expenses) ---------------------------------------------
-// Self-contained parser: quote-aware, handles escaped "" quotes, mixed line
-// endings and a BOM.
-
-// Currency follows the workspace country. It was hardcoded to NZD, which meant
-// a coach in another country was quoted prices in New Zealand dollars.
-/* Clarity Pay's cut in words: "1%", "1% + $0.30", "$0.30". */
-function clarityPayFeeLabel(fee: { percent: number; fixedCents: number }) {
-  const parts = [
-    fee.percent > 0 ? `${fee.percent}%` : "",
-    fee.fixedCents > 0 ? formatMoney(fee.fixedCents / 100) : "",
-  ].filter(Boolean);
-  return parts.length ? parts.join(" + ") : "nothing";
-}
-
-function formatMoney(amount: number, currency = activeCurrency()) {
-  return new Intl.NumberFormat(activeLocale(), {
-    style: "currency",
-    currency: currency || activeCurrency(),
-    maximumFractionDigits: 2,
-  }).format(Number.isFinite(amount) ? amount : 0);
-}
-
-// The currency's symbol (e.g. "$") for the active/selected currency, used to
-// prefix money inputs in the invoice editor so a raw number never shows without
-// its unit. Falls back to "$" if the locale can't produce one.
-function currencySymbol(currency = activeCurrency()) {
-  try {
-    const parts = new Intl.NumberFormat(activeLocale(), {
-      style: "currency",
-      currency: currency || activeCurrency(),
-      maximumFractionDigits: 0,
-    }).formatToParts(0);
-    return parts.find((part) => part.type === "currency")?.value || "$";
-  } catch {
-    return "$";
-  }
-}
-
-function parseMoneyInput(value: string) {
-  const normalised = value.replace(/,/g, "").replace(/[^0-9.]/g, "");
-  const firstDot = normalised.indexOf(".");
-  const cleaned =
-    firstDot === -1
-      ? normalised
-      : `${normalised.slice(0, firstDot + 1)}${normalised.slice(firstDot + 1).replace(/\./g, "")}`;
-  const parsed = Number(cleaned);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function parseQuantityInput(value: string) {
-  return Math.max(0, Math.round(parseMoneyInput(value)));
-}
-
-function parseDraftNumber(value: string) {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const parsed = Number(trimmed);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-type ServiceNumberField =
-  | "duration"
-  | "price"
-  | "packageAllowance"
-  | "reviewTurnaroundDays"
-  | "baseParticipants"
-  | "basePrice"
-  | "extraPersonPrice";
-
-const SERVICE_NUMBER_LIMITS: Record<ServiceNumberField, { min: number; max: number; fallback: number }> = {
-  duration: { min: 15, max: 240, fallback: 60 },
-  price: { min: 0, max: 100000, fallback: 0 },
-  packageAllowance: { min: 1, max: 100, fallback: 5 },
-  reviewTurnaroundDays: {
-    min: 1,
-    max: MAX_REVIEW_TURNAROUND_DAYS,
-    fallback: DEFAULT_REVIEW_TURNAROUND_DAYS,
-  },
-  baseParticipants: {
-    min: DEFAULT_CUSTOM_GROUP_MIN_PARTICIPANTS,
-    max: DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS,
-    fallback: DEFAULT_CUSTOM_GROUP_BASE_PARTICIPANTS,
-  },
-  basePrice: { min: 0, max: 100000, fallback: DEFAULT_CUSTOM_GROUP_BASE_PRICE },
-  extraPersonPrice: { min: 0, max: 100000, fallback: DEFAULT_CUSTOM_GROUP_EXTRA_PERSON_PRICE },
-};
-
-function generateServiceDraftId() {
-  return `service-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
 function emptyInvoiceDraft(settings = defaultInvoiceSettings, coachId = defaultCoachProfileFromAccount().id): InvoiceDraft {
   return {
     coachId,
@@ -5032,193 +1922,6 @@ function emptyInvoiceDraft(settings = defaultInvoiceSettings, coachId = defaultC
     taxInclusive: settings.taxInclusive,
     lines: [],
   };
-}
-
-function emptyServiceEditor(): ServiceEditor {
-  return {
-    name: "",
-    duration: 60,
-    price: 0,
-    description: "",
-    visibility: "public",
-    active: true,
-    capacity: 1,
-    minParticipants: 1,
-    lessonFormat: "private",
-    priceMode: "session",
-    color: defaultServiceColor(0),
-    coachIds: [],
-    locationIds: [],
-    lessonNote: "",
-    location: "",
-    groupSchedule: defaultGroupSchedule(),
-    packageAllowance: 5,
-    packageCoverageMode: "upfront",
-    packageCoversServiceId: "",
-    bookingScreenIds: ["main"],
-    customGroup: false,
-    customGroupEnabled: false,
-    baseParticipants: DEFAULT_CUSTOM_GROUP_BASE_PARTICIPANTS,
-    basePrice: DEFAULT_CUSTOM_GROUP_BASE_PRICE,
-    extraPersonPrice: DEFAULT_CUSTOM_GROUP_EXTRA_PERSON_PRICE,
-  };
-}
-
-function cleanAvailability(availability?: AvailabilityWindow[][], fallbackCoachId = defaultCoachProfileFromAccount().id): AvailabilityWindow[][] {
-  const source = Array.isArray(availability) ? availability : defaultAvailability;
-  return Array.from({ length: DAY_COUNT }, (_, day) => {
-    const windows = Array.isArray(source[day]) ? source[day] : [];
-    return windows
-      .map<AvailabilityWindow | null>((window) => {
-        const rawStart = Number.isFinite(Number(window?.start)) ? Number(window?.start) : DEFAULT_CALENDAR_START_MINUTES;
-        const rawEnd = Number.isFinite(Number(window?.end)) ? Number(window?.end) : rawStart + 60;
-        const start = snap(clamp(rawStart, DAY_START_MINUTES, LAST_TIME_SLOT_MINUTES));
-        const end = snap(clamp(rawEnd, start + SNAP_MINUTES, LAST_TIME_SLOT_MINUTES));
-        const coachId = cleanSlug(window?.coachId, fallbackCoachId);
-        const accountId = cleanSlug(window?.accountId, defaultWorkspaceAccountFromCoachAccount().id);
-        const locationId = cleanSlug(window?.locationId, "");
-        return end > start ? { start, end, coachId, accountId, ...(locationId ? { locationId } : {}) } : null;
-      })
-      .filter((window): window is AvailabilityWindow => Boolean(window))
-      .sort(
-        (a, b) =>
-          (a.coachId || "").localeCompare(b.coachId || "") ||
-          (a.locationId || "").localeCompare(b.locationId || "") ||
-          a.start - b.start,
-      )
-      .reduce<AvailabilityWindow[]>((merged, window) => {
-        const previous = merged.at(-1);
-        if (
-          previous &&
-          previous.coachId === window.coachId &&
-          (previous.locationId || "") === (window.locationId || "") &&
-          window.start < previous.end
-        ) {
-          previous.end = Math.max(previous.end, window.end);
-        } else {
-          merged.push({ ...window });
-        }
-        return merged;
-      }, []);
-  });
-}
-
-/**
- * A window pinned to a location only opens the coach there. A window with no
- * location predates locations and still covers every one. Same rule as the
- * server's availabilityWindowCoversLocation.
- */
-function availabilityWindowCoversLocation(window: AvailabilityWindow, locationId = "") {
-  return !window.locationId || !locationId || window.locationId === locationId;
-}
-
-// Band tint per location, as a hue. hsl() rather than hex so it sits on top of
-// --available in either theme, and the hex ratchet stays where it is.
-const LOCATION_BAND_HUES = [150, 212, 32, 282, 352, 52, 188, 320];
-
-function availabilityForCoach(availability: AvailabilityWindow[][], coachId: string, fallbackCoachId: string) {
-  return availability.map((dayWindows) =>
-    dayWindows.filter((window) => (window.coachId || fallbackCoachId) === coachId),
-  );
-}
-
-function isCancelledGroupSessionItem(item: CalendarItem) {
-  return (
-    item.kind === "block" &&
-    Boolean(item.serviceId) &&
-    (item.note === CANCELLED_GROUP_SESSION_NOTE || item.title === CANCELLED_GROUP_SESSION_TITLE)
-  );
-}
-
-function isCancelledGroupSessionMatch(item: CalendarItem, serviceId: string, week: number, day: number, start: number) {
-  return (
-    isCancelledGroupSessionItem(item) &&
-    item.serviceId === serviceId &&
-    itemWeek(item) === week &&
-    item.day === day &&
-    item.start === start
-  );
-}
-
-function getStoredCoachAccount(): CoachAccount {
-  if (typeof window === "undefined") return defaultCoachAccount;
-  try {
-    const stored = window.localStorage.getItem(COACH_ACCOUNT_STORAGE_KEY);
-    return stored ? cleanCoachAccount(JSON.parse(stored) as Partial<CoachAccount>) : defaultCoachAccount;
-  } catch {
-    return defaultCoachAccount;
-  }
-}
-
-/**
- * The workspace accounts from the last visit, so the sidebar can be right on
- * first paint. The plan lives here and the plan is what decides whether Sell
- * and Billing are in the nav at all; without it every load started on a
- * made-up solo account and those two items arrived with the calendar shell.
- * The shell still overwrites this the moment it answers.
- */
-function getStoredWorkspaceAccounts(): Partial<WorkspaceAccount>[] | undefined {
-  if (typeof window === "undefined") return undefined;
-  try {
-    const stored = window.localStorage.getItem(WORKSPACE_ACCOUNTS_STORAGE_KEY);
-    const parsed = stored ? (JSON.parse(stored) as unknown) : undefined;
-    return Array.isArray(parsed) ? (parsed as Partial<WorkspaceAccount>[]) : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function cleanBrandSettings(settings?: Partial<BrandSettings>): BrandSettings {
-  return {
-    coachName: typeof settings?.coachName === "string" && settings.coachName.trim()
-      ? settings.coachName.trim().slice(0, 80)
-      : defaultBrandSettings.coachName,
-    logoName: typeof settings?.logoName === "string" ? settings.logoName.trim().slice(0, 120) : "",
-    logoPreview:
-      typeof settings?.logoPreview === "string" && settings.logoPreview.startsWith("data:image/")
-        ? settings.logoPreview
-        : "",
-    showLogo: settings?.showLogo === true,
-    neutral: cleanHexColor(settings?.neutral, defaultBrandSettings.neutral),
-    primary: cleanHexColor(settings?.primary, defaultBrandSettings.primary),
-    secondary: cleanHexColor(settings?.secondary, defaultBrandSettings.secondary),
-    accent: cleanHexColor(settings?.accent, defaultBrandSettings.accent),
-    bookingTheme: settings?.bookingTheme === "light" ? "light" : "dark",
-    calendarColors: cleanCalendarColors(settings?.calendarColors),
-  };
-}
-
-/** { lessonPrivate: "#2b2233" } -> { "--lesson-private-set": "#2b2233" } */
-function calendarColorVariables(colors: CalendarColorSettings): Record<string, string> {
-  const variables: Record<string, string> = {};
-  calendarColorFields.forEach(({ key }) => {
-    const name = key.replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase();
-    variables[`--${name}-set`] = colors[key];
-  });
-  return variables;
-}
-
-function cleanCalendarColors(colors?: Partial<CalendarColorSettings>): CalendarColorSettings {
-  const cleaned = {} as CalendarColorSettings;
-  calendarColorFields.forEach(({ key }) => {
-    cleaned[key] = cleanHexColor(colors?.[key], defaultCalendarColors[key]);
-  });
-  return cleaned;
-}
-
-function getStoredTheme(): ThemeMode {
-  if (typeof window === "undefined") return "light";
-  return window.localStorage.getItem(THEME_STORAGE_KEY) === "dark" ? "dark" : "light";
-}
-
-function getStoredBrandSettings(): BrandSettings {
-  if (typeof window === "undefined") return defaultBrandSettings;
-  try {
-    const stored = window.localStorage.getItem(BRAND_STORAGE_KEY);
-    return stored ? cleanBrandSettings(JSON.parse(stored) as Partial<BrandSettings>) : defaultBrandSettings;
-  } catch {
-    return defaultBrandSettings;
-  }
 }
 
 function colorDistance(a: { r: number; g: number; b: number }, b: { r: number; g: number; b: number }) {
@@ -5594,16 +2297,6 @@ const defaultGoogleDriveTransferStatus: GoogleDriveTransferStatus = {
   uploadRouteReady: true,
   chunkedTransportReady: true,
   incomingImportReady: false,
-};
-
-const emptyClientEditor: ClientEditor = {
-  id: "",
-  name: "",
-  email: "",
-  phone: "",
-  notes: "",
-  caddyProfileId: "",
-  caddyProfileUrl: "",
 };
 
 /**
