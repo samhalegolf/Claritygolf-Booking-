@@ -17277,3 +17277,66 @@ button {
 .today-row.is-done .today-row-state {
   color: var(--c-text-soft, #76736d);
 }
+
+/* ---- Billing (and Settings) on the phone ---------------------------------- */
+
+/* iPhone zooms the page into any text box set smaller than 16px the moment it
+   is tapped, and leaves it zoomed. The phone layout's fields are 16px so a
+   coach typing an invoice line or a bank search keeps the whole screen. */
+.app-shell.is-phone input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+.app-shell.is-phone select,
+.app-shell.is-phone textarea {
+  font-size: 16px;
+}
+
+/* Billing's and Settings' sections: one row that scrolls sideways. Below
+   820px the side column already turns into a top strip, but it wrapped, and
+   Billing's ten sections took four rows before any of the section showed. */
+.app-shell.is-phone .settings-subnav {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding: 8px 12px;
+  scrollbar-width: none;
+}
+
+.app-shell.is-phone .settings-subnav::-webkit-scrollbar {
+  display: none;
+}
+
+.app-shell.is-phone .settings-subnav button {
+  flex: none;
+  white-space: nowrap;
+}
+
+.app-shell.is-phone .billing-pane {
+  padding: 12px;
+}
+
+/* Every Billing table keeps its columns and scrolls sideways inside its card,
+   rather than squeezing seven columns into a phone's width until each cell
+   wraps a word per line. The cells tighten and stay on one line. */
+.app-shell.is-phone .recent-invoices-table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.app-shell.is-phone .recent-invoices-table th,
+.app-shell.is-phone .recent-invoices-table td {
+  padding: 8px 6px;
+  white-space: nowrap;
+}
+
+.app-shell.is-phone .bank-toolbar {
+  padding: 8px;
+}
+
+.app-shell.is-phone .bank-search-field {
+  flex: 1 1 100%;
+}
+
+.app-shell.is-phone .bank-search-field input {
+  flex: 1;
+  width: auto;
+}
