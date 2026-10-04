@@ -88,7 +88,6 @@ import { WORKSPACE_ACCOUNTS_STORAGE_KEY } from "./modules/shared/workspaceStorag
 import { useBackNavigation } from "./modules/shared/backNavigation";
 import { Loading, loadingLabel } from "./modules/shared/Loading";
 import { type PeopleImportDiagnostic, type Person } from "./modules/clients/clientsModel";
-import { isManagedService } from "./serviceCatalog";
 import { isUnauthorizedClientsError, loadClients, replaceClients, resetClients, useClientsState } from "./modules/clients/clientsStore";
 import type { ClientsPanel as ClientsPanelComponent } from "./modules/clients/ClientsPanel";
 import type {
@@ -126,8 +125,7 @@ import {
   type BusinessTerminology,
   type BusinessTerminologyPreset,
 } from "../netlify/functions/_shared/business-terminology.mts";
-import { resolveMarket, type CapabilityKey } from "../netlify/functions/_shared/market-profile.mts";
-import { publishActiveMarket } from "./lib/activeMarket";
+import { type CapabilityKey } from "../netlify/functions/_shared/market-profile.mts";
 import { ResourceSystemPanel } from "./modules/integrations/ResourceSystemPanel";
 import { availabilityConflicts, type AvailabilityConflict } from "./availabilityConflicts";
 import {
@@ -142,7 +140,7 @@ import {
 import { serviceIncludesCoach } from "../netlify/functions/_shared/service-scope.mts";
 // The country itself is held per page here, not in the shared module -- see
 // that file for why the server cannot have one.
-import { activeLocale, setActiveRegion } from "./lib/activeCountry";
+import { activeLocale, } from "./lib/activeCountry";
 import { BusinessHubPanel, OwnerIdentityCard } from "./modules/business-hub/BusinessHubPanel";
 import { CoachAvatar, CoachProfilePanel, type CoachWeekDay, type CoachWeekEntry } from "./modules/business-hub/CoachProfilePanel";
 import { RegionSettings, TimeZoneSelect, type RegionValues } from "./modules/settings/RegionSettings";
@@ -302,9 +300,7 @@ import {
   DAY_COUNT,
   WEEK_FOCUS_INDEX,
   WEEK_PANEL_COUNT,
-  WEEK_PEEK,
 } from "./calendar-axis";
-import type { CalendarAxisMode } from "./calendar-axis";
 import { clamp } from "./lib/number";
 import { dateInputValue, timeToMinutes } from "./lib/date";
 import BookingResourcesPanel from "./BookingResourcesPanel";
@@ -327,7 +323,6 @@ import {
 import { safeText } from "./lib/text";
 import {
   adminCustomGroupAttendee,
-  ARMED_TOUCH_DRAG_THRESHOLD,
   availabilityForCoach,
   AvailabilityWindow,
   availabilityWindowCoversLocation,
@@ -344,7 +339,6 @@ import {
   businessNow,
   calendarDateUtcTime,
   type CalendarFeedStatus,
-  CalendarHoverPreview,
   CalendarItem,
   calendarItemBelongsToCoach,
   calendarItemCoach,
@@ -354,7 +348,6 @@ import {
   CalendarPerspective,
   type CalendarSaveStatus,
   calendarStateFingerprint,
-  CalendarViewMode,
   CANCELLED_GROUP_SESSION_NOTE,
   CANCELLED_GROUP_SESSION_TITLE,
   cleanAvailability,
@@ -368,16 +361,13 @@ import {
   DAY_START_MINUTES,
   DEFAULT_CALENDAR_END_MINUTES,
   DEFAULT_CALENDAR_START_MINUTES,
-  defaultAvailability,
   DockFlight,
   type Draft,
   EDGE_NAV_ZONE,
   externalProviderLabel,
   externalRescheduleMessage,
-  FloatingDrag,
   formatRange,
   formatTime,
-  formatWeekTitle,
   fullDayNames,
   getCurrentWeekOffset,
   GroupSession,
@@ -397,14 +387,10 @@ import {
   locationSnapshot,
   mergeCalendarItemsAfterConflict,
   minutesToInputTime,
-  MOUSE_DRAG_THRESHOLD,
   newCalendarItemId,
   overlaps,
   PAST_ADMIN_LESSON_WARNING,
   PendingBooking,
-  PlacementAnimation,
-  PointerSession,
-  QuickCreateState,
   resolvedCalendarItemCoachId,
   resolvedCalendarItemLocationId,
   sameSlot,
@@ -414,7 +400,6 @@ import {
   snap,
   SNAP_MINUTES,
   startOfCalendarWeek,
-  TOUCH_DRAG_THRESHOLD,
 } from "./modules/calendar/calendarModel";
 import type { Toast } from "./modules/shared/toast";
 import {
@@ -513,27 +498,14 @@ import {
   useEditableBlock,
 } from "./modules/settings/SettingsLayout";
 import {
-  AccountLimits,
-  AppUser,
-  BRAND_STORAGE_KEY,
-  BrandSettings,
-  CADDY_APP_URL,
-  COACH_ACCOUNT_STORAGE_KEY,
-  CoachAccount,
-  CoachProfile,
-  Location,
-  SUBSCRIPTION_STATUS_LABEL,
-  THEME_STORAGE_KEY,
-  ThemeMode,
-  UNLIMITED_ACCOUNT_LIMIT,
-  WorkspaceAccount,
-  accountById,
-  accountEntitlements,
-  accountFeatureKeys,
   accountFeatureLabel,
   accountLimit,
+  AccountLimits,
   activeLocations,
+  AppUser,
   blankCoachProfile,
+  BrandSettings,
+  CADDY_APP_URL,
   calendarColorFields,
   calendarColorVariables,
   canCreateWithinLimit,
@@ -547,7 +519,9 @@ import {
   cleanLocations,
   cleanUrl,
   cleanWorkspaceAccounts,
+  CoachAccount,
   coachById,
+  CoachProfile,
   defaultAccountId,
   defaultAppUserFromCoachAccount,
   defaultBrandSettings,
@@ -560,21 +534,25 @@ import {
   featureUnavailableMessage,
   filterRecordsForAccount,
   firstCoachId,
-  getStoredBrandSettings,
   getStoredCoachAccount,
   getStoredTheme,
-  getStoredWorkspaceAccounts,
   isAccountActive,
   limitReachedMessage,
+  Location,
   locationById,
   recordBelongsToAccount,
   serviceBelongsToAccount,
-  userBelongsToAccount,
+  SUBSCRIPTION_STATUS_LABEL,
+  THEME_STORAGE_KEY,
+  ThemeMode,
+  UNLIMITED_ACCOUNT_LIMIT,
+  WorkspaceAccount,
 } from "./modules/workspace/workspaceModel";
 import { useCalendarController } from "./modules/calendar/useCalendarController";
 import { CalendarView } from "./modules/calendar/CalendarView";
 import { useCalendarState } from "./modules/calendar/useCalendarState";
 import { useCalendarInteraction } from "./modules/calendar/useCalendarInteraction";
+import { useWorkspaceData } from "./modules/workspace/useWorkspaceData";
 
 // Video analysis and voice notes are heavy, coach-only features (together well
 // over a third of the client bundle). They never render on the public booking
@@ -701,30 +679,6 @@ function prefetchPracticeForPlayer(playerId: string) {
       // A prefetch that fails is not an error the coach needs: the panel does
       // its own read when it mounts, and reports its own failure.
     });
-}
-
-/**
- * The workspace the session answer carried, cleaned with the same functions the
- * calendar shell's answer goes through. This is what lets the sidebar be right
- * on the very first render: the plan decides whether Sell and Billing exist,
- * the user decides what is editable, and both used to arrive with the shell.
- * Null when the session came without one; local storage is the fallback then.
- */
-function workspaceBootstrapFromSession(session?: Session) {
-  const workspace = session?.role === "coach" ? session.workspace : undefined;
-  if (!workspace) return null;
-  const account = cleanCoachAccount(workspace.account as Partial<CoachAccount>);
-  const accounts = cleanWorkspaceAccounts(workspace.workspaceAccounts as Partial<WorkspaceAccount>[], account);
-  return {
-    account,
-    accounts,
-    coaches: cleanCoachProfiles(workspace.coaches as Partial<CoachProfile>[], account),
-    currentUser: cleanAppUser(
-      workspace.currentUser as Partial<AppUser>,
-      defaultAppUserFromCoachAccount(account),
-      defaultAccountId(accounts),
-    ),
-  };
 }
 
 // The note normaliser lives in modules/player-profiles/lessonNotesModel. This
@@ -1331,7 +1285,6 @@ type WorkspaceApiFailureDetail = {
   statusText?: string;
 };
 
-const initialItems: CalendarItem[] = [];
 
 const DEFAULT_MIN_BOOKING_NOTICE_MINUTES = 240;
 const MAX_MIN_BOOKING_NOTICE_MINUTES = 7 * 24 * 60;
@@ -2302,26 +2255,51 @@ type AppProps = {
 function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   const bookingCardScheme = useBookingCardScheme();
   const [themeMode, setThemeMode] = useState<ThemeMode>(getStoredTheme);
-  // What the session answer said about this workspace, if it said anything.
-  // It seeds the state below so the frame is right on the first render; the
-  // stored copies from the last visit are the fallback, and the calendar shell
-  // overwrites all of it when it answers.
-  const [bootstrap] = useState(() => workspaceBootstrapFromSession(entrySession));
-  const [coachAccount, setCoachAccount] = useState<CoachAccount>(() => bootstrap?.account ?? getStoredCoachAccount());
-  // The business's words and the modules it shows. Everything below asks
-  // `capabilities.x` and reads `terms.x`; nothing asks which industry it is.
-  const market = useMemo(
-    () => resolveMarket(coachAccount.market, coachAccount.terminology),
-    [coachAccount.market, coachAccount.terminology],
-  );
-  const terms = market.terminology;
-  const capabilities = market.capabilities;
-  useEffect(() => {
-    publishActiveMarket(market);
-  }, [market]);
-  useEffect(() => {
-    document.title = market.product.documentTitle;
-  }, [market.product.documentTitle]);
+  const workspaceData = useWorkspaceData({ entrySession });
+  const {
+    coachAccount,
+    setCoachAccount,
+    market,
+    terms,
+    capabilities,
+    setWorkspaceAccounts,
+    coachProfiles,
+    setCoachProfiles,
+    currentAppUser,
+    setCurrentAppUser,
+    brandSettings,
+    setBrandSettings,
+    items,
+    setItems,
+    services,
+    setServices,
+    locations,
+    setLocations,
+    availability,
+    setAvailability,
+    activeAccountId,
+    activeAccount,
+    isAdminUser,
+    isPlatformAdmin,
+    accountCoachProfiles,
+    accountLocations,
+    activeCoachId,
+    fallbackCoachId,
+    ownCoachProfile,
+    activeCoachList,
+    accountAvailability,
+    managedAccountServices,
+    activeLocationList,
+    archivedLocationList,
+    defaultLocation,
+    publicBookingEnabled,
+    invoiceSettings,
+    billingWorkspaceEnabled,
+    googleCalendarSyncEnabled,
+    activeAccountEntitlements,
+    accountUsage,
+    enabledAccountFeatures,
+  } = workspaceData;
   const settingsSections = useMemo(
     () =>
       SETTINGS_SECTIONS.map((section) =>
@@ -2332,31 +2310,11 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     [terms.serviceSingular],
   );
   setBusinessTimeZone(coachAccount.timezone);
-  // Contact matching and phone formatting resolve bare national numbers against
-  // the workspace's country. The server does the same, from the same setting —
-  // if these two ever disagree, the client and server disagree about whether
-  // two numbers belong to the same person, which is what produced duplicate
-  // contacts and the failed saves.
-  // Money is shown in the currency the business chose, which is its country's
-  // unless it picked another in Country & region.
-  useEffect(() => {
-    setActiveRegion(coachAccount.country, coachAccount.invoiceSettings.currency);
-  }, [coachAccount.country, coachAccount.invoiceSettings.currency]);
   // Booking pop-ups are written in this browser's language; tell the server if
   // the coach has switched language since turning them on.
   useEffect(() => {
     void syncPushLanguage().catch(() => undefined);
   }, []);
-  const [workspaceAccounts, setWorkspaceAccounts] = useState<WorkspaceAccount[]>(() =>
-    bootstrap?.accounts ?? cleanWorkspaceAccounts(getStoredWorkspaceAccounts(), getStoredCoachAccount()),
-  );
-  const [coachProfiles, setCoachProfiles] = useState<CoachProfile[]>(
-    () => bootstrap?.coaches ?? cleanCoachProfiles(undefined, getStoredCoachAccount()),
-  );
-  const [currentAppUser, setCurrentAppUser] = useState<AppUser>(
-    () => bootstrap?.currentUser ?? defaultAppUserFromCoachAccount(getStoredCoachAccount()),
-  );
-  const [brandSettings, setBrandSettings] = useState<BrandSettings>(getStoredBrandSettings);
   const [brandSaveState, setBrandSaveState] = useState<"idle" | "saving" | "saved">("idle");
   // The entry point only mounts this component for a coach session or the
   // public booking embed, so it starts authenticated. What is still tracked
@@ -2392,12 +2350,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   const [passwordChangeState, setPasswordChangeState] = useState<"idle" | "saving" | "saved">("idle");
   const [showPasswordFields, setShowPasswordFields] = useState(false);
   const [passwordChangeMessage, setPasswordChangeMessage] = useState("");
-  const [items, setItems] = useState<CalendarItem[]>(initialItems);
-  // Empty until the server says otherwise. Seeding this with defaultServices
-  // meant every workspace flashed the original coach's lesson list and prices
-  // before its own data arrived.
-  const [services, setServices] = useState<Service[]>(() => []);
-  const [locations, setLocations] = useState<Location[]>(() => cleanLocations(undefined, getStoredCoachAccount()));
   const [locationEditor, setLocationEditor] = useState<Location>(() => defaultLocationFromCoachAccount(getStoredCoachAccount()));
   const [editingLocationId, setEditingLocationId] = useState<string | null>(null);
   const [showLocationEditor, setShowLocationEditor] = useState(false);
@@ -2419,7 +2371,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   const [groupMinimumInput, setGroupMinimumInput] = useState("");
   const [groupMaximumInput, setGroupMaximumInput] = useState("");
   const [serviceNumberDrafts, setServiceNumberDrafts] = useState<Partial<Record<ServiceNumberField, string>>>({});
-  const [availability, setAvailability] = useState<AvailabilityWindow[][]>(() => defaultAvailability);
   const [availabilitySaveState, setAvailabilitySaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [editingAvailabilityWindow, setEditingAvailabilityWindow] = useState("");
   const [availabilityCoachChoice, setAvailabilityCoachChoice] = useState("");
@@ -2942,40 +2893,28 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   const [pullRangeEditing, setPullRangeEditing] = useState(false);
   const calendarInteraction = useCalendarInteraction();
   const {
-    draft,
     setDraft,
     pointerSession,
-    holdingItemId,
-    setHoldingItemId,
     quickCreate,
     setQuickCreate,
-    quickClientSearch,
     setQuickClientSearch,
-    quickMatchField,
     setQuickMatchField,
-    placementAnimation,
     setPlacementAnimation,
     floatingDrag,
     setFloatingDrag,
-    hasMoved,
     setHasMoved,
     gridRef,
     pointerSessionRef,
     suppressItemClickRef,
     suppressItemClickUntilRef,
     weekStripRef,
-    weekPanelsRef,
     calendarScrollRef,
-    weekSettleTimerRef,
     weekLandingTimerRef,
-    weekPagerSyncingRef,
     clickPlaceRef,
     pointerClientRef,
     pointerStartRef,
     pointerKindRef,
     dragPreviewMetaRef,
-    touchHoldTimerRef,
-    touchHoldCleanupRef,
     pendingQuickCreateRef,
     calendarPerspectiveChosenRef,
     isClientInsideGrid,
@@ -3010,24 +2949,18 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     activeWeek,
     setActiveWeek,
     calendarDetailMode,
-    setCalendarDetailMode,
     calendarViewMode,
-    setCalendarViewMode,
     calendarAxisMode,
-    setCalendarAxisMode,
     calendarDayFocus,
     setCalendarDayFocus,
-    calendarNowMinutes,
     calendarPerspective,
     setCalendarPerspective,
     calendarCoachFilterId,
     setCalendarCoachFilterId,
     calendarLocationFilterId,
-    setCalendarLocationFilterId,
     activeWeekRef,
     weekDays,
     weekTitle,
-    calendarTodayIndex,
   } = calendarState;
   const [edgeCue, setEdgeCue] = useState<null | "prev" | "next">(null);
   const [bookingServiceId, setBookingServiceId] = useState("");
@@ -3105,12 +3038,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     useState<NotificationSettings>(defaultNotificationSettings);
   const [testEmailAddress, setTestEmailAddress] = useState("");
   const [testEmailState, setTestEmailState] = useState<"idle" | "sending" | "sent">("idle");
-  const activeAccountId = defaultAccountId(workspaceAccounts);
-  const activeAccount =
-    accountById(workspaceAccounts, activeAccountId) ?? defaultWorkspaceAccountFromCoachAccount(coachAccount);
-  const isAdminUser = currentAppUser.role === "admin" || currentAppUser.role === "account_admin" || currentAppUser.role === "platform_admin";
-  // Running Clarity, as distinct from running a business on it.
-  const isPlatformAdmin = currentAppUser.role === "platform_admin";
   const businessNameEditor = useEditableBlock<CoachAccount>({
     value: coachAccount,
     onSave: saveCoachAccount,
@@ -3707,21 +3634,11 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
       ),
     [activeAccountId, items, shelvedItemIds],
   );
-  const accountCoachProfiles = useMemo(() => filterRecordsForAccount(coachProfiles, activeAccountId), [activeAccountId, coachProfiles]);
-  const accountLocations = useMemo(() => filterRecordsForAccount(locations, activeAccountId), [activeAccountId, locations]);
   const weekItems = useMemo(() => accountItems.filter((item) => itemWeek(item) === activeWeek), [activeWeek, accountItems]);
-  const activeCoachId = currentAppUser.coachId || firstCoachId(accountCoachProfiles);
-  const fallbackCoachId = firstCoachId(accountCoachProfiles);
-  // The signed-in person's own coach profile, if they coach: what the profile
-  // page shows. An owner who only runs the business has none.
-  const ownCoachProfile = currentAppUser.coachId
-    ? accountCoachProfiles.find((coach) => coach.id === currentAppUser.coachId)
-    : undefined;
   // Whose Google Calendar the controls are showing: the coach open in
   // Settings › Coaches, else your own while you are on the Business Hub.
   const googleCalendarProfileCoachId =
     openCoachId && !newCoach ? openCoachId : activeView === "profile" && ownCoachProfile ? ownCoachProfile.id : "";
-  const activeCoachList = accountCoachProfiles.filter((coach) => coach.active && !coach.archived && coach.bookable);
   const effectiveCalendarPerspective: CalendarPerspective =
     isAdminUser && (calendarPerspective !== "location" || canUseFeature(activeAccount, "locationCalendar"))
       ? calendarPerspective
@@ -3894,10 +3811,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   ]);
   const appointments = weekItems.filter((item) => item.kind === "appointment").length;
   const blocks = weekItems.filter((item) => item.kind === "block").length;
-  const accountAvailability = useMemo(
-    () => availability.map((dayWindows) => dayWindows.filter((window) => recordBelongsToAccount(window, activeAccountId))),
-    [activeAccountId, availability],
-  );
   // The location calendar only answers for the coaches working there, so a
   // coach at another range must not light up this range's day.
   const locationCalendarCoachIds = useMemo(
@@ -4099,8 +4012,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   const serviceVisibleToCurrentUser = (service: Service) =>
     serviceBelongsToAccount(service, activeAccountId) &&
     (isAdminUser || serviceIncludesCoach(service, serviceScopeCoachId, firstCoachId(accountCoachProfiles)));
-  const accountServices = services.filter((service) => serviceBelongsToAccount(service, activeAccountId));
-  const managedAccountServices = accountServices.filter(isManagedService);
   // Every coach-and-place pair a booking of this lesson type could be with, in
   // the order they are tried. Mirrors serviceBookingOptions in booking-core.
   function serviceBookingOptions(service: Service) {
@@ -4142,10 +4053,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   }
   const activeServices = managedAccountServices.filter((service) => service.archived !== true && serviceVisibleToCurrentUser(service));
   const archivedServices = managedAccountServices.filter((service) => service.archived === true && serviceVisibleToCurrentUser(service));
-  const sortedLocations = [...accountLocations].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name));
-  const activeLocationList = sortedLocations.filter((location) => location.active && !location.archived);
-  const archivedLocationList = sortedLocations.filter((location) => location.archived || !location.active);
-  const defaultLocation = locationById(accountLocations, defaultLocationId(accountLocations)) ?? defaultLocationFromCoachAccount(coachAccount);
   const locationUsageCount = (locationId: string) =>
     managedAccountServices.filter(
       (service) =>
@@ -4154,7 +4061,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     ).length;
   const bookableServices = activeServices.filter((service) => service.active && service.lessonFormat !== "package");
   const appointmentServices = activeServices.filter((service) => service.active && isAppointmentStyleService(service));
-  const publicBookingEnabled = canUseFeature(activeAccount, "publicBooking");
   const publicServices = publicBookingEnabled ? bookableServices.filter((service) => service.visibility === "public") : [];
   const currentBookingScreenId = getBookingScreenId(typeof window === "undefined" ? "/" : window.location.pathname);
   const currentScreenPublicServices = publicServices.filter((service) =>
@@ -4206,13 +4112,10 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   const selectedBookingScreen = bookingScreenEmbeds.find((bookingScreen) => bookingScreen.id === selectedBookingScreenId) ?? bookingScreenEmbeds[0];
   const calendarFeedUrl = `${syncBaseUrl.trim().replace(/\/+$/, "") || "https://booking.yourdomain.co.nz"}/calendar/${coachAccount.calendarSlug}.ics?key=${calendarSyncKey}`;
   const caddyWorkspaceUrl = coachAccount.caddyWorkspaceUrl || CADDY_APP_URL;
-  const invoiceSettings = coachAccount.invoiceSettings;
   // Prefer the server's next-in-series number (aligned with the Stripe imports);
   // fall back to the local prefix+counter until that lookup resolves.
   const invoiceNumber =
     suggestedInvoiceNumber || `${invoiceSettings.prefix}-${String(invoiceSettings.nextNumber).padStart(4, "0")}`;
-  const billingWorkspaceEnabled = invoiceSettings.enabled && invoiceSettings.showBillingWorkspace && canUseFeature(activeAccount, "invoicing");
-  const googleCalendarSyncEnabled = canUseFeature(activeAccount, "googleCalendarSync");
   const localStorageHealth = getLocalStorageHealth(managedLocalLibraryStatus);
   const clarityCloudHealth = getClarityCloudHealth(googleDriveTransfer);
   const videoWorkspaceStorage: VideoWorkspaceStorage = {
@@ -4245,15 +4148,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
       );
     });
   }, [clarityCloudHealth, savedVideoItems, uploadingSavedVideoIds]);
-  const activeAccountEntitlements = accountEntitlements(activeAccount);
-  const accountUsage = {
-    maxCoaches: activeCoachList.length,
-    maxLocations: activeLocationList.length,
-    maxUsers: userBelongsToAccount(currentAppUser, activeAccountId) ? 1 : 0,
-    maxServices: managedAccountServices.filter((service) => service.archived !== true).length,
-    maxBookingScreens: BOOKING_SCREENS.length,
-  };
-  const enabledAccountFeatures = accountFeatureKeys.filter((feature) => activeAccountEntitlements.features[feature]);
   const bookingBrandName = (brandSettings.coachName || coachAccount.businessName).trim();
   const bookingBrandWords = bookingBrandName.split(/\s+/);
   const bookingBrandPrimary = bookingBrandWords.slice(0, -1).join(" ") || bookingBrandName;
@@ -4552,27 +4446,12 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     document.documentElement.style.colorScheme = themeMode;
   }, [themeMode]);
 
-  // The booking widget only ever holds the public view of the account (see
-  // public-account.mts). Storing it would overwrite a coach's own saved copy
-  // in the same browser with a thinner one.
-  useEffect(() => {
-    window.localStorage.setItem(COACH_ACCOUNT_STORAGE_KEY, JSON.stringify(coachAccount));
-  }, [coachAccount]);
-
-  useEffect(() => {
-    window.localStorage.setItem(WORKSPACE_ACCOUNTS_STORAGE_KEY, JSON.stringify(workspaceAccounts));
-  }, [workspaceAccounts]);
-
   useEffect(() => {
     const defaultSync = getDefaultSyncBaseUrl();
     if (syncBaseUrl === defaultSync || syncBaseUrl === defaultCoachAccount.bookingUrl) {
       setSyncBaseUrl(coachAccount.bookingUrl);
     }
   }, [coachAccount.bookingUrl, syncBaseUrl]);
-
-  useEffect(() => {
-    window.localStorage.setItem(BRAND_STORAGE_KEY, JSON.stringify(brandSettings));
-  }, [brandSettings]);
 
   useEffect(() => {
     if (activeDockBookingId && !dockBookings.some((booking) => booking.id === activeDockBookingId)) {
