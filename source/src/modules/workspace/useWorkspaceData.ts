@@ -48,10 +48,9 @@ import {
  * out from them alone, such as this business's coaches.
  *
  * Seeded from the session answer when there is one, so the first render is
- * already the right business. Loading and saving still live in App; this is
- * where they read and write.
+ * already the right business. useWorkspaceSync loads and saves it.
  */
-export function useWorkspaceData({ entrySession }: { entrySession: Session | undefined }) {
+export function useWorkspaceData({ entrySession }: { entrySession: Session }) {
   // What the session answer said about this workspace, if it said anything.
   // It seeds the state below so the frame is right on the first render; the
   // stored copies from the last visit are the fallback, and the calendar shell
