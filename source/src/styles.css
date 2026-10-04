@@ -9901,11 +9901,86 @@ button {
   border-bottom: 1px dashed color-mix(in srgb, var(--border) 80%, transparent);
 }
 
-/* Day view: the heading whose day fills the grid. Marked rather than
-   highlighted — the grid below already shows which day you are on, so this
-   only has to confirm which heading did it. */
-.day-heading.is-focused-day {
-  box-shadow: inset 0 -3px 0 var(--coach-primary, #1fd36d);
+/* Day view: the strip turns into a row of folder tabs, the same look as the
+   calendar's scope tabs above it. The open day stands taller and wider, joined
+   to the grid with no line under it; the rest sit lower and quieter along the
+   folder's top edge. The edge is drawn on each closed tab (and the gutter)
+   rather than as the row's border, so it can break where the open tab is. */
+.calendar-header-row.is-day-view {
+  border-bottom-color: transparent;
+}
+
+.calendar-header-row.is-day-view .time-gutter,
+.calendar-header-row.is-day-view .week-pager-spacer,
+.calendar-header-row.is-day-view .day-heading:not(.is-focused-day) {
+  box-shadow: inset 0 -2px 0 var(--c-accent);
+}
+
+.calendar-header-row.is-day-view .day-heading {
+  transition:
+    flex-grow 180ms ease,
+    margin-top 180ms ease,
+    opacity 180ms ease;
+}
+
+.calendar-header-row.is-day-view .day-heading:not(.is-focused-day) {
+  margin-top: 12px;
+  background: none;
+  opacity: 0.55;
+}
+
+.calendar-header-row.is-day-view .day-heading.is-focused-day {
+  flex-grow: 1.8;
+  border: 2px solid var(--c-accent);
+  border-bottom: 0;
+  border-radius: var(--c-radius-control) var(--c-radius-control) 0 0;
+  background: var(--panel);
+  box-shadow: none;
+  opacity: 1;
+}
+
+.calendar-header-row.is-day-view .day-heading.is-focused-day::before,
+.calendar-header-row.is-day-view .day-heading.is-focused-day + .day-heading::before {
+  content: none;
+}
+
+.calendar-header-row.is-day-view .day-heading.is-focused-day strong {
+  font-size: 24px;
+}
+
+.calendar-header-row.is-day-view .day-heading.is-focused-day span {
+  color: var(--c-text-body);
+  font-weight: 700;
+}
+
+/* Week or Day: both words always showing, the one you are on filled. One
+   button, so a tap anywhere on it switches. */
+.calendar-span-switch {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--c-radius-control);
+  background: var(--panel-soft);
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--c-size-meta);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.calendar-span-switch span {
+  min-width: 46px;
+  padding: 5px 10px;
+  border-radius: calc(var(--c-radius-control) - 3px);
+  transition:
+    background var(--c-t-hover),
+    color var(--c-t-hover);
+}
+
+.calendar-span-switch.is-week span:first-child,
+.calendar-span-switch.is-day span:last-child {
+  background: var(--c-accent);
+  color: var(--c-accent-text);
 }
 
 /* A day with no availability collapses to the width of the gap it would have
@@ -17174,6 +17249,65 @@ button {
 .today-header span {
   color: var(--c-text-soft, #76736d);
   font-size: 13px;
+}
+
+/* Book (QuickBookScreen.tsx): the week's times, then the booking form. The
+   form is the calendar's quick-create, sitting in the page instead of
+   floating over the grid. */
+.quick-book-page .booking-week-controls {
+  margin-top: 0;
+}
+
+.quick-book-page .booking-week-controls button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.quick-book-time {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--c-radius-card);
+  background: var(--panel-soft);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.quick-book-time > span:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.quick-book-time strong {
+  font-size: 18px;
+}
+
+.quick-book-time em {
+  color: var(--muted);
+  font-style: normal;
+  font-size: 13px;
+}
+
+.quick-book-change {
+  color: var(--coach-primary, #01632f);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.quick-create.quick-book-form {
+  position: static;
+  width: auto;
+  max-height: none;
+  overflow: visible;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
 }
 
 .today-featured {

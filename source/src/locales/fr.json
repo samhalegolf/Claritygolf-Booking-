@@ -215,11 +215,6 @@
   "Could not save this setting.": "Impossible d’enregistrer ce paramètre.",
   "Saving…": "Enregistrement…",
   "Any location": "N’importe quel site",
-  "No morning hours are available in this view.": "Aucun créneau du matin dans cette vue.",
-  "No afternoon or evening hours are available in this view.": "Aucun créneau d’après-midi ou de soirée dans cette vue.",
-  "View: Full": "Vue : journée",
-  "View: AM": "Vue : matin",
-  "View: PM": "Vue : après-midi",
   "No coach": "Aucun coach",
   "Sent": "Envoyé",
   "Published": "Publié",
@@ -4437,7 +4432,6 @@
   "The customer holds their card, phone or watch flat against the back of this phone and keeps it there until it confirms.": "Le client tient sa carte, son téléphone ou sa montre à plat contre le dos de ce téléphone jusqu'à la confirmation.",
   "Hold card or phone against the back of this phone.": "Approchez la carte ou le téléphone du dos de ce téléphone.",
   "This phone cannot take Tap to Pay.": "Ce téléphone ne prend pas en charge Tap to Pay.",
-  "No free time left today. Tap a time on the calendar to book.": "Plus de créneau libre aujourd'hui. Touchez une heure dans le calendrier pour réserver.",
   "Book": "Réserver",
   "On now": "En cours",
   "Up next": "À suivre",
@@ -4454,5 +4448,10 @@
   "Turn off on this phone": "Désactiver sur ce téléphone",
   "Turn on for this phone": "Activer sur ce téléphone",
   "This phone did not answer. Check it has a connection, then try again.": "Le téléphone n'a pas répondu. Vérifiez qu'il est connecté, puis réessayez.",
-  "This phone could not be registered for notifications.": "Ce téléphone n'a pas pu être enregistré pour les notifications."
+  "This phone could not be registered for notifications.": "Ce téléphone n'a pas pu être enregistré pour les notifications.",
+  "Show the whole week": "Afficher toute la semaine",
+  "Show today": "Afficher aujourd'hui",
+  "Day": "Jour",
+  "Pick a time": "Choisissez un créneau",
+  "No free times this week.": "Aucun créneau libre cette semaine."
 }

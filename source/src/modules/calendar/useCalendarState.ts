@@ -5,7 +5,6 @@ import {
   businessNow,
   CalendarHoverPreview,
   CalendarPerspective,
-  CalendarViewMode,
   formatWeekTitle,
   getCurrentWeekOffset,
 } from "./calendarModel";
@@ -23,7 +22,6 @@ export function useCalendarState({ timeZone }: { timeZone: string }) {
   const [calendarHover, setCalendarHover] = useState<CalendarHoverPreview | null>(null);
   const [activeWeek, setActiveWeek] = useState(getCurrentWeekOffset);
   const [calendarDetailMode, setCalendarDetailMode] = useState(false);
-  const [calendarViewMode, setCalendarViewMode] = useState<CalendarViewMode>("full");
   const [calendarAxisMode, setCalendarAxisMode] = useState<CalendarAxisMode>("week");
   // Day view: which weekday fills the grid, or null for the whole week. Phones
   // start on a day because seven columns across a phone leaves 45px each, which
@@ -91,8 +89,6 @@ export function useCalendarState({ timeZone }: { timeZone: string }) {
     setActiveWeek,
     calendarDetailMode,
     setCalendarDetailMode,
-    calendarViewMode,
-    setCalendarViewMode,
     calendarAxisMode,
     setCalendarAxisMode,
     calendarDayFocus,

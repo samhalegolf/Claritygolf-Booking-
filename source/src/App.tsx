@@ -79,8 +79,9 @@ import {
 import type { IconComponent } from "./modules/shared/ClarityIcons";
 import { isPhoneLayout, usePhoneLayout } from "./modules/phone/phoneLayout";
 import { type PhoneDestination, PhoneTabBar } from "./modules/phone/PhoneTabBar";
+import { QuickBookScreen } from "./modules/quick-book/QuickBookScreen";
+import { quickBookSlots } from "./modules/quick-book/quickBookModel";
 import { TodayScreen } from "./modules/today/TodayScreen";
-import { nextFreeStart } from "./modules/today/todayModel";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "./modules/auth/apiFetch";
 import { SnapshotFrameViewer, type FrameViewerShot } from "./modules/shared/SnapshotFrameViewer";
@@ -1064,6 +1065,8 @@ function sectionTitle(view: View, terms: BusinessTerminology = terminologyFor())
       return t("Business Hub");
     case "today":
       return t("Today");
+    case "book":
+      return t("Book");
     default:
       return t("Calendar");
 
@@ -1074,6 +1077,7 @@ function sectionTitle(view: View, terms: BusinessTerminology = terminologyFor())
 // every business (Clients, Settings, the hub).
 const VIEW_CAPABILITY: Partial<Record<View, CapabilityKey>> = {
   calendar: "calendar",
+  book: "calendar",
   video: "videoAnalysis",
   "putting-lab": "puttingLab",
   sell: "billing",
@@ -2123,10 +2127,10 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   const [selectedGroupSession, setSelectedGroupSession] = useState<GroupSession | null>(null);
   const [activeView, setActiveView] = useState<View>(() => getInitialView());
   const phoneLayout = usePhoneLayout();
-  // Today is the phone layout's screen and has no place in the sidebar, so a
-  // window widened past the phone width goes on to the calendar.
+  // Today and Book are the phone layout's screens and have no place in the
+  // sidebar, so a window widened past the phone width goes on to the calendar.
   useEffect(() => {
-    if (!phoneLayout && activeView === "today") setActiveView("calendar");
+    if (!phoneLayout && (activeView === "today" || activeView === "book")) setActiveView("calendar");
   }, [phoneLayout, activeView]);
   // A view whose module is switched off is not reachable by a bookmark, a
   // ?view= link or a stale button somewhere else in the app either: it falls
@@ -2572,7 +2576,6 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     activeWeek,
     setActiveWeek,
     calendarDetailMode,
-    calendarViewMode,
     calendarAxisMode,
     calendarDayFocus,
     setCalendarDayFocus,
@@ -3522,49 +3525,8 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
       end: Math.max(end, start + 60),
     };
   }, [calendarAvailability, services, visibleWeekItems]);
-  const fullCalendarStartMinutes = calendarDisplayBounds.start;
-  const fullCalendarEndMinutes = calendarDisplayBounds.end;
-  const calendarViewBounds = useMemo(() => {
-    if (calendarViewMode === "full") {
-      return {
-        start: fullCalendarStartMinutes,
-        end: fullCalendarEndMinutes,
-        emptyMessage: "",
-      };
-    }
-
-    if (calendarViewMode === "am") {
-      const end = Math.min(fullCalendarEndMinutes, 12 * 60);
-      if (end <= fullCalendarStartMinutes) {
-        return {
-          start: fullCalendarStartMinutes,
-          end: Math.min(DAY_END_MINUTES, fullCalendarStartMinutes + 60),
-          emptyMessage: t("No morning hours are available in this view."),
-        };
-      }
-      return {
-        start: fullCalendarStartMinutes,
-        end,
-        emptyMessage: "",
-      };
-    }
-
-    const start = Math.max(fullCalendarStartMinutes, 12 * 60);
-    if (start >= fullCalendarEndMinutes) {
-      return {
-        start: Math.max(DAY_START_MINUTES, fullCalendarEndMinutes - 60),
-        end: fullCalendarEndMinutes,
-        emptyMessage: t("No afternoon or evening hours are available in this view."),
-      };
-    }
-    return {
-      start,
-      end: fullCalendarEndMinutes,
-      emptyMessage: "",
-    };
-  }, [calendarViewMode, fullCalendarEndMinutes, fullCalendarStartMinutes]);
-  const calendarStartMinutes = calendarViewBounds.start;
-  const calendarEndMinutes = calendarViewBounds.end;
+  const calendarStartMinutes = calendarDisplayBounds.start;
+  const calendarEndMinutes = calendarDisplayBounds.end;
   // gridHeight / calendarMinutesToTop live further down: they come off the
   // squash axis, which needs the week's items to know what to collapse.
   const clipCalendarSegment = (start: number, duration: number) => {
@@ -3584,6 +3546,23 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
       Boolean(flyingBooking) ||
       pointerSession?.mode === "place" ||
       (pointerSession?.mode === "move" && Boolean(floatingDrag)));
+  // Book's free times: the hours of whoever the calendar is showing, less
+  // what each of them already has on. A location-wide block takes the time
+  // of every window at that location.
+  const quickBookSlotsForWeek = (week: number) =>
+    quickBookSlots({
+      week,
+      availability: calendarAvailability,
+      items: accountItems,
+      takesWindow: (item, window) => {
+        const service = itemService(item, services);
+        if (isLocationOnlyBlock(item)) {
+          return Boolean(window.locationId) && resolvedCalendarItemLocationId(item, service, locations, coachAccount) === window.locationId;
+        }
+        return resolvedCalendarItemCoachId(item, service, coachProfiles) === (window.coachId || activeCoachId);
+      },
+      isPast: isSlotInPast,
+    });
   const serviceScopeCoachId = isAdminUser ? selectedCalendarCoachId || activeCoachId : activeCoachId;
   const itemInCoachScope = (item: CalendarItem) =>
     isAdminUser || resolvedCalendarItemCoachId(item, itemService(item, services), coachProfiles) === serviceScopeCoachId;
@@ -5201,47 +5180,40 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
    * outright here rather than left for a state change to trigger.
    */
   /**
-   * The phone's Book tab: the calendar's own quick-create, on today at the
-   * next quarter-hour nobody is booked or blocked, so the coach only picks
-   * the client and lesson type.
+   * The phone's Book screen. It books into the calendar on show, except a
+   * single location's calendar, which has no lesson types to offer, so an
+   * admin there books across everyone instead.
    */
-  function startPhoneBooking() {
+  function openQuickBook() {
     if (!requireLiveDatabase("create calendar items")) return;
-    const week = getCurrentWeekOffset();
-    const day = buildWeekDays(week).findIndex((weekDay) => weekDay.isToday);
-    const start = nextFreeStart(
-      accountItems,
-      { week, day, nowMinutes: businessNow().minutes, inScope: itemInCoachScope },
-      calendarStartMinutes,
-      calendarEndMinutes,
-    );
-    switchView("calendar");
-    goToToday();
-    if (start === null) {
-      setToast({ message: t("No free time left today. Tap a time on the calendar to book.") });
-      return;
+    if (effectiveCalendarPerspective === "location") {
+      calendarPerspectiveChosenRef.current = true;
+      setCalendarPerspective("all");
     }
-    setQuickCreate({
-      week,
-      day,
-      start,
-      x: 0,
-      y: 0,
-      serviceId: "",
-      phone: "",
-      email: "",
-      note: "",
-      attendees: [],
-      attendeeName: "",
-      attendeeEmail: "",
-      error: "",
-    });
+    switchView("book");
   }
 
-  function openBookingFromToday(item: CalendarItem) {
+  /** Open the calendar on a booking's day with its card showing. */
+  function showBookingOnCalendar(item: CalendarItem) {
     switchView("calendar");
-    goToToday();
+    setActiveWeekState(itemWeek(item));
+    setCalendarDayFocus(item.day);
+    centreWeekPager();
     setSelectedId(item.id);
+  }
+
+  /**
+   * The calendar's Week/Day switch. From a day it goes out to the whole week;
+   * from the week it opens today, whichever week was on show.
+   */
+  function toggleCalendarDayView() {
+    if (calendarDayFocus !== null) {
+      setCalendarDayFocus(null);
+      return;
+    }
+    const week = getCurrentWeekOffset();
+    setCalendarDayFocus(Math.max(0, buildWeekDays(week).findIndex((day) => day.isToday)));
+    goToToday();
   }
 
   function goToToday() {
@@ -17276,7 +17248,6 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     accountCoachProfiles,
     activeCoachId,
     availabilityLocations,
-    calendarViewBounds,
     calendarStartMinutes,
     calendarEndMinutes,
     activeServices,
@@ -17338,6 +17309,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     selectedId,
     terms,
     quickCreateServices,
+    toggleCalendarDayView,
   });
 
   const clientProfile = useClientProfileController({
@@ -17425,7 +17397,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     { key: "today", label: t("Today"), Icon: ClaritySessions, active: activeView === "today", onSelect: () => switchView("today") },
     ...workspaceDestinations.filter((destination) => destination.key === "calendar" || destination.key === "clients"),
     ...(capabilities.calendar
-      ? [{ key: "book", label: t("Book"), Icon: ClarityNewBooking, active: false, onSelect: startPhoneBooking }]
+      ? [{ key: "book", label: t("Book"), Icon: ClarityNewBooking, active: activeView === "book", onSelect: openQuickBook }]
       : []),
   ];
   const phoneMore = workspaceDestinations.filter((destination) => destination.key !== "calendar" && destination.key !== "clients");
@@ -17772,13 +17744,17 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
             items={accountItems}
             services={services}
             inScope={itemInCoachScope}
-            onOpenBooking={openBookingFromToday}
-            onNewBooking={startPhoneBooking}
+            onOpenBooking={showBookingOnCalendar}
+            onNewBooking={openQuickBook}
             onOpenCalendar={() => {
               switchView("calendar");
               goToToday();
             }}
           />
+        )}
+
+        {adminWorkspaceReady && activeView === "book" && (
+          <QuickBookScreen calendar={calendar} slotsForWeek={quickBookSlotsForWeek} onBooked={showBookingOnCalendar} />
         )}
 
         {adminWorkspaceReady && activeView === "clients" && (

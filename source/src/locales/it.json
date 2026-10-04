@@ -215,11 +215,6 @@
   "Could not save this setting.": "Impossibile salvare questa impostazione.",
   "Saving…": "Salvataggio…",
   "Any location": "Qualsiasi sede",
-  "No morning hours are available in this view.": "Nessun orario mattutino disponibile in questa vista.",
-  "No afternoon or evening hours are available in this view.": "Nessun orario pomeridiano o serale disponibile in questa vista.",
-  "View: Full": "Vista: completa",
-  "View: AM": "Vista: mattina",
-  "View: PM": "Vista: pomeriggio",
   "No coach": "Nessun coach",
   "Sent": "Inviata",
   "Published": "Pubblicata",
@@ -4437,7 +4432,6 @@
   "The customer holds their card, phone or watch flat against the back of this phone and keeps it there until it confirms.": "Il cliente tiene la carta, il telefono o l'orologio appoggiato sul retro di questo telefono finché il pagamento non viene confermato.",
   "Hold card or phone against the back of this phone.": "Avvicina la carta o il telefono al retro di questo telefono.",
   "This phone cannot take Tap to Pay.": "Questo telefono non supporta Tap to Pay.",
-  "No free time left today. Tap a time on the calendar to book.": "Oggi non c'è più tempo libero. Tocca un orario nel calendario per prenotare.",
   "Book": "Prenota",
   "On now": "In corso",
   "Up next": "Prossimo",
@@ -4454,5 +4448,10 @@
   "Turn off on this phone": "Disattiva su questo telefono",
   "Turn on for this phone": "Attiva su questo telefono",
   "This phone did not answer. Check it has a connection, then try again.": "Il telefono non ha risposto. Controlla che sia connesso e riprova.",
-  "This phone could not be registered for notifications.": "Impossibile registrare questo telefono per le notifiche."
+  "This phone could not be registered for notifications.": "Impossibile registrare questo telefono per le notifiche.",
+  "Show the whole week": "Mostra tutta la settimana",
+  "Show today": "Mostra oggi",
+  "Day": "Giorno",
+  "Pick a time": "Scegli un orario",
+  "No free times this week.": "Nessun orario libero questa settimana."
 }

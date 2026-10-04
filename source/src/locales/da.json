@@ -215,11 +215,6 @@
   "Could not save this setting.": "Kunne ikke gemme denne indstilling.",
   "Saving…": "Gemmer…",
   "Any location": "Alle lokationer",
-  "No morning hours are available in this view.": "Der er ingen formiddagstimer i denne visning.",
-  "No afternoon or evening hours are available in this view.": "Der er ingen eftermiddags- eller aftentimer i denne visning.",
-  "View: Full": "Visning: Fuld",
-  "View: AM": "Visning: AM",
-  "View: PM": "Visning: PM",
   "No coach": "Ingen træner",
   "Sent": "Sendt",
   "Published": "Publiceret",
@@ -4437,7 +4432,6 @@
   "The customer holds their card, phone or watch flat against the back of this phone and keeps it there until it confirms.": "Kunden holder sit kort, sin telefon eller sit ur fladt mod bagsiden af denne telefon, indtil betalingen er bekræftet.",
   "Hold card or phone against the back of this phone.": "Hold kort eller telefon mod bagsiden af denne telefon.",
   "This phone cannot take Tap to Pay.": "Denne telefon kan ikke bruge Tap to Pay.",
-  "No free time left today. Tap a time on the calendar to book.": "Ingen ledig tid tilbage i dag. Tryk på et tidspunkt i kalenderen for at booke.",
   "Book": "Book",
   "On now": "I gang nu",
   "Up next": "Næste",
@@ -4454,5 +4448,10 @@
   "Turn off on this phone": "Slå fra på denne telefon",
   "Turn on for this phone": "Slå til på denne telefon",
   "This phone did not answer. Check it has a connection, then try again.": "Telefonen svarede ikke. Tjek, at den har forbindelse, og prøv igen.",
-  "This phone could not be registered for notifications.": "Telefonen kunne ikke registreres til notifikationer."
+  "This phone could not be registered for notifications.": "Telefonen kunne ikke registreres til notifikationer.",
+  "Show the whole week": "Vis hele ugen",
+  "Show today": "Vis i dag",
+  "Day": "Dag",
+  "Pick a time": "Vælg et tidspunkt",
+  "No free times this week.": "Ingen ledige tider denne uge."
 }

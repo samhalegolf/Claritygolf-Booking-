@@ -215,11 +215,6 @@
   "Could not save this setting.": "Tätä asetusta ei voitu tallentaa.",
   "Saving…": "Tallennetaan…",
   "Any location": "Mikä tahansa sijainti",
-  "No morning hours are available in this view.": "Tässä näkymässä ei ole aamupäivän aikoja.",
-  "No afternoon or evening hours are available in this view.": "Tässä näkymässä ei ole iltapäivän tai illan aikoja.",
-  "View: Full": "Näkymä: koko päivä",
-  "View: AM": "Näkymä: AP",
-  "View: PM": "Näkymä: IP",
   "No coach": "Ei valmentajaa",
   "Sent": "Lähetetty",
   "Published": "Julkaistu",
@@ -4437,7 +4432,6 @@
   "The customer holds their card, phone or watch flat against the back of this phone and keeps it there until it confirms.": "Asiakas pitää korttia, puhelinta tai kelloa tasaisesti tämän puhelimen takaosaa vasten, kunnes maksu vahvistetaan.",
   "Hold card or phone against the back of this phone.": "Pidä korttia tai puhelinta tämän puhelimen takaosaa vasten.",
   "This phone cannot take Tap to Pay.": "Tällä puhelimella ei voi käyttää Tap to Payta.",
-  "No free time left today. Tap a time on the calendar to book.": "Tänään ei ole enää vapaata aikaa. Varaa napauttamalla aikaa kalenterissa.",
   "Book": "Varaa",
   "On now": "Käynnissä",
   "Up next": "Seuraavaksi",
@@ -4454,5 +4448,10 @@
   "Turn off on this phone": "Poista käytöstä tässä puhelimessa",
   "Turn on for this phone": "Ota käyttöön tässä puhelimessa",
   "This phone did not answer. Check it has a connection, then try again.": "Puhelin ei vastannut. Tarkista yhteys ja yritä uudelleen.",
-  "This phone could not be registered for notifications.": "Tätä puhelinta ei voitu rekisteröidä ilmoituksia varten."
+  "This phone could not be registered for notifications.": "Tätä puhelinta ei voitu rekisteröidä ilmoituksia varten.",
+  "Show the whole week": "Näytä koko viikko",
+  "Show today": "Näytä tänään",
+  "Day": "Päivä",
+  "Pick a time": "Valitse aika",
+  "No free times this week.": "Ei vapaita aikoja tällä viikolla."
 }

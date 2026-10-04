@@ -215,11 +215,6 @@
   "Could not save this setting.": "No se ha podido guardar este ajuste.",
   "Saving…": "Guardando…",
   "Any location": "Cualquier centro",
-  "No morning hours are available in this view.": "No hay horas de mañana disponibles en esta vista.",
-  "No afternoon or evening hours are available in this view.": "No hay horas de tarde ni de noche disponibles en esta vista.",
-  "View: Full": "Vista: completa",
-  "View: AM": "Vista: mañana",
-  "View: PM": "Vista: tarde",
   "No coach": "Sin profesor",
   "Sent": "Enviada",
   "Published": "Publicada",
@@ -4437,7 +4432,6 @@
   "The customer holds their card, phone or watch flat against the back of this phone and keeps it there until it confirms.": "El cliente acerca su tarjeta, teléfono o reloj a la parte trasera de este teléfono y lo mantiene ahí hasta que se confirme.",
   "Hold card or phone against the back of this phone.": "Acerca la tarjeta o el móvil a la parte trasera de este teléfono.",
   "This phone cannot take Tap to Pay.": "Este teléfono no admite Tap to Pay.",
-  "No free time left today. Tap a time on the calendar to book.": "No queda tiempo libre hoy. Toca una hora en el calendario para reservar.",
   "Book": "Reservar",
   "On now": "Ahora",
   "Up next": "A continuación",
@@ -4454,5 +4448,10 @@
   "Turn off on this phone": "Desactivar en este teléfono",
   "Turn on for this phone": "Activar en este teléfono",
   "This phone did not answer. Check it has a connection, then try again.": "El teléfono no respondió. Comprueba que tiene conexión y vuelve a intentarlo.",
-  "This phone could not be registered for notifications.": "No se pudo registrar este teléfono para notificaciones."
+  "This phone could not be registered for notifications.": "No se pudo registrar este teléfono para notificaciones.",
+  "Show the whole week": "Ver toda la semana",
+  "Show today": "Ver hoy",
+  "Day": "Día",
+  "Pick a time": "Elige una hora",
+  "No free times this week.": "No hay horas libres esta semana."
 }

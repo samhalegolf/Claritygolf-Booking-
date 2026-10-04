@@ -215,11 +215,6 @@
   "Could not save this setting.": "この設定を保存できませんでした。",
   "Saving…": "保存中…",
   "Any location": "すべてのロケーション",
-  "No morning hours are available in this view.": "この表示では午前の時間帯がありません。",
-  "No afternoon or evening hours are available in this view.": "この表示では午後・夕方の時間帯がありません。",
-  "View: Full": "表示：終日",
-  "View: AM": "表示：午前",
-  "View: PM": "表示：午後",
   "No coach": "コーチなし",
   "Sent": "送信済み",
   "Published": "公開済み",
@@ -4437,7 +4432,6 @@
   "The customer holds their card, phone or watch flat against the back of this phone and keeps it there until it confirms.": "お客様にカード、スマートフォン、または時計をこのスマートフォンの背面に平らに当て、決済が確認されるまでそのままにしてもらいます。",
   "Hold card or phone against the back of this phone.": "カードまたはスマートフォンをこのスマートフォンの背面にかざしてください。",
   "This phone cannot take Tap to Pay.": "このスマートフォンではタッチ決済を使用できません。",
-  "No free time left today. Tap a time on the calendar to book.": "本日は空き時間がありません。カレンダーの時間をタップして予約してください。",
   "Book": "予約",
   "On now": "進行中",
   "Up next": "次の予定",
@@ -4454,5 +4448,10 @@
   "Turn off on this phone": "このスマートフォンでオフにする",
   "Turn on for this phone": "このスマートフォンでオンにする",
   "This phone did not answer. Check it has a connection, then try again.": "スマートフォンから応答がありません。接続を確認して、もう一度お試しください。",
-  "This phone could not be registered for notifications.": "このスマートフォンを通知に登録できませんでした。"
+  "This phone could not be registered for notifications.": "このスマートフォンを通知に登録できませんでした。",
+  "Show the whole week": "週全体を表示",
+  "Show today": "今日を表示",
+  "Day": "日",
+  "Pick a time": "時間を選択",
+  "No free times this week.": "今週は空き時間がありません。"
 }

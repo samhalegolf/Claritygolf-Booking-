@@ -215,11 +215,6 @@
   "Could not save this setting.": "Diese Einstellung konnte nicht gespeichert werden.",
   "Saving…": "Speichern…",
   "Any location": "Beliebiger Standort",
-  "No morning hours are available in this view.": "In dieser Ansicht sind keine Vormittagszeiten verfügbar.",
-  "No afternoon or evening hours are available in this view.": "In dieser Ansicht sind keine Nachmittags- oder Abendzeiten verfügbar.",
-  "View: Full": "Ansicht: Ganz",
-  "View: AM": "Ansicht: Vormittag",
-  "View: PM": "Ansicht: Nachmittag",
   "No coach": "Kein Coach",
   "Sent": "Gesendet",
   "Published": "Veröffentlicht",
@@ -4437,7 +4432,6 @@
   "The customer holds their card, phone or watch flat against the back of this phone and keeps it there until it confirms.": "Die Kundin oder der Kunde hält Karte, Telefon oder Uhr flach an die Rückseite dieses Telefons, bis die Zahlung bestätigt ist.",
   "Hold card or phone against the back of this phone.": "Karte oder Handy an die Rückseite dieses Telefons halten.",
   "This phone cannot take Tap to Pay.": "Dieses Telefon unterstützt Tap to Pay nicht.",
-  "No free time left today. Tap a time on the calendar to book.": "Heute ist keine Zeit mehr frei. Tippe im Kalender auf eine Uhrzeit, um zu buchen.",
   "Book": "Buchen",
   "On now": "Läuft gerade",
   "Up next": "Als Nächstes",
@@ -4454,5 +4448,10 @@
   "Turn off on this phone": "Auf diesem Telefon ausschalten",
   "Turn on for this phone": "Für dieses Telefon einschalten",
   "This phone did not answer. Check it has a connection, then try again.": "Das Telefon hat nicht geantwortet. Prüfe die Verbindung und versuche es erneut.",
-  "This phone could not be registered for notifications.": "Dieses Telefon konnte nicht für Benachrichtigungen registriert werden."
+  "This phone could not be registered for notifications.": "Dieses Telefon konnte nicht für Benachrichtigungen registriert werden.",
+  "Show the whole week": "Ganze Woche anzeigen",
+  "Show today": "Heute anzeigen",
+  "Day": "Tag",
+  "Pick a time": "Zeit wählen",
+  "No free times this week.": "Diese Woche keine freien Zeiten."
 }

@@ -1,19 +1,15 @@
-import { ArrowLeft, Check, GripVertical, Minimize2, Plus, Search, X } from "lucide-react";
+import { GripVertical, Minimize2, X } from "lucide-react";
 import type { CSSProperties } from "react";
 import { formatDurationLabel, WEEK_PANEL_OFFSETS } from "../../calendar-axis";
 import { t } from "../../lib/i18n";
-import { formatMoney } from "../../lib/money";
 import { notificationStatusLabel } from "../notifications/notificationModel";
-import { customGroupMaxParticipants } from "../services/serviceModel";
-import { ClarityCalendar, ClarityProfile, ClaritySessions } from "../shared/ClarityIcons";
+import { ClarityCalendar } from "../shared/ClarityIcons";
 import { activeLocations, canUseFeature, locationById } from "../workspace/workspaceModel";
 import {
-  bookingCoachSnapshotFor,
   bookingLocationShortDisplay,
   buildWeekDays,
   calendarItemLocation,
   calendarLessonColor,
-  customGroupStatusLabel,
   formatRange,
   formatTime,
   isCoachLocationBlock,
@@ -25,6 +21,7 @@ import {
   resolvedCalendarItemCoachId,
   resolvedCalendarItemLocationId,
 } from "./calendarModel";
+import { QuickCreateForm } from "./QuickCreateForm";
 import type { CalendarController } from "./useCalendarController";
 
 /** The calendar screen. Everything it shows and does comes from its controller. */
@@ -47,14 +44,12 @@ export function CalendarView({ calendar }: { calendar: CalendarController }) {
     calendarDetailMode,
     toggleCalendarDetailMode,
     handleCalendarTouchStart,
-    cycleCalendarViewMode,
-    calendarViewButtonLabel,
+    toggleCalendarDayView,
     weekTitle,
     calendarSaveStatus,
     calendarFeedStatus,
     calendarSaveError,
     calendarSaveFailureKind,
-    calendarViewEmptyMessage,
     locationCalendarCoachGroups,
     locationCalendarHasAppointments,
     calendarAxisMode,
@@ -117,27 +112,6 @@ export function CalendarView({ calendar }: { calendar: CalendarController }) {
     quickCreate,
     hasMoved,
     quickCreatePopoverStyle,
-    quickCreateService,
-    quickCreateServices,
-    selectQuickService,
-    createBlockFromQuick,
-    backToQuickServiceChoice,
-    quickCreateChoices,
-    chooseQuickCreateScope,
-    quickCreateAvailabilityError,
-    quickCreateCandidate,
-    quickClientSearch,
-    setQuickMatchField,
-    setQuickClientSearch,
-    confirmQuickAppointment,
-    quickClientMatchButton,
-    updateQuickCreateField,
-    quickCreateIsCustomGroup,
-    quickCreateCustomGroupParticipantCount,
-    quickCreateCustomGroupPrice,
-    removeQuickCreateCustomGroupAttendee,
-    updateQuickCreateAttendeeDraft,
-    addQuickCreateCustomGroupAttendee,
   } = calendar;
 
   return (
@@ -215,8 +189,17 @@ export function CalendarView({ calendar }: { calendar: CalendarController }) {
       >
         <div className="calendar-toolbar">
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <button className="outline-button compact-button" onClick={cycleCalendarViewMode} type="button">
-              {calendarViewButtonLabel}
+            {/* Says which of the two you are on. Tapping a day heading is how
+                you get into a day; this is how you get back out to the week,
+                and from the week it opens today. */}
+            <button
+              className={`calendar-span-switch ${calendarDayFocus !== null ? "is-day" : "is-week"}`}
+              onClick={toggleCalendarDayView}
+              type="button"
+              aria-label={calendarDayFocus !== null ? t("Show the whole week") : t("Show today")}
+            >
+              <span>{t("Week")}</span>
+              <span>{t("Day")}</span>
             </button>
             <h2>{weekTitle}</h2>
           </div>
@@ -242,9 +225,6 @@ export function CalendarView({ calendar }: { calendar: CalendarController }) {
               : t("Your latest change was not saved. Please try again; the app will retry when you make another change.")}
           </div>
         )}
-        {calendarViewEmptyMessage ? (
-          <div className="calendar-save-warning">{calendarViewEmptyMessage}</div>
-        ) : null}
         {effectiveCalendarPerspective === "location" && !locationCalendarCoachGroups.length ? (
           <div className="calendar-save-warning">{t("No active coaches are assigned to this location yet.")}</div>
         ) : null}
@@ -252,7 +232,7 @@ export function CalendarView({ calendar }: { calendar: CalendarController }) {
           <div className="calendar-save-warning">{t("No appointments at this location for the selected week.")}</div>
         ) : null}
 
-        <div className="calendar-header-row">
+        <div className={`calendar-header-row ${calendarDayFocus !== null ? "is-day-view" : ""}`}>
           <div className="time-gutter">
             {/* Sits above the time gutter because that is the corner the
                 axis belongs to: it changes how the vertical scale reads,
@@ -283,7 +263,8 @@ export function CalendarView({ calendar }: { calendar: CalendarController }) {
                 {(offset === 0 ? weekDays : buildWeekDays(activeWeek + offset)).map((day, dayIndex) => (
                   // In day view the strip is the day picker: the headings
                   // stay where they are and tapping one fills the grid with
-                  // it, so the week is never more than a tap away.
+                  // it. The open day stands up as a folder tab joined to the
+                  // grid, so which day you are on reads at a glance.
                   <button
                     type="button"
                     className={`day-heading ${day.isToday ? "today" : ""} ${
@@ -694,232 +675,7 @@ export function CalendarView({ calendar }: { calendar: CalendarController }) {
             </button>
             <span>{`${weekDays[quickCreate.day].short}, ${formatTime(quickCreate.start)}`}</span>
             <strong>{t("Quick create")}</strong>
-            {!quickCreateService ? (
-              <>
-                {quickCreateServices.map((service) => (
-                  <button key={service.id} onClick={() => selectQuickService(service.id)}>
-                    <Plus size={16} />
-                    <span>
-                      <strong>{service.name}</strong>
-                      <em>{t("{duration} min · {price}", { duration: service.duration, price: formatMoney(service.price) })}</em>
-                    </span>
-                  </button>
-                ))}
-                {effectiveCalendarPerspective === "location" ? (
-                  <>
-                    <button onClick={() => createBlockFromQuick("location")}>
-                      <ClaritySessions size={16} />{t("Block this location")}</button>
-                    {quickCreate.coachId ? (
-                      <button onClick={() => createBlockFromQuick("coach-location")}>
-                        <ClaritySessions size={16} />{t("Block this coach")}</button>
-                    ) : null}
-                  </>
-                ) : (
-                  <button onClick={() => createBlockFromQuick("coach-location")}>
-                    <ClaritySessions size={16} />{t("Block 30 minutes")}</button>
-                )}
-              </>
-            ) : (
-              <div className="quick-create-form">
-                <button className="quick-service-summary" onClick={backToQuickServiceChoice} type="button">
-                  <span>
-                    <strong>{quickCreateService.name}</strong>
-                    <em>{t("{duration} min · {price}", { duration: quickCreateService.duration, price: formatMoney(quickCreateService.price) })}</em>
-                  </span>
-                  <ArrowLeft size={14} />
-                </button>
-                {quickCreateChoices && !quickCreateChoices.fixedCoachId ? (
-                  <label>
-                    <span>{t("Coach")}</span>
-                    <select
-                      value={quickCreate.coachId ?? ""}
-                      onChange={(event) => chooseQuickCreateScope("coachId", event.target.value)}
-                    >
-                      <option value="" disabled>{t("Choose a coach")}</option>
-                      {quickCreateChoices.coachIds.map((coachId) => {
-                        const coach = bookingCoachSnapshotFor(coachId, coachProfiles);
-                        const free = !quickCreateAvailabilityError(quickCreateCandidate!, quickCreateService, {
-                          coachId,
-                          locationId: quickCreate.locationId,
-                        });
-                        return (
-                          <option key={coachId} value={coachId}>
-                            {coach?.displayName || coach?.name || coachId}
-                            {free ? "" : t(" (busy)")}
-                          </option>
-                        );
-                      })}
-                    </select>
-                  </label>
-                ) : null}
-                {quickCreateChoices && !quickCreateChoices.fixedLocationId ? (
-                  <label>
-                    <span>{t("Location")}</span>
-                    <select
-                      value={quickCreate.locationId ?? ""}
-                      onChange={(event) => chooseQuickCreateScope("locationId", event.target.value)}
-                    >
-                      <option value="" disabled>{t("Choose a location")}</option>
-                      {quickCreateChoices.locationIds.map((locationId) => {
-                        const location = locationById(locations, locationId);
-                        const free = !quickCreateAvailabilityError(quickCreateCandidate!, quickCreateService, {
-                          coachId: quickCreate.coachId,
-                          locationId,
-                        });
-                        return (
-                          <option key={locationId} value={locationId}>
-                            {location?.shortName || location?.name || locationId}
-                            {free ? "" : t(" (busy)")}
-                          </option>
-                        );
-                      })}
-                    </select>
-                  </label>
-                ) : null}
-                <label>
-                  <span>{t("Name")}</span>
-                  <div className="quick-match-anchor">
-                    <div className="quick-client-search w-name">
-                      <Search size={15} />
-                      <input
-                        value={quickClientSearch}
-                        autoComplete="name"
-                        onBlur={() => setQuickMatchField("")}
-                        onFocus={() => setQuickMatchField("name")}
-                        onChange={(event) => {
-                          setQuickMatchField("name");
-                          setQuickClientSearch(event.target.value);
-                          setQuickCreate((current) => (current ? { ...current, error: "" } : current));
-                        }}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") {
-                            event.preventDefault();
-                            confirmQuickAppointment();
-                          }
-                        }}
-                        placeholder={t("Client name")}
-                      />
-                    </div>
-                    {quickClientMatchButton("name")}
-                  </div>
-                </label>
-                <label>
-                  <span>{t("Phone")}</span>
-                  <div className="quick-match-anchor">
-                      <input
-                        className="w-name"
-                        value={quickCreate.phone}
-                        autoComplete="tel"
-                        inputMode="tel"
-                        type="tel"
-                        onBlur={() => setQuickMatchField("")}
-                        onFocus={() => setQuickMatchField("phone")}
-                        onChange={(event) => {
-                        setQuickMatchField("phone");
-                        updateQuickCreateField("phone", event.target.value);
-                      }}
-                      placeholder="+64"
-                    />
-                    {quickClientMatchButton("phone")}
-                  </div>
-                </label>
-                <label>
-                  <span>{t("Email")}</span>
-                  <div className="quick-match-anchor">
-                      <input
-                        className="w-email"
-                        value={quickCreate.email}
-                        autoComplete="email"
-                        inputMode="email"
-                        onFocus={() => setQuickMatchField("email")}
-                        onBlur={() => setQuickMatchField("")}
-                        onChange={(event) => {
-                        setQuickMatchField("email");
-                        updateQuickCreateField("email", event.target.value);
-                      }}
-                      placeholder={t("client@example.com")}
-                      type="email"
-                    />
-                    {quickClientMatchButton("email")}
-                  </div>
-                </label>
-                <label>
-                  <span>{t("Lesson note")}</span>
-                  <textarea
-                    className="w-prose"
-                    value={quickCreate.note}
-                    onChange={(event) => updateQuickCreateField("note", event.target.value)}
-                    placeholder={t("Optional")}
-                  />
-                </label>
-                {quickCreateIsCustomGroup && quickCreateService && (
-                  <div className="lesson-receipts-panel custom-group-admin-panel">
-                    <div className="receipt-panel-title">
-                      <ClarityProfile size={16} />
-                      <span>{t("Custom group attendees")}</span>
-                      <em>
-                        {quickCreateCustomGroupParticipantCount} / {customGroupMaxParticipants(quickCreateService)} · {formatMoney(quickCreateCustomGroupPrice)}
-                      </em>
-                    </div>
-                    <div className="email-receipt-row">
-                      <span className="email-status-dot sent" aria-hidden="true" />
-                      <div>
-                        <strong>{quickClientSearch.trim() || t("Booker")}</strong>
-                        <span>{quickCreate.email.trim() || t("Booker")}</span>
-                      </div>
-                      <em>{customGroupStatusLabel("booker")}</em>
-                    </div>
-                    {quickCreate.attendees.map((attendee) => (
-                      <div className="email-receipt-row" key={attendee.id}>
-                        <span className={`email-status-dot ${attendee.status === "manual" ? "sent" : "pending"}`} aria-hidden="true" />
-                        <div>
-                          <strong>{attendee.name}</strong>
-                          <span>{attendee.email || t("Manual attendee")}</span>
-                        </div>
-                        <em>{customGroupStatusLabel(attendee.status)}</em>
-                        <button className="icon-button small" onClick={() => removeQuickCreateCustomGroupAttendee(attendee.id)} aria-label={t("Remove {name}", { name: attendee.name })}>
-                          <X size={14} />
-                        </button>
-                      </div>
-                    ))}
-                    <div className="booking-form custom-group-attendee-form">
-                      <input
-                        value={quickCreate.attendeeName}
-                        onChange={(event) => updateQuickCreateAttendeeDraft("attendeeName", event.target.value)}
-                        placeholder={t("Attendee name")}
-                      />
-                      <input
-                        value={quickCreate.attendeeEmail}
-                        onChange={(event) => updateQuickCreateAttendeeDraft("attendeeEmail", event.target.value)}
-                        placeholder={t("Email optional")}
-                        type="email"
-                      />
-                      <button
-                        className="outline-button"
-                        onClick={addQuickCreateCustomGroupAttendee}
-                        disabled={quickCreateCustomGroupParticipantCount >= customGroupMaxParticipants(quickCreateService)}
-                        type="button"
-                      >
-                        <Plus size={15} />
-                        {quickCreate.attendeeEmail.trim() ? t("Send invite") : t("Confirm attendee")}
-                      </button>
-                    </div>
-                  </div>
-                )}
-                {quickCreate.error && <p className="quick-create-error">{quickCreate.error}</p>}
-                <div className="quick-create-actions">
-                  <button className="outline-button" onClick={backToQuickServiceChoice} type="button">
-                    <ArrowLeft size={15} />{t("Back")}</button>
-                  <button
-                    className="primary-button"
-                    onClick={confirmQuickAppointment}
-                    disabled={!quickClientSearch.trim() || Boolean(quickCreate.error)}
-                    type="button"
-                  >
-                    <Check size={15} />{t("Create")}</button>
-                </div>
-              </div>
-            )}
+            <QuickCreateForm calendar={calendar} allowBlocks />
           </div>
         )}
       </div>
