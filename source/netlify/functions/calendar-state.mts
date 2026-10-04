@@ -8,9 +8,9 @@ import {
   defaultCoachAccount,
   isOriginalWorkspace,
 } from "./_shared/coach-account.mts";
+import { filterCalendarStateForContext } from "./_shared/bookings.mts";
 import { bayBookingMatchesSlot } from "./_shared/optix-reconcile.mts";
 import { cleanLocationKind, cleanLocationResources, cleanResourceSource } from "./_shared/resources.mts";
-import { serviceIncludesCoach } from "./_shared/service-scope.mts";
 import {
   requireCoachActor,
   appUserRoleForMembership,
@@ -506,30 +506,6 @@ function rowToItem(row: Record<string, unknown>) {
     completedAt: cleanString(typeof row.completed_at === "string" ? row.completed_at : String(row.completed_at || ""), "", 120),
     ...(cancelledGroupSession ? { readOnly: true, groupSlot: true } : {}),
     ...(customGroup || {}),
-  };
-}
-
-function recordBelongsToAccount(record: Record<string, unknown>, accountId: string) {
-  return record.accountId === accountId;
-}
-
-function filterCalendarStateForContext(state: Record<string, any>, context: { accountId: string; isAdmin: boolean; coachId?: string }) {
-  const coaches = state.coaches || [];
-  const fallbackCoachId = coaches.find((coach: Record<string, unknown>) => coach.active && !coach.archived)?.id || coaches[0]?.id || "";
-  const filteredItems = context.isAdmin
-    ? (state.items || []).filter((item: Record<string, unknown>) => recordBelongsToAccount(item, context.accountId))
-    : (state.items || []).filter((item: Record<string, unknown>) => recordBelongsToAccount(item, context.accountId) && (item.coachId || fallbackCoachId) === context.coachId);
-  return {
-    ...state,
-    items: filteredItems,
-    services: context.isAdmin
-      ? (state.services || []).filter((service: Record<string, unknown>) => recordBelongsToAccount(service, context.accountId))
-      : (state.services || []).filter((service: Record<string, unknown>) => recordBelongsToAccount(service, context.accountId) && serviceIncludesCoach(service, context.coachId || "", fallbackCoachId)),
-    availability: context.isAdmin
-      ? (state.availability || []).map((day: Array<Record<string, unknown>>) => day.filter((window) => recordBelongsToAccount(window, context.accountId)))
-      : (state.availability || []).map((day: Array<Record<string, unknown>>) => day.filter((window) => recordBelongsToAccount(window, context.accountId) && (window.coachId || fallbackCoachId) === context.coachId)),
-    people: state.people || [],
-    notifications: state.notifications || [],
   };
 }
 

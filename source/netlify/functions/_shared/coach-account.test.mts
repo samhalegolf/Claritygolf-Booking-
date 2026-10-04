@@ -33,6 +33,15 @@ test("the account carries the business's own country, currency and tax", () => {
   assert.equal(account.invoiceSettings.taxInclusive, false);
 });
 
+test("the calendar shell decides what a coach may see with the shared rule", () => {
+  // The shell answers every calendar load. It used to carry its own copy of
+  // this filter, and a copy is free to drift from the rule every save is
+  // checked against.
+  const source = readFileSync(join(here, "../calendar-state.mts"), "utf8");
+  assert.doesNotMatch(source, /^\s*function filterCalendarStateForContext\b/m, "calendar-state defines its own visibility filter");
+  assert.match(source, /import \{ filterCalendarStateForContext \} from "\.\/_shared\/bookings\.mts"/);
+});
+
 test("the calendar shell and booking-core build the account from the one shared copy", () => {
   for (const file of ["../calendar-state.mts", "../booking-core.mts"]) {
     const source = readFileSync(join(here, file), "utf8");
