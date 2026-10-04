@@ -20,6 +20,7 @@ import { cleanInvoiceSettings, defaultInvoiceSettings } from "../billing/invoice
 import type { InvoiceSettings } from "../billing/types";
 import type { Service } from "../services/serviceModel";
 import { WORKSPACE_ACCOUNTS_STORAGE_KEY } from "../shared/workspaceStorage";
+import type { Session } from "../auth/session";
 
 /**
  * The business in the coach app: its account and plan, coaches, locations,
@@ -952,4 +953,28 @@ export function getStoredBrandSettings(): BrandSettings {
   } catch {
     return defaultBrandSettings;
   }
+}
+
+/**
+ * The workspace the session answer carried, cleaned with the same functions the
+ * calendar shell's answer goes through. This is what lets the sidebar be right
+ * on the very first render: the plan decides whether Sell and Billing exist,
+ * the user decides what is editable, and both used to arrive with the shell.
+ * Null when the session came without one; local storage is the fallback then.
+ */
+export function workspaceBootstrapFromSession(session?: Session) {
+  const workspace = session?.role === "coach" ? session.workspace : undefined;
+  if (!workspace) return null;
+  const account = cleanCoachAccount(workspace.account as Partial<CoachAccount>);
+  const accounts = cleanWorkspaceAccounts(workspace.workspaceAccounts as Partial<WorkspaceAccount>[], account);
+  return {
+    account,
+    accounts,
+    coaches: cleanCoachProfiles(workspace.coaches as Partial<CoachProfile>[], account),
+    currentUser: cleanAppUser(
+      workspace.currentUser as Partial<AppUser>,
+      defaultAppUserFromCoachAccount(account),
+      defaultAccountId(accounts),
+    ),
+  };
 }
