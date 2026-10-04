@@ -12,6 +12,7 @@ import {
   RESOURCE_WEBHOOK_INTEGRATION_ID,
   RESOURCE_WEBHOOK_SECRET_FIELD,
 } from "./_shared/resource-webhook-provider.mts";
+import { json } from "./_shared/http.mts";
 
 /**
  * Changes a business's bay system makes on its own side.
@@ -26,13 +27,6 @@ import {
  * The URL names the business; the signature is what proves the request is
  * theirs. An unsigned or wrongly signed request changes nothing.
  */
-
-function json(value: unknown, status = 200) {
-  return new Response(JSON.stringify(value), {
-    status,
-    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
-  });
-}
 
 export default async function handler(req: Request) {
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);

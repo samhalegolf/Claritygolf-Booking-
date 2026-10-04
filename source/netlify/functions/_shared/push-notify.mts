@@ -2,6 +2,7 @@ import { getDatabase } from "@netlify/database";
 import { randomUUID } from "node:crypto";
 
 import { cleanMessageLanguage } from "./message-language.mts";
+import { trimmedEnv } from "./values.mts";
 
 /**
  * Web push transport for coach browser notifications.
@@ -45,12 +46,8 @@ function db() {
   return getDatabase();
 }
 
-function env(name: string, fallback = "") {
-  return (globalThis.Netlify?.env?.get(name) || process.env[name] || fallback).trim();
-}
-
 export function pushPublicKey() {
-  return env("VAPID_PUBLIC_KEY");
+  return trimmedEnv("VAPID_PUBLIC_KEY");
 }
 
 /**
@@ -58,15 +55,15 @@ export function pushPublicKey() {
  * Falls back to the address bookings already reply to.
  */
 function vapidSubject() {
-  const configured = env("VAPID_SUBJECT");
+  const configured = trimmedEnv("VAPID_SUBJECT");
   if (configured) return configured;
-  const email = env("NOTIFICATION_REPLY_TO") || env("RESEND_FROM_EMAIL");
+  const email = trimmedEnv("NOTIFICATION_REPLY_TO") || trimmedEnv("RESEND_FROM_EMAIL");
   const address = email.includes("<") ? email.slice(email.indexOf("<") + 1, email.indexOf(">")) : email;
   return address ? `mailto:${address.trim()}` : "mailto:support@claritygolf.app";
 }
 
 export function pushConfigured() {
-  return Boolean(env("VAPID_PUBLIC_KEY") && env("VAPID_PRIVATE_KEY"));
+  return Boolean(trimmedEnv("VAPID_PUBLIC_KEY") && trimmedEnv("VAPID_PRIVATE_KEY"));
 }
 
 let tableReady = false;
@@ -241,7 +238,7 @@ export async function sendCoachPush(
   let webPush: any;
   try {
     webPush = await loadWebPush();
-    webPush.setVapidDetails(vapidSubject(), env("VAPID_PUBLIC_KEY"), env("VAPID_PRIVATE_KEY"));
+    webPush.setVapidDetails(vapidSubject(), trimmedEnv("VAPID_PUBLIC_KEY"), trimmedEnv("VAPID_PRIVATE_KEY"));
   } catch (error) {
     console.error("push_notify:library_unavailable", error);
     return { sent: 0, failed: 0, pruned: 0, skipped: "library_missing" };

@@ -11,6 +11,7 @@ import {
   syncStripeInvoice,
 } from "./_shared/stripe-billing.mts";
 import { handleMembershipStripeEvent } from "./_shared/memberships.mts";
+import { json } from "./_shared/http.mts";
 
 // Stripe webhook: keeps billing_invoices / billing_invoice_items live-mirrored
 // from Stripe. All operations are idempotent upserts keyed on Stripe ids, so
@@ -46,13 +47,6 @@ import { handleMembershipStripeEvent } from "./_shared/memberships.mts";
 // renewal's payment_intent.succeeded settles a charge whose off-session
 // confirm timed out. Both carry clarity_membership_* metadata, which is how
 // they are told apart from till sales and portal purchases.
-
-function json(value: unknown, status = 200) {
-  return new Response(JSON.stringify(value), {
-    status,
-    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
-  });
-}
 
 /** Both modes' secrets: the live and test endpoints are signed separately. */
 function webhookSecrets() {

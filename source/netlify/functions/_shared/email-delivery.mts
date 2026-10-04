@@ -23,28 +23,11 @@
 // category as the _shared/stripe.mts it already imports.
 
 import { getDatabase } from "./database.mts";
-
-function env(name: string, fallback = ""): string {
-  return (
-    (globalThis as unknown as { Netlify?: { env?: { get: (n: string) => string } } })
-      .Netlify?.env?.get(name) ||
-    (process.env[name] as string | undefined) ||
-    fallback
-  );
-}
-
-function cleanText(value: unknown, fallback = "", max = 800): string {
-  return typeof value === "string" && value.trim() ? value.trim().slice(0, max) : fallback;
-}
-
-function cleanEmail(value: unknown, fallback = ""): string {
-  const email = cleanText(value, "", 180).toLowerCase();
-  return email.includes("@") ? email : fallback;
-}
+import { cleanEmail, cleanString, cleanText, env } from "./values.mts";
 
 /** Pulls the bare address out of a "Name <addr@host>" header, or "" if there isn't one. */
 function emailAddressFromHeader(fromHeader: string): string {
-  const rawFrom = cleanText(fromHeader, "", 512);
+  const rawFrom = cleanString(fromHeader, "", 512);
   if (!rawFrom) return "";
   const matched = rawFrom.match(/^\s*(?:"[^"]*"|[^<"]*?)\s*<\s*([^>]+)\s*>\s*$/);
   if (matched) {
@@ -55,7 +38,7 @@ function emailAddressFromHeader(fromHeader: string): string {
 }
 
 function quoteAddressName(name: string): string {
-  const trimmed = cleanText(name, "", 160);
+  const trimmed = cleanString(name, "", 160);
   if (!trimmed) return "";
   const sanitized = trimmed.replace(/"/g, '\\"');
   return /[<>"]/.test(trimmed) ? `"${sanitized}"` : sanitized;
@@ -124,7 +107,7 @@ async function fromIdentity(accountId: string): Promise<{
     return {
       businessName: cleanText(map.accountBusinessName, env("CLARITY_BUSINESS_NAME", ""), 120),
       coachName: cleanText(map.accountCoachName, env("CLARITY_COACH_NAME", ""), 120),
-      notificationFromName: cleanText(map.notificationFromName, "", 120),
+      notificationFromName: cleanString(map.notificationFromName, "", 120),
     };
   } catch {
     // A settings read that fails is not a reason to drop the email. The From
@@ -206,7 +189,7 @@ export async function deliverEmail(input: DeliverEmailInput): Promise<EmailDeliv
   );
   // The business's own name, never the product's, unless nothing else is set.
   const fromName =
-    cleanText(input.fromName, "", 120) ||
+    cleanString(input.fromName, "", 120) ||
     identity.notificationFromName ||
     identity.coachName ||
     identity.businessName ||

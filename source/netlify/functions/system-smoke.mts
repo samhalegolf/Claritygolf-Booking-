@@ -7,22 +7,9 @@ import {
   settingsSelectQuery,
   settingsUpsertRows,
 } from "./_shared/settings-scope.mts";
+import { env, nowIso } from "./_shared/values.mts";
+import { json } from "./_shared/http.mts";
 
-
-function env(name: string, fallback = "") {
-  return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
-}
-
-function json(value: unknown, status = 200) {
-  return new Response(JSON.stringify(value), {
-    status,
-    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
-  });
-}
-
-function nowIso() {
-  return new Date().toISOString();
-}
 
 function supabaseConfig() {
   const url = env("SUPABASE_URL").replace(/\/$/, "");

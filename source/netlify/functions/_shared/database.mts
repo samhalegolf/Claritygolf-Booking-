@@ -1,4 +1,5 @@
 import pg from "pg";
+import { trimmedEnv } from "./values.mts";
 
 /**
  * Postgres access for the booking app.
@@ -16,12 +17,8 @@ const { Pool, types } = pg;
 
 types.setTypeParser(20, (value: string) => (value === null ? null : Number(value)));
 
-function env(name: string): string {
-  return (globalThis.Netlify?.env?.get(name) || process.env[name] || "").trim();
-}
-
 function connectionString(): string {
-  const url = env("DATABASE_URL") || env("SUPABASE_DB_URL");
+  const url = trimmedEnv("DATABASE_URL") || trimmedEnv("SUPABASE_DB_URL");
   if (!url) {
     throw new Error(
       "Postgres is not configured. Set DATABASE_URL in Netlify to the Supabase " +

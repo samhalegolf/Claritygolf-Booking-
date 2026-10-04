@@ -15,7 +15,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { personRowUnchanged, setSettingsBulk, upsertCalendarItemChunk } from "../booking-core.mts";
+import { upsertCalendarItemChunk } from "./bookings.mts";
+import { personRowUnchanged } from "./clients.mts";
+import { setSettingsBulk } from "./settings-store.mts";
 
 /** Stands in for a pg client, capturing the statement instead of running it. */
 function recordingClient() {

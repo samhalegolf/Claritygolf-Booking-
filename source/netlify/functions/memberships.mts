@@ -17,6 +17,7 @@ import {
   type MembershipAction,
 } from "./_shared/memberships.mts";
 import { stripeCredentialStatus, STRIPE_CONNECTION_SETTING } from "./_shared/stripe.mts";
+import { json } from "./_shared/http.mts";
 
 /**
  * Memberships -- the coach's side, plus the one public route a card form
@@ -46,13 +47,6 @@ const ACTIONS: MembershipAction[] = [
   "retry",
   "use_manual",
 ];
-
-function json(value: unknown, status = 200) {
-  return new Response(JSON.stringify(value), {
-    status,
-    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
-  });
-}
 
 async function body(req: Request): Promise<Record<string, any>> {
   try {

@@ -14,14 +14,7 @@
 
 import { integrationCredentials } from "./integration-credentials.mts";
 import { randomUUID } from "node:crypto";
-
-function env(name: string, fallback = "") {
-  return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
-}
-
-function nowIso() {
-  return new Date().toISOString();
-}
+import { cleanString, cleanText, env, nowIso } from "./values.mts";
 
 function round2(value: unknown) {
   return Math.round((Number(value) || 0) * 100) / 100;
@@ -29,10 +22,6 @@ function round2(value: unknown) {
 
 function encodeFilter(value: unknown) {
   return encodeURIComponent(String(value ?? ""));
-}
-
-function cleanString(value: unknown, fallback = "", max = 600) {
-  return typeof value === "string" ? value.trim().slice(0, max) || fallback : fallback;
 }
 
 function toDateOnly(value: unknown) {
@@ -344,7 +333,7 @@ export async function approveBankExpenseCandidate(
       cleanString(overrides.description, "", 600) || cleanString(txn.description, "", 600) || "Bank expense",
     vendor: cleanString(overrides.vendor, "", 200) || cleanString(txn.merchant_name, "", 200) || null,
     amount: round2(Math.abs(Number(txn.amount) || 0)),
-    currency: cleanString(txn.currency, "NZD", 10) || "NZD",
+    currency: cleanText(txn.currency, "NZD", 10) || "NZD",
     expense_date: txn.date,
     note: "Imported from bank feed (Akahu)",
     external_ref: txn.id,

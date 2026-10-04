@@ -6,6 +6,7 @@ import {
   ignoreReconcileCandidate,
   listReconcileCandidates,
 } from "./_shared/akahu.mts";
+import { json } from "./_shared/http.mts";
 
 // Phase 3 of the Akahu bank feed: native payment reconciliation. Matches
 // money-in bank transactions to open invoices and marks them paid LOCALLY only
@@ -17,13 +18,6 @@ import {
 //   { action: "apply", id, invoiceId }       -> confirm one match
 //   { action: "ignore", id }                 -> dismiss a credit (not a payment)
 
-
-function json(value: unknown, status = 200) {
-  return new Response(JSON.stringify(value), {
-    status,
-    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
-  });
-}
 
 function cleanId(value: unknown) {
   return typeof value === "string" ? value.trim().slice(0, 200) : "";

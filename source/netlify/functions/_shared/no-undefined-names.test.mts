@@ -7,6 +7,10 @@
  * function nobody imported is not a build failure -- it is a ReferenceError on
  * a live route, thrown the first time a real person uses the feature.
  *
+ * The domain modules booking-core imports (_shared/bookings.mts, clients.mts,
+ * services.mts, workspace.mts, permissions.mts and the rest) are checked
+ * through it: tsc follows the imports and reports their errors too.
+ *
  * This nearly shipped: a player-facing route was written calling
  * reservePassCredit() without importing it, and `npm run typecheck` was green
  * because the file it was in is not in the project.

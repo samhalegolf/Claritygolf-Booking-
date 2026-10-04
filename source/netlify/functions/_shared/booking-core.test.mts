@@ -2,18 +2,18 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  compatiblePersonMatch,
   handlePublicBookingSlotsRequest,
   publicAppointmentContactQuery,
   publicAppointmentReadQuery,
   publicSlotCalendarItemsQuery,
   publicBookableServices,
   publicBookingSlots,
-  normalizeServices,
   portalInviteEmailContent,
   readPublicSlotContext,
   readPublicSlotItemsForWeek,
 } from "../booking-core.mts";
+import { compatiblePersonMatch } from "./clients.mts";
+import { normalizeServices } from "./services.mts";
 import { coachAccountFromSettings } from "./coach-account.mts";
 
 const accountId = "test-account";

@@ -1,3 +1,4 @@
+import { cleanString } from "./values.mts";
 export type ClarityCloudGoogleMissingField = "clientId" | "clientSecret" | "redirectUri";
 
 export type ClarityCloudGoogleConfigSource =
@@ -44,13 +45,9 @@ function env(name: string, reader?: EnvReader) {
   return globalThis.Netlify?.env?.get(name) || process.env[name] || "";
 }
 
-function cleanString(value: unknown, max = 4000) {
-  return typeof value === "string" ? value.trim().slice(0, max) : "";
-}
-
 function firstConfiguredEnv(names: readonly string[], reader?: EnvReader) {
   for (const name of names) {
-    const value = cleanString(env(name, reader));
+    const value = cleanString(env(name, reader), "", 4000);
     if (value) return { value, source: name as ClarityCloudGoogleConfigSource };
   }
   return { value: "", source: "" as ClarityCloudGoogleConfigSource };
@@ -100,7 +97,7 @@ export function clarityCloudGoogleMissingConfigurationLabels(fields: readonly Cl
 }
 
 export function isClarityCloudProviderTokenEncryptionConfigured(options: { env?: EnvReader } = {}) {
-  return Boolean(cleanString(env("GOOGLE_PROVIDER_TOKEN_ENCRYPTION_KEY_V1", options.env)));
+  return Boolean(cleanString(env("GOOGLE_PROVIDER_TOKEN_ENCRYPTION_KEY_V1", options.env), "", 4000));
 }
 
 export function getSafeClarityCloudGoogleRuntimeDiagnostic(

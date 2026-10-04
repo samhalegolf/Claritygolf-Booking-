@@ -2,17 +2,8 @@ import type { Config } from "@netlify/functions";
 
 import { holdResource } from "./_shared/resource-handler.mts";
 import { requireCoachActor } from "./_shared/coach-auth.mts";
+import { json } from "./_shared/http.mts";
 
-
-function json(value: unknown, status = 200) {
-  return new Response(JSON.stringify(value), {
-    status,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      "cache-control": "no-store",
-    },
-  });
-}
 
 /**
  * Booking an Optix resource acts on one Clarity booking by id. The old check

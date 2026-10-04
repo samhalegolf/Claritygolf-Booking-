@@ -2,6 +2,7 @@ import type { Config } from "@netlify/functions";
 import { createVerify } from "node:crypto";
 import { resolveWebhookAccount } from "./_shared/integration-credentials.mts";
 import { autoReconcileCredits, syncAkahuTransactionsByIds } from "./_shared/akahu.mts";
+import { json } from "./_shared/http.mts";
 
 // Akahu webhook — keeps the bank feed live. On a TRANSACTION webhook Akahu sends
 // only the changed transaction ids; we verify its RSA signature, fetch those
@@ -13,13 +14,6 @@ import { autoReconcileCredits, syncAkahuTransactionsByIds } from "./_shared/akah
 // events; the URL Integrations › Akahu shows is the one to use). No shared
 // secret — Akahu signs each delivery with a rotating key we fetch from
 // /v1/keys/{X-Akahu-Signing-Key} and verify (RSA-SHA256).
-
-function json(value: unknown, status = 200) {
-  return new Response(JSON.stringify(value), {
-    status,
-    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
-  });
-}
 
 // Akahu signing public keys, cached by id (they rotate but rarely).
 const keyCache = new Map<string, string>();

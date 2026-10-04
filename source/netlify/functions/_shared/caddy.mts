@@ -1,3 +1,4 @@
+import { env } from "./values.mts";
 /**
  * The Booking side of the one deliberate Booking <-> Caddy seam.
  *
@@ -14,10 +15,6 @@
  * Authentication is a shared secret set in both Netlify sites. It is
  * server-to-server only; it must never reach a browser.
  */
-
-function env(name: string, fallback = ""): string {
-  return (globalThis as any).Netlify?.env?.get(name) || process.env[name] || fallback;
-}
 
 export type CaddyPassType = "month_pass";
 

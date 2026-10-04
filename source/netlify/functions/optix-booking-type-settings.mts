@@ -1,6 +1,7 @@
 import { getDatabase } from "@netlify/database";
 import type { Config } from "@netlify/functions";
 import { requireCoachActor } from "./_shared/coach-auth.mts";
+import { json } from "./_shared/http.mts";
 
 const SETTINGS_KEY = "optixBookingTypeConfigJson";
 const PROFILES_KEY = "optixResourceProfilesJson";
@@ -16,16 +17,6 @@ const KNOWN_RESOURCE_IDS = new Set([
 
 function db() {
   return getDatabase();
-}
-
-function json(value: unknown, status = 200) {
-  return new Response(JSON.stringify(value), {
-    status,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      "cache-control": "no-store",
-    },
-  });
 }
 
 /**

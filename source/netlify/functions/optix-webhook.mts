@@ -5,13 +5,7 @@ import { integrationRequest } from "./_shared/integrations/db.mts";
 import { notifyBookingEvent, sendCoachPushForBooking } from "./notification-engine.mts";
 import { validateOptixWebhook } from "./_shared/integrations/providers/optix-webhook-auth.mts";
 import { integrationCredentials, resolveWebhookAccount } from "./_shared/integration-credentials.mts";
-
-function json(value: unknown, status = 200) {
-  return new Response(JSON.stringify(value), {
-    status,
-    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
-  });
-}
+import { json } from "./_shared/http.mts";
 
 export default async function handler(req: Request) {
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);

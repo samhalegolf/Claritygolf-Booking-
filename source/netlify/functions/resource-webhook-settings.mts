@@ -26,6 +26,7 @@ import {
   RESOURCE_WEBHOOK_SECRET_FIELD,
   RESOURCE_WEBHOOK_SETTINGS_KEY,
 } from "./_shared/resource-webhook-provider.mts";
+import { json } from "./_shared/http.mts";
 
 /**
  * Settings › Booking › Bay & room system.
@@ -40,13 +41,6 @@ const INBOUND_PATH = "/api/resource-webhook";
 
 function db() {
   return getDatabase();
-}
-
-function json(value: unknown, status = 200) {
-  return new Response(JSON.stringify(value), {
-    status,
-    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
-  });
 }
 
 async function writeSetting(accountId: string, key: string, value: string) {

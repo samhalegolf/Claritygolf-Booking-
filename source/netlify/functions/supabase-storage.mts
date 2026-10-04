@@ -23,13 +23,7 @@
 // @netlify/database or local-db naming for Netlify Database or SQLite-backed
 // production persistence; production persistence is Supabase REST using
 // SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY / SUPABASE_SERVICE_KEY.
-function env(name, fallback = "") {
-  return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
-}
-
-function nowIso() {
-  return new Date().toISOString();
-}
+import { env, nowIso } from "./_shared/values.mts";
 
 function normalizeSql(sql) {
   return String(sql || "")

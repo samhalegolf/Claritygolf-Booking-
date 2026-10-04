@@ -3,22 +3,9 @@ import { randomUUID } from "node:crypto";
 
 import { getDatabase } from "@netlify/database";
 import { requireCoachActor } from "./_shared/coach-auth.mts";
+import { cleanString } from "./_shared/values.mts";
+import { json } from "./_shared/http.mts";
 
-
-function json(value, status = 200) {
-  return new Response(JSON.stringify(value), {
-    status,
-    headers: {
-      "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": "no-store",
-    },
-  });
-}
-
-function cleanString(value, fallback = "", max = 600) {
-  if (typeof value !== "string") return fallback;
-  return value.trim().slice(0, max);
-}
 
 async function parseBody(req: Request) {
   const raw = await req.text();

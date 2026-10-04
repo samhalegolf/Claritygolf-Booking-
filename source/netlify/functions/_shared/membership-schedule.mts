@@ -1,3 +1,4 @@
+import { cleanString } from "./values.mts";
 /**
  * The arithmetic of recurring billing, with no database and no Stripe.
  *
@@ -70,10 +71,6 @@ function fail(message: string): never {
   throw Object.assign(new Error(message), { status: 400, code: "invalid" });
 }
 
-function text(value: unknown, max: number) {
-  return typeof value === "string" ? value.trim().slice(0, max) : "";
-}
-
 function wholeNumber(value: unknown, fallback: number, min: number, max: number) {
   if (value === null || value === undefined || value === "") return fallback;
   const num = Number(value);
@@ -106,12 +103,12 @@ export function normaliseEntitlements(value: unknown, knownServiceIds?: Set<stri
   const seen = new Set<string>();
   return value.map((raw, index) => {
     const entry = (raw || {}) as Record<string, unknown>;
-    let id = text(entry.id, 60).replace(/[^A-Za-z0-9_-]/g, "") || `ent${index + 1}`;
+    let id = cleanString(entry.id, "", 60).replace(/[^A-Za-z0-9_-]/g, "") || `ent${index + 1}`;
     while (seen.has(id)) id = `${id}x`;
     seen.add(id);
 
     const serviceIds = Array.isArray(entry.serviceIds)
-      ? [...new Set(entry.serviceIds.map((sid) => text(sid, 120)).filter(Boolean))].slice(0, 12)
+      ? [...new Set(entry.serviceIds.map((sid) => cleanString(sid, "", 120)).filter(Boolean))].slice(0, 12)
       : [];
     if (!serviceIds.length) fail("Each entitlement needs at least one lesson type it can be spent on.");
     if (knownServiceIds) {
@@ -130,7 +127,7 @@ export function normaliseEntitlements(value: unknown, knownServiceIds?: Set<stri
 
     return {
       id,
-      name: text(entry.name, 120),
+      name: cleanString(entry.name, "", 120),
       serviceIds,
       credits,
       rollover,
@@ -145,7 +142,7 @@ export function normalisePlan(
   defaults: { id: string; currency: string },
   knownServiceIds?: Set<string>,
 ): MembershipPlan {
-  const name = text(input.name, 120);
+  const name = cleanString(input.name, "", 120);
   if (!name) fail("Give the plan a name.");
 
   const interval = INTERVALS.includes(input.interval as BillingInterval)
@@ -156,7 +153,7 @@ export function normalisePlan(
   const anchor: BillingAnchor = input.anchor === "day_of_month" && interval === "month" ? "day_of_month" : "signup";
   const anchorDay = anchor === "day_of_month" ? wholeNumber(input.anchorDay, 1, 1, 28) : null;
 
-  const currency = text(input.currency, 3).toUpperCase() || defaults.currency;
+  const currency = cleanString(input.currency, "", 3).toUpperCase() || defaults.currency;
   if (!/^[A-Z]{3}$/.test(currency)) fail("The plan needs a three-letter currency.");
 
   const termRaw = input.termCycles;
@@ -170,9 +167,9 @@ export function normalisePlan(
   }
 
   return {
-    id: text(input.id, 120) || defaults.id,
+    id: cleanString(input.id, "", 120) || defaults.id,
     name,
-    description: text(input.description, 600),
+    description: cleanString(input.description, "", 600),
     active: input.active !== false,
     sellOnline: input.sellOnline === true,
     priceCents: cents(input.priceCents, "The price"),

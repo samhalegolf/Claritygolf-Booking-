@@ -1,4 +1,3 @@
-import { getDatabase } from "@netlify/database";
 import { ddlBatch } from "./_shared/database.mts";
 import {
   createHash,
@@ -22,28 +21,10 @@ import {
   releaseResource,
   runResourceAction,
 } from "./_shared/resource-handler.mts";
-import { bayBookingMatchesSlot, bayFollowsReschedule } from "./_shared/optix-reconcile.mts";
-import { calendarSlot, MINUTES_IN_DAY } from "./_shared/calendar-slot.mts";
+import { bayFollowsReschedule } from "./_shared/optix-reconcile.mts";
 import { cleanHandedness, handednessFromNote, handednessNoteLine } from "./_shared/handedness.mts";
-import {
-  clarityResourcesApply,
-  cleanLocationKind,
-  cleanLocationResources,
-  cleanResourceSource,
-  cleanResourceMode,
-  cleanServiceResourceIds,
-  cleanServiceResourceTypes,
-  pickFreeResource,
-  serviceResourceMode,
-} from "./_shared/resources.mts";
-import {
-  cleanScopeIds,
-  primaryServiceCoachId,
-  primaryServiceLocationId,
-  serviceCoachIds,
-  serviceIncludesCoach,
-  serviceLocationIds,
-} from "./_shared/service-scope.mts";
+import { clarityResourcesApply, serviceResourceMode } from "./_shared/resources.mts";
+import { primaryServiceCoachId, serviceCoachIds, serviceLocationIds } from "./_shared/service-scope.mts";
 import { planExternalReschedule, sameSlot } from "./_shared/external-reschedule.mts";
 import { legacyOriginalWorkspaceId } from "./_shared/account.mts";
 import {
@@ -118,7 +99,6 @@ import {
   ensureLegacyOwnerMembershipIfMissing,
   findSupabaseAuthUserId as findCoachAuthUserId,
   verifySupabaseAuthPassword as verifyCoachAuthPassword,
-  userBelongsToAccountStrict,
   recordBelongsToAccountStrict,
 } from "./_shared/coach-auth.mts";
 import {
@@ -160,18 +140,13 @@ import {
   cleanPlayerBookingEmbedLabel,
   cleanPlayerBookingEmbedUrl,
   playerBookingEmbedForPortal,
-  playerBookingEmbedFromSettings,
 } from "./_shared/player-booking-embed.mts";
 import {
   guestRegistrationsPerAccountPerDay,
   guestRetentionDays,
   guestSubmissionsLifetime,
 } from "./_shared/guest-limits.mts";
-import {
-  canonicalPhoneKey,
-  cleanPhoneCountry,
-  FALLBACK_PHONE_COUNTRY,
-} from "./_shared/phone.mts";
+import { FALLBACK_PHONE_COUNTRY } from "./_shared/phone.mts";
 import { deliverEmail } from "./_shared/email-delivery.mts";
 import { cleanMessageLanguage, messageText } from "./_shared/message-language.mts";
 import { lookBusyStarts } from "./_shared/look-busy.mts";
@@ -181,417 +156,156 @@ import {
   runNotificationOutboxWorker,
   type NotificationOutboxJob,
 } from "./_shared/notification-outbox.mts";
+import {
+  CANCELLED_GROUP_SESSION_NOTE,
+  assertCanWriteCalendarItem,
+  baseWeekStart,
+  bookingCoachSnapshotFor,
+  bookingLocationDisplay,
+  calendarItemLocation,
+  canReadCalendarItem,
+  clarityResourceFor,
+  cleanBookingCoachSnapshot,
+  cleanBookingLocationSnapshot,
+  cleanCalendarItem,
+  cleanCustomGroupAttendee,
+  conflictItemSummary,
+  currentWeekOffset,
+  filterNotificationsForContext,
+  findCollision,
+  hasCollision,
+  isCancelledGroupSessionLike,
+  isCoachLocationBlock,
+  isCoachOnlyBlock,
+  isGroupServiceSlotMatch,
+  isInactiveForConflict,
+  isLocationOnlyBlock,
+  itemWeek,
+  normalizeCalendarItemsForContext,
+  readCalendarItemById,
+  readItems,
+  resolvedCalendarItemCoachId,
+  resolvedCalendarItemLocationId,
+  rowToItem,
+  serviceForCalendarItem,
+  slotOverlaps,
+  stampResolvedPersonIds,
+  videoReviewDueSlot,
+  writeItems,
+} from "./_shared/bookings.mts";
+import {
+  accountPhoneCountry,
+  assertCanManagePerson,
+  defaultPhoneCountry,
+  deleteLessonNote,
+  filterPeopleForContext,
+  importPeople,
+  mergePeople,
+  normalizedPersonEmail,
+  normalizedPersonName,
+  normalizedPersonPhone,
+  personFromAppointment,
+  readLessonNotes,
+  readPeople,
+  rowToPerson,
+  updatePerson,
+  upsertLessonNote,
+  writeLessonNotes,
+} from "./_shared/clients.mts";
+import {
+  accountEntitlements,
+  accountPlanCatalog,
+  assertAccountAdminContext,
+  assertAccountFeature,
+  assertAccountLimit,
+  assertAuthenticatedContext,
+  forbidden,
+  hasPermission,
+  missingAccountScope,
+  permissionDenied,
+  userCoachId,
+} from "./_shared/permissions.mts";
+import {
+  calculateCustomGroupPrice,
+  cleanHexColor,
+  countManagedActiveServices,
+  customGroupMaxParticipants,
+  customGroupMinParticipants,
+  defaultServices,
+  isCustomGroupService,
+  isScheduledGroupService,
+  isVideoReviewService,
+  managedServicesForStorage,
+  mergeServicesForContext,
+  normalizeServices,
+  serviceBelongsToContext,
+  serviceLocation,
+} from "./_shared/services.mts";
+import {
+  db,
+  getSetting,
+  parseSettingJson,
+  queryRows,
+  readSettingsMap,
+  setSetting,
+  setSettingsBulk,
+  settingValue,
+  tableExists,
+} from "./_shared/settings-store.mts";
+import {
+  cleanEmail,
+  cleanSlug,
+  cleanString,
+  env,
+  hasOwn,
+  nowIso,
+  safeJsonParse,
+} from "./_shared/values.mts";
+import {
+  accountTimeZoneFor,
+  cleanCoachPhoto,
+  coachById,
+  defaultAppUserFromAccount,
+  defaultCoachProfileFromAccount,
+  filterCoachesForContext,
+  filterLocationsForContext,
+  firstCoachId,
+  locationById,
+  locationSnapshot,
+  normalizeCoachProfiles,
+  normalizeLocations,
+  normalizeWorkspaceAccounts,
+} from "./_shared/workspace.mts";
+import {
+  adminSettingsFromSettings,
+  adminStateFromSettings,
+  appUsersFromSettings,
+  brandSettingsFromSettings,
+  cleanCalendarColors,
+  cleanReminderLeadMinutes,
+  coachProfilesFromSettings,
+  coachUserForMembership,
+  defaultAvailability,
+  defaultEmailTemplates,
+  locationsFromSettings,
+  modernClientEmailFooter,
+  normalizeAvailability,
+  publicCalendarState,
+  stateFromSettings,
+  workspaceAccountsFromSettings,
+} from "./_shared/workspace-state.mts";
+import { json } from "./_shared/http.mts";
 
 const sessionCookieName = "clarity_session";
 const sessionDays = 7;
 const passwordResetMinutes = 30;
-const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
-const MAX_GROUP_OCCURRENCE_COUNT = 52;
 const PUBLIC_SLOT_STEP_MINUTES = 30;
-const CANCELLED_GROUP_SESSION_TITLE = "Cancelled group session";
-const CANCELLED_GROUP_SESSION_NOTE = "__cancelled_group_session__";
-const CUSTOM_GROUP_DEFAULTS = {
-  baseParticipants: 3,
-  basePrice: 200,
-  extraPersonPrice: 20,
-  minParticipants: 2,
-  maxParticipants: 5,
-};
 const ADMIN_NOTIFICATION_DEBOUNCE_MS = 30_000;
 const ADMIN_NOTIFICATION_DEBOUNCE_QUEUE_KEY = "adminNotificationDebounceQueueJson";
 let authReadyPromise = null;
 let authReady = false;
 let authReadyConfigSignature = "";
 let seedReadyPromise = null;
-const defaultEmailTemplates = {
-  clientEmailSubject: "Your {{service}} is confirmed",
-  clientEmailIntro:
-    "Thanks {{firstName}}, your booking with {{coach}} is confirmed.",
-  clientEmailFooter: "We look forward to seeing you.",
-  adminEmailSubject: "New booking: {{client}}",
-  adminEmailIntro: "{{client}} booked {{service}} for {{date}} at {{time}}.",
-};
-
-const defaultServices = [
-  {
-    id: "lesson-30",
-    name: "30min Lesson",
-    duration: 30,
-    price: 100,
-    description: "Price Includes Bay Hire",
-    visibility: "public",
-    active: true,
-    capacity: 1,
-    minParticipants: 1,
-    lessonFormat: "private",
-    priceMode: "session",
-    lessonNote: "Bay hire included",
-    location: "Bay hire included",
-  },
-  {
-    id: "lesson-60",
-    name: "1 Hour Golf Lesson",
-    duration: 60,
-    price: 180,
-    description: "Price Includes Bay Hire",
-    visibility: "public",
-    active: true,
-    capacity: 1,
-    minParticipants: 1,
-    lessonFormat: "private",
-    priceMode: "session",
-    lessonNote: "Bay hire included",
-    location: "Bay hire included",
-  },
-  {
-    id: "lesson-pair",
-    name: "2 Person Golf Lesson",
-    duration: 60,
-    price: 200,
-    description: "Two-player coaching session",
-    visibility: "public",
-    active: true,
-    capacity: 2,
-    minParticipants: 1,
-    lessonFormat: "private",
-    priceMode: "session",
-    lessonNote: "Bay hire included",
-    location: "Bay hire included",
-  },
-  {
-    id: "group-clinic",
-    name: "Group Golf Clinic",
-    duration: 90,
-    price: 55,
-    description: "Small-group coaching session with shared practice goals",
-    visibility: "public",
-    active: true,
-    capacity: 6,
-    minParticipants: 3,
-    lessonFormat: "group",
-    priceMode: "per-person",
-    lessonNote: "Group coaching bay",
-    location: "Group coaching bay",
-    groupSchedule: {
-      dayOfWeek: 2,
-      startMinutes: timeToMinutes(18, 0),
-      occurrenceCount: 8,
-      active: true,
-    },
-  },
-  {
-    id: "member-30",
-    name: "30min Golf Lesson (Range 24/7 Member)",
-    duration: 30,
-    price: 90,
-    description: "Bay hire is deducted from membership account",
-    visibility: "public",
-    active: true,
-    capacity: 1,
-    minParticipants: 1,
-    lessonFormat: "private",
-    priceMode: "session",
-    lessonNote: "Bay hire deducted from membership account",
-    location: "Range 24/7 member bay",
-  },
-  {
-    id: "member-60",
-    name: "1 Hour Golf Lesson (Range 24/7 Member)",
-    duration: 60,
-    price: 160,
-    description: "Bay hire is deducted from membership account",
-    visibility: "public",
-    active: true,
-    capacity: 1,
-    minParticipants: 1,
-    lessonFormat: "private",
-    priceMode: "session",
-    lessonNote: "Bay hire deducted from membership account",
-    location: "Range 24/7 member bay",
-  },
-  {
-    id: "package-60",
-    name: "1 hour Lesson - 5 Lesson Package",
-    duration: 60,
-    price: 650,
-    description: "Five one-hour lessons tracked as a package.",
-    visibility: "private",
-    active: true,
-    capacity: 1,
-    minParticipants: 1,
-    lessonFormat: "package",
-    priceMode: "session",
-    lessonNote: "Package allowance",
-    location: "Package allowance",
-    packageAllowance: 5,
-    packageCoverageMode: "upfront",
-    packageCoversServiceId: "lesson-60",
-  },
-];
-
-const defaultAvailability = [
-  [{ start: timeToMinutes(16, 30), end: timeToMinutes(20, 0) }],
-  [],
-  [{ start: timeToMinutes(14, 0), end: timeToMinutes(20, 0) }],
-  [
-    { start: timeToMinutes(7, 0), end: timeToMinutes(11, 0) },
-    { start: timeToMinutes(14, 0), end: timeToMinutes(16, 30) },
-  ],
-  [{ start: timeToMinutes(14, 0), end: timeToMinutes(16, 0) }],
-  [],
-  [{ start: timeToMinutes(15, 0), end: timeToMinutes(18, 0) }],
-];
-
-const initialItems = [];
-
-function timeToMinutes(hour, minute) {
-  return hour * 60 + minute;
-}
-
-function env(name, fallback = "") {
-  return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
-}
-
-function hasOwn(source, key) {
-  return Object.prototype.hasOwnProperty.call(source || {}, key);
-}
-
-function nowIso() {
-  return new Date().toISOString();
-}
-
-function safeJsonStringify(value) {
-  const seen = new WeakSet();
-  return JSON.stringify(value, (_key, current) => {
-    if (typeof current === "bigint") {
-      const asNumber = Number(current);
-      return Number.isSafeInteger(asNumber) ? asNumber : String(current);
-    }
-    if (current && typeof current === "object") {
-      if (seen.has(current)) return "[Circular]";
-      seen.add(current);
-    }
-    return current;
-  });
-}
-
-function safeJsonParse(value, fallback) {
-  if (!value) return fallback;
-  try {
-    return JSON.parse(value);
-  } catch {
-    return fallback;
-  }
-}
-
-function cleanPositiveInteger(value, fallback, min = 1, max = 100) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed)
-    ? Math.max(min, Math.min(max, Math.round(parsed)))
-    : fallback;
-}
-
-function hasCustomGroupFlag(service) {
-  return service?.customGroup === true || service?.customGroupEnabled === true;
-}
-
-function isCustomGroupService(service) {
-  return Boolean(hasCustomGroupFlag(service));
-}
-
-function isScheduledGroupService(service) {
-  return Boolean(service?.lessonFormat === "group" && !isCustomGroupService(service));
-}
-
-/**
- * An asynchronous video review: the player books it, sends a swing, and the
- * coach returns an annotated clip within the turnaround.
- *
- * It is a lesson format rather than a flag on a normal lesson because the one
- * thing it does not have is a time. Everything else a lesson has -- a price, a
- * duration of the coach's work, notes, a pass that can pay for it, a place in
- * the client's history -- it has unchanged, and that is exactly why it still
- * gets a calendar item. The slot it lands on is the deadline, not an
- * appointment.
- */
-function isVideoReviewService(service) {
-  return Boolean(service?.lessonFormat === "video-review");
-}
-
-/** Default working days between booking a review and owing it back. */
-const VIDEO_REVIEW_DEFAULT_TURNAROUND_DAYS = 3;
-const VIDEO_REVIEW_MAX_TURNAROUND_DAYS = 30;
-/**
- * Where a review sits when the coach has no availability that day. 8pm is the
- * calendar's own default end hour, so the card lands inside the rendered grid
- * rather than below it.
- */
-const VIDEO_REVIEW_FALLBACK_DAY_END_MINUTES = 20 * 60;
-
-function cleanReviewTurnaroundDays(value, fallback = VIDEO_REVIEW_DEFAULT_TURNAROUND_DAYS) {
-  const days = Number(value);
-  if (!Number.isFinite(days)) return fallback;
-  return Math.max(1, Math.min(VIDEO_REVIEW_MAX_TURNAROUND_DAYS, Math.round(days)));
-}
-
-/**
- * Where a review's deadline lands on the calendar grid.
- *
- * The date is the booking moment plus the turnaround. The time is the end of
- * that day's work, so the card reads as "owed by close of play" rather than
- * pretending to be an appointment at some invented hour -- and it ends exactly
- * where the coach's day does.
- *
- * Reviews already due that day stack backwards from there, one duration at a
- * time, so a day with three of them shows three cards in a row instead of one
- * card with two hidden underneath it.
- */
-function videoReviewDueSlot(service, accountState, coachId, timezone) {
-  const duration = Math.max(15, Math.round(Number(service?.duration) || 30));
-  const turnaround = cleanReviewTurnaroundDays(service?.reviewTurnaroundDays);
-  const dueAt = new Date(Date.now() + turnaround * 86_400_000);
-  // Same rule the rest of the clock maths follows: an unusable timezone falls
-  // back to UTC loudly rather than throwing inside a booking the player has
-  // already paid attention to.
-  let grid;
-  try {
-    grid = calendarSlot(dueAt.toISOString(), timezone);
-  } catch {
-    console.warn("booking_core:invalid_timezone_falling_back_to_utc", { timeZone: timezone });
-    grid = calendarSlot(dueAt.toISOString(), FALLBACK_TIME_ZONE);
-  }
-  const { week, day } = grid;
-  const fallbackCoachId = defaultCoachProfileFromAccount().id;
-  const windows = (accountState?.availability?.[day] || []).filter(
-    (window) => (window.coachId || fallbackCoachId) === (coachId || fallbackCoachId),
-  );
-  const dayEnd = windows.length
-    ? Math.max(...windows.map((window) => Number(window.end) || 0))
-    : VIDEO_REVIEW_FALLBACK_DAY_END_MINUTES;
-  // Count what is already owed on this day so the next one sits beside it.
-  const reviewServiceIds = new Set(
-    (accountState?.services || []).filter(isVideoReviewService).map((entry) => entry.id),
-  );
-  const alreadyDue = (accountState?.items || []).filter(
-    (item) =>
-      Number(item.week ?? 0) === week &&
-      Number(item.day) === day &&
-      !isInactiveForConflict(item) &&
-      reviewServiceIds.has(item.serviceId),
-  ).length;
-  const start = Math.max(
-    0,
-    Math.min(MINUTES_IN_DAY - duration, dayEnd - duration * (alreadyDue + 1)),
-  );
-  return { week, day, start, duration, dueAt: dueAt.toISOString() };
-}
-
-function customGroupBaseParticipants(service) {
-  return cleanPositiveInteger(
-    service?.baseParticipants,
-    CUSTOM_GROUP_DEFAULTS.baseParticipants,
-    CUSTOM_GROUP_DEFAULTS.minParticipants,
-    customGroupMaxParticipants(service),
-  );
-}
-
-function customGroupBasePrice(service) {
-  return cleanPositiveInteger(
-    service?.basePrice ?? service?.price,
-    CUSTOM_GROUP_DEFAULTS.basePrice,
-    0,
-    100000,
-  );
-}
-
-function customGroupExtraPersonPrice(service) {
-  return cleanPositiveInteger(
-    service?.extraPersonPrice,
-    CUSTOM_GROUP_DEFAULTS.extraPersonPrice,
-    0,
-    100000,
-  );
-}
-
-function customGroupMinParticipants(service) {
-  return cleanPositiveInteger(
-    service?.minParticipants,
-    CUSTOM_GROUP_DEFAULTS.minParticipants,
-    CUSTOM_GROUP_DEFAULTS.minParticipants,
-    CUSTOM_GROUP_DEFAULTS.maxParticipants,
-  );
-}
-
-function customGroupMaxParticipants(service) {
-  return cleanPositiveInteger(
-    service?.capacity,
-    CUSTOM_GROUP_DEFAULTS.maxParticipants,
-    CUSTOM_GROUP_DEFAULTS.minParticipants,
-    CUSTOM_GROUP_DEFAULTS.maxParticipants,
-  );
-}
-
-function calculateCustomGroupPrice(service, participantCount) {
-  const baseParticipants = customGroupBaseParticipants(service);
-  const extraPeople = Math.max(0, cleanPositiveInteger(participantCount, 1, 1, CUSTOM_GROUP_DEFAULTS.maxParticipants) - baseParticipants);
-  return customGroupBasePrice(service) + extraPeople * customGroupExtraPersonPrice(service);
-}
-
-function cleanCustomGroupAttendee(raw, index = 0) {
-  if (!raw || typeof raw !== "object") return null;
-  const name = cleanString(raw.name, "", 120);
-  const email = cleanEmail(raw.email, "");
-  if (!name && !email) return null;
-  const rawStatus = ["booker", "manual", "invited", "confirmed"].includes(raw.status)
-    ? raw.status
-    : "";
-  const status = rawStatus
-    ? rawStatus === "invited" && !email
-      ? "manual"
-      : rawStatus
-    : email
-      ? "invited"
-      : "manual";
-  return {
-    id: cleanString(raw.id, `attendee-${index + 1}`, 120),
-    name: name || email,
-    ...(email ? { email } : {}),
-    status,
-    ...(raw.token ? { token: cleanString(raw.token, "", 180) } : {}),
-  };
-}
-
-function cleanCustomGroupData(value) {
-  const source = typeof value === "string" ? safeJsonParse(value, null) : value;
-  if (!source || typeof source !== "object") return null;
-  const attendees = Array.isArray(source.attendees)
-    ? source.attendees.map(cleanCustomGroupAttendee).filter(Boolean)
-    : [];
-  if (!source.customGroup && !attendees.length) return null;
-  return {
-    customGroup: true,
-    attendees,
-    calculatedPrice: cleanPositiveInteger(source.calculatedPrice, 0, 0, 100000),
-  };
-}
-
-function json(value, status = 200, extraHeaders = {}) {
-  const headers = new Headers({
-    "Content-Type": "application/json; charset=utf-8",
-    "Cache-Control": "no-store",
-  });
-  // An array value is appended one header at a time. Set-Cookie is the reason:
-  // logout clears both the admin and the player cookie, and a comma-joined
-  // Set-Cookie is not a valid header -- the browser would drop both.
-  for (const [name, value] of Object.entries(extraHeaders)) {
-    if (Array.isArray(value)) {
-      for (const entry of value) headers.append(name, entry);
-    } else if (value !== undefined && value !== null) {
-      headers.set(name, value);
-    }
-  }
-  return new Response(safeJsonStringify(value), { status, headers });
-}
 
 function text(value, status = 200, contentType = "text/plain; charset=utf-8") {
   return new Response(value, {
@@ -601,23 +315,6 @@ function text(value, status = 200, contentType = "text/plain; charset=utf-8") {
       "Cache-Control": "no-store",
     },
   });
-}
-
-function cleanString(value, fallback = "", max = 600) {
-  if (typeof value !== "string") return fallback;
-  return value.trim().slice(0, max);
-}
-
-function cleanSlug(value, fallback = legacyOriginalWorkspaceId()) {
-  if (typeof value !== "string") return fallback;
-  const slug = value
-    .trim()
-    .toLowerCase()
-    .replace(/&/g, " and ")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80);
-  return slug || fallback;
 }
 
 function formatTime(minutes) {
@@ -655,976 +352,13 @@ function servicePriceLabel(service) {
   return `NZ$${service.price}.00${service.priceMode === "per-person" ? " pp" : ""}`;
 }
 
-function cleanEmail(value, fallback = "") {
-  const email = cleanString(value, "", 180).toLowerCase();
-  return email.includes("@") ? email : fallback;
-}
-
-function cleanUrl(value, fallback) {
-  const raw = cleanString(value, "", 600);
-  if (!raw) return fallback;
-  try {
-    const url = new URL(raw);
-    if (url.protocol !== "http:" && url.protocol !== "https:") return fallback;
-    return url.toString().replace(/\/$/, "");
-  } catch {
-    return fallback;
-  }
-}
-
-/**
- * Starting fills for lesson types, handed out by position. Kept in step with
- * serviceColorPalette in src/App.tsx so a service that has never had a colour
- * picked reads the same on the server as it does in the browser.
- */
-const serviceColorPalette = [
-  "#2b2233",
-  "#1c3348",
-  "#14342a",
-  "#3f3320",
-  "#2f2438",
-  "#123043",
-  "#1a3b2f",
-  "#402b28",
-];
-
-function defaultServiceColor(index) {
-  return serviceColorPalette[Math.abs(index) % serviceColorPalette.length];
-}
-
-function cleanHexColor(value, fallback) {
-  if (typeof value !== "string") return fallback;
-  const trimmed = value.trim();
-  return /^#[0-9a-f]{6}$/i.test(trimmed) ? trimmed : fallback;
-}
-
-// A coach photo: either a link, or a small image uploaded from the coach
-// profile screen and kept as a data URL beside the coach (like the logo).
-const COACH_PHOTO_DATA_URL = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$/;
-function cleanCoachPhoto(value) {
-  if (typeof value === "string" && value.startsWith("data:image/")) {
-    return value.length <= 200_000 && COACH_PHOTO_DATA_URL.test(value) ? value : "";
-  }
-  return cleanUrl(value, "");
-}
-
 function cleanLogoPreview(value) {
   if (typeof value !== "string" || !value.startsWith("data:image/")) return "";
   return value.slice(0, 180_000);
 }
 
-function cleanGroupSchedule(value, fallback = {}) {
-  const source = typeof value === "object" && value !== null ? value : {};
-  const dayOfWeek = Number.isFinite(Number(source.dayOfWeek))
-    ? Number(source.dayOfWeek)
-    : Number.isFinite(Number(fallback.dayOfWeek))
-      ? Number(fallback.dayOfWeek)
-      : 2;
-  const startMinutes = Number.isFinite(Number(source.startMinutes))
-    ? Number(source.startMinutes)
-    : Number.isFinite(Number(fallback.startMinutes))
-      ? Number(fallback.startMinutes)
-      : timeToMinutes(18, 0);
-  const occurrenceCount = Number.isFinite(Number(source.occurrenceCount))
-    ? Number(source.occurrenceCount)
-    : Number.isFinite(Number(fallback.occurrenceCount))
-      ? Number(fallback.occurrenceCount)
-      : 8;
-  return {
-    dayOfWeek: Math.max(0, Math.min(6, Math.round(dayOfWeek))),
-    startMinutes: Math.round(startMinutes),
-    occurrenceCount: Math.max(1, Math.min(MAX_GROUP_OCCURRENCE_COUNT, Math.round(occurrenceCount))),
-    active: source.active !== false,
-  };
-}
-
-/**
- * The booking screens a lesson type appears on.
- *
- * Unrecognised ids are KEPT, not dropped. This used to filter against
- * a hardcoded list of known screens, and the filtered result is what gets
- * written back -- so a
- * plain load-and-save, with nobody touching the screens at all, silently pruned
- * any id this build did not know about and persisted the loss. A lesson type
- * would just stop appearing on the public booking page, with no error anywhere.
- *
- * That is fatal once screens become per-business: a service belonging to one
- * workspace would be pruned by a request serving another. Deciding what to
- * *show* is a render-time question (the public page matches on the screen it is
- * currently rendering, so an unknown id simply never matches); deciding what to
- * *store* is not the same question, and this function only stores.
- *
- * A missing field means legacy data, which defaults to the main screen. An
- * explicit empty list means "show on no booking screens" and is preserved.
- */
-function cleanBookingScreenIds(value) {
-  if (!Array.isArray(value)) return ["main"];
-  return Array.from(
-    new Set(
-      value
-        .map((candidate) => (typeof candidate === "string" ? candidate.trim().slice(0, 80) : ""))
-        .filter(Boolean),
-    ),
-  ).slice(0, 24);
-}
-
-function cleanEditableServiceText(value, fallback = "", max = 600) {
-  if (typeof value === "string") return value.trim().slice(0, max);
-  return fallback;
-}
-
-// The per-field fallback for a service. Mirrors the frontend's
-// neutralServiceFallback in src/App.tsx.
-//
-// This used to be defaultServices[index] -- the original coach's real lesson
-// list -- so a service arriving with a missing name, price or note had that
-// coach's name, price and "Bay hire included" written into it. Structural
-// defaults (a duration, a capacity of one) are product-level and stay; anything
-// a coach would recognise as *theirs* does not.
-const neutralServiceFallback = {
-  ...defaultServices[0],
-  id: "",
-  name: "",
-  description: "",
-  lessonNote: "",
-  location: "",
-  price: 0,
-};
-
-function cleanServiceResourceUse(service, canUseResources) {
-  const resourceMode = canUseResources ? serviceResourceMode(service) : "none";
-  if (resourceMode === "none") return {};
-  return {
-    resourceMode: cleanResourceMode(resourceMode),
-    resourceTypes: cleanServiceResourceTypes(service?.resourceTypes),
-    // Unqualified ids are from when a lesson type had one location.
-    resourceIds: cleanServiceResourceIds(service?.resourceIds, primaryServiceLocationId(service)),
-  };
-}
-
-function cleanService(service, index = 0, accountId = "") {
-  const fallback = neutralServiceFallback;
-  const descriptionFallback = service ? "" : fallback.description;
-  const locationFallback = service ? "" : fallback.location;
-  const lessonNoteFallback = service ? service.location || "" : fallback.lessonNote || fallback.location || "";
-  const name = cleanString(service?.name, fallback.name, 120);
-  const duration = Number.isFinite(Number(service?.duration)) ? Number(service.duration) : fallback.duration;
-  const price = Number.isFinite(Number(service?.price)) ? Number(service.price) : fallback.price;
-  const capacity = Number.isFinite(Number(service?.capacity)) ? Number(service.capacity) : fallback.capacity || 1;
-  // The chosen lesson format is authoritative. Legacy rows that predate the
-  // lessonFormat field are still detected by their "package-" id prefix, but a
-  // service name is never used to infer the format.
-  const looksLikePackage =
-    service?.lessonFormat === "package" ||
-    (!service?.lessonFormat && String(service?.id || "").startsWith("package-"));
-  const lessonFormat =
-    looksLikePackage
-      ? "package"
-      : service?.lessonFormat === "group"
-        ? "group"
-        : service?.lessonFormat === "video-review"
-          ? "video-review"
-          : "private";
-  const videoReview = lessonFormat === "video-review";
-  const customGroup = lessonFormat === "group" && hasCustomGroupFlag(service);
-  const cleanCapacity = videoReview
-    ? 1
-    : customGroup
-      ? Math.max(CUSTOM_GROUP_DEFAULTS.minParticipants, Math.min(CUSTOM_GROUP_DEFAULTS.maxParticipants, Math.round(capacity || CUSTOM_GROUP_DEFAULTS.maxParticipants)))
-      : Math.max(lessonFormat === "group" ? 2 : 1, Math.min(24, Math.round(capacity)));
-  const rawMinParticipants = Number.isFinite(Number(service?.minParticipants))
-    ? Number(service.minParticipants)
-    : customGroup
-      ? CUSTOM_GROUP_DEFAULTS.minParticipants
-      : lessonFormat === "group"
-      ? Math.min(2, cleanCapacity)
-      : 1;
-  const minParticipants =
-    lessonFormat === "group"
-      ? Math.max(2, Math.min(cleanCapacity, Math.round(rawMinParticipants)))
-      : 1;
-  const priceMode =
-    lessonFormat === "group" && service?.priceMode === "per-person" && !customGroup
-      ? "per-person"
-      : "session";
-  const packageAllowance = Number.isFinite(Number(service?.packageAllowance))
-    ? Math.max(1, Math.min(100, Math.round(Number(service.packageAllowance))))
-    : Math.max(1, fallback.packageAllowance ?? 5);
-  const packageCoverageMode = service?.packageCoverageMode === "lesson-by-lesson" ? "lesson-by-lesson" : "upfront";
-  const groupSchedule = lessonFormat === "group" && !customGroup
-    ? cleanGroupSchedule(service?.groupSchedule, fallback.groupSchedule || {})
-    : undefined;
-  const bookingScreenIds = cleanBookingScreenIds(service?.bookingScreenIds);
-  return {
-    id: cleanSlug(
-      service?.id,
-      cleanSlug(name, `service-${Date.now()}-${index}`),
-    ),
-    // The owning business is supplied by the caller. A stored service that
-    // names no account used to adopt the original workspace's id, which made
-    // it visible to that business and nobody else -- fail-open in the same
-    // shape the calendar rows had.
-    accountId: cleanSlug(service?.accountId, accountId),
-    // Every coach who teaches it and every place it runs, in the order a
-    // booking tries them. Older rows held one of each; see service-scope.mts.
-    coachIds: cleanScopeIds(serviceCoachIds(service)),
-    name,
-    duration: Math.max(15, Math.min(240, Math.round(duration))),
-    price: Math.max(0, Math.round(price)),
-    description: cleanEditableServiceText(service?.description, descriptionFallback, 240),
-    visibility:
-      lessonFormat === "package" || service?.visibility === "private"
-        ? "private"
-        : "public",
-    active: service?.active !== false,
-    capacity: cleanCapacity,
-    minParticipants,
-    lessonFormat,
-    priceMode,
-    color: cleanHexColor(service?.color, defaultServiceColor(index)),
-    locationIds: cleanScopeIds(serviceLocationIds(service)),
-    // Whether a booking must hold, or only takes when free, one of the
-    // location's resources, and which types or single resources it may take
-    // (none chosen = any). A review is not at a location at all.
-    ...cleanServiceResourceUse(service, !videoReview && lessonFormat !== "package"),
-    lessonNote: cleanEditableServiceText(service?.lessonNote, lessonNoteFallback, 180),
-    location: cleanEditableServiceText(service?.location, locationFallback, 160),
-    packageAllowance: lessonFormat === "package" ? packageAllowance : undefined,
-    packageCoverageMode: lessonFormat === "package" ? packageCoverageMode : undefined,
-    packageCoversServiceId:
-      lessonFormat === "package" ? cleanString(service?.packageCoversServiceId, "", 120) || undefined : undefined,
-    crossRedeemable: lessonFormat === "package" ? service?.crossRedeemable === true : undefined,
-    acceptsCrossRedemption:
-      lessonFormat !== "package" ? service?.acceptsCrossRedemption !== false : undefined,
-    // A review is one player's swing, reviewed once. Carrying a turnaround on
-    // any other format would be a number nothing reads.
-    reviewTurnaroundDays: videoReview
-      ? cleanReviewTurnaroundDays(service?.reviewTurnaroundDays, fallback.reviewTurnaroundDays)
-      : undefined,
-    bookingScreenIds,
-    customGroup: customGroup || undefined,
-    customGroupEnabled: customGroup || undefined,
-    baseParticipants: customGroup ? customGroupBaseParticipants({ ...service, capacity: cleanCapacity }) : undefined,
-    basePrice: customGroup ? customGroupBasePrice(service) : undefined,
-    extraPersonPrice: customGroup ? customGroupExtraPersonPrice(service) : undefined,
-    archived: service?.archived === true,
-    groupSchedule,
-  };
-}
-
-// Every inbound external booking (Optix) files under this reserved lesson
-// type. The id must match EXTERNAL_BOOKING_SERVICE_ID in _shared/integrations/ingest.mts.
-export const EXTERNAL_BOOKING_SERVICE_ID = "external-booking";
-
-export function isReservedExternalBookingService(service) {
-  return cleanSlug(service?.id, "") === EXTERNAL_BOOKING_SERVICE_ID;
-}
-
-export function countManagedActiveServices(services) {
-  return Array.isArray(services)
-    ? services.filter((service) => service?.archived !== true && !isReservedExternalBookingService(service)).length
-    : 0;
-}
-
-export function managedServicesForStorage(services) {
-  return Array.isArray(services) ? services.filter((service) => !isReservedExternalBookingService(service)) : [];
-}
-
-const externalBookingServiceTemplate = {
-  id: EXTERNAL_BOOKING_SERVICE_ID,
-  name: "External Booking",
-  duration: 60,
-  price: 0,
-  description: "Booking imported from an external system. Its time comes from the source; the source's own label is in the lesson note.",
-  visibility: "private",
-  active: true,
-  capacity: 1,
-  minParticipants: 1,
-  lessonFormat: "private",
-  priceMode: "session",
-  lessonNote: "",
-  location: "",
-};
-
-export function normalizeServices(serviceList, accountId = "") {
-  // Only seed the demo lesson types when there is no services data at all.
-  // An explicit empty list means the coach deleted them and must stay empty.
-  const source = Array.isArray(serviceList) ? serviceList : defaultServices;
-  const seen = new Set();
-  const services = source.map((service, index) => {
-    const clean = cleanService(service, index, accountId);
-    let id = clean.id;
-    let suffix = 2;
-    while (seen.has(id)) {
-      id = `${clean.id}-${suffix}`;
-      suffix += 1;
-    }
-    seen.add(id);
-    return { ...clean, id };
-  });
-  // The reserved External Booking type always exists in memory, so an inbound
-  // external booking can never reference a missing lesson type. Legacy stored
-  // copies are accepted, but new saves omit it because it is not part of the
-  // business's lesson-type catalogue.
-  if (!seen.has(EXTERNAL_BOOKING_SERVICE_ID)) {
-    services.push(cleanService(externalBookingServiceTemplate, services.length, accountId));
-  }
-  return services;
-}
-
-function normalizeAvailability(availability) {
-  const source = Array.isArray(availability)
-    ? availability
-    : defaultAvailability;
-  const dayStartMinutes = 0;
-  const dayEndMinutes = (24 * 60) - 15;
-  return Array.from({ length: 7 }, (_, day) => {
-    const windows = Array.isArray(source[day]) ? source[day] : [];
-    return windows
-      .map((window) => {
-        const rawStart = Number.isFinite(Number(window?.start))
-          ? Number(window.start)
-          : timeToMinutes(7, 0);
-        const rawEnd = Number.isFinite(Number(window?.end))
-          ? Number(window.end)
-          : rawStart + 60;
-        const start = Math.max(
-          dayStartMinutes,
-          Math.min(dayEndMinutes, Math.round(rawStart / 15) * 15),
-        );
-        const end = Math.max(
-          start + 15,
-          Math.min(dayEndMinutes, Math.round(rawEnd / 15) * 15),
-        );
-        const coachId = cleanSlug(window?.coachId, defaultCoachProfileFromAccount().id);
-        // Keep the owning business on the window. Every account filter is
-        // strict now, so a window that loses its accountId here is dropped
-        // from the public slot calculation and the booking page shows no
-        // times at all.
-        const accountId = cleanSlug(window?.accountId, "");
-        // Where the coach is working in this window. Empty means "wherever the
-        // lesson type is" -- every window saved before locations existed.
-        const locationId = cleanSlug(window?.locationId, "");
-        if (end <= start) return null;
-        return {
-          start,
-          end,
-          coachId,
-          ...(accountId ? { accountId } : {}),
-          ...(locationId ? { locationId } : {}),
-        };
-      })
-      .filter(Boolean)
-      .sort(
-        (a, b) =>
-          (a.coachId || "").localeCompare(b.coachId || "") ||
-          (a.locationId || "").localeCompare(b.locationId || "") ||
-          a.start - b.start,
-      )
-      .reduce((merged, window) => {
-        const previous = merged.at(-1);
-        if (
-          previous &&
-          previous.coachId === window.coachId &&
-          (previous.locationId || "") === (window.locationId || "") &&
-          window.start < previous.end
-        ) {
-          previous.end = Math.max(previous.end, window.end);
-        } else {
-          merged.push({ ...window });
-        }
-        return merged;
-      }, []);
-  });
-}
-const accountFeatureKeys = [
-  "publicBooking",
-  "coachCalendar",
-  "locationCalendar",
-  "multiCoach",
-  "multiLocation",
-  "services",
-  "groupLessons",
-  "packages",
-  "clients",
-  "notifications",
-  "googleCalendarSync",
-  "invoicing",
-  "checkout",
-  "customBranding",
-  "customDomains",
-  "staffUsers",
-  "advancedPermissions",
-];
-
-function accountFeatures(enabled) {
-  return Object.fromEntries(accountFeatureKeys.map((feature) => [feature, enabled.includes(feature)]));
-}
-
-const allAccountFeatures = accountFeatures(accountFeatureKeys);
-const accountPlanCatalog = {
-  solo: {
-    features: accountFeatures(["publicBooking", "coachCalendar", "services", "groupLessons", "packages", "clients", "notifications", "googleCalendarSync"]),
-    limits: { maxCoaches: 1, maxLocations: 1, maxUsers: 1, maxServices: 10, maxBookingScreens: 1 },
-  },
-  studio: {
-    features: accountFeatures(["publicBooking", "coachCalendar", "locationCalendar", "multiCoach", "multiLocation", "services", "groupLessons", "packages", "clients", "notifications", "googleCalendarSync", "invoicing", "customBranding", "staffUsers"]),
-    limits: { maxCoaches: 5, maxLocations: 3, maxUsers: 8, maxServices: 40, maxBookingScreens: 4 },
-  },
-  academy: { features: allAccountFeatures, limits: { maxCoaches: 20, maxLocations: 10, maxUsers: 30, maxServices: 120, maxBookingScreens: 12 } },
-  enterprise: { features: allAccountFeatures, limits: { maxCoaches: 999, maxLocations: 999, maxUsers: 999, maxServices: 999, maxBookingScreens: 999 } },
-  founder: { features: allAccountFeatures, limits: { maxCoaches: 999, maxLocations: 999, maxUsers: 999, maxServices: 999, maxBookingScreens: 999 } },
-};
-
-function mergeEntitlementOverrides(base, override) {
-  return {
-    features: { ...base.features, ...(override?.features || {}) },
-    limits: { ...base.limits, ...(override?.limits || {}) },
-  };
-}
-
-function accountEntitlements(account) {
-  return mergeEntitlementOverrides(accountPlanCatalog[account?.planKey] || accountPlanCatalog.solo, account?.entitlementsOverride);
-}
-
-function accountHasFeature(account, feature) {
-  return accountEntitlements(account).features[feature] === true;
-}
-
-function accountLimit(account, limit) {
-  return accountEntitlements(account).limits[limit];
-}
-
-function isAccountActive(account) {
-  return account?.active !== false && ["trialing", "active", "comped", "internal"].includes(account?.subscriptionStatus);
-}
-
-function entitlementError(message, status = 403) {
-  return Object.assign(new Error(message), { status });
-}
-
-function assertAccountActive(account) {
-  if (!isAccountActive(account)) {
-    throw entitlementError("This workspace subscription is not active.");
-  }
-}
-
-function assertAccountFeature(account, feature) {
-  assertAccountActive(account);
-  if (!accountHasFeature(account, feature)) {
-    throw entitlementError(`${feature} is not included in this workspace plan.`);
-  }
-}
-
-function assertAccountLimit(account, currentUsage, limitName) {
-  const limit = accountLimit(account, limitName);
-  if (Number.isFinite(limit) && currentUsage > limit) {
-    throw entitlementError(`This workspace plan allows ${limit} ${String(limitName).replace(/^max/, "").toLowerCase()}.`, 409);
-  }
-}
-
-function forbidden(message = "Permission denied.", code = "permission_denied") {
-  const error = Object.assign(new Error(message), { status: 403, code });
-  return error;
-}
-
-function permissionDenied(message = "You do not have permission to perform this action.") {
-  return forbidden(message, "permission_denied");
-}
-
-/**
- * Raised when a query would have to run without an account filter.
- *
- * Several reads used to retry unscoped when Supabase reported account_id
- * missing, which turned a schema problem into a silent cross-tenant read. The
- * column is NOT NULL now; if the scope cannot be applied, that is a server
- * fault and the request fails.
- */
-function missingAccountScope(where = "query") {
-  return Object.assign(
-    new Error("This request could not be scoped to a business and was refused."),
-    { status: 500, code: "account_scope_unavailable", scope: where },
-  );
-}
-
-function defaultWorkspaceAccountFromCoachAccount(account = defaultCoachAccount()) {
-  const clean = cleanCoachAccount(account);
-  const slug = cleanSlug(clean.calendarSlug || clean.businessName, legacyOriginalWorkspaceId());
-  return {
-    id: slug,
-    name: clean.businessName,
-    slug,
-    planKey: "founder",
-    subscriptionStatus: "comped",
-    billingProvider: "none",
-    active: true,
-  };
-}
-
-function cleanWorkspaceAccount(raw = {}, fallback = defaultWorkspaceAccountFromCoachAccount()) {
-  const name = cleanString(raw?.name, fallback.name, 120);
-  const slug = cleanSlug(raw?.slug || raw?.id || name, fallback.slug);
-  const planKey = accountPlanCatalog[raw?.planKey] ? raw.planKey : fallback.planKey;
-  const subscriptionStatus = ["trialing", "active", "past_due", "paused", "cancelled", "comped", "internal"].includes(raw?.subscriptionStatus)
-    ? raw.subscriptionStatus
-    : fallback.subscriptionStatus;
-  return {
-    id: cleanSlug(raw?.id, slug),
-    name,
-    slug,
-    planKey,
-    subscriptionStatus,
-    ownerUserId: cleanString(raw?.ownerUserId, fallback.ownerUserId || "", 120) || undefined,
-    billingProvider: ["stripe", "manual", "none"].includes(raw?.billingProvider) ? raw.billingProvider : fallback.billingProvider,
-    billingCustomerId: cleanString(raw?.billingCustomerId, "", 160) || undefined,
-    billingSubscriptionId: cleanString(raw?.billingSubscriptionId, "", 160) || undefined,
-    trialEndsAt: cleanString(raw?.trialEndsAt, "", 80) || undefined,
-    currentPeriodEndsAt: cleanString(raw?.currentPeriodEndsAt, "", 80) || undefined,
-    entitlementsOverride: raw?.entitlementsOverride && typeof raw.entitlementsOverride === "object" ? raw.entitlementsOverride : undefined,
-    active: raw?.active !== false,
-    createdAt: cleanString(raw?.createdAt, fallback.createdAt || "", 80) || undefined,
-    updatedAt: cleanString(raw?.updatedAt, fallback.updatedAt || "", 80) || undefined,
-  };
-}
-
-function normalizeWorkspaceAccounts(rawAccounts, account = defaultCoachAccount()) {
-  const fallback = defaultWorkspaceAccountFromCoachAccount(account);
-  const source = Array.isArray(rawAccounts) && rawAccounts.length ? rawAccounts : [fallback];
-  const seen = new Set();
-  return source.map((raw, index) => {
-    const clean = cleanWorkspaceAccount(raw, index === 0 ? fallback : defaultWorkspaceAccountFromCoachAccount(account));
-    let id = clean.id;
-    let suffix = 2;
-    while (seen.has(id)) {
-      id = `${clean.id}-${suffix}`;
-      suffix += 1;
-    }
-    seen.add(id);
-    return { ...clean, id, active: clean.active || index === 0 };
-  });
-}
-
-function defaultLocationFromCoachAccount(account = defaultCoachAccount()) {
-  const clean = cleanCoachAccount(account);
-  const workspaceAccount = defaultWorkspaceAccountFromCoachAccount(clean);
-  return {
-    id: "default-location",
-    accountId: workspaceAccount.id,
-    name: clean.venueName,
-    shortName: clean.venueShortName || clean.venueName,
-    address: "",
-    timezone: clean.timezone,
-    active: true,
-    archived: false,
-    isDefault: true,
-    sortOrder: 0,
-  };
-}
-
-function defaultCoachProfileFromAccount(account = defaultCoachAccount()) {
-  const clean = cleanCoachAccount(account);
-  const workspaceAccount = defaultWorkspaceAccountFromCoachAccount(clean);
-  return {
-    id: clean.id || legacyOriginalWorkspaceId(),
-    accountId: workspaceAccount.id,
-    name: clean.coachName,
-    displayName: clean.coachName || clean.businessName,
-    shortName: clean.coachName.split(/\s+/)[0] || "",
-    email: clean.contactEmail,
-    active: true,
-    archived: false,
-    bookable: true,
-    assignedLocationIds: ["default-location"],
-    defaultLocationId: "default-location",
-    sortOrder: 0,
-  };
-}
-
-function defaultAppUserFromAccount(account = defaultCoachAccount()) {
-  const coach = defaultCoachProfileFromAccount(account);
-  const workspaceAccount = defaultWorkspaceAccountFromCoachAccount(account);
-  return {
-    id: `${coach.id}-admin`,
-    accountId: workspaceAccount.id,
-    email: coach.email,
-    name: coach.displayName,
-    role: "admin",
-    coachId: coach.id,
-    permissions: {
-      bookings: "all",
-      services: "all",
-      availability: "all",
-      locations: "all",
-      clients: "all",
-      settings: "all",
-    },
-  };
-}
-
-function cleanCoachProfile(raw = {}, fallback = defaultCoachProfileFromAccount(), index = 0) {
-  const name = cleanString(raw?.name, fallback.name, 120);
-  return {
-    id: cleanSlug(raw?.id, cleanSlug(name, `coach-${index + 1}`)),
-    // The fallback is the caller's account (via `fallback`), never the original
-    // workspace: a coach profile whose stored accountId is missing belongs to
-    // the business being read, not to Sam Hale Golf.
-    accountId: cleanSlug(raw?.accountId, fallback.accountId || ""),
-    name,
-    displayName: cleanString(raw?.displayName, name, 120),
-    shortName: cleanString(raw?.shortName, name.split(/\s+/).map((part) => part[0]).join("").slice(0, 4).toUpperCase(), 60),
-    email: cleanEmail(raw?.email, fallback.email),
-    phone: cleanString(raw?.phone, "", 80) || undefined,
-    bio: cleanString(raw?.bio, "", 600) || undefined,
-    photoUrl: cleanCoachPhoto(raw?.photoUrl) || undefined,
-    active: raw?.active !== false,
-    archived: raw?.archived === true,
-    bookable: raw?.bookable !== false,
-    assignedLocationIds: Array.isArray(raw?.assignedLocationIds)
-      ? raw.assignedLocationIds.map((id) => cleanSlug(id, "")).filter(Boolean)
-      : fallback.assignedLocationIds,
-    defaultLocationId: cleanSlug(raw?.defaultLocationId, raw?.assignedLocationIds?.[0] || fallback.assignedLocationIds?.[0] || "") || undefined,
-    sortOrder: Number.isFinite(Number(raw?.sortOrder)) ? Math.round(Number(raw.sortOrder)) : index,
-  };
-}
-
-/**
- * A business's coaches, exactly as stored. Only a business that has never
- * saved a coach list is seeded, with the owner's coach profile; a saved empty
- * list means the owner runs the business without coaching and is kept empty.
- * A business with no bookable coach simply shows no availability.
- */
-function normalizeCoachProfiles(rawProfiles, account = defaultCoachAccount()) {
-  const seeded = !Array.isArray(rawProfiles);
-  const fallback = defaultCoachProfileFromAccount(account);
-  const source = seeded ? [fallback] : rawProfiles;
-  const seen = new Set();
-  const cleaned = source.map((raw, index) => {
-    const coach = cleanCoachProfile(raw, seeded ? fallback : blankCoachProfile(fallback.accountId), index);
-    let id = coach.id;
-    let suffix = 2;
-    while (seen.has(id)) {
-      id = `${coach.id}-${suffix}`;
-      suffix += 1;
-    }
-    seen.add(id);
-    return { ...coach, id };
-  });
-  return cleaned.sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.displayName.localeCompare(b.displayName));
-}
-
-// What a stored coach is missing is left blank, never borrowed from the
-// business: a coach's name and email are their own.
-function blankCoachProfile(accountId = "") {
-  return { ...defaultCoachProfileFromAccount(), id: "", accountId, name: "", displayName: "", shortName: "", email: "" };
-}
-
-/**
- * The signed-in person's own coach profile, or "" when they have none. The
- * owner's is the one seeded with the business (its id is the account id)
- * until their membership names one; an owner who deleted theirs has none and
- * is never handed another coach's calendar. Anyone else keeps the old
- * first-coach fallback.
- */
-function ownCoachIdFor(actor, coaches, accountId) {
-  const live = (id) => (id && coaches.some((coach) => coach.id === id) ? id : "");
-  if (live(actor?.coachId)) return actor.coachId;
-  if (actor?.isOwner) return live(cleanSlug(accountId, ""));
-  return firstCoachId(coaches);
-}
-
-/**
- * The coach a record that names none belongs to: the first active coach in
- * the business's list. There is no "default coach" setting -- lesson types,
- * bookings and availability all name their coach -- so this only decides
- * where rows saved before that are shown.
- */
-function firstCoachId(coaches) {
-  return (
-    coaches.find((coach) => coach.active && !coach.archived)?.id ||
-    coaches[0]?.id ||
-    ""
-  );
-}
-
-function coachById(coaches, id) {
-  if (!id) return null;
-  return (coaches || []).find((coach) => coach.id === id) || null;
-}
-
-function coachSnapshot(coach) {
-  return {
-    coachId: coach.id,
-    name: coach.name,
-    displayName: coach.displayName,
-    email: coach.email || undefined,
-    phone: coach.phone || undefined,
-  };
-}
-
-function bookingCoachSnapshotFor(coachId, coaches) {
-  const profile = coachById(coaches, coachId) || coachById(coaches, firstCoachId(coaches));
-  return profile ? coachSnapshot(profile) : undefined;
-}
-
-function cleanBookingCoachSnapshot(raw, fallback) {
-  const source = raw?.name ? raw : fallback;
-  if (!source?.name) return undefined;
-  return {
-    coachId: cleanSlug(source.coachId, "") || undefined,
-    name: cleanString(source.name, "", 120),
-    displayName: cleanString(source.displayName, "", 120) || undefined,
-    email: cleanEmail(source.email, "") || undefined,
-    phone: cleanString(source.phone, "", 80) || undefined,
-  };
-}
-
-function cleanLocation(raw = {}, fallback = defaultLocationFromCoachAccount(), index = 0) {
-  const name = cleanString(raw?.name, fallback.name, 140);
-  const shortName = cleanString(raw?.shortName, name, 80);
-  return {
-    id: cleanSlug(raw?.id, cleanSlug(name, `location-${index + 1}`)),
-    // As cleanCoachProfile: the caller's account, not the original workspace.
-    accountId: cleanSlug(raw?.accountId, fallback.accountId || ""),
-    name,
-    shortName,
-    // An online location has no address; without this the first location
-    // would inherit the venue's.
-    address: cleanLocationKind(raw?.kind) === "online" ? "" : cleanString(raw?.address, fallback.address || "", 240),
-    mapUrl: cleanUrl(raw?.mapUrl, "", 300) || undefined,
-    arrivalInstructions: cleanString(raw?.arrivalInstructions, "", 500) || undefined,
-    publicNotes: cleanString(raw?.publicNotes, "", 500) || undefined,
-    timezone: cleanString(raw?.timezone, fallback.timezone, 80),
-    // Physical or online, and the bays or rooms it has. See _shared/resources.mts.
-    kind: cleanLocationKind(raw?.kind),
-    resourceSource: cleanResourceSource(raw?.resourceSource),
-    resources: cleanLocationResources(raw?.resources),
-    active: raw?.active !== false,
-    archived: raw?.archived === true,
-    isDefault: raw?.isDefault === true || fallback.isDefault === true,
-    sortOrder: Number.isFinite(Number(raw?.sortOrder)) ? Math.round(Number(raw.sortOrder)) : index,
-  };
-}
-
-function normalizeLocations(rawLocations, account = defaultCoachAccount()) {
-  const fallback = defaultLocationFromCoachAccount(account);
-  const source = Array.isArray(rawLocations) && rawLocations.length ? rawLocations : [fallback];
-  const seen = new Set();
-  const cleaned = source.map((raw, index) => {
-    const location = cleanLocation(raw, index === 0 ? fallback : undefined, index);
-    let id = location.id;
-    let suffix = 2;
-    while (seen.has(id)) {
-      id = `${location.id}-${suffix}`;
-      suffix += 1;
-    }
-    seen.add(id);
-    return { ...location, id };
-  });
-  if (!cleaned.some((location) => location.active && !location.archived)) {
-    cleaned[0] = { ...cleaned[0], active: true, archived: false };
-  }
-  const defaultIndex = cleaned.findIndex((location) => location.isDefault && location.active && !location.archived);
-  const fallbackDefaultIndex = defaultIndex >= 0 ? defaultIndex : cleaned.findIndex((location) => location.active && !location.archived);
-  return cleaned
-    .map((location, index) => ({ ...location, isDefault: index === fallbackDefaultIndex }))
-    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name));
-}
-
-function activeLocations(locations) {
-  return (locations || []).filter((location) => location.active && !location.archived);
-}
-
-function defaultLocationId(locations) {
-  return activeLocations(locations).find((location) => location.isDefault)?.id || activeLocations(locations)[0]?.id || locations?.[0]?.id || "";
-}
-
-function locationById(locations, id) {
-  if (!id) return null;
-  return (locations || []).find((location) => location.id === id) || null;
-}
-
-function locationSnapshot(location) {
-  return {
-    locationId: location.id,
-    name: location.name,
-    shortName: location.shortName,
-    address: location.address || undefined,
-    mapUrl: location.mapUrl || undefined,
-    arrivalInstructions: location.arrivalInstructions || undefined,
-    publicNotes: location.publicNotes || undefined,
-    timezone: location.timezone || undefined,
-  };
-}
-
-function serviceLocation(service, locations, account) {
-  return (
-    locationById(locations, primaryServiceLocationId(service)) ||
-    locationById(locations, defaultLocationId(locations)) ||
-    defaultLocationFromCoachAccount(account)
-  );
-}
-
-function cleanBookingLocationSnapshot(raw, fallback) {
-  const source = raw?.name ? raw : fallback;
-  if (!source?.name) return undefined;
-  return {
-    locationId: cleanString(source.locationId, "", 120) || undefined,
-    name: cleanString(source.name, "", 140),
-    shortName: cleanString(source.shortName, "", 80) || undefined,
-    address: cleanString(source.address, "", 240) || undefined,
-    mapUrl: cleanUrl(source.mapUrl, "", 300) || undefined,
-    arrivalInstructions: cleanString(source.arrivalInstructions, "", 500) || undefined,
-    publicNotes: cleanString(source.publicNotes, "", 500) || undefined,
-    timezone: cleanString(source.timezone, "", 80) || undefined,
-  };
-}
-
-function bookingLocationSnapshotFor(service, locations, account) {
-  return locationSnapshot(serviceLocation(service, locations, account));
-}
-
-function calendarItemLocation(item, service, locations, account) {
-  return (
-    cleanBookingLocationSnapshot(item?.location) ||
-    cleanBookingLocationSnapshot(
-      item?.locationId
-        ? locationSnapshot(locationById(locations, item.locationId) || serviceLocation(service, locations, account))
-        : undefined,
-    ) ||
-    bookingLocationSnapshotFor(service, locations, account)
-  );
-}
-
-function calendarItemCoach(item, coaches) {
-  return (
-    cleanBookingCoachSnapshot(item?.coach) ||
-    bookingCoachSnapshotFor(item?.coachId, coaches)
-  );
-}
-
-function resolvedCalendarItemCoachId(item, service, coaches) {
-  return item?.coachId || item?.coach?.coachId || primaryServiceCoachId(service) || calendarItemCoach(item, coaches)?.coachId || firstCoachId(coaches);
-}
-
-function resolvedCalendarItemLocationId(item, service, locations, account) {
-  return item?.locationId || item?.location?.locationId || primaryServiceLocationId(service) || calendarItemLocation(item, service, locations, account).locationId || defaultLocationId(locations);
-}
-
-function serviceForCalendarItem(item, services = []) {
-  return (services || []).find((service) => service.id && service.id === item?.serviceId) || null;
-}
-
-export function recordBelongsToAccount(record, accountId) {
-  return recordBelongsToAccountStrict(record, accountId);
-}
-
-
-export function calendarItemBelongsToAccount(item, accountId) {
-  return recordBelongsToAccount(item, accountId);
-}
-
-function calendarItemBelongsToCoach(item, coachId, services = [], coaches = []) {
-  if (!coachId) return false;
-  if (isLocationOnlyBlock(item)) return true;
-  return resolvedCalendarItemCoachId(item, serviceForCalendarItem(item, services), coaches) === coachId;
-}
-
-function canReadCalendarItem(context, item, state) {
-  if (!calendarItemBelongsToAccount(item, context.accountId)) return false;
-  if (context.isAdmin) return true;
-  return calendarItemBelongsToCoach(item, context.coachId, state.services, state.coaches);
-}
-
-function assertCanWriteCalendarItem(context, item, previousItem, state) {
-  if (!calendarItemBelongsToAccount(item, context.accountId)) {
-    throw permissionDenied("This booking does not belong to your workspace.");
-  }
-  if (context.isAdmin) return;
-  if (!hasPermission(context.user, "bookings", "own")) {
-    throw permissionDenied("You do not have permission to edit bookings.");
-  }
-  if (isLocationOnlyBlock(item)) {
-    throw permissionDenied("You do not have permission to block an entire location.");
-  }
-  if (previousItem && !calendarItemBelongsToCoach(previousItem, context.coachId, state.services, state.coaches)) {
-    throw permissionDenied("You do not have permission to edit another coach's calendar.");
-  }
-  if (!calendarItemBelongsToCoach(item, context.coachId, state.services, state.coaches)) {
-    throw permissionDenied("You do not have permission to move bookings to another coach.");
-  }
-}
-
-function normalizeCalendarItemsForContext(items, context) {
-  return normalizeItems(items).map((item) => ({ ...item, accountId: context.accountId }));
-}
-
-export function filterCalendarStateForContext(state, context) {
-  const filteredItems = (state.items || []).filter((item) => canReadCalendarItem(context, item, state));
-  const visibleItemIds = new Set(filteredItems.map((item) => item.id));
-  return {
-    ...state,
-    items: filteredItems,
-    services: context.isAdmin
-      ? (state.services || []).filter((service) => recordBelongsToAccount(service, context.accountId))
-      : (state.services || []).filter((service) => recordBelongsToAccount(service, context.accountId) && serviceIncludesCoach(service, context.coachId, firstCoachId(state.coaches))),
-    availability: context.isAdmin
-      ? (state.availability || []).map((day) => day.filter((window) => recordBelongsToAccount(window, context.accountId)))
-      : (state.availability || []).map((day) => day.filter((window) => recordBelongsToAccount(window, context.accountId) && (window.coachId || firstCoachId(state.coaches)) === context.coachId)),
-    notifications: context.isAdmin
-      ? state.notifications
-      : (state.notifications || []).filter((notification) => visibleItemIds.has(notification.calendarItemId)),
-    people: context.isAdmin
-      ? state.people
-      : (state.people || []).filter((person) => filteredItems.some((item) => item.email && person.email && item.email === person.email)),
-  };
-}
-
-function serviceBelongsToContext(service, context, coaches = []) {
-  if (!recordBelongsToAccount(service, context.accountId)) return false;
-  if (context.isAdmin) return true;
-  return serviceIncludesCoach(service, context.coachId, firstCoachId(coaches));
-}
-
-function assertCanWriteService(context, service, previousService, coaches = []) {
-  if (!recordBelongsToAccount(service, context.accountId)) {
-    throw permissionDenied("This service does not belong to your workspace.");
-  }
-  if (context.isAdmin) return;
-  if (!hasPermission(context.user, "services", "own")) {
-    throw permissionDenied("You do not have permission to edit lesson services.");
-  }
-  if (previousService && !serviceBelongsToContext(previousService, context, coaches)) {
-    throw permissionDenied("You do not have permission to edit another coach's service.");
-  }
-  if (!serviceBelongsToContext(service, context, coaches)) {
-    throw permissionDenied("You do not have permission to assign services to another coach.");
-  }
-}
-
-function mergeServicesForContext(incomingServices, currentServices, context, coaches = []) {
-  if (context.isAdmin) return incomingServices.map((service) => ({ ...service, accountId: context.accountId }));
-  const previousById = new Map((currentServices || []).map((service) => [service.id, service]));
-  // Which coaches teach a lesson type is the admin's call. A coach keeps the
-  // list an existing lesson type already has, and a new one is theirs alone.
-  const ownedIncoming = incomingServices.map((service) => {
-    const previous = previousById.get(service.id);
-    const { coachId: _legacyCoachId, ...rest } = service;
-    return {
-      ...rest,
-      accountId: context.accountId,
-      coachIds: previous ? serviceCoachIds(previous) : [context.coachId],
-    };
-  });
-  ownedIncoming.forEach((service) => assertCanWriteService(context, service, previousById.get(service.id), coaches));
-  const ownedIds = new Set(ownedIncoming.map((service) => service.id));
-  const preserved = (currentServices || []).filter(
-    (service) => !ownedIds.has(service.id) && !serviceBelongsToContext(service, context, coaches),
-  );
-  return [...preserved, ...ownedIncoming];
-}
-
 function availabilityWindowBelongsToContext(window, context, fallbackCoachId) {
-  if (!recordBelongsToAccount(window, context.accountId)) return false;
+  if (!recordBelongsToAccountStrict(window, context.accountId)) return false;
   if (context.isAdmin) return true;
   return (window?.coachId || fallbackCoachId) === context.coachId;
 }
@@ -1652,73 +386,6 @@ function mergeAvailabilityForContext(incomingAvailability, currentAvailability, 
     );
     return [...preserved, ...dayWindows];
   });
-}
-
-function personMatchesCalendarItem(person, item) {
-  const email = cleanString(person?.email, "", 180).toLowerCase();
-  const phone = cleanString(person?.phone, "", 80).replace(/\D/g, "");
-  const itemEmail = cleanString(item?.email, "", 180).toLowerCase();
-  const itemPhone = cleanString(item?.phone, "", 80).replace(/\D/g, "");
-  if (email && itemEmail && email === itemEmail) return true;
-  if (phone && itemPhone && phone === itemPhone) return true;
-  return false;
-}
-
-function filterPeopleForContext(people, context, state) {
-  const accountPeople = (people || []).filter((person) => recordBelongsToAccount(person, context.accountId));
-  if (context.isAdmin) return accountPeople;
-  const visibleItems = (state.items || []).filter((item) => canReadCalendarItem(context, item, state));
-  return accountPeople.filter((person) => visibleItems.some((item) => personMatchesCalendarItem(person, item)));
-}
-
-function filterNotificationsForContext(notifications, context, state) {
-  if (context.isAdmin) return notifications || [];
-  const visibleItemIds = new Set((state.items || []).filter((item) => canReadCalendarItem(context, item, state)).map((item) => item.id));
-  return (notifications || []).filter((notification) => visibleItemIds.has(notification.calendarItemId));
-}
-
-function filterCoachesForContext(coaches, context) {
-  if (context.isAdmin) return (coaches || []).filter((coach) => recordBelongsToAccount(coach, context.accountId));
-  return (coaches || []).filter((coach) => recordBelongsToAccount(coach, context.accountId) && coach.id === context.coachId);
-}
-
-function filterLocationsForContext(locations, context, coaches = []) {
-  const accountLocations = (locations || []).filter((location) => recordBelongsToAccount(location, context.accountId));
-  if (context.isAdmin) return accountLocations;
-  const coach = (coaches || []).find((candidate) => candidate.id === context.coachId);
-  const assigned = new Set([...(coach?.assignedLocationIds || []), coach?.defaultLocationId].filter(Boolean));
-  return accountLocations.filter((location) => assigned.has(location.id) || location.isDefault);
-}
-
-function assertCanManagePerson(context, person, state) {
-  assertAccountFeature(context.account, "clients");
-  if (context.isAdmin) return;
-  if (!hasPermission(context.user, "clients", "own")) {
-    throw permissionDenied("You do not have permission to edit clients.");
-  }
-  if (!filterPeopleForContext([person], context, state).length) {
-    throw permissionDenied("You do not have permission to edit this client.");
-  }
-}
-
-function isLocationOnlyBlock(item) {
-  return item?.kind === "block" && Boolean(item.locationId || item.location?.locationId) && !item.coachId && !item.coach?.coachId;
-}
-
-function isCoachOnlyBlock(item) {
-  return item?.kind === "block" && Boolean(item.coachId || item.coach?.coachId) && !item.locationId && !item.location?.locationId;
-}
-
-function isCoachLocationBlock(item) {
-  return item?.kind === "block" && Boolean(item.coachId || item.coach?.coachId) && Boolean(item.locationId || item.location?.locationId);
-}
-
-function isInactiveForConflict(item) {
-  return item?.status === "cancelled" || item?.status === "no_show";
-}
-
-function bookingLocationDisplay(location) {
-  return [location?.name, location?.address].filter(Boolean).join(" · ");
 }
 
 function generateSyncKey() {
@@ -1888,89 +555,6 @@ function corsHeaders(req) {
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   };
-}
-
-function db() {
-  return getDatabase();
-}
-
-/**
- * Does this table exist?
- *
- * Some tables here are created by a migration rather than by ensureSchema(), so
- * a database that has never run one is missing them without being broken. A
- * reader that assumes otherwise turns "this account has no Optix" into a 500.
- */
-async function tableExists(table: string) {
-  const rows = (await db().sql`
-    SELECT to_regclass(${`public.${table}`}) AS name
-  `) as Record<string, unknown>[];
-  return Boolean(rows[0]?.name);
-}
-
-async function setSetting(accountId: string, key: string, value: unknown) {
-  await setSettingsBulk(accountId, { [key]: value });
-}
-
-/**
- * Write a group of settings in one statement — account-scoped.
- *
- * Saving a settings form means writing a dozen or more keys, and doing that one
- * key at a time is a dozen or more sequential round trips to Postgres for a
- * change the coach experiences as pressing Save once. Same shape as the calendar
- * save that was rewriting one item per round trip: individually cheap, and the
- * cost is the count.
- *
- * Callers that write a single key keep using setSetting, which comes through
- * here with one entry. `run` is the statement runner, injectable so the built
- * SQL can be checked without a database behind it.
- *
- * accountId is required. No global writes.
- */
-export async function setSettingsBulk(accountId: string, values: Record<string, unknown>, run: null | ((text: string, args: unknown[]) => Promise<unknown>) = null) {
-  const entries = Object.entries(values || {}).filter(([key]) => key);
-  if (!entries.length) return;
-  if (!accountId) {
-    throw new Error("setSettingsBulk: accountId is required");
-  }
-
-  const params: unknown[] = [];
-  const rows = entries.map(([key, value]) => {
-    params.push(accountId, key, String(value ?? ""));
-    return `($${params.length - 2}, $${params.length - 1}, $${params.length}, NOW())`;
-  });
-  const query = run || ((text: string, args: unknown[]) => db().pool.query(text, args));
-  await query(
-    `INSERT INTO settings (account_id, key, value, updated_at)
-     VALUES ${rows.join(", ")}
-     ON CONFLICT (account_id, key) DO UPDATE
-       SET value = EXCLUDED.value,
-           updated_at = EXCLUDED.updated_at`,
-    params,
-  );
-}
-
-export async function getSetting(accountId: string, key: string): Promise<string> {
-  if (!accountId) return "";
-  const rows = await db().sql<{ value: string }[]>`SELECT value FROM settings WHERE account_id = ${accountId} AND key = ${key}`;
-  return rows[0]?.value || "";
-}
-
-export async function readSettingsMap(accountId: string): Promise<Record<string, string>> {
-  if (!accountId) return {};
-  // Excludes the bulk-excluded keys (see _shared/settings-keys.mts): this read
-  // runs on nearly every request and was shipping a 34 kB Google sync debug log
-  // with it. Read those keys individually via getSetting() when needed.
-  const rows = await db().sql<{ key: string; value: string }[]>`SELECT key, value FROM settings WHERE account_id = ${accountId} AND key <> 'googleCalendarDebugLogJson'`;
-  return Object.fromEntries(rows.map((row) => [row.key, row.value || ""]));
-}
-
-function settingValue(settings, key) {
-  return settings?.[key] || "";
-}
-
-function parseSettingJson(settings, key, fallback) {
-  return safeJsonParse(settingValue(settings, key), fallback);
 }
 
 async function ensureCoreTables() {
@@ -2309,48 +893,6 @@ async function seedSettings(accountId: string) {
   );
 }
 
-async function seedItems(accountId: string) {
-  if (!accountId) throw missingAccountScope("seed_items");
-  const countRows = await db()
-    .sql`SELECT COUNT(*) AS count FROM calendar_items WHERE account_id = ${accountId}`;
-  if ((countRows[0]?.count ?? 0) > 0) return;
-
-  const client = await db().pool.connect();
-  try {
-    await client.query("BEGIN");
-    for (const item of initialItems) {
-      await client.query(
-        `INSERT INTO calendar_items (
-          id, account_id, kind, week, day, start, duration, service_id, client, title, phone, email, note, status, created_at, updated_at
-	        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW())
-	        ON CONFLICT (id) DO NOTHING`,
-        [
-          item.id,
-          accountId,
-          item.kind,
-          item.week,
-          item.day,
-          item.start,
-          item.duration,
-          item.serviceId,
-          item.client,
-          item.title,
-          item.phone,
-          item.email,
-          item.note,
-          item.status || "booked",
-        ],
-      );
-    }
-    await client.query("COMMIT");
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
-  }
-}
-
 /**
  * Seeds the ORIGINAL workspace's admin login from CLARITY_ADMIN_EMAIL /
  * CLARITY_ADMIN_PASSWORD.
@@ -2683,8 +1225,6 @@ async function ensureSeeded() {
       await seedSettings(originalWorkspaceId);
       await backfillLegacyPeopleAccountIds(originalWorkspaceId);
       await ensureNotificationHistoryTable();
-      await seedItems(originalWorkspaceId);
-      await seedPeopleFromAppointments(originalWorkspaceId);
       await ensureAdminUser();
     })().catch((error) => {
       seedReadyPromise = null;
@@ -2693,69 +1233,6 @@ async function ensureSeeded() {
   }
   await seedReadyPromise;
 }
-
-function rowToItem(row) {
-  const updatedAt = cleanString(typeof row?.updated_at === "string" ? row.updated_at : String(row?.updated_at || ""), "", 120);
-  const completedAt = cleanString(typeof row?.completed_at === "string" ? row.completed_at : String(row?.completed_at || ""), "", 120);
-  const status = ["completed", "cancelled", "no_show"].includes(row.status)
-    ? row.status
-    : "booked";
-  const customGroup = cleanCustomGroupData(row.custom_group);
-  const cancelledGroupSession = isCancelledGroupSessionLike(row);
-  const location = cleanBookingLocationSnapshot(row.location);
-  // A synced sync row is not on its own proof of a bay: it can be left over
-  // from before the lesson was moved. See bayBookingMatchesSlot.
-  const bayBooked =
-    row.bay_booked === true &&
-    bayBookingMatchesSlot(
-      { week: Number(row.week ?? 0), day: Number(row.day ?? 0), start: Number(row.start ?? 0), location },
-      // The lesson's own location timezone wins inside; this is only reached
-      // when it has none. A deployment constant, not another business's clock.
-      Number(row.bay_start_timestamp ?? 0),
-      defaultTimeZone(),
-    );
-  return {
-    id: row.id,
-    // No owner means no owner. Migration C made the column NOT NULL, so this
-    // only bites genuinely malformed data -- which should be invisible, not
-    // adopted by whichever business is reading.
-    accountId: cleanSlug(row.accountId || row.account_id, ""),
-    kind: row.kind,
-    week: Number(row.week ?? 0),
-    day: Number(row.day ?? 0),
-    start: Number(row.start ?? 0),
-    duration: Number(row.duration ?? 0),
-    coachId: row.coach_id || defaultCoachProfileFromAccount().id,
-    locationId: row.location_id || cleanBookingLocationSnapshot(row.location)?.locationId || "",
-    serviceId: row.service_id || "",
-    client: row.client || "",
-    title: row.title,
-    phone: row.phone || "",
-    email: row.email || "",
-    personId: row.person_id || "",
-    note: row.note || "",
-    coach: cleanBookingCoachSnapshot(row.coach),
-    location,
-    status: cancelledGroupSession ? "cancelled" : status,
-    // Who owns this booking. The calendar needs this to tell a native lesson
-    // from one an external system owns -- without it the UI cannot label an
-    // Optix booking, and worse, cannot stop a gesture that would silently
-    // convert one. Read-only: writeItems() never updates these columns, so a
-    // client cannot claim a booking for a provider by echoing them back.
-    origin: row.origin || "clarity",
-    externalProvider: row.external_provider || "",
-    externalBookingId: row.external_booking_id || "",
-    bayBooked,
-    bayResourceId: row.bay_resource_id || "",
-    // The Clarity resource this lesson holds. Server-owned: writeItems never
-    // writes it, assignClarityResources does.
-    resourceId: row.resource_id || "",
-    updatedAt,
-    completedAt,
-    ...(cancelledGroupSession ? { readOnly: true, groupSlot: true } : {}),
-    ...(customGroup || {}),
-	  };
-	}
 
 // An upstream status must never become this API's status. Optix answers a
 // failed bay call with HTTP 200 and a GraphQL error body, and passing that 200
@@ -3156,361 +1633,6 @@ async function completeCalendarItemById(currentState, itemId, requestContext) {
   }
 }
 
-function isCancelledGroupSessionLike(item) {
-  return (
-    item?.kind === "block" &&
-    Boolean(item?.service_id || item?.serviceId) &&
-    (item?.note === CANCELLED_GROUP_SESSION_NOTE || item?.title === CANCELLED_GROUP_SESSION_TITLE)
-  );
-}
-
-function cleanCalendarItem(item) {
-  if (!item || typeof item !== "object") return null;
-  const kind =
-    item.kind === "block"
-      ? "block"
-      : item.kind === "appointment"
-        ? "appointment"
-        : null;
-  if (!kind) return null;
-
-  const day = Number(item.day);
-  const start = Number(item.start);
-  const duration = Number(item.duration);
-  if (!Number.isInteger(day) || day < 0 || day > 6) return null;
-  if (!Number.isInteger(start) || start < 0 || start > 24 * 60) return null;
-  if (!Number.isInteger(duration) || duration <= 0 || duration > 12 * 60)
-    return null;
-
-  const customGroup = cleanCustomGroupData({
-    customGroup: item.customGroup,
-    attendees: item.attendees,
-    calculatedPrice: item.calculatedPrice,
-  });
-  const cancelledGroupSession = isCancelledGroupSessionLike({ ...item, kind });
-  return {
-    id: cleanString(item.id, `${kind}-${Date.now()}`),
-    // Whatever the client claimed, or nothing. The authoritative stamp happens
-    // in calendarItemParams from server context.
-    accountId: cleanSlug(item.accountId, ""),
-    kind,
-    week: Number.isInteger(Number(item.week)) ? Number(item.week) : 0,
-    day,
-    start,
-    duration,
-    coachId: cleanSlug(item.coachId || item.coach?.coachId, kind === "appointment" ? defaultCoachProfileFromAccount().id : "") || undefined,
-    locationId: cleanSlug(item.locationId || item.location?.locationId, ""),
-    serviceId: cleanString(item.serviceId),
-    client: cancelledGroupSession ? "" : cleanString(item.client),
-    title: cancelledGroupSession
-      ? CANCELLED_GROUP_SESSION_TITLE
-      : cleanString(item.title, kind === "block" ? "Busy" : "Appointment"),
-    phone: cancelledGroupSession ? "" : cleanString(item.phone),
-    email: cancelledGroupSession ? "" : cleanString(item.email),
-    personId: cancelledGroupSession ? "" : cleanString(item.personId, "", 120),
-    note: cancelledGroupSession ? CANCELLED_GROUP_SESSION_NOTE : cleanString(item.note),
-    coach: cancelledGroupSession ? undefined : cleanBookingCoachSnapshot(item.coach),
-    location: cancelledGroupSession ? undefined : cleanBookingLocationSnapshot(item.location),
-    status:
-      cancelledGroupSession
-        ? "cancelled"
-        : item.status === "completed" ||
-            item.status === "cancelled" ||
-            item.status === "no_show"
-          ? item.status
-          : "booked",
-    ...(cancelledGroupSession ? {} : customGroup || {}),
-  };
-}
-
-function normalizeItems(items) {
-  return Array.isArray(items)
-    ? items.map(cleanCalendarItem).filter(Boolean)
-    : initialItems;
-}
-
-// accountId is required. As an optional parameter defaulting to the original
-// workspace, any caller that lost track of the business silently wrote a client
-// into Sam Hale Golf.
-function cleanPerson(person, source = "import", accountId: string) {
-  if (!person || typeof person !== "object") return null;
-  const joinedName = [person.firstName, person.lastName]
-    .filter(Boolean)
-    .join(" ");
-  const name = cleanString(
-    person.name || joinedName || person.client || person.title,
-    "",
-    180,
-  );
-  const email = cleanString(person.email, "", 180).toLowerCase();
-  if (!name && !email) return null;
-
-  return {
-    id: cleanString(person.id, "", 120),
-    // The server's account, full stop. This read `person.accountId || accountId`,
-    // so a request body could name the business a client was filed under --
-    // the forged-account-id case, for people.
-    accountId: cleanSlug(accountId, ""),
-    name: name || email,
-    email,
-    phone: cleanString(person.phone, "", 80),
-    notes: cleanString(person.notes || person.note, "", 1200),
-    source: cleanString(person.source, source, 80),
-    caddyProfileId: cleanString(
-      person.caddyProfileId || person.caddyId,
-      "",
-      120,
-    ),
-    caddyProfileUrl: cleanString(
-      person.caddyProfileUrl || person.caddyUrl,
-      "",
-      600,
-    ),
-  };
-}
-
-function normalizedPersonName(value) {
-  return cleanString(value, "", 180).toLowerCase().replace(/\s+/g, " ").trim();
-}
-
-function normalizedPersonEmail(value) {
-  return cleanString(value, "", 180).toLowerCase();
-}
-
-// The country a bare national number (one with no leading +) is assumed to
-// belong to. The deployment default comes from CLARITY_PHONE_COUNTRY; the
-// workspace's own country setting overrides it. The active value lives in the
-// shared phone module so the frontend and the server cannot drift apart.
-function defaultPhoneCountry() {
-  return cleanPhoneCountry(env("CLARITY_PHONE_COUNTRY", FALLBACK_PHONE_COUNTRY));
-}
-
-/**
- * The timezone a business's wall-clock times are in.
- *
- * One key rather than readSettingsMap(): the bulk settings read is measured in
- * tens of kilobytes and some of these paths run per request. Mirrors
- * accountPhoneCountry() below, for the same reason.
- */
-async function accountTimeZoneFor(accountId: string) {
-  return (
-    cleanString(await getSetting(cleanSlug(accountId, ""), "accountTimezone"), "", 80) ||
-    defaultTimeZone()
-  );
-}
-
-// Phone numbers reach us in three shapes for the same person: the booking form
-// captures the national form (0274637700), spreadsheet imports carry the
-// international form (+64274637700), and Excel prefixes text cells with an
-// apostrophe ('+64274637700). Comparing raw digits treated these as three
-// different people, so compatiblePersonMatch missed an existing contact, fell
-// through to INSERT, and collided with the account-scoped unique index on
-// lower(email) — taking the caller's entire calendar save down with it. The
-// shared module is the single source of truth the frontend uses too.
-/**
- * The country this business's bare phone numbers belong to.
- *
- * One key rather than readSettingsMap(): this is called on paths that write a
- * person, and the bulk settings read is measured in tens of kilobytes. Falls
- * back to the deployment default, never to whatever another business set.
- */
-async function accountPhoneCountry(accountId: string) {
-  return cleanPhoneCountry(
-    await getSetting(cleanSlug(accountId, ""), "accountCountry"),
-    defaultPhoneCountry(),
-  );
-}
-
-function normalizedPersonPhone(value, country) {
-  return canonicalPhoneKey(cleanString(value, "", 80), cleanPhoneCountry(country, defaultPhoneCountry()));
-}
-
-/**
- * `country` decides what a bare national number means, so it has to be the
- * business's own -- and it used to come from a module-level value that belonged
- * to whichever business the warm instance served last. It is an argument now.
- * The frontend passes the same one from the same setting, which is what keeps
- * the two sides agreeing about whether two numbers are one person.
- */
-export function compatiblePersonMatch(candidate, rows = [], country = defaultPhoneCountry()) {
-  if (!candidate || !Array.isArray(rows) || !rows.length) return null;
-  // A candidate with no business matches nobody. Falling back to the original
-  // workspace here would have merged a second business's client into a
-  // same-named client of the first.
-  const accountId = cleanSlug(candidate.accountId, "");
-  if (!accountId) return null;
-  const scopedRows = rows.filter((row) => recordBelongsToAccount(row, accountId));
-
-  const candidateId = cleanString(candidate.id, "", 120);
-  if (candidateId && !candidateId.startsWith("appointment-")) {
-    const exactId = scopedRows.find((row) => String(row?.id || "") === candidateId);
-    if (exactId) return exactId;
-  }
-
-  const name = normalizedPersonName(candidate.name);
-  const email = normalizedPersonEmail(candidate.email);
-  const phone = normalizedPersonPhone(candidate.phone, country);
-
-  if (name && email) {
-    const matches = scopedRows.filter(
-      (row) =>
-        normalizedPersonName(row?.name) === name &&
-        normalizedPersonEmail(row?.email) === email,
-    );
-    const exact = matches.find((row) => {
-      const existingPhone = normalizedPersonPhone(row?.phone, country);
-      return !phone || !existingPhone || phone === existingPhone;
-    });
-    if (exact) return exact;
-  }
-
-  if (name && phone) {
-    const exact = scopedRows.find(
-      (row) =>
-        normalizedPersonName(row?.name) === name &&
-        normalizedPersonPhone(row?.phone, country) === phone,
-    );
-    if (exact) return exact;
-  }
-
-  // Use a lone contact-method match only when it is unambiguous and names do
-  // not conflict. Shared family or organisation details must remain separate.
-  if (email) {
-    const matches = scopedRows.filter(
-      (row) => normalizedPersonEmail(row?.email) === email,
-    );
-    if (matches.length === 1) {
-      const only = matches[0];
-      const existingName = normalizedPersonName(only?.name);
-      const existingPhone = normalizedPersonPhone(only?.phone, country);
-      if (
-        (!name || !existingName || name === existingName) &&
-        (!phone || !existingPhone || phone === existingPhone)
-      ) {
-        return only;
-      }
-    }
-  }
-
-  if (phone) {
-    const matches = scopedRows.filter(
-      (row) => normalizedPersonPhone(row?.phone, country) === phone,
-    );
-    if (matches.length === 1) {
-      const only = matches[0];
-      const existingName = normalizedPersonName(only?.name);
-      if (!name || !existingName || name === existingName) return only;
-    }
-  }
-
-  // A booking taken with a name and nothing else. Every check above needs an
-  // email or a phone number, so a contact with neither fell through to null and
-  // the caller minted a fresh person row -- one per booking, forever, for the
-  // same walk-in. Match on the name alone, but only against rows that are
-  // themselves contactless and only when exactly one exists: two people who
-  // share a name are told apart by their contact details, and a row that has
-  // some must not be silently absorbed by one that has none.
-  if (name && !email && !phone) {
-    const matches = scopedRows.filter(
-      (row) =>
-        normalizedPersonName(row?.name) === name &&
-        !normalizedPersonEmail(row?.email) &&
-        !normalizedPersonPhone(row?.phone, country),
-    );
-    if (matches.length === 1) return matches[0];
-  }
-
-  return null;
-}
-
-// personByEmail() and duplicatePersonEmailError() were removed on 14 July 2026.
-// They existed to enforce one-person-per-email, which the unique index on
-// lower(email) also enforced at the database level. Both are gone: an email
-// address is a contact method, not an identity, and families, clubs and couples
-// legitimately share one. Same-person merging is compatiblePersonMatch's job and
-// happens on name plus a compatible phone or email — never on an email alone.
-// Please do not reintroduce a "this email is taken" rule here.
-
-// The client derived from a booking belongs to the booking's business.
-function personFromAppointment(item, accountId: string) {
-  if (!item || item.kind !== "appointment") return null;
-  return cleanPerson(
-    {
-      // A personId already stamped on the booking (see person_id on
-      // calendar_items) is a stable link set up on a previous save. Carrying
-      // it through here means importPeople's id-first match (see
-      // compatiblePersonMatch) updates that same row instead of re-deriving
-      // the link from name/email/phone, which used to spin off a duplicate,
-      // disconnected profile whenever an edit changed any of those fields.
-      id: item.personId,
-      name: item.client || item.title,
-      email: item.email,
-      phone: item.phone,
-      source: "appointment",
-    },
-    "appointment",
-    accountId,
-  );
-}
-
-// Applies the per-index results of importPeople(items.map(personFromAppointment))
-// back onto the appointments they came from. Must run before writeItems so the
-// resolved id is persisted in the same write instead of a second round trip.
-function stampResolvedPersonIds(items, resolvedIds = []) {
-  return items.map((item, index) => {
-    if (item.kind !== "appointment") return item;
-    const resolvedId = resolvedIds[index];
-    if (!resolvedId || resolvedId === item.personId) return item;
-    return { ...item, personId: resolvedId };
-  });
-}
-
-// The account filter is in the SQL, not in a .filter() afterwards. Reading
-// every business's calendar and then discarding the rows that do not belong to
-// the caller made the tenant boundary a JavaScript predicate -- one wrong
-// comparison and another business's day was on screen. It was also the whole
-// table over the wire on every load.
-export async function readItems(accountId: string) {
-  if (!accountId) return [];
-  // The bay comes along with the lesson so the calendar can show which ones are
-  // covered without a second request and without matching on rendered text.
-  // Only a live booking counts: a failed or cancelled sync row means no bay.
-  const rows = await db().sql`
-    SELECT ci.*,
-           (s.optix_booking_id IS NOT NULL AND s.optix_booking_id <> ''
-            AND s.sync_status = 'synced') AS bay_booked,
-           s.resource_id AS bay_resource_id,
-           s.start_timestamp AS bay_start_timestamp
-    FROM calendar_items ci
-    LEFT JOIN optix_booking_sync s ON s.calendar_item_id = ci.id
-    WHERE ci.account_id = ${accountId}
-    ORDER BY ci.week, ci.day, ci.start, ci.id
-  `;
-  return rows.map(rowToItem);
-}
-
-// Same shape as readItems() but for a single booking. Used by paths that act on
-// one item and have no reason to pull the whole calendar first.
-export async function readCalendarItemById(accountId: string, itemId) {
-  const cleanId = cleanString(itemId, "", 140);
-  if (!cleanId || !accountId) return null;
-  // Scoped by id AND account: knowing another business's booking id must not be
-  // enough to read it.
-  const rows = await db().sql`
-    SELECT ci.*,
-           (s.optix_booking_id IS NOT NULL AND s.optix_booking_id <> ''
-            AND s.sync_status = 'synced') AS bay_booked,
-           s.resource_id AS bay_resource_id,
-           s.start_timestamp AS bay_start_timestamp
-    FROM calendar_items ci
-    LEFT JOIN optix_booking_sync s ON s.calendar_item_id = ci.id
-    WHERE ci.id = ${cleanId}
-      AND ci.account_id = ${accountId}
-    LIMIT 1
-  `;
-  return rows.length ? rowToItem(rows[0]) : null;
-}
-
 function publicBookingSlotsWeek(value) {
   const rawWeek = Number(value ?? currentWeekOffset());
   return Number.isInteger(rawWeek) ? rawWeek : currentWeekOffset();
@@ -3582,7 +1704,7 @@ async function readPublicAppointmentById(appointmentId, accountId) {
     accountId: cleanAccountId,
   });
   const rows = await requestSupabaseRows("calendar_items", { query });
-  return rows.map(rowToItem).find((item) => recordBelongsToAccount(item, cleanAccountId)) || null;
+  return rows.map(rowToItem).find((item) => recordBelongsToAccountStrict(item, cleanAccountId)) || null;
 }
 
 async function readPublicAppointmentsForContact({ accountId, email, phone } = {}) {
@@ -3598,36 +1720,8 @@ async function readPublicAppointmentsForContact({ accountId, email, phone } = {}
   const rows = await requestSupabaseRows("calendar_items", { query });
   const items = rows
     .map(rowToItem)
-    .filter((item) => recordBelongsToAccount(item, cleanAccountId) && matchesRescheduleContact(item, normalizedEmail, normalizedPhone));
+    .filter((item) => recordBelongsToAccountStrict(item, cleanAccountId) && matchesRescheduleContact(item, normalizedEmail, normalizedPhone));
   return { items, rowsFetched: rows.length, query, queryMode: "account_email" };
-}
-
-function queryRows(result) {
-  return Array.isArray(result) ? result : result?.rows || [];
-}
-
-// No fallback account id. A person row with no owner belongs to nobody and is
-// invisible to every business, rather than joining whichever one happens to be
-// reading. Migration C backfilled the legacy rows and made the column NOT NULL,
-// so this only bites genuinely malformed data.
-function rowToPerson(row) {
-  return {
-    id: row.id,
-    accountId: cleanSlug(row.account_id, ""),
-    name: row.name,
-    email: row.email || "",
-    phone: row.phone || "",
-    notes: row.notes || "",
-    source: row.source || "",
-    caddyProfileId: row.caddy_profile_id || "",
-    caddyProfileUrl: row.caddy_profile_url || "",
-    // TRUE only for people an inbound external booking created. They show in
-    // the external booking clients list until merged or moved into the main
-    // client list.
-    external: row.external === true,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
 }
 
 function notificationPersonKey({ name = "", email = "", phone = "" } = {}) {
@@ -3793,105 +1887,6 @@ async function recordNotification({
     )
   `;
   return record;
-}
-
-export async function readPeople(accountId: string) {
-  if (!accountId) return [];
-  const rows = await db().sql`
-    SELECT * FROM people
-    WHERE account_id = ${accountId}
-    ORDER BY LOWER(name), LOWER(email), id
-  `;
-  return rows.map(rowToPerson);
-}
-
-const LESSON_NOTES_SETTING_PREFIX = "lessonNotes.v1";
-
-function lessonNotesSettingKey(accountId: string) {
-  const scoped = cleanSlug(accountId, "");
-  if (!scoped) throw missingAccountScope("lesson_notes");
-  return `${LESSON_NOTES_SETTING_PREFIX}.${scoped}`;
-}
-
-function rowToLessonNote(note, fallbackAccountId: string) {
-  const createdAt = cleanString(note?.createdAt || note?.created_at, "", 80) || nowIso();
-  const updatedAt = cleanString(note?.updatedAt || note?.updated_at, "", 80) || createdAt;
-  return {
-    id: cleanString(note?.id, "", 120) || randomUUID(),
-    accountId: cleanSlug(note?.accountId || note?.account_id, fallbackAccountId),
-    playerId: cleanString(note?.playerId || note?.player_id, "", 160),
-    playerName: cleanString(note?.playerName || note?.player_name, "", 180),
-    lessonId: cleanString(note?.lessonId || note?.lesson_id, "", 160),
-    calendarItemId: cleanString(note?.calendarItemId || note?.calendar_item_id, "", 160),
-    title: cleanString(note?.title, "Lesson note", 180),
-    body: cleanString(note?.body || note?.text || note?.note, "", 8000),
-    source: cleanString(note?.source, "typed", 40) === "voice" ? "voice" : "typed",
-    createdAt,
-    updatedAt,
-  };
-}
-
-async function readLessonNotes(accountId: string) {
-  const cleanAccountId = cleanSlug(accountId, "");
-  if (!cleanAccountId) throw missingAccountScope("lesson_notes");
-  const raw = await getSetting(cleanAccountId, lessonNotesSettingKey(cleanAccountId));
-  const parsed = safeJsonParse(raw, []);
-  return Array.isArray(parsed)
-    ? parsed
-        .map((note) => rowToLessonNote(note, cleanAccountId))
-        .filter((note) => note.playerId && note.body)
-        .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
-    : [];
-}
-
-async function writeLessonNotes(notes, accountId: string) {
-  const cleanAccountId = cleanSlug(accountId, "");
-  if (!cleanAccountId) throw missingAccountScope("lesson_notes");
-  const scopedNotes = Array.isArray(notes)
-    ? notes
-        .map((note) => rowToLessonNote(note, cleanAccountId))
-        .filter((note) => note.playerId && note.body)
-    : [];
-  await setSetting(cleanAccountId, lessonNotesSettingKey(cleanAccountId), JSON.stringify(scopedNotes));
-  return scopedNotes.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
-}
-
-async function upsertLessonNote(rawNote, accountId: string) {
-  const cleanAccountId = cleanSlug(accountId, "");
-  if (!cleanAccountId) throw missingAccountScope("lesson_notes");
-  const now = nowIso();
-  const current = await readLessonNotes(cleanAccountId);
-  const note = rowToLessonNote(
-    {
-      ...rawNote,
-      accountId: cleanAccountId,
-      id: rawNote?.id || randomUUID(),
-      createdAt: rawNote?.createdAt || now,
-      updatedAt: now,
-    },
-    cleanAccountId,
-  );
-  if (!note.playerId) {
-    throw Object.assign(new Error("A lesson note needs a player id."), { status: 400 });
-  }
-  if (!note.body.trim()) {
-    throw Object.assign(new Error("A lesson note cannot be empty."), { status: 400 });
-  }
-  const next = [note, ...current.filter((entry) => entry.id !== note.id)];
-  const notes = await writeLessonNotes(next, cleanAccountId);
-  return { note, notes };
-}
-
-async function deleteLessonNote(noteId, accountId: string) {
-  const cleanAccountId = cleanSlug(accountId, "");
-  if (!cleanAccountId) throw missingAccountScope("lesson_notes");
-  const cleanId = cleanString(noteId, "", 120);
-  if (!cleanId) {
-    throw Object.assign(new Error("A lesson note id is required."), { status: 400 });
-  }
-  const current = await readLessonNotes(cleanAccountId);
-  const notes = await writeLessonNotes(current.filter((note) => note.id !== cleanId), cleanAccountId);
-  return { notes };
 }
 
 /* --- Practice blocks --------------------------------------------------------
@@ -4593,432 +2588,6 @@ async function readPracticeComposerStarters(accountId, playerId) {
 }
 
 /**
- * True when writing this person would leave the stored row exactly as it is.
- *
- * The UPDATE in importPeople sets each field with COALESCE(NULLIF($n, ''),
- * column), so an empty incoming value never overwrites anything and an equal one
- * writes back what is already there. Every full calendar save re-derives a
- * contact from every appointment on the calendar, and on an ordinary save none
- * of them differ — so this is the check that turns hundreds of round trips into
- * none. updated_at would move, but nothing reads it as a contact-changed signal.
- */
-export function personRowUnchanged(person, existing, fallbackAccountId, source) {
-  const matches = (incoming, current) => {
-    const next = cleanString(incoming, "", 400);
-    return !next || next === cleanString(current, "", 400);
-  };
-  return (
-    matches(person.name, existing.name) &&
-    matches(person.email, existing.email) &&
-    matches(person.phone, existing.phone) &&
-    matches(person.notes, existing.notes) &&
-    matches(person.source || source, existing.source) &&
-    matches(person.caddyProfileId, existing.caddyProfileId) &&
-    matches(person.caddyProfileUrl, existing.caddyProfileUrl) &&
-    // The account this write would actually use -- which is the caller's, not
-    // the payload's, since the write paths stopped honouring person.accountId.
-    matches(fallbackAccountId, existing.accountId)
-  );
-}
-
-async function importPeople(rawPeople, source = "import", accountId: string) {
-  const cleanAccountId = cleanSlug(accountId, "");
-  if (!cleanAccountId) throw missingAccountScope("import_people");
-  // Indexed (not filtered) so callers that need to stamp a resolved person id
-  // back onto the record a given input came from (see resolvedIds below) can
-  // line results up positionally with rawPeople, including the null/skipped
-  // entries.
-  const indexedPeople = Array.isArray(rawPeople)
-    ? rawPeople.map((person) => cleanPerson(person, source, cleanAccountId))
-    : [];
-  const people = indexedPeople.filter(Boolean);
-  const resolvedIds = indexedPeople.map(() => "");
-  const result = {
-    imported: 0,
-    updated: 0,
-    skipped: Array.isArray(rawPeople) ? rawPeople.length - people.length : 0,
-    failed: 0,
-    errors: [],
-    people: [],
-    resolvedIds,
-  };
-  if (!Array.isArray(rawPeople)) return result;
-
-  // Read once for the whole import rather than per row: matching every incoming
-  // person against the list needs the same country, and it is this business's.
-  const phoneCountry = await accountPhoneCountry(cleanAccountId);
-
-  const knownPeople = await readPeople(cleanAccountId);
-  const knownById = new Map(knownPeople.map((row) => [row.id, row]));
-  // Opened on the first person that actually needs writing. A full calendar save
-  // re-derives a contact from every appointment on the calendar, and on a normal
-  // save none of them have changed — see personRowUnchanged. Connecting and
-  // running BEGIN/COMMIT for a transaction with no writes in it is pure latency
-  // on a pool that only has three connections to hand out.
-  let client = null;
-  const openTransaction = async () => {
-    if (!client) {
-      client = await db().pool.connect();
-      await client.query("BEGIN");
-    }
-    return client;
-  };
-  let personIndex = 0;
-  try {
-    for (let sourceIndex = 0; sourceIndex < indexedPeople.length; sourceIndex += 1) {
-      const person = indexedPeople[sourceIndex];
-      if (!person) continue;
-      // A person id carried on the incoming record (an appointment's stored
-      // person_id, see personFromAppointment) is an explicit, stable link set
-      // up on a previous save. Trust it ahead of the fuzzy name/email/phone
-      // heuristic below: compatiblePersonMatch already checks this id first,
-      // but knownById lets us confirm the id still resolves to a real row
-      // before treating the fuzzy match as a fallback.
-      const linkedId = cleanString(person.id, "", 120);
-      const linked = linkedId && !linkedId.startsWith("appointment-") ? knownById.get(linkedId) : null;
-      const existing = linked || compatiblePersonMatch(person, knownPeople, phoneCountry);
-      const existingId = existing?.id || "";
-
-      // Already matches what is stored, so the UPDATE below would write the row
-      // back to itself. Skip it: this is the case for nearly every contact on
-      // nearly every save, and the round trips it saves are the difference
-      // between a save that lands and one that times out.
-      if (existingId && personRowUnchanged(person, existing, cleanAccountId, source)) {
-        result.updated += 1;
-        resolvedIds[sourceIndex] = existingId;
-        continue;
-      }
-
-      // Every person write gets its own savepoint. Deriving contacts from
-      // appointments is housekeeping that rides along with the caller's save;
-      // when one contact cannot be reconciled (for example its email already
-      // belongs to another row under the account-scoped unique index) it must
-      // not abort the transaction and take the lesson the coach just booked
-      // down with it. Previously a single duplicate contact rolled back the
-      // whole calendar save and surfaced as a 409 the coach could not act on.
-      const savepoint = `person_${personIndex}`;
-      personIndex += 1;
-      await (await openTransaction()).query(`SAVEPOINT ${savepoint}`);
-      try {
-      if (existingId) {
-        await client.query(
-          `UPDATE people
-           SET name = COALESCE(NULLIF($2, ''), name),
-               email = COALESCE(NULLIF($3, ''), email),
-               phone = COALESCE(NULLIF($4, ''), phone),
-               notes = COALESCE(NULLIF($5, ''), notes),
-	               source = COALESCE(NULLIF($6, ''), source),
-	               caddy_profile_id = COALESCE(NULLIF($7, ''), caddy_profile_id),
-	               caddy_profile_url = COALESCE(NULLIF($8, ''), caddy_profile_url),
-	               account_id = COALESCE(NULLIF($9, ''), account_id),
-	               updated_at = NOW()
-	           WHERE id = $1`,
-	          [
-            existingId,
-            person.name,
-            person.email,
-            person.phone,
-            person.notes,
-	            person.source || source,
-	            person.caddyProfileId,
-	            person.caddyProfileUrl,
-              cleanAccountId,
-	          ],
-	        );
-	        Object.assign(existing, {
-            accountId: cleanAccountId,
-	          name: person.name || existing.name,
-          email: person.email || existing.email,
-          phone: person.phone || existing.phone,
-          notes: person.notes || existing.notes,
-          source: person.source || source || existing.source,
-          caddyProfileId: person.caddyProfileId || existing.caddyProfileId,
-          caddyProfileUrl: person.caddyProfileUrl || existing.caddyProfileUrl,
-        });
-        result.updated += 1;
-        resolvedIds[sourceIndex] = existingId;
-      } else {
-        const personId = linkedId && !linkedId.startsWith("appointment-") ? linkedId : randomUUID();
-	        await client.query(
-	          `INSERT INTO people (
-	             id, name, email, phone, notes, source, caddy_profile_id, caddy_profile_url, account_id, created_at, updated_at
-	           ) VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), $6, NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), NOW(), NOW())`,
-	          [
-            personId,
-            person.name,
-            person.email,
-            person.phone,
-            person.notes,
-	            person.source || source,
-	            person.caddyProfileId,
-	            person.caddyProfileUrl,
-              cleanAccountId,
-	          ],
-	        );
-        const created = { ...person, id: personId };
-        knownPeople.push(created);
-        knownById.set(personId, created);
-        result.imported += 1;
-        resolvedIds[sourceIndex] = personId;
-      }
-        await client.query(`RELEASE SAVEPOINT ${savepoint}`);
-      } catch (error) {
-        await client.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
-        await client.query(`RELEASE SAVEPOINT ${savepoint}`);
-        const message = error instanceof Error ? error.message : String(error || "");
-        result.failed += 1;
-        result.errors.push({
-          name: person.name || "",
-          email: person.email || "",
-          reason: /duplicate key|idx_people_.*email/i.test(message)
-            ? "A contact in this account already uses that email address."
-            : message.slice(0, 300),
-        });
-        console.warn("people_import_person_skipped", {
-          source,
-          accountId: cleanAccountId,
-          name: person.name || "",
-          email: person.email || "",
-          message: message.slice(0, 300),
-        });
-      }
-    }
-    if (client) await client.query("COMMIT");
-  } catch (error) {
-    if (client) await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    if (client) client.release();
-  }
-
-  result.people = await readPeople(cleanAccountId);
-  return result;
-}
-
-export async function updatePerson(rawPerson, accountId: string) {
-  const cleanAccountId = cleanSlug(accountId, "");
-  if (!cleanAccountId) throw missingAccountScope("update_person");
-  const person = cleanPerson(rawPerson, "manual_update", cleanAccountId);
-  if (!person) {
-    const error = new Error("A person needs a name or email.");
-    error.status = 400;
-    throw error;
-  }
-
-  const knownPeople = await readPeople(cleanAccountId);
-  const existing = compatiblePersonMatch(person, knownPeople, await accountPhoneCountry(cleanAccountId));
-  const existingId = existing?.id || "";
-  const personId =
-    existingId ||
-    (person.id && !person.id.startsWith("appointment-")
-      ? person.id
-      : randomUUID());
-
-  // No email-ownership check. A parent booking for two children, a club booking
-  // for its players, a couple sharing an inbox — all use one address for several
-  // people, and refusing the second one is wrong. compatiblePersonMatch above has
-  // already merged this record into an existing contact if it genuinely is the
-  // same person (matching name with a compatible phone or email); if it did not,
-  // this is a different person who happens to share an address, and they are
-  // entitled to their own row.
-
-  const client = await db().pool.connect();
-  try {
-    await client.query("BEGIN");
-    if (existingId) {
-      const emailUnchanged =
-        normalizedPersonEmail(existing?.email) === normalizedPersonEmail(person.email);
-      // One statement whether or not the email changed: $10 says which. Two
-      // statements used to share one parameter list, and the one that leaves
-      // the email alone never mentioned $3 -- which Postgres refuses outright
-      // ("could not determine data type of parameter $3"), so editing a
-      // client without changing their email failed.
-      await client.query(
-        `UPDATE people
-         SET name = $2,
-             email = CASE WHEN $10::boolean THEN email ELSE NULLIF($3, '') END,
-             phone = NULLIF($4, ''),
-             notes = NULLIF($5, ''),
-             source = COALESCE(NULLIF($6, ''), source),
-             caddy_profile_id = NULLIF($7, ''),
-             caddy_profile_url = NULLIF($8, ''),
-             account_id = COALESCE(NULLIF($9, ''), account_id),
-             updated_at = NOW()
-         WHERE id = $1`,
-        [
-          personId,
-          person.name,
-          person.email,
-          person.phone,
-          person.notes,
-          person.source,
-          person.caddyProfileId,
-          person.caddyProfileUrl,
-          cleanAccountId,
-          emailUnchanged,
-        ],
-      );
-    } else {
-	      await client.query(
-	        `INSERT INTO people (
-	          id, name, email, phone, notes, source, caddy_profile_id, caddy_profile_url, account_id, created_at, updated_at
-	        ) VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), $6, NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), NOW(), NOW())`,
-	        [
-          personId,
-          person.name,
-          person.email,
-          person.phone,
-          person.notes,
-	          person.source,
-	          person.caddyProfileId,
-	          person.caddyProfileUrl,
-            cleanAccountId,
-	        ],
-	      );
-    }
-
-    const saved = await client.query(
-      "SELECT * FROM people WHERE id = $1 LIMIT 1",
-      [personId],
-    );
-    await client.query("COMMIT");
-    return { person: rowToPerson(saved.rows[0]), people: await readPeople(cleanAccountId) };
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
-  }
-}
-
-async function mergePeople(rawSurvivorId, rawLoserId, fieldOverrides = {}, accountId: string) {
-  const cleanAccountId = cleanSlug(accountId, "");
-  if (!cleanAccountId) throw missingAccountScope("merge_people");
-  const survivorId = cleanString(rawSurvivorId, "", 120);
-  const loserId = cleanString(rawLoserId, "", 120);
-  if (!survivorId || !loserId || survivorId === loserId) {
-    throw Object.assign(new Error("Two different clients are required to merge."), {
-      status: 400,
-      code: "PEOPLE_MERGE_INVALID_IDS",
-    });
-  }
-
-  const knownPeople = await readPeople(cleanAccountId);
-  const survivorRow = knownPeople.find((person) => person.id === survivorId);
-  const loserRow = knownPeople.find((person) => person.id === loserId);
-  if (!survivorRow || !loserRow) {
-    throw Object.assign(new Error("One of the selected clients could not be found."), {
-      status: 404,
-      code: "PEOPLE_MERGE_NOT_FOUND",
-    });
-  }
-
-  const merged = cleanPerson({ ...survivorRow, ...fieldOverrides, id: survivorId }, survivorRow.source, cleanAccountId);
-  if (!merged) {
-    throw Object.assign(new Error("The merged client needs a name or email."), {
-      status: 400,
-      code: "PEOPLE_MERGE_INVALID_FIELDS",
-    });
-  }
-
-  const client = await db().pool.connect();
-  let mergedItemIds = [];
-  let mergedExternalBookingIds = [];
-  try {
-    await client.query("BEGIN");
-    await client.query(
-      `UPDATE people
-       SET name = $2,
-           email = NULLIF($3, ''),
-           phone = NULLIF($4, ''),
-           notes = NULLIF($5, ''),
-           caddy_profile_id = NULLIF($6, ''),
-           caddy_profile_url = NULLIF($7, ''),
-           updated_at = NOW()
-       WHERE id = $1`,
-      [survivorId, merged.name, merged.email, merged.phone, merged.notes, merged.caddyProfileId, merged.caddyProfileUrl],
-    );
-    const reassigned = await client.query(
-      "UPDATE calendar_items SET person_id = $1, updated_at = NOW() WHERE person_id = $2 RETURNING id",
-      [survivorId, loserId],
-    );
-    mergedItemIds = queryRows(reassigned).map((row) => row.id);
-    // Both tables below are created outside ensureSchema() — one by a migration,
-    // one lazily on first player login — so a database that has never needed
-    // them is not an error and must not abort the merge.
-    // Same question as the module-level tableExists(), asked on the pooled
-    // client this transaction is already holding rather than on a new one.
-    const tableExistsHere = async (table) =>
-      Boolean(
-        queryRows(await client.query("SELECT to_regclass($1) AS name", [`public.${table}`]))[0]?.name,
-      );
-    // External providers resolve the customer from their own link row, and
-    // processStoredExternalEvent() prefers that value over the calendar item. Left
-    // behind, the next inbound event would write the deleted loser id straight
-    // back onto the booking and silently undo this merge.
-    if (await tableExistsHere("external_booking_links")) {
-      const relinked = await client.query(
-        "UPDATE external_booking_links SET person_id = $1, updated_at = NOW() WHERE person_id = $2 RETURNING external_booking_id",
-        [survivorId, loserId],
-      );
-      mergedExternalBookingIds = queryRows(relinked).map((row) => row.external_booking_id);
-    }
-    // A live player session carries the person id into playerProfileIdCandidates(),
-    // which is what selects the portal's lesson notes. The notes move to the
-    // survivor below, so a session left on the loser id would show the customer
-    // an empty notes list until their next sign-in. No updated_at on this table.
-    if (await tableExistsHere("player_sessions")) {
-      await client.query(
-        "UPDATE player_sessions SET person_id = $1 WHERE person_id = $2",
-        [survivorId, loserId],
-      );
-    }
-    // Optix sales carry no email, so they are the records most likely to be
-    // sitting on a duplicate person in the first place — which makes them the
-    // ones a merge most needs to move. There is no foreign key on this column,
-    // so leaving them behind does not fail loudly: the purchase would simply
-    // point at a deleted person id and drop out of the client's history with
-    // nothing to show it had ever been linked.
-    if (await tableExistsHere("optix_pass_purchases")) {
-      await client.query(
-        "UPDATE optix_pass_purchases SET person_id = $1, updated_at = NOW() WHERE person_id = $2",
-        [survivorId, loserId],
-      );
-    }
-    await client.query("DELETE FROM people WHERE id = $1", [loserId]);
-    await client.query("COMMIT");
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
-  }
-
-  // Lesson notes live in a per-account settings JSON blob (see
-  // LESSON_NOTES_SETTING_PREFIX), not a SQL table, so they can't be reassigned
-  // inside the transaction above. Do it right after the transaction commits so
-  // a note is never left pointing at a person id that no longer exists.
-  const currentNotes = await readLessonNotes(cleanAccountId);
-  const mergedNoteIds = currentNotes.filter((note) => note.playerId === loserId).map((note) => note.id);
-  if (mergedNoteIds.length) {
-    await writeLessonNotes(
-      currentNotes.map((note) => (note.playerId === loserId ? { ...note, playerId: survivorId } : note)),
-      cleanAccountId,
-    );
-  }
-
-  const savedRows = await db().sql`SELECT * FROM people WHERE id = ${survivorId} LIMIT 1`;
-  return {
-    person: rowToPerson(savedRows[0]),
-    removedPersonId: loserId,
-    mergedItemIds,
-    mergedExternalBookingIds,
-    mergedNoteIds,
-    people: await readPeople(cleanAccountId),
-  };
-}
-
-/**
  * Permanently removes a person and everything scoped to them: bookings,
  * practice blocks, video submissions, portal access, and -- if they had a
  * portal login -- the underlying Supabase Auth user. Unlike mergePeople there
@@ -5155,196 +2724,6 @@ async function hardDeletePerson(personId: string, accountId: string) {
   };
 }
 
-// The columns every calendar item write sets, in the order calendarItemParams
-// builds them. created_at/updated_at come from NOW() rather than a parameter.
-const CALENDAR_ITEM_WRITE_COLUMNS = [
-  "id",
-  "account_id",
-  "kind",
-  "week",
-  "day",
-  "start",
-  "duration",
-  "coach_id",
-  "location_id",
-  "service_id",
-  "client",
-  "title",
-  "phone",
-  "email",
-  "person_id",
-  "note",
-  "status",
-  "custom_group",
-  "coach",
-  "location",
-];
-const CALENDAR_ITEM_JSON_WRITE_COLUMNS = new Set(["custom_group", "coach", "location"]);
-// Postgres caps a statement at 65535 parameters, which at twenty columns would
-// allow far more rows than this. The smaller chunk keeps any single statement
-// modest enough to stay well inside statement_timeout.
-const CALENDAR_ITEM_WRITE_CHUNK = 250;
-
-/**
- * The column values for one calendar row.
- *
- * accountId is passed in from server context, never read off the item. The
- * item arrives from the client, and `item.accountId || <default workspace>`
- * meant a write that lost or omitted its tenant was stamped into the original
- * business. Any account id on the item is ignored.
- */
-export function calendarItemParams(item, accountId: string) {
-  if (!accountId) throw missingAccountScope("calendar_item_write");
-  return [
-    item.id,
-    accountId,
-    item.kind,
-    item.week ?? 0,
-    item.day,
-    item.start,
-    item.duration,
-    item.coachId || defaultCoachProfileFromAccount().id,
-    item.locationId || item.location?.locationId || "",
-    item.serviceId || "",
-    item.client || "",
-    item.title,
-    item.phone || "",
-    item.email || "",
-    item.personId || "",
-    item.note || "",
-    item.status || "booked",
-    item.customGroup ? JSON.stringify(cleanCustomGroupData(item)) : null,
-    item.coach ? JSON.stringify(cleanBookingCoachSnapshot(item.coach)) : null,
-    item.location ? JSON.stringify(cleanBookingLocationSnapshot(item.location)) : null,
-  ];
-}
-
-/**
- * Upsert a batch of calendar items in one statement.
- *
- * A full calendar save replaces the whole item array, so this used to run one
- * INSERT per item. Every one of those is a round trip to Postgres, and the
- * calendar only grows: a coach with a season of history behind them was paying
- * hundreds of sequential round trips to move a single lesson, which is what
- * eventually pushed the save past the function timeout and surfaced as
- * "Calendar save failed" on a booking that had nothing wrong with it.
- */
-export async function upsertCalendarItemChunk(client, chunk, accountId: string) {
-  const params = [];
-  const rows = chunk.map((item) => {
-    const placeholders = calendarItemParams(item, accountId).map((value, column) => {
-      params.push(value);
-      return CALENDAR_ITEM_JSON_WRITE_COLUMNS.has(CALENDAR_ITEM_WRITE_COLUMNS[column])
-        ? `$${params.length}::jsonb`
-        : `$${params.length}`;
-    });
-    return `(${placeholders.join(", ")}, NOW(), NOW())`;
-  });
-  const assignments = CALENDAR_ITEM_WRITE_COLUMNS
-    .filter((column) => column !== "id")
-    .map((column) => `${column} = EXCLUDED.${column}`)
-    .concat("updated_at = NOW()")
-    .join(", ");
-  const result = await client.query(
-    `INSERT INTO calendar_items (${CALENDAR_ITEM_WRITE_COLUMNS.join(", ")}, created_at, updated_at)
-     VALUES ${rows.join(", ")}
-     ON CONFLICT (id) DO UPDATE SET ${assignments}
-     RETURNING *`,
-    params,
-  );
-  return queryRows(result);
-}
-
-/**
- * Write calendar items for exactly one business.
- *
- * options.accountId is required. It used to be optional, and without it both
- * the clear and the replace-stale-rows paths ran against the whole table --
- * `DELETE FROM calendar_items` with no predicate, and a stale-id scan that
- * loaded every business's rows and filtered them in JavaScript. Both are now
- * scoped in the SQL.
- */
-export async function writeItems(items, options = {}) {
-  const accountId = cleanSlug(options.accountId, "");
-  if (!accountId) throw missingAccountScope("calendar_write");
-  // ON CONFLICT DO UPDATE cannot touch the same row twice in one statement, so
-  // a repeated id has to collapse before the insert. Last write wins, which is
-  // what the row-at-a-time loop did.
-  const cleanItems = Array.from(
-    new Map(normalizeItems(items).map((item) => [item.id, item])).values(),
-  );
-  const returnedRows = [];
-  const client = await db().pool.connect();
-  try {
-    await client.query("BEGIN");
-    if (options.clearItems === true) {
-      await client.query("DELETE FROM calendar_items WHERE account_id = $1", [accountId]);
-    }
-    for (let offset = 0; offset < cleanItems.length; offset += CALENDAR_ITEM_WRITE_CHUNK) {
-      returnedRows.push(
-        ...(await upsertCalendarItemChunk(
-          client,
-          cleanItems.slice(offset, offset + CALENDAR_ITEM_WRITE_CHUNK),
-          accountId,
-        )),
-      );
-    }
-    if (options.replaceItems === true && cleanItems.length) {
-      const keepIds = Array.from(new Set(cleanItems.map((item) => item.id)));
-      // One scoped statement instead of "read every row, filter in JS, delete
-      // by id list". Rows belonging to other businesses are not read, let alone
-      // considered for deletion.
-      const deleted = queryRows(
-        await client.query(
-          "DELETE FROM calendar_items WHERE account_id = $1 AND NOT (id = ANY($2::text[])) RETURNING id",
-          [accountId, keepIds],
-        ),
-      );
-      if (deleted.length) {
-        console.info("CALENDAR_STATE_REPLACE_STALE_CLEANUP", {
-          action: "replace_stale_cleanup",
-          route: "/api/calendar-state",
-          accountId,
-          targetedDelete: true,
-          staleCount: deleted.length,
-        });
-      }
-    }
-    await client.query("COMMIT");
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
-  }
-  if (
-    options.returnMode === "single" &&
-    cleanItems.length === 1 &&
-    options.clearItems !== true &&
-    options.replaceItems !== true
-  ) {
-    // The Supabase REST adapter ignores `INSERT ... RETURNING` and always
-    // resolves with no rows, so returnedRows can be empty even though the write
-    // committed. Fall back to the item we just wrote instead of calling
-    // rowToItem(undefined), which threw *after* the commit -- surfacing to the
-    // client as a failed save that then rolled the optimistic edit back (a
-    // dragged lesson visibly jumped to its original slot, and the reschedule
-    // notification that runs after this write never fired).
-    return returnedRows[0] ? rowToItem(returnedRows[0]) : cleanItems[0];
-  }
-  return readItems(accountId);
-}
-
-async function seedPeopleFromAppointments(accountId: string) {
-  const countRows = await db().sql`SELECT COUNT(*) AS count FROM people WHERE account_id = ${accountId}`;
-  if ((countRows[0]?.count ?? 0) > 0) return;
-  await importPeople(
-    initialItems.map((item) => personFromAppointment(item, accountId)).filter(Boolean),
-    "appointment",
-    accountId,
-  );
-}
-
 async function readStateSettingsSnapshot(accountId: string) {
   await ensureSeeded();
   const settings = await readSettingsMap(accountId);
@@ -5361,153 +2740,6 @@ async function readStateSettingsSnapshot(accountId: string) {
     settings.updatedAt = updatedAt;
   }
   return { settings, syncKey, updatedAt };
-}
-
-// Reminder lead time: 1 hour to 14 days before the lesson, default 24 hours.
-// Mirrors admin-settings.mts, which owns the /api/admin-settings write path.
-function cleanReminderLeadMinutes(value, fallback = 24 * 60) {
-  const minutes = Number(value === "" || value === undefined || value === null ? fallback : value);
-  return Number.isFinite(minutes) ? Math.max(60, Math.min(14 * 24 * 60, Math.round(minutes))) : fallback;
-}
-
-function adminSettingsFromSettings(settings) {
-  const delaySeconds = Number(settingValue(settings, "notificationDelaySeconds") || 30);
-  return {
-    emailNotificationsEnabled: settingValue(settings, "emailNotificationsEnabled") !== "false",
-    notificationEmail: settingValue(settings, "notificationEmail"),
-    coachEmail: settingValue(settings, "coachEmail"),
-    replyToEmail: settingValue(settings, "replyToEmail"),
-    notificationDelaySeconds: Number.isFinite(delaySeconds)
-      ? Math.max(30, Math.min(3600, delaySeconds))
-      : 30,
-    sendClientEmail: settingValue(settings, "sendClientEmail") !== "false",
-    sendCoachEmail: settingValue(settings, "sendCoachEmail") !== "false",
-    sendAdminEmail: settingValue(settings, "sendAdminEmail") !== "false",
-    sendLessonTypeChangeEmail: settingValue(settings, "sendLessonTypeChangeEmail") === "true",
-    reminderEnabled: settingValue(settings, "reminderEnabled") === "true",
-    reminderLeadMinutes: cleanReminderLeadMinutes(settingValue(settings, "reminderLeadMinutes")),
-    clientEmailSubject:
-      settingValue(settings, "clientEmailSubject") ||
-      defaultEmailTemplates.clientEmailSubject,
-    clientEmailIntro:
-      settingValue(settings, "clientEmailIntro") ||
-      defaultEmailTemplates.clientEmailIntro,
-    clientEmailFooter: modernClientEmailFooter(
-      settingValue(settings, "clientEmailFooter") ||
-        defaultEmailTemplates.clientEmailFooter,
-    ),
-    adminEmailSubject:
-      settingValue(settings, "adminEmailSubject") ||
-      defaultEmailTemplates.adminEmailSubject,
-    adminEmailIntro:
-      settingValue(settings, "adminEmailIntro") ||
-      defaultEmailTemplates.adminEmailIntro,
-    smsProviderName: settingValue(settings, "smsProviderName"),
-    smsWebhookUrl: settingValue(settings, "smsWebhookUrl"),
-    smsFromNumber: settingValue(settings, "smsFromNumber"),
-    sendClientSms: settingValue(settings, "sendClientSms") === "true",
-    sendAdminSms: settingValue(settings, "sendAdminSms") === "true",
-    ...playerBookingEmbedFromSettings(settings),
-  };
-}
-
-/**
- * The two outlines a booking card can wear: a border once the lesson is done,
- * and a ring while a bay is held for it. The fill is not here — that is the
- * lesson type's own colour, stored on the service in servicesJson.
- */
-const defaultCalendarColors = {
-  statusCompleted: "#7f8a80",
-  statusBayBooked: "#e08a2e",
-};
-
-function cleanCalendarColors(colors) {
-  const cleaned = {};
-  for (const [key, fallback] of Object.entries(defaultCalendarColors)) {
-    cleaned[key] = cleanHexColor(colors?.[key], fallback);
-  }
-  return cleaned;
-}
-
-function brandSettingsFromSettings(settings, account) {
-  return {
-    coachName: settingValue(settings, "coachName") || account.businessName,
-    logoName: settingValue(settings, "brandLogoName"),
-    logoPreview: settingValue(settings, "brandLogoPreview"),
-    showLogo: settingValue(settings, "brandShowLogo") === "true",
-    neutral: settingValue(settings, "brandNeutral") || "#ffffff",
-    primary: settingValue(settings, "brandPrimary") || "#1fd36d",
-    secondary: settingValue(settings, "brandSecondary") || "#d7b06b",
-    accent: settingValue(settings, "brandAccent") || "#07100a",
-    bookingTheme:
-      settingValue(settings, "brandBookingTheme") === "light" ? "light" : "dark",
-    calendarColors: cleanCalendarColors(
-      parseSettingJson(settings, "brandCalendarColorsJson", defaultCalendarColors),
-    ),
-  };
-}
-
-/**
- * A business's lesson types.
- *
- * defaultServices is the original coach's actual list -- their lesson names,
- * their prices, their "Price Includes Bay Hire" note -- so it is the seed for
- * the original workspace only. A new business starts with no lesson types and
- * creates its own; inheriting somebody else's price list is worse than an
- * empty screen.
- */
-export function servicesFromSettings(settings, accountId = "") {
-  const scopedAccountId = cleanSlug(settingValue(settings, "accountId") || accountId, "");
-  const seed = !scopedAccountId || isOriginalWorkspace(scopedAccountId) ? defaultServices : [];
-  return normalizeServices(parseSettingJson(settings, "servicesJson", seed), scopedAccountId);
-}
-
-function workspaceAccountsFromSettings(settings, account) {
-  return normalizeWorkspaceAccounts(
-    parseSettingJson(settings, "workspaceAccountsJson", []),
-    account,
-  );
-}
-
-function coachProfilesFromSettings(settings, account) {
-  return normalizeCoachProfiles(
-    parseSettingJson(settings, "coachProfilesJson", null),
-    account,
-  );
-}
-
-function appUsersFromSettings(settings, account) {
-  const users = parseSettingJson(settings, "appUsersJson", []);
-  return Array.isArray(users) && users.length ? users : [defaultAppUserFromAccount(account)];
-}
-
-function locationsFromSettings(settings, account) {
-  return normalizeLocations(
-    parseSettingJson(settings, "locationsJson", []),
-    account,
-  );
-}
-
-/**
- * A business's bookable hours.
- *
- * defaultAvailability is the original coach's actual working week, so a new
- * business starts closed rather than advertising somebody else's evenings.
- */
-export function availabilityFromSettings(settings, accountId = "") {
-  const scopedAccountId = cleanSlug(settingValue(settings, "accountId") || accountId, "");
-  const seed =
-    !scopedAccountId || isOriginalWorkspace(scopedAccountId) ? defaultAvailability : [[], [], [], [], [], [], []];
-  // availabilityJson is a per-account settings row, so every window in it
-  // belongs to the business whose row was read. Windows saved before accountId
-  // was stamped on write (and the seeded defaults) carry no accountId; file
-  // them under that account so the strict account filters keep them.
-  const ownerAccountId = cleanSlug(accountId, "") || scopedAccountId;
-  return normalizeAvailability(parseSettingJson(settings, "availabilityJson", seed)).map((dayWindows) =>
-    dayWindows.map((window) =>
-      window.accountId || !ownerAccountId ? window : { ...window, accountId: ownerAccountId },
-    ),
-  );
 }
 
 async function readAdminSettings(accountId: string, settingsMap = null) {
@@ -5757,18 +2989,7 @@ async function readWorkspaceBootstrap(membership: CoachActor): Promise<Workspace
       workspaceAccounts: workspaceAccountsFromSettings(settingsMap, account),
       account,
       coaches,
-      // Mirrors the calendar shell's currentUser exactly: the app-user
-      // vocabulary, and permissions from the membership rather than settings.
-      currentUser: {
-        id: membership.authUserId,
-        accountId: membership.accountId,
-        name: coachName,
-        role: appUserRoleForMembership(membership.role),
-        coachId: ownCoachIdFor(membership, coaches, membership.accountId) || undefined,
-        permissions: membership.isAdmin
-          ? { bookings: "all", services: "all", availability: "all", locations: "all", clients: "all", settings: "all" }
-          : { bookings: "own", services: "own", availability: "own", locations: "none", clients: "own", settings: "none" },
-      },
+      currentUser: coachUserForMembership(membership, coaches, coachName),
     };
   } catch (error) {
     console.warn("workspace_bootstrap_unavailable", {
@@ -5781,7 +3002,6 @@ async function readWorkspaceBootstrap(membership: CoachActor): Promise<Workspace
 
 export async function readCalendarState(accountId: string) {
   const { settings: settingsMap, syncKey, updatedAt } = await readStateSettingsSnapshot(accountId);
-  const account = coachAccountFromSettings(settingsMap, accountId);
   // No Google Calendar status here: it is per coach, read by the coach
   // profile, and a connected one costs a Google API call -- which every read
   // of the calendar used to pay.
@@ -5794,18 +3014,9 @@ export async function readCalendarState(accountId: string) {
     syncKey,
     updatedAt,
     items,
-    services: servicesFromSettings(settingsMap, accountId),
-    workspaceAccounts: workspaceAccountsFromSettings(settingsMap, account),
-    coaches: coachProfilesFromSettings(settingsMap, account),
-    currentUser: appUsersFromSettings(settingsMap, account)[0],
-    locations: locationsFromSettings(settingsMap, account),
-    availability: availabilityFromSettings(settingsMap, accountId),
+    ...adminStateFromSettings(settingsMap, accountId),
     people,
     notifications,
-    settings: adminSettingsFromSettings(settingsMap),
-    brand: brandSettingsFromSettings(settingsMap, account),
-    accountId,
-    account,
   };
 }
 
@@ -5823,124 +3034,26 @@ export async function readCalendarState(accountId: string) {
  */
 async function readSettingsState(accountId: string) {
   const { settings: settingsMap, syncKey, updatedAt } = await readStateSettingsSnapshot(accountId);
-  const account = coachAccountFromSettings(settingsMap, accountId);
   return {
     syncKey,
     updatedAt,
     items: [],
-    services: servicesFromSettings(settingsMap, accountId),
-    workspaceAccounts: workspaceAccountsFromSettings(settingsMap, account),
-    coaches: coachProfilesFromSettings(settingsMap, account),
-    currentUser: appUsersFromSettings(settingsMap, account)[0],
-    locations: locationsFromSettings(settingsMap, account),
-    availability: availabilityFromSettings(settingsMap, accountId),
+    ...adminStateFromSettings(settingsMap, accountId),
     people: [],
     notifications: [],
-    settings: adminSettingsFromSettings(settingsMap),
-    brand: brandSettingsFromSettings(settingsMap, account),
-    accountId,
-    account,
   };
 }
 
 async function readLessonCompleteState(accountId: string, itemId) {
   const { settings: settingsMap, syncKey, updatedAt } = await readStateSettingsSnapshot(accountId);
-  const account = coachAccountFromSettings(settingsMap, accountId);
   const item = await readCalendarItemById(accountId, itemId);
   return {
     syncKey,
     updatedAt,
     items: item ? [item] : [],
-    services: servicesFromSettings(settingsMap, accountId),
-    workspaceAccounts: workspaceAccountsFromSettings(settingsMap, account),
-    coaches: coachProfilesFromSettings(settingsMap, account),
-    currentUser: appUsersFromSettings(settingsMap, account)[0],
-    locations: locationsFromSettings(settingsMap, account),
-    availability: availabilityFromSettings(settingsMap, accountId),
+    ...adminStateFromSettings(settingsMap, accountId),
     people: [],
     notifications: [],
-    settings: adminSettingsFromSettings(settingsMap),
-    brand: brandSettingsFromSettings(settingsMap, account),
-    accountId,
-    account,
-  };
-}
-
-async function readAdminCalendarShellState(accountId: string) {
-  const startedAt = Date.now();
-  console.info("CALENDAR_SHELL_STATE_LOAD_STARTED", {
-    route: "/api/calendar-state",
-    routeUsed: "shell",
-  });
-
-  const { settings: settingsMap, syncKey, updatedAt } = await readStateSettingsSnapshot(accountId);
-  const account = coachAccountFromSettings(settingsMap, accountId);
-  const items = await readItems(accountId);
-  const shellLoadDurationMs = Date.now() - startedAt;
-  const deferred = {
-    people: true,
-    notifications: true,
-    googleSyncStatus: true,
-  };
-
-  console.info("PEOPLE_LOAD_DEFERRED", {
-    route: "/api/calendar-state",
-    routeUsed: "shell",
-  });
-  console.info("NOTIFICATION_HISTORY_DEFERRED", {
-    route: "/api/calendar-state",
-    routeUsed: "shell",
-  });
-  console.info("GOOGLE_SYNC_STATUS_DEFERRED", {
-    route: "/api/calendar-state",
-    routeUsed: "shell",
-  });
-  console.info("NON_CRITICAL_DATA_DEFERRED", {
-    route: "/api/calendar-state",
-    routeUsed: "shell",
-    peopleDeferred: deferred.people,
-    notificationsDeferred: deferred.notifications,
-    googleSyncStatusDeferred: deferred.googleSyncStatus,
-  });
-  console.info("CALENDAR_SHELL_STATE_LOAD_COMPLETED", {
-    route: "/api/calendar-state",
-    routeUsed: "shell",
-    shellLoadDurationMs,
-    itemCount: items.length,
-    peopleDeferred: deferred.people,
-    notificationsDeferred: deferred.notifications,
-    googleSyncStatusDeferred: deferred.googleSyncStatus,
-  });
-
-  return {
-    syncKey,
-    updatedAt,
-    items,
-    services: servicesFromSettings(settingsMap, accountId),
-    workspaceAccounts: workspaceAccountsFromSettings(settingsMap, account),
-    coaches: coachProfilesFromSettings(settingsMap, account),
-    currentUser: appUsersFromSettings(settingsMap, account)[0],
-    locations: locationsFromSettings(settingsMap, account),
-    availability: availabilityFromSettings(settingsMap, accountId),
-    people: [],
-    notifications: [],
-    settings: adminSettingsFromSettings(settingsMap),
-    brand: brandSettingsFromSettings(settingsMap, account),
-    accountId,
-    account,
-    // No googleCalendar here on purpose: this route does not read the Google
-    // status. The placeholder it used to send said configured: false, which the
-    // client applied over the real status and greyed out Connect Google.
-    diagnostics: {
-      calendarState: {
-        routeUsed: "shell",
-        shellLoadDurationMs,
-        itemCount: items.length,
-        peopleDeferred: deferred.people,
-        notificationsDeferred: deferred.notifications,
-        googleSyncStatusDeferred: deferred.googleSyncStatus,
-      },
-    },
   };
 }
 
@@ -5964,19 +3077,11 @@ async function readPublicCalendarState(accountId: string) {
   // them in sequence cost a full extra round trip for nothing.
   const [snapshot, items] = await Promise.all([readStateSettingsSnapshot(accountId), readItems(accountId)]);
   const { settings: settingsMap, syncKey, updatedAt } = snapshot;
-  const account = coachAccountFromSettings(settingsMap, accountId);
   return {
     syncKey,
     updatedAt,
     items,
-    services: servicesFromSettings(settingsMap, accountId),
-    workspaceAccounts: workspaceAccountsFromSettings(settingsMap, account),
-    coaches: coachProfilesFromSettings(settingsMap, account),
-    locations: locationsFromSettings(settingsMap, account),
-    availability: availabilityFromSettings(settingsMap, accountId),
-    brand: brandSettingsFromSettings(settingsMap, account),
-    accountId,
-    account,
+    ...stateFromSettings(settingsMap, accountId),
   };
 }
 
@@ -5989,19 +3094,11 @@ export async function readPublicSlotContext({ accountId, serviceId, week } = {},
   const settingsMap = snapshot.settings || {};
   const syncKey = snapshot.syncKey || settingValue(settingsMap, "syncKey") || "";
   const updatedAt = snapshot.updatedAt || settingValue(settingsMap, "updatedAt") || nowIso();
-  const account = coachAccountFromSettings(settingsMap, accountId);
   const state = {
-    accountId,
     syncKey,
     updatedAt,
     items: [],
-    services: servicesFromSettings(settingsMap, accountId),
-    workspaceAccounts: workspaceAccountsFromSettings(settingsMap, account),
-    coaches: coachProfilesFromSettings(settingsMap, account),
-    locations: locationsFromSettings(settingsMap, account),
-    availability: availabilityFromSettings(settingsMap, accountId),
-    brand: brandSettingsFromSettings(settingsMap, account),
-    account,
+    ...stateFromSettings(settingsMap, accountId),
     // Booking page › Look busy. Offers only the times that butt up against the
     // day's edges or an existing booking, so lessons pack together.
     lookBusy: settingValue(settingsMap, "publicBookingLookBusy") === "true",
@@ -6025,7 +3122,7 @@ export async function readPublicSlotContext({ accountId, serviceId, week } = {},
   });
   const rawItems = Array.isArray(itemRead) ? itemRead : itemRead?.items || [];
   const rowsFetched = Number.isFinite(Number(itemRead?.rowsFetched)) ? Number(itemRead.rowsFetched) : rawItems.length;
-  const accountItems = rawItems.filter((item) => recordBelongsToAccount(item, workspaceAccount.id));
+  const accountItems = rawItems.filter((item) => recordBelongsToAccountStrict(item, workspaceAccount.id));
   const requestedWeekItems = publicSlotRequestedWeekItems(accountItems, safeWeek);
   // A normal booking page requests the whole week's public availability once.
   // It still needs every booking in the week because different public services
@@ -6064,36 +3161,20 @@ export async function readPublicSlotContext({ accountId, serviceId, week } = {},
 
 export async function readPublicCatalogState(accountId: string) {
   const { settings: settingsMap, syncKey, updatedAt } = await readStateSettingsSnapshot(accountId);
-  const account = coachAccountFromSettings(settingsMap, accountId);
   return {
-    accountId,
     syncKey,
     updatedAt,
-    services: servicesFromSettings(settingsMap, accountId),
-    workspaceAccounts: workspaceAccountsFromSettings(settingsMap, account),
-    coaches: coachProfilesFromSettings(settingsMap, account),
-    locations: locationsFromSettings(settingsMap, account),
-    availability: availabilityFromSettings(settingsMap, accountId),
-    brand: brandSettingsFromSettings(settingsMap, account),
-    account,
+    ...stateFromSettings(settingsMap, accountId),
   };
 }
 
 async function readFastPublicCalendarState(accountId: string) {
   const { settings: settingsMap, syncKey, updatedAt } = await readStateSettingsSnapshot(accountId);
-  const account = coachAccountFromSettings(settingsMap, accountId);
   return {
-    accountId,
     syncKey,
     updatedAt,
     items: await readItems(accountId),
-    services: servicesFromSettings(settingsMap, accountId),
-    workspaceAccounts: workspaceAccountsFromSettings(settingsMap, account),
-    coaches: coachProfilesFromSettings(settingsMap, account),
-    locations: locationsFromSettings(settingsMap, account),
-    availability: availabilityFromSettings(settingsMap, accountId),
-    brand: brandSettingsFromSettings(settingsMap, account),
-    account,
+    ...stateFromSettings(settingsMap, accountId),
   };
 }
 
@@ -6257,11 +3338,11 @@ export async function handleCalendarFeedRequest(req: Request) {
     assertAccountFeature(workspaceAccount, "coachCalendar");
     const scopedState = {
       ...state,
-      items: (state.items || []).filter((item) => recordBelongsToAccount(item, workspaceAccount.id)),
-      services: (state.services || []).filter((service) => recordBelongsToAccount(service, workspaceAccount.id)),
-      coaches: (state.coaches || []).filter((coach) => recordBelongsToAccount(coach, workspaceAccount.id)),
-      locations: (state.locations || []).filter((location) => recordBelongsToAccount(location, workspaceAccount.id)),
-      availability: (state.availability || []).map((day) => day.filter((window) => recordBelongsToAccount(window, workspaceAccount.id))),
+      items: (state.items || []).filter((item) => recordBelongsToAccountStrict(item, workspaceAccount.id)),
+      services: (state.services || []).filter((service) => recordBelongsToAccountStrict(service, workspaceAccount.id)),
+      coaches: (state.coaches || []).filter((coach) => recordBelongsToAccountStrict(coach, workspaceAccount.id)),
+      locations: (state.locations || []).filter((location) => recordBelongsToAccountStrict(location, workspaceAccount.id)),
+      availability: (state.availability || []).map((day) => day.filter((window) => recordBelongsToAccountStrict(window, workspaceAccount.id))),
     };
     return text(
       generateCalendarFeed(scopedState),
@@ -7226,32 +4307,11 @@ async function writePublicBookingAppointment(accountId: string, currentState: Re
   };
 }
 
-function publicCalendarState(state) {
-  return {
-    syncKey: state.syncKey,
-    updatedAt: state.updatedAt,
-    items: state.items,
-    services: state.services || [],
-    workspaceAccounts: state.workspaceAccounts || [],
-    currentUser: state.currentUser || null,
-    coaches: state.coaches || [],
-    locations: state.locations || [],
-    availability: state.availability || [],
-    people: state.people || [],
-    notifications: state.notifications || [],
-    settings: state.settings,
-    brand: state.brand,
-    account: state.account,
-    googleCalendarSync: state.googleCalendarSync,
-    diagnostics: state.diagnostics,
-  };
-}
-
 export function publicBookingState(state) {
   const workspaceAccount = publicWorkspaceAccount(state);
   assertAccountFeature(workspaceAccount, "publicBooking");
-  const accountServices = (state.services || []).filter((service) => recordBelongsToAccount(service, workspaceAccount.id));
-  const accountItems = (state.items || []).filter((item) => recordBelongsToAccount(item, workspaceAccount.id));
+  const accountServices = (state.services || []).filter((service) => recordBelongsToAccountStrict(service, workspaceAccount.id));
+  const accountItems = (state.items || []).filter((item) => recordBelongsToAccountStrict(item, workspaceAccount.id));
   return {
     updatedAt: state.updatedAt,
     services: accountServices.filter(
@@ -7261,9 +4321,9 @@ export function publicBookingState(state) {
         service.visibility === "public" &&
         service.lessonFormat !== "package",
     ),
-    coaches: (state.coaches || []).filter((coach) => recordBelongsToAccount(coach, workspaceAccount.id)),
-    locations: (state.locations || []).filter((location) => recordBelongsToAccount(location, workspaceAccount.id)),
-    availability: (state.availability || []).map((day) => day.filter((window) => recordBelongsToAccount(window, workspaceAccount.id))),
+    coaches: (state.coaches || []).filter((coach) => recordBelongsToAccountStrict(coach, workspaceAccount.id)),
+    locations: (state.locations || []).filter((location) => recordBelongsToAccountStrict(location, workspaceAccount.id)),
+    availability: (state.availability || []).map((day) => day.filter((window) => recordBelongsToAccountStrict(window, workspaceAccount.id))),
     brand: state.brand,
     account: publicCoachAccount(state.account),
     items: accountItems.map((item) => ({
@@ -7285,7 +4345,7 @@ export function publicBookingState(state) {
 export function publicBookingCatalog(state) {
   const workspaceAccount = publicWorkspaceAccount(state);
   assertAccountFeature(workspaceAccount, "publicBooking");
-  const accountServices = (state.services || []).filter((service) => recordBelongsToAccount(service, workspaceAccount.id));
+  const accountServices = (state.services || []).filter((service) => recordBelongsToAccountStrict(service, workspaceAccount.id));
   return {
     updatedAt: state.updatedAt,
     services: accountServices.filter(
@@ -7295,9 +4355,9 @@ export function publicBookingCatalog(state) {
         service.visibility === "public" &&
         service.lessonFormat !== "package",
     ),
-    workspaceAccounts: (state.workspaceAccounts || []).filter((account) => recordBelongsToAccount(account, workspaceAccount.id)),
-    coaches: (state.coaches || []).filter((coach) => recordBelongsToAccount(coach, workspaceAccount.id)),
-    locations: (state.locations || []).filter((location) => recordBelongsToAccount(location, workspaceAccount.id)),
+    workspaceAccounts: (state.workspaceAccounts || []).filter((account) => recordBelongsToAccountStrict(account, workspaceAccount.id)),
+    coaches: (state.coaches || []).filter((coach) => recordBelongsToAccountStrict(coach, workspaceAccount.id)),
+    locations: (state.locations || []).filter((location) => recordBelongsToAccountStrict(location, workspaceAccount.id)),
     brand: state.brand,
     account: publicCoachAccount(state.account),
   };
@@ -8163,18 +5223,6 @@ function customGroupInviteEmail({ appointment, attendee, service, account, coach
       mt("Confirmation is helpful, but the booking is already in place."),
     ].filter(Boolean).join("\n"),
   };
-}
-
-function modernClientEmailFooter(value, language = "en") {
-  const mt = messageText(language);
-  const footer = cleanString(value, "", 900);
-  const legacyChangeFooter =
-    /need to (move|change)|reply to this email.*(move|change|reschedul)|email.*(move|change|reschedul)/i.test(
-      footer,
-    );
-  return footer && !legacyChangeFooter
-    ? footer
-    : mt("We look forward to seeing you.");
 }
 
 // Coach emails used to go to a single global `settings.coachEmail`, ignoring the coach who
@@ -9834,7 +6882,7 @@ async function readPlayerProfile(session) {
   const state = await readPublicCatalogState(accountId);
   const workspaceAccount = publicWorkspaceAccount(state);
   const serviceList = (state.services || []).filter((service) =>
-    recordBelongsToAccount(service, workspaceAccount.id),
+    recordBelongsToAccountStrict(service, workspaceAccount.id),
   );
 
   const itemRead = await readPublicAppointmentsForContact({
@@ -10428,45 +7476,6 @@ function appUserForActor(actor, settings = {}) {
   };
 }
 
-function isAdminUser(user) {
-  return ["admin", "account_admin", "platform_admin"].includes(user?.role) || Object.values(user?.permissions || {}).includes("all");
-}
-
-function userBelongsToAccount(user, accountId) {
-  return userBelongsToAccountStrict(user, accountId);
-}
-
-function userCoachId(user) {
-  return cleanSlug(user?.coachId, "") || undefined;
-}
-
-function hasPermission(user, permissionKey, scope = "own") {
-  if (isAdminUser(user)) return true;
-  const grant = user?.permissions?.[permissionKey];
-  if (!grant) return false;
-  if (grant === "all") return true;
-  if (scope === "assigned") return grant === "assigned";
-  if (scope === "own") return grant === "own" || grant === "assigned";
-  return false;
-}
-
-function assertUserBelongsToAccount(user, accountId) {
-  if (!userBelongsToAccount(user, accountId)) {
-    throw permissionDenied("This user does not belong to the requested workspace.");
-  }
-}
-
-function assertAuthenticatedContext(context) {
-  if (!context?.user) throw Object.assign(new Error("Admin login required."), { status: 401, code: "unauthorized" });
-  assertAccountActive(context.account);
-  assertUserBelongsToAccount(context.user, context.accountId);
-}
-
-function assertAccountAdminContext(context, message = "You do not have permission to change account settings.") {
-  assertAuthenticatedContext(context);
-  if (!context.isAdmin) throw permissionDenied(message);
-}
-
 /**
  * The authorization context for a private request.
  *
@@ -10581,19 +7590,6 @@ async function resolveBackendRequestContext(req, settings = null) {
   return context;
 }
 
-function itemWeek(item) {
-  return item.week ?? 0;
-}
-
-function slotOverlaps(a, b) {
-  return (
-    a.week === b.week &&
-    a.day === b.day &&
-    a.start < b.start + b.duration &&
-    a.start + a.duration > b.start
-  );
-}
-
 /**
  * A window with no location predates locations and covers every one. A window
  * pinned to a location only opens the coach there: a coach at the Range on
@@ -10624,251 +7620,6 @@ function isInsideAvailability(
   );
 }
 
-function currentWeekOffset() {
-  const today = new Date();
-  const day = today.getDay();
-  const mondayOffset = day === 0 ? -6 : 1 - day;
-  const weekStart = new Date(today);
-  weekStart.setHours(0, 0, 0, 0);
-  weekStart.setDate(weekStart.getDate() + mondayOffset);
-  const weekStartUtc = Date.UTC(
-    weekStart.getFullYear(),
-    weekStart.getMonth(),
-    weekStart.getDate(),
-  );
-  const baseWeekStartUtc = Date.UTC(
-    baseWeekStart.getFullYear(),
-    baseWeekStart.getMonth(),
-    baseWeekStart.getDate(),
-  );
-  return Math.round((weekStartUtc - baseWeekStartUtc) / (7 * 24 * 60 * 60 * 1000));
-}
-
-function isGroupServiceSlotMatch(service, candidate) {
-  if (!isScheduledGroupService(service)) return false;
-  if (!service.groupSchedule || service.groupSchedule.active === false) return false;
-  const schedule = service.groupSchedule;
-  if (candidate.day !== schedule.dayOfWeek) return false;
-  if (candidate.start !== schedule.startMinutes) return false;
-  if (!Number.isInteger(candidate.week)) return false;
-  const minWeek = currentWeekOffset();
-  const occurrenceCount = Math.max(1, Math.min(MAX_GROUP_OCCURRENCE_COUNT, Math.round(schedule.occurrenceCount || 1)));
-  if (candidate.week < minWeek || candidate.week >= minWeek + occurrenceCount) return false;
-  return true;
-}
-
-function isCancelledGroupSessionRecord(item, serviceId, session) {
-  return (
-    isCancelledGroupSessionLike(item) &&
-    (item.serviceId || item.service_id) === serviceId &&
-    itemWeek(item) === session.week &&
-    Number(item.day) === session.day &&
-    Number(item.start) === session.start
-  );
-}
-
-// Scheduled group sessions are recurring service definitions, not stored calendar rows.
-// They only become rows once someone books one, so conflict checks must synthesise a
-// "hold" for every live occurrence — otherwise a private lesson can be booked on top of
-// an empty group session.
-function scheduledGroupSessionHolds(items = [], candidate, state = {}) {
-  const services = state.services || defaultServices;
-  const coaches = state.coaches || [];
-  const locations = state.locations || [];
-  const account = state.account || defaultCoachAccount();
-  if (!Number.isInteger(candidate?.week)) return [];
-  // Cancelled-session rows are stripped from some conflict item lists (they are status
-  // "cancelled"), so callers can supply them separately to keep cancelled occurrences bookable.
-  const cancellations = Array.isArray(state.cancelledGroupSessions) ? state.cancelledGroupSessions : items;
-  const holds = [];
-  for (const groupService of services) {
-    if (!groupService?.active || groupService.archived === true) continue;
-    if (!isScheduledGroupService(groupService)) continue;
-    const schedule = groupService.groupSchedule;
-    if (!schedule?.active) continue;
-    const session = {
-      week: candidate.week,
-      day: schedule.dayOfWeek,
-      start: schedule.startMinutes,
-      duration: groupService.duration,
-    };
-    if (!isGroupServiceSlotMatch(groupService, session)) continue;
-    if (!slotOverlaps(session, candidate)) continue;
-    if (cancellations.some((item) => isCancelledGroupSessionRecord(item, groupService.id, session))) continue;
-    const holdSeed = { serviceId: groupService.id };
-    holds.push({
-      ...session,
-      id: `group-session-hold-${groupService.id}-${session.week}`,
-      kind: "appointment",
-      status: "booked",
-      serviceId: groupService.id,
-      coachId: resolvedCalendarItemCoachId(holdSeed, groupService, coaches),
-      locationId: resolvedCalendarItemLocationId(holdSeed, groupService, locations, account),
-      title: `${groupService.name} (group session)`,
-      syntheticGroupSlot: true,
-      readOnly: true,
-    });
-  }
-  return holds;
-}
-
-function itemsWithGroupSessionHolds(items = [], candidate, service, state = {}) {
-  const holds = scheduledGroupSessionHolds(items, candidate, state).filter((hold) => hold.serviceId !== service?.id);
-  return holds.length ? [...items, ...holds] : items;
-}
-
-function conflictItemSummary(item, state = {}) {
-  if (!item) return null;
-  const services = state.services || defaultServices;
-  const coaches = state.coaches || [];
-  const locations = state.locations || [];
-  const account = state.account || defaultCoachAccount();
-  const service = services.find((candidateService) => candidateService.id === item.serviceId);
-  return {
-    id: item.id,
-    kind: item.kind,
-    status: item.status || "booked",
-    serviceId: item.serviceId || "",
-    serviceName: service?.name || "",
-    week: itemWeek(item),
-    day: item.day,
-    start: item.start,
-    duration: item.duration,
-    coachId: resolvedCalendarItemCoachId(item, service, coaches),
-    locationId: resolvedCalendarItemLocationId(item, service, locations, account),
-  };
-}
-
-/**
- * The lessons at a location that hold, or are owed, one of its Clarity
- * resources, in the shape pickFreeResource wants. A lesson type that only
- * uses a resource when one is free is owed nothing, so its lessons count
- * only while they actually hold one.
- */
-function clarityResourceHolders(items, locationId, state = {}) {
-  const services = state.services || defaultServices;
-  const locations = state.locations || [];
-  const account = state.account || defaultCoachAccount();
-  return (items || [])
-    .filter((item) => {
-      if (item.kind !== "appointment" || isInactiveForConflict(item)) return false;
-      const itemService = services.find((candidateService) => candidateService.id === item.serviceId);
-      const mode = serviceResourceMode(itemService);
-      if (mode === "none" || (mode === "usable" && !item.resourceId)) return false;
-      return resolvedCalendarItemLocationId(item, itemService, locations, account) === locationId;
-    })
-    .map((item) => ({
-      id: item.id,
-      week: itemWeek(item),
-      day: Number(item.day),
-      start: Number(item.start),
-      duration: Number(item.duration),
-      resourceId: item.resourceId || "",
-    }));
-}
-
-/**
- * Which of the location's resources this booking would hold. `applies` is
- * false when the location or lesson type does not use Clarity resources, so
- * the caller can tell "no resource needed" from "none free". `required` says
- * whether "none free" means the booking cannot go ahead.
- */
-function clarityResourceFor(items, candidate, service, state = {}, { ignoreId = "", preferResourceId = "" } = {}) {
-  const location = candidate.locationId
-    ? (state.locations || []).find((entry) => entry.id === candidate.locationId)
-    : serviceLocation(service, state.locations || [], state.account || defaultCoachAccount());
-  if (!clarityResourcesApply(location, service) || isScheduledGroupService(service)) {
-    return { applies: false, required: false, resource: null };
-  }
-  const handedness =
-    candidate.handedness === "left" || candidate.handedness === "right"
-      ? candidate.handedness
-      : handednessFromNote(candidate.note);
-  const resource = pickFreeResource({
-    location,
-    service,
-    slot: {
-      week: Number(candidate.week ?? 0),
-      day: Number(candidate.day),
-      start: Number(candidate.start),
-      duration: Number(candidate.duration),
-    },
-    holders: clarityResourceHolders(items, location.id, state),
-    handedness,
-    ignoreId: ignoreId || candidate.id || "",
-    preferResourceId,
-  });
-  return { applies: true, required: serviceResourceMode(service) === "required", resource };
-}
-
-function findCollision(items, candidate, service, state = {}) {
-  const services = state.services || defaultServices;
-  const coaches = state.coaches || [];
-  const locations = state.locations || [];
-  const account = state.account || defaultCoachAccount();
-  // The coach and location this booking would be with. A lesson type offered
-  // by several says which one on the candidate; otherwise it is the first.
-  const candidateCoachId = candidate.coachId || primaryServiceCoachId(service, firstCoachId(coaches));
-  const candidateLocationId = candidate.locationId || serviceLocation(service, locations, account).id;
-  const candidateItem = {
-    kind: "appointment",
-    coachId: candidateCoachId,
-    locationId: candidateLocationId,
-    ...candidate,
-  };
-  const existingService = (item) => services.find((candidateService) => candidateService.id === item.serviceId);
-  const isCoachConflict = (item) => {
-    if (isInactiveForConflict(item) || isLocationOnlyBlock(item)) return false;
-    const itemCoachId = resolvedCalendarItemCoachId(item, existingService(item), coaches);
-    return Boolean(candidateCoachId && itemCoachId && candidateCoachId === itemCoachId);
-  };
-  const isLocationConflict = (item) => {
-    if (isInactiveForConflict(item)) return false;
-    const itemLocationId = resolvedCalendarItemLocationId(item, existingService(item), locations, account);
-    if (!candidateLocationId || !itemLocationId || candidateLocationId !== itemLocationId) return false;
-    if (isLocationOnlyBlock(item)) return true;
-    if (isCoachOnlyBlock(item)) return false;
-    if (isCoachLocationBlock(item)) return isCoachConflict(item);
-    return candidateItem.kind === "block" && isLocationOnlyBlock(candidateItem);
-  };
-  const isAppointmentConflict = (item) => isCoachConflict(item) || isLocationConflict(item);
-  const conflictItems = itemsWithGroupSessionHolds(items, candidate, service, state);
-  const overlapping = conflictItems.filter((item) =>
-    slotOverlaps(
-      {
-        week: itemWeek(item),
-        day: item.day,
-        start: item.start,
-        duration: item.duration,
-      },
-      candidate,
-    ),
-  );
-  if (!isScheduledGroupService(service)) {
-    const item = overlapping.find(isAppointmentConflict);
-    if (item) return { reason: "blocking_item", item, candidateCoachId, candidateLocationId };
-    // Every bay or room this lesson must have is held for some of the time.
-    const held = clarityResourceFor(conflictItems, { ...candidate, locationId: candidateLocationId }, service, state);
-    if (held.required && !held.resource) {
-      return { reason: "resource_full", item: null, candidateCoachId, candidateLocationId };
-    }
-    return null;
-  }
-  const blockingItem = overlapping.find(
-    (item) => (item.kind !== "appointment" || item.serviceId !== service.id) && isAppointmentConflict(item),
-  );
-  if (blockingItem) return { reason: "blocking_item", item: blockingItem, candidateCoachId, candidateLocationId };
-  const sameService = overlapping.filter((item) => item.serviceId === service.id && !isInactiveForConflict(item));
-  if (sameService.length >= service.capacity) {
-    return { reason: "capacity_full", item: sameService[0], candidateCoachId, candidateLocationId };
-  }
-  return null;
-}
-
-function hasCollision(items, candidate, service, state = {}) {
-  return Boolean(findCollision(items, candidate, service, state));
-}
-
 function publicBookingSlotsRequestError(message, status, code = "request_error") {
   return Object.assign(new Error(message), { status, code });
 }
@@ -10880,11 +7631,11 @@ function publicAccountState(state) {
     workspaceAccount,
     state: {
       ...state,
-      items: (state.items || []).filter((item) => recordBelongsToAccount(item, workspaceAccount.id)),
-      services: (state.services || []).filter((service) => recordBelongsToAccount(service, workspaceAccount.id)),
-      coaches: (state.coaches || []).filter((coach) => recordBelongsToAccount(coach, workspaceAccount.id)),
-      locations: (state.locations || []).filter((location) => recordBelongsToAccount(location, workspaceAccount.id)),
-      availability: (state.availability || []).map((day) => day.filter((window) => recordBelongsToAccount(window, workspaceAccount.id))),
+      items: (state.items || []).filter((item) => recordBelongsToAccountStrict(item, workspaceAccount.id)),
+      services: (state.services || []).filter((service) => recordBelongsToAccountStrict(service, workspaceAccount.id)),
+      coaches: (state.coaches || []).filter((coach) => recordBelongsToAccountStrict(coach, workspaceAccount.id)),
+      locations: (state.locations || []).filter((location) => recordBelongsToAccountStrict(location, workspaceAccount.id)),
+      availability: (state.availability || []).map((day) => day.filter((window) => recordBelongsToAccountStrict(window, workspaceAccount.id))),
     },
   };
 }
@@ -11208,11 +7959,10 @@ export function publicBookingSlots(state, options = {}) {
     const serviceSlots = isVideoReviewService(service)
       ? []
       : publicSlotsForService(serviceState, service, week, ignoreId, handedness);
-    servicesById[service.id] = { serviceId: service.id, week, slots: serviceSlots.map((slot) => ({ ...slot })) };
+    servicesById[service.id] = { serviceId: service.id, week, slots: serviceSlots };
   }
-  // safeJsonStringify deliberately rejects shared references, so retain the
-  // legacy top-level `slots` compatibility field as a separate copy.
-  const slots = targetService ? servicesById[targetService.id].slots.map((slot) => ({ ...slot })) : [];
+  // `slots` is the legacy top-level field: the one requested service's slots.
+  const slots = targetService ? servicesById[targetService.id].slots : [];
   if (metrics) metrics.returnedSlotCount = Object.values(servicesById).reduce((sum, entry: any) => sum + entry.slots.length, 0);
   return {
     updatedAt: state.updatedAt,
@@ -11321,11 +8071,11 @@ export async function createPublicBooking(
   }
   const accountState = {
     ...state,
-    items: (state.items || []).filter((item) => recordBelongsToAccount(item, workspaceAccount.id)),
-    services: (state.services || []).filter((service) => recordBelongsToAccount(service, workspaceAccount.id)),
-    coaches: (state.coaches || []).filter((coach) => recordBelongsToAccount(coach, workspaceAccount.id)),
-    locations: (state.locations || []).filter((location) => recordBelongsToAccount(location, workspaceAccount.id)),
-    availability: (state.availability || []).map((day) => day.filter((window) => recordBelongsToAccount(window, workspaceAccount.id))),
+    items: (state.items || []).filter((item) => recordBelongsToAccountStrict(item, workspaceAccount.id)),
+    services: (state.services || []).filter((service) => recordBelongsToAccountStrict(service, workspaceAccount.id)),
+    coaches: (state.coaches || []).filter((coach) => recordBelongsToAccountStrict(coach, workspaceAccount.id)),
+    locations: (state.locations || []).filter((location) => recordBelongsToAccountStrict(location, workspaceAccount.id)),
+    availability: (state.availability || []).map((day) => day.filter((window) => recordBelongsToAccountStrict(window, workspaceAccount.id))),
   };
   const service = accountState.services.find(
     (candidate) =>
@@ -11660,7 +8410,7 @@ export async function handleCustomGroupConfirmRequest(req) {
     let confirmedAttendee = null;
     let confirmedAppointment = null;
     const nextItems = state.items.map((item) => {
-      if (!recordBelongsToAccount(item, workspaceAccount.id)) return item;
+      if (!recordBelongsToAccountStrict(item, workspaceAccount.id)) return item;
       if (!item.customGroup || !Array.isArray(item.attendees)) return item;
       let changed = false;
       const attendees = item.attendees.map((attendee) => {
@@ -11678,7 +8428,7 @@ export async function handleCustomGroupConfirmRequest(req) {
     }
 
     await writePublicBookingState(workspaceAccount.id, state, nextItems);
-    const service = state.services.find((candidate) => recordBelongsToAccount(candidate, workspaceAccount.id) && candidate.id === confirmedAppointment.serviceId);
+    const service = state.services.find((candidate) => recordBelongsToAccountStrict(candidate, workspaceAccount.id) && candidate.id === confirmedAppointment.serviceId);
     const title = "Attendance confirmed";
     return text(
       `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title></head><body style="font-family:Arial,sans-serif;line-height:1.5;color:#101612;padding:32px;max-width:640px;margin:auto"><h1>${title}</h1><p>${escapeHtml(confirmedAttendee.name)} is confirmed for ${escapeHtml(service?.name || "the custom group lesson")}.</p><p>You can close this page.</p></body></html>`,
@@ -11953,7 +8703,7 @@ async function lookupPublicReschedule(accountId: string, payload: Record<string,
   assertAccountFeature(workspaceAccount, "publicBooking");
   const accountState = {
     ...state,
-    services: (state.services || []).filter((service) => recordBelongsToAccount(service, workspaceAccount.id)),
+    services: (state.services || []).filter((service) => recordBelongsToAccountStrict(service, workspaceAccount.id)),
   };
   const serviceList = accountState.services || defaultServices;
   const itemRead = await readPublicAppointmentsForContact({
@@ -12019,10 +8769,10 @@ export async function reschedulePublicBooking(
   const accountState = {
     ...state,
     items: [],
-    services: (state.services || []).filter((service) => recordBelongsToAccount(service, workspaceAccount.id)),
-    coaches: (state.coaches || []).filter((coach) => recordBelongsToAccount(coach, workspaceAccount.id)),
-    locations: (state.locations || []).filter((location) => recordBelongsToAccount(location, workspaceAccount.id)),
-    availability: (state.availability || []).map((day) => day.filter((window) => recordBelongsToAccount(window, workspaceAccount.id))),
+    services: (state.services || []).filter((service) => recordBelongsToAccountStrict(service, workspaceAccount.id)),
+    coaches: (state.coaches || []).filter((coach) => recordBelongsToAccountStrict(coach, workspaceAccount.id)),
+    locations: (state.locations || []).filter((location) => recordBelongsToAccountStrict(location, workspaceAccount.id)),
+    availability: (state.availability || []).map((day) => day.filter((window) => recordBelongsToAccountStrict(window, workspaceAccount.id))),
   };
   const appointment = await readPublicAppointmentById(appointmentId, workspaceAccount.id);
   if (!appointment || (!contactVerified && !matchesRescheduleContact(appointment, email, phone))) {
@@ -12038,7 +8788,7 @@ export async function reschedulePublicBooking(
   const duration = service?.duration || appointment.duration;
   const slot = { week, day, start, duration };
   const itemRead = await readPublicSlotItemsForWeek({ accountId: workspaceAccount.id, week });
-  const accountItems = (itemRead.items || []).filter((item) => recordBelongsToAccount(item, workspaceAccount.id));
+  const accountItems = (itemRead.items || []).filter((item) => recordBelongsToAccountStrict(item, workspaceAccount.id));
   const requestedWeekItems = publicSlotRequestedWeekItems(accountItems, week);
   const relevantResourceItems = service
     ? publicSlotRelevantResourceItems(requestedWeekItems, service, accountState)
@@ -13002,7 +9752,7 @@ async function routeBookingApiRequest(
       const state = await readPublicCatalogState(accountId);
       const service = findReviewService(
         (state.services || []).filter((entry) =>
-          recordBelongsToAccount(entry, publicWorkspaceAccount(state).id),
+          recordBelongsToAccountStrict(entry, publicWorkspaceAccount(state).id),
         ),
       );
       if (!service) {
@@ -13169,7 +9919,7 @@ async function routeBookingApiRequest(
       const item = findPlayerShopItem(
         playerShopItems(
           (state.services || []).filter((service) =>
-            recordBelongsToAccount(service, publicWorkspaceAccount(state).id),
+            recordBelongsToAccountStrict(service, publicWorkspaceAccount(state).id),
           ),
           playerShopCurrency(settingsMap),
         ),
@@ -13417,7 +10167,7 @@ async function routeBookingApiRequest(
 
       const state = await readPublicCatalogState(accountId);
       const services = (state.services || []).filter((service) =>
-        recordBelongsToAccount(service, publicWorkspaceAccount(state).id),
+        recordBelongsToAccountStrict(service, publicWorkspaceAccount(state).id),
       );
       const item = findPlayerShopItem(
         playerShopItems(services, playerShopCurrency(settingsMap)),
@@ -13616,12 +10366,6 @@ async function routeBookingApiRequest(
     // carries the status the outer handler renders.
     if (pathname.startsWith("/api/")) {
       await requireAdmin(req);
-    }
-
-    if (req.method === "GET" && pathname === "/api/calendar-state") {
-      const state = await readAdminCalendarShellState(await currentAccountId(req));
-      const requestContext = await resolveBackendRequestContext(req, state);
-      return json(publicCalendarState(filterCalendarStateForContext(state, requestContext)));
     }
 
     if (req.method === "PUT" && pathname === "/api/calendar-state") {
@@ -14354,7 +11098,7 @@ async function routeBookingApiRequest(
       const requestContext = await resolveBackendRequestContext(req, state);
       assertAuthenticatedContext(requestContext);
       const own = (state.coaches || []).find(
-        (coach) => coach.id === requestContext.coachId && recordBelongsToAccount(coach, requestContext.accountId),
+        (coach) => coach.id === requestContext.coachId && recordBelongsToAccountStrict(coach, requestContext.accountId),
       );
       if (!own) throw permissionDenied("You do not have a coach profile to edit.");
       const next = (state.coaches || []).map((coach) =>

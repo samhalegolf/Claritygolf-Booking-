@@ -14,42 +14,12 @@ import { LEGACY_DEFAULT_ACCOUNT_ID } from "./account.mts";
 import { LIVE_KIND, SANDBOX_KIND, readSandboxAccount } from "./sandbox.mts";
 import type { AccountRole, AppUserRole, SessionRole } from "./auth-contract.mts";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { cleanEmail, cleanSlug, cleanString, env } from "./values.mts";
 
 const sessionCookieName = "clarity_session";
 
-function env(name: string, fallback = ""): string {
-  return (
-    (globalThis as unknown as { Netlify?: { env?: { get: (n: string) => string } } })
-      .Netlify?.env?.get(name) ||
-    (process.env[name] as string | undefined) ||
-    fallback
-  );
-}
-
 function db() {
   return getDatabase();
-}
-
-function cleanString(value: unknown, fallback = "", max = 600): string {
-  if (typeof value !== "string") return fallback;
-  return value.trim().slice(0, max);
-}
-
-function cleanEmail(value: unknown, fallback = ""): string {
-  const email = cleanString(value, "", 180).toLowerCase();
-  return email.includes("@") ? email : fallback;
-}
-
-function cleanSlug(value: unknown, fallback = ""): string {
-  if (typeof value !== "string") return fallback;
-  const slug = value
-    .trim()
-    .toLowerCase()
-    .replace(/&/g, " and ")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80);
-  return slug || fallback;
 }
 
 function hashToken(token: string): string {

@@ -1,14 +1,5 @@
 import type { Config } from "@netlify/functions";
-
-function json(value: unknown, status = 200) {
-  return new Response(JSON.stringify(value), {
-    status,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      "cache-control": "no-store",
-    },
-  });
-}
+import { json } from "./_shared/http.mts";
 
 /**
  * Compatibility endpoint retained so older callers receive an explicit answer.

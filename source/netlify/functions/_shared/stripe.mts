@@ -1,3 +1,4 @@
+import { trimmedEnv } from "./values.mts";
 /**
  * Stripe, and whose Stripe it is.
  *
@@ -98,27 +99,23 @@ export type StripePlatform = {
   webhookSecret: string;
 };
 
-function env(name: string) {
-  return String(globalThis.Netlify?.env?.get(name) || process.env[name] || "").trim();
-}
-
 /** Clarity's own Connect app for one mode. Empty strings when not set up. */
 export function stripePlatform(livemode: boolean): StripePlatform {
   return livemode
     ? {
-        clientId: env("STRIPE_CONNECT_CLIENT_ID"),
-        secret: env("STRIPE_PLATFORM_SECRET_KEY"),
-        webhookSecret: env("STRIPE_CONNECT_WEBHOOK_SECRET"),
+        clientId: trimmedEnv("STRIPE_CONNECT_CLIENT_ID"),
+        secret: trimmedEnv("STRIPE_PLATFORM_SECRET_KEY"),
+        webhookSecret: trimmedEnv("STRIPE_CONNECT_WEBHOOK_SECRET"),
       }
     : {
-        clientId: env("STRIPE_CONNECT_TEST_CLIENT_ID"),
-        secret: env("STRIPE_PLATFORM_TEST_SECRET_KEY"),
-        webhookSecret: env("STRIPE_CONNECT_TEST_WEBHOOK_SECRET"),
+        clientId: trimmedEnv("STRIPE_CONNECT_TEST_CLIENT_ID"),
+        secret: trimmedEnv("STRIPE_PLATFORM_TEST_SECRET_KEY"),
+        webhookSecret: trimmedEnv("STRIPE_CONNECT_TEST_WEBHOOK_SECRET"),
       };
 }
 
 function feeNumber(name: string, fallback: number) {
-  const raw = env(name);
+  const raw = trimmedEnv(name);
   const value = raw === "" ? fallback : Number(raw);
   return Number.isFinite(value) && value >= 0 ? value : fallback;
 }

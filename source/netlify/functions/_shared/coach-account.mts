@@ -22,46 +22,8 @@ import {
 import { cleanMessageLanguage } from "./message-language.mts";
 import { cleanPhoneCountry, FALLBACK_PHONE_COUNTRY } from "./phone.mts";
 import { taxDefaultsForCountry } from "./region.mts";
-
-function env(name, fallback = "") {
-  return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
-}
-
-function cleanString(value, fallback = "", max = 600) {
-  if (typeof value !== "string") return fallback;
-  return value.trim().slice(0, max);
-}
-
-function cleanEmail(value, fallback = "") {
-  const email = cleanString(value, "", 180).toLowerCase();
-  return email.includes("@") ? email : fallback;
-}
-
-function cleanUrl(value, fallback) {
-  const raw = cleanString(value, "", 600);
-  if (!raw) return fallback;
-  try {
-    const url = new URL(raw);
-    if (url.protocol !== "http:" && url.protocol !== "https:") return fallback;
-    return url.toString().replace(/\/$/, "");
-  } catch {
-    return fallback;
-  }
-}
-
-function settingValue(settings, key) {
-  return settings?.[key] || "";
-}
-
-function parseSettingJson(settings, key, fallback) {
-  const value = settingValue(settings, key);
-  if (!value) return fallback;
-  try {
-    return JSON.parse(value);
-  } catch {
-    return fallback;
-  }
-}
+import { cleanEmail, cleanString, cleanUrl, env } from "./values.mts";
+import { parseSettingJson, settingValue } from "./settings-store.mts";
 
 const defaultInvoiceSettings = {
   enabled: true,

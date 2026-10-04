@@ -1,3 +1,4 @@
+import { cleanString } from "./values.mts";
 /**
  * "A payment of this much was this product."
  *
@@ -35,13 +36,9 @@ export type VoucherRule = {
   until: string;
 };
 
-function text(value: unknown, max: number): string {
-  return typeof value === "string" ? value.trim().slice(0, max) : "";
-}
-
 /** An ISO date, or "" for anything that is not one. Never a silent today. */
 function isoDate(value: unknown): string {
-  const raw = text(value, 40);
+  const raw = cleanString(value, "", 40);
   if (!raw) return "";
   const parsed = Date.parse(raw.length <= 10 ? `${raw}T00:00:00Z` : raw);
   return Number.isFinite(parsed) ? new Date(parsed).toISOString().slice(0, 10) : "";
@@ -62,10 +59,10 @@ export function parseVoucherRules(raw: unknown): VoucherRule[] {
       const row = (entry || {}) as Record<string, unknown>;
       const amountCents = Math.round(Number(row.amountCents) || 0);
       return {
-        id: text(row.id, 60) || `rule-${index + 1}`,
+        id: cleanString(row.id, "", 60) || `rule-${index + 1}`,
         amountCents,
-        currency: text(row.currency, 10).toUpperCase(),
-        label: text(row.label, 120),
+        currency: cleanString(row.currency, "", 10).toUpperCase(),
+        label: cleanString(row.label, "", 120),
         from: isoDate(row.from),
         until: isoDate(row.until),
       };

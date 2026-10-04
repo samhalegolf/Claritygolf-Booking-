@@ -3,6 +3,8 @@ import type { Config } from "@netlify/functions";
 import { randomBytes, randomUUID } from "node:crypto";
 
 import { requireCoachActor } from "./_shared/coach-auth.mts";
+import { cleanString } from "./_shared/values.mts";
+import { json } from "./_shared/http.mts";
 
 /**
  * Clarity Terminal: the computer in the bay with the cameras plugged into it.
@@ -59,20 +61,6 @@ function db() {
   return getDatabase();
 }
 
-function json(value: unknown, status = 200) {
-  return new Response(JSON.stringify(value), {
-    status,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      "cache-control": "no-store",
-    },
-  });
-}
-
-function cleanText(value: unknown, max: number) {
-  return typeof value === "string" ? value.trim().slice(0, max) : "";
-}
-
 const codeAlphabet = "abcdefghjkmnpqrstuvwxyz23456789";
 
 function randomCode(length: number) {
@@ -104,14 +92,14 @@ type TerminalCamera = { label: string };
 export function cleanCameras(value: unknown): TerminalCamera[] {
   if (!Array.isArray(value)) return [];
   return value
-    .map((camera) => ({ label: cleanText((camera as { label?: unknown })?.label, 120) || "Camera" }))
+    .map((camera) => ({ label: cleanString((camera as { label?: unknown })?.label, "", 120) || "Camera" }))
     .slice(0, maxCameras);
 }
 
 const terminalStates = new Set(["idle", "recording", "uploading", "no-camera", "error"]);
 
 function cleanState(value: unknown) {
-  const state = cleanText(value, 20);
+  const state = cleanString(value, "", 20);
   return terminalStates.has(state) ? state : "idle";
 }
 
@@ -181,7 +169,7 @@ async function handleNewPairing() {
 }
 
 async function handlePairingCheck(req: Request) {
-  const pairToken = cleanText((await readJson(req)).pairToken, 80);
+  const pairToken = cleanString((await readJson(req)).pairToken, "", 80);
   if (!pairToken) return json({ error: "bad_request", message: "Missing pairing." }, 400);
   const rows = await db().sql`
     SELECT terminal_code FROM public.camera_terminal_pairings
@@ -194,7 +182,7 @@ async function handlePairingCheck(req: Request) {
 // --- The terminal's side ----------------------------------------------------
 
 async function readTerminalByCode(req: Request) {
-  const code = cleanText(req.headers.get(terminalCodeHeaderName), 64).toLowerCase();
+  const code = cleanString(req.headers.get(terminalCodeHeaderName), "", 64).toLowerCase();
   if (!code) return null;
   const rows = await db().sql`SELECT * FROM public.camera_terminals WHERE code = ${code} LIMIT 1`;
   return rows[0] || null;
@@ -207,13 +195,13 @@ async function readTerminalByCode(req: Request) {
  */
 async function handleStationBeat(req: Request, terminal: any) {
   const body = await readJson(req);
-  const ackedCommandId = cleanText(body.ackedCommandId, 80) || terminal.acked_command_id || null;
+  const ackedCommandId = cleanString(body.ackedCommandId, "", 80) || terminal.acked_command_id || null;
   const progress = Number(body.uploadProgress);
   const rows = await db().sql`
     UPDATE public.camera_terminals SET
       last_seen_at = NOW(),
       state = ${cleanState(body.state)},
-      state_message = ${cleanText(body.message, 240) || null},
+      state_message = ${cleanString(body.message, "", 240) || null},
       cameras = ${JSON.stringify(cleanCameras(body.cameras))}::jsonb,
       upload_progress = ${Number.isFinite(progress) ? Math.max(0, Math.min(100, Math.round(progress))) : null},
       acked_command_id = ${ackedCommandId}
@@ -249,7 +237,7 @@ async function handleStationBeat(req: Request, terminal: any) {
 
 async function handleStationAnswer(req: Request, terminal: any) {
   const body = await readJson(req);
-  const sessionId = cleanText(body.sessionId, 80);
+  const sessionId = cleanString(body.sessionId, "", 80);
   const sdp = typeof body.sdp === "string" ? body.sdp.slice(0, maxSdpLength) : "";
   if (!sessionId || !sdp) return json({ error: "bad_request", message: "An answer needs a session and an SDP." }, 400);
   // Keyed on the session so an answer to an offer the laptop has already
@@ -262,8 +250,8 @@ async function handleStationAnswer(req: Request, terminal: any) {
 
 async function handleStationTake(req: Request, terminal: any) {
   const body = await readJson(req);
-  const savedVideoId = cleanText(body.savedVideoId, 160);
-  const status = cleanText(body.status, 20);
+  const savedVideoId = cleanString(body.savedVideoId, "", 160);
+  const status = cleanString(body.status, "", 20);
   // "ready" is not the terminal's to say: the upload engine sets it when the
   // bytes are verified in Clarity Cloud.
   if (!savedVideoId || (status !== "uploading" && status !== "failed")) {
@@ -272,7 +260,7 @@ async function handleStationTake(req: Request, terminal: any) {
   await db().sql`
     UPDATE public.camera_terminal_takes SET
       status = ${status},
-      message = ${cleanText(body.message, 240) || null},
+      message = ${cleanString(body.message, "", 240) || null},
       updated_at = NOW()
     WHERE saved_video_id = ${savedVideoId} AND terminal_id = ${terminal.id} AND status <> 'ready'`;
   return json({ ok: true });
@@ -288,15 +276,15 @@ async function readCoachTerminal(accountId: string, id: string) {
 
 function playerFromBody(body: Record<string, unknown>) {
   return {
-    playerId: cleanText(body.playerId, 160),
-    playerName: cleanText(body.playerName, 180),
-    lessonId: cleanText(body.lessonId, 160) || null,
+    playerId: cleanString(body.playerId, "", 160),
+    playerName: cleanString(body.playerName, "", 180),
+    lessonId: cleanString(body.lessonId, "", 160) || null,
   };
 }
 
 async function readCommandTakes(row: any) {
   const ids = jsonArray(row.command_takes)
-    .map((take) => cleanText((take as { savedVideoId?: unknown })?.savedVideoId, 160))
+    .map((take) => cleanString((take as { savedVideoId?: unknown })?.savedVideoId, "", 160))
     .filter(Boolean);
   if (!ids.length) return [];
   const rows = await db().sql`
@@ -380,7 +368,7 @@ async function handleCoachRoute(req: Request, accountId: string, parts: string[]
     }
     if (req.method === "POST") {
       const body = await readJson(req);
-      const name = cleanText(body.name, 60);
+      const name = cleanString(body.name, "", 60);
       const pairCode = cleanPairCode(body.pairCode);
       if (!name) return json({ error: "bad_request", message: "Give the terminal a name." }, 400);
       if (!pairCode) return json({ error: "bad_request", message: "Type the code shown on the terminal." }, 400);
@@ -406,7 +394,7 @@ async function handleCoachRoute(req: Request, accountId: string, parts: string[]
     return json({ error: "method_not_allowed" }, 405);
   }
 
-  const row = await readCoachTerminal(accountId, cleanText(parts[0], 80));
+  const row = await readCoachTerminal(accountId, cleanString(parts[0], "", 80));
   if (!row) return json({ error: "not_found", message: "Terminal not found." }, 404);
   const action = parts[1] || "";
 
@@ -415,7 +403,7 @@ async function handleCoachRoute(req: Request, accountId: string, parts: string[]
     return json({ ok: true });
   }
   if (!action && req.method === "GET") {
-    const sessionId = cleanText(new URL(req.url).searchParams.get("preview"), 80);
+    const sessionId = cleanString(new URL(req.url).searchParams.get("preview"), "", 80);
     return json({
       ok: true,
       terminal: coachTerminal(row),
@@ -444,7 +432,7 @@ async function handleCoachRoute(req: Request, accountId: string, parts: string[]
   if (action === "start") return await handleStart(accountId, row, body);
   if (action === "stop") return await handleStop(row);
   if (action === "preview") {
-    const sessionId = cleanText(body.sessionId, 80);
+    const sessionId = cleanString(body.sessionId, "", 80);
     const sdp = typeof body.sdp === "string" ? body.sdp.slice(0, maxSdpLength) : "";
     if (!sessionId || !sdp) return json({ error: "bad_request", message: "A preview needs a session and an SDP." }, 400);
     await db().sql`

@@ -7,6 +7,7 @@ import {
   ignoreManyBankExpenseCandidates,
   listBankExpenseCandidates,
 } from "./_shared/akahu.mts";
+import { json } from "./_shared/http.mts";
 
 // Phase 2 of the Akahu bank feed: turn money-out bank transactions into
 // review-first expense candidates. The coach lists them, then approves (→ a
@@ -20,13 +21,6 @@ import {
 //   { action: "approveMany", ids, categoryId?, categoryName? }
 //   { action: "ignoreMany", ids }
 
-
-function json(value: unknown, status = 200) {
-  return new Response(JSON.stringify(value), {
-    status,
-    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
-  });
-}
 
 function cleanId(value: unknown) {
   return typeof value === "string" ? value.trim().slice(0, 200) : "";

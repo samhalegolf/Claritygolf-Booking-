@@ -22,21 +22,10 @@
 //    the two can never disagree.
 
 import { getDatabase } from "./database.mts";
+import { cleanSlug } from "./values.mts";
 
 function db() {
   return getDatabase();
-}
-
-function cleanSlug(value: unknown, fallback = ""): string {
-  if (typeof value !== "string") return fallback;
-  const slug = value
-    .trim()
-    .toLowerCase()
-    .replace(/&/g, " and ")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80);
-  return slug || fallback;
 }
 
 export const SANDBOX_KIND = "sandbox";

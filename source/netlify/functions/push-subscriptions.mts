@@ -12,6 +12,8 @@ import {
   updatePushSubscriptionLanguage,
 } from "./_shared/push-notify.mts";
 import { messageText } from "./_shared/message-language.mts";
+import { cleanString } from "./_shared/values.mts";
+import { json } from "./_shared/http.mts";
 
 /**
  * Browser notification subscriptions for the signed-in coach.
@@ -22,23 +24,6 @@ import { messageText } from "./_shared/message-language.mts";
  * POST   -> { endpoint, language } this browser now reads another language
  * DELETE -> forget this browser
  */
-
-
-function json(value: unknown, status = 200) {
-  return new Response(JSON.stringify(value), {
-    status,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      "cache-control": "no-store",
-    },
-  });
-}
-
-/** Returns the signed-in admin's user id, or "" when the session is not valid. */
-function cleanText(value: unknown, max: number) {
-  return typeof value === "string" ? value.trim().slice(0, max) : "";
-}
-
 export default async function handler(req: Request) {
   // A push subscription belongs to one coach in one business: it is how that
   // business's booking alerts reach that device. Resolving the account
@@ -62,7 +47,7 @@ export default async function handler(req: Request) {
   }
 
   if (req.method === "GET") {
-    const endpoint = cleanText(new URL(req.url).searchParams.get("endpoint"), 600);
+    const endpoint = cleanString(new URL(req.url).searchParams.get("endpoint"), "", 600);
     try {
       return json({
         configured: pushConfigured(),
@@ -108,7 +93,7 @@ export default async function handler(req: Request) {
 
     if (body?.language && body?.endpoint && !body?.subscription) {
       try {
-        const updated = await updatePushSubscriptionLanguage(accountId, cleanText(body.endpoint, 600), body.language);
+        const updated = await updatePushSubscriptionLanguage(accountId, cleanString(body.endpoint, "", 600), body.language);
         return json({ ok: updated });
       } catch (error) {
         console.error("push_subscriptions:language_failed", error);
@@ -116,9 +101,9 @@ export default async function handler(req: Request) {
       }
     }
 
-    const endpoint = cleanText(body?.subscription?.endpoint, 600);
-    const p256dh = cleanText(body?.subscription?.keys?.p256dh, 300);
-    const auth = cleanText(body?.subscription?.keys?.auth, 300);
+    const endpoint = cleanString(body?.subscription?.endpoint, "", 600);
+    const p256dh = cleanString(body?.subscription?.keys?.p256dh, "", 300);
+    const auth = cleanString(body?.subscription?.keys?.auth, "", 300);
     if (!endpoint || !p256dh || !auth) {
       return json({ error: "invalid_subscription", message: "The browser did not supply a usable subscription." }, 400);
     }
@@ -130,7 +115,7 @@ export default async function handler(req: Request) {
         endpoint,
         p256dh,
         auth,
-        label: cleanText(body?.label, 200) || cleanText(req.headers.get("user-agent"), 200),
+        label: cleanString(body?.label, "", 200) || cleanString(req.headers.get("user-agent"), "", 200),
         language: body?.language,
       });
       return json({ ok: true, deviceCount: await countPushSubscriptions(accountId) });
@@ -147,7 +132,7 @@ export default async function handler(req: Request) {
     } catch {
       body = null;
     }
-    const endpoint = cleanText(body?.endpoint, 600);
+    const endpoint = cleanString(body?.endpoint, "", 600);
     if (!endpoint) return json({ error: "invalid_endpoint" }, 400);
     try {
       const removed = await deletePushSubscription(accountId, endpoint);

@@ -1,6 +1,7 @@
 import type { Config } from "@netlify/functions";
 import { requireCoachActor } from "./_shared/coach-auth.mts";
 import { DEFAULT_SINCE_EPOCH, syncChargesSince, syncInvoicesSince } from "./_shared/stripe-billing.mts";
+import { json } from "./_shared/http.mts";
 
 // Admin backfill endpoint: pulls Stripe invoices and charges (card payments
 // from the booking site) into the billing tables. Safe to re-run — everything
@@ -13,13 +14,6 @@ import { DEFAULT_SINCE_EPOCH, syncChargesSince, syncInvoicesSince } from "./_sha
 //   { action?: "syncAll" | "syncInvoices" | "syncCharges",
 //     since?: string | number }   // since "all" (or 0) backfills full history
 
-
-function json(value: unknown, status = 200) {
-  return new Response(JSON.stringify(value), {
-    status,
-    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
-  });
-}
 
 // Same session check as billing-api.mts.
 /**

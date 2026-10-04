@@ -3,21 +3,10 @@ import { LEGACY_DEFAULT_ACCOUNT_ID as LEGACY_ORIGINAL_WORKSPACE_ID } from "./_sh
 import { resolvePublicAccount } from "./_shared/coach-auth.mts";
 import { settingsSelectQuery } from "./_shared/settings-scope.mts";
 import { cleanMessageLanguage, messageText } from "./_shared/message-language.mts";
+import { cleanEmail, cleanString, cleanText, env } from "./_shared/values.mts";
+import { json } from "./_shared/http.mts";
 
 const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
-
-function env(name: string, fallback = "") {
-  return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
-}
-
-function cleanText(value: unknown, fallback = "", max = 700) {
-  return typeof value === "string" && value.trim() ? value.trim().slice(0, max) : fallback;
-}
-
-function cleanEmail(value: unknown, fallback = "") {
-  const email = cleanText(value, "", 180).toLowerCase();
-  return email.includes("@") ? email : fallback;
-}
 
 function cleanUrl(value: unknown, fallback = "") {
   if (typeof value !== "string" || !value.trim()) return fallback;
@@ -43,10 +32,10 @@ function cleanBookingLocationSnapshot(raw: any, fallback: any = {}) {
   return {
     name: cleanText(base.name, fallback.name || "", 140),
     shortName: cleanText(base.shortName, fallback.shortName || base.name || "", 80),
-    address: cleanText(base.address, "", 240),
+    address: cleanString(base.address, "", 240),
     mapUrl: cleanUrl(base.mapUrl, ""),
-    arrivalInstructions: cleanText(base.arrivalInstructions, "", 500),
-    publicNotes: cleanText(base.publicNotes, "", 500),
+    arrivalInstructions: cleanString(base.arrivalInstructions, "", 500),
+    publicNotes: cleanString(base.publicNotes, "", 500),
     timezone: cleanText(base.timezone, fallback.timezone || "", 80),
   };
 }
@@ -56,7 +45,7 @@ function bookingLocationDisplay(location: any) {
 }
 
 function normalizePhone(value: unknown) {
-  return cleanText(value, "", 80).replace(/\D/g, "");
+  return cleanString(value, "", 80).replace(/\D/g, "");
 }
 
 function supabaseConfig() {
@@ -293,18 +282,11 @@ function generateInvite(appointment: any, settings: any) {
   return `${lines.map(foldLine).join("\r\n")}\r\n`;
 }
 
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
-  });
-}
-
 export default async function handler(req: Request) {
   try {
     if (req.method !== "GET") return json({ error: "method_not_allowed" }, 405);
     const url = new URL(req.url);
-    const bookingId = cleanText(url.searchParams.get("booking"), "", 160);
+    const bookingId = cleanString(url.searchParams.get("booking"), "", 160);
     const email = cleanEmail(url.searchParams.get("email"), "");
     const phone = normalizePhone(url.searchParams.get("phone"));
     if (!bookingId || (!email && !phone)) {

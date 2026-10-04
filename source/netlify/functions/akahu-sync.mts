@@ -1,6 +1,7 @@
 import type { Config } from "@netlify/functions";
 import { requireCoachActor } from "./_shared/coach-auth.mts";
 import { listAkahuAccounts, syncAkahuTransactions } from "./_shared/akahu.mts";
+import { json } from "./_shared/http.mts";
 
 // Admin backfill / poll endpoint for the Akahu bank feed: pulls transactions
 // from the connected Akahu accounts into bank_transactions. Safe to re-run —
@@ -11,13 +12,6 @@ import { listAkahuAccounts, syncAkahuTransactions } from "./_shared/akahu.mts";
 // POST /api/akahu-sync  { action?: "sync" | "accounts", since?: string }
 //   since: ISO date-time (exclusive start); omit for all available history.
 
-
-function json(value: unknown, status = 200) {
-  return new Response(JSON.stringify(value), {
-    status,
-    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
-  });
-}
 
 // Same session check as billing-api.mts / stripe-billing-sync.mts.
 export default async function handler(req: Request) {
