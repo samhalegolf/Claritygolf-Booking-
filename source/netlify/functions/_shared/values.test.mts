@@ -14,7 +14,7 @@ test("cleanString keeps a cleared value blank; cleanText falls back", () => {
   assert.equal(cleanString(42, "Busy"), "Busy");
   assert.equal(cleanText(42, "Busy"), "Busy");
   assert.equal(cleanString("  abcdef  ", "", 3), "abc");
-  assert.equal(cleanText("  abcdef  ", "", 3), "abc");
+  assert.equal(cleanString("  abcdef  ", "", 3), "abc");
 });
 
 test("safeJsonStringify writes a shared object every time it appears", () => {

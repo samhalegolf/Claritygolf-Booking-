@@ -9,6 +9,19 @@ import {
 } from "./_shared/akahu.mts";
 import { json } from "./_shared/http.mts";
 
+// Phase 2 of the Akahu bank feed: turn money-out bank transactions into
+// review-first expense candidates. The coach lists them, then approves (→ a
+// billing_expenses row, keyed by the Akahu id so it can't be imported twice) or
+// ignores. Admin-only, same session check as the other billing endpoints.
+//
+// POST /api/akahu-expenses
+//   { action: "list" }
+//   { action: "approve", id, categoryId?, categoryName?, description?, vendor? }
+//   { action: "ignore", id }
+//   { action: "approveMany", ids, categoryId?, categoryName? }
+//   { action: "ignoreMany", ids }
+
+
 function cleanId(value: unknown) {
   return typeof value === "string" ? value.trim().slice(0, 200) : "";
 }
@@ -32,12 +45,14 @@ export default async function handler(req: Request) {
     if (action === "approve") {
       const id = cleanId(body?.id);
       if (!id) return json({ error: "bad_request", message: "Missing transaction id." }, 400);
-      return json(await approveBankExpenseCandidate(accountId, id, {
+      return json(
+        await approveBankExpenseCandidate(accountId, id, {
           categoryId: typeof body?.categoryId === "string" ? body.categoryId : undefined,
           categoryName: typeof body?.categoryName === "string" ? body.categoryName : undefined,
           description: typeof body?.description === "string" ? body.description : undefined,
           vendor: typeof body?.vendor === "string" ? body.vendor : undefined,
-        }));
+        }),
+      );
     }
     if (action === "ignore") {
       const id = cleanId(body?.id);
@@ -49,20 +64,25 @@ export default async function handler(req: Request) {
       if (!ids.length) return json({ error: "bad_request", message: "No transaction ids supplied." }, 400);
       if (ids.length > 500) return json({ error: "bad_request", message: "Too many transactions in one request." }, 400);
       if (action === "ignoreMany") return json(await ignoreManyBankExpenseCandidates(accountId, ids));
-      return json(await approveManyBankExpenseCandidates(accountId, ids, {
+      return json(
+        await approveManyBankExpenseCandidates(accountId, ids, {
           categoryId: typeof body?.categoryId === "string" ? body.categoryId : undefined,
           categoryName: typeof body?.categoryName === "string" ? body.categoryName : undefined,
-        }));
+        }),
+      );
     }
 
     return json({ error: "unknown_action", message: "Unknown bank-expense action." }, 400);
   } catch (error) {
     console.error("akahu_expenses:failed", error);
     const status = Number((error as { status?: unknown })?.status);
-    return json({
+    return json(
+      {
         error: (error as { code?: string })?.code || "akahu_expenses_error",
         message: error instanceof Error ? error.message : "Request failed." ,
-      }, Number.isInteger(status) && status >= 400 && status <= 599 ? status : 500);
+      },
+      Number.isInteger(status) && status >= 400 && status <= 599 ? status : 500,
+    );
   }
 }
 

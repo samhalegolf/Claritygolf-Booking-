@@ -250,10 +250,13 @@ export default async function handler(req: Request) {
   } catch (error) {
     const status = (error as { status?: number })?.status;
     if (status === 401 || status === 403) {
-      return json({
+      return json(
+        {
           error: (error as { code?: string })?.code || "unauthorized",
           message: error instanceof Error ? error.message : "Admin login required.",
-        }, status);
+        },
+        status,
+      );
     }
     console.error("admin_settings:failed", error);
     return json({ error: "admin_settings_error", message: error instanceof Error ? error.message : "Admin settings failed." }, 500);

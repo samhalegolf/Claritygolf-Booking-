@@ -40,7 +40,8 @@ function errorStatus(error: unknown) {
 
 function jsonError(req: Request, error: unknown, phase: "import" | "handler" | "shell") {
   const status = errorStatus(error);
-  return json({
+  return json(
+    {
       error: phase === "import" ? "calendar_state_import_error" : "calendar_state_error",
       phase,
       details: safeErrorDetail(error),
@@ -49,7 +50,9 @@ function jsonError(req: Request, error: unknown, phase: "import" | "handler" | "
         req.method === "PUT"
           ? "Your calendar change could not be saved. Please try again."
           : "Calendar data could not be loaded. Please refresh.",
-    }, status);
+    },
+    status,
+  );
 }
 
 async function readTinyCalendarShell(req: Request, requestStartedAt: number) {

@@ -3,6 +3,16 @@ import { requireCoachActor } from "./_shared/coach-auth.mts";
 import { listAkahuAccounts, syncAkahuTransactions } from "./_shared/akahu.mts";
 import { json } from "./_shared/http.mts";
 
+// Admin backfill / poll endpoint for the Akahu bank feed: pulls transactions
+// from the connected Akahu accounts into bank_transactions. Safe to re-run —
+// everything upserts on the Akahu transaction id. Live updates arrive
+// separately via akahu-webhook.mts (later phase); this endpoint is the manual
+// backfill and the nightly-poll safety net.
+//
+// POST /api/akahu-sync  { action?: "sync" | "accounts", since?: string }
+//   since: ISO date-time (exclusive start); omit for all available history.
+
+
 // Same session check as billing-api.mts / stripe-billing-sync.mts.
 export default async function handler(req: Request) {
   if (req.method !== "POST") return json({ error: "method_not_allowed", message: "POST only." }, 405);
@@ -30,10 +40,13 @@ export default async function handler(req: Request) {
   } catch (error) {
     console.error("akahu_sync:failed", error);
     const status = Number((error as { status?: unknown })?.status);
-    return json({
+    return json(
+      {
         error: (error as { code?: string })?.code || "akahu_sync_error",
         message: error instanceof Error ? error.message : "Sync failed." ,
-      }, Number.isInteger(status) && status >= 400 && status <= 599 ? status : 500);
+      },
+      Number.isInteger(status) && status >= 400 && status <= 599 ? status : 500,
+    );
   }
 }
 

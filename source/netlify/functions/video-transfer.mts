@@ -449,11 +449,15 @@ function redactForLogs(value: unknown, max = 300) {
 }
 
 function safeGoogleReason(data: any, fallback = "") {
-  return cleanText(data?.error?.errors?.[0]?.reason ||
+  return cleanText(
+    data?.error?.errors?.[0]?.reason ||
       data?.error?.status ||
       data?.error?.reason ||
       data?.error ||
-      fallback, fallback, 160);
+      fallback,
+    fallback,
+    160
+  );
 }
 
 async function readGoogleError(response: Response) {
@@ -2989,7 +2993,11 @@ async function readPortalPlayerForReturn(accountId: string, personId: string) {
 async function resolveCoachReturn(req: Request, accountId: string): Promise<CoachReturn | null> {
   const body = (await req.clone().json().catch(() => ({}))) as any;
   if (body?.returnToPlayer !== true) return null;
-  const personId = cleanString(body?.returnToPersonId || body?.savedVideo?.playerId || body?.playerId, "", 160);
+  const personId = cleanString(
+    body?.returnToPersonId || body?.savedVideo?.playerId || body?.playerId,
+    "",
+    160,
+  );
   const target = personId ? await readPortalPlayerForReturn(accountId, personId) : null;
   if (!target) {
     throw new TransferError(
@@ -3519,7 +3527,10 @@ async function handlePlayerVideoRoute(
       return json({ error: "not_found", message: "Video not found for this player." }, 404);
     }
     if (!scope.portalPlayerId) {
-      return json({ error: "forbidden", message: "Ask your coach to set up portal access before sending videos." }, 403);
+      return json(
+        { error: "forbidden", message: "Ask your coach to set up portal access before sending videos." },
+        403,
+      );
     }
 
     const body = await req.clone().json().catch(() => ({})) as any;
@@ -4720,10 +4731,13 @@ async function routeVideoTransferRequest(
     if (error?.status === 401 || error?.status === 403) {
       // Same shape the old inline gate returned, so the client's handling of
       // "you are signed out" is unchanged.
-      return json({
+      return json(
+        {
           error: error.code || "unauthorized",
           message: error instanceof Error ? error.message : "Admin login required.",
-        }, error.status);
+        },
+        error.status,
+      );
     }
     const code =
       error?.code === "CLOUD_OAUTH_NOT_CONFIGURED"

@@ -5,6 +5,7 @@ import { deliverEmail, emailNotificationsGloballyDisabled } from "./_shared/emai
 import { cleanEmail, cleanText, env } from "./_shared/values.mts";
 import { json } from "./_shared/http.mts";
 
+
 function supabaseConfig() {
   const url = env("SUPABASE_URL").replace(/\/$/, "");
   const key = env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY");
@@ -61,10 +62,13 @@ export default async function handler(req: Request) {
     const recipient = cleanEmail(body.email);
     if (!recipient) return json({ error: "missing_email", message: "Enter an email address to send the test to." }, 400);
     if (emailNotificationsGloballyDisabled()) {
-      return json({
+      return json(
+        {
           ok: false,
           message: "Email notifications are disabled by EMAIL_NOTIFICATIONS_ENABLED.",
-        }, 503);
+        },
+        503,
+      );
     }
 
     const replyTo = env("CLARITY_REPLY_TO_EMAIL", env("CLARITY_NOTIFICATION_EMAIL", ""));
@@ -104,11 +108,14 @@ export default async function handler(req: Request) {
       if (result.reason === "missing_resend_key") {
         return json({ ok: false, message: "Resend API key is missing in Netlify functions environment." }, 502);
       }
-      return json({
+      return json(
+        {
           ok: false,
           message: result.error || "Resend rejected the email.",
           resendStatus: result.status,
-        }, 502);
+        },
+        502,
+      );
     }
 
     return json({
@@ -129,14 +136,20 @@ export default async function handler(req: Request) {
   } catch (error) {
     const status = (error as { status?: number })?.status;
     if (status === 401 || status === 403) {
-      return json({
+      return json(
+        {
           ok: false,
           error: (error as { code?: string })?.code || "unauthorized",
           message: error instanceof Error ? error.message : "Admin login required.",
-        }, status);
+        },
+        status,
+      );
     }
     console.error("test_email:failed", error);
-    return json({ ok: false, message: error instanceof Error ? error.message : "Could not send test email." }, 500);
+    return json(
+      { ok: false, message: error instanceof Error ? error.message : "Could not send test email." },
+      500,
+    );
   }
 }
 

@@ -14,6 +14,20 @@ import {
 } from "./_shared/resource-webhook-provider.mts";
 import { json } from "./_shared/http.mts";
 
+/**
+ * Changes a business's bay system makes on its own side.
+ *
+ * POST /api/resource-webhook?account=<business>, signed with the same secret
+ * Clarity signs its own requests with (x-clarity-signature). Two events:
+ *
+ *   resource.released  { "event": "resource.released", "booking": { "id": "<Clarity booking id>" } }
+ *   resource.updated   { "event": "resource.updated", "booking": { "id": "..." },
+ *                        "hold": { "reference": "B-124", "resource": { "id": "3", "name": "Bay 3" } } }
+ *
+ * The URL names the business; the signature is what proves the request is
+ * theirs. An unsigned or wrongly signed request changes nothing.
+ */
+
 export default async function handler(req: Request) {
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
   const accountId = await resolveWebhookAccount(req);

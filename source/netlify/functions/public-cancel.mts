@@ -333,13 +333,16 @@ export default async function handler(req: Request, context: Context) {
   } catch (error: any) {
     console.error("public_cancel:failed", error);
     const status = error?.status || 500;
-    return json({
+    return json(
+      {
         error: status === 500 ? "public_cancel_error" : "request_error",
         message:
           error instanceof Error
             ? error.message
             : "Unknown public cancellation error",
-      }, status);
+      },
+      status,
+    );
   }
 }
 

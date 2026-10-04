@@ -106,7 +106,10 @@ export default async function handler(req: Request) {
     const rawUrl = String(body?.url ?? "").trim();
     const url = cleanResourceWebhookUrl(rawUrl);
     if (rawUrl && !url) {
-      return json({ error: "invalid_url", message: "Use a public https:// address. Local and private addresses can't be reached." }, 400);
+      return json(
+        { error: "invalid_url", message: "Use a public https:// address. Local and private addresses can't be reached." },
+        400,
+      );
     }
     const enabled = body?.enabled === true && Boolean(url);
     await writeSetting(accountId, RESOURCE_WEBHOOK_SETTINGS_KEY, JSON.stringify({ url, enabled }));

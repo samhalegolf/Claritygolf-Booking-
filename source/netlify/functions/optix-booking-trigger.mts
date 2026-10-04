@@ -15,12 +15,15 @@ export default async function handler(req: Request) {
     return json({ error: "method_not_allowed" }, 405);
   }
 
-  return json({
+  return json(
+    {
       ok: false,
       error: "manual_booking_required",
       message:
         "Automatic Optix reconciliation is disabled. Use Book resource on the Clarity booking card.",
-    }, 409);
+    },
+    409,
+  );
 }
 
 export const config: Config = {

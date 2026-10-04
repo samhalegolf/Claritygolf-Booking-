@@ -1914,12 +1914,15 @@ export default async function googleCalendarSyncHandler(req: Request) {
     return json({ error: "method_not_allowed", message: "Use GET for status or POST to sync." }, 405);
   } catch (error: any) {
     console.error("google_calendar_sync:function_failed", error);
-    return json({
+    return json(
+      {
         error: "google_calendar_sync_error",
         message: error instanceof Error ? error.message : "Google Calendar sync failed.",
         failure: debugErrorFromUnknown(error, "sync"),
         request: error?.debugRequest || null,
-      }, error?.status || 500);
+      },
+      error?.status || 500,
+    );
   }
 }
 

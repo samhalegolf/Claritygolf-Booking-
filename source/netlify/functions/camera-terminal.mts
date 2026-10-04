@@ -380,7 +380,10 @@ async function handleCoachRoute(req: Request, accountId: string, parts: string[]
         WHERE pair_code = ${pairCode} AND terminal_code IS NULL AND expires_at > NOW()
         RETURNING pair_code`;
       if (!claimed[0]) {
-        return json({ error: "bad_pair_code", message: "That code doesn't match a terminal. Check the code on the terminal's screen." }, 400);
+        return json(
+          { error: "bad_pair_code", message: "That code doesn't match a terminal. Check the code on the terminal's screen." },
+          400,
+        );
       }
       const rows = await db().sql`
         INSERT INTO public.camera_terminals (id, account_id, name, code)
@@ -472,10 +475,13 @@ export default async function handler(req: Request) {
     return await handleCoachRoute(req, actor.accountId, parts);
   } catch (error: any) {
     if (error?.status === 401 || error?.status === 403) {
-      return json({
+      return json(
+        {
           error: error.code || "unauthorized",
           message: error instanceof Error ? error.message : "Admin login required.",
-        }, error.status);
+        },
+        error.status,
+      );
     }
     console.error("camera_terminal:failed", error instanceof Error ? error.message : error);
     return json({ error: "server_error", message: "Clarity Terminal could not be reached." }, 500);

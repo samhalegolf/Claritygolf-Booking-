@@ -8,6 +8,17 @@ import {
 } from "./_shared/akahu.mts";
 import { json } from "./_shared/http.mts";
 
+// Phase 3 of the Akahu bank feed: native payment reconciliation. Matches
+// money-in bank transactions to open invoices and marks them paid LOCALLY only
+// — it never calls Stripe. Admin-only.
+//
+// POST /api/akahu-reconcile
+//   { action: "list" }                       -> credits + suggested invoice matches
+//   { action: "auto" }                       -> apply every unambiguous match
+//   { action: "apply", id, invoiceId }       -> confirm one match
+//   { action: "ignore", id }                 -> dismiss a credit (not a payment)
+
+
 function cleanId(value: unknown) {
   return typeof value === "string" ? value.trim().slice(0, 200) : "";
 }
@@ -47,10 +58,13 @@ export default async function handler(req: Request) {
   } catch (error) {
     console.error("akahu_reconcile:failed", error);
     const status = Number((error as { status?: unknown })?.status);
-    return json({
+    return json(
+      {
         error: (error as { code?: string })?.code || "akahu_reconcile_error",
         message: error instanceof Error ? error.message : "Request failed." ,
-      }, Number.isInteger(status) && status >= 400 && status <= 599 ? status : 500);
+      },
+      Number.isInteger(status) && status >= 400 && status <= 599 ? status : 500,
+    );
   }
 }
 

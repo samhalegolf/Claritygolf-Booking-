@@ -46,6 +46,24 @@ async function ensureTable() {
 }
 
 /**
+ * Bay names come from Optix itself.
+ *
+ * Removed: a BAY_NAMES constant mapping seven literal Optix resource ids to
+ * "Bay #1".."Bay #7". It was one business's bay list compiled into the server,
+ * so any other resource -- another business's bay, a fitting room, a bay added
+ * last week -- resolved to "" and the card fell back to "Resource booked".
+ *
+ * Every Optix webhook carries workspace_id and workspace_name, which is where
+ * the Integrations screen already gets its bay list (observedWorkspaces in
+ * external-bookings.mts). Newest sighting wins: a workspace can be renamed, and
+ * one of Sam's has carried three names.
+ *
+ * optix_webhook_events has no account_id -- it is the shared inbound log. The
+ * resource id being named always comes from the caller's own sync row, so this
+ * names a bay the caller has already booked and nothing else.
+ */
+
+/**
  * Newest name Optix has used for each of the given resource ids.
  *
  * Scoped to the ids actually on screen rather than every workspace ever seen,
@@ -158,10 +176,13 @@ export default async function handler(req: Request) {
     accountId = await requireAccountId(req);
   } catch (error) {
     const status = (error as { status?: number })?.status === 403 ? 403 : 401;
-    return json({
+    return json(
+      {
         error: (error as { code?: string })?.code || "unauthorized",
         message: error instanceof Error ? error.message : "Admin login required.",
-      }, status);
+      },
+      status,
+    );
   }
 
   await ensureTable();

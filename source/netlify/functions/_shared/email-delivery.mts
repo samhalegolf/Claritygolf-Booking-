@@ -183,7 +183,10 @@ export async function deliverEmail(input: DeliverEmailInput): Promise<EmailDeliv
   if (!recipients.length) return { sent: false, reason: "missing_recipient" };
 
   const identity = await fromIdentity(input.accountId);
-  const rawFromHeader = env("CLARITY_EMAIL_FROM", `${identity.businessName || "Clarity Golf"} <onboarding@resend.dev>`);
+  const rawFromHeader = env(
+    "CLARITY_EMAIL_FROM",
+    `${identity.businessName || "Clarity Golf"} <onboarding@resend.dev>`,
+  );
   // The business's own name, never the product's, unless nothing else is set.
   const fromName =
     cleanString(input.fromName, "", 120) ||

@@ -6256,7 +6256,8 @@ async function portalPlayerSessionIdentity(authUserId, rawEmail, accountId) {
 /** Mints a player session and answers with it. */
 async function playerSessionResponse(player, req) {
   const session = await createPlayerSession(player);
-  return json({
+  return json(
+    {
       authenticated: true,
       role: "player",
       email: player.email,
@@ -6265,13 +6266,16 @@ async function playerSessionResponse(player, req) {
       // Only to a client that has said it cannot hold the cookie. The cookie is
       // still set either way, so the web is unchanged.
       ...(wantsTokenAuth(req) ? { token: session.token } : {}),
-    }, 200, {
+    },
+    200,
+    {
       "Set-Cookie": playerCookieHeader(
         session.token,
         req,
         playerSessionDays * 24 * 60 * 60,
       ),
-    });
+    },
+  );
 }
 
 // --- Portal invites --------------------------------------------------------
@@ -8013,10 +8017,13 @@ export async function handlePublicBookingSlotsRequest(req, options = {}) {
     console.error("public_booking_slots_error", error);
     const status = error?.status || 500;
     metrics.status = status;
-    return json({
+    return json(
+      {
         error: error?.code === "service_required" ? "service_required" : status === 500 ? "public_booking_slots_error" : "request_error",
         message: error instanceof Error ? error.message : "Unknown public booking slots error",
-      }, status);
+      },
+      status,
+    );
   } finally {
     const durationMs = Date.now() - startedAt;
     console.info("public_booking_slots:timing", {
@@ -8379,13 +8386,16 @@ export async function handlePublicBookingRequest(req, context = null) {
   } catch (error) {
     console.error("public_booking:failed", error);
     const status = error?.status || 500;
-    return json({
+    return json(
+      {
         error: status === 500 ? "public_booking_error" : "request_error",
         message:
           error instanceof Error
             ? error.message
             : "Unknown public booking error",
-      }, status);
+      },
+      status,
+    );
   }
 }
 
@@ -8882,14 +8892,17 @@ export async function handlePublicRescheduleLookupRequest(req) {
   } catch (error) {
     console.error("public_reschedule_lookup:failed", error);
     const status = error?.status || 500;
-    return json({
+    return json(
+      {
         error:
           status === 500 ? "public_reschedule_lookup_error" : "request_error",
         message:
           error instanceof Error
             ? error.message
             : "Unknown public reschedule lookup error",
-      }, status);
+      },
+      status,
+    );
   }
 }
 
@@ -8911,13 +8924,16 @@ export async function handlePublicRescheduleRequest(req, context = null) {
   } catch (error) {
     console.error("public_reschedule:failed", error);
     const status = error?.status || 500;
-    return json({
+    return json(
+      {
         error: status === 500 ? "public_reschedule_error" : "request_error",
         message:
           error instanceof Error
             ? error.message
             : "Unknown public reschedule error",
-      }, status);
+      },
+      status,
+    );
   }
 }
 
@@ -9186,7 +9202,9 @@ async function routeBookingApiRequest(
       req.method === "POST" &&
       pathname === "/api/public-booking-notifications"
     ) {
-      return json(await triggerPublicBookingNotifications(await resolvePublicAccountId(req), await parseBody(req)));
+      return json(
+        await triggerPublicBookingNotifications(await resolvePublicAccountId(req), await parseBody(req)),
+      );
     }
 
     if (pathname.startsWith("/api/auth/")) {
@@ -9245,14 +9263,20 @@ async function routeBookingApiRequest(
           // Genuinely nothing to sign in to: a coach whose workspace was never
           // created, and not a player either. There is deliberately no default
           // account to fall back on.
-          return json({
+          return json(
+            {
               error: "membership_required",
               message: "This login is not attached to a business workspace yet.",
-            }, 403);
+            },
+            403,
+          );
         }
         const adminUserId = legacyUser?.id || authUserId;
         const session = await createAdminSession(adminUserId, authUserId);
-        return json(authSessionResponse({
+        return json(
+          // Wrapped so the union is checked here: an object literal in this
+          // file infers `role: string` and would accept anything.
+          authSessionResponse({
             authenticated: true,
             // The session vocabulary the app shell routes on -- NOT the
             // membership role, which is reported separately below.
@@ -9262,7 +9286,10 @@ async function routeBookingApiRequest(
             accountId: membership.accountId,
             expiresAt: session.expiresAt,
             workspace: await readWorkspaceBootstrap(membership),
-          }), 200, { "Set-Cookie": cookieHeader(session.token, req, 7 * 24 * 60 * 60) });
+          }),
+          200,
+          { "Set-Cookie": cookieHeader(session.token, req, 7 * 24 * 60 * 60) },
+        );
       }
 
       // No second player attempt here. It used to re-verify the same password
@@ -9274,10 +9301,13 @@ async function routeBookingApiRequest(
     if (req.method === "POST" && pathname === "/api/auth/forgot-password") {
       const emailConfigured = Boolean(env("RESEND_API_KEY"));
       if (!emailConfigured) {
-        return json({
+        return json(
+          {
             ok: false,
             message: "Password reset email is not configured yet.",
-          }, 503);
+          },
+          503,
+        );
       }
 
       await cleanupExpiredPasswordResets();
@@ -9296,10 +9326,13 @@ async function routeBookingApiRequest(
           req,
         );
         if (!emailResult.sent) {
-          return json({
+          return json(
+            {
               ok: false,
               message: "Could not send the reset email. Try again in a minute.",
-            }, 502);
+            },
+            502,
+          );
         }
       } else {
         // Not an admin, so try the player portal. This used to stop at the line
@@ -9324,10 +9357,13 @@ async function routeBookingApiRequest(
             })
           : null;
         if (playerReset && !playerReset.sent) {
-          return json({
+          return json(
+            {
               ok: false,
               message: "Could not send the reset email. Try again in a minute.",
-            }, 502);
+            },
+            502,
+          );
         }
       }
 
@@ -9345,13 +9381,19 @@ async function routeBookingApiRequest(
         body.password || "",
       );
       if (result.error === "weak_password") {
-        return json({ error: "weak_password", message: "Use at least 8 characters." }, 400);
+        return json(
+          { error: "weak_password", message: "Use at least 8 characters." },
+          400,
+        );
       }
       if (!result.user) {
-        return json({
+        return json(
+          {
             error: "invalid_token",
             message: "This reset link has expired or has already been used.",
-          }, 400);
+          },
+          400,
+        );
       }
       // Mint the session the same way the login route does: linked to the
       // Supabase identity and checked against a membership. Without the link
@@ -9362,23 +9404,30 @@ async function routeBookingApiRequest(
         ? await resolveMembershipForAuthUser(resetAuthUserId)
         : null;
       if (!resetMembership) {
-        return json(authSessionResponse({
+        return json(
+          authSessionResponse({
             authenticated: false,
             role: "guest",
             error: "membership_required",
             message:
               "Your password was changed, but this login is not attached to a business workspace yet.",
-          }), 403);
+          }),
+          403,
+        );
       }
       const session = await createAdminSession(result.user, resetAuthUserId);
-      return json(authSessionResponse({
+      return json(
+        authSessionResponse({
           authenticated: true,
           role: sessionRoleForMembership(resetMembership.role),
           accountRole: resetMembership.role,
           email: result.user.email,
           accountId: resetMembership.accountId,
           expiresAt: session.expiresAt,
-        }), 200, { "Set-Cookie": cookieHeader(session.token, req, 7 * 24 * 60 * 60) });
+        }),
+        200,
+        { "Set-Cookie": cookieHeader(session.token, req, 7 * 24 * 60 * 60) },
+      );
     }
 
     if (req.method === "POST" && pathname === "/api/auth/change-password") {
@@ -9388,7 +9437,10 @@ async function routeBookingApiRequest(
       const changeActor = await requireAdmin(req);
       const currentSession = await readAdminSession(sessionTokenFromRequest(req));
       if (!currentSession)
-        return json({ error: "unauthorized", message: "Admin login required." }, 401);
+        return json(
+          { error: "unauthorized", message: "Admin login required." },
+          401,
+        );
       const body = await parseBody(req);
       let result;
       try {
@@ -9404,38 +9456,54 @@ async function routeBookingApiRequest(
         // else is ours and goes to the normal error path.
         const status = Number((error as { status?: number })?.status);
         if (!(status >= 400 && status < 500)) throw error;
-        return json({
+        return json(
+          {
             error: "change_password_failed",
             message: error instanceof Error && error.message ? error.message : "Could not change password.",
-          }, 400);
+          },
+          400,
+        );
       }
       if (result.error === "weak_password") {
-        return json({ error: "weak_password", message: "Use at least 8 characters." }, 400);
+        return json(
+          { error: "weak_password", message: "Use at least 8 characters." },
+          400,
+        );
       }
       if (result.error === "invalid_current_password") {
-        return json({
+        return json(
+          {
             error: "invalid_current_password",
             message: "Current password is incorrect.",
-          }, 400);
+          },
+          400,
+        );
       }
       if (!result.user) {
-        return json({
+        return json(
+          {
             error: "change_password_failed",
             message: "Could not change password.",
-          }, 400);
+          },
+          400,
+        );
       }
       // The new session must carry the same Supabase identity the old one did,
       // or the coach is signed out in all but name: requireCoachActor would
       // find no auth_user_id and refuse every request.
       const session = await createAdminSession(result.user, changeActor.authUserId);
-      return json(authSessionResponse({
+      return json(
+        authSessionResponse({
           authenticated: true,
           role: sessionRoleForMembership(changeActor.role),
           accountRole: changeActor.role,
           email: result.user.email,
           accountId: changeActor.accountId,
           expiresAt: session.expiresAt,
-        }), 200, { "Set-Cookie": cookieHeader(session.token, req, 7 * 24 * 60 * 60) });
+        }),
+        200,
+        { "Set-Cookie": cookieHeader(session.token, req, 7 * 24 * 60 * 60) },
+      );
     }
 
     // Clears whichever session the browser is holding. A coach who is also a
@@ -9489,14 +9557,17 @@ async function routeBookingApiRequest(
           // renders as the sign-in screen. A non-2xx here is read as the
           // session API being down, which is a worse and less true story. Every
           // route that actually returns data still refuses with 403.
-          return json(authSessionResponse({
+          return json(
+            authSessionResponse({
               authenticated: false,
               role: "guest",
               error: "membership_required",
               message: "This login is not attached to a business workspace yet.",
-            }));
+            }),
+          );
         }
-        return json(authSessionResponse({
+        return json(
+          authSessionResponse({
             authenticated: true,
             role: sessionRoleForMembership(membership.role),
             accountRole: membership.role,
@@ -9510,7 +9581,8 @@ async function routeBookingApiRequest(
               ? { liveAccountId: membership.sandboxOfAccountId }
               : {}),
             workspace: await readWorkspaceBootstrap(membership),
-          }));
+          }),
+        );
       }
       const player = await readPlayerSession(playerSessionTokenFromRequest(req));
       if (player) {
@@ -9547,7 +9619,9 @@ async function routeBookingApiRequest(
       req.method === "POST" &&
       pathname === "/api/public-booking-notifications"
     ) {
-      return json(await triggerPublicBookingNotifications(await resolvePublicAccountId(req), await parseBody(req)));
+      return json(
+        await triggerPublicBookingNotifications(await resolvePublicAccountId(req), await parseBody(req)),
+      );
     }
 
     if (req.method === "GET" && pathname === "/api/public-diagnostics") {
@@ -9578,22 +9652,30 @@ async function routeBookingApiRequest(
     if (req.method === "GET" && pathname === "/api/portal/invite") {
       const token = new URL(req.url).searchParams.get("token") || "";
       const portalPlayer = await readPortalInvite(token);
-      return json(portalPlayer
+      return json(
+        portalPlayer
           ? { valid: true, email: portalPlayer.email }
-          : { valid: false, message: "That invite link has expired. Ask your coach to send a new one." });
+          : { valid: false, message: "That invite link has expired. Ask your coach to send a new one." },
+      );
     }
 
     if (req.method === "POST" && pathname === "/api/portal/set-password") {
       const body = await parseBody(req);
       const result = await completePortalInvite(body?.token || "", body?.password || "");
       if (result.error === "weak_password") {
-        return json({ error: "weak_password", message: "Use at least 10 characters." }, 400);
+        return json(
+          { error: "weak_password", message: "Use at least 10 characters." },
+          400,
+        );
       }
       if (result.error) {
-        return json({
+        return json(
+          {
             error: "invalid_token",
             message: "That invite link has expired. Ask your coach to send a new one.",
-          }, 400);
+          },
+          400,
+        );
       }
       return json({ ok: true, email: result.portalPlayer?.email || "" });
     }
@@ -9652,7 +9734,10 @@ async function routeBookingApiRequest(
         return json({ error: "unauthorized", message: "Player login required." }, 401);
       }
       if (!session.personId) {
-        return json({ error: "no_profile", message: "Your coach needs to finish setting up your profile." }, 409);
+        return json(
+          { error: "no_profile", message: "Your coach needs to finish setting up your profile." },
+          409,
+        );
       }
       const accountId = cleanSlug(session.accountId, "");
       if (!accountId) throw missingAccountScope("player_review");
@@ -9671,10 +9756,13 @@ async function routeBookingApiRequest(
         ),
       );
       if (!service) {
-        return json({
+        return json(
+          {
             error: "no_review_service",
             message: "Your coach does not offer video reviews yet.",
-          }, 409);
+          },
+          409,
+        );
       }
 
       // Which credit is being spent is named by the caller, but whether it may
@@ -9695,12 +9783,15 @@ async function routeBookingApiRequest(
         ? options.find((option) => option.passId === passId)
         : options[0];
       if (!chosen) {
-        return json({
+        return json(
+          {
             error: "payment_required",
             message: "You have no review credits left.",
             serviceId: service.id,
             price: service.price,
-          }, 402);
+          },
+          402,
+        );
       }
 
       const lessonId = newSwingReviewLessonId();
@@ -9753,13 +9844,16 @@ async function routeBookingApiRequest(
         });
       } catch (error) {
         console.error("player_review:credit_lost_race", accountId, bookingId, error);
-        return json({
+        return json(
+          {
             error: "credit_unavailable",
             message:
               "Your review was booked but the credit could not be taken. Your coach will sort it out.",
             bookingId,
             lessonId,
-          }, 409);
+          },
+          409,
+        );
       }
 
       if (notes) {
@@ -9803,10 +9897,13 @@ async function routeBookingApiRequest(
         return json({ error: "unauthorized", message: "Player login required." }, 401);
       }
       if (!session.personId) {
-        return json({
+        return json(
+          {
             error: "no_profile",
             message: "Your coach needs to finish setting up your profile before you can buy.",
-          }, 409);
+          },
+          409,
+        );
       }
       const accountId = cleanSlug(session.accountId, "");
       if (!accountId) throw missingAccountScope("player_checkout");
@@ -9954,7 +10051,10 @@ async function routeBookingApiRequest(
       const session = await readPlayerSession(playerSessionTokenFromRequest(req));
       if (!session) return json({ error: "unauthorized", message: "Player login required." }, 401);
       if (!session.personId) {
-        return json({ error: "no_profile", message: "Your coach needs to finish setting up your profile before you can join." }, 409);
+        return json(
+          { error: "no_profile", message: "Your coach needs to finish setting up your profile before you can join." },
+          409,
+        );
       }
       const accountId = cleanSlug(session.accountId, "");
       if (!accountId) throw missingAccountScope("player_memberships");
@@ -10077,11 +10177,14 @@ async function routeBookingApiRequest(
         // Paid for something the catalogue no longer sells. The money is real,
         // so this is a job for a human rather than a silent drop.
         console.error("player_checkout:item_gone", accountId, sessionId);
-        return json({
+        return json(
+          {
             ok: false,
             status: "needs_coach",
             message: "Your payment went through. Your coach will add this to your account.",
-          }, 202);
+          },
+          202,
+        );
       }
 
       const creditUsedCents = Math.max(0, Math.round(Number(paid.metadata?.credit_used_cents) || 0));
@@ -10188,10 +10291,13 @@ async function routeBookingApiRequest(
       const name = cleanString(body?.name, "", 180);
       const email = cleanEmail(body?.email, "");
       if (!name || !email) {
-        return json({
+        return json(
+          {
             error: "invalid",
             message: "Add your name and email so your coach knows who sent it.",
-          }, 400);
+          },
+          400,
+        );
       }
       // Resolved server-side from the validated public workspace, not from the
       // body: a body-supplied account would let anyone pick whose Drive they
@@ -10200,10 +10306,13 @@ async function routeBookingApiRequest(
       const accountId = await resolvePublicAccountId(req);
       await ensureGuestSendersTable();
       if ((await countGuestRegistrationsToday(accountId)) >= guestRegistrationsPerAccountPerDay) {
-        return json({
+        return json(
+          {
             error: "rate_limited",
             message: "Too many people are setting this up right now. Try again later.",
-          }, 429);
+          },
+          429,
+        );
       }
       const guest = await createGuestSender({
         name,
@@ -10212,11 +10321,14 @@ async function routeBookingApiRequest(
         accountId,
       });
       // The raw token is returned exactly once and never stored.
-      return json({
+      return json(
+        {
           ok: true,
           token: guest.token,
           guest: { id: guest.id, name: guest.name, email: guest.email },
-        }, 201);
+        },
+        201,
+      );
     }
 
     if (req.method === "GET" && pathname === "/api/guest/status") {
@@ -10305,11 +10417,14 @@ async function routeBookingApiRequest(
             durationMs,
           );
           console.error("lesson_complete_failed", diagnostics);
-          return json({
+          return json(
+            {
               error: diagnostics.errorCode,
               message: diagnostics.backendMessage,
               ...diagnostics,
-            }, diagnostics.httpStatus || 500);
+            },
+            diagnostics.httpStatus || 500,
+          );
         }
       }
       const current = await readCalendarState(await currentAccountId(req));
@@ -10332,7 +10447,10 @@ async function routeBookingApiRequest(
             httpStatus: 400,
             message: "Calendar item was invalid.",
           });
-          return json({ error: "BOOKING_UPSERT_INVALID_ITEM", message: "Calendar item was invalid." }, 400);
+          return json(
+            { error: "BOOKING_UPSERT_INVALID_ITEM", message: "Calendar item was invalid." },
+            400,
+          );
         }
         console.info("upsert_item_started", { ...timedDetails, httpStatus: 0 });
         try {
@@ -10503,7 +10621,8 @@ async function routeBookingApiRequest(
           console.error("BOOKING_DELETE_OWNERSHIP_VIOLATION", failure);
         }
         console.error(failure.errorCode === "BOOKING_DELETE_VERIFY_FAILED" ? "BOOKING_DELETE_VERIFY_FAILED" : "BOOKING_DELETE_FAILED", failure);
-        return json({
+        return json(
+          {
             error: failure.errorCode,
             message: deleteUserMessage(failure.operationOwner, failure.errorCode),
             detail: failure.backendMessage,
@@ -10511,7 +10630,9 @@ async function routeBookingApiRequest(
               code: failure.errorCode,
               ...failure,
             },
-          }, failure.httpStatus || 500);
+          },
+          failure.httpStatus || 500,
+        );
       }
     }
 
@@ -10545,7 +10666,8 @@ async function routeBookingApiRequest(
       const current = await readCalendarState(await currentAccountId(req));
       const requestContext = await resolveBackendRequestContext(req, current);
       assertAccountAdminContext(requestContext, "You do not have permission to rotate the calendar sync key.");
-      return json(publicCalendarState(
+      return json(
+        publicCalendarState(
           await writeCalendarState(requestContext.accountId, {
             ...current,
             syncKey:
@@ -10553,7 +10675,8 @@ async function routeBookingApiRequest(
                 ? body.syncKey
                 : generateSyncKey(),
           }),
-        ));
+        ),
+      );
     }
 
     if (req.method === "GET" && pathname === "/api/admin-settings") {
@@ -10601,10 +10724,13 @@ async function routeBookingApiRequest(
       assertAccountFeature(requestContext.account, "notifications");
       const recipient = cleanEmail(body.email, "");
       if (!recipient)
-        return json({
+        return json(
+          {
             error: "missing_email",
             message: "Enter an email address to send the test to.",
-          }, 400);
+          },
+          400,
+        );
       const services = state.services;
       const service =
         services.find((candidate) => candidate.active) || defaultServices[0];
@@ -10633,7 +10759,8 @@ async function routeBookingApiRequest(
       const missingResendKey = results.some(
         (result) => result.reason === "missing_resend_key",
       );
-      return json({
+      return json(
+        {
           ok: sent,
           results,
           message: sent
@@ -10641,7 +10768,9 @@ async function routeBookingApiRequest(
             : missingResendKey
               ? "Test email could not be sent because the Resend API key is missing in production."
               : "Test email could not be sent. Check Resend settings.",
-        }, sent ? 200 : 502);
+        },
+        sent ? 200 : 502,
+      );
     }
 
     // Who the coach can become. Sandbox only, and only their own sandbox --
@@ -10714,7 +10843,11 @@ async function routeBookingApiRequest(
         lifetimeMs: 2 * 60 * 60 * 1000,
       });
 
-      return json({ ok: true, viewingAs: cleanString(person.name, "", 180) }, 200, { "Set-Cookie": playerCookieHeader(session.token, req, 2 * 60 * 60) });
+      return json(
+        { ok: true, viewingAs: cleanString(person.name, "", 180) },
+        200,
+        { "Set-Cookie": playerCookieHeader(session.token, req, 2 * 60 * 60) },
+      );
     }
 
     // Does this business have a sandbox, and is this session in it?
@@ -10843,7 +10976,10 @@ async function routeBookingApiRequest(
       }
 
       if (!inSandbox) {
-        return json({ error: "sandbox_required", message: "Custom presets are saved from inside the sandbox." }, 403);
+        return json(
+          { error: "sandbox_required", message: "Custom presets are saved from inside the sandbox." },
+          403,
+        );
       }
 
       if (req.method === "POST" && pathname === "/api/market-profile/presets") {
@@ -11739,7 +11875,10 @@ async function readPassInbox(accountId: string, services) {
       const templateServiceId = cleanString(body?.templateServiceId, "", 120);
       const template = templates.find((entry) => entry.serviceId === templateServiceId);
       if (!template) {
-        return json({ error: "invalid", message: "Pick which package this sale was, so the credits are right." }, 400);
+        return json(
+          { error: "invalid", message: "Pick which package this sale was, so the credits are right." },
+          400,
+        );
       }
 
       const quantity = sale.quantity;
@@ -11864,12 +12003,15 @@ async function readPassInbox(accountId: string, services) {
         return json({ error: "already_reversed", message: "That credit has already been returned." }, 409);
       }
       if (redemption.booking_id) {
-        return json({
+        return json(
+          {
             error: "booking_backed",
             message:
               "That credit paid for a lesson. Cancel the lesson to hand it back, " +
               "so the booking stops showing as paid at the same time.",
-          }, 409);
+          },
+          409,
+        );
       }
 
       await reversePassRedemption(
@@ -11971,11 +12113,14 @@ async function readPassInbox(accountId: string, services) {
 	      assertAccountAdminContext(requestContext, "You do not have permission to import clients.");
 	      assertAccountFeature(requestContext.account, "clients");
       const result = await importPeople(body.people || body.clients || [], body.source || "manual_import", requestContext.accountId);
-	      return json({
+	      return json(
+        {
           ok: true,
           ...result,
           people: filterPeopleForContext(result.people, requestContext, state),
-        }, 201);
+        },
+        201,
+      );
 	    }
 
     if (req.method === "PUT" && pathname === "/api/people") {
@@ -12020,7 +12165,10 @@ async function readPassInbox(accountId: string, services) {
       const survivorRow = knownPeople.find((person) => person.id === survivorId);
       const loserRow = knownPeople.find((person) => person.id === loserId);
       if (!survivorRow || !loserRow) {
-        return json({ error: "PEOPLE_MERGE_NOT_FOUND", message: "One of the selected clients could not be found." }, 404);
+        return json(
+          { error: "PEOPLE_MERGE_NOT_FOUND", message: "One of the selected clients could not be found." },
+          404,
+        );
       }
       assertCanManagePerson(requestContext, survivorRow, state);
       assertCanManagePerson(requestContext, loserRow, state);
@@ -12070,7 +12218,8 @@ async function readPassInbox(accountId: string, services) {
       details?: unknown;
     };
     const status = anyError?.status || 500;
-    return json({
+    return json(
+      {
         error: anyError?.code || (status === 500 ? "booking_api_error" : "request_error"),
         message:
           error instanceof Error ? error.message : "Unknown booking API error",
@@ -12082,6 +12231,8 @@ async function readPassInbox(accountId: string, services) {
         ...(anyError?.personId ? { personId: anyError.personId } : {}),
         ...(anyError?.email ? { email: anyError.email } : {}),
         ...(anyError?.details !== undefined ? { details: anyError.details } : {}),
-      }, status);
+      },
+      status,
+    );
   }
 }

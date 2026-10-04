@@ -149,10 +149,13 @@ export default async (req: Request, context: Context) => {
     await assertRescheduleIsFuture(req);
   } catch (error: any) {
     const status = error?.status || 400;
-    return json({
+    return json(
+      {
         error: "request_error",
         message: error instanceof Error ? error.message : "Choose a future appointment time.",
-      }, status);
+      },
+      status,
+    );
   }
 
   return handlePublicRescheduleRequest(req, context);

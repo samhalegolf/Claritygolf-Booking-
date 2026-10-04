@@ -3,6 +3,7 @@ import { requireCoachActor } from "./_shared/coach-auth.mts";
 import { trimmedEnv } from "./_shared/values.mts";
 import { json } from "./_shared/http.mts";
 
+
 /**
  * The old check proved a session row existed and nothing more, while the query
  * below read every business's Optix bookings -- client names included.
@@ -36,10 +37,13 @@ export default async function handler(req: Request) {
   } catch (error) {
     const status = (error as { status?: number })?.status;
     if (status === 401 || status === 403) {
-      return json({
+      return json(
+        {
           error: (error as { code?: string })?.code || "unauthorized",
           message: error instanceof Error ? error.message : "Admin login required.",
-        }, status);
+        },
+        status,
+      );
     }
     return json({ error: "origin_status_failed", message: error instanceof Error ? error.message : "Unable to read Optix records." }, 500);
   }

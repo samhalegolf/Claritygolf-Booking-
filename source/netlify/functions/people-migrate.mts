@@ -6,6 +6,7 @@ import { requireCoachActor } from "./_shared/coach-auth.mts";
 import { cleanString } from "./_shared/values.mts";
 import { json } from "./_shared/http.mts";
 
+
 async function parseBody(req: Request) {
   const raw = await req.text();
   return raw ? JSON.parse(raw) : {};
@@ -16,7 +17,11 @@ function cleanPerson(person: any, source = "client_migration") {
   const joinedName = [person.firstName, person.lastName]
     .filter(Boolean)
     .join(" ");
-  const name = cleanString(person.name || joinedName || person.client || person.title, "", 180);
+  const name = cleanString(
+    person.name || joinedName || person.client || person.title,
+    "",
+    180,
+  );
   const email = cleanString(person.email, "", 180).toLowerCase();
   if (!name && !email) return null;
   return {
@@ -26,8 +31,16 @@ function cleanPerson(person: any, source = "client_migration") {
     phone: cleanString(person.phone, "", 80),
     notes: cleanString(person.notes || person.note, "", 1200),
     source: cleanString(person.source, source, 80),
-    caddyProfileId: cleanString(person.caddyProfileId || person.caddyId, "", 120),
-    caddyProfileUrl: cleanString(person.caddyProfileUrl || person.caddyUrl, "", 600),
+    caddyProfileId: cleanString(
+      person.caddyProfileId || person.caddyId,
+      "",
+      120,
+    ),
+    caddyProfileUrl: cleanString(
+      person.caddyProfileUrl || person.caddyUrl,
+      "",
+      600,
+    ),
   };
 }
 
@@ -206,19 +219,25 @@ export default async (req: Request, _context: Context) => {
   } catch (error) {
     const status = (error as { status?: number })?.status;
     if (status === 401 || status === 403) {
-      return json({
+      return json(
+        {
           error: (error as { code?: string })?.code || "unauthorized",
           message: error instanceof Error ? error.message : "Admin login required.",
-        }, status);
+        },
+        status,
+      );
     }
     console.error("people_migrate_failed", error);
-    return json({
+    return json(
+      {
         error: "people_migrate_failed",
         message:
           error instanceof Error
             ? error.message
             : "Unknown client migration error",
-      }, 500);
+      },
+      500,
+    );
   }
 };
 

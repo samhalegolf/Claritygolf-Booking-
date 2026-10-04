@@ -216,10 +216,13 @@ export default async function handler(req: Request) {
   } catch (error) {
     const status = Number((error as { status?: number })?.status) || 500;
     if (status >= 500) console.error("memberships:failed", path, error);
-    return json({
+    return json(
+      {
         error: (error as { code?: string })?.code || "failed",
         message: status >= 500 && status !== 502 && status !== 503 ? "Something went wrong." : (error as Error).message,
-      }, status);
+      },
+      status,
+    );
   }
 }
 

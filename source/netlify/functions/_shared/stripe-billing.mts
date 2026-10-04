@@ -1,4 +1,15 @@
-
+// Stripe → billing tables sync (shared logic).
+//
+// Mirrors Stripe invoices and products into billing_invoices /
+// billing_invoice_items / billing_products_services. Used by
+// stripe-billing-sync.mts (admin backfill endpoint) and
+// stripe-billing-webhook.mts (live Stripe events).
+//
+// Follows billing-api.mts's protected rules: owns nothing outside the billing
+// tables, and keeps its own Supabase REST helper rather than importing the
+// local-db shim. Stripe rows are keyed by their Stripe ids (in_/il_/prod_...),
+// which keeps every sync idempotent and never collides with the app's own
+// randomUUID invoice ids.
 
 function round2(value: number) {
   return Math.round((Number(value) || 0) * 100) / 100;

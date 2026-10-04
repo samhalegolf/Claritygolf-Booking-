@@ -327,10 +327,13 @@ export default async function handler(req: Request) {
     });
   } catch (error) {
     console.error("public_calendar_invite:failed", error);
-    return json({
+    return json(
+      {
         error: "public_calendar_invite_error",
         message: error instanceof Error ? error.message : "Calendar invite could not be created.",
-      }, 500);
+      },
+      500,
+    );
   }
 }
 

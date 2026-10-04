@@ -68,6 +68,23 @@ import { cleanPhoneCountry } from "./_shared/phone.mts";
 import { cleanString, cleanText, env, nowIso } from "./_shared/values.mts";
 import { json } from "./_shared/http.mts";
 
+// Billing is a new, isolated top-level app section. This function owns its
+// own tables (billing_products_services, billing_invoices,
+// billing_invoice_items, billing_booking_invoice_links) and its own Supabase
+// REST helper below. It deliberately does not import booking-core.mts or the
+// local-db adapter: it reads calendar_items (completed bookings) and the
+// shared settings table directly and read-only, and otherwise must not
+// depend on booking/calendar code, per the billing build plan's "protected
+// rules" (billing may read completed bookings/account settings, but does not
+// own booking creation, completion, or calendar state).
+//
+// _shared/passes.mts is the one exception, and it does not breach that rule:
+// the pass tables are not billing's and not booking's, and this file never
+// touches them except through that module. A sale settled by a pass has to take
+// the credit and write the receipt as one decision, so something has to know
+// both -- and the alternative, teaching the pass engine to write into
+// billing_pos_transactions, would put billing's tables in someone else's hands.
+
 // A calendar date on its way into a DATE column. Anything that isn't an actual
 // yyyy-mm-dd becomes null rather than reaching Postgres and 400-ing the whole
 // save - these fields are optional, so a bad one should drop, not block.
@@ -5911,13 +5928,16 @@ export default async function handler(req: Request) {
     console.error("billing_api:failed", action, error);
     const status = Number((error as { status?: unknown })?.status);
     const httpStatus = Number.isInteger(status) && status >= 400 && status <= 599 ? status : 500;
-    return json({
+    return json(
+      {
         error: (error as { code?: string })?.code || "billing_api_error",
         message: error instanceof Error ? error.message : "Billing request failed.",
         // Structured detail a caller can act on rather than only display - the
         // booking/invoice conflicts behind a 409, for one.
         ...((error as { details?: Record<string, unknown> })?.details || {}),
-      }, httpStatus);
+      },
+      httpStatus,
+    );
   }
 }
 
