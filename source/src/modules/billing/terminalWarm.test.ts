@@ -53,7 +53,7 @@ Object.assign(globalThis, {
   },
 });
 
-const { connectThisIphone, keepTapToPayWarm } = await import("./terminal");
+const { connectThisPhone, keepTapToPayWarm } = await import("./terminal");
 const settle = () => new Promise((resolve) => setTimeout(resolve, 40));
 
 test("a phone never set up is not connected behind the coach's back", async () => {
@@ -64,7 +64,7 @@ test("a phone never set up is not connected behind the coach's back", async () =
 });
 
 test("once set up, it connects on open and again on coming back to the app", async () => {
-  await connectThisIphone("loc-1");
+  await connectThisPhone("loc-1");
   prepares.length = 0;
   const stop = keepTapToPayWarm();
   await settle();
@@ -78,6 +78,6 @@ test("once set up, it connects on open and again on coming back to the app", asy
 
 test("connections asked for together run one at a time", async () => {
   maxInFlight = 0;
-  await Promise.all([connectThisIphone("loc-1"), connectThisIphone("loc-1"), connectThisIphone("loc-1")]);
+  await Promise.all([connectThisPhone("loc-1"), connectThisPhone("loc-1"), connectThisPhone("loc-1")]);
   assert.equal(maxInFlight, 1);
 });

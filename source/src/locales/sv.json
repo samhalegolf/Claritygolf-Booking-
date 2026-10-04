@@ -4433,5 +4433,12 @@
   "Clarity Cloud isn't connected. Choose a folder on this computer for My Library, or connect Clarity Cloud.": "Clarity Cloud är inte anslutet. Välj en mapp på den här datorn för My Library, eller anslut Clarity Cloud.",
   "Reconnect folder and save": "Anslut mappen igen och spara",
   "Choose folder and save": "Välj mapp och spara",
-  "Save on this device": "Spara på den här enheten"
+  "Save on this device": "Spara på den här enheten",
+  "Customer taps their card on this phone. The QR is there if they'd rather.": "Kunden blippar sitt kort mot den här telefonen. QR-koden finns där om de hellre vill använda den.",
+  "Take contactless cards, Google Pay and other digital wallets on this phone. No extra hardware. Set it up once here, before your first sale, so this phone is ready when a customer is waiting.": "Ta emot kontaktlösa kort, Google Pay och andra digitala plånböcker på den här telefonen. Ingen extra hårdvara. Ställ in det här en gång, före din första försäljning, så att telefonen är redo när en kund väntar.",
+  "This phone is ready for Tap to Pay.": "Den här telefonen är redo för Tap to Pay.",
+  "Set up this phone": "Ställ in den här telefonen",
+  "The customer holds their card, phone or watch flat against the back of this phone and keeps it there until it confirms.": "Kunden håller kortet, telefonen eller klockan plant mot baksidan av den här telefonen tills betalningen bekräftas.",
+  "Hold card or phone against the back of this phone.": "Håll kortet eller telefonen mot baksidan av den här telefonen.",
+  "This phone cannot take Tap to Pay.": "Den här telefonen kan inte använda Tap to Pay."
 }

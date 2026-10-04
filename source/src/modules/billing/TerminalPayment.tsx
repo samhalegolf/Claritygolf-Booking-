@@ -1,4 +1,4 @@
-// Taking the card part of a sale by Tap to Pay on this iPhone.
+// Taking the card part of a sale by Tap to Pay on this phone (iPhone or Android).
 //
 // Shared by the checkout modal and the Sell screen. The sale already exists and
 // is pending on Clarity Pay; this only collects the card. Whatever happens, the
@@ -10,10 +10,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, CircleHelp, Loader2, Nfc, QrCode, RotateCcw, X } from "lucide-react";
-import { nativeTerminal } from "../../native/clarityTerminal";
+import { nativeTerminal, onAndroid } from "../../native/clarityTerminal";
 import {
   canRetry,
-  connectThisIphone,
+  connectThisPhone,
   defaultTerminalLocationId,
   saveTerminalLocation,
   showHowToTap,
@@ -44,8 +44,9 @@ export type TerminalPaymentProps = {
 
 /**
  * Apple's "How to Tap" guide, which Apple requires the app to offer. On an
- * iPhone before iOS 18 Apple has no guide to show, so the same words are given
- * here instead.
+ * iPhone before iOS 18, and on Android, there is no system guide to show, so
+ * the same words are given here instead. An Android phone's tap spot is on its
+ * back, not its top.
  */
 export function HowToTap() {
   const [fallback, setFallback] = useState(false);
@@ -59,7 +60,9 @@ export function HowToTap() {
         <CircleHelp size={15} />{" "}{t("How to tap")}</button>
       {fallback && (
         <p className="field-help">
-          {t("The customer holds their card, phone or watch flat against the top of this iPhone and keeps it there until the check mark shows.")}
+          {onAndroid()
+            ? t("The customer holds their card, phone or watch flat against the back of this phone and keeps it there until it confirms.")
+            : t("The customer holds their card, phone or watch flat against the top of this iPhone and keeps it there until the check mark shows.")}
         </p>
       )}
     </>
@@ -133,7 +136,7 @@ export function TerminalPayment({
     setState({ kind: "connecting" });
     let started;
     try {
-      await connectThisIphone(locationId);
+      await connectThisPhone(locationId);
       started = await terminalApi.start(transactionId, locationId);
     } catch (error) {
       // Nothing has been tapped yet, so nothing can have been charged.
@@ -284,7 +287,9 @@ export function TerminalPayment({
       {state.kind === "ready_to_tap" && (
         <>
           <p className="pos-tap-title">{t("Ready to tap")}</p>
-          <p className="field-help">{t("Hold card or phone near the top of this iPhone.")}</p>
+          <p className="field-help">
+            {onAndroid() ? t("Hold card or phone against the back of this phone.") : t("Hold card or phone near the top of this iPhone.")}
+          </p>
         </>
       )}
       {state.kind === "reading" && <p className="pos-tap-title">{state.message}</p>}

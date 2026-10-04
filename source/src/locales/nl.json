@@ -4433,5 +4433,12 @@
   "Clarity Cloud isn't connected. Choose a folder on this computer for My Library, or connect Clarity Cloud.": "Clarity Cloud is niet gekoppeld. Kies een map op deze computer voor My Library, of koppel Clarity Cloud.",
   "Reconnect folder and save": "Map opnieuw koppelen en opslaan",
   "Choose folder and save": "Map kiezen en opslaan",
-  "Save on this device": "Opslaan op dit apparaat"
+  "Save on this device": "Opslaan op dit apparaat",
+  "Customer taps their card on this phone. The QR is there if they'd rather.": "De klant houdt zijn kaart tegen deze telefoon. De QR-code is er als de klant dat liever heeft.",
+  "Take contactless cards, Google Pay and other digital wallets on this phone. No extra hardware. Set it up once here, before your first sale, so this phone is ready when a customer is waiting.": "Accepteer contactloze kaarten, Google Pay en andere digitale wallets op deze telefoon. Geen extra hardware. Stel het hier één keer in, vóór je eerste verkoop, zodat deze telefoon klaar is als er een klant wacht.",
+  "This phone is ready for Tap to Pay.": "Deze telefoon is klaar voor Tap to Pay.",
+  "Set up this phone": "Deze telefoon instellen",
+  "The customer holds their card, phone or watch flat against the back of this phone and keeps it there until it confirms.": "De klant houdt de kaart, telefoon of watch plat tegen de achterkant van deze telefoon tot de betaling is bevestigd.",
+  "Hold card or phone against the back of this phone.": "Houd kaart of telefoon tegen de achterkant van deze telefoon.",
+  "This phone cannot take Tap to Pay.": "Deze telefoon ondersteunt Tap to Pay niet."
 }

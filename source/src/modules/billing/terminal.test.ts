@@ -16,6 +16,7 @@ import {
   posMethodLabel,
   stateAfterCollect,
   stateFromServer,
+  tapToPayName,
   tenderLabel,
 } from "./terminal";
 import type { PosTransaction } from "./types";
@@ -92,4 +93,16 @@ test("only QR and Tap to Pay sales are refunded to a card", () => {
 test("the card gets back the sale less the voucher part", () => {
   assert.equal(cardRefundAmount({ amount: 120, couponAmount: 50 }), 70);
   assert.equal(cardRefundAmount({ amount: 80.1, couponAmount: 0 }), 80.1);
+});
+
+test("the method is named for the phone it runs on", () => {
+  const global = globalThis as { Capacitor?: unknown };
+  try {
+    global.Capacitor = { getPlatform: () => "ios" };
+    assert.equal(tapToPayName(), "Tap to Pay on iPhone");
+    global.Capacitor = { getPlatform: () => "android" };
+    assert.equal(tapToPayName(), "Tap to Pay");
+  } finally {
+    delete global.Capacitor;
+  }
 });

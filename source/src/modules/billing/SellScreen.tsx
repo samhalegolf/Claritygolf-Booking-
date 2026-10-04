@@ -57,7 +57,7 @@ import { catalogTiles, offTabMatchCount } from "./catalogSearch";
 import type { SellLine } from "./stockMath";
 import { postPosJson, renderQrSvg, usePosPaymentPoll } from "./posCheckoutPoll";
 import { TerminalPayment } from "./TerminalPayment";
-import { tenderLabel, useTapToPay, type PosTender, type TapState } from "./terminal";
+import { tapToPayName, tenderLabel, useTapToPay, type PosTender, type TapState } from "./terminal";
 import { t, tn } from "../../lib/i18n";
 
 export type SellScreenProps = {
@@ -187,7 +187,7 @@ export function SellScreen({
   const [openLessonGroups, setOpenLessonGroups] = useState<string[]>([]);
 
   // Payment overlay. "closed" -> "method" -> ("coupon" to confirm a part
-  // payment, "cash" for tendering) -> ("tap" on the staff iPhone app, else
+  // payment, "cash" for tendering) -> ("tap" in the staff app, else
   // "qr") -> "done".
   const [payStage, setPayStage] = useState<"closed" | "method" | "coupon" | "cash" | "tap" | "qr" | "done">("closed");
   const tapToPay = useTapToPay();
@@ -1162,7 +1162,7 @@ export function SellScreen({
                   <a className="outline-button" href={checkoutUrl} target="_blank" rel="noreferrer noopener">
                     <ExternalLink size={15} />{" "}{t("Pay on this device")}</a>
                   {tapToPay.ready && (
-                    <button className="outline-button" disabled={busy} onClick={() => setPayStage("tap")} type="button">{t("Tap to Pay on iPhone")}</button>
+                    <button className="outline-button" disabled={busy} onClick={() => setPayStage("tap")} type="button">{tapToPayName()}</button>
                   )}
                 </div>
               </>
