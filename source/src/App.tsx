@@ -78,6 +78,7 @@ import {
 } from "./modules/shared/ClarityIcons";
 import type { IconComponent } from "./modules/shared/ClarityIcons";
 import { isPhoneLayout, usePhoneLayout } from "./modules/phone/phoneLayout";
+import { type PhoneStep, PhoneStepSwipe } from "./modules/phone/PhoneStepSwipe";
 import { type PhoneDestination, PhoneTabBar } from "./modules/phone/PhoneTabBar";
 import { QuickBookScreen } from "./modules/quick-book/QuickBookScreen";
 import { quickBookSlots } from "./modules/quick-book/quickBookModel";
@@ -2260,6 +2261,10 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   }, [activeView, authStatus, people.length]);
 
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("none");
+  // The section last open in each menu, for the phone's swipe forward.
+  const lastSettingsSectionRef = useRef<SettingsTab>("none");
+  const lastBillingSectionRef = useRef<BillingSection>("none");
+  const mainPanelRef = useRef<HTMLElement>(null);
   // Products first: adding something you sell is the most common reason to open
   // Billing, and it is the one screen that is useless if you have to find it.
   const [billingSection, setBillingSection] = useState<BillingSection>(() =>
@@ -16863,15 +16868,32 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
    * over a screen (popovers, sheets, overlays) close with their own X, which
    * is sized for a thumb on a phone.
    */
-  const phoneBackStep: (() => void) | null = !phoneLayout
+  const phoneBackStep: PhoneStep | null = !phoneLayout
     ? null
     : activeView === "settings" && settingsTab !== "none" && workspaceOverlay?.kind !== "settings"
-      ? () => switchSettingsTab("none")
+      ? { label: t("Settings"), go: () => switchSettingsTab("none") }
       : activeView === "billing" && billingSection !== "none" && workspaceOverlay?.kind !== "billing"
-        ? () => setBillingSection("none")
+        ? { label: t("Billing"), go: () => setBillingSection("none") }
         : activeView === "book" && quickCreate
-          ? () => setQuickCreate(null)
+          ? { label: t("Book"), go: () => setQuickCreate(null) }
           : null;
+  // And forward, for the swipe only: from a menu, back into the section you
+  // last had open there. A new invoice is never reopened this way -- it would
+  // start another one.
+  if (settingsTab !== "none") lastSettingsSectionRef.current = settingsTab;
+  if (billingSection !== "none" && billingSection !== "new-invoice") lastBillingSectionRef.current = billingSection;
+  const lastSettingsSection = lastSettingsSectionRef.current;
+  const lastBillingSection = lastBillingSectionRef.current;
+  const phoneForwardStep: PhoneStep | null = !phoneLayout
+    ? null
+    : activeView === "settings" && settingsTab === "none" && lastSettingsSection !== "none"
+      ? {
+          label: settingsSections.find((section) => section.key === lastSettingsSection)?.label ?? t("Settings"),
+          go: () => switchSettingsTab(lastSettingsSection),
+        }
+      : activeView === "billing" && billingSection === "none" && lastBillingSection !== "none"
+        ? { label: billingSectionLabel(lastBillingSection), go: () => switchBillingSection(lastBillingSection) }
+        : null;
 
   // Browser Back moves between the screens the coach has actually been on,
   // rather than leaving the app: it closes whatever is open over the workspace
@@ -17474,14 +17496,17 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
       </nav>
     </aside>
 
-      <main className="main-panel">
+      <main
+        ref={mainPanelRef}
+        className={`main-panel${phoneBackStep ? " has-paper-under" : ""}${phoneForwardStep ? " has-paper-ahead" : ""}`}
+      >
         {/* Video analysis is the one destination that brings its own header
             and its own way back, so the global one would sit on top of it. */}
         {activeView !== "video" && (
         <header className="topbar">
           <div className={phoneBackStep ? "topbar-title has-back" : "topbar-title"}>
             {phoneBackStep ? (
-              <button type="button" className="phone-back-button" onClick={phoneBackStep} aria-label={t("Back")}>
+              <button type="button" className="phone-back-button" onClick={phoneBackStep.go} aria-label={t("Back")}>
                 <ArrowLeft size={22} />
               </button>
             ) : null}
@@ -23963,6 +23988,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
           </WorkspaceSurface>
         )}
       </main>
+      {phoneLayout && <PhoneStepSwipe panelRef={mainPanelRef} back={phoneBackStep} forward={phoneForwardStep} />}
       {phoneLayout && <PhoneTabBar tabs={phoneTabs} more={phoneMore} />}
 
       {adminWorkspaceReady && activeView === "calendar" && selectedDetails && (

@@ -17242,6 +17242,79 @@ button {
   height: 44px;
 }
 
+/* ---- The paper stack (PhoneStepSwipe.tsx) ---------------------------------
+   A page you stepped into is a sheet lying on the one it came from. The sheet
+   underneath shows as a strip down the left; a page you can swipe forward to
+   shows as a strip down the right. Swiping slides the top sheet off (Back) or
+   brings the next one in over it (Forward).
+
+   The sheets are fixed at z-index -1 and the page simply paints over them, so
+   the page is not made a stacking context: modals inside it still sit above
+   the tab bar. That needs the shell's own fill moved off it on a phone, or it
+   would paint over the sheets too. */
+.app-shell.is-phone {
+  background: transparent;
+}
+
+.app-shell.is-phone .main-panel {
+  min-height: 100dvh;
+  background: var(--page);
+  transition:
+    margin 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.app-shell.is-phone .main-panel.has-paper-under {
+  margin-left: 10px;
+  box-shadow:
+    -1px 0 0 var(--border),
+    -6px 0 14px rgba(0, 0, 0, 0.08);
+}
+
+.app-shell.is-phone .main-panel.has-paper-ahead {
+  margin-right: 10px;
+  box-shadow:
+    1px 0 0 var(--border),
+    6px 0 14px rgba(0, 0, 0, 0.08);
+}
+
+.phone-paper,
+.phone-paper-edge {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  z-index: -1;
+}
+
+/* Two sheets deep: a thin one at the very edge, then the page you came from. */
+.phone-paper {
+  left: 0;
+  right: 0;
+  padding: max(28px, env(safe-area-inset-top)) 28px 0;
+  background: linear-gradient(to right, var(--panel-soft) 0 4px, var(--border) 4px 5px, var(--page) 5px);
+}
+
+.phone-paper strong {
+  display: block;
+  color: var(--text);
+  font-size: 30px;
+  font-weight: 800;
+  opacity: 0.45;
+}
+
+.phone-paper.is-incoming {
+  z-index: 1;
+  background: var(--page);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.16);
+  will-change: transform;
+}
+
+.phone-paper-edge.is-right {
+  right: 0;
+  width: 10px;
+  background: linear-gradient(to left, var(--panel-soft) 0 4px, var(--border) 4px 5px, var(--page) 5px);
+}
+
 .app-shell.is-phone .toast {
   bottom: calc(76px + env(safe-area-inset-bottom));
 }
