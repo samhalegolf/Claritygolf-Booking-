@@ -39,6 +39,7 @@ import {
   isScheduledGroupService,
   Service,
 } from "../services/serviceModel";
+import { isPhoneLayout } from "../phone/phoneLayout";
 import { ClarityProfile } from "../shared/ClarityIcons";
 import type { Toast } from "../shared/toast";
 import type { CalendarState } from "./useCalendarState";
@@ -1198,19 +1199,20 @@ export function useCalendarController(app: CalendarControllerInputs) {
 
   function quickCreatePopoverStyle(): CSSProperties {
     if (!quickCreate) return {};
+    const zIndex = selectedGroupSession ? 120 : undefined;
+    // A phone gets a sheet along the bottom, above the tab bar, wherever the
+    // tap was: the stylesheet places it (.app-shell.is-phone .quick-create).
+    if (isPhoneLayout()) return { zIndex };
     const viewport = window.visualViewport;
     const viewportWidth = viewport?.width ?? window.innerWidth;
     const viewportHeight = viewport?.height ?? window.innerHeight;
     const margin = 12;
-    const compact = viewportWidth <= 680;
     const availableWidth = Math.max(280, viewportWidth - margin * 2);
     const availableHeight = Math.max(280, viewportHeight - margin * 2);
-    const popoverWidth = Math.min(compact ? availableWidth : 340, availableWidth);
-    const estimatedHeight = quickCreateService ? (compact ? 620 : 560) : 360;
+    const popoverWidth = Math.min(340, availableWidth);
+    const estimatedHeight = quickCreateService ? 560 : 360;
     const usableHeight = Math.min(estimatedHeight, availableHeight);
-    const left = compact
-      ? margin
-      : clamp(quickCreate.x + 10, margin, Math.max(margin, viewportWidth - popoverWidth - margin));
+    const left = clamp(quickCreate.x + 10, margin, Math.max(margin, viewportWidth - popoverWidth - margin));
     const top = clamp(quickCreate.y + 10, margin, Math.max(margin, viewportHeight - usableHeight - margin));
 
     return {
@@ -1218,7 +1220,7 @@ export function useCalendarController(app: CalendarControllerInputs) {
       top,
       width: popoverWidth,
       maxHeight: availableHeight,
-      zIndex: selectedGroupSession ? 120 : undefined,
+      zIndex,
     };
   }
 

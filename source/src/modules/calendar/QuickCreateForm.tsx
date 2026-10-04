@@ -1,11 +1,16 @@
-import { ArrowLeft, Check, Plus, Search, X } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, Plus, Search, X } from "lucide-react";
+import { useState } from "react";
 import { t } from "../../lib/i18n";
 import { formatMoney } from "../../lib/money";
+import { usePhoneLayout } from "../phone/phoneLayout";
 import { customGroupMaxParticipants } from "../services/serviceModel";
 import { ClarityProfile, ClaritySessions } from "../shared/ClarityIcons";
 import { locationById } from "../workspace/workspaceModel";
 import { bookingCoachSnapshotFor, type CalendarItem, customGroupStatusLabel } from "./calendarModel";
 import type { CalendarController } from "./useCalendarController";
+
+/** How many lesson types a phone sheet lists before "more". */
+const PHONE_SERVICE_COUNT = 3;
 
 /**
  * Making a booking at a time already picked: the lesson type first, then who
@@ -50,7 +55,14 @@ export function QuickCreateForm({
     updateQuickCreateAttendeeDraft,
     addQuickCreateCustomGroupAttendee,
   } = calendar;
+  const phoneLayout = usePhoneLayout();
+  const [showAllServices, setShowAllServices] = useState(false);
   if (!quickCreate) return null;
+
+  // A phone sheet holds the first few lesson types; the rest are one tap away
+  // rather than pushing the sheet up over the time that was tapped.
+  const shortList = phoneLayout && !showAllServices && quickCreateServices.length > PHONE_SERVICE_COUNT + 1;
+  const listedServices = shortList ? quickCreateServices.slice(0, PHONE_SERVICE_COUNT) : quickCreateServices;
 
   function submit() {
     const created = confirmQuickAppointment();
@@ -59,7 +71,7 @@ export function QuickCreateForm({
 
   return !quickCreateService ? (
     <>
-      {quickCreateServices.map((service) => (
+      {listedServices.map((service) => (
         <button key={service.id} onClick={() => selectQuickService(service.id)}>
           <Plus size={16} />
           <span>
@@ -68,18 +80,27 @@ export function QuickCreateForm({
           </span>
         </button>
       ))}
+      {shortList ? (
+        <button className="quick-create-more" onClick={() => setShowAllServices(true)} type="button">
+          <ChevronDown size={16} />
+          {t("More")}
+          <em>{quickCreateServices.length - PHONE_SERVICE_COUNT}</em>
+        </button>
+      ) : null}
+      {/* Blocking time out is the odd one out here, so it is a slim row under
+          the lesson types rather than another card the same size as them. */}
       {!allowBlocks ? null : effectiveCalendarPerspective === "location" ? (
         <>
-          <button onClick={() => createBlockFromQuick("location")}>
-            <ClaritySessions size={16} />{t("Block this location")}</button>
+          <button className="quick-create-block" onClick={() => createBlockFromQuick("location")}>
+            <ClaritySessions size={14} />{t("Block this location")}</button>
           {quickCreate.coachId ? (
-            <button onClick={() => createBlockFromQuick("coach-location")}>
-              <ClaritySessions size={16} />{t("Block this coach")}</button>
+            <button className="quick-create-block" onClick={() => createBlockFromQuick("coach-location")}>
+              <ClaritySessions size={14} />{t("Block this coach")}</button>
           ) : null}
         </>
       ) : (
-        <button onClick={() => createBlockFromQuick("coach-location")}>
-          <ClaritySessions size={16} />{t("Block 30 minutes")}</button>
+        <button className="quick-create-block" onClick={() => createBlockFromQuick("coach-location")}>
+          <ClaritySessions size={14} />{t("Block 30 minutes")}</button>
       )}
     </>
   ) : (

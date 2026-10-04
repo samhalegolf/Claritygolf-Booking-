@@ -4281,6 +4281,31 @@ button {
   font-style: normal;
 }
 
+/* Blocking the time out is the odd one out among the lesson types: a slim
+   text row under them, not another card. */
+.quick-create button.quick-create-block:not(.popover-close):not(.quick-client-ghost) {
+  min-height: 34px;
+  margin-top: 8px;
+  padding: 4px 6px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.quick-create button.quick-create-block:not(.popover-close):not(.quick-client-ghost):hover {
+  color: var(--text);
+}
+
+/* The rest of the lesson types, on a phone sheet. */
+.quick-create button.quick-create-more:not(.popover-close):not(.quick-client-ghost) {
+  justify-content: center;
+  border-style: dashed;
+  color: var(--muted);
+  font-weight: 700;
+}
+
 .quick-create-form {
   display: grid;
   gap: 8px;
@@ -17145,6 +17170,78 @@ button {
   z-index: 50;
 }
 
+/* On a phone quick-create is a sheet along the bottom, just above the tab bar,
+   wherever the tap was. It is short -- three lesson types, More, and a slim
+   Block row -- so it covers the end of the day and not the time picked. Book
+   shows the same form in its page, so it is left out. */
+.app-shell.is-phone .quick-create:not(.quick-book-form) {
+  top: auto;
+  left: 8px;
+  right: 8px;
+  bottom: calc(76px + env(safe-area-inset-bottom));
+  width: auto;
+  max-height: min(60dvh, calc(100dvh - 160px));
+  padding: 14px 14px 10px;
+  border-radius: var(--c-radius-page);
+  box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.18);
+}
+
+.app-shell.is-phone .quick-create > span,
+.app-shell.is-phone .quick-create > strong {
+  padding-right: 48px;
+}
+
+/* ---- Back and close on a phone ---------------------------------------------
+   One rule for leaving anything: a step inside a screen (a Settings or Billing
+   section, Book's form) has a Back arrow at the top left of the header; a
+   thing floating over a screen (a popover, a sheet, an overlay) has an X at
+   its top right. Both are 44px, the size of a thumb. */
+.topbar-title {
+  min-width: 0;
+}
+
+.topbar-title.has-back {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.phone-back-button {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  margin-left: -10px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--c-radius-control);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.phone-back-button:active {
+  background: var(--c-hover);
+}
+
+.app-shell.is-phone .popover-close {
+  top: 4px;
+  right: 4px;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--c-radius-control);
+}
+
+.app-shell.is-phone .popover-close svg {
+  width: 20px;
+  height: 20px;
+}
+
+.app-shell.is-phone .workspace-overlay-head .icon-button {
+  width: 44px;
+  height: 44px;
+}
+
 .app-shell.is-phone .toast {
   bottom: calc(76px + env(safe-area-inset-bottom));
 }
@@ -17423,23 +17520,37 @@ button {
   font-size: 16px;
 }
 
-/* Billing's and Settings' sections: one row that scrolls sideways. Below
-   820px the side column already turns into a top strip, but it wrapped, and
-   Billing's ten sections took four rows before any of the section showed. */
+/* Billing's and Settings' sections on a phone: a menu screen of its own.
+   The list shows until a section is picked, then the section has the screen
+   and the topbar's Back returns to the list (is-phone-menu, App.tsx). */
 .app-shell.is-phone .settings-subnav {
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  padding: 8px 12px;
-  scrollbar-width: none;
-}
-
-.app-shell.is-phone .settings-subnav::-webkit-scrollbar {
-  display: none;
+  flex-direction: column;
+  padding: 8px;
+  border: 0;
+  background: none;
 }
 
 .app-shell.is-phone .settings-subnav button {
-  flex: none;
-  white-space: nowrap;
+  height: var(--c-h-touch, 48px);
+  font-size: 16px;
+}
+
+/* A chevron says each row goes somewhere. */
+.app-shell.is-phone .settings-subnav button::after {
+  content: "›";
+  margin-left: auto;
+  color: var(--c-text-soft);
+  font-size: 20px;
+  font-weight: 400;
+}
+
+/* A row with a count keeps the count at the far end, chevron after it. */
+.app-shell.is-phone .settings-subnav button:has(.tab-count)::after {
+  margin-left: 8px;
+}
+
+.app-shell.is-phone .is-phone-menu > :not(.settings-subnav) {
+  display: none;
 }
 
 .app-shell.is-phone .billing-pane {

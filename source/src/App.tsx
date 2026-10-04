@@ -2267,6 +2267,13 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
       ? "settings"
       : "products",
   );
+  // The menus are a phone screen of their own. A window widened past the phone
+  // width shows the menu beside a section, so it needs a section to show.
+  useEffect(() => {
+    if (phoneLayout) return;
+    if (activeView === "settings" && settingsTab === "none") setSettingsTab("services");
+    if (activeView === "billing" && billingSection === "none") setBillingSection("products");
+  }, [phoneLayout, activeView, settingsTab, billingSection]);
   const [invoiceDraft, setInvoiceDraft] = useState<InvoiceDraft>(() =>
     emptyInvoiceDraft(getStoredCoachAccount().invoiceSettings),
   );
@@ -6175,8 +6182,11 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   function switchView(view: View) {
     setActiveView(view);
     setQuickCreate(null);
-    if (view === "settings") setSettingsTab("services");
-    if (view === "billing") setBillingSection("products");
+    // A phone opens Settings and Billing on their menu, and a section is a
+    // step in from it; the desktop shows the menu beside a section, so it
+    // opens straight onto one.
+    if (view === "settings") setSettingsTab(phoneLayout ? "none" : "services");
+    if (view === "billing") setBillingSection(phoneLayout ? "none" : "products");
     // Opening Video from the nav is the general workspace (no player context).
     if (view === "video") setVideoContext(null);
     if (view !== "calendar") closeCalendarDetails();
@@ -16845,6 +16855,24 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   }
   const backLayerIds = backLayers.map((layer) => layer.id);
 
+  /**
+   * The phone's Back: one arrow, always at the top left of the header, that
+   * goes up one step inside the screen you are on -- a Settings or Billing
+   * section to its menu, Book's form to its times. Screens with nowhere to go
+   * up to show no arrow; the tab bar moves between them. Things that float
+   * over a screen (popovers, sheets, overlays) close with their own X, which
+   * is sized for a thumb on a phone.
+   */
+  const phoneBackStep: (() => void) | null = !phoneLayout
+    ? null
+    : activeView === "settings" && settingsTab !== "none" && workspaceOverlay?.kind !== "settings"
+      ? () => switchSettingsTab("none")
+      : activeView === "billing" && billingSection !== "none" && workspaceOverlay?.kind !== "billing"
+        ? () => setBillingSection("none")
+        : activeView === "book" && quickCreate
+          ? () => setQuickCreate(null)
+          : null;
+
   // Browser Back moves between the screens the coach has actually been on,
   // rather than leaving the app: it closes whatever is open over the workspace
   // first, and only then walks back through the views themselves.
@@ -16855,7 +16883,16 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   // nobody makes. A Forward onto such an entry simply rewrites it.
   useBackNavigation({
     enabled: true,
-    depth: (snapshot) => snapshot.layers.length,
+    // On a phone a section is a step in from its menu, so it counts like a
+    // layer: the topbar's Back onto the menu you came from steps back through
+    // history, and the phone's own back gesture does the same thing.
+    depth: (snapshot) =>
+      snapshot.layers.length +
+      (phoneLayout &&
+      ((snapshot.view === "settings" && snapshot.settingsTab !== "none") ||
+        (snapshot.view === "billing" && snapshot.billingSection !== "none"))
+        ? 1
+        : 0),
     state: {
       view: activeView,
       settingsTab,
@@ -17442,9 +17479,16 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
             and its own way back, so the global one would sit on top of it. */}
         {activeView !== "video" && (
         <header className="topbar">
-          <div>
-            <h1>{pageHeading.title}</h1>
-            {pageHeading.subtitle ? <span>{pageHeading.subtitle}</span> : null}
+          <div className={phoneBackStep ? "topbar-title has-back" : "topbar-title"}>
+            {phoneBackStep ? (
+              <button type="button" className="phone-back-button" onClick={phoneBackStep} aria-label={t("Back")}>
+                <ArrowLeft size={22} />
+              </button>
+            ) : null}
+            <div>
+              <h1>{pageHeading.title}</h1>
+              {pageHeading.subtitle ? <span>{pageHeading.subtitle}</span> : null}
+            </div>
           </div>
           {activeView === "calendar" && (
             <div className="top-actions">
@@ -19464,14 +19508,16 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
           <WorkspaceSurface
             overlay={workspaceOverlay?.kind === "billing"}
             title={workspaceOverlay?.title ?? ""}
-            pageClassName="billing-page"
+            pageClassName={`billing-page${phoneLayout && billingSection === "none" ? " is-phone-menu" : ""}`}
             onClose={closeWorkspaceOverlay}
           >
             {/* The same side column as Settings: one row per section, the
                 open one filled. Not drawn in the overlay, for the same reason
                 the settings sub-nav is not: one section was asked for, so a
                 column of others offers a journey nobody started. */}
-            {workspaceOverlay?.kind !== "billing" && (
+            {/* On a phone the column is a menu screen of its own: it shows
+                until a section is picked, and the topbar's Back returns to it. */}
+            {workspaceOverlay?.kind !== "billing" && (!phoneLayout || billingSection === "none") && (
             <nav className="settings-subnav" aria-label={t("Billing sections")}>
               {BILLING_SECTION_NAV.map((section) => (
                 <button
@@ -22257,7 +22303,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
           <WorkspaceSurface
             overlay={workspaceOverlay?.kind === "settings"}
             title={workspaceOverlay?.title ?? ""}
-            pageClassName="settings-page"
+            pageClassName={`settings-page${phoneLayout && settingsTab === "none" ? " is-phone-menu" : ""}`}
             onClose={closeWorkspaceOverlay}
           >
             {/* Rule 07: the sub-nav keeps its boxes. 216px column, 38px rows,
@@ -22268,7 +22314,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                 Not drawn in the overlay: that is one section opened from the
                 coach profile, so a column for picking a different category is
                 offering a journey nobody started. */}
-            {workspaceOverlay?.kind !== "settings" && (
+            {workspaceOverlay?.kind !== "settings" && (!phoneLayout || settingsTab === "none") && (
             <nav className="settings-subnav" aria-label={t("Settings sections")}>
               {settingsSections.filter(
                 (section) =>
