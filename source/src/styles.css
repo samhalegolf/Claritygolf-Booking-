@@ -17315,6 +17315,44 @@ button {
   background: linear-gradient(to left, var(--panel-soft) 0 4px, var(--border) 4px 5px, var(--page) 5px);
 }
 
+/* A client's profile on a phone: a page laid over the screen it was opened
+   from (ClientProfileView.tsx). That screen's edge shows down the left, as
+   the sheet underneath; the Back arrow or a swipe right slides the page off.
+   The entrance only animates in (fill backwards), so it never holds a
+   transform over the one the swipe writes. */
+.app-shell.is-phone .client-profile-overlay {
+  place-items: stretch;
+  padding: 0;
+  background: rgba(7, 16, 10, 0.12);
+  backdrop-filter: none;
+}
+
+.app-shell.is-phone .client-profile-overlay .client-profile-modal {
+  width: auto;
+  max-height: none;
+  height: 100dvh;
+  margin-left: 10px;
+  padding-top: max(12px, env(safe-area-inset-top));
+  padding-bottom: calc(24px + env(safe-area-inset-bottom));
+  border-radius: 0;
+  box-shadow:
+    -1px 0 0 var(--border),
+    -6px 0 14px rgba(0, 0, 0, 0.12);
+  animation: phone-page-in 200ms ease backwards;
+}
+
+.app-shell.is-phone .client-profile-modal .panel-header {
+  justify-content: flex-start;
+  gap: 4px;
+}
+
+@keyframes phone-page-in {
+  from {
+    transform: translateX(48px);
+    opacity: 0.6;
+  }
+}
+
 .app-shell.is-phone .toast {
   bottom: calc(76px + env(safe-area-inset-bottom));
 }

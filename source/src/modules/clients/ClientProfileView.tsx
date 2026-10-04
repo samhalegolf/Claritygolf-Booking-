@@ -1,11 +1,13 @@
-import { Check, ExternalLink, GitMerge, Phone, Plus, Trash2, X } from "lucide-react";
-import { Suspense } from "react";
+import { ArrowLeft, Check, ExternalLink, GitMerge, Phone, Plus, Trash2, X } from "lucide-react";
+import { Suspense, useRef } from "react";
 import { t, tn } from "../../lib/i18n";
 import { formatMoney } from "../../lib/money";
 import { posMethodLabel } from "../billing/terminal";
 import { buildWeekDays, formatRange, itemService, itemWeek } from "../calendar/calendarModel";
 import { notificationKindLabel, notificationStatusLabel, notificationTimeLabel } from "../notifications/notificationModel";
 import { PassesPanel, PersonMemberships } from "../passes/lazyPanels";
+import { usePhoneLayout } from "../phone/phoneLayout";
+import { PhoneStepSwipe } from "../phone/PhoneStepSwipe";
 import {
   ClarityAccessPermissions,
   ClarityBookingPages,
@@ -78,10 +80,20 @@ export function ClientProfileView({ clientProfile }: { clientProfile: ClientProf
     personDeleteBusyId,
     hardDeletePerson,
   } = clientProfile;
+  // On a phone the profile is a page laid over the screen it was opened from,
+  // not a box floating in the middle: Back arrow top left, swipe right to
+  // slide it off, and that screen's edge showing down the left like the sheet
+  // underneath (the phone's back rule, see PhoneStepSwipe).
+  const phoneLayout = usePhoneLayout();
+  const panelRef = useRef<HTMLElement>(null);
 
   return (
-    <div className="details-overlay" role="presentation" onPointerDown={closeClientModal}>
+    <div className="details-overlay client-profile-overlay" role="presentation" onPointerDown={closeClientModal}>
+      {phoneLayout ? (
+        <PhoneStepSwipe panelRef={panelRef} back={{ label: "", go: closeClientModal }} forward={null} paper={false} />
+      ) : null}
       <aside
+        ref={panelRef}
         className="details-panel details-modal client-profile-modal"
         role="dialog"
         aria-modal="true"
@@ -89,10 +101,17 @@ export function ClientProfileView({ clientProfile }: { clientProfile: ClientProf
         onPointerDown={(event) => event.stopPropagation()}
       >
         <div className="panel-header">
+          {phoneLayout ? (
+            <button type="button" className="phone-back-button" onClick={closeClientModal} aria-label={t("Back")}>
+              <ArrowLeft size={22} />
+            </button>
+          ) : null}
           <span>{isAddingClient ? t("Add Client") : t("Client Profile")}</span>
-          <button className="icon-button small" onClick={closeClientModal} aria-label={t("Close client profile")}>
-            <X size={17} />
-          </button>
+          {phoneLayout ? null : (
+            <button className="icon-button small" onClick={closeClientModal} aria-label={t("Close client profile")}>
+              <X size={17} />
+            </button>
+          )}
         </div>
 
         {clientEditMode ? (
