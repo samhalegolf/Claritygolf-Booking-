@@ -6640,8 +6640,9 @@ function playerBase64(value) {
   }
 }
 
-// Mirrors the client's profileIdsForClient (src/App.tsx): lesson notes are
-// keyed by whatever id form a note was saved under -- a resolved people.id
+// Mirrors the client's profileIdsForClient
+// (src/modules/clients/clientMatching.ts): lesson notes are keyed by whatever
+// id form a note was saved under -- a resolved people.id
 // (which for legacy rows is itself often `email-<base64>`), the raw email, an
 // `email-<base64>` derivation, or `phone-<canonical>`. Building the same
 // candidate set here lets the player see every note that belongs to them

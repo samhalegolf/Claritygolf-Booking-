@@ -248,8 +248,9 @@ export function calculateCustomGroupPrice(service, participantCount) {
 
 /**
  * Starting fills for lesson types, handed out by position. Kept in step with
- * serviceColorPalette in src/App.tsx so a service that has never had a colour
- * picked reads the same on the server as it does in the browser.
+ * serviceColorPalette in src/modules/services/serviceModel.ts, so a service
+ * that has never had a colour picked reads the same on the server as it does
+ * in the browser.
  */
 const serviceColorPalette = [
   "#2b2233",
@@ -333,7 +334,7 @@ function cleanEditableServiceText(value, fallback = "", max = 600) {
 }
 
 // The per-field fallback for a service. Mirrors the frontend's
-// neutralServiceFallback in src/App.tsx.
+// neutralServiceFallback in src/modules/services/serviceModel.ts.
 //
 // This used to be defaultServices[index] -- the original coach's real lesson
 // list -- so a service arriving with a missing name, price or note had that
