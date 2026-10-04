@@ -18,7 +18,7 @@
  *
  * Billing keeps dollars; the API speaks cents. The conversion is here.
  */
-import { getDatabase } from "@netlify/database";
+import { getDatabase } from "../database.mts";
 import {
   createPosTransaction,
   emailPosReceipt,

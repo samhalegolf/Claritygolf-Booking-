@@ -1,7 +1,7 @@
 import type { Config, Context } from "@netlify/functions";
 import { randomUUID } from "node:crypto";
 
-import { getDatabase } from "@netlify/database";
+import { getDatabase } from "./_shared/database.mts";
 import { requireCoachActor } from "./_shared/coach-auth.mts";
 import { cleanString } from "./_shared/values.mts";
 import { json } from "./_shared/http.mts";

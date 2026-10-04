@@ -16,7 +16,7 @@
  * account: the account comes from the key row, never from the request.
  */
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { getDatabase } from "@netlify/database";
+import { getDatabase } from "../database.mts";
 
 export const API_SCOPES = [
   "bookings:read",
