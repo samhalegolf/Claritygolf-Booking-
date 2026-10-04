@@ -4436,5 +4436,12 @@
   "Set up this phone": "Ställ in den här telefonen",
   "The customer holds their card, phone or watch flat against the back of this phone and keeps it there until it confirms.": "Kunden håller kortet, telefonen eller klockan plant mot baksidan av den här telefonen tills betalningen bekräftas.",
   "Hold card or phone against the back of this phone.": "Håll kortet eller telefonen mot baksidan av den här telefonen.",
-  "This phone cannot take Tap to Pay.": "Den här telefonen kan inte använda Tap to Pay."
+  "This phone cannot take Tap to Pay.": "Den här telefonen kan inte använda Tap to Pay.",
+  "No free time left today. Tap a time on the calendar to book.": "Ingen ledig tid kvar i dag. Tryck på en tid i kalendern för att boka.",
+  "Book": "Boka",
+  "On now": "Pågår nu",
+  "Up next": "Härnäst",
+  "{total} booked · {done} done · {remaining} to go": "{total} bokade · {done} klara · {remaining} kvar",
+  "Nothing booked today": "Inget bokat i dag",
+  "Open booking": "Öppna bokning"
 }

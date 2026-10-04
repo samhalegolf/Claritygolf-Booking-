@@ -77,6 +77,10 @@ import {
   ClarityVideoAnalysis,
 } from "./modules/shared/ClarityIcons";
 import type { IconComponent } from "./modules/shared/ClarityIcons";
+import { isPhoneLayout, usePhoneLayout } from "./modules/phone/phoneLayout";
+import { type PhoneDestination, PhoneTabBar } from "./modules/phone/PhoneTabBar";
+import { TodayScreen } from "./modules/today/TodayScreen";
+import { nextFreeStart } from "./modules/today/todayModel";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "./modules/auth/apiFetch";
 import { SnapshotFrameViewer, type FrameViewerShot } from "./modules/shared/SnapshotFrameViewer";
@@ -1057,6 +1061,8 @@ function sectionTitle(view: View, terms: BusinessTerminology = terminologyFor())
       return t("Putting Lab");
     case "profile":
       return t("Business Hub");
+    case "today":
+      return t("Today");
     default:
       return t("Calendar");
 
@@ -1089,7 +1095,9 @@ function getInitialView(): View {
   if (requestedView === "players") return "players";
   if (requestedView === "video") return "video";
   if (requestedView === "profile") return "profile";
-  return "calendar";
+  if (requestedView === "today") return "today";
+  // A phone opens on Today; the calendar's week view is a desktop screen.
+  return isPhoneLayout() ? "today" : "calendar";
 }
 
 /**
@@ -2111,6 +2119,12 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   const [personDeleteBusyId, setPersonDeleteBusyId] = useState("");
   const [selectedGroupSession, setSelectedGroupSession] = useState<GroupSession | null>(null);
   const [activeView, setActiveView] = useState<View>(() => getInitialView());
+  const phoneLayout = usePhoneLayout();
+  // Today is the phone layout's screen and has no place in the sidebar, so a
+  // window widened past the phone width goes on to the calendar.
+  useEffect(() => {
+    if (!phoneLayout && activeView === "today") setActiveView("calendar");
+  }, [phoneLayout, activeView]);
   // A view whose module is switched off is not reachable by a bookmark, a
   // ?view= link or a stale button somewhere else in the app either: it falls
   // back to the hub. The sidebar hides the link; this closes the door.
@@ -5183,6 +5197,50 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
    * a strip parked mid-swipe stayed parked. Everything is therefore called
    * outright here rather than left for a state change to trigger.
    */
+  /**
+   * The phone's Book tab: the calendar's own quick-create, on today at the
+   * next quarter-hour nobody is booked or blocked, so the coach only picks
+   * the client and lesson type.
+   */
+  function startPhoneBooking() {
+    if (!requireLiveDatabase("create calendar items")) return;
+    const week = getCurrentWeekOffset();
+    const day = buildWeekDays(week).findIndex((weekDay) => weekDay.isToday);
+    const start = nextFreeStart(
+      accountItems,
+      { week, day, nowMinutes: businessNow().minutes, inScope: itemInCoachScope },
+      calendarStartMinutes,
+      calendarEndMinutes,
+    );
+    switchView("calendar");
+    goToToday();
+    if (start === null) {
+      setToast({ message: t("No free time left today. Tap a time on the calendar to book.") });
+      return;
+    }
+    setQuickCreate({
+      week,
+      day,
+      start,
+      x: 0,
+      y: 0,
+      serviceId: "",
+      phone: "",
+      email: "",
+      note: "",
+      attendees: [],
+      attendeeName: "",
+      attendeeEmail: "",
+      error: "",
+    });
+  }
+
+  function openBookingFromToday(item: CalendarItem) {
+    switchView("calendar");
+    goToToday();
+    setSelectedId(item.id);
+  }
+
   function goToToday() {
     const week = getCurrentWeekOffset();
     setActiveWeekState(week);
@@ -17341,11 +17399,39 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
 
 
 
+  // Every workspace destination, once. The sidebar lists them all; the phone
+  // layout puts Calendar and Clients on its tab bar and the rest under More.
+  const workspaceDestinations: (PhoneDestination & { className?: string; show?: boolean })[] = [
+    { key: "profile", label: hubLabel, Icon: ClarityDashboardHome, active: activeView === "profile", onSelect: () => switchView("profile"), className: "nav-home" },
+    { key: "calendar", label: t("Calendar"), Icon: ClarityCalendar, active: activeView === "calendar", onSelect: () => switchView("calendar"), show: capabilities.calendar },
+    { key: "clients", label: terms.customerPlural, Icon: ClarityClientsPlayers, active: activeView === "clients", onSelect: () => switchView("clients") },
+    {
+      key: "players",
+      label: t("{customerSingular} Profiles", { customerSingular: terms.customerSingular }),
+      Icon: ClarityProfile,
+      active: activeView === "players",
+      onSelect: () => switchView("players"),
+    },
+    { key: "putting-lab", label: t("Putting Lab"), Icon: ClarityAssessments, active: activeView === "putting-lab", onSelect: () => switchView("putting-lab"), show: capabilities.puttingLab },
+    { key: "sell", label: t("Sell"), Icon: ClarityStore, active: activeView === "sell", onSelect: () => switchView("sell"), show: billingWorkspaceEnabled && capabilities.billing },
+    { key: "billing", label: t("Billing"), Icon: ClarityInvoices, active: activeView === "billing", onSelect: () => switchView("billing"), show: billingWorkspaceEnabled && capabilities.billing },
+    { key: "settings", label: t("Settings"), Icon: ClaritySettings, active: activeView === "settings", onSelect: () => switchView("settings") },
+    { key: "logout", label: t("Logout"), Icon: LogOut, active: false, onSelect: () => void handleAdminLogout(), className: "nav-logout" },
+  ].filter((destination) => destination.show !== false);
+  const phoneTabs: PhoneDestination[] = [
+    { key: "today", label: t("Today"), Icon: ClaritySessions, active: activeView === "today", onSelect: () => switchView("today") },
+    ...workspaceDestinations.filter((destination) => destination.key === "calendar" || destination.key === "clients"),
+    ...(capabilities.calendar
+      ? [{ key: "book", label: t("Book"), Icon: ClarityNewBooking, active: false, onSelect: startPhoneBooking }]
+      : []),
+  ];
+  const phoneMore = workspaceDestinations.filter((destination) => destination.key !== "calendar" && destination.key !== "clients");
+
   // No guest branch here any more: the entry point renders the login screen
   // when there is no session, and only mounts this component for a coach.
 
   return (
-    <div className={`app-shell theme-${themeMode}`} style={brandStyle}>
+    <div className={`app-shell theme-${themeMode}${phoneLayout ? " is-phone" : ""}`} style={brandStyle}>
     <aside className="sidebar">
       <div className="brand">
         {/* Product identity (the platform), not business identity -- the
@@ -17367,39 +17453,12 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
             are the one thing the coach profile cannot open over itself. This
             is the way back from them, in the one place that is on screen in
             every view. */}
-        <button
-          className={`nav-home${activeView === "profile" ? " active" : ""}`}
-          onClick={() => switchView("profile")}
-        >
-          <ClarityDashboardHome size={18} />
-          {hubLabel}
-        </button>
-        {capabilities.calendar && (
-          <button className={activeView === "calendar" ? "active" : ""} onClick={() => switchView("calendar")}>
-            <ClarityCalendar size={18} />{t("Calendar")}</button>
-        )}
-        <button className={activeView === "clients" ? "active" : ""} onClick={() => switchView("clients")}>
-          <ClarityClientsPlayers size={18} />
-          {terms.customerPlural}
-        </button>
-        <button className={activeView === "players" ? "active" : ""} onClick={() => switchView("players")}>
-          <ClarityProfile size={18} />{t("{customerSingular} Profiles", { customerSingular: terms.customerSingular })}</button>
-        {capabilities.puttingLab && (
-          <button className={activeView === "putting-lab" ? "active" : ""} onClick={() => switchView("putting-lab")}>
-            <ClarityAssessments size={18} />{t("Putting Lab")}</button>
-        )}
-        {billingWorkspaceEnabled && capabilities.billing && (
-          <button className={activeView === "sell" ? "active" : ""} onClick={() => switchView("sell")}>
-            <ClarityStore size={18} />{t("Sell")}</button>
-        )}
-        {billingWorkspaceEnabled && capabilities.billing && (
-          <button className={activeView === "billing" ? "active" : ""} onClick={() => switchView("billing")}>
-            <ClarityInvoices size={18} />{t("Billing")}</button>
-        )}
-        <button className={activeView === "settings" ? "active" : ""} onClick={() => switchView("settings")}>
-          <ClaritySettings size={18} />{t("Settings")}</button>
-        <button className="nav-logout" onClick={handleAdminLogout}>
-          <LogOut size={18} />{t("Logout")}</button>
+        {workspaceDestinations.map(({ key, label, Icon, active, onSelect, className }) => (
+          <button key={key} className={[className, active ? "active" : ""].filter(Boolean).join(" ")} onClick={onSelect}>
+            <Icon size={18} />
+            {label}
+          </button>
+        ))}
       </nav>
     </aside>
 
@@ -17703,6 +17762,20 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
               <span>{calendarHover.adminEmailStatus}</span>
             </div>
           </aside>
+        )}
+
+        {adminWorkspaceReady && activeView === "today" && (
+          <TodayScreen
+            items={accountItems}
+            services={services}
+            inScope={itemInCoachScope}
+            onOpenBooking={openBookingFromToday}
+            onNewBooking={startPhoneBooking}
+            onOpenCalendar={() => {
+              switchView("calendar");
+              goToToday();
+            }}
+          />
         )}
 
         {adminWorkspaceReady && activeView === "clients" && (
@@ -23865,6 +23938,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
           </WorkspaceSurface>
         )}
       </main>
+      {phoneLayout && <PhoneTabBar tabs={phoneTabs} more={phoneMore} />}
 
       {adminWorkspaceReady && activeView === "calendar" && selectedDetails && (
         <div className="details-overlay" role="presentation" onPointerDown={closeCalendarDetails}>

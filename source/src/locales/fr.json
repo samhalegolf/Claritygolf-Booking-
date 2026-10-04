@@ -4436,5 +4436,12 @@
   "Set up this phone": "Configurer ce téléphone",
   "The customer holds their card, phone or watch flat against the back of this phone and keeps it there until it confirms.": "Le client tient sa carte, son téléphone ou sa montre à plat contre le dos de ce téléphone jusqu'à la confirmation.",
   "Hold card or phone against the back of this phone.": "Approchez la carte ou le téléphone du dos de ce téléphone.",
-  "This phone cannot take Tap to Pay.": "Ce téléphone ne prend pas en charge Tap to Pay."
+  "This phone cannot take Tap to Pay.": "Ce téléphone ne prend pas en charge Tap to Pay.",
+  "No free time left today. Tap a time on the calendar to book.": "Plus de créneau libre aujourd'hui. Touchez une heure dans le calendrier pour réserver.",
+  "Book": "Réserver",
+  "On now": "En cours",
+  "Up next": "À suivre",
+  "{total} booked · {done} done · {remaining} to go": "{total} réservées · {done} terminées · {remaining} à venir",
+  "Nothing booked today": "Rien de réservé aujourd'hui",
+  "Open booking": "Ouvrir la réservation"
 }

@@ -4436,5 +4436,12 @@
   "Set up this phone": "このスマートフォンを設定",
   "The customer holds their card, phone or watch flat against the back of this phone and keeps it there until it confirms.": "お客様にカード、スマートフォン、または時計をこのスマートフォンの背面に平らに当て、決済が確認されるまでそのままにしてもらいます。",
   "Hold card or phone against the back of this phone.": "カードまたはスマートフォンをこのスマートフォンの背面にかざしてください。",
-  "This phone cannot take Tap to Pay.": "このスマートフォンではタッチ決済を使用できません。"
+  "This phone cannot take Tap to Pay.": "このスマートフォンではタッチ決済を使用できません。",
+  "No free time left today. Tap a time on the calendar to book.": "本日は空き時間がありません。カレンダーの時間をタップして予約してください。",
+  "Book": "予約",
+  "On now": "進行中",
+  "Up next": "次の予定",
+  "{total} booked · {done} done · {remaining} to go": "予約 {total} 件 · 完了 {done} 件 · 残り {remaining} 件",
+  "Nothing booked today": "本日の予約はありません",
+  "Open booking": "予約を開く"
 }
