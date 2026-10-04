@@ -23,7 +23,6 @@ import {
   ImagePlus,
   Inbox,
   LogOut,
-  Minimize2,
   Moon,
   Nfc,
   Pause,
@@ -297,15 +296,12 @@ import {
   axisMinuteToTop,
   axisTopToMinute,
   buildCalendarAxis,
-  buildDayColumns,
   dayColumnPixels,
   dayFromGridX,
   formatDurationLabel,
   DAY_COUNT,
-  HOUR_HEIGHT,
   WEEK_FOCUS_INDEX,
   WEEK_PANEL_COUNT,
-  WEEK_PANEL_OFFSETS,
   WEEK_PEEK,
 } from "./calendar-axis";
 import type { CalendarAxisMode } from "./calendar-axis";
@@ -316,10 +312,8 @@ import type {
   ChangeEvent,
   CSSProperties,
   FormEvent,
-  MouseEvent as ReactMouseEvent,
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
-  TouchEvent as ReactTouchEvent,
 } from "react";
 import { t, tn } from "./lib/i18n";
 import {
@@ -332,78 +326,65 @@ import {
 } from "./lib/money";
 import { safeText } from "./lib/text";
 import {
-  ARMED_TOUCH_DRAG_THRESHOLD,
-  AvailabilityWindow,
-  BookingCoachSnapshot,
-  BookingSlot,
-  BookingStatus,
-  CANCELLED_GROUP_SESSION_NOTE,
-  CANCELLED_GROUP_SESSION_TITLE,
-  COMPLETED_LESSON_MOVE_WARNING,
-  CalendarHoverPreview,
-  CalendarItem,
-  CalendarPerspective,
-  CalendarViewMode,
-  CustomGroupAttendee,
-  DAY_END_MINUTES,
-  DAY_START_MINUTES,
-  DEFAULT_CALENDAR_END_MINUTES,
-  DEFAULT_CALENDAR_START_MINUTES,
-  DockFlight,
-  EDGE_NAV_ZONE,
-  FloatingDrag,
-  GroupSession,
-  LAST_TIME_SLOT_MINUTES,
-  LOCATION_BAND_HUES,
-  MOUSE_DRAG_THRESHOLD,
-  PAST_ADMIN_LESSON_WARNING,
-  PendingBooking,
-  PlacementAnimation,
-  PointerSession,
-  QuickCreateState,
-  SNAP_MINUTES,
-  SlotCandidate,
-  TOUCH_DRAG_THRESHOLD,
-  TOUCH_HOLD_MS,
-  TOUCH_HOLD_TOLERANCE,
   adminCustomGroupAttendee,
+  ARMED_TOUCH_DRAG_THRESHOLD,
   availabilityForCoach,
+  AvailabilityWindow,
   availabilityWindowCoversLocation,
   baseWeekDays,
   baseWeekStart,
+  BookingCoachSnapshot,
   bookingCoachSnapshotFor,
   bookingLocationDisplay,
   bookingLocationShortDisplay,
   bookingLocationSnapshotFor,
+  BookingSlot,
+  BookingStatus,
   buildWeekDays,
   businessNow,
   calendarDateUtcTime,
+  type CalendarFeedStatus,
+  CalendarHoverPreview,
+  CalendarItem,
   calendarItemBelongsToCoach,
   calendarItemCoach,
-  calendarItemCoachColumnId,
   calendarItemLocation,
   calendarItemsEquivalent,
   calendarLessonColor,
+  CalendarPerspective,
+  type CalendarSaveStatus,
   calendarStateFingerprint,
+  CalendarViewMode,
+  CANCELLED_GROUP_SESSION_NOTE,
+  CANCELLED_GROUP_SESSION_TITLE,
   cleanAvailability,
   cleanBookingLocationSnapshot,
+  COMPLETED_LESSON_MOVE_WARNING,
+  CustomGroupAttendee,
   customGroupBookerAttendee,
   customGroupStatusLabel,
   dateForSlot,
+  DAY_END_MINUTES,
+  DAY_START_MINUTES,
+  DEFAULT_CALENDAR_END_MINUTES,
+  DEFAULT_CALENDAR_START_MINUTES,
   defaultAvailability,
+  DockFlight,
+  type Draft,
+  EDGE_NAV_ZONE,
   externalProviderLabel,
   externalRescheduleMessage,
+  FloatingDrag,
   formatRange,
   formatTime,
   formatWeekTitle,
   fullDayNames,
   getCurrentWeekOffset,
+  GroupSession,
   inputTimeToMinutes,
   isAppointmentConflict,
   isCancelledGroupSessionItem,
   isCancelledGroupSessionMatch,
-  isCoachLocationBlock,
-  isCoachOnlyBlock,
   isExternallyOwned,
   isInactiveForConflict,
   isLocationOnlyBlock,
@@ -411,19 +392,31 @@ import {
   itemService,
   itemSlot,
   itemWeek,
+  LAST_TIME_SLOT_MINUTES,
+  LOCATION_BAND_HUES,
   locationSnapshot,
   mergeCalendarItemsAfterConflict,
   minutesToInputTime,
+  MOUSE_DRAG_THRESHOLD,
   newCalendarItemId,
   overlaps,
+  PAST_ADMIN_LESSON_WARNING,
+  PendingBooking,
+  PlacementAnimation,
+  PointerSession,
+  QuickCreateState,
   resolvedCalendarItemCoachId,
   resolvedCalendarItemLocationId,
   sameSlot,
   serviceLocation,
   setBusinessTimeZone,
+  SlotCandidate,
   snap,
+  SNAP_MINUTES,
   startOfCalendarWeek,
+  TOUCH_DRAG_THRESHOLD,
 } from "./modules/calendar/calendarModel";
+import type { Toast } from "./modules/shared/toast";
 import {
   ClientEditor,
   ClientMergeFieldKey,
@@ -578,6 +571,8 @@ import {
   serviceBelongsToAccount,
   userBelongsToAccount,
 } from "./modules/workspace/workspaceModel";
+import { useCalendarController } from "./modules/calendar/useCalendarController";
+import { CalendarView } from "./modules/calendar/CalendarView";
 
 // Video analysis and voice notes are heavy, coach-only features (together well
 // over a third of the client bundle). They never render on the public booking
@@ -735,47 +730,6 @@ function workspaceBootstrapFromSession(session?: Session) {
 function cleanLessonNotes(notes: unknown[]): LessonNote[] {
   return cleanLessonNotesWith(notes, defaultWorkspaceAccountFromCoachAccount().id);
 }
-
-type Draft =
-  | {
-      mode: "move";
-      itemId: string;
-      week: number;
-      day: number;
-      start: number;
-      duration: number;
-      valid: boolean;
-    }
-  | {
-      mode: "resize";
-      itemId: string;
-      week: number;
-      day: number;
-      start: number;
-      duration: number;
-      valid: boolean;
-    }
-  | {
-      mode: "block";
-      week: number;
-      day: number;
-      start: number;
-      duration: number;
-      valid: boolean;
-    }
-  | {
-      mode: "place";
-      week: number;
-      day: number;
-      start: number;
-      duration: number;
-      valid: boolean;
-    };
-
-type Toast = {
-  message: string;
-  undo?: () => void;
-};
 
 // The sidebar's destinations. Lesson types and availability used to be two of
 // them; they are Settings sections now (SETTINGS_SECTIONS "services" and the
@@ -1029,8 +983,6 @@ const SECONDARY_PLAYER_TOOLS: ReadonlySet<PlayerProfileTool> = new Set<PlayerPro
   SECONDARY_PLAYER_TOOL_TABS.map((tab) => tab.id),
 );
 
-type CalendarFeedStatus = "checking" | "connected" | "offline";
-type CalendarSaveStatus = "idle" | "saving" | "saved" | "failed";
 type AdminWorkspaceLoadStatus = "idle" | "loading" | "loaded" | "error";
 type AdminSaveOwner = "lesson_complete" | "upsert_item" | "calendar_delete" | "locations" | "coaches" | "settings";
 type DiagnosticStatus = "started" | "success" | "failed" | "warning" | "skipped" | "verified";
@@ -3559,8 +3511,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   const pointerKindRef = useRef<globalThis.PointerEvent["pointerType"]>("mouse");
   const dragPreviewMetaRef = useRef<null | { width: number; height: number; offsetX: number; offsetY: number }>(null);
   const lastEdgeNavRef = useRef(0);
-  const lastCalendarTapRef = useRef(0);
-  const suppressBlankGestureUntilRef = useRef(0);
   const edgeCueTimerRef = useRef<number | null>(null);
   const gestureCleanupRef = useRef<null | (() => void)>(null);
   // The touch hold that has to complete before a card can be dragged.
@@ -3933,14 +3883,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     services,
     visibleWeekItems,
   ]);
-  const locationCalendarHasAppointments = visibleWeekItems.some((item) => item.kind === "appointment");
-  const locationCalendarCoachItemCount = (coachId?: string) => {
-    if (!coachId) return 0;
-    return visibleWeekItems.filter((item) => {
-      if (item.kind !== "appointment") return false;
-      return calendarItemCoachColumnId(item, itemService(item, services), coachProfiles) === coachId;
-    }).length;
-  };
   const appointments = weekItems.filter((item) => item.kind === "appointment").length;
   const blocks = weekItems.filter((item) => item.kind === "block").length;
   const accountAvailability = useMemo(
@@ -3993,18 +3935,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   const availabilityLocationLabel = (locationId?: string) => {
     const location = availabilityLocations.find((entry) => entry.id === locationId);
     return location ? location.shortName || location.name : t("Any location");
-  };
-  // Where a window on the calendar is. Hours saved before locations existed
-  // carry no locationId; they still belong to the one place the coach is
-  // rostered, so read it off the coach. A coach at several places with an
-  // unpinned window really is open at any of them, so that stays unresolved.
-  const availabilityWindowLocationId = (window: AvailabilityWindow) => {
-    if (window.locationId) return window.locationId;
-    const coach = accountCoachProfiles.find((entry) => entry.id === (window.coachId || activeCoachId));
-    const assigned = (coach?.assignedLocationIds ?? []).filter((id) =>
-      availabilityLocations.some((location) => location.id === id),
-    );
-    return assigned.length === 1 ? assigned[0] : "";
   };
   // Settings › Availability edits one coach at a time. An admin picks whose
   // week; a coach only ever sees their own.
@@ -4135,16 +4065,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   }, [calendarViewMode, fullCalendarEndMinutes, fullCalendarStartMinutes]);
   const calendarStartMinutes = calendarViewBounds.start;
   const calendarEndMinutes = calendarViewBounds.end;
-  const calendarViewEmptyMessage = calendarViewBounds.emptyMessage;
-  const calendarViewButtonLabel =
-    calendarViewMode === "full" ? t("View: Full") : calendarViewMode === "am" ? t("View: AM") : t("View: PM");
-  const calendarHourMarks = useMemo(() => {
-    const marks: number[] = [];
-    for (let minutes = calendarStartMinutes; minutes <= calendarEndMinutes; minutes += 60) {
-      marks.push(minutes);
-    }
-    return marks;
-  }, [calendarStartMinutes, calendarEndMinutes]);
   // gridHeight / calendarMinutesToTop live further down: they come off the
   // squash axis, which needs the week's items to know what to collapse.
   const clipCalendarSegment = (start: number, duration: number) => {
@@ -4240,14 +4160,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
             serviceBookingOptions(service).some((option) => option.coachId === selectedCalendarCoachId),
           )
         : appointmentServices;
-  // Resolve the quick-create service from all account services, not just the
-  // appointment-style pick list: "Add person" on a scheduled group session sets
-  // serviceId to the group service, which the pick list deliberately excludes.
-  // Resolving against the pick list made the popover fall back to the "choose a
-  // service" list of normal lessons instead of the group booking form.
-  const quickCreateService = quickCreate?.serviceId
-    ? activeServices.find((service) => service.id === quickCreate.serviceId) ?? null
-    : null;
   const selectedBookingService =
     currentScreenPublicServices.find((service) => service.id === bookingServiceId) ?? null;
   const visiblePublicServices = selectedBookingService ? [selectedBookingService] : currentScreenPublicServices;
@@ -5971,22 +5883,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
           ];
       });
   }, [activeWeek, items, services]);
-
-  const displayItems = useMemo(() => {
-    const floatingItemId = floatingDrag?.itemId ?? "";
-    const baseWeekItems = floatingItemId ? visibleWeekItems.filter((item) => item.id !== floatingItemId) : visibleWeekItems;
-    if (!draft || draft.mode === "block" || draft.mode === "place") {
-      return [...baseWeekItems, ...scheduledGroupSlots];
-    }
-    const withoutMoving = baseWeekItems.filter((item) => item.id !== draft.itemId);
-    const movingItem = items.find((item) => item.id === draft.itemId);
-    if (!movingItem || draft.week !== activeWeek) return [...withoutMoving, ...scheduledGroupSlots];
-    return [
-      ...withoutMoving,
-      ...scheduledGroupSlots,
-      { ...movingItem, week: draft.week, day: draft.day, start: draft.start, duration: draft.duration },
-    ];
-  }, [activeWeek, draft, floatingDrag, items, visibleWeekItems, scheduledGroupSlots]);
   const floatingItem = floatingDrag ? items.find((item) => item.id === floatingDrag.itemId) : null;
   const floatingService = floatingItem ? itemService(floatingItem, services) : null;
 
@@ -6038,33 +5934,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [calendarAvailability, calendarAxisMode, calendarAxisSource, calendarEndMinutes, calendarStartMinutes]);
-  const calendarDayColumns = useMemo(
-    () => buildDayColumns(calendarCollapsedDays, calendarDayFocus),
-    [calendarCollapsedDays, calendarDayFocus],
-  );
-
-  // Hour labels are dropped when they land inside a collapsed gap — the hour
-  // never visibly happens there — and thinned when squashing has pushed two of
-  // them within 15px of each other.
-  const visibleCalendarHourMarks = useMemo(() => {
-    if (!calendarAxis.squashed) return calendarHourMarks.map((hour, index) => ({ hour, top: index * HOUR_HEIGHT }));
-    const marks: { hour: number; top: number }[] = [];
-    let lastTop = Number.NEGATIVE_INFINITY;
-    calendarHourMarks.forEach((hour) => {
-      const segment = calendarAxis.segments.find((entry) => hour >= entry.start && hour < entry.end);
-      if (segment?.quiet) return;
-      const top = axisMinuteToTop(calendarAxis, hour);
-      if (top - lastTop < 15) return;
-      lastTop = top;
-      marks.push({ hour, top });
-    });
-    return marks;
-  }, [calendarAxis, calendarHourMarks]);
-
-  const calendarQuietGaps = useMemo(
-    () => (calendarAxis.squashed ? calendarAxis.segments.filter((segment) => segment.quiet) : []),
-    [calendarAxis],
-  );
 
   // The now line is drawn once, in today's column, and only when the week on
   // screen is the one today falls in.
@@ -6072,10 +5941,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   // Read by the breakpoint effect, which must not re-run when the week changes.
   const calendarTodayIndexRef = useRef(calendarTodayIndex);
   calendarTodayIndexRef.current = calendarTodayIndex;
-  const calendarNowTop =
-    calendarTodayIndex >= 0 && calendarNowMinutes >= calendarStartMinutes && calendarNowMinutes <= calendarEndMinutes
-      ? calendarMinutesToTop(calendarNowMinutes)
-      : null;
 
   // A phone opens on a day and a desktop on the week. Keyed off crossing the
   // breakpoint rather than every render, so tapping back to the week on a phone
@@ -6326,27 +6191,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     return list;
   }, [clarityCloudImports, savedVideoItems]);
   const [assigningVideoId, setAssigningVideoId] = useState("");
-
-  const quickClientInput = {
-    name: quickClientSearch,
-    email: quickCreate?.email ?? "",
-    phone: quickCreate?.phone ?? "",
-  };
-  const quickClientHasInput = hasClientMatchInput(quickClientInput);
-  const quickClientSuggestion = useMemo(() => {
-    if (!quickClientHasInput) return null;
-    return findClientMatch(clients, quickClientInput);
-  }, [quickClientHasInput, clients, quickClientSearch, quickCreate?.email, quickCreate?.phone]);
-  const quickClientSuggestionApplied = Boolean(
-    quickClientSuggestion &&
-      normalizeMatchText(quickClientSearch) === normalizeMatchText(quickClientSuggestion.name) &&
-      (!quickClientSuggestion.phone || phoneValuesMatch(quickClientSuggestion.phone, quickCreate?.phone ?? "", true)) &&
-      (!quickClientSuggestion.email ||
-        normalizeMatchText(quickClientSuggestion.email) === normalizeMatchText(quickCreate?.email ?? "")),
-  );
-  const showQuickClientSuggestion = Boolean(
-    quickClientSuggestion && quickClientHasInput && !quickClientSuggestionApplied,
-  );
   const bookingClientInput = {
     firstName: bookingForm.firstName,
     lastName: bookingForm.lastName,
@@ -6727,48 +6571,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     return notificationsByAppointment.get(selected.id) ?? [];
   }, [notificationsByAppointment, selected]);
 
-  function showCalendarItemHover(
-    event: ReactPointerEvent<HTMLElement>,
-    item: CalendarItem,
-    service: Service | undefined | null,
-    latestClientEmail?: NotificationRecord,
-    latestCoachEmail?: NotificationRecord,
-    latestAdminEmail?: NotificationRecord,
-  ) {
-    if (pointerSessionRef.current) return;
-    if (event.pointerType === "touch") return;
-    const groupSessionContext = getGroupSessionContext(item);
-    if (!groupSessionContext && item.kind !== "appointment" && item.kind !== "block") return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    const cardWidth = 304;
-    const gap = 14;
-    const rightX = rect.right + gap;
-    const leftX = rect.left - cardWidth - gap;
-    const x = rightX + cardWidth < window.innerWidth - 16 ? rightX : Math.max(16, leftX);
-    const y = clamp(rect.top - 12, 16, Math.max(16, window.innerHeight - 260));
-    setCalendarHover({
-      itemId: item.id,
-      x,
-      y,
-      kind: groupSessionContext ? "group-session" : item.kind === "appointment" ? "appointment" : "blocked",
-      client: groupSessionContext ? groupSessionContext.service.name : item.client || item.title,
-      service: groupSessionContext
-        ? t("Group Session · {booked}/{capacity} booked", { booked: groupSessionContext.bookedCount, capacity: groupSessionContext.capacity })
-        : service?.name ?? t("Golf lesson"),
-      time: `${dateForSlot(itemWeek(item), item.day).toLocaleDateString(activeLocale(), { weekday: "long", month: "short", day: "numeric" })}, ${formatRange(item.start, item.duration)}`,
-      venue: bookingLocationShortDisplay(calendarItemLocation(item, service ?? undefined, locations, coachAccount)) || coachAccount.venueShortName || coachAccount.venueName,
-      phone: groupSessionContext ? "" : item.phone || "",
-      email: groupSessionContext ? "" : item.email || "",
-      clientEmailStatus: latestClientEmail ? notificationStatusLabel(latestClientEmail) : t("No client email receipt yet"),
-      coachEmailStatus: latestCoachEmail ? notificationStatusLabel(latestCoachEmail) : t("No coach receipt yet"),
-      adminEmailStatus: latestAdminEmail ? notificationStatusLabel(latestAdminEmail) : t("No admin receipt yet"),
-    });
-  }
-
-  function hideCalendarItemHover(itemId?: string) {
-    setCalendarHover((current) => (!itemId || current?.itemId === itemId ? null : current));
-  }
-
   const selectedClientNotifications = useMemo(() => {
     if (!selectedClient) return [];
     return notificationsForPerson(selectedClient, notifications, selectedClientAppointments);
@@ -6781,10 +6583,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   );
 
   const peopleImportPreview = useMemo(() => parsePeopleImport(peopleImportText).length, [peopleImportText]);
-
-  function cycleCalendarViewMode() {
-    setCalendarViewMode((current) => (current === "full" ? "am" : current === "am" ? "pm" : "full"));
-  }
 
   function closeCalendarDetails() {
     setSelectedId("");
@@ -6800,56 +6598,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     const occurrenceLimit = clamp(Math.round(service.groupSchedule.occurrenceCount), 1, MAX_GROUP_OCCURRENCE_COUNT);
     if (week < weekOffset || week >= weekOffset + occurrenceLimit) return false;
     return true;
-  }
-
-  function openGroupSessionFromSlot(item: CalendarItem): boolean {
-    const failWith = (reason: string) => {
-      setToast({ message: t("Unable to open group session: {reason}", { reason }) });
-      return false;
-    };
-
-    const serviceId = item.serviceId;
-    if (!serviceId) return failWith(t("missing serviceId"));
-
-    const service = services.find((candidate) => candidate.id === serviceId);
-    if (!service) return failWith("service not found");
-    if (!isScheduledGroupService(service)) return failWith("service is not scheduled group");
-
-    const week = itemWeek(item);
-    const slotWeek = Number.isInteger(week) ? week : NaN;
-    const slotData = {
-      day: item.day,
-      start: item.start,
-      duration: item.duration,
-    };
-
-    if (item.syntheticGroupSlot || item.groupSlot) {
-      if (!service || !Number.isInteger(slotWeek) || !Number.isInteger(slotData.day) || !Number.isFinite(slotData.start) || !Number.isFinite(slotData.duration)) {
-        return failWith("slot does not match schedule");
-      }
-    } else {
-      if (!service.groupSchedule || !service.groupSchedule.active) return failWith(t("missing groupSchedule"));
-      if (!isGroupServiceSlotMatch(service, slotWeek, slotData.day, slotData.start)) return failWith("slot does not match schedule");
-    }
-
-    const candidateSession: GroupSession = {
-      serviceId,
-      week: slotWeek,
-      day: slotData.day,
-      start: slotData.start,
-      duration: slotData.duration || service.duration,
-    };
-    const sessionService = services.find((candidate) => candidate.id === candidateSession.serviceId);
-    if (!sessionService) return failWith(t("selectedGroupSessionDetails failed to resolve"));
-
-    setSelectedGroupSession(candidateSession);
-    setSelectedId("");
-    setQuickCreate(null);
-    return true;
-  }
-
-  function openGroupSessionForItem(item: CalendarItem) {
-    return openGroupSessionFromSlot(item);
   }
 
   function openQuickCreateForGroupSession(anchor: { x: number; y: number }) {
@@ -6943,83 +6691,9 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     });
   }
 
-  function isScheduledGroupSessionSlot(item: CalendarItem) {
-    if (item.syntheticGroupSlot || item.groupSlot) return true;
-    const service = itemService(item, services);
-    return (
-      item.readOnly &&
-      item.kind === "block" &&
-      isScheduledGroupService(service) &&
-      isGroupServiceSlotMatch(service, itemWeek(item), item.day, item.start)
-    );
-  }
-
-  function isGroupSessionAppointment(item: CalendarItem) {
-    const service = itemService(item, services);
-    return (
-      item.kind === "appointment" &&
-      isScheduledGroupService(service) &&
-      isGroupServiceSlotMatch(service, itemWeek(item), item.day, item.start)
-    );
-  }
-
-  function isGroupSessionItem(item: CalendarItem) {
-    return isScheduledGroupSessionSlot(item) || isGroupSessionAppointment(item);
-  }
-
   function isActiveGroupBooking(status: BookingStatus | undefined) {
     if (!status) return true;
     return status === "booked" || status === "completed";
-  }
-
-  function getGroupSessionContext(item: CalendarItem) {
-    if (!isGroupSessionItem(item)) return null;
-    const service = itemService(item, services);
-    if (!service || !isScheduledGroupService(service)) return null;
-    const week = itemWeek(item);
-    if (!Number.isInteger(week) || !Number.isInteger(item.day) || !Number.isFinite(item.start)) return null;
-    const duration = Number.isFinite(item.duration) && item.duration > 0 ? item.duration : service.duration;
-    if (!isScheduledGroupSessionSlot(item) && !isGroupServiceSlotMatch(service, week, item.day, item.start)) return null;
-    const session: GroupSession = {
-      serviceId: service.id,
-      week,
-      day: item.day,
-      start: item.start,
-      duration,
-    };
-    const candidate = {
-      week: session.week,
-      day: session.day,
-      start: session.start,
-      duration: session.duration,
-    };
-    const attendees = items
-      .filter(
-        (candidateItem) =>
-          candidateItem.kind === "appointment" &&
-          candidateItem.serviceId === service.id &&
-          overlaps(itemSlot(candidateItem), candidate),
-      )
-      .sort((a, b) => (a.client ?? "").localeCompare(b.client ?? ""));
-    const bookedCount = attendees.filter((appointment) => isActiveGroupBooking(appointment.status)).length;
-    return {
-      service,
-      session,
-      attendees,
-      capacity: service.capacity,
-      bookedCount,
-    };
-  }
-
-  function handleCalendarItemClick(
-    event: ReactMouseEvent<HTMLElement> | ReactPointerEvent<HTMLElement> | ReactKeyboardEvent<HTMLElement>,
-    item: CalendarItem,
-  ) {
-    if (!isGroupSessionItem(item)) return false;
-    event.preventDefault();
-    event.stopPropagation();
-    hideCalendarItemHover();
-    return openGroupSessionForItem(item);
   }
 
 
@@ -7175,22 +6849,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     return { day, start, x, y };
   }
 
-  function coachIdFromLocationCalendarSlot(slot: { day: number; x: number }) {
-    if (effectiveCalendarPerspective !== "location" || !locationCalendarCoachGroups.length) return undefined;
-    const grid = gridRef.current;
-    if (!grid) return undefined;
-    const rect = grid.getBoundingClientRect();
-    const column = dayColumnPixels(calendarCollapsedDays, rect.width, calendarDayFocus)[slot.day];
-    const dayWidth = Math.max(1, column?.width ?? rect.width / DAY_COUNT);
-    const xWithinDay = clamp(slot.x - (column?.left ?? slot.day * dayWidth), 0, Math.max(0, dayWidth - 1));
-    const coachIndex = clamp(
-      Math.floor((xWithinDay / dayWidth) * locationCalendarCoachGroups.length),
-      0,
-      locationCalendarCoachGroups.length - 1,
-    );
-    return locationCalendarCoachGroups[coachIndex]?.coachId;
-  }
-
   function isClientInsideGrid(clientX: number, clientY: number) {
     const grid = gridRef.current;
     if (!grid) return false;
@@ -7237,10 +6895,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
       fromX: tileCenterX - finalCenterX,
       fromY: tileCenterY - finalCenterY,
     };
-  }
-
-  function slotFromPointer(event: ReactPointerEvent<HTMLElement>) {
-    return slotFromClient(event.clientX, event.clientY);
   }
 
   function setDraftState(nextDraft: Draft | null) {
@@ -7642,72 +7296,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     }, 60);
   }
 
-  function handleWeekStripScroll() {
-    const strip = weekStripRef.current;
-    if (!strip) return;
-    const panels = weekPanelsRef.current;
-    if (panels) panels.scrollLeft = strip.scrollLeft;
-    if (weekPagerSyncingRef.current) return;
-    if (weekSettleTimerRef.current) window.clearTimeout(weekSettleTimerRef.current);
-    weekSettleTimerRef.current = window.setTimeout(() => {
-      weekSettleTimerRef.current = null;
-      const index = clamp(Math.round(strip.scrollLeft / weekPagerStep()), 0, WEEK_PANEL_COUNT - 1);
-      if (index === WEEK_FOCUS_INDEX) return;
-      setActiveWeekState(activeWeekRef.current + (index - WEEK_FOCUS_INDEX));
-    }, 140);
-  }
-
-  /**
-   * Drag-to-page for pointers that cannot scroll sideways on their own. Touch
-   * and trackpads scroll the strip natively; a mouse would be left with only
-   * the toolbar arrows, and the strip says "grab" either way.
-   */
-  function beginWeekStripDrag(event: ReactPointerEvent<HTMLDivElement>) {
-    const strip = weekStripRef.current;
-    if (!strip || event.pointerType === "touch") return;
-    const startX = event.clientX;
-    const startLeft = strip.scrollLeft;
-    let dragged = false;
-
-    const onMove = (move: globalThis.PointerEvent) => {
-      const dx = move.clientX - startX;
-      if (Math.abs(dx) > 3) dragged = true;
-      strip.scrollLeft = startLeft - dx;
-    };
-    const onUp = () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
-      if (!dragged) {
-        strip.classList.remove("is-grabbing");
-        return;
-      }
-      // A decisive push pages; anything less falls back. Landing on whichever
-      // panel happens to be nearest would mean dragging half the calendar's
-      // width before the week changed, which is not what a swipe feels like.
-      const step = weekPagerStep();
-      const travelled = strip.scrollLeft - startLeft;
-      const delta = Math.abs(travelled) > Math.max(40, step * 0.15) ? Math.sign(travelled) : 0;
-      const left = step * clamp(WEEK_FOCUS_INDEX + delta, 0, WEEK_PANEL_COUNT - 1);
-      // is-grabbing stays on until the strip has landed: it is what suspends
-      // snapping, and re-enabling mandatory snap mid-flight cancels the scroll
-      // and drops the strip back on whichever panel was nearest at the time.
-      strip.scrollTo({ left, behavior: "smooth" });
-      if (weekLandingTimerRef.current) window.clearTimeout(weekLandingTimerRef.current);
-      weekLandingTimerRef.current = window.setTimeout(() => {
-        weekLandingTimerRef.current = null;
-        strip.scrollLeft = left;
-        strip.classList.remove("is-grabbing");
-      }, 320);
-      // The scroll handler picks the landing up from here and commits the week.
-    };
-
-    strip.classList.add("is-grabbing");
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
-  }
-
   function pageWeek(delta: number) {
     const strip = weekStripRef.current;
     if (!strip) {
@@ -7723,83 +7311,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
       weekLandingTimerRef.current = null;
       if (Math.abs(strip.scrollLeft - left) > 2) strip.scrollLeft = left;
     }, 320);
-  }
-
-  /** Tap a day to fill the grid with it; tap the same day again for the week. */
-  function focusCalendarDay(dayIndex: number) {
-    setCalendarDayFocus((current) => (current === dayIndex ? null : dayIndex));
-  }
-
-  function cycleCalendarAxisMode() {
-    suppressBlankGestureUntilRef.current = Date.now() + 360;
-    setCalendarAxisMode((current) => (current === "week" ? "squash" : "week"));
-  }
-
-  /**
-   * The 26px of the neighbouring week that stays visible past the edge. It
-   * shows the shape of that week's availability and nothing else: at 26px a
-   * booking card is unreadable, and keeping the panels inert means one live
-   * week's worth of drag, drop and quick-create logic rather than three.
-   */
-  function renderWeekPeekPanel(offset: number) {
-    return (
-      <div className="week-pager-panel is-off-week" key={offset} aria-hidden="true">
-        <div className="week-grid is-peek" style={{ height: gridHeight }}>
-          {weekDays.map((day, dayIndex) => (
-            <div
-              className={`day-lane ${calendarCollapsedDays[dayIndex] ? "is-unavailable" : ""}`}
-              key={day.label}
-              hidden={calendarDayColumns[dayIndex].hidden}
-              style={{ left: calendarDayColumns[dayIndex].left, width: calendarDayColumns[dayIndex].width }}
-            >
-              {calendarAvailability[dayIndex].map((window, index) => {
-                const visibleWindow = clipCalendarSegment(window.start, window.end - window.start);
-                if (!visibleWindow) return null;
-                const bandTop = calendarMinutesToTop(visibleWindow.start);
-                return (
-                  <div
-                    className="available-band"
-                    key={`${day.label}-${index}`}
-                    style={
-                      {
-                        top: bandTop,
-                        height: calendarSegmentHeight(visibleWindow.start, visibleWindow.duration),
-                        ["--band-offset" as string]: `${bandTop}px`,
-                      } as CSSProperties
-                    }
-                  />
-                );
-              })}
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  function toggleCalendarDetailMode() {
-    suppressBlankGestureUntilRef.current = Date.now() + 360;
-    setCalendarDetailMode((current) => !current);
-  }
-
-  function enableCalendarDetailMode() {
-    suppressBlankGestureUntilRef.current = Date.now() + 360;
-    setCalendarDetailMode(true);
-  }
-
-  function handleCalendarTouchStart(event: ReactTouchEvent<HTMLElement>) {
-    const now = Date.now();
-    if (event.touches.length > 1) {
-      enableCalendarDetailMode();
-      return;
-    }
-    if (now - lastCalendarTapRef.current < 320) {
-      event.preventDefault();
-      toggleCalendarDetailMode();
-      lastCalendarTapRef.current = 0;
-      return;
-    }
-    lastCalendarTapRef.current = now;
   }
 
   function flashEdgeCue(direction: "prev" | "next") {
@@ -7836,34 +7347,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     setPointerSessionState(null);
     setMovedState(false);
     if (!options.preserveQuickCreate) setQuickCreate(null);
-  }
-
-  function renderAvailableBand(window: AvailabilityWindow, key: string) {
-    const visibleWindow = clipCalendarSegment(window.start, window.end - window.start);
-    if (!visibleWindow) return null;
-    const bandTop = calendarMinutesToTop(visibleWindow.start);
-    // The location view is one location already; everywhere else the band says
-    // where the coach is working.
-    const showLocation = hasMultipleAvailabilityLocations && effectiveCalendarPerspective !== "location";
-    const locationId = showLocation ? availabilityWindowLocationId(window) : "";
-    const hue = locationId ? availabilityLocationHue(locationId) : null;
-    return (
-      <div
-        className={`available-band ${hue !== null ? "has-location" : ""}`}
-        key={key}
-        style={{
-          top: bandTop,
-          height: calendarSegmentHeight(visibleWindow.start, visibleWindow.duration),
-          // The band draws its own hour ticks, and a window rarely opens on the
-          // hour. Hand it its distance from the top of the grid so the ticks
-          // count from the time gutter rather than from the band edge.
-          ["--band-offset" as string]: `${bandTop}px`,
-          ...(hue !== null ? { ["--location-hue" as string]: String(hue) } : {}),
-        } as CSSProperties}
-      >
-        {showLocation ? <span className="available-band-location">{availabilityLocationLabel(locationId)}</span> : null}
-      </div>
-    );
   }
 
   // Recurring group sessions are service definitions, not stored calendar items: no row
@@ -8240,207 +7723,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     setHoldingItemId(null);
   }
 
-  // Android and desktop Chrome buzz; iOS Safari has no web haptic, which is why
-  // the lift also has to read visually rather than relying on this.
-  function pulseHoldFeedback() {
-    try {
-      navigator.vibrate?.(12);
-    } catch {
-      // A blocked or unsupported vibrate must never take the drag down with it.
-    }
-  }
-
-  function waitForTouchHold(event: ReactPointerEvent<HTMLElement>, itemId: string, arm: () => void) {
-    cancelTouchHold();
-    const startX = event.clientX;
-    const startY = event.clientY;
-
-    const abandon = (moveEvent: globalThis.PointerEvent) => {
-      if (Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY) < TOUCH_HOLD_TOLERANCE) return;
-      cancelTouchHold();
-    };
-    const release = () => cancelTouchHold();
-
-    window.addEventListener("pointermove", abandon);
-    window.addEventListener("pointerup", release);
-    // The browser fires pointercancel the moment it decides the touch is a
-    // scroll, which is the cleanest signal that this was never a drag.
-    window.addEventListener("pointercancel", release);
-    window.addEventListener("scroll", release, true);
-
-    touchHoldCleanupRef.current = () => {
-      window.removeEventListener("pointermove", abandon);
-      window.removeEventListener("pointerup", release);
-      window.removeEventListener("pointercancel", release);
-      window.removeEventListener("scroll", release, true);
-    };
-
-    setHoldingItemId(itemId);
-    touchHoldTimerRef.current = window.setTimeout(() => {
-      touchHoldTimerRef.current = null;
-      touchHoldCleanupRef.current?.();
-      touchHoldCleanupRef.current = null;
-      setHoldingItemId(null);
-      pulseHoldFeedback();
-      arm();
-    }, TOUCH_HOLD_MS);
-  }
-
-  function startMoveSession(
-    target: HTMLElement,
-    pointerId: number,
-    pointerType: string,
-    clientX: number,
-    clientY: number,
-    item: CalendarItem,
-  ) {
-    const slot = slotFromClient(clientX, clientY);
-    if (!slot) return;
-    const rect = target.getBoundingClientRect();
-    pointerStartRef.current = { x: clientX, y: clientY };
-    pointerClientRef.current = { x: clientX, y: clientY };
-    resetPointerTrail(clientX, clientY);
-    pointerKindRef.current = pointerType || "mouse";
-    dragPreviewMetaRef.current = {
-      width: rect.width,
-      height: rect.height,
-      offsetX: clientX - rect.left,
-      offsetY: clientY - rect.top,
-    };
-    setFloatingDrag(null);
-    setMovedState(false);
-    setQuickCreate(null);
-    setPointerSessionState({
-      mode: "move",
-      itemId: item.id,
-      offsetMinutes: slot.start - item.start,
-      origin: item,
-    });
-    if (target.isConnected) target.setPointerCapture(pointerId);
-    attachGestureListeners({ blockTouchScroll: pointerType === "touch" });
-  }
-
-  function startResizeSession(
-    target: HTMLElement,
-    pointerId: number,
-    pointerType: string,
-    clientX: number,
-    clientY: number,
-    item: CalendarItem,
-  ) {
-    pointerStartRef.current = { x: clientX, y: clientY };
-    pointerClientRef.current = { x: clientX, y: clientY };
-    resetPointerTrail(clientX, clientY);
-    pointerKindRef.current = pointerType || "mouse";
-    dragPreviewMetaRef.current = null;
-    setFloatingDrag(null);
-    setMovedState(false);
-    setQuickCreate(null);
-    setPointerSessionState({ mode: "resize", itemId: item.id, origin: item });
-    if (target.isConnected) target.setPointerCapture(pointerId);
-    attachGestureListeners({ blockTouchScroll: pointerType === "touch" });
-  }
-
-  function beginMove(event: ReactPointerEvent<HTMLElement>, item: CalendarItem) {
-    if (!requireLiveDatabase("move appointments")) return;
-    if (isExternallyOwned(item)) {
-      setToast({ message: externalRescheduleMessage(item) });
-      return;
-    }
-    const target = event.currentTarget;
-    const { pointerId, pointerType, clientX, clientY } = event;
-    if (pointerType === "touch") {
-      // stopPropagation, but no preventDefault: the grid must not read this as
-      // a blank-space gesture, while the browser keeps the touch until the hold
-      // completes so the week still scrolls under the finger.
-      event.stopPropagation();
-      waitForTouchHold(event, item.id, () =>
-        startMoveSession(target, pointerId, pointerType, clientX, clientY, item),
-      );
-      return;
-    }
-    event.preventDefault();
-    event.stopPropagation();
-    startMoveSession(target, pointerId, pointerType, clientX, clientY, item);
-  }
-
-  function beginResize(event: ReactPointerEvent<HTMLElement>, item: CalendarItem) {
-    if (!requireLiveDatabase("resize appointments")) return;
-    // Resizing moves the end time, which the external system owns just as much
-    // as the start. Gating the drag but not this would leave the same drift
-    // reachable by a different handle.
-    if (isExternallyOwned(item)) {
-      setToast({ message: externalRescheduleMessage(item) });
-      return;
-    }
-    const target = event.currentTarget;
-    const { pointerId, pointerType, clientX, clientY } = event;
-    if (pointerType === "touch") {
-      // The handle is a 9px strip along the bottom edge — the easiest thing on
-      // the calendar to catch by accident, so it waits out the same hold. The
-      // stop matters here: without it the card behind would start its own hold
-      // and a resize would turn into a move.
-      event.stopPropagation();
-      waitForTouchHold(event, item.id, () =>
-        startResizeSession(target, pointerId, pointerType, clientX, clientY, item),
-      );
-      return;
-    }
-    event.preventDefault();
-    event.stopPropagation();
-    startResizeSession(target, pointerId, pointerType, clientX, clientY, item);
-  }
-
-  function beginBlankGesture(event: ReactPointerEvent<HTMLDivElement>) {
-    if (event.button !== 0) return;
-    if (Date.now() < suppressBlankGestureUntilRef.current) return;
-    if ((event.target as HTMLElement).closest("[data-calendar-item]")) return;
-    const slot = slotFromPointer(event);
-    if (!slot) return;
-    pointerStartRef.current = { x: event.clientX, y: event.clientY };
-    pointerClientRef.current = { x: event.clientX, y: event.clientY };
-    resetPointerTrail(event.clientX, event.clientY);
-    pointerKindRef.current = event.pointerType || "mouse";
-    dragPreviewMetaRef.current = null;
-    setFloatingDrag(null);
-    pendingQuickCreateRef.current = {
-      week: activeWeek,
-      day: slot.day,
-      start: slot.start,
-      x: event.clientX,
-      y: event.clientY,
-      coachId: coachIdFromLocationCalendarSlot(slot),
-      locationId: effectiveCalendarPerspective === "location" ? selectedCalendarLocationId : undefined,
-      serviceId: "",
-      phone: "",
-      email: "",
-      note: "",
-      attendees: [],
-      attendeeName: "",
-      attendeeEmail: "",
-      error: "",
-    };
-    clickPlaceRef.current = activeDockBooking
-      ? {
-          bookingId: activeDockBooking.id,
-          candidate: {
-            week: activeWeekRef.current,
-            day: slot.day,
-            start: slot.start,
-            duration: activeDockBooking.duration,
-          },
-        }
-      : null;
-    setMovedState(false);
-    setPointerSessionState(event.pointerType === "touch" ? null : { mode: "block", day: slot.day, start: slot.start });
-    event.currentTarget.setPointerCapture(event.pointerId);
-    attachGestureListeners();
-  }
-
-  function updatePointer(event: ReactPointerEvent<HTMLElement>) {
-    updatePointerAt(event.clientX, event.clientY);
-  }
-
   function updatePointerAt(clientX: number, clientY: number) {
     pointerClientRef.current = { x: clientX, y: clientY };
     recordPointerTrail(clientX, clientY);
@@ -8703,40 +7985,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     }
   }
 
-  function applyQuickClient(client: ClientSummary) {
-    setQuickClientSearch(client.name);
-    setQuickCreate((current) =>
-      current
-        ? {
-            ...current,
-            phone: client.phone || current.phone,
-            email: client.email || current.email,
-            error: "",
-          }
-        : current,
-    );
-    setQuickMatchField("");
-  }
-
-  function quickClientMatchButton(field: "name" | "phone" | "email") {
-    if (!quickClientSuggestion || !showQuickClientSuggestion || quickMatchField !== field) return null;
-    return (
-      <button
-        className="client-match-prompt quick-field-match"
-        onMouseDown={(event) => event.preventDefault()}
-        onTouchStart={(event) => event.preventDefault()}
-        onClick={() => applyQuickClient(quickClientSuggestion)}
-        type="button"
-      >
-        <ClarityProfile size={15} />
-        <span>
-          <strong>{quickClientSuggestion.name}</strong>
-          <em>{[quickClientSuggestion.phone, quickClientSuggestion.email].filter(Boolean).join(" · ")}</em>
-        </span>
-      </button>
-    );
-  }
-
   function applyBookingClient(client: ClientSummary) {
     const { firstName, lastName } = splitClientName(client.name);
     setBookingSubmitError("");
@@ -8745,230 +7993,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
       lastName,
       phone: client.phone,
       email: client.email,
-    });
-  }
-
-  function updateQuickCreateField(field: "phone" | "email" | "note", value: string) {
-    setQuickCreate((current) => (current ? { ...current, [field]: value, error: "" } : current));
-  }
-
-  function updateQuickCreateAttendeeDraft(field: "attendeeName" | "attendeeEmail", value: string) {
-    setQuickCreate((current) => (current ? { ...current, [field]: value, error: "" } : current));
-  }
-
-  function addQuickCreateCustomGroupAttendee() {
-    if (!quickCreate || !quickCreateService || !isCustomGroupService(quickCreateService)) return;
-    if (quickCreate.attendeeEmail.trim() && !quickCreate.attendeeEmail.includes("@")) {
-      setQuickCreate((current) => (current ? { ...current, error: "Enter a valid attendee email or leave it blank." } : current));
-      return;
-    }
-    const attendee = adminCustomGroupAttendee(quickCreate.attendeeName, quickCreate.attendeeEmail);
-    if (!attendee) {
-      setQuickCreate((current) => (current ? { ...current, error: "Add an attendee name first." } : current));
-      return;
-    }
-    const nextCount = 1 + quickCreate.attendees.length + 1;
-    if (nextCount > customGroupMaxParticipants(quickCreateService)) {
-      setQuickCreate((current) => (current ? { ...current, error: "This custom group is already at maximum size." } : current));
-      return;
-    }
-    setQuickCreate((current) =>
-      current
-        ? {
-            ...current,
-            attendees: [...current.attendees, attendee],
-            attendeeName: "",
-            attendeeEmail: "",
-            error: "",
-          }
-        : current,
-    );
-  }
-
-  function removeQuickCreateCustomGroupAttendee(attendeeId: string) {
-    setQuickCreate((current) =>
-      current
-        ? {
-            ...current,
-            attendees: current.attendees.filter((attendee) => attendee.id !== attendeeId),
-            error: "",
-          }
-        : current,
-    );
-  }
-
-  function selectQuickService(serviceId: string) {
-    if (!quickCreate) return;
-    const service = appointmentServices.find((candidate) => candidate.id === serviceId);
-    if (!service) return;
-    const candidate = {
-      week: quickCreate.week,
-      day: quickCreate.day,
-      start: quickCreate.start,
-      duration: service.duration,
-    };
-    const { fixedCoachId, fixedLocationId } = calendarBookingChoices(service);
-    const choice = { coachId: fixedCoachId, locationId: fixedLocationId };
-    setQuickCreate((current) =>
-      current
-        ? {
-            ...current,
-            serviceId,
-            ...choice,
-            attendees: [],
-            attendeeName: "",
-            attendeeEmail: "",
-            error: quickCreateAvailabilityError(candidate, service, choice),
-          }
-        : current,
-    );
-    setQuickMatchField("name");
-  }
-
-  function chooseQuickCreateScope(field: "coachId" | "locationId", value: string) {
-    setQuickCreate((current) => {
-      if (!current || !quickCreateService) return current;
-      const next = { ...current, [field]: value };
-      const candidate = { week: next.week, day: next.day, start: next.start, duration: quickCreateService.duration };
-      return {
-        ...next,
-        error: quickCreateAvailabilityError(candidate, quickCreateService, {
-          coachId: next.coachId,
-          locationId: next.locationId,
-        }),
-      };
-    });
-  }
-
-  function backToQuickServiceChoice() {
-    setQuickCreate((current) => {
-      if (!current) return current;
-      // "Add person" on a scheduled group session pins the service; going back
-      // to the normal lesson pick list makes no sense there, so just close.
-      const service = activeServices.find((candidate) => candidate.id === current.serviceId);
-      if (isScheduledGroupService(service)) return null;
-      return { ...current, serviceId: "", coachId: undefined, locationId: undefined, phone: "", email: "", note: "", error: "" };
-    });
-  }
-
-  function confirmQuickAppointment() {
-    if (!quickCreate || !quickCreateService) return;
-    if (!requireLiveDatabase("create appointments")) return;
-    const typedClientName = quickClientSearch.trim();
-    const clientName = typedClientName;
-    if (!clientName) {
-      setQuickCreate((current) => (current ? { ...current, error: "Add a client name." } : current));
-      return;
-    }
-    const quickCreateIsCustomGroup = isCustomGroupService(quickCreateService);
-    if (quickCreateIsCustomGroup && quickCreate.attendees.length < customGroupMinParticipants(quickCreateService) - 1) {
-      setQuickCreate((current) => (current ? { ...current, error: "Add at least one other person." } : current));
-      return;
-    }
-    const coachId = quickCreate.coachId || "";
-    const locationId = quickCreate.locationId || "";
-    if (!coachId || !locationId) {
-      setQuickCreate((current) =>
-        current ? { ...current, error: coachId ? "Choose a location." : "Choose a coach." } : current,
-      );
-      return;
-    }
-    const candidate = {
-      week: quickCreate.week,
-      day: quickCreate.day,
-      start: quickCreate.start,
-      duration: quickCreateService.duration,
-    };
-    const choice = { candidateCoachId: coachId, candidateLocationId: locationId };
-    if (!isValidAppointmentSlot(candidate, undefined, quickCreateService, choice)) {
-      setQuickCreate((current) =>
-        current
-          ? { ...current, error: quickCreateAvailabilityError(candidate, quickCreateService, { coachId, locationId }) }
-          : current,
-      );
-      return;
-    }
-    if (!confirmPastAdminLesson(candidate)) return;
-    const chosenLocation = locationById(locations, locationId);
-    const location = chosenLocation
-      ? locationSnapshot(chosenLocation)
-      : bookingLocationSnapshotFor(quickCreateService, locations, coachAccount);
-    const item: CalendarItem = {
-      id: newCalendarItemId("appt"),
-      kind: "appointment",
-      accountId: activeAccountId,
-      title: clientName,
-      client: clientName,
-      serviceId: quickCreateService.id,
-      coachId,
-      locationId: location.locationId,
-      coach: bookingCoachSnapshotFor(coachId, coachProfiles),
-      ...candidate,
-      phone: quickCreate.phone.trim(),
-      email: quickCreate.email.trim(),
-      note: quickCreate.note.trim(),
-      location,
-      ...(quickCreateIsCustomGroup
-        ? {
-            customGroup: true as const,
-            attendees: [
-              customGroupBookerAttendee(clientName, quickCreate.email),
-              ...quickCreate.attendees,
-            ],
-            calculatedPrice: calculateCustomGroupPrice(quickCreateService, 1 + quickCreate.attendees.length),
-          }
-        : {}),
-    };
-    setItems(carveBusyBlocksForAppointment([...items, item], itemSlot(item)));
-    if (
-      !selectedGroupSession ||
-      selectedGroupSession.serviceId !== quickCreateService.id ||
-      selectedGroupSession.week !== quickCreate.week ||
-      selectedGroupSession.day !== quickCreate.day ||
-      selectedGroupSession.start !== quickCreate.start
-    ) {
-      setSelectedId("");
-    }
-    setQuickCreate(null);
-    setQuickClientSearch("");
-  }
-
-  function createBlockFromQuick(scope: "coach-location" | "location" = "coach-location") {
-    if (!quickCreate) return;
-    if (!requireLiveDatabase("create blocks")) return;
-    const locationOnly = effectiveCalendarPerspective === "location" && scope === "location";
-    const blockCoachId =
-      locationOnly
-        ? undefined
-        : quickCreate.coachId || selectedCalendarCoachId || currentAppUser.coachId || firstCoachId(coachProfiles);
-    const blockLocationId = quickCreate.locationId || selectedCalendarLocationId || defaultLocationId(locations);
-    const candidate = { week: activeWeek, day: quickCreate.day, start: quickCreate.start, duration: 30 };
-    if (!isValidBlockSlot(candidate, undefined, { coachId: blockCoachId, locationId: blockLocationId, locationOnly })) {
-      setToast({ message: t("That block would overlap with another calendar item.") });
-      return;
-    }
-    const previous = items;
-    const item: CalendarItem = {
-      id: newCalendarItemId("block"),
-      kind: "block",
-      accountId: activeAccountId,
-      title: locationOnly ? t("Location unavailable") : t("Coach unavailable"),
-      coachId: blockCoachId,
-      locationId: blockLocationId,
-      coach: blockCoachId ? bookingCoachSnapshotFor(blockCoachId, coachProfiles) : undefined,
-      location: cleanBookingLocationSnapshot(locationSnapshot(locationById(locations, blockLocationId) ?? defaultLocationFromCoachAccount(coachAccount))),
-      ...candidate,
-      note: locationOnly ? "Location-wide quick block" : "Coach-location quick block",
-    };
-    setItems([...items, item]);
-    closeCalendarDetails();
-    setQuickCreate(null);
-    setToast({
-      message: t("Blocked {short}, {start}.", { short: weekDays[item.day].short, start: formatRange(item.start, item.duration) }),
-      undo: () => {
-        setItems(previous);
-        void reconcileUndoByDelete(item.id, previous);
-      },
     });
   }
 
@@ -9244,32 +8268,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
       return;
     }
     setToast({ message: t("{client}'s parked lesson was removed.", { client: booking.client }) });
-  }
-
-  function quickCreatePopoverStyle(): CSSProperties {
-    if (!quickCreate) return {};
-    const viewport = window.visualViewport;
-    const viewportWidth = viewport?.width ?? window.innerWidth;
-    const viewportHeight = viewport?.height ?? window.innerHeight;
-    const margin = 12;
-    const compact = viewportWidth <= 680;
-    const availableWidth = Math.max(280, viewportWidth - margin * 2);
-    const availableHeight = Math.max(280, viewportHeight - margin * 2);
-    const popoverWidth = Math.min(compact ? availableWidth : 340, availableWidth);
-    const estimatedHeight = quickCreateService ? (compact ? 620 : 560) : 360;
-    const usableHeight = Math.min(estimatedHeight, availableHeight);
-    const left = compact
-      ? margin
-      : clamp(quickCreate.x + 10, margin, Math.max(margin, viewportWidth - popoverWidth - margin));
-    const top = clamp(quickCreate.y + 10, margin, Math.max(margin, viewportHeight - usableHeight - margin));
-
-    return {
-      left,
-      top,
-      width: popoverWidth,
-      maxHeight: availableHeight,
-      zIndex: selectedGroupSession ? 120 : undefined,
-    };
   }
 
   function moveWeek(delta: number) {
@@ -20373,22 +19371,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
       </EditableSettingsBlock>
     </SettingsGroup>
   );
-
-  const quickCreateIsCustomGroup = Boolean(quickCreate && quickCreateService && isCustomGroupService(quickCreateService));
-  // The coach and place choices the quick-create form asks for, if any.
-  const quickCreateChoices =
-    quickCreate && quickCreateService && !isScheduledGroupService(quickCreateService)
-      ? calendarBookingChoices(quickCreateService)
-      : null;
-  const quickCreateCandidate =
-    quickCreate && quickCreateService
-      ? { week: quickCreate.week, day: quickCreate.day, start: quickCreate.start, duration: quickCreateService.duration }
-      : null;
-  const quickCreateCustomGroupParticipantCount = quickCreateIsCustomGroup && quickCreate ? 1 + quickCreate.attendees.length : 1;
-  const quickCreateCustomGroupPrice =
-    quickCreateIsCustomGroup && quickCreateService
-      ? calculateCustomGroupPrice(quickCreateService, quickCreateCustomGroupParticipantCount)
-      : 0;
   const selectedIsCustomGroupAppointment =
     selected?.kind === "appointment" && isCustomGroupService(selectedService);
   const selectedCustomGroupAttendees =
@@ -21398,6 +20380,132 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     return counts;
   }, {});
 
+  const calendar = useCalendarController({
+    visibleWeekItems,
+    services,
+    coachProfiles,
+    accountCoachProfiles,
+    activeCoachId,
+    availabilityLocations,
+    calendarViewBounds,
+    calendarViewMode,
+    calendarStartMinutes,
+    calendarEndMinutes,
+    quickCreate,
+    activeServices,
+    floatingDrag,
+    draft,
+    scheduledGroupSlots,
+    items,
+    activeWeek,
+    calendarCollapsedDays,
+    calendarDayFocus,
+    calendarAxis,
+    calendarTodayIndex,
+    calendarNowMinutes,
+    calendarMinutesToTop,
+    quickClientSearch,
+    clients,
+    pointerSessionRef,
+    setCalendarHover,
+    locations,
+    coachAccount,
+    setCalendarViewMode,
+    setToast,
+    isGroupServiceSlotMatch,
+    setSelectedGroupSession,
+    setSelectedId,
+    setQuickCreate,
+    isActiveGroupBooking,
+    effectiveCalendarPerspective,
+    locationCalendarCoachGroups,
+    gridRef,
+    slotFromClient,
+    weekStripRef,
+    weekPanelsRef,
+    weekPagerSyncingRef,
+    weekSettleTimerRef,
+    weekPagerStep,
+    setActiveWeekState,
+    activeWeekRef,
+    weekLandingTimerRef,
+    setCalendarDayFocus,
+    setCalendarAxisMode,
+    gridHeight,
+    weekDays,
+    calendarAvailability,
+    clipCalendarSegment,
+    calendarSegmentHeight,
+    setCalendarDetailMode,
+    hasMultipleAvailabilityLocations,
+    availabilityLocationHue,
+    availabilityLocationLabel,
+    cancelTouchHold,
+    touchHoldCleanupRef,
+    setHoldingItemId,
+    touchHoldTimerRef,
+    pointerStartRef,
+    pointerClientRef,
+    resetPointerTrail,
+    pointerKindRef,
+    dragPreviewMetaRef,
+    setFloatingDrag,
+    setMovedState,
+    setPointerSessionState,
+    attachGestureListeners,
+    requireLiveDatabase,
+    pendingQuickCreateRef,
+    selectedCalendarLocationId,
+    clickPlaceRef,
+    activeDockBooking,
+    updatePointerAt,
+    setQuickClientSearch,
+    setQuickMatchField,
+    quickMatchField,
+    appointmentServices,
+    calendarBookingChoices,
+    quickCreateAvailabilityError,
+    isValidAppointmentSlot,
+    confirmPastAdminLesson,
+    activeAccountId,
+    setItems,
+    carveBusyBlocksForAppointment,
+    selectedGroupSession,
+    selectedCalendarCoachId,
+    currentAppUser,
+    isValidBlockSlot,
+    closeCalendarDetails,
+    reconcileUndoByDelete,
+    pointerSession,
+    isAdminUser,
+    calendarPerspectiveChosenRef,
+    setCalendarPerspective,
+    activeAccount,
+    accountLocations,
+    setCalendarLocationFilterId,
+    activeCoachList,
+    setCalendarCoachFilterId,
+    calendarDetailMode,
+    weekTitle,
+    calendarSaveStatus,
+    calendarFeedStatus,
+    calendarSaveError,
+    calendarSaveFailureKind,
+    calendarAxisMode,
+    calendarScrollRef,
+    endPointer,
+    placementAnimation,
+    notificationsByAppointment,
+    selectedId,
+    holdingItemId,
+    suppressItemClickRef,
+    suppressItemClickUntilRef,
+    terms,
+    hasMoved,
+    quickCreateServices,
+  });
+
+
   // No guest branch here any more: the entry point renders the login screen
   // when there is no session, and only mounts this component for a coach.
 
@@ -21699,793 +20807,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
         </div>
         )}
 
-        {adminWorkspaceReady && activeView === "calendar" && (
-        <section
-          className={`workspace ${pointerSession?.mode === "place" || activeDockBooking ? "placing-from-dock" : ""}`}
-        >
-          <div className="calendar-folder">
-          {/* Which calendar you're looking at, as folder tabs on top of it:
-              places on the left, people on the right. A coach who isn't an
-              admin only ever sees their own, so they get no tabs. */}
-          {isAdminUser ? (
-            <div className="calendar-scope-tabs" role="tablist" aria-label={t("Calendar")}>
-              <div className="calendar-scope-tab-group">
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={effectiveCalendarPerspective === "all"}
-                  className={effectiveCalendarPerspective === "all" ? "is-active" : ""}
-                  onClick={() => {
-                    calendarPerspectiveChosenRef.current = true;
-                    setCalendarPerspective("all");
-                  }}
-                >{t("All")}</button>
-                {canUseFeature(activeAccount, "locationCalendar")
-                  ? activeLocations(accountLocations).map((location) => {
-                      const isActive =
-                        effectiveCalendarPerspective === "location" && selectedCalendarLocationId === location.id;
-                      return (
-                        <button
-                          type="button"
-                          role="tab"
-                          key={location.id}
-                          aria-selected={isActive}
-                          className={`is-location ${isActive ? "is-active" : ""}`}
-                          style={{ ["--location-hue" as string]: String(availabilityLocationHue(location.id)) } as CSSProperties}
-                          onClick={() => {
-                            calendarPerspectiveChosenRef.current = true;
-                            setCalendarPerspective("location");
-                            setCalendarLocationFilterId(location.id);
-                          }}
-                        >
-                          {location.shortName || location.name}
-                        </button>
-                      );
-                    })
-                  : null}
-              </div>
-              <div className="calendar-scope-tab-group">
-                {activeCoachList.map((coach) => {
-                  const isActive = effectiveCalendarPerspective === "coach" && selectedCalendarCoachId === coach.id;
-                  return (
-                    <button
-                      type="button"
-                      role="tab"
-                      key={coach.id}
-                      aria-selected={isActive}
-                      className={isActive ? "is-active" : ""}
-                      onClick={() => {
-                        calendarPerspectiveChosenRef.current = true;
-                        setCalendarPerspective("coach");
-                        setCalendarCoachFilterId(coach.id);
-                      }}
-                    >
-                      {coach.displayName || coach.name}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          ) : null}
-          <div
-            className={`calendar-card ${calendarDetailMode ? "calendar-detail-mode" : ""}`}
-            onDoubleClick={toggleCalendarDetailMode}
-            onTouchStart={handleCalendarTouchStart}
-          >
-            <div className="calendar-toolbar">
-              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <button className="outline-button compact-button" onClick={cycleCalendarViewMode} type="button">
-                  {calendarViewButtonLabel}
-                </button>
-                <h2>{weekTitle}</h2>
-              </div>
-              <div className={`calendar-save-pill ${calendarSaveStatus}`}>
-                <strong>
-                  {calendarSaveStatus === "saving"
-                    ? t("Saving")
-                    : calendarSaveStatus === "saved"
-                      ? t("Saved")
-                      : calendarSaveStatus === "failed"
-                        ? t("Not saved")
-                        : calendarFeedStatus === "connected"
-                          ? t("Live database")
-                          : t("Not connected")}
-                </strong>
-                {calendarSaveStatus === "failed" && calendarSaveError ? <span>{calendarSaveError}</span> : null}
-              </div>
-            </div>
-            {calendarSaveStatus === "failed" && (
-              <div className="calendar-save-warning">
-                {calendarSaveFailureKind === "delete"
-                  ? t("The delete didn't go through, so the lesson was put back on the calendar. Delete it again to retry.")
-                  : t("Your latest change was not saved. Please try again; the app will retry when you make another change.")}
-              </div>
-            )}
-            {calendarViewEmptyMessage ? (
-              <div className="calendar-save-warning">{calendarViewEmptyMessage}</div>
-            ) : null}
-            {effectiveCalendarPerspective === "location" && !locationCalendarCoachGroups.length ? (
-              <div className="calendar-save-warning">{t("No active coaches are assigned to this location yet.")}</div>
-            ) : null}
-            {effectiveCalendarPerspective === "location" && locationCalendarCoachGroups.length && !locationCalendarHasAppointments ? (
-              <div className="calendar-save-warning">{t("No appointments at this location for the selected week.")}</div>
-            ) : null}
-
-            <div className="calendar-header-row">
-              <div className="time-gutter">
-                {/* Sits above the time gutter because that is the corner the
-                    axis belongs to: it changes how the vertical scale reads,
-                    not what the week contains. */}
-                <button
-                  type="button"
-                  className={`axis-cycle-button ${calendarAxisMode === "squash" ? "is-squashed" : ""}`}
-                  onClick={cycleCalendarAxisMode}
-                  aria-pressed={calendarAxisMode === "squash"}
-                  title={
-                    calendarAxisMode === "squash"
-                      ? t("Squash view: quiet stretches collapsed. Switch to the full week.")
-                      : t("Week view: every hour at full height. Switch to squash.")
-                  }
-                >
-                  {calendarAxisMode === "squash" ? <Minimize2 size={16} /> : <ClarityCalendar size={16} />}
-                  <small>{calendarAxisMode === "squash" ? t("Squash") : t("Week")}</small>
-                </button>
-              </div>
-              <div
-                className="week-strip"
-                ref={weekStripRef}
-                onScroll={handleWeekStripScroll}
-                onPointerDown={beginWeekStripDrag}
-              >
-                {WEEK_PANEL_OFFSETS.map((offset) => (
-                  <div className={`week-strip-panel ${offset === 0 ? "" : "is-off-week"}`} key={offset}>
-                    {(offset === 0 ? weekDays : buildWeekDays(activeWeek + offset)).map((day, dayIndex) => (
-                      // In day view the strip is the day picker: the headings
-                      // stay where they are and tapping one fills the grid with
-                      // it, so the week is never more than a tap away.
-                      <button
-                        type="button"
-                        className={`day-heading ${day.isToday ? "today" : ""} ${
-                          offset === 0 && calendarCollapsedDays[dayIndex] ? "is-unavailable" : ""
-                        } ${offset === 0 && calendarDayFocus === dayIndex ? "is-focused-day" : ""}`}
-                        key={day.label}
-                        aria-pressed={offset === 0 ? calendarDayFocus === dayIndex : undefined}
-                        onClick={() => (offset === 0 ? focusCalendarDay(dayIndex) : undefined)}
-                      >
-                        {offset === 0 && calendarCollapsedDays[dayIndex] ? (
-                          <span className="day-label">{day.short}</span>
-                        ) : (
-                          <>
-                            <span>{day.short}</span>
-                            <strong>{day.date}</strong>
-                            {offset === 0 &&
-                            effectiveCalendarPerspective === "location" &&
-                            locationCalendarCoachGroups.length ? (
-                              <div className="location-coach-columns" aria-label={t("Coach columns")}>
-                                {locationCalendarCoachGroups.map((coach) => (
-                                  <em key={coach.coachId || coach.name}>
-                                    <span>{coach.displayName || coach.name}</span>
-                                    <small>{t("{coachId} appt", { coachId: locationCalendarCoachItemCount(coach.coachId) })}</small>
-                                  </em>
-                                ))}
-                              </div>
-                            ) : null}
-                          </>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                ))}
-                <div className="week-pager-spacer" aria-hidden="true" />
-              </div>
-            </div>
-
-            <div className="calendar-scroll" ref={calendarScrollRef}>
-              <div className="time-column" style={{ height: gridHeight }}>
-                {visibleCalendarHourMarks.map(({ hour, top }) => {
-                  return (
-                    <div className="time-label" key={hour} style={{ top }}>
-                      {hour === 12 * 60 ? t("Noon") : formatTime(hour).replace(":00 ", "")}
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Driven, never scrolled directly: it mirrors the date strip. */}
-              <div className="week-pager" ref={weekPanelsRef}>
-                {renderWeekPeekPanel(-1)}
-                <div className="week-pager-panel">
-              <div
-                ref={gridRef}
-                className={`week-grid ${pointerSession ? "is-grabbing" : ""} ${
-                  calendarAxis.squashed ? "is-squashed" : ""
-                } ${calendarDayFocus !== null ? "is-day-view" : ""}`}
-                style={{ height: gridHeight }}
-                onPointerDown={beginBlankGesture}
-                onPointerMove={updatePointer}
-                onPointerUp={(event) => {
-                  pointerClientRef.current = { x: event.clientX, y: event.clientY };
-                  endPointer();
-                }}
-                onPointerCancel={(event) => {
-                  pointerClientRef.current = { x: event.clientX, y: event.clientY };
-                  endPointer();
-                }}
-                onPointerLeave={(event) => {
-                  if (pointerSession) updatePointer(event);
-                }}
-              >
-                {/* Full-width markers for the stretches squash collapsed, so the
-                    time that was skipped is stated rather than just missing. */}
-                {calendarQuietGaps.map((gap) => (
-                  <div className="quiet-gap" key={gap.start} style={{ top: gap.top, height: gap.height }}>
-                    <small>{t("{value} quiet · {start} – {end}", { value: formatDurationLabel(gap.end - gap.start), start: formatTime(gap.start), end: formatTime(gap.end) })}</small>
-                  </div>
-                ))}
-
-                {weekDays.map((day, dayIndex) => (
-                  <div
-                    className={`day-lane ${calendarCollapsedDays[dayIndex] ? "is-unavailable" : ""}`}
-                    key={day.label}
-                    hidden={calendarDayColumns[dayIndex].hidden}
-                    style={{ left: calendarDayColumns[dayIndex].left, width: calendarDayColumns[dayIndex].width }}
-                  >
-                    {effectiveCalendarPerspective === "location" && locationCalendarCoachGroups.length > 1
-                      ? // One lane per coach, in the same order and width as the
-                        // columns their bookings land in, each carrying only
-                        // that coach's hours. An empty lane is a coach not
-                        // working that day.
-                        locationCalendarCoachGroups.map((coach, coachIndex) => (
-                          <div
-                            className="location-coach-lane"
-                            key={coach.coachId || coach.name}
-                            style={{
-                              left: `${(coachIndex * 100) / locationCalendarCoachGroups.length}%`,
-                              width: `${100 / locationCalendarCoachGroups.length}%`,
-                            }}
-                          >
-                            {calendarAvailability[dayIndex]
-                              .filter((window) => (window.coachId || activeCoachId) === coach.coachId)
-                              .map((window, index) => renderAvailableBand(window, `${day.label}-${coach.coachId}-${index}`))}
-                          </div>
-                        ))
-                      : calendarAvailability[dayIndex].map((window, index) =>
-                          renderAvailableBand(window, `${day.label}-${index}`),
-                        )}
-                  </div>
-                ))}
-
-                {calendarNowTop !== null && !calendarDayColumns[calendarTodayIndex]?.hidden ? (
-                  <div
-                    className="calendar-now-line"
-                    aria-hidden="true"
-                    style={{
-                      top: calendarNowTop,
-                      left: calendarDayColumns[calendarTodayIndex].left,
-                      width: calendarDayColumns[calendarTodayIndex].width,
-                    }}
-                  />
-                ) : null}
-
-                {displayItems.map((item) => {
-                  const visibleItem = clipCalendarSegment(item.start, item.duration);
-                  if (!visibleItem) return null;
-                  // Day view draws one day; the rest are not on screen at all.
-                  if (calendarDayColumns[item.day]?.hidden) return null;
-                  const service = itemService(item, services);
-                  const resolvedItemCoachId = resolvedCalendarItemCoachId(item, service, coachProfiles);
-                  const activeDraft =
-                    draft && (draft.mode === "move" || draft.mode === "resize") && draft.itemId === item.id
-                      ? draft
-                      : null;
-                  const invalid = activeDraft ? !activeDraft.valid : false;
-                  const top = calendarMinutesToTop(visibleItem.start);
-                  const height = calendarSegmentHeight(visibleItem.start, visibleItem.duration);
-                  const dayColumn = calendarDayColumns[item.day] ?? calendarDayColumns[0];
-                  const coachColumnCount =
-                    effectiveCalendarPerspective === "location" ? Math.max(1, locationCalendarCoachGroups.length) : 1;
-                  const locationWideBlock = effectiveCalendarPerspective === "location" && isLocationOnlyBlock(item);
-                  const coachColumnIndex =
-                    effectiveCalendarPerspective === "location" && !locationWideBlock
-                      ? Math.max(
-                          0,
-                          locationCalendarCoachGroups.findIndex(
-                            (coach) => coach.coachId === resolvedItemCoachId,
-                          ),
-                        )
-                      : 0;
-                  // Widths come off the day column rather than a flat 1/7 so a
-                  // card still lands in its lane when squash view has collapsed
-                  // some of the other days to a hairline.
-                  const columnWidth =
-                    locationWideBlock || coachColumnCount === 1
-                      ? dayColumn.width
-                      : `calc(${dayColumn.width} / ${coachColumnCount})`;
-                  const columnLeft = coachColumnIndex
-                    ? `calc(${dayColumn.left} + ${coachColumnIndex} * ${
-                        columnWidth.startsWith("calc") ? columnWidth.slice(4) : `(${columnWidth})`
-                      })`
-                    : dayColumn.left;
-                  const flyAnimation = placementAnimation?.itemId === item.id ? placementAnimation : null;
-                  const itemNotifications = notificationsByAppointment.get(item.id) ?? [];
-                  const latestClientEmail = itemNotifications.find((notification) => notification.kind.includes("client"));
-                  const latestCoachEmail = itemNotifications.find((notification) => notification.kind.includes("coach"));
-                  const latestAdminEmail = itemNotifications.find((notification) => notification.kind.includes("admin"));
-                  // A card fades only once the lesson is over, so "already
-                  // happened" never gets confused with "cancelled" — status is
-                  // carried by the border instead.
-                  const isPastItem =
-                    item.kind === "appointment" &&
-                    isSlotInPast({ week: itemWeek(item), day: item.day, start: item.start + item.duration });
-                  const scheduledGroupSession = isScheduledGroupSessionSlot(item);
-                  const groupSessionItem = isGroupSessionItem(item);
-                  const groupSessionContext = getGroupSessionContext(item);
-                  // The bay or room this lesson holds rides along with the place.
-                  // The location view already is one place, so it shows the bay alone.
-                  const itemResourceName = item.resourceId
-                    ? locationById(locations, resolvedCalendarItemLocationId(item, service, locations, coachAccount))
-                        ?.resources?.find((resource) => resource.id === item.resourceId)?.name ?? ""
-                    : "";
-                  const itemLocationTag =
-                    item.kind === "appointment" || groupSessionContext
-                      ? [
-                          effectiveCalendarPerspective === "location"
-                            ? ""
-                            : bookingLocationShortDisplay(calendarItemLocation(item, service, locations, coachAccount)),
-                          itemResourceName,
-                        ]
-                          .filter(Boolean)
-                          .join(" · ")
-                      : "";
-                  const tooltipRows = [
-                    groupSessionContext ? t("Group Session") : item.client || item.title,
-                    groupSessionContext
-                      ? t("Booked: {booked}/{capacity}", { booked: groupSessionContext.bookedCount, capacity: groupSessionContext.capacity })
-                      : service?.name ?? (item.kind === "block" ? t("Blocked time") : t("Lesson")),
-                    formatRange(item.start, item.duration),
-                    latestClientEmail ? t("Client email: {status}", { status: notificationStatusLabel(latestClientEmail) }) : "",
-                    latestCoachEmail ? t("Coach email: {status}", { status: notificationStatusLabel(latestCoachEmail) }) : "",
-                    latestAdminEmail ? t("Admin email: {status}", { status: notificationStatusLabel(latestAdminEmail) }) : "",
-
-                  ].filter(Boolean);
-                  return (
-                    <article
-                      data-calendar-item
-                      key={item.id}
-                      className={`calendar-item ${item.kind} ${
-                        isLocationOnlyBlock(item) ? "location-wide-block" : ""
-                      } ${isCoachLocationBlock(item) ? "coach-location-block" : ""} ${
-                        isCoachOnlyBlock(item) ? "coach-only-block" : ""
-                      } ${selectedId === item.id ? "selected" : ""} ${
-                        invalid ? "invalid" : ""
-	                      } ${flyAnimation ? "just-placed-from-dock" : ""} ${
-	                        pointerSession?.mode === "move" && pointerSession.itemId === item.id ? "is-lifted" : ""
-	                      } ${
-	                        pointerSession?.mode === "resize" && pointerSession.itemId === item.id ? "is-resizing" : ""
-	                      } ${holdingItemId === item.id ? "is-holding" : ""} ${
-	                        item.kind === "appointment" && item.status ? `status-${item.status}` : ""
-	                      } ${
-                        item.kind === "appointment" && item.bayBooked ? "has-bay" : ""
-                      } ${isPastItem ? "is-past" : ""}`}
-
-                      aria-label={tooltipRows.join(", ")}
-                      onPointerEnter={(event) =>
-                        showCalendarItemHover(event, item, service, latestClientEmail, latestCoachEmail, latestAdminEmail)
-                      }
-                      onPointerLeave={() => hideCalendarItemHover(item.id)}
-                      style={{
-                        top,
-                        height: Math.max(height, 34),
-                        // Tucked inside the availability card behind it (inset
-                        // 3px left / 15px right) with 2px to spare on each
-                        // side, so a day column always reads wider than the
-                        // bookings sitting in it.
-                        left: `calc(${columnLeft} + var(--card-inset-left, 5px))`,
-                        width: `calc(${columnWidth} - var(--card-inset-total, 22px))`,
-                        // The fill is the lesson type. Set here rather than by
-                        // a class because the palette is per service, and
-                        // services are whatever this coach sells.
-                        ...(item.kind === "appointment" && calendarLessonColor(service)
-                          ? ({ "--lesson-type-color": calendarLessonColor(service) } as CSSProperties)
-                          : {}),
-                        ...(scheduledGroupSession ? ({ cursor: "pointer" } as CSSProperties) : {}),
-                        ...(flyAnimation
-                          ? ({
-                              "--dock-fly-x": `${flyAnimation.fromX}px`,
-                              "--dock-fly-y": `${flyAnimation.fromY}px`,
-                            } as CSSProperties)
-                          : {}),
-                      }}
-                      onPointerDown={(event) => {
-                        if (scheduledGroupSession) {
-                          event.stopPropagation();
-                          hideCalendarItemHover();
-                          return;
-                        }
-                        if (item.readOnly || groupSessionItem) return;
-                        hideCalendarItemHover();
-                        beginMove(event, item);
-                      }}
-                      onPointerUp={(event) => {
-                        if (groupSessionItem && !scheduledGroupSession) {
-                          event.preventDefault();
-                          handleCalendarItemClick(event, item);
-                        }
-                      }}
-                      onClick={(event) => {
-                        if (suppressItemClickRef.current || Date.now() < suppressItemClickUntilRef.current) return;
-                        if (groupSessionItem && !scheduledGroupSession) {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          handleCalendarItemClick(event, item);
-                          return;
-                        }
-                        event.stopPropagation();
-                        setSelectedGroupSession(null);
-                        setSelectedId(item.id);
-                        setQuickCreate(null);
-                      }}
-                      onKeyDown={(event) => {
-                        if ((event.key === "Enter" || event.key === " ") && groupSessionItem && !scheduledGroupSession) {
-                          handleCalendarItemClick(event, item);
-                        }
-                      }}
-                    >
-                      {item.readOnly ? null : (
-                        <div className="item-grip" aria-hidden="true">
-                          <GripVertical size={14} />
-                        </div>
-                        )}
-                        {scheduledGroupSession ? (
-                          <button
-                            type="button"
-                            className="outline-button"
-                            onPointerDown={(event) => {
-                              event.preventDefault();
-                              event.stopPropagation();
-                            }}
-                            onClick={(event) => {
-                              event.preventDefault();
-                              event.stopPropagation();
-                              openGroupSessionFromSlot(item);
-                            }}
-                          >{t("Open session")}</button>
-                        ) : null}
-                        <div className="item-content">
-                        <strong>{groupSessionContext ? groupSessionContext.service.name : item.kind === "appointment" ? item.client || item.title : item.title}</strong>
-                        <span>
-                          {groupSessionContext
-                            ? t("Group Session")
-                            : item.kind === "block" && isLocationOnlyBlock(item)
-                              ? t("Location unavailable")
-                              : item.kind === "block" && isCoachLocationBlock(item)
-                                ? t("Coach unavailable")
-                                : service?.name ?? t("Busy")}
-                        </span>
-                        <em>
-                          {groupSessionContext
-                            ? t("{start} · {bookedCount}/{capacity} booked", { start: formatRange(item.start, item.duration), bookedCount: groupSessionContext.bookedCount, capacity: groupSessionContext.capacity })
-                            : formatRange(item.start, item.duration)}
-                        </em>
-                        {itemLocationTag ? <small className="item-location-tag">{itemLocationTag}</small> : null}
-                      </div>
-                      {/* The C/O/A email dots lived here. Email status is still on
-                          the booking card and in the hover tooltip; three letters
-                          on every card was noise on the one view that has to stay
-                          readable at a glance. */}
-                      {item.readOnly ? null : (
-                        <button
-                          className="resize-handle"
-                          aria-label={t("Resize calendar item")}
-                          onPointerDown={(event) => beginResize(event, item)}
-                        />
-                      )}
-                    </article>
-                  );
-                })}
-
-                {draft?.mode === "block" && (
-                  (() => {
-                    const visibleDraft = clipCalendarSegment(draft.start, draft.duration);
-                    if (!visibleDraft) return null;
-                    return (
-                      <div
-                        className={`calendar-item block draft-block ${draft.valid ? "" : "invalid"}`}
-                        style={{
-                          top: calendarMinutesToTop(visibleDraft.start),
-                          height: Math.max(calendarSegmentHeight(visibleDraft.start, visibleDraft.duration), 24),
-                          left: `calc(${(calendarDayColumns[draft.day] ?? calendarDayColumns[0]).left} + var(--card-inset-left, 5px))`,
-                          width: `calc(${(calendarDayColumns[draft.day] ?? calendarDayColumns[0]).width} - var(--card-inset-total, 22px))`,
-                        }}
-                      >
-                        <div className="item-content">
-                          <strong>{t("Busy")}</strong>
-                          <span>{t("New blocked time")}</span>
-                          <em>{formatRange(draft.start, draft.duration)}</em>
-                        </div>
-                      </div>
-                    );
-                  })()
-                )}
-
-                {draft?.mode === "place" && pointerSession?.mode === "place" && (
-                  (() => {
-                    const visibleDraft = clipCalendarSegment(draft.start, draft.duration);
-                    if (!visibleDraft) return null;
-                    return (
-                      <div
-                        className={`calendar-item appointment draft-place ${draft.valid ? "" : "invalid"}`}
-                        style={{
-                          top: calendarMinutesToTop(visibleDraft.start),
-                          height: Math.max(calendarSegmentHeight(visibleDraft.start, visibleDraft.duration), 34),
-                          left: `calc(${(calendarDayColumns[draft.day] ?? calendarDayColumns[0]).left} + var(--card-inset-left, 5px))`,
-                          width: `calc(${(calendarDayColumns[draft.day] ?? calendarDayColumns[0]).width} - var(--card-inset-total, 22px))`,
-                        }}
-                      >
-                        <div className="item-grip" aria-hidden="true">
-                          <GripVertical size={14} />
-                        </div>
-                        <div className="item-content">
-                          <strong>{pointerSession.booking.client}</strong>
-                          <span>
-                            {services.find((service) => service.id === pointerSession.booking.serviceId)?.name ?? terms.serviceSingular}
-                          </span>
-                          <em>{formatRange(draft.start, draft.duration)}</em>
-                        </div>
-                      </div>
-                    );
-                  })()
-                )}
-              </div>
-                </div>
-                {renderWeekPeekPanel(1)}
-                <div className="week-pager-spacer" aria-hidden="true" />
-              </div>
-            </div>
-
-            {quickCreate && !hasMoved && (
-              <div
-                className="quick-create"
-                style={quickCreatePopoverStyle()}
-              >
-                <button className="popover-close" aria-label={t("Close quick create")} onClick={() => setQuickCreate(null)}>
-                  <X size={15} />
-                </button>
-                <span>{`${weekDays[quickCreate.day].short}, ${formatTime(quickCreate.start)}`}</span>
-                <strong>{t("Quick create")}</strong>
-                {!quickCreateService ? (
-                  <>
-                    {quickCreateServices.map((service) => (
-                      <button key={service.id} onClick={() => selectQuickService(service.id)}>
-                        <Plus size={16} />
-                        <span>
-                          <strong>{service.name}</strong>
-                          <em>{t("{duration} min · {price}", { duration: service.duration, price: formatMoney(service.price) })}</em>
-                        </span>
-                      </button>
-                    ))}
-                    {effectiveCalendarPerspective === "location" ? (
-                      <>
-                        <button onClick={() => createBlockFromQuick("location")}>
-                          <ClaritySessions size={16} />{t("Block this location")}</button>
-                        {quickCreate.coachId ? (
-                          <button onClick={() => createBlockFromQuick("coach-location")}>
-                            <ClaritySessions size={16} />{t("Block this coach")}</button>
-                        ) : null}
-                      </>
-                    ) : (
-                      <button onClick={() => createBlockFromQuick("coach-location")}>
-                        <ClaritySessions size={16} />{t("Block 30 minutes")}</button>
-                    )}
-                  </>
-                ) : (
-                  <div className="quick-create-form">
-                    <button className="quick-service-summary" onClick={backToQuickServiceChoice} type="button">
-                      <span>
-                        <strong>{quickCreateService.name}</strong>
-                        <em>{t("{duration} min · {price}", { duration: quickCreateService.duration, price: formatMoney(quickCreateService.price) })}</em>
-                      </span>
-                      <ArrowLeft size={14} />
-                    </button>
-                    {quickCreateChoices && !quickCreateChoices.fixedCoachId ? (
-                      <label>
-                        <span>{t("Coach")}</span>
-                        <select
-                          value={quickCreate.coachId ?? ""}
-                          onChange={(event) => chooseQuickCreateScope("coachId", event.target.value)}
-                        >
-                          <option value="" disabled>{t("Choose a coach")}</option>
-                          {quickCreateChoices.coachIds.map((coachId) => {
-                            const coach = bookingCoachSnapshotFor(coachId, coachProfiles);
-                            const free = !quickCreateAvailabilityError(quickCreateCandidate!, quickCreateService, {
-                              coachId,
-                              locationId: quickCreate.locationId,
-                            });
-                            return (
-                              <option key={coachId} value={coachId}>
-                                {coach?.displayName || coach?.name || coachId}
-                                {free ? "" : t(" (busy)")}
-                              </option>
-                            );
-                          })}
-                        </select>
-                      </label>
-                    ) : null}
-                    {quickCreateChoices && !quickCreateChoices.fixedLocationId ? (
-                      <label>
-                        <span>{t("Location")}</span>
-                        <select
-                          value={quickCreate.locationId ?? ""}
-                          onChange={(event) => chooseQuickCreateScope("locationId", event.target.value)}
-                        >
-                          <option value="" disabled>{t("Choose a location")}</option>
-                          {quickCreateChoices.locationIds.map((locationId) => {
-                            const location = locationById(locations, locationId);
-                            const free = !quickCreateAvailabilityError(quickCreateCandidate!, quickCreateService, {
-                              coachId: quickCreate.coachId,
-                              locationId,
-                            });
-                            return (
-                              <option key={locationId} value={locationId}>
-                                {location?.shortName || location?.name || locationId}
-                                {free ? "" : t(" (busy)")}
-                              </option>
-                            );
-                          })}
-                        </select>
-                      </label>
-                    ) : null}
-                    <label>
-                      <span>{t("Name")}</span>
-                      <div className="quick-match-anchor">
-                        <div className="quick-client-search w-name">
-                          <Search size={15} />
-                          <input
-                            value={quickClientSearch}
-                            autoComplete="name"
-                            onBlur={() => setQuickMatchField("")}
-                            onFocus={() => setQuickMatchField("name")}
-                            onChange={(event) => {
-                              setQuickMatchField("name");
-                              setQuickClientSearch(event.target.value);
-                              setQuickCreate((current) => (current ? { ...current, error: "" } : current));
-                            }}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter") {
-                                event.preventDefault();
-                                confirmQuickAppointment();
-                              }
-                            }}
-                            placeholder={t("Client name")}
-                          />
-                        </div>
-                        {quickClientMatchButton("name")}
-                      </div>
-                    </label>
-                    <label>
-                      <span>{t("Phone")}</span>
-                      <div className="quick-match-anchor">
-                          <input
-                            className="w-name"
-                            value={quickCreate.phone}
-                            autoComplete="tel"
-                            inputMode="tel"
-                            type="tel"
-                            onBlur={() => setQuickMatchField("")}
-                            onFocus={() => setQuickMatchField("phone")}
-                            onChange={(event) => {
-                            setQuickMatchField("phone");
-                            updateQuickCreateField("phone", event.target.value);
-                          }}
-                          placeholder="+64"
-                        />
-                        {quickClientMatchButton("phone")}
-                      </div>
-                    </label>
-                    <label>
-                      <span>{t("Email")}</span>
-                      <div className="quick-match-anchor">
-                          <input
-                            className="w-email"
-                            value={quickCreate.email}
-                            autoComplete="email"
-                            inputMode="email"
-                            onFocus={() => setQuickMatchField("email")}
-                            onBlur={() => setQuickMatchField("")}
-                            onChange={(event) => {
-                            setQuickMatchField("email");
-                            updateQuickCreateField("email", event.target.value);
-                          }}
-                          placeholder={t("client@example.com")}
-                          type="email"
-                        />
-                        {quickClientMatchButton("email")}
-                      </div>
-                    </label>
-                    <label>
-                      <span>{t("Lesson note")}</span>
-                      <textarea
-                        className="w-prose"
-                        value={quickCreate.note}
-                        onChange={(event) => updateQuickCreateField("note", event.target.value)}
-                        placeholder={t("Optional")}
-                      />
-                    </label>
-                    {quickCreateIsCustomGroup && quickCreateService && (
-                      <div className="lesson-receipts-panel custom-group-admin-panel">
-                        <div className="receipt-panel-title">
-                          <ClarityProfile size={16} />
-                          <span>{t("Custom group attendees")}</span>
-                          <em>
-                            {quickCreateCustomGroupParticipantCount} / {customGroupMaxParticipants(quickCreateService)} · {formatMoney(quickCreateCustomGroupPrice)}
-                          </em>
-                        </div>
-                        <div className="email-receipt-row">
-                          <span className="email-status-dot sent" aria-hidden="true" />
-                          <div>
-                            <strong>{quickClientSearch.trim() || t("Booker")}</strong>
-                            <span>{quickCreate.email.trim() || t("Booker")}</span>
-                          </div>
-                          <em>{customGroupStatusLabel("booker")}</em>
-                        </div>
-                        {quickCreate.attendees.map((attendee) => (
-                          <div className="email-receipt-row" key={attendee.id}>
-                            <span className={`email-status-dot ${attendee.status === "manual" ? "sent" : "pending"}`} aria-hidden="true" />
-                            <div>
-                              <strong>{attendee.name}</strong>
-                              <span>{attendee.email || t("Manual attendee")}</span>
-                            </div>
-                            <em>{customGroupStatusLabel(attendee.status)}</em>
-                            <button className="icon-button small" onClick={() => removeQuickCreateCustomGroupAttendee(attendee.id)} aria-label={t("Remove {name}", { name: attendee.name })}>
-                              <X size={14} />
-                            </button>
-                          </div>
-                        ))}
-                        <div className="booking-form custom-group-attendee-form">
-                          <input
-                            value={quickCreate.attendeeName}
-                            onChange={(event) => updateQuickCreateAttendeeDraft("attendeeName", event.target.value)}
-                            placeholder={t("Attendee name")}
-                          />
-                          <input
-                            value={quickCreate.attendeeEmail}
-                            onChange={(event) => updateQuickCreateAttendeeDraft("attendeeEmail", event.target.value)}
-                            placeholder={t("Email optional")}
-                            type="email"
-                          />
-                          <button
-                            className="outline-button"
-                            onClick={addQuickCreateCustomGroupAttendee}
-                            disabled={quickCreateCustomGroupParticipantCount >= customGroupMaxParticipants(quickCreateService)}
-                            type="button"
-                          >
-                            <Plus size={15} />
-                            {quickCreate.attendeeEmail.trim() ? t("Send invite") : t("Confirm attendee")}
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                    {quickCreate.error && <p className="quick-create-error">{quickCreate.error}</p>}
-                    <div className="quick-create-actions">
-                      <button className="outline-button" onClick={backToQuickServiceChoice} type="button">
-                        <ArrowLeft size={15} />{t("Back")}</button>
-                      <button
-                        className="primary-button"
-                        onClick={confirmQuickAppointment}
-                        disabled={!quickClientSearch.trim() || Boolean(quickCreate.error)}
-                        type="button"
-                      >
-                        <Check size={15} />{t("Create")}</button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-          </div>
-
-        </section>
-        )}
+        {adminWorkspaceReady && activeView === "calendar" && <CalendarView calendar={calendar} />}
 
         {adminWorkspaceReady && activeView === "calendar" && floatingDrag && floatingItem?.kind === "appointment" && (
           <article

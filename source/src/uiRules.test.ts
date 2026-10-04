@@ -152,7 +152,7 @@ const SET_FROM_JS: Array<{ name: string; setBy: string }> = [
   // Live measurements: where a tile flew from, how far a band is scrolled.
   { name: "--dock-fly-x", setBy: "App.tsx" },
   { name: "--dock-fly-y", setBy: "App.tsx" },
-  { name: "--band-offset", setBy: "App.tsx" },
+  { name: "--band-offset", setBy: "useCalendarController.tsx" },
   { name: "--tile-dx", setBy: "PlayerVideoShelf.tsx" },
   { name: "--tile-dy", setBy: "PlayerVideoShelf.tsx" },
 ];
