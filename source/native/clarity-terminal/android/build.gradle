@@ -1,0 +1,55 @@
+// Tap to Pay on Android for Clarity Booking. Pulled into the staff app by
+// `npx cap sync android` from booking-app/ (see booking-app/package.json); the
+// Player app never lists it, so it never ships there.
+
+ext {
+    // Tap to Pay on Android is its own artifact on top of the core SDK. Keep
+    // the two on the same version.
+    stripeTerminalVersion = '5.8.2'
+}
+
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.13.0'
+        classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:2.1.21'
+    }
+}
+
+apply plugin: 'com.android.library'
+apply plugin: 'org.jetbrains.kotlin.android'
+
+android {
+    namespace = "app.claritygolf.terminal"
+    compileSdk = project.hasProperty('compileSdkVersion') ? rootProject.ext.compileSdkVersion : 36
+    defaultConfig {
+        // The Stripe Terminal SDK's own floor. Stripe still refuses phones it
+        // will not accept (Android version, NFC, tampering) at discovery.
+        minSdkVersion 26
+        targetSdkVersion project.hasProperty('targetSdkVersion') ? rootProject.ext.targetSdkVersion : 36
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_21
+        targetCompatibility JavaVersion.VERSION_21
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21
+    }
+}
+
+repositories {
+    google()
+    mavenCentral()
+}
+
+dependencies {
+    implementation project(':capacitor-android')
+    api "com.stripe:stripeterminal-core:$stripeTerminalVersion"
+    api "com.stripe:stripeterminal-taptopay:$stripeTerminalVersion"
+}

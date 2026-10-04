@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Stripe needs to know where a payment is taken. Fine location only up to
+         Android 11, matching what the Stripe SDK itself declares; coarse after. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.NFC" />
+    <!-- Listed in Play only for phones that can tap, but not required to install:
+         isSupported says why not instead. -->
+    <uses-feature android:name="android.hardware.nfc" android:required="false" />
+</manifest>

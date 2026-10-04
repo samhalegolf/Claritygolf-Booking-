@@ -4433,5 +4433,12 @@
   "Clarity Cloud isn't connected. Choose a folder on this computer for My Library, or connect Clarity Cloud.": "Clarity Cloud no está conectado. Elige una carpeta en este ordenador para My Library o conecta Clarity Cloud.",
   "Reconnect folder and save": "Volver a conectar carpeta y guardar",
   "Choose folder and save": "Elegir carpeta y guardar",
-  "Save on this device": "Guardar en este dispositivo"
+  "Save on this device": "Guardar en este dispositivo",
+  "Customer taps their card on this phone. The QR is there if they'd rather.": "El cliente acerca su tarjeta a este teléfono. El QR está ahí si lo prefiere.",
+  "Take contactless cards, Google Pay and other digital wallets on this phone. No extra hardware. Set it up once here, before your first sale, so this phone is ready when a customer is waiting.": "Acepta tarjetas sin contacto, Google Pay y otras carteras digitales en este teléfono. Sin hardware adicional. Configúralo una vez aquí, antes de tu primera venta, para que este teléfono esté listo cuando un cliente esté esperando.",
+  "This phone is ready for Tap to Pay.": "Este teléfono está listo para Tap to Pay.",
+  "Set up this phone": "Configurar este teléfono",
+  "The customer holds their card, phone or watch flat against the back of this phone and keeps it there until it confirms.": "El cliente acerca su tarjeta, teléfono o reloj a la parte trasera de este teléfono y lo mantiene ahí hasta que se confirme.",
+  "Hold card or phone against the back of this phone.": "Acerca la tarjeta o el móvil a la parte trasera de este teléfono.",
+  "This phone cannot take Tap to Pay.": "Este teléfono no admite Tap to Pay."
 }

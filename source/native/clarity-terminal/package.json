@@ -2,10 +2,20 @@
   "name": "@claritygolf/capacitor-terminal",
   "version": "0.1.0",
   "private": true,
-  "description": "Tap to Pay on iPhone for the Clarity Booking staff app. Native only: the web side talks to it through window.Capacitor.Plugins.ClarityTerminal (src/native/clarityTerminal.ts).",
-  "files": ["ios/Sources", "Package.swift"],
+  "description": "Tap to Pay on iPhone and Android for the Clarity Booking staff app. Native only: the web side talks to it through window.Capacitor.Plugins.ClarityTerminal (src/native/clarityTerminal.ts).",
+  "files": [
+    "ios/Sources",
+    "Package.swift",
+    "android/src/main",
+    "android/build.gradle"
+  ],
   "capacitor": {
-    "ios": { "src": "ios" }
+    "ios": {
+      "src": "ios"
+    },
+    "android": {
+      "src": "android"
+    }
   },
   "peerDependencies": {
     "@capacitor/core": ">=8.0.0"

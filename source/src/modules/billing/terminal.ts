@@ -11,7 +11,7 @@
 // paid.
 
 import { useEffect, useState } from "react";
-import { installConnectionTokenBridge, nativeTerminal, type CollectOutcome } from "../../native/clarityTerminal";
+import { installConnectionTokenBridge, nativeTerminal, onAndroid, type CollectOutcome } from "../../native/clarityTerminal";
 import type { PosTransaction } from "./types";
 import { t } from "../../lib/i18n";
 
@@ -185,7 +185,7 @@ function terminalDevice() {
     id = globalThis.crypto?.randomUUID?.() || `device-${Date.now()}`;
     writeLocal(DEVICE_KEY, id);
   }
-  return { id, name: "iPhone (Tap to Pay)" };
+  return { id, name: onAndroid() ? "Android (Tap to Pay)" : "iPhone (Tap to Pay)" };
 }
 
 export function savedTerminalLocation() {
@@ -213,11 +213,11 @@ const SET_UP_KEY = "clarity-terminal-set-up";
 let connecting: Promise<void> = Promise.resolve();
 
 /**
- * Connect this iPhone's Tap to Pay at a location. Quick when it is already
+ * Connect this phone's Tap to Pay at a location. Quick when it is already
  * connected there; otherwise it can take a few seconds, or a minute or two the
- * very first time while Apple sets the phone up.
+ * very first time while Apple (or Stripe, on Android) sets the phone up.
  */
-export function connectThisIphone(locationId: string) {
+export function connectThisPhone(locationId: string) {
   const next = connecting
     .catch(() => undefined)
     .then(async () => {
@@ -234,22 +234,22 @@ export function connectThisIphone(locationId: string) {
 }
 
 /**
- * Connect this iPhone ahead of its first sale.
+ * Connect this phone ahead of its first sale.
  *
  * The first connection is when Apple asks the business to accept its Tap to
  * Pay terms and sets the phone up, which can take a minute or two. Doing it
  * from Settings means a customer is never left waiting through that.
  */
-export async function prepareThisIphone(locationId: string) {
-  await connectThisIphone(locationId);
+export async function prepareThisPhone(locationId: string) {
+  await connectThisPhone(locationId);
   saveTerminalLocation(locationId);
 }
 
 /**
- * Keep this iPhone connected so the first tap of a sale starts at once.
+ * Keep this phone connected so the first tap of a sale starts at once.
  *
  * Connects when the app opens and again whenever it comes back to the
- * foreground (iOS drops the connection in the background). Only on a phone
+ * foreground (the phone drops the connection in the background). Only on a phone
  * that has been set up before: the first connection is when Apple shows its
  * terms, and that should happen when a coach asks for it, not out of nowhere.
  * Failures are left for the sale to report; here there is nobody to tell.
@@ -264,7 +264,7 @@ export function keepTapToPayWarm() {
     availabilityOnce ||= loadAvailability();
     void availabilityOnce
       .then((availability) => {
-        if (!stopped && availability.ready) return connectThisIphone(defaultTerminalLocationId(availability.status));
+        if (!stopped && availability.ready) return connectThisPhone(defaultTerminalLocationId(availability.status));
       })
       .catch(() => undefined);
   };
@@ -276,7 +276,15 @@ export function keepTapToPayWarm() {
   };
 }
 
-/** Apple's "How to Tap" guide. False when this iPhone is too old for it (before iOS 18). */
+/**
+ * What the screen calls Tap to Pay. Apple wants "Tap to Pay on iPhone" on an
+ * iPhone; on Android it is plain "Tap to Pay", a name that stays in English.
+ */
+export function tapToPayName() {
+  return onAndroid() ? "Tap to Pay" : t("Tap to Pay on iPhone");
+}
+
+/** Apple's "How to Tap" guide. False when there is none to show: before iOS 18, and on Android. */
 export async function showHowToTap() {
   const plugin = nativeTerminal();
   if (!plugin?.showHowToTap) return false;
@@ -299,7 +307,9 @@ async function loadAvailability(): Promise<Availability> {
     plugin.isSupported().catch(() => ({ supported: false, reason: "" })),
     terminalApi.status().catch((error: unknown) => (error instanceof Error ? error.message : t("Tap to Pay could not reach Clarity."))),
   ]);
-  if (!device.supported) return { ready: false, reason: t("This iPhone cannot take Tap to Pay.") };
+  if (!device.supported) {
+    return { ready: false, reason: onAndroid() ? t("This phone cannot take Tap to Pay.") : t("This iPhone cannot take Tap to Pay.") };
+  }
   if (typeof status === "string") return { ready: false, reason: status };
   if (!status.available) return { ready: false, reason: status.reason };
   installConnectionTokenBridge(plugin, () => terminalApi.connectionToken(savedTerminalLocation()));
@@ -307,7 +317,7 @@ async function loadAvailability(): Promise<Availability> {
 }
 
 /**
- * Whether to offer Tap to Pay here: inside the staff app, on an iPhone that
+ * Whether to offer Tap to Pay here: inside the staff app, on a phone that
  * can, for a business the server says may. Asked once per page load. Anywhere
  * else -- every browser -- this is "not ready" and the QR works as it always
  * has.

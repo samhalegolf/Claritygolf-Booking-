@@ -29,7 +29,8 @@ import { CouponPicker, useSpendableCoupons } from "./CouponPicker";
 import { ReceiptEmailPrompt } from "./ReceiptEmailPrompt";
 import { postPosJson, renderQrSvg, usePosPaymentPoll } from "./posCheckoutPoll";
 import { TerminalPayment, tapIsBusy } from "./TerminalPayment";
-import { tenderLabel, useTapToPay, type PosTender, type TapState } from "./terminal";
+import { onAndroid } from "../../native/clarityTerminal";
+import { tapToPayName, tenderLabel, useTapToPay, type PosTender, type TapState } from "./terminal";
 import { addToBasket, basketTotal, describeBasket, isLowStock, lineTotal, round2, setBasketQuantity } from "./stockMath";
 import type { BasketLine } from "./stockMath";
 import { t, readerLocale } from "../../lib/i18n";
@@ -100,7 +101,7 @@ export function PosCheckoutModal({
   const [confirmingCoupon, setConfirmingCoupon] = useState(false);
 
   const [stage, setStage] = useState<"form" | "tap" | "qr" | "done">("form");
-  // Tap to Pay: only ever ready inside the staff iPhone app. Everywhere else
+  // Tap to Pay: only ever ready inside the staff app (iPhone or Android). Everywhere else
   // the Clarity Pay route is the QR, exactly as before.
   const tapToPay = useTapToPay();
   const [tapState, setTapState] = useState<TapState | null>(null);
@@ -172,7 +173,9 @@ export function PosCheckoutModal({
     ? ""
     : selectedMethod?.kind === "clarity_pay"
       ? tapToPay.ready
-        ? t("Customer taps their card on this iPhone. The QR is there if they'd rather.")
+        ? onAndroid()
+          ? t("Customer taps their card on this phone. The QR is there if they'd rather.")
+          : t("Customer taps their card on this iPhone. The QR is there if they'd rather.")
         : t("Shows a QR code the customer scans to pay.")
       : selectedMethod && !selectedMethod.settlesImmediately
         ? t("Recorded as owed. Mark it paid from the POS list once settled.")
@@ -900,10 +903,12 @@ export function PosCheckoutModal({
                       : selectedMethod?.kind === "clarity_pay"
                         ? amountValid
                           ? tapToPay.ready
-                            ? t("Tap to Pay on iPhone · {amount}", { amount: formatMoney(dueNow, currency) })
+                            ? onAndroid()
+                              ? `Tap to Pay · ${formatMoney(dueNow, currency)}`
+                              : t("Tap to Pay on iPhone · {amount}", { amount: formatMoney(dueNow, currency) })
                             : t("Charge {amount}", { amount: formatMoney(dueNow, currency) })
                           : tapToPay.ready
-                            ? t("Tap to Pay on iPhone")
+                            ? tapToPayName()
                             : t("Charge")
                         : selectedMethod && !selectedMethod.settlesImmediately
                           ? amountValid
@@ -954,7 +959,7 @@ export function PosCheckoutModal({
               <a className="outline-button" href={checkoutUrl} target="_blank" rel="noreferrer noopener">
                 <ExternalLink size={15} />{" "}{t("Pay on this device")}</a>
               {tapToPay.ready && (
-                <button className="outline-button" disabled={busy} onClick={() => setStage("tap")} type="button">{t("Tap to Pay on iPhone")}</button>
+                <button className="outline-button" disabled={busy} onClick={() => setStage("tap")} type="button">{tapToPayName()}</button>
               )}
             </div>
           </>

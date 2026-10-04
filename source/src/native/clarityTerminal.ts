@@ -1,9 +1,9 @@
-// Tap to Pay on iPhone, as the page sees it.
+// Tap to Pay on iPhone and Android, as the page sees it.
 //
 // The Clarity Booking staff app (booking-app/) is a native shell around the live
 // site, so this code runs in the ordinary web bundle. The shell injects
 // window.Capacitor, and with it the ClarityTerminal plugin
-// (native/clarity-terminal). In a browser neither exists, nativeTerminal()
+// (native/clarity-terminal), the same on both phones. In a browser neither exists, nativeTerminal()
 // returns null, and every Tap to Pay control stays hidden.
 //
 // Read off window rather than imported from @capacitor/core on purpose: the web
@@ -35,7 +35,7 @@ export type ClarityTerminalPlugin = {
   cancel(): Promise<{ cancelled: boolean }>;
   disconnect(): Promise<void>;
   provideConnectionToken(options: { requestId: string; secret?: string; error?: string }): Promise<void>;
-  /** Apple's "How to Tap" guide. `shown: false` before iOS 18: show our own words instead. */
+  /** Apple's "How to Tap" guide. `shown: false` before iOS 18 and always on Android: show our own words instead. */
   showHowToTap(): Promise<{ shown: boolean }>;
   addListener(
     event: "connectionTokenRequest",
@@ -50,6 +50,7 @@ export type ClarityTerminalPlugin = {
 };
 
 type CapacitorGlobal = {
+  getPlatform?: () => string;
   isNativePlatform?: () => boolean;
   isPluginAvailable?: (name: string) => boolean;
   Plugins?: Record<string, unknown>;
@@ -60,6 +61,15 @@ export function nativeTerminal(): ClarityTerminalPlugin | null {
   const capacitor = (globalThis as { Capacitor?: CapacitorGlobal }).Capacitor;
   if (!capacitor?.isNativePlatform?.() || !capacitor.isPluginAvailable?.("ClarityTerminal")) return null;
   return (capacitor.Plugins?.ClarityTerminal as ClarityTerminalPlugin | undefined) || null;
+}
+
+/**
+ * Is the staff app running on Android? The plugin behaves the same on both
+ * phones; only what the screen calls the phone, and where the customer taps it,
+ * differ.
+ */
+export function onAndroid() {
+  return (globalThis as { Capacitor?: CapacitorGlobal }).Capacitor?.getPlatform?.() === "android";
 }
 
 let tokenBridgeInstalled = false;

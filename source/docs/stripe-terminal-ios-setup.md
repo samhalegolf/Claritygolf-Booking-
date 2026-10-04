@@ -1,14 +1,15 @@
 # Tap to Pay on iPhone — setup
 
 How Clarity Pay takes a contactless card on a coach's iPhone, and what has to
-happen outside the code before it works.
+happen outside the code before it works. Android is the same app and the same
+plugin; what differs is in [stripe-terminal-android-setup.md](stripe-terminal-android-setup.md).
 
 ## How the pieces fit
 
 | Piece | Where | What it does |
 | --- | --- | --- |
 | Staff app | `booking-app/` | Its own Capacitor app, `app.claritygolf.booking`. Opens the **live** Booking site, so the coach signs in exactly as on the web (same cookie). No new login path into the admin API. |
-| Native plugin | `native/clarity-terminal/` | Swift, over the Stripe Terminal iOS SDK. Holds no keys and prices nothing. |
+| Native plugin | `native/clarity-terminal/` | Swift over the Stripe Terminal iOS SDK (`ios/`), Kotlin over the Android SDK (`android/`). Same methods and results on both. Holds no keys and prices nothing. |
 | Page bridge | `src/native/clarityTerminal.ts` | Finds the plugin at `window.Capacitor.Plugins.ClarityTerminal`. In a browser it is absent and Tap to Pay is hidden. |
 | Screen | `src/modules/billing/TerminalPayment.tsx`, `terminal.ts` | The tap flow and its states, used by the checkout modal and the Sell screen. |
 | Server | `/api/billing/terminal/*` in `billing-api.mts`, `_shared/terminal.mts` | Status, location, connection tokens, the PaymentIntent, reconcile, cancel. |

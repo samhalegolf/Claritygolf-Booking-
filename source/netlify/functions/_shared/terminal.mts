@@ -1,5 +1,5 @@
 /**
- * Stripe Terminal: Tap to Pay on iPhone, and card readers later.
+ * Stripe Terminal: Tap to Pay on iPhone and Android, and card readers later.
  *
  * Terminal is one more way Clarity Pay collects a card for a POS sale that
  * already exists. It never creates a sale, never decides an amount the server
@@ -25,7 +25,7 @@ import {
 export type TerminalAvailability = {
   available: boolean;
   route: StripeRoute | "";
-  /** Tap to Pay on iPhone. Readers are not offered yet. */
+  /** Tap to Pay on iPhone or Android. Readers are not offered yet. */
   tapToPay: boolean;
   testMode: boolean;
   /** Why not, in words a coach can act on. Empty when available. */
@@ -35,7 +35,7 @@ export type TerminalAvailability = {
 /**
  * Can this business take Tap to Pay, as far as the server can tell?
  *
- * The phone adds its own half (is it an iPhone that can, has the coach allowed
+ * The phone adds its own half (is it a phone that can, has the coach allowed
  * location). This half is the one the phone must not decide for itself.
  */
 export function terminalAvailability(

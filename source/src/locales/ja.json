@@ -4433,5 +4433,12 @@
   "Clarity Cloud isn't connected. Choose a folder on this computer for My Library, or connect Clarity Cloud.": "Clarity Cloudが接続されていません。My Library用にこのコンピューター上のフォルダーを選択するか、Clarity Cloudを接続してください。",
   "Reconnect folder and save": "フォルダーを再接続して保存",
   "Choose folder and save": "フォルダーを選択して保存",
-  "Save on this device": "このデバイスに保存"
+  "Save on this device": "このデバイスに保存",
+  "Customer taps their card on this phone. The QR is there if they'd rather.": "お客様がこのスマートフォンにカードをタッチします。ご希望の場合はQRコードも使えます。",
+  "Take contactless cards, Google Pay and other digital wallets on this phone. No extra hardware. Set it up once here, before your first sale, so this phone is ready when a customer is waiting.": "このスマートフォンで非接触カード、Google Pay、その他のデジタルウォレットを受け付けます。追加のハードウェアは不要です。最初の販売の前にここで一度設定しておけば、お客様をお待たせせずに済みます。",
+  "This phone is ready for Tap to Pay.": "このスマートフォンでタッチ決済を使用できます。",
+  "Set up this phone": "このスマートフォンを設定",
+  "The customer holds their card, phone or watch flat against the back of this phone and keeps it there until it confirms.": "お客様にカード、スマートフォン、または時計をこのスマートフォンの背面に平らに当て、決済が確認されるまでそのままにしてもらいます。",
+  "Hold card or phone against the back of this phone.": "カードまたはスマートフォンをこのスマートフォンの背面にかざしてください。",
+  "This phone cannot take Tap to Pay.": "このスマートフォンではタッチ決済を使用できません。"
 }
