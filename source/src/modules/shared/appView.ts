@@ -5,6 +5,8 @@
 export type View =
   // The phone layout's first screen: today's bookings. Not in the sidebar.
   | "today"
+  // The phone layout's Book screen: the week's free times, then who for.
+  | "book"
   | "calendar"
   | "clients"
   | "sell"

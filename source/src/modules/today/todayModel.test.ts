@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { CalendarItem } from "../calendar/calendarModel";
-import { featuredBooking, nextFreeStart, todaySummary, todaysBookings, type TodayScope } from "./todayModel";
+import { featuredBooking, todaySummary, todaysBookings, type TodayScope } from "./todayModel";
 
 function booking(id: string, start: number, duration: number, extra: Partial<CalendarItem> = {}): CalendarItem {
   return { id, kind: "appointment", week: 3, day: 2, start, duration, title: id, ...extra };
@@ -63,19 +63,4 @@ test("only bookings in the coach's scope are listed", () => {
     scope(8 * 60, (item) => item.coachId === "me"),
   );
   assert.deepEqual(rows.map((row) => row.item.id), ["mine"]);
-});
-
-test("the next free time is the next quarter-hour no booking or block covers", () => {
-  const items = [booking("a", 9 * 60, 60), booking("held", 10 * 60, 30, { kind: "block" })];
-  // 08:50 rounds up to 09:00, which is taken until 10:00, then blocked until 10:30.
-  assert.equal(nextFreeStart(items, scope(8 * 60 + 50), 7 * 60, 21 * 60), 10 * 60 + 30);
-  // Before the day opens, the first free time is the opening time.
-  assert.equal(nextFreeStart([], scope(5 * 60), 7 * 60, 21 * 60), 7 * 60);
-  // A cancelled booking leaves its time free.
-  assert.equal(nextFreeStart([booking("gone", 9 * 60, 60, { status: "cancelled" })], scope(9 * 60), 7 * 60, 21 * 60), 9 * 60);
-});
-
-test("no free time is offered once the day has no room left", () => {
-  assert.equal(nextFreeStart([], scope(20 * 60 + 50), 7 * 60, 21 * 60), null);
-  assert.equal(nextFreeStart([booking("last", 20 * 60, 60)], scope(19 * 60 + 50), 7 * 60, 21 * 60), null);
 });

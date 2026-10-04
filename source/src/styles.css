@@ -4281,6 +4281,31 @@ button {
   font-style: normal;
 }
 
+/* Blocking the time out is the odd one out among the lesson types: a slim
+   text row under them, not another card. */
+.quick-create button.quick-create-block:not(.popover-close):not(.quick-client-ghost) {
+  min-height: 34px;
+  margin-top: 8px;
+  padding: 4px 6px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.quick-create button.quick-create-block:not(.popover-close):not(.quick-client-ghost):hover {
+  color: var(--text);
+}
+
+/* The rest of the lesson types, on a phone sheet. */
+.quick-create button.quick-create-more:not(.popover-close):not(.quick-client-ghost) {
+  justify-content: center;
+  border-style: dashed;
+  color: var(--muted);
+  font-weight: 700;
+}
+
 .quick-create-form {
   display: grid;
   gap: 8px;
@@ -9901,11 +9926,86 @@ button {
   border-bottom: 1px dashed color-mix(in srgb, var(--border) 80%, transparent);
 }
 
-/* Day view: the heading whose day fills the grid. Marked rather than
-   highlighted — the grid below already shows which day you are on, so this
-   only has to confirm which heading did it. */
-.day-heading.is-focused-day {
-  box-shadow: inset 0 -3px 0 var(--coach-primary, #1fd36d);
+/* Day view: the strip turns into a row of folder tabs, the same look as the
+   calendar's scope tabs above it. The open day stands taller and wider, joined
+   to the grid with no line under it; the rest sit lower and quieter along the
+   folder's top edge. The edge is drawn on each closed tab (and the gutter)
+   rather than as the row's border, so it can break where the open tab is. */
+.calendar-header-row.is-day-view {
+  border-bottom-color: transparent;
+}
+
+.calendar-header-row.is-day-view .time-gutter,
+.calendar-header-row.is-day-view .week-pager-spacer,
+.calendar-header-row.is-day-view .day-heading:not(.is-focused-day) {
+  box-shadow: inset 0 -2px 0 var(--c-accent);
+}
+
+.calendar-header-row.is-day-view .day-heading {
+  transition:
+    flex-grow 180ms ease,
+    margin-top 180ms ease,
+    opacity 180ms ease;
+}
+
+.calendar-header-row.is-day-view .day-heading:not(.is-focused-day) {
+  margin-top: 12px;
+  background: none;
+  opacity: 0.55;
+}
+
+.calendar-header-row.is-day-view .day-heading.is-focused-day {
+  flex-grow: 1.8;
+  border: 2px solid var(--c-accent);
+  border-bottom: 0;
+  border-radius: var(--c-radius-control) var(--c-radius-control) 0 0;
+  background: var(--panel);
+  box-shadow: none;
+  opacity: 1;
+}
+
+.calendar-header-row.is-day-view .day-heading.is-focused-day::before,
+.calendar-header-row.is-day-view .day-heading.is-focused-day + .day-heading::before {
+  content: none;
+}
+
+.calendar-header-row.is-day-view .day-heading.is-focused-day strong {
+  font-size: 24px;
+}
+
+.calendar-header-row.is-day-view .day-heading.is-focused-day span {
+  color: var(--c-text-body);
+  font-weight: 700;
+}
+
+/* Week or Day: both words always showing, the one you are on filled. One
+   button, so a tap anywhere on it switches. */
+.calendar-span-switch {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--c-radius-control);
+  background: var(--panel-soft);
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--c-size-meta);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.calendar-span-switch span {
+  min-width: 46px;
+  padding: 5px 10px;
+  border-radius: calc(var(--c-radius-control) - 3px);
+  transition:
+    background var(--c-t-hover),
+    color var(--c-t-hover);
+}
+
+.calendar-span-switch.is-week span:first-child,
+.calendar-span-switch.is-day span:last-child {
+  background: var(--c-accent);
+  color: var(--c-accent-text);
 }
 
 /* A day with no availability collapses to the width of the gap it would have
@@ -17070,6 +17170,151 @@ button {
   z-index: 50;
 }
 
+/* On a phone quick-create is a sheet along the bottom, just above the tab bar,
+   wherever the tap was. It is short -- three lesson types, More, and a slim
+   Block row -- so it covers the end of the day and not the time picked. Book
+   shows the same form in its page, so it is left out. */
+.app-shell.is-phone .quick-create:not(.quick-book-form) {
+  top: auto;
+  left: 8px;
+  right: 8px;
+  bottom: calc(76px + env(safe-area-inset-bottom));
+  width: auto;
+  max-height: min(60dvh, calc(100dvh - 160px));
+  padding: 14px 14px 10px;
+  border-radius: var(--c-radius-page);
+  box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.18);
+}
+
+.app-shell.is-phone .quick-create > span,
+.app-shell.is-phone .quick-create > strong {
+  padding-right: 48px;
+}
+
+/* ---- Back and close on a phone ---------------------------------------------
+   One rule for leaving anything: a step inside a screen (a Settings or Billing
+   section, Book's form) has a Back arrow at the top left of the header; a
+   thing floating over a screen (a popover, a sheet, an overlay) has an X at
+   its top right. Both are 44px, the size of a thumb. */
+.topbar-title {
+  min-width: 0;
+}
+
+.topbar-title.has-back {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.phone-back-button {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  margin-left: -10px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--c-radius-control);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.phone-back-button:active {
+  background: var(--c-hover);
+}
+
+.app-shell.is-phone .popover-close {
+  top: 4px;
+  right: 4px;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--c-radius-control);
+}
+
+.app-shell.is-phone .popover-close svg {
+  width: 20px;
+  height: 20px;
+}
+
+.app-shell.is-phone .workspace-overlay-head .icon-button {
+  width: 44px;
+  height: 44px;
+}
+
+/* ---- The paper stack (PhoneStepSwipe.tsx) ---------------------------------
+   A page you stepped into is a sheet lying on the one it came from. The sheet
+   underneath shows as a strip down the left; a page you can swipe forward to
+   shows as a strip down the right. Swiping slides the top sheet off (Back) or
+   brings the next one in over it (Forward).
+
+   The sheets are fixed at z-index -1 and the page simply paints over them, so
+   the page is not made a stacking context: modals inside it still sit above
+   the tab bar. That needs the shell's own fill moved off it on a phone, or it
+   would paint over the sheets too. */
+.app-shell.is-phone {
+  background: transparent;
+}
+
+.app-shell.is-phone .main-panel {
+  min-height: 100dvh;
+  background: var(--page);
+  transition:
+    margin 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.app-shell.is-phone .main-panel.has-paper-under {
+  margin-left: 10px;
+  box-shadow:
+    -1px 0 0 var(--border),
+    -6px 0 14px rgba(0, 0, 0, 0.08);
+}
+
+.app-shell.is-phone .main-panel.has-paper-ahead {
+  margin-right: 10px;
+  box-shadow:
+    1px 0 0 var(--border),
+    6px 0 14px rgba(0, 0, 0, 0.08);
+}
+
+.phone-paper,
+.phone-paper-edge {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  z-index: -1;
+}
+
+/* Two sheets deep: a thin one at the very edge, then the page you came from. */
+.phone-paper {
+  left: 0;
+  right: 0;
+  padding: max(28px, env(safe-area-inset-top)) 28px 0;
+  background: linear-gradient(to right, var(--panel-soft) 0 4px, var(--border) 4px 5px, var(--page) 5px);
+}
+
+.phone-paper strong {
+  display: block;
+  color: var(--text);
+  font-size: 30px;
+  font-weight: 800;
+  opacity: 0.45;
+}
+
+.phone-paper.is-incoming {
+  z-index: 1;
+  background: var(--page);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.16);
+  will-change: transform;
+}
+
+.phone-paper-edge.is-right {
+  right: 0;
+  width: 10px;
+  background: linear-gradient(to left, var(--panel-soft) 0 4px, var(--border) 4px 5px, var(--page) 5px);
+}
+
 .app-shell.is-phone .toast {
   bottom: calc(76px + env(safe-area-inset-bottom));
 }
@@ -17174,6 +17419,65 @@ button {
 .today-header span {
   color: var(--c-text-soft, #76736d);
   font-size: 13px;
+}
+
+/* Book (QuickBookScreen.tsx): the week's times, then the booking form. The
+   form is the calendar's quick-create, sitting in the page instead of
+   floating over the grid. */
+.quick-book-page .booking-week-controls {
+  margin-top: 0;
+}
+
+.quick-book-page .booking-week-controls button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.quick-book-time {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--c-radius-card);
+  background: var(--panel-soft);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.quick-book-time > span:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.quick-book-time strong {
+  font-size: 18px;
+}
+
+.quick-book-time em {
+  color: var(--muted);
+  font-style: normal;
+  font-size: 13px;
+}
+
+.quick-book-change {
+  color: var(--coach-primary, #01632f);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.quick-create.quick-book-form {
+  position: static;
+  width: auto;
+  max-height: none;
+  overflow: visible;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
 }
 
 .today-featured {
@@ -17289,23 +17593,37 @@ button {
   font-size: 16px;
 }
 
-/* Billing's and Settings' sections: one row that scrolls sideways. Below
-   820px the side column already turns into a top strip, but it wrapped, and
-   Billing's ten sections took four rows before any of the section showed. */
+/* Billing's and Settings' sections on a phone: a menu screen of its own.
+   The list shows until a section is picked, then the section has the screen
+   and the topbar's Back returns to the list (is-phone-menu, App.tsx). */
 .app-shell.is-phone .settings-subnav {
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  padding: 8px 12px;
-  scrollbar-width: none;
-}
-
-.app-shell.is-phone .settings-subnav::-webkit-scrollbar {
-  display: none;
+  flex-direction: column;
+  padding: 8px;
+  border: 0;
+  background: none;
 }
 
 .app-shell.is-phone .settings-subnav button {
-  flex: none;
-  white-space: nowrap;
+  height: var(--c-h-touch, 48px);
+  font-size: 16px;
+}
+
+/* A chevron says each row goes somewhere. */
+.app-shell.is-phone .settings-subnav button::after {
+  content: "›";
+  margin-left: auto;
+  color: var(--c-text-soft);
+  font-size: 20px;
+  font-weight: 400;
+}
+
+/* A row with a count keeps the count at the far end, chevron after it. */
+.app-shell.is-phone .settings-subnav button:has(.tab-count)::after {
+  margin-left: 8px;
+}
+
+.app-shell.is-phone .is-phone-menu > :not(.settings-subnav) {
+  display: none;
 }
 
 .app-shell.is-phone .billing-pane {

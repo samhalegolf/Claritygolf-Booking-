@@ -215,11 +215,6 @@
   "Could not save this setting.": "Det gick inte att spara den här inställningen.",
   "Saving…": "Sparar…",
   "Any location": "Valfri plats",
-  "No morning hours are available in this view.": "Det finns inga förmiddagstider i den här vyn.",
-  "No afternoon or evening hours are available in this view.": "Det finns inga eftermiddags- eller kvällstider i den här vyn.",
-  "View: Full": "Vy: Hela dagen",
-  "View: AM": "Vy: FM",
-  "View: PM": "Vy: EM",
   "No coach": "Ingen tränare",
   "Sent": "Skickad",
   "Published": "Publicerad",
@@ -4437,7 +4432,6 @@
   "The customer holds their card, phone or watch flat against the back of this phone and keeps it there until it confirms.": "Kunden håller kortet, telefonen eller klockan plant mot baksidan av den här telefonen tills betalningen bekräftas.",
   "Hold card or phone against the back of this phone.": "Håll kortet eller telefonen mot baksidan av den här telefonen.",
   "This phone cannot take Tap to Pay.": "Den här telefonen kan inte använda Tap to Pay.",
-  "No free time left today. Tap a time on the calendar to book.": "Ingen ledig tid kvar i dag. Tryck på en tid i kalendern för att boka.",
   "Book": "Boka",
   "On now": "Pågår nu",
   "Up next": "Härnäst",
@@ -4454,5 +4448,10 @@
   "Turn off on this phone": "Stäng av på den här telefonen",
   "Turn on for this phone": "Slå på för den här telefonen",
   "This phone did not answer. Check it has a connection, then try again.": "Telefonen svarade inte. Kontrollera att den är ansluten och försök igen.",
-  "This phone could not be registered for notifications.": "Den här telefonen kunde inte registreras för aviseringar."
+  "This phone could not be registered for notifications.": "Den här telefonen kunde inte registreras för aviseringar.",
+  "Show the whole week": "Visa hela veckan",
+  "Show today": "Visa idag",
+  "Day": "Dag",
+  "Pick a time": "Välj en tid",
+  "No free times this week.": "Inga lediga tider den här veckan."
 }

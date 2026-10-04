@@ -1,4 +1,4 @@
-import { type CalendarItem, itemWeek, SNAP_MINUTES } from "../calendar/calendarModel";
+import { type CalendarItem, itemWeek } from "../calendar/calendarModel";
 
 /**
  * Where a booking stands against the clock: over (or marked done), on now,
@@ -55,30 +55,4 @@ export function featuredBooking(rows: TodayBooking[]): TodayBooking | undefined 
 export function todaySummary(rows: TodayBooking[]) {
   const done = rows.filter((row) => row.state === "done").length;
   return { total: rows.length, done, remaining: rows.length - done };
-}
-
-/**
- * The first quarter-hour from now that none of today's bookings covers, or
- * null when the day has no room left before `dayEnd`. Blocks count: time the
- * coach has blocked out is not free.
- */
-export function nextFreeStart(items: CalendarItem[], scope: TodayScope, dayStart: number, dayEnd: number): number | null {
-  const taken = items
-    .filter(
-      (item) =>
-        !item.syntheticGroupSlot &&
-        item.status !== "cancelled" &&
-        itemWeek(item) === scope.week &&
-        item.day === scope.day &&
-        scope.inScope(item),
-    )
-    .map((item) => [item.start, item.start + item.duration] as const);
-  const roundUp = (minutes: number) => Math.ceil(minutes / SNAP_MINUTES) * SNAP_MINUTES;
-  let candidate = Math.max(dayStart, roundUp(scope.nowMinutes));
-  while (candidate + SNAP_MINUTES <= dayEnd) {
-    const clash = taken.find(([start, end]) => start < candidate + SNAP_MINUTES && candidate < end);
-    if (!clash) return candidate;
-    candidate = roundUp(clash[1]);
-  }
-  return null;
 }

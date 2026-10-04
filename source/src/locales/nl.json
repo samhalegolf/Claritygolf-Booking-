@@ -215,11 +215,6 @@
   "Could not save this setting.": "Deze instelling kon niet worden opgeslagen.",
   "Saving…": "Opslaan…",
   "Any location": "Elke locatie",
-  "No morning hours are available in this view.": "Er zijn geen ochtenduren beschikbaar in deze weergave.",
-  "No afternoon or evening hours are available in this view.": "Er zijn geen middag- of avonduren beschikbaar in deze weergave.",
-  "View: Full": "Weergave: volledig",
-  "View: AM": "Weergave: ochtend",
-  "View: PM": "Weergave: middag",
   "No coach": "Geen coach",
   "Sent": "Verzonden",
   "Published": "Gepubliceerd",
@@ -4437,7 +4432,6 @@
   "The customer holds their card, phone or watch flat against the back of this phone and keeps it there until it confirms.": "De klant houdt de kaart, telefoon of watch plat tegen de achterkant van deze telefoon tot de betaling is bevestigd.",
   "Hold card or phone against the back of this phone.": "Houd kaart of telefoon tegen de achterkant van deze telefoon.",
   "This phone cannot take Tap to Pay.": "Deze telefoon ondersteunt Tap to Pay niet.",
-  "No free time left today. Tap a time on the calendar to book.": "Er is vandaag geen tijd meer vrij. Tik op een tijd in de agenda om te boeken.",
   "Book": "Boeken",
   "On now": "Nu bezig",
   "Up next": "Hierna",
@@ -4454,5 +4448,10 @@
   "Turn off on this phone": "Uitzetten op deze telefoon",
   "Turn on for this phone": "Aanzetten op deze telefoon",
   "This phone did not answer. Check it has a connection, then try again.": "De telefoon reageerde niet. Controleer de verbinding en probeer het opnieuw.",
-  "This phone could not be registered for notifications.": "Deze telefoon kon niet worden geregistreerd voor meldingen."
+  "This phone could not be registered for notifications.": "Deze telefoon kon niet worden geregistreerd voor meldingen.",
+  "Show the whole week": "Hele week tonen",
+  "Show today": "Vandaag tonen",
+  "Day": "Dag",
+  "Pick a time": "Kies een tijd",
+  "No free times this week.": "Geen vrije tijden deze week."
 }

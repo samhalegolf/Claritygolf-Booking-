@@ -39,6 +39,7 @@ import {
   isScheduledGroupService,
   Service,
 } from "../services/serviceModel";
+import { isPhoneLayout } from "../phone/phoneLayout";
 import { ClarityProfile } from "../shared/ClarityIcons";
 import type { Toast } from "../shared/toast";
 import type { CalendarState } from "./useCalendarState";
@@ -96,7 +97,6 @@ export type CalendarControllerInputs = {
   accountCoachProfiles: CoachProfile[];
   activeCoachId: string;
   availabilityLocations: Location[];
-  calendarViewBounds: { start: number; end: number; emptyMessage: string };
   calendarStartMinutes: number;
   calendarEndMinutes: number;
   activeServices: Service[];
@@ -158,6 +158,8 @@ export type CalendarControllerInputs = {
   selectedId: string;
   terms: BusinessTerminology;
   quickCreateServices: Service[];
+  /** The Week/Day switch: the week from a day, today from the week. */
+  toggleCalendarDayView: () => void;
 };
 
 /**
@@ -177,7 +179,6 @@ export function useCalendarController(app: CalendarControllerInputs) {
     accountCoachProfiles,
     activeCoachId,
     availabilityLocations,
-    calendarViewBounds,
     calendarStartMinutes,
     calendarEndMinutes,
     activeServices,
@@ -258,13 +259,11 @@ export function useCalendarController(app: CalendarControllerInputs) {
     quickMatchField,
   } = app.calendarInteraction;
   const {
-    calendarViewMode,
     activeWeek,
     calendarDayFocus,
     calendarTodayIndex,
     calendarNowMinutes,
     setCalendarHover,
-    setCalendarViewMode,
     activeWeekRef,
     setCalendarDayFocus,
     setCalendarAxisMode,
@@ -294,9 +293,6 @@ export function useCalendarController(app: CalendarControllerInputs) {
     );
     return assigned.length === 1 ? assigned[0] : "";
   };
-  const calendarViewEmptyMessage = calendarViewBounds.emptyMessage;
-  const calendarViewButtonLabel =
-    calendarViewMode === "full" ? t("View: Full") : calendarViewMode === "am" ? t("View: AM") : t("View: PM");
   const calendarHourMarks = useMemo(() => {
     const marks: number[] = [];
     for (let minutes = calendarStartMinutes; minutes <= calendarEndMinutes; minutes += 60) {
@@ -421,10 +417,6 @@ export function useCalendarController(app: CalendarControllerInputs) {
 
   function hideCalendarItemHover(itemId?: string) {
     setCalendarHover((current) => (!itemId || current?.itemId === itemId ? null : current));
-  }
-
-  function cycleCalendarViewMode() {
-    setCalendarViewMode((current) => (current === "full" ? "am" : current === "am" ? "pm" : "full"));
   }
 
   function openGroupSessionFromSlot(item: CalendarItem): boolean {
@@ -638,8 +630,10 @@ export function useCalendarController(app: CalendarControllerInputs) {
   }
 
   /** Tap a day to fill the grid with it; tap the same day again for the week. */
+  // A day heading always opens its day. Getting back to the week is the
+  // Week/Day switch's job, so a second tap on the open day does nothing.
   function focusCalendarDay(dayIndex: number) {
-    setCalendarDayFocus((current) => (current === dayIndex ? null : dayIndex));
+    setCalendarDayFocus(dayIndex);
   }
 
   function cycleCalendarAxisMode() {
@@ -1080,19 +1074,20 @@ export function useCalendarController(app: CalendarControllerInputs) {
     });
   }
 
-  function confirmQuickAppointment() {
-    if (!quickCreate || !quickCreateService) return;
-    if (!requireLiveDatabase("create appointments")) return;
+  /** Books the quick-create time, and hands back the booking it made (null if it did not). */
+  function confirmQuickAppointment(): CalendarItem | null {
+    if (!quickCreate || !quickCreateService) return null;
+    if (!requireLiveDatabase("create appointments")) return null;
     const typedClientName = quickClientSearch.trim();
     const clientName = typedClientName;
     if (!clientName) {
       setQuickCreate((current) => (current ? { ...current, error: "Add a client name." } : current));
-      return;
+      return null;
     }
     const quickCreateIsCustomGroup = isCustomGroupService(quickCreateService);
     if (quickCreateIsCustomGroup && quickCreate.attendees.length < customGroupMinParticipants(quickCreateService) - 1) {
       setQuickCreate((current) => (current ? { ...current, error: "Add at least one other person." } : current));
-      return;
+      return null;
     }
     const coachId = quickCreate.coachId || "";
     const locationId = quickCreate.locationId || "";
@@ -1100,7 +1095,7 @@ export function useCalendarController(app: CalendarControllerInputs) {
       setQuickCreate((current) =>
         current ? { ...current, error: coachId ? "Choose a location." : "Choose a coach." } : current,
       );
-      return;
+      return null;
     }
     const candidate = {
       week: quickCreate.week,
@@ -1115,9 +1110,9 @@ export function useCalendarController(app: CalendarControllerInputs) {
           ? { ...current, error: quickCreateAvailabilityError(candidate, quickCreateService, { coachId, locationId }) }
           : current,
       );
-      return;
+      return null;
     }
-    if (!confirmPastAdminLesson(candidate)) return;
+    if (!confirmPastAdminLesson(candidate)) return null;
     const chosenLocation = locationById(locations, locationId);
     const location = chosenLocation
       ? locationSnapshot(chosenLocation)
@@ -1160,6 +1155,7 @@ export function useCalendarController(app: CalendarControllerInputs) {
     }
     setQuickCreate(null);
     setQuickClientSearch("");
+    return item;
   }
 
   function createBlockFromQuick(scope: "coach-location" | "location" = "coach-location") {
@@ -1171,7 +1167,7 @@ export function useCalendarController(app: CalendarControllerInputs) {
         ? undefined
         : quickCreate.coachId || selectedCalendarCoachId || currentAppUser.coachId || firstCoachId(coachProfiles);
     const blockLocationId = quickCreate.locationId || selectedCalendarLocationId || defaultLocationId(locations);
-    const candidate = { week: activeWeek, day: quickCreate.day, start: quickCreate.start, duration: 30 };
+    const candidate = { week: quickCreate.week, day: quickCreate.day, start: quickCreate.start, duration: 30 };
     if (!isValidBlockSlot(candidate, undefined, { coachId: blockCoachId, locationId: blockLocationId, locationOnly })) {
       setToast({ message: t("That block would overlap with another calendar item.") });
       return;
@@ -1203,19 +1199,20 @@ export function useCalendarController(app: CalendarControllerInputs) {
 
   function quickCreatePopoverStyle(): CSSProperties {
     if (!quickCreate) return {};
+    const zIndex = selectedGroupSession ? 120 : undefined;
+    // A phone gets a sheet along the bottom, above the tab bar, wherever the
+    // tap was: the stylesheet places it (.app-shell.is-phone .quick-create).
+    if (isPhoneLayout()) return { zIndex };
     const viewport = window.visualViewport;
     const viewportWidth = viewport?.width ?? window.innerWidth;
     const viewportHeight = viewport?.height ?? window.innerHeight;
     const margin = 12;
-    const compact = viewportWidth <= 680;
     const availableWidth = Math.max(280, viewportWidth - margin * 2);
     const availableHeight = Math.max(280, viewportHeight - margin * 2);
-    const popoverWidth = Math.min(compact ? availableWidth : 340, availableWidth);
-    const estimatedHeight = quickCreateService ? (compact ? 620 : 560) : 360;
+    const popoverWidth = Math.min(340, availableWidth);
+    const estimatedHeight = quickCreateService ? 560 : 360;
     const usableHeight = Math.min(estimatedHeight, availableHeight);
-    const left = compact
-      ? margin
-      : clamp(quickCreate.x + 10, margin, Math.max(margin, viewportWidth - popoverWidth - margin));
+    const left = clamp(quickCreate.x + 10, margin, Math.max(margin, viewportWidth - popoverWidth - margin));
     const top = clamp(quickCreate.y + 10, margin, Math.max(margin, viewportHeight - usableHeight - margin));
 
     return {
@@ -1223,7 +1220,7 @@ export function useCalendarController(app: CalendarControllerInputs) {
       top,
       width: popoverWidth,
       maxHeight: availableHeight,
-      zIndex: selectedGroupSession ? 120 : undefined,
+      zIndex,
     };
   }
 
@@ -1249,9 +1246,6 @@ export function useCalendarController(app: CalendarControllerInputs) {
     ...app.calendarState,
     toggleCalendarDetailMode,
     handleCalendarTouchStart,
-    cycleCalendarViewMode,
-    calendarViewButtonLabel,
-    calendarViewEmptyMessage,
     locationCalendarHasAppointments,
     cycleCalendarAxisMode,
     handleWeekStripScroll,

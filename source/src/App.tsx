@@ -78,9 +78,11 @@ import {
 } from "./modules/shared/ClarityIcons";
 import type { IconComponent } from "./modules/shared/ClarityIcons";
 import { isPhoneLayout, usePhoneLayout } from "./modules/phone/phoneLayout";
+import { type PhoneStep, PhoneStepSwipe } from "./modules/phone/PhoneStepSwipe";
 import { type PhoneDestination, PhoneTabBar } from "./modules/phone/PhoneTabBar";
+import { QuickBookScreen } from "./modules/quick-book/QuickBookScreen";
+import { quickBookSlots } from "./modules/quick-book/quickBookModel";
 import { TodayScreen } from "./modules/today/TodayScreen";
-import { nextFreeStart } from "./modules/today/todayModel";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "./modules/auth/apiFetch";
 import { SnapshotFrameViewer, type FrameViewerShot } from "./modules/shared/SnapshotFrameViewer";
@@ -1064,6 +1066,8 @@ function sectionTitle(view: View, terms: BusinessTerminology = terminologyFor())
       return t("Business Hub");
     case "today":
       return t("Today");
+    case "book":
+      return t("Book");
     default:
       return t("Calendar");
 
@@ -1074,6 +1078,7 @@ function sectionTitle(view: View, terms: BusinessTerminology = terminologyFor())
 // every business (Clients, Settings, the hub).
 const VIEW_CAPABILITY: Partial<Record<View, CapabilityKey>> = {
   calendar: "calendar",
+  book: "calendar",
   video: "videoAnalysis",
   "putting-lab": "puttingLab",
   sell: "billing",
@@ -2123,10 +2128,10 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   const [selectedGroupSession, setSelectedGroupSession] = useState<GroupSession | null>(null);
   const [activeView, setActiveView] = useState<View>(() => getInitialView());
   const phoneLayout = usePhoneLayout();
-  // Today is the phone layout's screen and has no place in the sidebar, so a
-  // window widened past the phone width goes on to the calendar.
+  // Today and Book are the phone layout's screens and have no place in the
+  // sidebar, so a window widened past the phone width goes on to the calendar.
   useEffect(() => {
-    if (!phoneLayout && activeView === "today") setActiveView("calendar");
+    if (!phoneLayout && (activeView === "today" || activeView === "book")) setActiveView("calendar");
   }, [phoneLayout, activeView]);
   // A view whose module is switched off is not reachable by a bookmark, a
   // ?view= link or a stale button somewhere else in the app either: it falls
@@ -2256,6 +2261,10 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   }, [activeView, authStatus, people.length]);
 
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("none");
+  // The section last open in each menu, for the phone's swipe forward.
+  const lastSettingsSectionRef = useRef<SettingsTab>("none");
+  const lastBillingSectionRef = useRef<BillingSection>("none");
+  const mainPanelRef = useRef<HTMLElement>(null);
   // Products first: adding something you sell is the most common reason to open
   // Billing, and it is the one screen that is useless if you have to find it.
   const [billingSection, setBillingSection] = useState<BillingSection>(() =>
@@ -2263,6 +2272,13 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
       ? "settings"
       : "products",
   );
+  // The menus are a phone screen of their own. A window widened past the phone
+  // width shows the menu beside a section, so it needs a section to show.
+  useEffect(() => {
+    if (phoneLayout) return;
+    if (activeView === "settings" && settingsTab === "none") setSettingsTab("services");
+    if (activeView === "billing" && billingSection === "none") setBillingSection("products");
+  }, [phoneLayout, activeView, settingsTab, billingSection]);
   const [invoiceDraft, setInvoiceDraft] = useState<InvoiceDraft>(() =>
     emptyInvoiceDraft(getStoredCoachAccount().invoiceSettings),
   );
@@ -2572,7 +2588,6 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     activeWeek,
     setActiveWeek,
     calendarDetailMode,
-    calendarViewMode,
     calendarAxisMode,
     calendarDayFocus,
     setCalendarDayFocus,
@@ -3522,49 +3537,8 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
       end: Math.max(end, start + 60),
     };
   }, [calendarAvailability, services, visibleWeekItems]);
-  const fullCalendarStartMinutes = calendarDisplayBounds.start;
-  const fullCalendarEndMinutes = calendarDisplayBounds.end;
-  const calendarViewBounds = useMemo(() => {
-    if (calendarViewMode === "full") {
-      return {
-        start: fullCalendarStartMinutes,
-        end: fullCalendarEndMinutes,
-        emptyMessage: "",
-      };
-    }
-
-    if (calendarViewMode === "am") {
-      const end = Math.min(fullCalendarEndMinutes, 12 * 60);
-      if (end <= fullCalendarStartMinutes) {
-        return {
-          start: fullCalendarStartMinutes,
-          end: Math.min(DAY_END_MINUTES, fullCalendarStartMinutes + 60),
-          emptyMessage: t("No morning hours are available in this view."),
-        };
-      }
-      return {
-        start: fullCalendarStartMinutes,
-        end,
-        emptyMessage: "",
-      };
-    }
-
-    const start = Math.max(fullCalendarStartMinutes, 12 * 60);
-    if (start >= fullCalendarEndMinutes) {
-      return {
-        start: Math.max(DAY_START_MINUTES, fullCalendarEndMinutes - 60),
-        end: fullCalendarEndMinutes,
-        emptyMessage: t("No afternoon or evening hours are available in this view."),
-      };
-    }
-    return {
-      start,
-      end: fullCalendarEndMinutes,
-      emptyMessage: "",
-    };
-  }, [calendarViewMode, fullCalendarEndMinutes, fullCalendarStartMinutes]);
-  const calendarStartMinutes = calendarViewBounds.start;
-  const calendarEndMinutes = calendarViewBounds.end;
+  const calendarStartMinutes = calendarDisplayBounds.start;
+  const calendarEndMinutes = calendarDisplayBounds.end;
   // gridHeight / calendarMinutesToTop live further down: they come off the
   // squash axis, which needs the week's items to know what to collapse.
   const clipCalendarSegment = (start: number, duration: number) => {
@@ -3584,6 +3558,23 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
       Boolean(flyingBooking) ||
       pointerSession?.mode === "place" ||
       (pointerSession?.mode === "move" && Boolean(floatingDrag)));
+  // Book's free times: the hours of whoever the calendar is showing, less
+  // what each of them already has on. A location-wide block takes the time
+  // of every window at that location.
+  const quickBookSlotsForWeek = (week: number) =>
+    quickBookSlots({
+      week,
+      availability: calendarAvailability,
+      items: accountItems,
+      takesWindow: (item, window) => {
+        const service = itemService(item, services);
+        if (isLocationOnlyBlock(item)) {
+          return Boolean(window.locationId) && resolvedCalendarItemLocationId(item, service, locations, coachAccount) === window.locationId;
+        }
+        return resolvedCalendarItemCoachId(item, service, coachProfiles) === (window.coachId || activeCoachId);
+      },
+      isPast: isSlotInPast,
+    });
   const serviceScopeCoachId = isAdminUser ? selectedCalendarCoachId || activeCoachId : activeCoachId;
   const itemInCoachScope = (item: CalendarItem) =>
     isAdminUser || resolvedCalendarItemCoachId(item, itemService(item, services), coachProfiles) === serviceScopeCoachId;
@@ -5201,47 +5192,40 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
    * outright here rather than left for a state change to trigger.
    */
   /**
-   * The phone's Book tab: the calendar's own quick-create, on today at the
-   * next quarter-hour nobody is booked or blocked, so the coach only picks
-   * the client and lesson type.
+   * The phone's Book screen. It books into the calendar on show, except a
+   * single location's calendar, which has no lesson types to offer, so an
+   * admin there books across everyone instead.
    */
-  function startPhoneBooking() {
+  function openQuickBook() {
     if (!requireLiveDatabase("create calendar items")) return;
-    const week = getCurrentWeekOffset();
-    const day = buildWeekDays(week).findIndex((weekDay) => weekDay.isToday);
-    const start = nextFreeStart(
-      accountItems,
-      { week, day, nowMinutes: businessNow().minutes, inScope: itemInCoachScope },
-      calendarStartMinutes,
-      calendarEndMinutes,
-    );
-    switchView("calendar");
-    goToToday();
-    if (start === null) {
-      setToast({ message: t("No free time left today. Tap a time on the calendar to book.") });
-      return;
+    if (effectiveCalendarPerspective === "location") {
+      calendarPerspectiveChosenRef.current = true;
+      setCalendarPerspective("all");
     }
-    setQuickCreate({
-      week,
-      day,
-      start,
-      x: 0,
-      y: 0,
-      serviceId: "",
-      phone: "",
-      email: "",
-      note: "",
-      attendees: [],
-      attendeeName: "",
-      attendeeEmail: "",
-      error: "",
-    });
+    switchView("book");
   }
 
-  function openBookingFromToday(item: CalendarItem) {
+  /** Open the calendar on a booking's day with its card showing. */
+  function showBookingOnCalendar(item: CalendarItem) {
     switchView("calendar");
-    goToToday();
+    setActiveWeekState(itemWeek(item));
+    setCalendarDayFocus(item.day);
+    centreWeekPager();
     setSelectedId(item.id);
+  }
+
+  /**
+   * The calendar's Week/Day switch. From a day it goes out to the whole week;
+   * from the week it opens today, whichever week was on show.
+   */
+  function toggleCalendarDayView() {
+    if (calendarDayFocus !== null) {
+      setCalendarDayFocus(null);
+      return;
+    }
+    const week = getCurrentWeekOffset();
+    setCalendarDayFocus(Math.max(0, buildWeekDays(week).findIndex((day) => day.isToday)));
+    goToToday();
   }
 
   function goToToday() {
@@ -6203,8 +6187,11 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   function switchView(view: View) {
     setActiveView(view);
     setQuickCreate(null);
-    if (view === "settings") setSettingsTab("services");
-    if (view === "billing") setBillingSection("products");
+    // A phone opens Settings and Billing on their menu, and a section is a
+    // step in from it; the desktop shows the menu beside a section, so it
+    // opens straight onto one.
+    if (view === "settings") setSettingsTab(phoneLayout ? "none" : "services");
+    if (view === "billing") setBillingSection(phoneLayout ? "none" : "products");
     // Opening Video from the nav is the general workspace (no player context).
     if (view === "video") setVideoContext(null);
     if (view !== "calendar") closeCalendarDetails();
@@ -16873,6 +16860,41 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   }
   const backLayerIds = backLayers.map((layer) => layer.id);
 
+  /**
+   * The phone's Back: one arrow, always at the top left of the header, that
+   * goes up one step inside the screen you are on -- a Settings or Billing
+   * section to its menu, Book's form to its times. Screens with nowhere to go
+   * up to show no arrow; the tab bar moves between them. Things that float
+   * over a screen (popovers, sheets, overlays) close with their own X, which
+   * is sized for a thumb on a phone.
+   */
+  const phoneBackStep: PhoneStep | null = !phoneLayout
+    ? null
+    : activeView === "settings" && settingsTab !== "none" && workspaceOverlay?.kind !== "settings"
+      ? { label: t("Settings"), go: () => switchSettingsTab("none") }
+      : activeView === "billing" && billingSection !== "none" && workspaceOverlay?.kind !== "billing"
+        ? { label: t("Billing"), go: () => setBillingSection("none") }
+        : activeView === "book" && quickCreate
+          ? { label: t("Book"), go: () => setQuickCreate(null) }
+          : null;
+  // And forward, for the swipe only: from a menu, back into the section you
+  // last had open there. A new invoice is never reopened this way -- it would
+  // start another one.
+  if (settingsTab !== "none") lastSettingsSectionRef.current = settingsTab;
+  if (billingSection !== "none" && billingSection !== "new-invoice") lastBillingSectionRef.current = billingSection;
+  const lastSettingsSection = lastSettingsSectionRef.current;
+  const lastBillingSection = lastBillingSectionRef.current;
+  const phoneForwardStep: PhoneStep | null = !phoneLayout
+    ? null
+    : activeView === "settings" && settingsTab === "none" && lastSettingsSection !== "none"
+      ? {
+          label: settingsSections.find((section) => section.key === lastSettingsSection)?.label ?? t("Settings"),
+          go: () => switchSettingsTab(lastSettingsSection),
+        }
+      : activeView === "billing" && billingSection === "none" && lastBillingSection !== "none"
+        ? { label: billingSectionLabel(lastBillingSection), go: () => switchBillingSection(lastBillingSection) }
+        : null;
+
   // Browser Back moves between the screens the coach has actually been on,
   // rather than leaving the app: it closes whatever is open over the workspace
   // first, and only then walks back through the views themselves.
@@ -16883,7 +16905,16 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   // nobody makes. A Forward onto such an entry simply rewrites it.
   useBackNavigation({
     enabled: true,
-    depth: (snapshot) => snapshot.layers.length,
+    // On a phone a section is a step in from its menu, so it counts like a
+    // layer: the topbar's Back onto the menu you came from steps back through
+    // history, and the phone's own back gesture does the same thing.
+    depth: (snapshot) =>
+      snapshot.layers.length +
+      (phoneLayout &&
+      ((snapshot.view === "settings" && snapshot.settingsTab !== "none") ||
+        (snapshot.view === "billing" && snapshot.billingSection !== "none"))
+        ? 1
+        : 0),
     state: {
       view: activeView,
       settingsTab,
@@ -17276,7 +17307,6 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     accountCoachProfiles,
     activeCoachId,
     availabilityLocations,
-    calendarViewBounds,
     calendarStartMinutes,
     calendarEndMinutes,
     activeServices,
@@ -17338,6 +17368,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     selectedId,
     terms,
     quickCreateServices,
+    toggleCalendarDayView,
   });
 
   const clientProfile = useClientProfileController({
@@ -17425,7 +17456,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     { key: "today", label: t("Today"), Icon: ClaritySessions, active: activeView === "today", onSelect: () => switchView("today") },
     ...workspaceDestinations.filter((destination) => destination.key === "calendar" || destination.key === "clients"),
     ...(capabilities.calendar
-      ? [{ key: "book", label: t("Book"), Icon: ClarityNewBooking, active: false, onSelect: startPhoneBooking }]
+      ? [{ key: "book", label: t("Book"), Icon: ClarityNewBooking, active: activeView === "book", onSelect: openQuickBook }]
       : []),
   ];
   const phoneMore = workspaceDestinations.filter((destination) => destination.key !== "calendar" && destination.key !== "clients");
@@ -17465,14 +17496,24 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
       </nav>
     </aside>
 
-      <main className="main-panel">
+      <main
+        ref={mainPanelRef}
+        className={`main-panel${phoneBackStep ? " has-paper-under" : ""}${phoneForwardStep ? " has-paper-ahead" : ""}`}
+      >
         {/* Video analysis is the one destination that brings its own header
             and its own way back, so the global one would sit on top of it. */}
         {activeView !== "video" && (
         <header className="topbar">
-          <div>
-            <h1>{pageHeading.title}</h1>
-            {pageHeading.subtitle ? <span>{pageHeading.subtitle}</span> : null}
+          <div className={phoneBackStep ? "topbar-title has-back" : "topbar-title"}>
+            {phoneBackStep ? (
+              <button type="button" className="phone-back-button" onClick={phoneBackStep.go} aria-label={t("Back")}>
+                <ArrowLeft size={22} />
+              </button>
+            ) : null}
+            <div>
+              <h1>{pageHeading.title}</h1>
+              {pageHeading.subtitle ? <span>{pageHeading.subtitle}</span> : null}
+            </div>
           </div>
           {activeView === "calendar" && (
             <div className="top-actions">
@@ -17772,13 +17813,17 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
             items={accountItems}
             services={services}
             inScope={itemInCoachScope}
-            onOpenBooking={openBookingFromToday}
-            onNewBooking={startPhoneBooking}
+            onOpenBooking={showBookingOnCalendar}
+            onNewBooking={openQuickBook}
             onOpenCalendar={() => {
               switchView("calendar");
               goToToday();
             }}
           />
+        )}
+
+        {adminWorkspaceReady && activeView === "book" && (
+          <QuickBookScreen calendar={calendar} slotsForWeek={quickBookSlotsForWeek} onBooked={showBookingOnCalendar} />
         )}
 
         {adminWorkspaceReady && activeView === "clients" && (
@@ -19488,14 +19533,16 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
           <WorkspaceSurface
             overlay={workspaceOverlay?.kind === "billing"}
             title={workspaceOverlay?.title ?? ""}
-            pageClassName="billing-page"
+            pageClassName={`billing-page${phoneLayout && billingSection === "none" ? " is-phone-menu" : ""}`}
             onClose={closeWorkspaceOverlay}
           >
             {/* The same side column as Settings: one row per section, the
                 open one filled. Not drawn in the overlay, for the same reason
                 the settings sub-nav is not: one section was asked for, so a
                 column of others offers a journey nobody started. */}
-            {workspaceOverlay?.kind !== "billing" && (
+            {/* On a phone the column is a menu screen of its own: it shows
+                until a section is picked, and the topbar's Back returns to it. */}
+            {workspaceOverlay?.kind !== "billing" && (!phoneLayout || billingSection === "none") && (
             <nav className="settings-subnav" aria-label={t("Billing sections")}>
               {BILLING_SECTION_NAV.map((section) => (
                 <button
@@ -22281,7 +22328,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
           <WorkspaceSurface
             overlay={workspaceOverlay?.kind === "settings"}
             title={workspaceOverlay?.title ?? ""}
-            pageClassName="settings-page"
+            pageClassName={`settings-page${phoneLayout && settingsTab === "none" ? " is-phone-menu" : ""}`}
             onClose={closeWorkspaceOverlay}
           >
             {/* Rule 07: the sub-nav keeps its boxes. 216px column, 38px rows,
@@ -22292,7 +22339,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                 Not drawn in the overlay: that is one section opened from the
                 coach profile, so a column for picking a different category is
                 offering a journey nobody started. */}
-            {workspaceOverlay?.kind !== "settings" && (
+            {workspaceOverlay?.kind !== "settings" && (!phoneLayout || settingsTab === "none") && (
             <nav className="settings-subnav" aria-label={t("Settings sections")}>
               {settingsSections.filter(
                 (section) =>
@@ -23941,6 +23988,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
           </WorkspaceSurface>
         )}
       </main>
+      {phoneLayout && <PhoneStepSwipe panelRef={mainPanelRef} back={phoneBackStep} forward={phoneForwardStep} />}
       {phoneLayout && <PhoneTabBar tabs={phoneTabs} more={phoneMore} />}
 
       {adminWorkspaceReady && activeView === "calendar" && selectedDetails && (

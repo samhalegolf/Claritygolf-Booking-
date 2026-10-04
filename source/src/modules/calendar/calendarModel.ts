@@ -153,7 +153,6 @@ export type PlacementAnimation = {
   fromY: number;
 };
 
-export type CalendarViewMode = "full" | "am" | "pm";
 export type CalendarPerspective = "all" | "coach" | "location";
 
 export type DockFlight = PendingBooking & {
