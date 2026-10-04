@@ -544,6 +544,12 @@ import { PublicBookingSection, } from "./modules/booking/bookingModel";
 import { View } from "./modules/shared/appView";
 import { useBookingFlow } from "./modules/booking/useBookingFlow";
 import { BookingFlowView } from "./modules/booking/BookingFlowView";
+import {
+  DIAGNOSTIC_EVENT_LIMIT,
+  DiagnosticTab,
+  diagnosticDurationBand,
+} from "./modules/diagnostics/diagnosticsModel";
+import { useDiagnostics } from "./modules/diagnostics/useDiagnostics";
 
 // Video analysis and voice notes are heavy, coach-only features (together well
 // over a third of the client bundle). They never render on the public booking
@@ -904,57 +910,6 @@ const SECONDARY_PLAYER_TOOLS: ReadonlySet<PlayerProfileTool> = new Set<PlayerPro
 
 type AdminWorkspaceLoadStatus = "idle" | "loading" | "loaded" | "error";
 type AdminSaveOwner = "lesson_complete" | "upsert_item" | "calendar_delete" | "locations" | "coaches" | "settings";
-type DiagnosticStatus = "started" | "success" | "failed" | "warning" | "skipped" | "verified";
-type DiagnosticSystem =
-  | "supabase"
-  | "auth"
-  | "calendar"
-  | "booking"
-  | "publicBooking"
-  | "save"
-  | "email"
-  | "notification"
-  | "admin"
-  | "ui"
-  | "cache"
-  | "reload";
-type DiagnosticTab = "overview" | "database" | "calendar" | "cache" | "errors" | "raw";
-type DiagnosticEvent = {
-  id: string;
-  timestamp: string;
-  system: DiagnosticSystem;
-  action: string;
-  phase: string;
-  status: DiagnosticStatus;
-  durationMs?: number;
-  route?: string;
-  functionName?: string;
-  errorCode?: string;
-  humanMessage?: string;
-  httpStatus?: number;
-  expectedAccountId?: string;
-  returnedAccountId?: string;
-  objectType?: string;
-  objectId?: string;
-  details?: Record<string, string | number | boolean>;
-};
-type DiagnosticEventInput = Omit<DiagnosticEvent, "id" | "timestamp" | "details"> & {
-  id?: string;
-  timestamp?: string;
-  details?: Record<string, unknown>;
-};
-type DiagnosticTimerInput = {
-  system: DiagnosticSystem;
-  action: string;
-  phase?: string;
-  route?: string;
-  functionName?: string;
-  expectedAccountId?: string;
-  objectType?: string;
-  objectId?: string;
-  details?: Record<string, unknown>;
-};
-type DiagnosticTimer = DiagnosticTimerInput & { id: string; startedAt: number };
 type LessonCompleteDiagnostic = {
   action: "lesson_complete";
   itemId: string;
@@ -1831,49 +1786,6 @@ function loadImage(url: string) {
     image.onerror = () => reject(new Error(t("Could not read that logo image.")));
     image.src = url;
   });
-}
-
-const DIAGNOSTIC_EVENT_LIMIT = 150;
-
-function createDiagnosticId() {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return `diag-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-function sanitizeDiagnosticDetails(details?: Record<string, unknown>): Record<string, string | number | boolean> | undefined {
-  if (!details) return undefined;
-  const sanitized: Record<string, string | number | boolean> = {};
-  Object.entries(details).forEach(([key, value]) => {
-    const lowerKey = key.toLowerCase();
-    if (
-      lowerKey.includes("token") ||
-      lowerKey.includes("secret") ||
-      lowerKey.includes("authorization") ||
-      lowerKey.includes("password") ||
-      lowerKey.includes("emailbody") ||
-      lowerKey.includes("body")
-    ) {
-      return;
-    }
-    if (typeof value === "string") sanitized[key] = value.slice(0, 160);
-    if (typeof value === "number" && Number.isFinite(value)) sanitized[key] = value;
-    if (typeof value === "boolean") sanitized[key] = value;
-  });
-  return Object.keys(sanitized).length ? sanitized : undefined;
-}
-
-function diagnosticDurationBand(event: Pick<DiagnosticEvent, "details" | "durationMs">) {
-  const durationMs = event.durationMs;
-  if (typeof durationMs !== "number") return "";
-  if (event.details?.blockingCalendar === false || event.details?.backgroundRefresh === true) {
-    return durationMs < 1000 ? "Okay" : "Background";
-  }
-  if (durationMs < 300) return "Fast";
-  if (durationMs < 1000) return "Okay";
-  if (durationMs < 3000) return "Slow";
-  return "Problem";
 }
 
 async function analyzeLogoFile(file: File): Promise<BrandSettings> {
@@ -2922,9 +2834,27 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   const [deleteInFlightId, setDeleteInFlightId] = useState("");
   const [resendConfirmationState, setResendConfirmationState] = useState<Record<string, "sending" | "sent" | "failed">>({});
   const [calendarStateVersion, setCalendarStateVersion] = useState("");
-  const [diagnosticEvents, setDiagnosticEvents] = useState<DiagnosticEvent[]>([]);
-  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
-  const [diagnosticsTab, setDiagnosticsTab] = useState<DiagnosticTab>("overview");
+  const diagnostics = useDiagnostics();
+  const {
+    diagnosticEvents,
+    diagnosticsOpen,
+    setDiagnosticsOpen,
+    diagnosticsTab,
+    setDiagnosticsTab,
+    trackDiagnosticEvent,
+    startDiagnosticTimer,
+    finishDiagnosticTimer,
+    trackDiagnosticError,
+    trackDiagnosticMilestone,
+    failedDiagnosticEvents,
+    latestDiagnosticEvent,
+    latestDiagnosticError,
+    diagnosticEventsForActiveTab,
+    averageDiagnosticDuration,
+    slowestDiagnosticEvent,
+    latestReloadEvent,
+    diagnosticsBySystem,
+  } = diagnostics;
   const [storageDiagnosticsOpen, setStorageDiagnosticsOpen] = useState(false);
   const [pendingLessonCompleteId, setPendingLessonCompleteId] = useState("");
   const [lessonCompleteErrors, setLessonCompleteErrors] = useState<LessonCompleteErrorMap>({});
@@ -3423,92 +3353,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     } else {
       activeAdminSaveOwnersRef.current.delete(owner);
     }
-  }
-
-  function trackDiagnosticEvent(event: DiagnosticEventInput) {
-    const next: DiagnosticEvent = {
-      ...event,
-      id: event.id || createDiagnosticId(),
-      timestamp: event.timestamp || new Date().toISOString(),
-      details: sanitizeDiagnosticDetails(event.details),
-    };
-    setDiagnosticEvents((current) => [next, ...current].slice(0, DIAGNOSTIC_EVENT_LIMIT));
-  }
-
-  function startDiagnosticTimer(input: DiagnosticTimerInput): DiagnosticTimer {
-    const timer: DiagnosticTimer = {
-      ...input,
-      id: createDiagnosticId(),
-      phase: input.phase || "request",
-      startedAt: performance.now(),
-    };
-    trackDiagnosticEvent({
-      ...timer,
-      phase: timer.phase || "request",
-      status: "started",
-    });
-    return timer;
-  }
-
-  function finishDiagnosticTimer(
-    timer: DiagnosticTimer,
-    status: DiagnosticStatus,
-    extra: Partial<DiagnosticEventInput> = {},
-  ) {
-    trackDiagnosticEvent({
-      system: timer.system,
-      action: timer.action,
-      phase: extra.phase || timer.phase || "request",
-      status,
-      route: extra.route || timer.route,
-      functionName: extra.functionName || timer.functionName,
-      errorCode: extra.errorCode,
-      humanMessage: extra.humanMessage,
-      httpStatus: extra.httpStatus,
-      expectedAccountId: extra.expectedAccountId || timer.expectedAccountId,
-      returnedAccountId: extra.returnedAccountId,
-      objectType: extra.objectType || timer.objectType,
-      objectId: extra.objectId || timer.objectId,
-      durationMs: Math.max(0, Math.round(performance.now() - timer.startedAt)),
-      details: { ...(timer.details ?? {}), ...(extra.details ?? {}) },
-    });
-  }
-
-  function trackDiagnosticError(
-    input: DiagnosticTimerInput & {
-      errorCode: string;
-      humanMessage: string;
-      httpStatus?: number;
-      returnedAccountId?: string;
-    },
-  ) {
-    trackDiagnosticEvent({
-      system: input.system,
-      action: input.action,
-      phase: input.phase || "request",
-      status: "failed",
-      route: input.route,
-      functionName: input.functionName,
-      errorCode: input.errorCode,
-      humanMessage: input.humanMessage,
-      httpStatus: input.httpStatus,
-      expectedAccountId: input.expectedAccountId,
-      returnedAccountId: input.returnedAccountId,
-      objectType: input.objectType,
-      objectId: input.objectId,
-      details: input.details,
-    });
-  }
-
-  function trackDiagnosticMilestone(input: DiagnosticEventInput & { startedAt?: number }) {
-    const { startedAt, ...event } = input;
-    trackDiagnosticEvent({
-      ...event,
-      durationMs:
-        typeof startedAt === "number"
-          ? Math.max(0, Math.round(performance.now() - startedAt))
-          : input.durationMs,
-    });
   }
   const selectedLessonNote = selectedService?.lessonNote || selectedService?.location || "";
   const selectedGroupSessionService = selectedGroupSession
@@ -19350,46 +19194,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
                   : t("Your profile, your calendar, and the settings that are yours"),
               }
             : { title: sectionTitle(activeView, terms) };
-  const failedDiagnosticEvents = diagnosticEvents.filter((event) => event.status === "failed");
-  const latestDiagnosticEvent = diagnosticEvents[0];
-  const latestDiagnosticError = failedDiagnosticEvents[0];
-  const databaseDiagnosticEvents = diagnosticEvents.filter((event) =>
-    ["supabase", "save", "calendar", "auth"].includes(event.system),
-  );
-  const calendarDiagnosticEvents = diagnosticEvents.filter(
-    (event) =>
-      event.system === "calendar" ||
-      event.action.includes("CALENDAR") ||
-      event.action.includes("BOOKING_CARDS") ||
-      event.route?.includes("calendar"),
-  );
-  const cacheDiagnosticEvents = diagnosticEvents.filter((event) =>
-    ["cache", "reload"].includes(event.system),
-  );
-  const diagnosticEventsForActiveTab =
-    diagnosticsTab === "errors"
-      ? failedDiagnosticEvents
-      : diagnosticsTab === "database"
-        ? databaseDiagnosticEvents
-        : diagnosticsTab === "calendar"
-          ? calendarDiagnosticEvents
-          : diagnosticsTab === "cache"
-            ? cacheDiagnosticEvents
-            : diagnosticEvents;
-  const averageDiagnosticDuration = Math.round(
-    diagnosticEvents.reduce((total, event) => total + (event.durationMs ?? 0), 0) /
-      Math.max(1, diagnosticEvents.filter((event) => typeof event.durationMs === "number").length),
-  );
-  const slowestDiagnosticEvent = diagnosticEvents.reduce<DiagnosticEvent | null>((slowest, event) => {
-    if (typeof event.durationMs !== "number") return slowest;
-    if (!slowest || (slowest.durationMs ?? 0) < event.durationMs) return event;
-    return slowest;
-  }, null);
-  const latestReloadEvent = diagnosticEvents.find((event) => event.system === "reload");
-  const diagnosticsBySystem = diagnosticEvents.reduce<Record<string, number>>((counts, event) => {
-    counts[event.system] = (counts[event.system] ?? 0) + 1;
-    return counts;
-  }, {});
 
   const calendar = useCalendarController({
     calendarInteraction,
