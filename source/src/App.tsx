@@ -2089,14 +2089,13 @@ type AppProps = {
    */
   onSessionLost?: () => void;
   /**
-   * The session the entry point already resolved. When it is a coach, the
-   * workspace starts hydrating straight away instead of asking
-   * /api/auth/session a second time.
+   * The coach session the entry point already resolved. The entry point only
+   * mounts the workspace for a coach, so it starts hydrating straight away.
    */
-  session?: Session;
+  session: Session;
 };
 
-function App({ onSessionLost, session: entrySession }: AppProps = {}) {
+function App({ onSessionLost, session: entrySession }: AppProps) {
   const [themeMode, setThemeMode] = useState<ThemeMode>(getStoredTheme);
   const workspaceData = useWorkspaceData({ entrySession });
   const {
@@ -2844,7 +2843,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     trackDiagnosticEvent,
     startDiagnosticTimer,
     finishDiagnosticTimer,
-    trackDiagnosticError,
     trackDiagnosticMilestone,
     failedDiagnosticEvents,
     latestDiagnosticEvent,
@@ -4222,92 +4220,10 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     }
   }, [bookingServiceId, currentScreenPublicServices]);
 
+  // The entry point only mounts this component for a coach, having already
+  // asked /api/auth/session, so the calendar shell starts at once.
   useEffect(() => {
-    let cancelled = false;
-
-    async function loadInitialState() {
-      try {
-
-        // The entry point already asked /api/auth/session and only mounts this
-        // component for a coach. Asking again cost a full round trip before the
-        // calendar shell could even start, so its answer is taken as given.
-        if (entrySession?.role === "coach") {
-          setAuthStatus("authenticated");
-          void startAdminWorkspaceHydration();
-          return;
-        }
-
-        const sessionController = new AbortController();
-        const sessionTimeout = window.setTimeout(() => sessionController.abort(), 8000);
-        let sessionResponse: Response;
-        const sessionTimer = startDiagnosticTimer({
-          system: "auth",
-          action: "admin_session_load",
-          route: "GET /api/auth/session",
-          functionName: "loadInitialState",
-        });
-        try {
-          sessionResponse = await fetch("/api/auth/session", {
-            credentials: "same-origin",
-            cache: "no-store",
-            headers: { Accept: "application/json" },
-            signal: sessionController.signal,
-          });
-          finishDiagnosticTimer(sessionTimer, sessionResponse.ok ? "success" : "failed", {
-            httpStatus: sessionResponse.status,
-            errorCode: sessionResponse.ok ? undefined : "AUTH_SESSION_MISSING",
-            humanMessage: sessionResponse.ok ? undefined : t("Admin session could not be loaded."),
-          });
-        } finally {
-          window.clearTimeout(sessionTimeout);
-        }
-        if (!sessionResponse.ok) throw new Error(t("Session API unavailable"));
-        const session = (await sessionResponse.json()) as { authenticated?: boolean; email?: string };
-        if (cancelled) return;
-
-        if (!session.authenticated) {
-          trackDiagnosticEvent({
-            system: "auth",
-            action: "admin_session_load",
-            phase: "session",
-            status: "warning",
-            route: "GET /api/auth/session",
-            errorCode: "AUTH_SESSION_MISSING",
-            humanMessage: t("No authenticated admin session."),
-          });
-          setAuthStatus("guest");
-          setCalendarFeedStatus("offline");
-          setAdminWorkspaceLoadStatus("idle");
-          setAdminWorkspaceLoadError("");
-          return;
-        }
-
-        setAuthStatus("authenticated");
-        void startAdminWorkspaceHydration();
-      } catch {
-        if (!cancelled) {
-          trackDiagnosticError({
-            system: "auth",
-            action: "admin_session_load",
-            phase: "request",
-            route: "GET /api/auth/session",
-            functionName: "loadInitialState",
-            errorCode: "AUTH_SESSION_MISSING",
-            humanMessage: t("Admin session load failed."),
-          });
-          hasLoadedCalendarApiRef.current = false;
-          setCalendarFeedStatus("offline");
-          setAdminWorkspaceLoadStatus("idle");
-          setAdminWorkspaceLoadError("");
-          setAuthStatus("guest");
-        }
-      }
-    }
-
-    void loadInitialState();
-    return () => {
-      cancelled = true;
-    };
+    void startAdminWorkspaceHydration();
   }, []);
 
   async function refreshNotificationHistory() {

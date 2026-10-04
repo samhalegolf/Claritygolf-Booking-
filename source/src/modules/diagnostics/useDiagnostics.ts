@@ -70,32 +70,6 @@ export function useDiagnostics() {
     });
   }
 
-  function trackDiagnosticError(
-    input: DiagnosticTimerInput & {
-      errorCode: string;
-      humanMessage: string;
-      httpStatus?: number;
-      returnedAccountId?: string;
-    },
-  ) {
-    trackDiagnosticEvent({
-      system: input.system,
-      action: input.action,
-      phase: input.phase || "request",
-      status: "failed",
-      route: input.route,
-      functionName: input.functionName,
-      errorCode: input.errorCode,
-      humanMessage: input.humanMessage,
-      httpStatus: input.httpStatus,
-      expectedAccountId: input.expectedAccountId,
-      returnedAccountId: input.returnedAccountId,
-      objectType: input.objectType,
-      objectId: input.objectId,
-      details: input.details,
-    });
-  }
-
   function trackDiagnosticMilestone(input: DiagnosticEventInput & { startedAt?: number }) {
     const { startedAt, ...event } = input;
     trackDiagnosticEvent({
@@ -156,7 +130,6 @@ export function useDiagnostics() {
     trackDiagnosticEvent,
     startDiagnosticTimer,
     finishDiagnosticTimer,
-    trackDiagnosticError,
     trackDiagnosticMilestone,
     failedDiagnosticEvents,
     latestDiagnosticEvent,
