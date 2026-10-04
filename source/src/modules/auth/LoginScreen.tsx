@@ -135,10 +135,16 @@ export default function LoginScreen({ onSignedIn, onCancel }: LoginScreenProps) 
   async function handleLogin(event: FormEvent) {
     event.preventDefault();
     if (busy) return;
+    // Read the boxes directly: browser autofill can fill them without firing onChange,
+    // which would leave state empty and send a blank login.
+    const fields = new FormData(event.currentTarget as HTMLFormElement);
+    const enteredEmail = String(fields.get("email") ?? email).trim();
+    const enteredPassword = String(fields.get("password") ?? password);
+    setEmail(enteredEmail);
     setBusy(true);
     setError("");
     try {
-      const session = await login(email.trim(), password);
+      const session = await login(enteredEmail, enteredPassword);
       setPassword("");
       onSignedIn(session);
     } catch (caught) {
@@ -344,6 +350,7 @@ export default function LoginScreen({ onSignedIn, onCancel }: LoginScreenProps) 
             <label>
               <span>{t("Email")}</span>
               <input
+                name="email"
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
                 type="email"
@@ -353,6 +360,7 @@ export default function LoginScreen({ onSignedIn, onCancel }: LoginScreenProps) 
             <label>
               <span>{t("Password")}</span>
               <input
+                name="password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 type={showPassword ? "text" : "password"}
