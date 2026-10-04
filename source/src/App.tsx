@@ -18,7 +18,6 @@ import {
   List,
   Eye,
   ExternalLink,
-  GitMerge,
   GripVertical,
   ImagePlus,
   Inbox,
@@ -94,7 +93,6 @@ import type {
   CoverableService,
   InvoicedLesson,
   Pass,
-  PassGrant,
   PassTemplate,
 } from "./modules/passes/PassesPanel";
 import type { IssuedPass } from "./modules/passes/IssuedPassesPanel";
@@ -236,7 +234,6 @@ import {
 import {
   loadPlayerProfilesState,
   addManualPlayer,
-  stampNotesUpdate,
   type PlayerProfilesLocalState,
 } from "./modules/player-profiles/playerProfilesStore";
 import "./modules/player-profiles/playerProfiles.css";
@@ -544,6 +541,22 @@ import {
 import { useWorkspaceSync } from "./modules/workspace/useWorkspaceSync";
 import { AuthStatus } from "./modules/auth/authStatus";
 import { useClients } from "./modules/clients/useClients";
+import { InvoicedBookingLink } from "./modules/clients/clientProfileModel";
+import {
+  IssuedPassesPanel,
+  MembershipsPanel,
+  PassInboxPanel,
+} from "./modules/passes/lazyPanels";
+import {
+  PRIMARY_PLAYER_TOOL_TABS,
+  PlayerPracticeSummary,
+  PlayerProfileTool,
+  SECONDARY_PLAYER_TOOLS,
+  SECONDARY_PLAYER_TOOL_TABS,
+  playerToolAllowed,
+} from "./modules/player-profiles/playerTools";
+import { useClientProfileController } from "./modules/clients/useClientProfileController";
+import { ClientProfileView } from "./modules/clients/ClientProfileView";
 
 // Video analysis and voice notes are heavy, coach-only features (together well
 // over a third of the client bundle). They never render on the public booking
@@ -590,24 +603,6 @@ const ClientsPanel = lazy(() =>
 // including the ones whose plan has no billing at all; now each arrives when
 // it is first drawn. The maths and types they share with the workspace stay
 // static -- they are small, and the calendar needs them for the Paid marker.
-// The Passes tab on a client profile. Loaded on demand like the rest: most
-// visits to a profile are about a booking or a note, not an entitlement.
-const PassInboxPanel = lazy(() =>
-  import("./modules/passes/PassInboxPanel").then((module) => ({ default: module.PassInboxPanel })),
-);
-const PassesPanel = lazy(() =>
-  import("./modules/passes/PassesPanel").then((module) => ({ default: module.PassesPanel })),
-);
-const MembershipsPanel = lazy(() =>
-  import("./modules/memberships/MembershipsPanel").then((module) => ({ default: module.MembershipsPanel })),
-);
-const PersonMemberships = lazy(() =>
-  import("./modules/memberships/PersonMemberships").then((module) => ({ default: module.PersonMemberships })),
-);
-const IssuedPassesPanel = lazy(() =>
-  import("./modules/passes/IssuedPassesPanel").then((module) => ({ default: module.IssuedPassesPanel })),
-);
-
 const SellScreen = lazy(() => import("./modules/billing/SellScreen").then((module) => ({ default: module.SellScreen })));
 const ProductsPanel = lazy(() => import("./modules/billing/ProductsPanel").then((module) => ({ default: module.ProductsPanel })));
 const CouponsPanel = lazy(() => import("./modules/billing/CouponsPanel").then((module) => ({ default: module.CouponsPanel })));
@@ -753,8 +748,6 @@ type BankExpenseCandidate = {
 type BankExpenseSortKey = "date" | "account" | "description" | "amount";
 type BankExpenseSortDirection = "asc" | "desc";
 type BankExpenseSort = { key: BankExpenseSortKey; direction: BankExpenseSortDirection };
-// The invoice a completed booking has already been pulled onto.
-type InvoicedBookingLink = { invoiceId: string; invoiceNumber: string };
 // A money-in bank transaction awaiting reconciliation against an invoice.
 type ReconcileSuggestion = {
   invoiceId: string;
@@ -817,77 +810,6 @@ function bankCandidateSearchText(candidate: BankExpenseCandidate) {
 function bankCandidateSortText(value: string | null | undefined) {
   return (value || "").trim().toLowerCase();
 }
-/* The nine sections of a player profile. The first four are the coach's
- * daily reads and sit on the bar; the last five are the record and live behind
- * its toggle -- see .player-tool-tabs.is-expanded. */
-type PlayerProfileTool =
-  | "bookings"
-  | "reviews"
-  | "videos"
-  | "practice"
-  | "notes"
-  | "emails"
-  | "transactions"
-  | "passes"
-  | "portals";
-
-/* What the Practice tab shows per block. The full practice module owns the
- * composer and the wall; the profile only needs enough of a block to list it,
- * so it takes a flattened copy rather than importing the module's types into
- * the console's bundle. */
-type PlayerPracticeSummary = {
-  id: string;
-  title: string;
-  typeLabel: string;
-  tone: string;
-  dose: string;
-  steps: number;
-  assignedAt: string;
-  expiryType: string;
-  expiryDate: string | null;
-  hasVideo: boolean;
-  linkedVideoId: string;
-  content: string;
-  status: string;
-};
-
-/* The bar itself, in order. Split into the four that are always on it and the
- * five behind the toggle -- SECONDARY_PLAYER_TOOLS below is derived from the
- * second list so the two can never drift apart. */
-const PRIMARY_PLAYER_TOOL_TABS = [
-  { id: "bookings", label: t("Bookings"), Icon: ClarityCalendar },
-  { id: "reviews", label: t("Swing reviews"), Icon: ImagePlus },
-  { id: "videos", label: t("Videos"), Icon: ClarityVideoAnalysis },
-  { id: "practice", label: t("Practice"), Icon: ClarityLessonsProgrammes },
-] as const satisfies ReadonlyArray<{ id: PlayerProfileTool; label: string; Icon: IconComponent }>;
-
-const SECONDARY_PLAYER_TOOL_TABS = [
-  { id: "notes", label: t("Notes"), Icon: ClarityBookingPages },
-  { id: "emails", label: t("Emails"), Icon: ClarityEmail },
-  { id: "transactions", label: t("Transactions"), Icon: ClarityPayments },
-  { id: "passes", label: t("Passes"), Icon: ClarityPassesCredits },
-  { id: "portals", label: t("Portals"), Icon: ClarityIntegrations },
-] as const satisfies ReadonlyArray<{ id: PlayerProfileTool; label: string; Icon: IconComponent }>;
-
-// The module each client-profile tool belongs to; unlisted tools are part of
-// every business. Same mapping the client portal uses for its own tabs.
-const PLAYER_TOOL_CAPABILITY: Partial<Record<PlayerProfileTool, CapabilityKey>> = {
-  reviews: "swingReview",
-  videos: "videoAnalysis",
-  practice: "practice",
-  passes: "passes",
-  portals: "portal",
-};
-
-function playerToolAllowed(tool: PlayerProfileTool, capabilities: Record<CapabilityKey, boolean>) {
-  const capability = PLAYER_TOOL_CAPABILITY[tool];
-  return !capability || capabilities[capability];
-}
-
-/** The five that only appear once the tab bar is opened out. */
-const SECONDARY_PLAYER_TOOLS: ReadonlySet<PlayerProfileTool> = new Set<PlayerProfileTool>(
-  SECONDARY_PLAYER_TOOL_TABS.map((tab) => tab.id),
-);
 type LessonCompleteDiagnostic = {
   action: "lesson_complete";
   itemId: string;
@@ -2099,7 +2021,6 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   const [passTemplates, setPassTemplates] = useState<PassTemplate[]>([]);
   const [passCoverableServices, setPassCoverableServices] = useState<CoverableService[]>([]);
   const [clientPassesLoadState, setClientPassesLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
-  const [passGranting, setPassGranting] = useState(false);
   const [passInbox, setPassInbox] = useState<{
     waitingToIssue: PassInboxPurchase[];
     waitingForOwner: PassInboxUnassigned[];
@@ -4561,11 +4482,6 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   }, [accountItems, activeAccountId, coachAccount, coachProfiles, isAdminUser, notifications, services, serviceScopeCoachId]);
   const selectedClient =
     !isAddingClient && selectedClientId ? clients.find((client) => client.id === selectedClientId) ?? null : null;
-  const selectedClientAppointments = useMemo(() => {
-    if (!selectedClient) return [];
-    return appointmentsForPerson(selectedClient, items, itemInCoachScope);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [coachAccount, coachProfiles, isAdminUser, items, selectedClient, services, serviceScopeCoachId]);
   const notesWorkspaceClient = useMemo(() => {
     if (!notesContext) return null;
     return (
@@ -4888,14 +4804,6 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     if (!selected || selected.kind !== "appointment") return [];
     return notificationsByAppointment.get(selected.id) ?? [];
   }, [notificationsByAppointment, selected]);
-
-  const selectedClientNotifications = useMemo(() => {
-    if (!selectedClient) return [];
-    return notificationsForPerson(selectedClient, notifications, selectedClientAppointments);
-  }, [notifications, selectedClient, selectedClientAppointments]);
-  const hasSelectedClientCaddyProfile = Boolean(
-    safeText(selectedClient?.caddyProfileId).trim() || safeText(selectedClient?.caddyProfileUrl).trim(),
-  );
   const hasSelectedPersonCaddyProfile = Boolean(
     safeText(selectedPerson?.caddyProfileId).trim() || safeText(selectedPerson?.caddyProfileUrl).trim(),
   );
@@ -7413,14 +7321,6 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     if (SECONDARY_PLAYER_TOOLS.has(tool)) setPlayerToolTabsExpanded(true);
   }
 
-  function openNotesForClient(client: Pick<Person, "id" | "name">) {
-    selectPlayerProfileTool(client, "notes");
-    setActiveView("players");
-    closeClientModal();
-    setQuickCreate(null);
-    closeCalendarDetails();
-  }
-
   function openPlayerAddDialog() {
     setPlayerAddSearch("");
     setPlayerAddNew({ name: "", email: "", phone: "" });
@@ -9881,33 +9781,6 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
       setPosTransactionsLoadState("error");
       setToast({ message: error instanceof Error ? error.message : t("Could not load POS transactions.") });
     }
-  }
-
-  /* How a lesson was paid for, in one word, or nothing at all.
-   *
-   * Four answers off two maps the billing screens already maintain, in the
-   * order that decides which is the truest: a pass credit settles through a $0
-   * till sale, so it has to be read before "paid at the till" or every
-   * pass-paid lesson would report as a sale of nothing. An invoice is checked
-   * last because a lesson can be both invoiced and then paid, and what a coach
-   * wants to see is that the money arrived.
-   *
-   * Silence is deliberate when nothing is known. A lesson with no record is not
-   * the same as an unpaid one -- it may predate any of this, or have been
-   * settled in a way the app never saw -- and stamping "Unpaid" on a client's
-   * history on that basis would be an accusation the data cannot support.
-   */
-  function bookingPaymentBadge(bookingId: string) {
-    const paid = posPaidBookings[bookingId];
-    if (paid?.paymentMethodKind === "pass") return { tone: "pass", label: t("Paid with a pass") };
-    if (paid) {
-      return {
-        tone: "money",
-        label: paid.paymentMethodName ? t("Paid · {paymentMethodName}", { paymentMethodName: paid.paymentMethodName }) : t("Paid at the till"),
-      };
-    }
-    if (invoicedBookingIds[bookingId]) return { tone: "invoiced", label: t("On an invoice") };
-    return null;
   }
 
   async function fetchPosBookingPayments(bookingIds: string[]) {
@@ -13377,94 +13250,6 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     }
   }
 
-  async function grantClientPass(grant: PassGrant) {
-    if (!selectedClientId) return;
-    setPassGranting(true);
-    try {
-      const response = await fetch("/api/passes", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ...grant, personId: selectedClientId }),
-      });
-      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not give that pass.")));
-      const data = (await response.json()) as { passes?: Pass[]; merged?: boolean };
-      setClientPasses(Array.isArray(data.passes) ? data.passes : []);
-      setClientPassesLoadState("loaded");
-      setToast({
-        message: data.merged
-          ? t("Added {credits} to their existing pass.", { credits: grant.credits })
-          : t("{name} given.", { name: grant.name || t("Pass") }),
-      });
-    } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : t("Could not give that pass.") });
-    } finally {
-      setPassGranting(false);
-    }
-  }
-
-  /* Spending a credit on a lesson that was never booked, and putting one back.
-   *
-   * Both re-read the passes from the response rather than patching state: the
-   * balance is derived server-side from the allocation ledger, and a browser
-   * that decremented a number locally would be inventing the one figure this
-   * whole system exists to not have to trust.
-   *
-   * The invoiced lines are deliberately left alone. They are a record of what
-   * was billed, and spending a credit does not change what was billed.
-   */
-  async function redeemClientPassCredit(passId: string, credits: number, note: string) {
-    if (!selectedClientId) return;
-    try {
-      const response = await fetch("/api/passes/redeem", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ personId: selectedClientId, passId, credits, note }),
-      });
-      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not use that credit.")));
-      const data = (await response.json()) as { passes?: Pass[] };
-      setClientPasses(Array.isArray(data.passes) ? data.passes : []);
-      setToast({ message: credits === 1 ? t("Credit used.") : t("{credits} credits used.", { credits }) });
-    } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : t("Could not use that credit.") });
-    }
-  }
-
-  async function returnClientPassCredit(redemptionId: string) {
-    if (!selectedClientId) return;
-    try {
-      const response = await fetch("/api/passes/redeem/reverse", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ personId: selectedClientId, redemptionId }),
-      });
-      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not put that credit back.")));
-      const data = (await response.json()) as { passes?: Pass[] };
-      setClientPasses(Array.isArray(data.passes) ? data.passes : []);
-      setToast({ message: t("Credit put back.") });
-    } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : t("Could not put that credit back.") });
-    }
-  }
-
-  async function voidClientPass(pass: Pass) {
-    if (!window.confirm(t("Void {name}? Credits already used stay on the record.", { name: pass.name }))) return;
-    try {
-      const response = await fetch(`/api/passes?id=${encodeURIComponent(pass.id)}`, {
-        method: "DELETE",
-        credentials: "same-origin",
-      });
-      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not void that pass.")));
-      const data = (await response.json()) as { passes?: Pass[] };
-      setClientPasses(Array.isArray(data.passes) ? data.passes : []);
-      setToast({ message: `${pass.name} voided.` });
-    } catch (error) {
-      setToast({ message: error instanceof Error ? error.message : t("Could not void that pass.") });
-    }
-  }
-
   useEffect(() => {
     if (clientProfileTab !== "passes" || !selectedClientId || selectedClientId.startsWith("appointment-")) return;
     void fetchClientPasses(selectedClientId);
@@ -13597,12 +13382,6 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     setClientSaveState("idle");
   }
 
-  function startClientEdit() {
-    if (selectedClient) setClientEditor(editorFromClient(selectedClient));
-    setClientEditMode(true);
-    setClientSaveState("idle");
-  }
-
   async function sendTestEmail() {
     const email = testEmailAddress.trim() || notificationSettings.notificationEmail || coachAccount.contactEmail;
     if (!email) {
@@ -13681,43 +13460,6 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     } catch {
       setResendConfirmationState((current) => ({ ...current, [appointment.id]: "failed" }));
       setToast({ message: t("Could not reach the email sender.") });
-    }
-  }
-
-  async function saveClientProfile() {
-    if (!clientEditor.name.trim() && !clientEditor.email.trim()) {
-      setToast({ message: t("A client needs a name or email.") });
-      return;
-    }
-    setClientSaveState("saving");
-    try {
-      const response = await fetch("/api/people", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ person: clientEditor }),
-      });
-      if (response.status === 401) {
-        setAuthStatus("guest");
-        throw new Error(t("Admin login required"));
-      }
-      if (!response.ok) throw new Error(await readApiFailure(response, t("Client save failed")));
-      const result = (await response.json()) as PeopleUpdateResult;
-      if (Array.isArray(result.people)) setPeople(cleanPeople(result.people));
-      if (result.person?.id) setSelectedClientId(result.person.id);
-      // Stamp a device-local timestamp so notes changes surface in the Player
-      // Profiles activity feed (person records carry no notes-updated time).
-      if (result.person?.id && clientEditor.notes.trim().length > 0) {
-        const savedId = result.person.id;
-        setPlayerProfilesLocal((current) => stampNotesUpdate(current, savedId));
-      }
-      setIsAddingClient(false);
-      setClientEditMode(false);
-      setClientSaveState("saved");
-      setToast({ message: t("Client profile saved.") });
-      window.setTimeout(() => setClientSaveState("idle"), 1400);
-    } catch (error) {
-      setClientSaveState("idle");
-      setToast({ message: error instanceof Error ? error.message : t("Could not save client profile.") });
     }
   }
 
@@ -17536,6 +17278,67 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     terms,
     quickCreateServices,
   });
+
+  const clientProfile = useClientProfileController({
+    selectedClient,
+    items,
+    itemInCoachScope,
+    coachAccount,
+    coachProfiles,
+    isAdminUser,
+    services,
+    serviceScopeCoachId,
+    notifications,
+    selectPlayerProfileTool,
+    setActiveView,
+    closeClientModal,
+    setQuickCreate,
+    closeCalendarDetails,
+    posPaidBookings,
+    invoicedBookingIds,
+    selectedClientId,
+    readApiFailure,
+    setClientPasses,
+    setClientPassesLoadState,
+    setToast,
+    setClientEditor,
+    setClientEditMode,
+    setClientSaveState,
+    clientEditor,
+    setAuthStatus,
+    setPeople,
+    setSelectedClientId,
+    setPlayerProfilesLocal,
+    setIsAddingClient,
+    isAddingClient,
+    clientEditMode,
+    clientMoveSavingId,
+    moveExternalClientToMain,
+    openVideoAnalysisForClient,
+    videoPlayerIds,
+    clientProfileTab,
+    setClientProfileTab,
+    fetchClientPasses,
+    clientPasses,
+    clientInvoicedLines,
+    clientUnmatchedInvoicedLines,
+    passTemplates,
+    passCoverableServices,
+    clientPassesLoadState,
+    clientTransactionsLoadState,
+    fetchClientTransactions,
+    clientTransactions,
+    transactionDateLabel,
+    switchView,
+    openInvoiceForEdit,
+    clientSaveState,
+    billingWorkspaceEnabled,
+    openPosCheckoutForClient,
+    caddyWorkspaceUrl,
+    personDeleteBusyId,
+    hardDeletePerson,
+  });
+
 
 
   // No guest branch here any more: the entry point renders the login screen
@@ -24224,455 +24027,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
       )}
 
       {(selectedClient || isAddingClient) && (
-        <div className="details-overlay" role="presentation" onPointerDown={closeClientModal}>
-          <aside
-            className="details-panel details-modal client-profile-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="client-profile-title"
-            onPointerDown={(event) => event.stopPropagation()}
-          >
-            <div className="panel-header">
-              <span>{isAddingClient ? t("Add Client") : t("Client Profile")}</span>
-              <button className="icon-button small" onClick={closeClientModal} aria-label={t("Close client profile")}>
-                <X size={17} />
-              </button>
-            </div>
-
-            {clientEditMode ? (
-              <div className="client-editor">
-                <label className="settings-field">
-                  <span>{t("Name")}</span>
-                  <input
-                    value={clientEditor.name}
-                    autoComplete="name"
-                    onChange={(event) => setClientEditor((current) => ({ ...current, name: event.target.value }))}
-                  />
-                </label>
-                <label className="settings-field">
-                  <span>{t("Email")}</span>
-                  <input
-                    value={clientEditor.email}
-                    autoComplete="email"
-                    inputMode="email"
-                    onChange={(event) => setClientEditor((current) => ({ ...current, email: event.target.value }))}
-                    type="email"
-                  />
-                </label>
-                <label className="settings-field">
-                  <span>{t("Phone")}</span>
-                  <input
-                    value={clientEditor.phone}
-                    autoComplete="tel"
-                    inputMode="tel"
-                    onChange={(event) => setClientEditor((current) => ({ ...current, phone: event.target.value }))}
-                    type="tel"
-                  />
-                </label>
-                <label className="settings-field">
-                  <span>{t("Caddy profile URL")}</span>
-                  <input
-                    value={clientEditor.caddyProfileUrl}
-                    onChange={(event) =>
-                      setClientEditor((current) => ({ ...current, caddyProfileUrl: event.target.value }))
-                    }
-                  />
-                </label>
-                <label className="settings-field">
-                  <span>{t("Profile notes")}</span>
-                  <textarea
-                    value={clientEditor.notes}
-                    onChange={(event) => setClientEditor((current) => ({ ...current, notes: event.target.value }))}
-                  />
-                </label>
-              </div>
-            ) : (
-              <>
-                <h2 id="client-profile-title">{selectedClient?.name}</h2>
-                <div className="info-stack client-profile-info">
-                  <div>
-                    <ClarityEmail size={16} />
-                    <span>{selectedClient?.email || t("No email yet")}</span>
-                  </div>
-                  <div>
-                    <Phone size={16} />
-                    <span>{selectedClient?.phone || t("No phone yet")}</span>
-                  </div>
-                  <div>
-                    <ClarityCalendar size={16} />
-                    <span>
-                      {tn(selectedClient?.count ?? 0, "{count} booking", "{count} bookings")}
-                    </span>
-                  </div>
-                  {selectedClient && (
-                    <div>
-                      <ClarityAccessPermissions size={16} />
-                      <span
-                        className="client-profile-user-id"
-                        title={t("Copy this client's id")}
-                        onClick={() => {
-                          void navigator.clipboard?.writeText(selectedClient.id).catch(() => {});
-                          setToast({ message: t("Client id copied.") });
-                        }}
-                      >{t("ID: {id}", { id: selectedClient.id })}</span>
-                    </div>
-                  )}
-                </div>
-                {selectedClient && profileNotesText(selectedClient) && (
-                  <div className="client-profile-note-block">
-                    <strong>{t("Profile notes")}</strong>
-                    <p>{profileNotesText(selectedClient)}</p>
-                  </div>
-                )}
-                {selectedClient?.external === true && (
-                  <button
-                    type="button"
-                    className="outline-button client-move-button"
-                    disabled={clientMoveSavingId === selectedClient.id}
-                    onClick={() => void moveExternalClientToMain(selectedClient)}
-                  >
-                    <GitMerge size={16} />
-                    {clientMoveSavingId === selectedClient.id ? t("Moving…") : t("Move to clients")}
-                  </button>
-                )}
-                {selectedClient && (
-                  <button
-                    type="button"
-                    className="outline-button client-video-button"
-                    onClick={() =>
-                      openVideoAnalysisForClient({
-                        id: preferredVideoPlayerId(selectedClient, videoPlayerIds),
-                        name: selectedClient.name,
-                      })
-                    }
-                  >
-                    <ClarityVideoAnalysis size={16} />{t("Open Video Analysis")}</button>
-                )}
-              </>
-            )}
-
-            {!isAddingClient && (
-              <div className="client-profile-tabs">
-                <div className="profile-tab-list" role="tablist" aria-label={t("Client profile sections")}>
-                  <button
-                    className={clientProfileTab === "bookings" ? "active" : ""}
-                    onClick={() => setClientProfileTab("bookings")}
-                    role="tab"
-                    type="button"
-                    aria-selected={clientProfileTab === "bookings"}
-                  >
-                    <ClarityCalendar size={16} />{t("Booking history")}</button>
-                  <button
-                    className={clientProfileTab === "notes" ? "active" : ""}
-                    onClick={() => setClientProfileTab("notes")}
-                    role="tab"
-                    type="button"
-                    aria-selected={clientProfileTab === "notes"}
-                  >
-                    <ClarityBookingPages size={16} />{t("Lesson notes")}</button>
-                  <button
-                    className={clientProfileTab === "notifications" ? "active" : ""}
-                    onClick={() => setClientProfileTab("notifications")}
-                    role="tab"
-                    type="button"
-                    aria-selected={clientProfileTab === "notifications"}
-                  >
-                    <ClarityEmail size={16} />{t("Emails sent")}</button>
-                  <button
-                    className={clientProfileTab === "transactions" ? "active" : ""}
-                    onClick={() => setClientProfileTab("transactions")}
-                    role="tab"
-                    type="button"
-                    aria-selected={clientProfileTab === "transactions"}
-                  >
-                    <ClarityPayments size={16} />{t("Transactions")}</button>
-                  <button
-                    className={clientProfileTab === "passes" ? "active" : ""}
-                    onClick={() => setClientProfileTab("passes")}
-                    role="tab"
-                    type="button"
-                    aria-selected={clientProfileTab === "passes"}
-                  >
-                    <ClarityPassesCredits size={16} />{t("Passes")}</button>
-                </div>
-
-                <div className="profile-history-panel">
-                  {clientProfileTab === "bookings" ? (
-                    selectedClientAppointments.length ? (
-                      selectedClientAppointments.map((appointment) => {
-                        const appointmentDays = buildWeekDays(itemWeek(appointment));
-                        const service = itemService(appointment, services);
-                        return (
-                          <div className="profile-history-row" key={appointment.id}>
-                            <div>
-                              <strong>{service?.name ?? appointment.title}</strong>
-                              <span>{appointment.kind === "appointment" ? t("Booked lesson") : t("Blocked time")}</span>
-                              {appointment.kind === "appointment" &&
-                                appointment.status !== "cancelled" &&
-                                (() => {
-                                  // How this one was settled, read off the maps
-                                  // the billing screens already keep. Shown
-                                  // here because "which of these did the pass
-                                  // pay for" is the question the credits on the
-                                  // Passes tab cannot answer on their own.
-                                  const badge = bookingPaymentBadge(appointment.id);
-                                  return badge ? (
-                                    <span className={`booking-paid-badge booking-paid-${badge.tone}`}>
-                                      {badge.label}
-                                    </span>
-                                  ) : null;
-                                })()}
-                              {appointment.note ? (
-                                <span className="booking-note-line">{t("Booking notes: {note}", { note: appointment.note })}</span>
-                              ) : null}
-                            </div>
-                            <em>{`${appointmentDays[appointment.day].label}, ${formatRange(appointment.start, appointment.duration)}`}</em>
-                          </div>
-                        );
-                      })
-                    ) : (
-                      <p>{t("No appointments yet.")}</p>
-                    )
-                  ) : clientProfileTab === "notes" ? (
-                    <div className="lesson-notes-panel">
-                      {selectedClient && (
-                        <div className="lesson-notes-window">
-                          <div>
-                            <strong>{t("Lesson Notes")}</strong>
-                            <span>{t("Start something fresh, or open the player profile for older records.")}</span>
-                          </div>
-                          <div className="lesson-quick-actions">
-                            <button
-                              type="button"
-                              className="icon-button"
-                              onClick={() => openNotesForClient(selectedClient)}
-                              title={t("Add lesson note")}
-                              aria-label={t("Add lesson note")}
-                            >
-                              <Plus size={16} />
-                              <ClarityBookingPages size={15} />
-                            </button>
-                            <button
-                              type="button"
-                              className="icon-button"
-                              onClick={() =>
-                                openVideoAnalysisForClient({
-                                  id: preferredVideoPlayerId(selectedClient, videoPlayerIds),
-                                  name: selectedClient.name,
-                                })
-                              }
-                              title={t("Add video")}
-                              aria-label={t("Add video")}
-                            >
-                              <Plus size={16} />
-                              <ClarityVideoAnalysis size={15} />
-                            </button>
-                            <button
-                              type="button"
-                              className="outline-button"
-                              onClick={() => openNotesForClient(selectedClient)}
-                            >
-                              <ClarityProfile size={15} />{t("Player profile")}</button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ) : clientProfileTab === "passes" ? (
-                    selectedClient && selectedClient.id.startsWith("appointment-") ? (
-                      <p>{t("Save this booking contact as a client before giving them a pass.")}</p>
-                    ) : (
-                      <Suspense fallback={<Loading what={t("passes")} />}>
-                        {selectedClient ? (
-                          <PersonMemberships
-                            personId={selectedClient.id}
-                            formatMoney={formatMoney}
-                            notify={(message) => setToast({ message })}
-                            onPassesChanged={() => void fetchClientPasses(selectedClient.id)}
-                          />
-                        ) : null}
-                        <PassesPanel
-                          passes={clientPasses}
-                          invoicedLines={clientInvoicedLines}
-                          unmatchedInvoicedLines={clientUnmatchedInvoicedLines}
-                          templates={passTemplates}
-                          coverableServices={passCoverableServices}
-                          loadState={clientPassesLoadState}
-                          granting={passGranting}
-                          onGrant={(grant) => void grantClientPass(grant)}
-                          onVoid={(pass) => void voidClientPass(pass)}
-                          onRedeem={(passId, credits, note) =>
-                            void redeemClientPassCredit(passId, credits, note)
-                          }
-                          onReturnCredit={(redemptionId) => void returnClientPassCredit(redemptionId)}
-                          onRetry={() => selectedClientId && void fetchClientPasses(selectedClientId)}
-                          serviceName={(serviceId) =>
-                            services.find((service) => service.id === serviceId)?.name || serviceId
-                          }
-                        />
-                      </Suspense>
-                    )
-                  ) : clientProfileTab === "notifications" ? (
-                    selectedClientNotifications.length ? (
-                      selectedClientNotifications.map((notification) => (
-                        <div className="profile-history-row notification-history-row" key={notification.id}>
-                          <div>
-                            <strong>{notification.subject || notificationKindLabel(notification.kind)}</strong>
-                            <span>{t("{kind} to {recipient}", { kind: notificationKindLabel(notification.kind), recipient: notification.recipient })}</span>
-                          </div>
-                          <em>
-                            {notificationStatusLabel(notification)}
-                            {notification.createdAt ? ` · ${notificationTimeLabel(notification.createdAt)}` : ""}
-                          </em>
-                        </div>
-                      ))
-                    ) : (
-                      <p>{t("No email receipts recorded yet.")}</p>
-                    )
-                  ) : selectedClient && selectedClient.id.startsWith("appointment-") ? (
-                    <p>{t("Save this booking contact as a client to track their transactions.")}</p>
-                  ) : clientTransactionsLoadState === "loading" ? (
-                    <Loading what={t("transactions")} />
-                  ) : clientTransactionsLoadState === "error" ? (
-                    <p>{t("Could not load transactions.")}{" "}{selectedClient && (
-                        <button
-                          className="link-button"
-                          onClick={() => void fetchClientTransactions(selectedClient.id)}
-                          type="button"
-                        >{t("Retry")}</button>
-                      )}
-                    </p>
-                  ) : clientTransactions.length ? (
-                    clientTransactions.map((row) =>
-                      row.kind === "coupon" ? (
-                        <div className="profile-history-row" key={`coupon-${row.coupon.id}`}>
-                          <div>
-                            <strong>
-                              <ClarityPassesCredits size={15} /> {row.coupon.code}
-                            </strong>
-                            <span>{t("Gift voucher")}{row.coupon.issuedToName ? t(" · bought by {issuedToName}", { issuedToName: row.coupon.issuedToName }) : ""}
-                              {row.coupon.note ? ` · ${row.coupon.note}` : ""}
-                            </span>
-                          </div>
-                          <em>
-                            {/* What is left, not what it was worth: the
-                                question asked at a counter is always "how much
-                                is on this", and the original is beside it only
-                                because a half-spent voucher is confusing
-                                without it. */}
-                            {t("{remainingValue} left of {originalValue} · {date}", { remainingValue: formatMoney(row.coupon.remainingValue, row.coupon.currency), originalValue: formatMoney(
-                              row.coupon.originalValue,
-                              row.coupon.currency,
-                            ), date: transactionDateLabel(row.date) })}
-                          </em>
-                        </div>
-                      ) : row.kind === "sale" ? (
-                        <div className="profile-history-row" key={`sale-${row.sale.id}`}>
-                          <div>
-                            <strong>{row.sale.description || row.sale.receiptNumber}</strong>
-                            <span>
-                              {row.sale.receiptNumber} · {posMethodLabel(row.sale)}
-                              {row.sale.isLessonPass ? t(" · Lesson pass") : ""}
-                            </span>
-                          </div>
-                          <em>{`${formatMoney(row.sale.amount, row.sale.currency)} · ${row.sale.status} · ${transactionDateLabel(row.date)}`}</em>
-                        </div>
-                      ) : (
-                        <div className="profile-history-row" key={`invoice-${row.invoice.id}`}>
-                          <div>
-                            <strong>
-                              <button
-                                className="link-button"
-                                onClick={() => {
-                                  // The invoice editor lives in the Billing view;
-                                  // close the profile modal and go there, or the
-                                  // invoice opens invisibly underneath it.
-                                  closeClientModal();
-                                  switchView("billing");
-                                  void openInvoiceForEdit(row.invoice);
-                                }}
-                                type="button"
-                              >
-                                {row.invoice.invoiceNumber}
-                              </button>
-                            </strong>
-                            <span>
-                              {row.invoice.relation === "included"
-                                ? t("Included on an invoice billed to {name}", { name: row.invoice.customerName || t("someone else") })
-
-                                : t("Invoice")}
-                            </span>
-                          </div>
-                          <em>{`${formatMoney(row.invoice.total, row.invoice.currency)} · ${row.invoice.status} · ${transactionDateLabel(row.date)}`}</em>
-                        </div>
-                      ),
-                    )
-                  ) : (
-                    <p>{t("No transactions for this client yet.")}</p>
-                  )}
-                </div>
-              </div>
-            )}
-
-            <div className="panel-actions">
-              {clientEditMode ? (
-                <>
-                  <button className="primary-button" onClick={saveClientProfile} disabled={clientSaveState === "saving"}>
-                    <Check size={16} />
-                    {clientSaveState === "saving" ? t("Saving") : t("Save")}
-                  </button>
-                  <button
-                    className="outline-button"
-                    onClick={() => {
-                      if (isAddingClient) {
-                        closeClientModal();
-                        return;
-                      }
-                      setClientEditMode(false);
-                      if (selectedClient) setClientEditor(editorFromClient(selectedClient));
-                    }}
-                  >{t("Cancel")}</button>
-                </>
-              ) : (
-                <>
-                  {selectedClient && billingWorkspaceEnabled && (
-                    <button
-                      className="primary-button"
-                      onClick={() => openPosCheckoutForClient(selectedClient)}
-                      type="button"
-                    >
-                      <ClarityPayments size={16} />{t("Checkout")}</button>
-                  )}
-                  <button className="primary-button" onClick={startClientEdit}>
-                    <ClarityProfile size={16} />{t("Edit")}</button>
-                  {selectedClient && hasSelectedClientCaddyProfile ? (
-                    <a
-                      className="outline-button"
-                      href={caddyProfileUrl(selectedClient, caddyWorkspaceUrl)}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      <ExternalLink size={16} />{t("Caddy")}</a>
-                  ) : (
-                    <button className="outline-button" type="button">
-                      <ClarityIntegrations size={16} />{t("Add Clarity Caddy")}</button>
-                  )}
-                  {selectedClient && isAdminUser && (
-                    <button
-                      type="button"
-                      className="danger-button"
-                      disabled={personDeleteBusyId === selectedClient.id}
-                      onClick={() => void hardDeletePerson(selectedClient)}
-                      title={t("Permanently delete this client and their data. No email is sent.")}
-                    >
-                      <Trash2 size={16} />
-                      {personDeleteBusyId === selectedClient.id ? t("Deleting…") : t("Delete permanently")}
-                    </button>
-                  )}
-                </>
-              )}
-            </div>
-          </aside>
-        </div>
+        <ClientProfileView clientProfile={clientProfile} />
       )}
 
       {posCheckout && (
