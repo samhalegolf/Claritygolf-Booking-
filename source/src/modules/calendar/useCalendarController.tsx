@@ -43,6 +43,8 @@ import {
 } from "../services/serviceModel";
 import { ClarityProfile } from "../shared/ClarityIcons";
 import type { Toast } from "../shared/toast";
+import type { CalendarState } from "./useCalendarState";
+import type { CalendarInteraction } from "./useCalendarInteraction";
 import {
   type AppUser,
   type CoachAccount,
@@ -96,6 +98,8 @@ import {
 } from "./calendarModel";
 
 export type CalendarControllerInputs = {
+  calendarInteraction: CalendarInteraction;
+  calendarState: CalendarState;
   visibleWeekItems: CalendarItem[];
   services: Service[];
   coachProfiles: CoachProfile[];
@@ -103,80 +107,40 @@ export type CalendarControllerInputs = {
   activeCoachId: string;
   availabilityLocations: Location[];
   calendarViewBounds: { start: number; end: number; emptyMessage: string };
-  calendarViewMode: CalendarViewMode;
   calendarStartMinutes: number;
   calendarEndMinutes: number;
-  quickCreate: QuickCreateState | null;
   activeServices: Service[];
-  floatingDrag: FloatingDrag | null;
-  draft: Draft | null;
   scheduledGroupSlots: CalendarItem[];
   items: CalendarItem[];
-  activeWeek: number;
   calendarCollapsedDays: boolean[];
-  calendarDayFocus: number | null;
   calendarAxis: CalendarAxis;
-  calendarTodayIndex: number;
-  calendarNowMinutes: number;
   calendarMinutesToTop: (minutes: number) => number;
-  quickClientSearch: string;
   clients: ClientSummary[];
-  pointerSessionRef: RefObject<PointerSession>;
-  setCalendarHover: Dispatch<SetStateAction<CalendarHoverPreview | null>>;
   locations: Location[];
   coachAccount: CoachAccount;
-  setCalendarViewMode: Dispatch<SetStateAction<CalendarViewMode>>;
   setToast: Dispatch<SetStateAction<Toast | null>>;
   isGroupServiceSlotMatch: (service: Service | null | undefined, week: number, day: number, start: number) => boolean;
   setSelectedGroupSession: Dispatch<SetStateAction<GroupSession | null>>;
   setSelectedId: Dispatch<SetStateAction<string>>;
-  setQuickCreate: Dispatch<SetStateAction<QuickCreateState | null>>;
   isActiveGroupBooking: (status: BookingStatus | undefined) => boolean;
   effectiveCalendarPerspective: CalendarPerspective;
   locationCalendarCoachGroups: BookingCoachSnapshot[];
-  gridRef: RefObject<HTMLDivElement | null>;
   slotFromClient: (clientX: number, clientY: number) => { day: number; start: number; x: number; y: number } | null;
-  weekStripRef: RefObject<HTMLDivElement | null>;
-  weekPanelsRef: RefObject<HTMLDivElement | null>;
-  weekPagerSyncingRef: RefObject<boolean>;
-  weekSettleTimerRef: RefObject<number | null>;
-  weekPagerStep: () => number;
   setActiveWeekState: (nextWeek: number) => void;
-  activeWeekRef: RefObject<number>;
-  weekLandingTimerRef: RefObject<number | null>;
-  setCalendarDayFocus: Dispatch<SetStateAction<number | null>>;
-  setCalendarAxisMode: Dispatch<SetStateAction<CalendarAxisMode>>;
   gridHeight: number;
-  weekDays: WeekDay[];
   calendarAvailability: AvailabilityWindow[][];
   clipCalendarSegment: (start: number, duration: number) => { start: number; duration: number } | null;
   calendarSegmentHeight: (start: number, duration: number) => number;
-  setCalendarDetailMode: Dispatch<SetStateAction<boolean>>;
   hasMultipleAvailabilityLocations: boolean;
   availabilityLocationHue: (locationId?: string) => number | null;
   availabilityLocationLabel: (locationId?: string) => string;
-  cancelTouchHold: () => void;
-  touchHoldCleanupRef: RefObject<(() => void) | null>;
-  setHoldingItemId: Dispatch<SetStateAction<string | null>>;
-  touchHoldTimerRef: RefObject<number | null>;
-  pointerStartRef: RefObject<{ x: number; y: number }>;
-  pointerClientRef: RefObject<{ x: number; y: number }>;
   resetPointerTrail: (clientX: number, clientY: number) => void;
-  pointerKindRef: RefObject<string>;
-  dragPreviewMetaRef: RefObject<{ width: number; height: number; offsetX: number; offsetY: number } | null>;
-  setFloatingDrag: Dispatch<SetStateAction<FloatingDrag | null>>;
   setMovedState: (nextMoved: boolean) => void;
-  setPointerSessionState: (nextSession: PointerSession) => void;
   attachGestureListeners: (options?: { blockTouchScroll?: boolean }) => void;
   requireLiveDatabase: (action?: string) => boolean;
-  pendingQuickCreateRef: RefObject<QuickCreateState | null>;
   selectedCalendarLocationId: string;
-  clickPlaceRef: RefObject<{ bookingId: string; candidate: SlotCandidate } | null>;
   activeDockBooking: PendingBooking | null;
   updatePointerAt: (clientX: number, clientY: number) => void;
-  setQuickClientSearch: Dispatch<SetStateAction<string>>;
-  setQuickMatchField: Dispatch<SetStateAction<"" | "name" | "phone" | "email">>;
-  quickMatchField: "" | "name" | "phone" | "email";
   appointmentServices: Service[];
   calendarBookingChoices: (service: Service) => { coachIds: string[]; locationIds: string[]; fixedCoachId: string; fixedLocationId: string };
   quickCreateAvailabilityError: (candidate: SlotCandidate, service?: Service, choice?: { coachId?: string; locationId?: string }) => string;
@@ -191,32 +155,18 @@ export type CalendarControllerInputs = {
   isValidBlockSlot: (candidate: SlotCandidate, ignoreId?: string, options?: { coachId?: string; locationId?: string; locationOnly?: boolean }) => boolean;
   closeCalendarDetails: () => void;
   reconcileUndoByDelete: (itemId: string, previousItems: CalendarItem[]) => Promise<void>;
-  pointerSession: PointerSession;
   isAdminUser: boolean;
-  calendarPerspectiveChosenRef: RefObject<boolean>;
-  setCalendarPerspective: Dispatch<SetStateAction<CalendarPerspective>>;
   activeAccount: WorkspaceAccount;
   accountLocations: Location[];
-  setCalendarLocationFilterId: Dispatch<SetStateAction<string>>;
   activeCoachList: CoachProfile[];
-  setCalendarCoachFilterId: Dispatch<SetStateAction<string>>;
-  calendarDetailMode: boolean;
-  weekTitle: string;
   calendarSaveStatus: CalendarSaveStatus;
   calendarFeedStatus: CalendarFeedStatus;
   calendarSaveError: string;
   calendarSaveFailureKind: "change" | "delete";
-  calendarAxisMode: CalendarAxisMode;
-  calendarScrollRef: RefObject<HTMLDivElement | null>;
   endPointer: () => void;
-  placementAnimation: PlacementAnimation | null;
   notificationsByAppointment: Map<string, NotificationRecord[]>;
   selectedId: string;
-  holdingItemId: string | null;
-  suppressItemClickRef: RefObject<boolean>;
-  suppressItemClickUntilRef: RefObject<number>;
   terms: BusinessTerminology;
-  hasMoved: boolean;
   quickCreateServices: Service[];
 };
 
@@ -238,80 +188,40 @@ export function useCalendarController(app: CalendarControllerInputs) {
     activeCoachId,
     availabilityLocations,
     calendarViewBounds,
-    calendarViewMode,
     calendarStartMinutes,
     calendarEndMinutes,
-    quickCreate,
     activeServices,
-    floatingDrag,
-    draft,
     scheduledGroupSlots,
     items,
-    activeWeek,
     calendarCollapsedDays,
-    calendarDayFocus,
     calendarAxis,
-    calendarTodayIndex,
-    calendarNowMinutes,
     calendarMinutesToTop,
-    quickClientSearch,
     clients,
-    pointerSessionRef,
-    setCalendarHover,
     locations,
     coachAccount,
-    setCalendarViewMode,
     setToast,
     isGroupServiceSlotMatch,
     setSelectedGroupSession,
     setSelectedId,
-    setQuickCreate,
     isActiveGroupBooking,
     effectiveCalendarPerspective,
     locationCalendarCoachGroups,
-    gridRef,
     slotFromClient,
-    weekStripRef,
-    weekPanelsRef,
-    weekPagerSyncingRef,
-    weekSettleTimerRef,
-    weekPagerStep,
     setActiveWeekState,
-    activeWeekRef,
-    weekLandingTimerRef,
-    setCalendarDayFocus,
-    setCalendarAxisMode,
     gridHeight,
-    weekDays,
     calendarAvailability,
     clipCalendarSegment,
     calendarSegmentHeight,
-    setCalendarDetailMode,
     hasMultipleAvailabilityLocations,
     availabilityLocationHue,
     availabilityLocationLabel,
-    cancelTouchHold,
-    touchHoldCleanupRef,
-    setHoldingItemId,
-    touchHoldTimerRef,
-    pointerStartRef,
-    pointerClientRef,
     resetPointerTrail,
-    pointerKindRef,
-    dragPreviewMetaRef,
-    setFloatingDrag,
     setMovedState,
-    setPointerSessionState,
     attachGestureListeners,
     requireLiveDatabase,
-    pendingQuickCreateRef,
     selectedCalendarLocationId,
-    clickPlaceRef,
     activeDockBooking,
     updatePointerAt,
-    setQuickClientSearch,
-    setQuickMatchField,
-    quickMatchField,
     appointmentServices,
     calendarBookingChoices,
     quickCreateAvailabilityError,
@@ -326,34 +236,78 @@ export function useCalendarController(app: CalendarControllerInputs) {
     isValidBlockSlot,
     closeCalendarDetails,
     reconcileUndoByDelete,
-    pointerSession,
     isAdminUser,
-    calendarPerspectiveChosenRef,
-    setCalendarPerspective,
     activeAccount,
     accountLocations,
-    setCalendarLocationFilterId,
     activeCoachList,
-    setCalendarCoachFilterId,
-    calendarDetailMode,
-    weekTitle,
     calendarSaveStatus,
     calendarFeedStatus,
     calendarSaveError,
     calendarSaveFailureKind,
-    calendarAxisMode,
-    calendarScrollRef,
     endPointer,
-    placementAnimation,
     notificationsByAppointment,
     selectedId,
+    terms,
+    quickCreateServices,
+  } = app;
+  const {
+    quickCreate,
+    floatingDrag,
+    draft,
+    quickClientSearch,
+    pointerSessionRef,
+    setQuickCreate,
+    gridRef,
+    weekStripRef,
+    weekPanelsRef,
+    weekPagerSyncingRef,
+    weekSettleTimerRef,
+    weekPagerStep,
+    weekLandingTimerRef,
+    cancelTouchHold,
+    touchHoldCleanupRef,
+    setHoldingItemId,
+    touchHoldTimerRef,
+    pointerStartRef,
+    pointerClientRef,
+    pointerKindRef,
+    dragPreviewMetaRef,
+    setFloatingDrag,
+    setPointerSessionState,
+    pendingQuickCreateRef,
+    clickPlaceRef,
+    setQuickClientSearch,
+    setQuickMatchField,
+    quickMatchField,
+    pointerSession,
+    calendarPerspectiveChosenRef,
+    calendarScrollRef,
+    placementAnimation,
     holdingItemId,
     suppressItemClickRef,
     suppressItemClickUntilRef,
-    terms,
     hasMoved,
-    quickCreateServices,
-  } = app;
+  } = app.calendarInteraction;
+  const {
+    calendarViewMode,
+    activeWeek,
+    calendarDayFocus,
+    calendarTodayIndex,
+    calendarNowMinutes,
+    setCalendarHover,
+    setCalendarViewMode,
+    activeWeekRef,
+    setCalendarDayFocus,
+    setCalendarAxisMode,
+    weekDays,
+    setCalendarDetailMode,
+    setCalendarPerspective,
+    setCalendarLocationFilterId,
+    setCalendarCoachFilterId,
+    calendarDetailMode,
+    weekTitle,
+    calendarAxisMode,
+  } = app.calendarState;
 
   const lastCalendarTapRef = useRef(0);
   const suppressBlankGestureUntilRef = useRef(0);
@@ -1328,6 +1282,8 @@ export function useCalendarController(app: CalendarControllerInputs) {
 
   return {
     ...app,
+    ...app.calendarInteraction,
+    ...app.calendarState,
     toggleCalendarDetailMode,
     handleCalendarTouchStart,
     cycleCalendarViewMode,

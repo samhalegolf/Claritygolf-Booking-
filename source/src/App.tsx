@@ -573,6 +573,8 @@ import {
 } from "./modules/workspace/workspaceModel";
 import { useCalendarController } from "./modules/calendar/useCalendarController";
 import { CalendarView } from "./modules/calendar/CalendarView";
+import { useCalendarState } from "./modules/calendar/useCalendarState";
+import { useCalendarInteraction } from "./modules/calendar/useCalendarInteraction";
 
 // Video analysis and voice notes are heavy, coach-only features (together well
 // over a third of the client bundle). They never render on the public booking
@@ -2938,11 +2940,52 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   // The pull range defaults smartly (last invoiced lesson -> today) and shows as
   // plain text; this flips it to editable date inputs.
   const [pullRangeEditing, setPullRangeEditing] = useState(false);
-  const [draft, setDraft] = useState<Draft | null>(null);
-  const [pointerSession, setPointerSession] = useState<PointerSession>(null);
-  // The card a finger is currently resting on, waiting out the hold. Drives
-  // the press-in cue so the wait is visible rather than a dead half second.
-  const [holdingItemId, setHoldingItemId] = useState<string | null>(null);
+  const calendarInteraction = useCalendarInteraction();
+  const {
+    draft,
+    setDraft,
+    pointerSession,
+    holdingItemId,
+    setHoldingItemId,
+    quickCreate,
+    setQuickCreate,
+    quickClientSearch,
+    setQuickClientSearch,
+    quickMatchField,
+    setQuickMatchField,
+    placementAnimation,
+    setPlacementAnimation,
+    floatingDrag,
+    setFloatingDrag,
+    hasMoved,
+    setHasMoved,
+    gridRef,
+    pointerSessionRef,
+    suppressItemClickRef,
+    suppressItemClickUntilRef,
+    weekStripRef,
+    weekPanelsRef,
+    calendarScrollRef,
+    weekSettleTimerRef,
+    weekLandingTimerRef,
+    weekPagerSyncingRef,
+    clickPlaceRef,
+    pointerClientRef,
+    pointerStartRef,
+    pointerKindRef,
+    dragPreviewMetaRef,
+    touchHoldTimerRef,
+    touchHoldCleanupRef,
+    pendingQuickCreateRef,
+    calendarPerspectiveChosenRef,
+    isClientInsideGrid,
+    setPointerSessionState,
+    hasPointerMovedPastThreshold,
+    setFloatingDragFromPointer,
+    weekPagerStep,
+    centreWeekPager,
+    cancelTouchHold,
+  } = calendarInteraction;
   const [toast, setToast] = useState<Toast | null>(null);
   // Every setToast in the app lands here and is rendered once, at the bottom of
   // App. Each new message replaces the previous one and clears itself; a message
@@ -2952,9 +2995,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     const timer = window.setTimeout(() => setToast(null), toast.undo ? 8000 : 4500);
     return () => window.clearTimeout(timer);
   }, [toast]);
-  const [quickCreate, setQuickCreate] = useState<QuickCreateState | null>(null);
-  const [quickClientSearch, setQuickClientSearch] = useState("");
-  const [quickMatchField, setQuickMatchField] = useState<"name" | "phone" | "email" | "">("");
   const [dockBookings, setDockBookings] = useState<PendingBooking[]>([]);
   // Lessons parked on the shelf. They stay in `items` -- the calendar save is a
   // full replace, so dropping one here would delete it server-side -- and are
@@ -2963,10 +3003,32 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   const [shelvedItemIds, setShelvedItemIds] = useState<string[]>([]);
   const [flyingBooking, setFlyingBooking] = useState<DockFlight | null>(null);
   const [activeDockBookingId, setActiveDockBookingId] = useState("");
-  const [placementAnimation, setPlacementAnimation] = useState<PlacementAnimation | null>(null);
-  const [floatingDrag, setFloatingDrag] = useState<FloatingDrag | null>(null);
-  const [calendarHover, setCalendarHover] = useState<CalendarHoverPreview | null>(null);
-  const [activeWeek, setActiveWeek] = useState(getCurrentWeekOffset);
+  const calendarState = useCalendarState({ timeZone: coachAccount.timezone });
+  const {
+    calendarHover,
+    setCalendarHover,
+    activeWeek,
+    setActiveWeek,
+    calendarDetailMode,
+    setCalendarDetailMode,
+    calendarViewMode,
+    setCalendarViewMode,
+    calendarAxisMode,
+    setCalendarAxisMode,
+    calendarDayFocus,
+    setCalendarDayFocus,
+    calendarNowMinutes,
+    calendarPerspective,
+    setCalendarPerspective,
+    calendarCoachFilterId,
+    setCalendarCoachFilterId,
+    calendarLocationFilterId,
+    setCalendarLocationFilterId,
+    activeWeekRef,
+    weekDays,
+    weekTitle,
+    calendarTodayIndex,
+  } = calendarState;
   const [edgeCue, setEdgeCue] = useState<null | "prev" | "next">(null);
   const [bookingServiceId, setBookingServiceId] = useState("");
   const [bookingDay, setBookingDay] = useState(0);
@@ -3013,25 +3075,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   const [storageDiagnosticsOpen, setStorageDiagnosticsOpen] = useState(false);
   const [pendingLessonCompleteId, setPendingLessonCompleteId] = useState("");
   const [lessonCompleteErrors, setLessonCompleteErrors] = useState<LessonCompleteErrorMap>({});
-  const [calendarDetailMode, setCalendarDetailMode] = useState(false);
-  const [calendarViewMode, setCalendarViewMode] = useState<CalendarViewMode>("full");
-  const [calendarAxisMode, setCalendarAxisMode] = useState<CalendarAxisMode>("week");
-  // Day view: which weekday fills the grid, or null for the whole week. Phones
-  // start on a day because seven columns across a phone leaves 45px each, which
-  // is not enough for a client's name.
-  const [calendarDayFocus, setCalendarDayFocus] = useState<number | null>(null);
-  // Minute of the day the now line is drawn at. Ticks on its own so the line
-  // creeps down the column without anything else having to re-render it.
-  const [calendarNowMinutes, setCalendarNowMinutes] = useState(() => businessNow().minutes);
-  // Which calendar day it currently is. buildWeekDays reads new Date() when it
-  // runs and is memoised on the week, so a calendar left open overnight kept
-  // yesterday labelled Today and drew the now line down yesterday's column
-  // until the week was changed. Ticked by the same interval as the minute
-  // above; a string date so re-renders happen once a day, not once a minute.
-  const [todayStamp, setTodayStamp] = useState(() => businessNow().date.toDateString());
-  const [calendarPerspective, setCalendarPerspective] = useState<CalendarPerspective>("all");
-  const [calendarCoachFilterId, setCalendarCoachFilterId] = useState("");
-  const [calendarLocationFilterId, setCalendarLocationFilterId] = useState("");
   const [googleCalendar, setGoogleCalendar] = useState<GoogleCalendarSyncStatus>(defaultGoogleCalendarStatus);
   const [googleCalendarAction, setGoogleCalendarAction] = useState<GoogleCalendarActionState>("idle");
   const [googleCalendarStatusError, setGoogleCalendarStatusError] = useState("");
@@ -3062,7 +3105,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     useState<NotificationSettings>(defaultNotificationSettings);
   const [testEmailAddress, setTestEmailAddress] = useState("");
   const [testEmailState, setTestEmailState] = useState<"idle" | "sending" | "sent">("idle");
-  const [hasMoved, setHasMoved] = useState(false);
   const activeAccountId = defaultAccountId(workspaceAccounts);
   const activeAccount =
     accountById(workspaceAccounts, activeAccountId) ?? defaultWorkspaceAccountFromCoachAccount(coachAccount);
@@ -3482,40 +3524,15 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
       void refreshClarityCloudImports();
     }
   }, [activeView, settingsTab, googleDriveTransfer.connected, googleDriveTransfer.incomingImportReady]);
-  const gridRef = useRef<HTMLDivElement | null>(null);
   const dockRef = useRef<HTMLDivElement | null>(null);
   const draftRef = useRef<Draft | null>(null);
-  const pointerSessionRef = useRef<PointerSession>(null);
   const hasMovedRef = useRef(false);
-  const suppressItemClickRef = useRef(false);
-  const suppressItemClickUntilRef = useRef(0);
-  const activeWeekRef = useRef(activeWeek);
-  // The two halves of the week pager: the date strip takes the gesture, the
-  // grid is driven from it and never scrolled directly.
-  const weekStripRef = useRef<HTMLDivElement | null>(null);
-  const weekPanelsRef = useRef<HTMLDivElement | null>(null);
-  // The vertical scroller (.calendar-scroll). The week pager owns the
-  // horizontal axis; this is the only thing that moves up and down.
-  const calendarScrollRef = useRef<HTMLDivElement | null>(null);
-  const weekSettleTimerRef = useRef<number | null>(null);
-  const weekLandingTimerRef = useRef<number | null>(null);
-  // Set while the pager repositions itself, so the scroll events that causes
-  // are not read back as the user paging again.
-  const weekPagerSyncingRef = useRef(false);
   const hasLoadedCalendarApiRef = useRef(false);
   const adminHydrationRunIdRef = useRef(0);
-  const clickPlaceRef = useRef<null | { bookingId: string; candidate: SlotCandidate }>(null);
-  const pointerClientRef = useRef({ x: 0, y: 0 });
-  const pointerStartRef = useRef({ x: 0, y: 0 });
   const pointerTrailRef = useRef<{ x: number; y: number; t: number }[]>([]);
-  const pointerKindRef = useRef<globalThis.PointerEvent["pointerType"]>("mouse");
-  const dragPreviewMetaRef = useRef<null | { width: number; height: number; offsetX: number; offsetY: number }>(null);
   const lastEdgeNavRef = useRef(0);
   const edgeCueTimerRef = useRef<number | null>(null);
   const gestureCleanupRef = useRef<null | (() => void)>(null);
-  // The touch hold that has to complete before a card can be dragged.
-  const touchHoldTimerRef = useRef<number | null>(null);
-  const touchHoldCleanupRef = useRef<null | (() => void)>(null);
   const brandSaveVersionRef = useRef(0);
   const serviceSaveVersionRef = useRef(0);
   const calendarSaveVersionRef = useRef(0);
@@ -3527,7 +3544,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   const lastPersistedCalendarItemsRef = useRef<CalendarItem[]>([]);
   const pendingLessonCompleteIdRef = useRef("");
   const activeAdminSaveOwnersRef = useRef<Map<AdminSaveOwner, number>>(new Map());
-  const pendingQuickCreateRef = useRef<QuickCreateState | null>(null);
   const adminBootStartedAtRef = useRef(typeof performance !== "undefined" ? performance.now() : Date.now());
   const adminShellRenderedRef = useRef(false);
   const calendarFrameRenderedRef = useRef(false);
@@ -3684,9 +3700,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
         day: "numeric",
       })
     : "";
-  // todayStamp is a dependency, not decoration: isToday is baked in here.
-  const weekDays = useMemo(() => buildWeekDays(activeWeek), [activeWeek, todayStamp, coachAccount.timezone]);
-  const weekTitle = useMemo(() => formatWeekTitle(activeWeek), [activeWeek]);
   const accountItems = useMemo(
     () =>
       filterRecordsForAccount(items, activeAccountId).filter(
@@ -3718,10 +3731,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   const selectedCalendarCoachId = calendarCoachFilterId || activeCoachId;
   const selectedCalendarLocationId = calendarLocationFilterId || defaultLocationId(accountLocations);
   const selectedCalendarCoach = bookingCoachSnapshotFor(selectedCalendarCoachId, accountCoachProfiles);
-  // A business owner who coaches opens on their own calendar, where bookings
-  // are theirs without asking. "All calendars" is still one pick away, and
-  // once they pick a view it stays theirs.
-  const calendarPerspectiveChosenRef = useRef(false);
   const ownCalendarCoachId = activeCoachList.some((coach) => coach.id === currentAppUser.coachId)
     ? currentAppUser.coachId || ""
     : "";
@@ -4583,10 +4592,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
       setOpenPublicBookingSection("appointment");
     }
   }, [bookingServiceId, currentScreenPublicServices]);
-
-  useEffect(() => {
-    if (!quickCreate) setQuickClientSearch("");
-  }, [quickCreate]);
 
   useEffect(() => {
     let cancelled = false;
@@ -5935,30 +5940,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [calendarAvailability, calendarAxisMode, calendarAxisSource, calendarEndMinutes, calendarStartMinutes]);
 
-  // The now line is drawn once, in today's column, and only when the week on
-  // screen is the one today falls in.
-  const calendarTodayIndex = weekDays.findIndex((day) => day.isToday);
-  // Read by the breakpoint effect, which must not re-run when the week changes.
-  const calendarTodayIndexRef = useRef(calendarTodayIndex);
-  calendarTodayIndexRef.current = calendarTodayIndex;
-
-  // A phone opens on a day and a desktop on the week. Keyed off crossing the
-  // breakpoint rather than every render, so tapping back to the week on a phone
-  // sticks until the viewport itself changes.
-  useEffect(() => {
-    const narrow = () => window.matchMedia("(max-width: 640px)").matches;
-    let wasNarrow: boolean | null = null;
-    const sync = () => {
-      const isNarrow = narrow();
-      if (isNarrow === wasNarrow) return;
-      wasNarrow = isNarrow;
-      setCalendarDayFocus(isNarrow ? (calendarTodayIndexRef.current >= 0 ? calendarTodayIndexRef.current : 0) : null);
-    };
-    sync();
-    window.addEventListener("resize", sync);
-    return () => window.removeEventListener("resize", sync);
-  }, []);
-
   // Opening the calendar lands on the current time. Deliberately keyed off the
   // calendar becoming visible and not off the week: paging to next week, or
   // opening a lesson, must not yank the grid back to now under the coach.
@@ -5982,20 +5963,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeView, adminWorkspaceLoadStatus]);
 
-  useEffect(() => {
-    const update = () => {
-      const now = businessNow();
-      setCalendarNowMinutes(now.minutes);
-      // Unchanged on 1439 of every 1440 ticks, and React drops a set to the
-      // same string, so this costs nothing until the date actually rolls over.
-      setTodayStamp(now.date.toDateString());
-    };
-    // Straight away as well, so a time zone change moves the now line at once.
-    update();
-    const tick = window.setInterval(update, 60_000);
-    return () => window.clearInterval(tick);
-  }, [coachAccount.timezone]);
-
   // Removed: a window CustomEvent listener that existed only so the injected
   // Optix panel could tell React a bay had been booked. BookingResourcesPanel
   // is React, so it calls setItems through its onBayStatus prop instead.
@@ -6017,14 +5984,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     // the layout switches that change the strip's width.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeView, activeWeek, calendarDetailMode, effectiveCalendarPerspective]);
-
-  useEffect(
-    () => () => {
-      if (weekSettleTimerRef.current) window.clearTimeout(weekSettleTimerRef.current);
-      if (weekLandingTimerRef.current) window.clearTimeout(weekLandingTimerRef.current);
-    },
-    [],
-  );
 
   const clients = useMemo<ClientSummary[]>(() => {
     // Grouping keys off personId first — the stable backend link — and only
@@ -6849,13 +6808,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     return { day, start, x, y };
   }
 
-  function isClientInsideGrid(clientX: number, clientY: number) {
-    const grid = gridRef.current;
-    if (!grid) return false;
-    const rect = grid.getBoundingClientRect();
-    return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
-  }
-
   function isClientInsideDock(clientX: number, clientY: number) {
     const dock = dockRef.current;
     if (!dock) return false;
@@ -6900,11 +6852,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   function setDraftState(nextDraft: Draft | null) {
     draftRef.current = nextDraft;
     setDraft(nextDraft);
-  }
-
-  function setPointerSessionState(nextSession: PointerSession) {
-    pointerSessionRef.current = nextSession;
-    setPointerSession(nextSession);
   }
 
   function setMovedState(nextMoved: boolean) {
@@ -7187,30 +7134,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     return true;
   }
 
-  function hasPointerMovedPastThreshold(clientX: number, clientY: number) {
-    const deltaX = clientX - pointerStartRef.current.x;
-    const deltaY = clientY - pointerStartRef.current.y;
-    const threshold =
-      pointerKindRef.current === "touch"
-        ? pointerSessionRef.current
-          ? ARMED_TOUCH_DRAG_THRESHOLD
-          : TOUCH_DRAG_THRESHOLD
-        : MOUSE_DRAG_THRESHOLD;
-    return Math.hypot(deltaX, deltaY) >= threshold;
-  }
-
-  function setFloatingDragFromPointer(itemId: string, clientX: number, clientY: number) {
-    const meta = dragPreviewMetaRef.current;
-    if (!meta) return;
-    setFloatingDrag({
-      itemId,
-      x: clientX - meta.offsetX,
-      y: clientY - meta.offsetY,
-      width: meta.width,
-      height: meta.height,
-    });
-  }
-
   function setActiveWeekState(nextWeek: number) {
     activeWeekRef.current = nextWeek;
     setActiveWeek(nextWeek);
@@ -7260,40 +7183,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     });
     centreWeekPager();
     scrollCalendarToNow();
-  }
-
-  // --- Week pager ----------------------------------------------------------
-  // The date strip is the only thing that takes the horizontal gesture; the
-  // grid mirrors its scroll position and is never scrolled directly. Three
-  // panels are mounted at a time and the focused week is always the middle
-  // one, so landing on a neighbour swaps the week and re-centres underneath —
-  // the panel you scrolled to becomes the panel you are looking at, which is
-  // what makes the recentre invisible.
-  function weekPagerStep() {
-    const strip = weekStripRef.current;
-    if (!strip) return 0;
-    return Math.max(1, strip.clientWidth - WEEK_PEEK);
-  }
-
-  function centreWeekPager() {
-    const strip = weekStripRef.current;
-    const panels = weekPanelsRef.current;
-    if (!strip) return;
-    // Any pending landing would put the strip back on the panel we just came
-    // from, so it goes with the week it belonged to — along with the class it
-    // would otherwise have been left to clear.
-    if (weekLandingTimerRef.current) {
-      window.clearTimeout(weekLandingTimerRef.current);
-      weekLandingTimerRef.current = null;
-    }
-    strip.classList.remove("is-grabbing");
-    const left = weekPagerStep() * WEEK_FOCUS_INDEX;
-    weekPagerSyncingRef.current = true;
-    strip.scrollLeft = left;
-    if (panels) panels.scrollLeft = left;
-    window.setTimeout(() => {
-      weekPagerSyncingRef.current = false;
-    }, 60);
   }
 
   function pageWeek(delta: number) {
@@ -7705,22 +7594,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
       window.removeEventListener("mouseup", finish);
       window.removeEventListener("touchmove", blockTouchScroll);
     };
-  }
-
-  // --- Touch hold ----------------------------------------------------------
-  // Arming a drag is split from starting one. A mouse arms on press, because a
-  // press with a mouse is unambiguous; a finger arms only after TOUCH_HOLD_MS
-  // of stillness. Everything below the arm point is shared, so a touch drag and
-  // a mouse drag are the same gesture once running.
-
-  function cancelTouchHold() {
-    if (touchHoldTimerRef.current !== null) {
-      window.clearTimeout(touchHoldTimerRef.current);
-      touchHoldTimerRef.current = null;
-    }
-    touchHoldCleanupRef.current?.();
-    touchHoldCleanupRef.current = null;
-    setHoldingItemId(null);
   }
 
   function updatePointerAt(clientX: number, clientY: number) {
@@ -20381,6 +20254,8 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   }, {});
 
   const calendar = useCalendarController({
+    calendarInteraction,
+    calendarState,
     visibleWeekItems,
     services,
     coachProfiles,
@@ -20388,80 +20263,40 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     activeCoachId,
     availabilityLocations,
     calendarViewBounds,
-    calendarViewMode,
     calendarStartMinutes,
     calendarEndMinutes,
-    quickCreate,
     activeServices,
-    floatingDrag,
-    draft,
     scheduledGroupSlots,
     items,
-    activeWeek,
     calendarCollapsedDays,
-    calendarDayFocus,
     calendarAxis,
-    calendarTodayIndex,
-    calendarNowMinutes,
     calendarMinutesToTop,
-    quickClientSearch,
     clients,
-    pointerSessionRef,
-    setCalendarHover,
     locations,
     coachAccount,
-    setCalendarViewMode,
     setToast,
     isGroupServiceSlotMatch,
     setSelectedGroupSession,
     setSelectedId,
-    setQuickCreate,
     isActiveGroupBooking,
     effectiveCalendarPerspective,
     locationCalendarCoachGroups,
-    gridRef,
     slotFromClient,
-    weekStripRef,
-    weekPanelsRef,
-    weekPagerSyncingRef,
-    weekSettleTimerRef,
-    weekPagerStep,
     setActiveWeekState,
-    activeWeekRef,
-    weekLandingTimerRef,
-    setCalendarDayFocus,
-    setCalendarAxisMode,
     gridHeight,
-    weekDays,
     calendarAvailability,
     clipCalendarSegment,
     calendarSegmentHeight,
-    setCalendarDetailMode,
     hasMultipleAvailabilityLocations,
     availabilityLocationHue,
     availabilityLocationLabel,
-    cancelTouchHold,
-    touchHoldCleanupRef,
-    setHoldingItemId,
-    touchHoldTimerRef,
-    pointerStartRef,
-    pointerClientRef,
     resetPointerTrail,
-    pointerKindRef,
-    dragPreviewMetaRef,
-    setFloatingDrag,
     setMovedState,
-    setPointerSessionState,
     attachGestureListeners,
     requireLiveDatabase,
-    pendingQuickCreateRef,
     selectedCalendarLocationId,
-    clickPlaceRef,
     activeDockBooking,
     updatePointerAt,
-    setQuickClientSearch,
-    setQuickMatchField,
-    quickMatchField,
     appointmentServices,
     calendarBookingChoices,
     quickCreateAvailabilityError,
@@ -20476,32 +20311,18 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     isValidBlockSlot,
     closeCalendarDetails,
     reconcileUndoByDelete,
-    pointerSession,
     isAdminUser,
-    calendarPerspectiveChosenRef,
-    setCalendarPerspective,
     activeAccount,
     accountLocations,
-    setCalendarLocationFilterId,
     activeCoachList,
-    setCalendarCoachFilterId,
-    calendarDetailMode,
-    weekTitle,
     calendarSaveStatus,
     calendarFeedStatus,
     calendarSaveError,
     calendarSaveFailureKind,
-    calendarAxisMode,
-    calendarScrollRef,
     endPointer,
-    placementAnimation,
     notificationsByAppointment,
     selectedId,
-    holdingItemId,
-    suppressItemClickRef,
-    suppressItemClickUntilRef,
     terms,
-    hasMoved,
     quickCreateServices,
   });
 
