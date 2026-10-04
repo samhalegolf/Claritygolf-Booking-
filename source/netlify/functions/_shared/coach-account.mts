@@ -22,46 +22,8 @@ import {
 import { cleanMessageLanguage } from "./message-language.mts";
 import { cleanPhoneCountry, FALLBACK_PHONE_COUNTRY } from "./phone.mts";
 import { taxDefaultsForCountry } from "./region.mts";
-
-function env(name, fallback = "") {
-  return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
-}
-
-function cleanString(value, fallback = "", max = 600) {
-  if (typeof value !== "string") return fallback;
-  return value.trim().slice(0, max);
-}
-
-function cleanEmail(value, fallback = "") {
-  const email = cleanString(value, "", 180).toLowerCase();
-  return email.includes("@") ? email : fallback;
-}
-
-function cleanUrl(value, fallback) {
-  const raw = cleanString(value, "", 600);
-  if (!raw) return fallback;
-  try {
-    const url = new URL(raw);
-    if (url.protocol !== "http:" && url.protocol !== "https:") return fallback;
-    return url.toString().replace(/\/$/, "");
-  } catch {
-    return fallback;
-  }
-}
-
-function settingValue(settings, key) {
-  return settings?.[key] || "";
-}
-
-function parseSettingJson(settings, key, fallback) {
-  const value = settingValue(settings, key);
-  if (!value) return fallback;
-  try {
-    return JSON.parse(value);
-  } catch {
-    return fallback;
-  }
-}
+import { cleanEmail, cleanString, cleanUrl, env } from "./values.mts";
+import { parseSettingJson, settingValue } from "./settings-store.mts";
 
 const defaultInvoiceSettings = {
   enabled: true,
@@ -267,21 +229,9 @@ function cleanInvoiceSettings(settings = {}, country = FALLBACK_PHONE_COUNTRY) {
       : defaultInvoiceSettings.paymentTermsDays,
     businessAddress: cleanString(settings?.businessAddress, "", 400),
     headerText: cleanString(settings?.headerText, "", 280),
-    footerText: cleanString(
-      settings?.footerText,
-      defaultInvoiceSettings.footerText,
-      400,
-    ),
-    defaultCustomerNote: cleanString(
-      settings?.defaultCustomerNote,
-      defaultInvoiceSettings.defaultCustomerNote,
-      400,
-    ),
-    paymentInstructions: cleanString(
-      settings?.paymentInstructions,
-      defaultInvoiceSettings.paymentInstructions,
-      400,
-    ),
+    footerText: cleanString(settings?.footerText, defaultInvoiceSettings.footerText, 400),
+    defaultCustomerNote: cleanString(settings?.defaultCustomerNote, defaultInvoiceSettings.defaultCustomerNote, 400),
+    paymentInstructions: cleanString(settings?.paymentInstructions, defaultInvoiceSettings.paymentInstructions, 400),
     customFields,
     lineTags,
     unpaidLoudness: [1, 2, 3].includes(Number(settings?.unpaidLoudness))
@@ -296,22 +246,14 @@ export function cleanCoachAccount(account) {
   // config is owned by /api/market-profile, so a stale account draft saved
   // from another block cannot revert a profile or capability change.
   const market = cleanMarketConfig(account?.market);
-  const businessName = cleanString(
-    account?.businessName,
-    defaults.businessName,
-    100,
-  );
+  const businessName = cleanString(account?.businessName, defaults.businessName, 100);
   const venueName = cleanString(account?.venueName, defaults.venueName, 140);
   return {
     id: slugify(account?.id, defaults.id),
     coachName: cleanString(account?.coachName, defaults.coachName, 100),
     businessName,
     venueName,
-    venueShortName: cleanString(
-      account?.venueShortName,
-      defaults.venueShortName || venueName,
-      80,
-    ),
+    venueShortName: cleanString(account?.venueShortName, defaults.venueShortName || venueName, 80),
     timezone: cleanString(account?.timezone, defaults.timezone, 80),
     country: cleanPhoneCountry(account?.country, defaults.country),
     messageLanguage: cleanMessageLanguage(account?.messageLanguage || defaults.messageLanguage),
@@ -321,10 +263,7 @@ export function cleanCoachAccount(account) {
       account?.calendarSlug,
       slugify(businessName, defaults.calendarSlug),
     ),
-    caddyWorkspaceUrl: cleanUrl(
-      account?.caddyWorkspaceUrl,
-      defaults.caddyWorkspaceUrl,
-    ),
+    caddyWorkspaceUrl: cleanUrl(account?.caddyWorkspaceUrl, defaults.caddyWorkspaceUrl),
     // Words the business has not set come from its market profile, so a
     // salon reads "Chair" where a golf business reads "Bay".
     terminology: terminologyFor(account?.terminology, marketProfileFor(market.profileId).terminology),
@@ -396,10 +335,6 @@ export function coachAccountFromSettings(settings, accountId = "") {
       defaults.caddyWorkspaceUrl,
     terminology: parseSettingJson(settings, "accountTerminologyJson", {}),
     market: marketConfigFromSettings(settings),
-    invoiceSettings: parseSettingJson(
-      settings,
-      "accountInvoiceSettingsJson",
-      defaults.invoiceSettings,
-    ),
+    invoiceSettings: parseSettingJson(settings, "accountInvoiceSettingsJson", defaults.invoiceSettings),
   });
 }

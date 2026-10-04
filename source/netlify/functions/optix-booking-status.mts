@@ -4,27 +4,7 @@ import { requireCoachActor } from "./_shared/coach-auth.mts";
 import { bayBookingMatchesSlot } from "./_shared/optix-reconcile.mts";
 import { chosenResourceProviderId } from "./_shared/resource-handler.mts";
 import { readResourceWebhookSettings } from "./_shared/resource-webhook-provider.mts";
-
-/**
- * Bay names come from Optix itself.
- *
- * Removed: a BAY_NAMES constant mapping seven literal Optix resource ids to
- * "Bay #1".."Bay #7". It was one business's bay list compiled into the server,
- * so any other resource -- another business's bay, a fitting room, a bay added
- * last week -- resolved to "" and the card fell back to "Resource booked".
- *
- * Every Optix webhook carries workspace_id and workspace_name, which is where
- * the Integrations screen already gets its bay list (observedWorkspaces in
- * external-bookings.mts). Newest sighting wins: a workspace can be renamed, and
- * one of Sam's has carried three names.
- *
- * optix_webhook_events has no account_id -- it is the shared inbound log. The
- * resource id being named always comes from the caller's own sync row, so this
- * names a bay the caller has already booked and nothing else.
- */
-function env(name: string, fallback = "") {
-  return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
-}
+import { env } from "./_shared/values.mts";
 
 function db() {
   return getDatabase();

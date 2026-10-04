@@ -9,20 +9,7 @@ import {
   settingsSelectQuery,
   settingsUpsertRows,
 } from "./_shared/settings-scope.mts";
-
-function env(name: string, fallback = "") {
-  return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
-}
-
-function nowIso() {
-  return new Date().toISOString();
-}
-
-function cleanString(value: unknown, fallback = "", max = 500) {
-  return typeof value === "string" && value.trim()
-    ? value.trim().slice(0, max)
-    : fallback;
-}
+import { cleanString, env, nowIso } from "./_shared/values.mts";
 
 function normalizeContact(value: unknown) {
   return cleanString(value, "", 180)

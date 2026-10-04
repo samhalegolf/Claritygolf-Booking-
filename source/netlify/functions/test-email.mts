@@ -2,11 +2,7 @@ import type { Config } from "@netlify/functions";
 import { randomUUID } from "node:crypto";
 import { requireCoachActor } from "./_shared/coach-auth.mts";
 import { deliverEmail, emailNotificationsGloballyDisabled } from "./_shared/email-delivery.mts";
-
-
-function env(name: string, fallback = "") {
-  return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
-}
+import { cleanEmail, cleanText, env } from "./_shared/values.mts";
 
 function json(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), {
@@ -16,15 +12,6 @@ function json(value: unknown, status = 200) {
       "Cache-Control": "no-store",
     },
   });
-}
-
-function cleanString(value: unknown, fallback = "", max = 600) {
-  return typeof value === "string" ? value.trim().slice(0, max) || fallback : fallback;
-}
-
-function cleanEmail(value: unknown, fallback = "") {
-  const email = cleanString(value, "", 180).toLowerCase();
-  return email.includes("@") ? email : fallback;
 }
 
 function supabaseConfig() {

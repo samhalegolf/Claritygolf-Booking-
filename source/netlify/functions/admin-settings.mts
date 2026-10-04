@@ -17,6 +17,7 @@ import {
   cleanPlayerBookingEmbedUrl,
   playerBookingEmbedFromSettings,
 } from "./_shared/player-booking-embed.mts";
+import { cleanString, env, hasOwn, nowIso } from "./_shared/values.mts";
 
 const defaultMinBookingNoticeMinutes = 240;
 
@@ -28,23 +29,11 @@ const defaultEmailTemplates = {
   adminEmailIntro: "{{client}} booked {{service}} for {{date}} at {{time}}.",
 };
 
-function env(name: string, fallback = "") {
-  return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
-}
-
 function json(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), {
     status,
     headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
   });
-}
-
-function nowIso() {
-  return new Date().toISOString();
-}
-
-function cleanString(value: unknown, fallback = "", max = 600) {
-  return typeof value === "string" ? value.trim().slice(0, max) : fallback;
 }
 
 function cleanEmail(value: unknown, fallback = "") {
@@ -84,10 +73,6 @@ function modernClientEmailFooter(value: unknown) {
   return /need to (move|change)|reply to this email.*(move|change|reschedul)|email.*(move|change|reschedul)/i.test(footer)
     ? defaultEmailTemplates.clientEmailFooter
     : footer;
-}
-
-function hasOwn(source: unknown, key: string) {
-  return Object.prototype.hasOwnProperty.call(source || {}, key);
 }
 
 function supabaseConfig() {

@@ -65,41 +65,13 @@ import {
   type TerminalIntent,
 } from "./_shared/terminal.mts";
 import { cleanPhoneCountry } from "./_shared/phone.mts";
-
-// Billing is a new, isolated top-level app section. This function owns its
-// own tables (billing_products_services, billing_invoices,
-// billing_invoice_items, billing_booking_invoice_links) and its own Supabase
-// REST helper below. It deliberately does not import booking-core.mts or the
-// local-db adapter: it reads calendar_items (completed bookings) and the
-// shared settings table directly and read-only, and otherwise must not
-// depend on booking/calendar code, per the billing build plan's "protected
-// rules" (billing may read completed bookings/account settings, but does not
-// own booking creation, completion, or calendar state).
-//
-// _shared/passes.mts is the one exception, and it does not breach that rule:
-// the pass tables are not billing's and not booking's, and this file never
-// touches them except through that module. A sale settled by a pass has to take
-// the credit and write the receipt as one decision, so something has to know
-// both -- and the alternative, teaching the pass engine to write into
-// billing_pos_transactions, would put billing's tables in someone else's hands.
-
-function env(name: string, fallback = "") {
-  return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
-}
-
-function nowIso() {
-  return new Date().toISOString();
-}
+import { cleanString, cleanText, env, nowIso } from "./_shared/values.mts";
 
 function json(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), {
     status,
     headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
   });
-}
-
-function cleanString(value: unknown, fallback = "", max = 600) {
-  return typeof value === "string" ? value.trim().slice(0, max) || fallback : fallback;
 }
 
 // A calendar date on its way into a DATE column. Anything that isn't an actual
@@ -887,7 +859,7 @@ function cleanExpensePayload(raw: Record<string, unknown>) {
     description: cleanString(raw?.description, "", 200),
     vendor: cleanString(raw?.vendor, "", 140) || null,
     amount: round2(cleanNumber(raw?.amount, 0, { min: 0 })),
-    currency: cleanString(raw?.currency, "NZD", 8).toUpperCase(),
+    currency: cleanText(raw?.currency, "NZD", 8).toUpperCase(),
     expense_date: /^\d{4}-\d{2}-\d{2}$/.test(expenseDate) ? expenseDate : nowIso().slice(0, 10),
     note: cleanString(raw?.note, "", 600) || null,
   };
@@ -1369,7 +1341,7 @@ export async function createBookingLinks(
 // as more Stripe invoices import. The prefix is sanitised to [A-Z0-9-] so it is
 // safe to drop straight into the RegExp below (no metacharacters survive).
 function normalizeInvoicePrefix(value: unknown) {
-  return cleanString(value, "INV", 12).toUpperCase().replace(/[^A-Z0-9-]/g, "") || "INV";
+  return cleanText(value, "INV", 12).toUpperCase().replace(/[^A-Z0-9-]/g, "") || "INV";
 }
 
 function invoiceSequenceForPrefix(invoiceNumber: string, prefix: string): number | null {
@@ -1469,7 +1441,7 @@ export async function createInvoice(accountId: string, body: Record<string, unkn
     customer_name: customerName,
     customer_email: cleanString(body?.customerEmail, "", 180) || null,
     customer_phone: cleanString(body?.customerPhone, "", 80) || null,
-    issue_date: cleanString(body?.issueDate, new Date().toISOString().slice(0, 10), 20),
+    issue_date: cleanText(body?.issueDate, new Date().toISOString().slice(0, 10), 20),
     due_date: cleanString(body?.dueDate, "", 20) || null,
     currency: cleanString(body?.currency, "", 10) || await resolveDefaultCurrency(accountId),
     subtotal,
@@ -1571,7 +1543,7 @@ async function updateInvoiceDraft(accountId: string, id: string, body: Record<st
     customer_name: customerName,
     customer_email: cleanString(body?.customerEmail, "", 180) || null,
     customer_phone: cleanString(body?.customerPhone, "", 80) || null,
-    issue_date: cleanString(body?.issueDate, new Date().toISOString().slice(0, 10), 20),
+    issue_date: cleanText(body?.issueDate, new Date().toISOString().slice(0, 10), 20),
     due_date: cleanString(body?.dueDate, "", 20) || null,
     currency: cleanString(body?.currency, "", 10) || await resolveDefaultCurrency(accountId),
     subtotal,
@@ -1944,7 +1916,7 @@ async function resolveReportTaxConfig(accountId: string) {
   return {
     currency: currencyForAccountSettings(parsed?.currency, country),
     taxRate: Number.isFinite(rate) ? Math.max(0, Math.min(100, rate)) : fallback.taxRate,
-    taxName: cleanString(parsed?.taxName, fallback.taxName, 40),
+    taxName: cleanText(parsed?.taxName, fallback.taxName, 40),
   };
 }
 
@@ -2207,7 +2179,7 @@ async function resolveInvoiceBranding(accountId: string): Promise<InvoiceBrandin
     contactEmail: cleanString(map.accountContactEmail, "", 180),
     fromName: cleanString(map.notificationFromName, "", 140) || coachName || businessName,
     currency: currencyForAccountSettings(invoice.currency, map.accountCountry),
-    taxName: cleanString(invoice.taxName, taxDefaultsForCountry(map.accountCountry).taxName, 40),
+    taxName: cleanText(invoice.taxName, taxDefaultsForCountry(map.accountCountry).taxName, 40),
     taxNumber: cleanString(invoice.taxNumber, "", 60),
     bankAccount: cleanString(invoice.bankAccount, "", 120),
     businessAddress: cleanString(invoice.businessAddress, "", 300),
@@ -5135,7 +5107,7 @@ async function issueCoupon(
     status: "active",
     original_value: value,
     remaining_value: value,
-    currency: cleanString(input.currency, await resolveDefaultCurrency(accountId), 10),
+    currency: cleanText(input.currency, await resolveDefaultCurrency(accountId), 10),
     issued_to_name: cleanString(input.issuedToName, "", 140) || null,
     issued_to_email: cleanString(input.issuedToEmail, "", 180) || null,
     customer_id: cleanString(input.customerId, "", 160) || null,

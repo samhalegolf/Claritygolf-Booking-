@@ -50,6 +50,7 @@ import {
   STRIPE_CONNECTION_SETTING,
   type StripeCredential,
 } from "./stripe.mts";
+import { cleanString } from "./values.mts";
 
 const db = getDatabase;
 
@@ -60,10 +61,6 @@ export type MembershipActor = { accountId: string; actorId: string };
 
 function fail(message: string, status = 400, code = "invalid"): never {
   throw Object.assign(new Error(message), { status, code });
-}
-
-function text(value: unknown, max: number) {
-  return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
 
 function iso(value: unknown): string | null {
@@ -260,7 +257,7 @@ export async function savePlan(
 ): Promise<MembershipPlanView[]> {
   const { accountId } = actor;
   if (!accountId) fail("No account.", 403, "forbidden");
-  const existingId = text(input?.id, 120);
+  const existingId = cleanString(input?.id, "", 120);
   if (existingId && !(await readPlan(accountId, existingId))) fail("That plan was not found.", 404, "not_found");
   const plan = normalisePlan(
     input || {},
@@ -310,7 +307,7 @@ export async function archivePlan(planId: string, actor: MembershipActor): Promi
   await db().sql`
     UPDATE public.membership_plans
     SET archived_at = NOW(), active = FALSE, sell_online = FALSE, updated_at = NOW()
-    WHERE id = ${text(planId, 120)} AND account_id = ${actor.accountId}
+    WHERE id = ${cleanString(planId, "", 120)} AND account_id = ${actor.accountId}
   `;
   return readPlans(actor.accountId);
 }
@@ -353,7 +350,7 @@ export async function readMemberships(
 }
 
 async function readMembership(accountId: string, membershipId: string) {
-  const found = (await readMemberships(accountId, { membershipId: text(membershipId, 120) }))[0];
+  const found = (await readMemberships(accountId, { membershipId: cleanString(membershipId, "", 120) }))[0];
   if (!found) fail("That membership was not found.", 404, "not_found");
   return found;
 }
@@ -564,7 +561,7 @@ export async function completeCardCheckout(
   params.append("expand[]", "setup_intent.payment_method");
   const session = await stripeRequest(credential, `checkout/sessions/${encodeURIComponent(sessionId)}`, { params });
   const metadata = (session?.metadata || {}) as Record<string, string>;
-  const membershipId = text(metadata.clarity_membership_id, 120);
+  const membershipId = cleanString(metadata.clarity_membership_id, "", 120);
   if (metadata.clarity_account_id !== accountId || !membershipId) return { status: "not_found", membershipId: "" };
 
   const rows = (await db().sql`
@@ -609,7 +606,7 @@ export async function completeCardCheckout(
 
   // The first period: paid by this checkout, or free (a trial with no joining
   // fee) and only waiting on the card.
-  const chargeId = text(metadata.clarity_membership_charge_id, 120);
+  const chargeId = cleanString(metadata.clarity_membership_charge_id, "", 120);
   if (chargeId && session.mode === "payment" && intent.status === "succeeded") {
     await settleCharge(accountId, chargeId, { status: "paid", via: "card", paymentIntentId: String(intent.id) }, "");
   } else if (chargeId && session.mode === "payment") {
@@ -714,7 +711,7 @@ async function chargeSavedCard(
   }
   const error = (body.error || {}) as Row;
   const paymentIntentId = String(error.payment_intent?.id || "");
-  const message = text(error.message, 300) || "The card was declined.";
+  const message = cleanString(error.message, "", 300) || "The card was declined.";
   if (error.code === "authentication_required" || error.payment_intent?.status === "requires_action") {
     return { outcome: "requires_action", paymentIntentId, message };
   }
@@ -840,7 +837,7 @@ export async function settleCharge(
        WHERE id = $1 AND account_id = $2
          AND status IN ('pending', 'processing', 'failed', 'requires_action')
        RETURNING membership_id`,
-      [chargeId, accountId, how.status, text(how.via, 60) || "manual", how.paymentIntentId || "", text(how.note, 300)],
+      [chargeId, accountId, how.status, cleanString(how.via, "", 60) || "manual", how.paymentIntentId || "", cleanString(how.note, "", 300)],
     );
     if (rows[0]) {
       // Paying the oldest debt brings a past-due member back; a paused or
@@ -977,8 +974,8 @@ export async function enrolMembership(
 ): Promise<MembershipView> {
   const { accountId } = actor;
   const now = options.now || new Date();
-  const personId = text(input.personId, 160);
-  const planId = text(input.planId, 120);
+  const personId = cleanString(input.personId, "", 160);
+  const planId = cleanString(input.planId, "", 120);
   if (!personId) fail("Who is joining?");
   const plan = planId ? await readPlan(accountId, planId) : null;
   if (!plan || !plan.active) fail("That plan is not available.", 404, "not_found");
@@ -1005,7 +1002,7 @@ export async function enrolMembership(
     await finishMembership(accountId, String(row.id), "cancelled", now, "Replaced by a new signup");
   }
 
-  const startText = text(input.startDate, 10);
+  const startText = cleanString(input.startDate, "", 10);
   let startedAt = now;
   if (/^\d{4}-\d{2}-\d{2}$/.test(startText) && startText > now.toISOString().slice(0, 10)) {
     startedAt = new Date(`${startText}T${now.toISOString().slice(11)}`);
@@ -1041,7 +1038,7 @@ export async function enrolMembership(
         planned.period.end.toISOString(),
         collection === "manual" ? planned.period.end.toISOString() : null,
         planned.cycleNumber,
-        text(input.note, 300),
+        cleanString(input.note, "", 300),
         actor.actorId,
       ],
     );
@@ -1402,7 +1399,7 @@ export async function handleMembershipStripeEvent(accountId: string, type: strin
   }
   if (type === "payment_intent.succeeded" && metadata.clarity_membership_charge_id) {
     if (metadata.clarity_account_id !== accountId) return { ignored: "other_account" };
-    const chargeId = text(metadata.clarity_membership_charge_id, 120);
+    const chargeId = cleanString(metadata.clarity_membership_charge_id, "", 120);
     const rows = (await db().sql`
       SELECT amount_cents FROM public.membership_charges WHERE id = ${chargeId} AND account_id = ${accountId}
     `) as Row[];
@@ -1455,7 +1452,7 @@ export async function membershipAction(
     }
   }
   const id = membership.id;
-  const reason = text(options.reason, 300);
+  const reason = cleanString(options.reason, "", 300);
 
   switch (action) {
     case "cancel_at_period_end": {
@@ -1559,7 +1556,7 @@ export async function chargeAction(
   const { accountId } = actor;
   const rows = (await db().sql`
     SELECT id, membership_id, status FROM public.membership_charges
-    WHERE id = ${text(chargeId, 120)} AND account_id = ${accountId} LIMIT 1
+    WHERE id = ${cleanString(chargeId, "", 120)} AND account_id = ${accountId} LIMIT 1
   `) as Row[];
   const charge = rows[0];
   if (!charge) fail("That charge was not found.", 404, "not_found");
@@ -1569,7 +1566,7 @@ export async function chargeAction(
   if (action === "void") {
     await db().sql`
       UPDATE public.membership_charges
-      SET status = 'void', note = ${text(options.note, 300)}, updated_at = NOW()
+      SET status = 'void', note = ${cleanString(options.note, "", 300)}, updated_at = NOW()
       WHERE id = ${String(charge.id)} AND account_id = ${accountId}
     `;
     await db().sql`
@@ -1588,7 +1585,7 @@ export async function chargeAction(
       String(charge.id),
       action === "waive"
         ? { status: "waived", via: "waived", note: options.note }
-        : { status: "paid", via: text(options.via, 60) || "Cash", note: options.note },
+        : { status: "paid", via: cleanString(options.via, "", 60) || "Cash", note: options.note },
       actor.actorId,
     );
   }

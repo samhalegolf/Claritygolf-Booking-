@@ -55,6 +55,7 @@ import {
   snapshotImageFileName,
   snapshotUploadVerdict,
 } from "./_shared/swing-review-snapshots.mts";
+import { cleanString, cleanText, env } from "./_shared/values.mts";
 
 // Player portal sessions (see booking-core.mts). Player video routes are scoped
 // to the player's own player_id; the admin transfer surface is untouched.
@@ -402,10 +403,6 @@ class TransferError extends Error {
   }
 }
 
-function env(name: string, fallback = "") {
-  return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
-}
-
 function assertClarityCloudServerConfigured(req: Request) {
   const googleConfig = getClarityCloudGoogleConfig(req);
   if (!googleConfig.configured) {
@@ -454,10 +451,6 @@ function errorJson(
   }, status);
 }
 
-function cleanString(value: unknown, fallback = "", max = 1200) {
-  return typeof value === "string" ? value.trim().slice(0, max) || fallback : fallback;
-}
-
 function redactForLogs(value: unknown, max = 300) {
   return cleanString(value, "", max)
     .replace(/https:\/\/www\.googleapis\.com\/upload\/drive\/v3\/files\?[^"'\s)]+/gi, "[redacted-google-upload-url]")
@@ -465,15 +458,11 @@ function redactForLogs(value: unknown, max = 300) {
 }
 
 function safeGoogleReason(data: any, fallback = "") {
-  return cleanString(
-    data?.error?.errors?.[0]?.reason ||
+  return cleanText(data?.error?.errors?.[0]?.reason ||
       data?.error?.status ||
       data?.error?.reason ||
       data?.error ||
-      fallback,
-    fallback,
-    160
-  );
+      fallback, fallback, 160);
 }
 
 async function readGoogleError(response: Response) {
@@ -919,7 +908,7 @@ async function readJson(req: Request) {
 }
 
 function safeFileName(name: unknown, fallback: string) {
-  return cleanString(name, fallback, 180).replace(/[\\/:*?"<>|]+/g, "-") || fallback;
+  return cleanText(name, fallback, 180).replace(/[\\/:*?"<>|]+/g, "-") || fallback;
 }
 
 function extensionFor(fileName: string, mimeType: string) {
@@ -1052,9 +1041,9 @@ function validateSavedVideo(candidate: any, savedVideoIdFromPath?: string): Safe
     playerId,
     lessonId: cleanString(candidate?.lessonId, "", 160) || undefined,
     analysisId,
-    title: cleanString(candidate?.title, "Saved video", 240),
-    createdAt: cleanString(candidate?.createdAt, new Date().toISOString(), 80),
-    updatedAt: cleanString(candidate?.updatedAt, new Date().toISOString(), 80),
+    title: cleanText(candidate?.title, "Saved video", 240),
+    createdAt: cleanText(candidate?.createdAt, new Date().toISOString(), 80),
+    updatedAt: cleanText(candidate?.updatedAt, new Date().toISOString(), 80),
     source: candidate?.source || {},
   };
 }
@@ -1070,7 +1059,7 @@ function validateVideoMetadata(candidate: any): UploadVideoMetadata {
   }
   return {
     fileName: safeFileName(candidate?.fileName, "video.mp4"),
-    mimeType: cleanString(candidate?.mimeType, "application/octet-stream", 180),
+    mimeType: cleanText(candidate?.mimeType, "application/octet-stream", 180),
     sizeBytes,
     checksumSha256: checksumSha256.toLowerCase(),
     driveFileId: cleanString(candidate?.driveFileId, "", 180) || undefined,
@@ -1169,7 +1158,7 @@ async function ensureDriveReady(accountId: string, diagnostics: ProviderDiagnost
       providerErrorOptions({
         ...diagnostics,
         googleStatus: Number(error?.status) || undefined,
-        googleReason: cleanString(error?.code, "token_refresh_failed", 160),
+        googleReason: cleanText(error?.code, "token_refresh_failed", 160),
       })
     );
   }
@@ -2810,15 +2799,15 @@ function importSummaryFromManifest(session: VideoTransferSession, manifest: any)
       playerId: session.playerId,
       lessonId: session.lessonId,
       analysisId: session.analysisId,
-      title: cleanString(manifest?.title, "Saved video", 240),
-      createdAt: cleanString(manifest?.createdAt, session.createdAt, 80),
-      updatedAt: cleanString(manifest?.updatedAt, session.updatedAt, 80),
+      title: cleanText(manifest?.title, "Saved video", 240),
+      createdAt: cleanText(manifest?.createdAt, session.createdAt, 80),
+      updatedAt: cleanText(manifest?.updatedAt, session.updatedAt, 80),
     },
     video: {
-      fileName: cleanString(video.fileName, `${session.savedVideoId}.mp4`, 180),
-      mimeType: cleanString(video.mimeType, "application/octet-stream", 180),
+      fileName: cleanText(video.fileName, `${session.savedVideoId}.mp4`, 180),
+      mimeType: cleanText(video.mimeType, "application/octet-stream", 180),
       sizeBytes: Number(video.sizeBytes || session.expectedSizeBytes || 0),
-      checksumSha256: cleanString(video.checksumSha256, session.checksumSha256, 128),
+      checksumSha256: cleanText(video.checksumSha256, session.checksumSha256, 128),
       duration: Number.isFinite(Number(video.duration)) ? Number(video.duration) : undefined,
       width: Number.isFinite(Number(video.width)) ? Number(video.width) : undefined,
       height: Number.isFinite(Number(video.height)) ? Number(video.height) : undefined,
@@ -2912,14 +2901,14 @@ async function handleImportReceipt(req: Request, accountId: string, savedVideoId
     transferId: session.transferId,
     savedVideoId: session.savedVideoId,
     accountId,
-    localSavedVideoId: cleanString(body?.localSavedVideoId, session.savedVideoId, 160),
-    deviceId: cleanString(body?.deviceId, "browser", 160),
+    localSavedVideoId: cleanText(body?.localSavedVideoId, session.savedVideoId, 160),
+    deviceId: cleanText(body?.deviceId, "browser", 160),
     deviceName: cleanString(body?.deviceName, "", 180),
     platform: cleanString(body?.platform, "", 180),
     libraryStatus: cleanString(body?.libraryStatus, "", 120),
     sizeBytes,
     checksumSha256,
-    verifiedAt: cleanString(body?.verifiedAt, now.toISOString(), 80),
+    verifiedAt: cleanText(body?.verifiedAt, now.toISOString(), 80),
     receivedAt: now.toISOString(),
   };
   const next = await patchTransferSession(session, {
@@ -3009,11 +2998,7 @@ async function readPortalPlayerForReturn(accountId: string, personId: string) {
 async function resolveCoachReturn(req: Request, accountId: string): Promise<CoachReturn | null> {
   const body = (await req.clone().json().catch(() => ({}))) as any;
   if (body?.returnToPlayer !== true) return null;
-  const personId = cleanString(
-    body?.returnToPersonId || body?.savedVideo?.playerId || body?.playerId,
-    "",
-    160,
-  );
+  const personId = cleanString(body?.returnToPersonId || body?.savedVideo?.playerId || body?.playerId, "", 160);
   const target = personId ? await readPortalPlayerForReturn(accountId, personId) : null;
   if (!target) {
     throw new TransferError(
@@ -3450,14 +3435,14 @@ async function handleShareRoute(
       JSON.stringify({
         ok: true,
         video: {
-          title: cleanString(manifest?.title, "Swing video", 180),
+          title: cleanText(manifest?.title, "Swing video", 180),
           sizeBytes: session.expectedSizeBytes,
-          mimeType: cleanString(manifest?.video?.mimeType, "video/mp4", 80),
+          mimeType: cleanText(manifest?.video?.mimeType, "video/mp4", 80),
           duration: Number(manifest?.video?.duration || 0) || null,
           createdAt: session.createdAt,
         },
         sender: {
-          name: cleanString(session.submittedByName, "Someone", 180),
+          name: cleanText(session.submittedByName, "Someone", 180),
           email: cleanString(session.submittedByEmail, "", 180),
           // Never let this page imply the identity was checked.
           verified: false,

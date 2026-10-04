@@ -1,23 +1,5 @@
-/**
- * The Booking side of the one deliberate Booking <-> Caddy seam.
- *
- * Booking administers the coaching relationship; Caddy administers the golf
- * product. This module is the only place Booking talks to Caddy, and it can do
- * exactly three things: make sure a coach-player relationship exists, issue a
- * pass, and read enough status to draw a card. It deliberately owns none of
- * Caddy's entitlement or billing logic -- Caddy stays the source of truth.
- *
- * The link between the two systems is the shared Supabase Auth user id, never
- * email. Email exists here only as a fallback for accounts that predate shared
- * auth and have not signed in since.
- *
- * Authentication is a shared secret set in both Netlify sites. It is
- * server-to-server only; it must never reach a browser.
- */
+import { env } from "./values.mts";
 
-function env(name: string, fallback = ""): string {
-  return (globalThis as any).Netlify?.env?.get(name) || process.env[name] || fallback;
-}
 
 export type CaddyPassType = "month_pass";
 

@@ -7,21 +7,13 @@ import {
   settingsSelectQuery,
   settingsUpsertRows,
 } from "./_shared/settings-scope.mts";
-
-
-function env(name: string, fallback = "") {
-  return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
-}
+import { env, nowIso } from "./_shared/values.mts";
 
 function json(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), {
     status,
     headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
   });
-}
-
-function nowIso() {
-  return new Date().toISOString();
 }
 
 function supabaseConfig() {

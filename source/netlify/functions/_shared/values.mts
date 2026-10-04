@@ -16,6 +16,11 @@ export function env(name, fallback = "") {
   return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
 }
 
+/** env() with surrounding whitespace removed: for keys and URLs pasted into Netlify. */
+export function trimmedEnv(name, fallback = "") {
+  return String(env(name, fallback)).trim();
+}
+
 export function hasOwn(source, key) {
   return Object.prototype.hasOwnProperty.call(source || {}, key);
 }
@@ -58,6 +63,14 @@ export function cleanPositiveInteger(value, fallback, min = 1, max = 100) {
 export function cleanString(value, fallback = "", max = 600) {
   if (typeof value !== "string") return fallback;
   return value.trim().slice(0, max);
+}
+
+/**
+ * Like cleanString, but a blank string also falls back. Use it where an empty
+ * value means "not given" (a title, a name on an email) rather than "cleared".
+ */
+export function cleanText(value, fallback = "", max = 600) {
+  return typeof value === "string" && value.trim() ? value.trim().slice(0, max) : fallback;
 }
 
 export function cleanSlug(value, fallback = legacyOriginalWorkspaceId()) {

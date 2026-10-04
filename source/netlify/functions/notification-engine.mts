@@ -19,6 +19,7 @@ import type {
   NotificationTemplateField,
   NotificationVariantId,
 } from "./_shared/notification-templates.mts";
+import { cleanEmail, cleanString, cleanText, env } from "./_shared/values.mts";
 
 type BookingAction = "booking" | "rescheduled" | "cancelled" | "updated" | "reminder" | "test";
 type NotificationChannel = "client" | "coach" | "admin";
@@ -41,19 +42,6 @@ type NotifyInput = {
    */
   coachPush?: boolean;
 };
-
-function env(name: string, fallback = "") {
-  return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
-}
-
-function cleanText(value: unknown, fallback = "", max = 800) {
-  return typeof value === "string" && value.trim() ? value.trim().slice(0, max) : fallback;
-}
-
-function cleanEmail(value: unknown, fallback = "") {
-  const email = cleanText(value, "", 180).toLowerCase();
-  return email.includes("@") ? email : fallback;
-}
 
 export function sameNotificationRecipient(left: unknown, right: unknown) {
   const a = cleanEmail(left, "");
@@ -101,13 +89,13 @@ function cleanBookingLocationSnapshot(raw: any, fallback: any = {}) {
   if (!source?.name && !fallback?.name) return null;
   const base = source?.name ? source : fallback;
   return {
-    locationId: cleanText(base.locationId, "", 120) || undefined,
+    locationId: cleanString(base.locationId, "", 120) || undefined,
     name: cleanText(base.name, fallback.name || "", 140),
     shortName: cleanText(base.shortName, fallback.shortName || base.name || "", 80) || undefined,
-    address: cleanText(base.address, "", 240) || undefined,
+    address: cleanString(base.address, "", 240) || undefined,
     mapUrl: cleanUrl(base.mapUrl, "") || undefined,
-    arrivalInstructions: cleanText(base.arrivalInstructions, "", 500) || undefined,
-    publicNotes: cleanText(base.publicNotes, "", 500) || undefined,
+    arrivalInstructions: cleanString(base.arrivalInstructions, "", 500) || undefined,
+    publicNotes: cleanString(base.publicNotes, "", 500) || undefined,
     timezone: cleanText(base.timezone, fallback.timezone || "", 80) || undefined,
   };
 }
@@ -123,11 +111,11 @@ function cleanBookingCoachSnapshot(raw: any) {
   }
   if (!source?.name && !source?.displayName && !source?.coachId) return null;
   return {
-    coachId: cleanText(source.coachId, "", 120) || undefined,
-    name: cleanText(source.name, "", 120) || undefined,
-    displayName: cleanText(source.displayName, "", 120) || undefined,
+    coachId: cleanString(source.coachId, "", 120) || undefined,
+    name: cleanString(source.name, "", 120) || undefined,
+    displayName: cleanString(source.displayName, "", 120) || undefined,
     email: cleanEmail(source.email, "") || undefined,
-    phone: cleanText(source.phone, "", 80) || undefined,
+    phone: cleanString(source.phone, "", 80) || undefined,
   };
 }
 
@@ -212,8 +200,8 @@ async function readSettings(accountId: string) {
     coachEmail: cleanEmail(s.coachEmail, env("CLARITY_COACH_EMAIL", "")),
     replyToEmail: cleanEmail(s.replyToEmail, env("CLARITY_REPLY_TO_EMAIL", env("CLARITY_NOTIFICATION_EMAIL", ""))),
     googleReviewUrl: cleanUrl(s.googleReviewUrl || "", ""),
-    notificationSubjectLine: cleanText(s.notificationSubjectLine, "", 180),
-    notificationFromName: cleanText(s.notificationFromName, "", 120),
+    notificationSubjectLine: cleanString(s.notificationSubjectLine, "", 180),
+    notificationFromName: cleanString(s.notificationFromName, "", 120),
     sendClientEmail: s.sendClientEmail !== "false",
     sendCoachEmail: s.sendCoachEmail !== "false",
     sendAdminEmail: s.sendAdminEmail !== "false",
@@ -280,7 +268,7 @@ function parseCoachProfiles(raw: unknown) {
 function resolveAppointmentCoach(appt: any, settings: any) {
   const snapshot = appt?.coach || null;
   const coaches: any[] = Array.isArray(settings?.coachProfiles) ? settings.coachProfiles : [];
-  const coachId = cleanText(appt?.coachId || snapshot?.coachId, "", 120);
+  const coachId = cleanString(appt?.coachId || snapshot?.coachId, "", 120);
   const profile =
     coaches.find((coach) => coach?.id && coach.id === coachId) ||
     null;
@@ -291,10 +279,10 @@ function resolveAppointmentCoach(appt: any, settings: any) {
       cleanEmail(settings?.coachEmail, "") ||
       cleanEmail(settings?.contactEmail, ""),
     name:
-      cleanText(profile?.displayName || profile?.name, "", 120) ||
-      cleanText(snapshot?.displayName || snapshot?.name, "", 120) ||
-      cleanText(settings?.coachName, "", 120) ||
-      cleanText(settings?.businessName, "", 120),
+      cleanString(profile?.displayName || profile?.name, "", 120) ||
+      cleanString(snapshot?.displayName || snapshot?.name, "", 120) ||
+      cleanString(settings?.coachName, "", 120) ||
+      cleanString(settings?.businessName, "", 120),
   };
 }
 
@@ -360,7 +348,7 @@ function normaliseAppointment(raw: any = {}, clientFallback = "Client") {
     ? raw.attendees
         .map((attendee: any, index: number) => ({
           id: cleanText(attendee?.id, `attendee-${index + 1}`, 120),
-          name: cleanText(attendee?.name, "", 120),
+          name: cleanString(attendee?.name, "", 120),
           email: cleanEmail(attendee?.email, ""),
           status:
             attendee?.status === "booker" ||
@@ -368,7 +356,7 @@ function normaliseAppointment(raw: any = {}, clientFallback = "Client") {
             attendee?.status === "confirmed"
               ? attendee.status
               : "invited",
-          token: cleanText(attendee?.token, "", 220),
+          token: cleanString(attendee?.token, "", 220),
         }))
         .filter((attendee: any) => attendee.name)
     : [];
@@ -379,13 +367,13 @@ function normaliseAppointment(raw: any = {}, clientFallback = "Client") {
     day: Number(raw.day ?? 0),
     start: Number(raw.start ?? 0),
     duration: Number(raw.duration ?? 30),
-    serviceId: cleanText(raw.serviceId || raw.service_id, "", 160),
+    serviceId: cleanString(raw.serviceId || raw.service_id, "", 160),
     client: client || clientFallback,
     title: cleanText(raw.title, client || "Booking", 160),
-    phone: cleanText(raw.phone, "", 80),
+    phone: cleanString(raw.phone, "", 80),
     email: cleanEmail(raw.email, ""),
-    note: cleanText(raw.note || raw.notes, "", 1200),
-    coachId: cleanText(raw.coachId || raw.coach_id, "", 120),
+    note: cleanString(raw.note || raw.notes, "", 1200),
+    coachId: cleanString(raw.coachId || raw.coach_id, "", 120),
     coach: cleanBookingCoachSnapshot(raw.coach),
     location: cleanBookingLocationSnapshot(raw.location),
     customGroup: raw.customGroup === true || raw.customGroupEnabled === true || attendees.length > 0,
@@ -401,11 +389,11 @@ function normaliseAppointment(raw: any = {}, clientFallback = "Client") {
 function attendeeSignature(appt: any) {
   return JSON.stringify(
     (Array.isArray(appt?.attendees) ? appt.attendees : []).map((attendee: any) => ({
-      id: cleanText(attendee?.id, "", 120),
-      name: cleanText(attendee?.name, "", 120),
+      id: cleanString(attendee?.id, "", 120),
+      name: cleanString(attendee?.name, "", 120),
       email: cleanEmail(attendee?.email, ""),
-      status: cleanText(attendee?.status, "", 40),
-      token: cleanText(attendee?.token, "", 220),
+      status: cleanString(attendee?.status, "", 40),
+      token: cleanString(attendee?.token, "", 220),
     })),
   );
 }
@@ -452,7 +440,7 @@ function rescheduleUrlFor(appt: any, settings: any) {
     // first path segment. Legacy accountBookingUrl values often point at the
     // host root, which rendered the manager but made its API calls unscoped.
     // Repair only that legacy/root shape; an explicitly configured path wins.
-    const calendarSlug = cleanText(settings.calendarSlug, "", 120)
+    const calendarSlug = cleanString(settings.calendarSlug, "", 120)
       .toLowerCase()
       .replace(/[^a-z0-9-]+/g, "-")
       .replace(/^-+|-+$/g, "");
@@ -519,17 +507,17 @@ async function recordNotification(row: any) {
       body: [
         {
           id: randomUUID(),
-          account_id: cleanText(row.accountId, "", 120),
-          person_key: cleanText(row.personKey, "", 220),
-          calendar_item_id: cleanText(row.calendarItemId, "", 180),
-          recipient: cleanEmail(row.recipient, cleanText(row.recipient, "", 180)),
-          subject: cleanText(row.subject, "", 220),
-          kind: cleanText(row.kind, "", 100),
-          status: cleanText(row.status, "", 80),
-          provider: cleanText(row.provider, "", 80),
-          provider_id: cleanText(row.providerId, "", 180),
-          error: cleanText(row.error, "", 1000),
-          notification_job_id: cleanText(row.notificationJobId, "", 180) || null,
+          account_id: cleanString(row.accountId, "", 120),
+          person_key: cleanString(row.personKey, "", 220),
+          calendar_item_id: cleanString(row.calendarItemId, "", 180),
+          recipient: cleanEmail(row.recipient, cleanString(row.recipient, "", 180)),
+          subject: cleanString(row.subject, "", 220),
+          kind: cleanString(row.kind, "", 100),
+          status: cleanString(row.status, "", 80),
+          provider: cleanString(row.provider, "", 80),
+          provider_id: cleanString(row.providerId, "", 180),
+          error: cleanString(row.error, "", 1000),
+          notification_job_id: cleanString(row.notificationJobId, "", 180) || null,
           created_at: new Date().toISOString(),
         },
       ],
@@ -626,7 +614,7 @@ function clientText(
 
   for (const legacy of Object.values(LEGACY_CLIENT_WORDING)) {
     if (legacy.variant !== variant || legacy.field !== field) continue;
-    const value = cleanText(settings[legacy.setting], "", 1200);
+    const value = cleanString(settings[legacy.setting], "", 1200);
     if (!value || value === legacy.shipped) continue;
     // An even older default footer told clients to reply in order to move a
     // lesson, which the Manage/Reschedule button does better. Only legacy
@@ -645,7 +633,7 @@ function templateSubjects(
   variables: Record<string, string>,
 ) {
   const mt = messageText(settings.messageLanguage);
-  const sharedSubjectTemplate = cleanText(settings.notificationSubjectLine, "", 180);
+  const sharedSubjectTemplate = cleanString(settings.notificationSubjectLine, "", 180);
   const sharedSubject = sharedSubjectTemplate.trim() ? render(sharedSubjectTemplate, variables) : "";
   if (sharedSubject) return { client: sharedSubject, admin: sharedSubject };
 
@@ -889,7 +877,7 @@ export async function sendCoachPushForBooking(input: {
   source?: string;
 }) {
   try {
-    const accountId = cleanText(input.appointment?.accountId || input.appointment?.account_id, "", 120);
+    const accountId = cleanString(input.appointment?.accountId || input.appointment?.account_id, "", 120);
     if (!accountId) {
       console.error("notification_engine:coach_push_no_account", input.appointment?.id);
       return;
@@ -898,12 +886,12 @@ export async function sendCoachPushForBooking(input: {
       readServices(accountId),
       readSettings(accountId),
     ]);
-    const serviceId = cleanText(input.appointment?.serviceId || input.appointment?.service_id, "", 160);
+    const serviceId = cleanString(input.appointment?.serviceId || input.appointment?.service_id, "", 160);
     const service = services.find((candidate: any) => candidate.id === serviceId);
     const compose = (language: string) =>
       composeCoachPushMessage({
         ...input,
-        serviceName: cleanText(service?.name, "", 160),
+        serviceName: cleanString(service?.name, "", 160),
         // This business's own country, so the pop-up's date reads the way the
         // coach writes dates. It used to come from a module value that belonged
         // to whoever this warm instance served last.
@@ -924,7 +912,7 @@ export async function notifyBookingEvent(input: NotifyInput) {
   // A notification belongs to the business the booking belongs to. No
   // fallback: an appointment with no owner gets no email rather than one
   // sent under the original business's name.
-  const accountId = cleanText(input.appointment?.accountId || (input.appointment as any)?.account_id, "", 120);
+  const accountId = cleanString(input.appointment?.accountId || (input.appointment as any)?.account_id, "", 120);
   if (!accountId) {
     console.error("notification_engine:no_account_for_booking", (input.appointment as any)?.id);
     return [];
@@ -941,7 +929,7 @@ export async function notifyBookingEvent(input: NotifyInput) {
   const variant = notificationVariantFor(action, service?.lessonFormat);
   const subjects = templateSubjects(action, variant, settings, variables);
   const personKey = appt.email ? `email:${appt.email}` : appt.phone ? `phone:${appt.phone}` : `name:${appt.client.toLowerCase()}`;
-  const signature = cleanText(input.notificationJobId, "", 180) || hash({ action, appt, previous, source: input.source }).slice(0, 24);
+  const signature = cleanString(input.notificationJobId, "", 180) || hash({ action, appt, previous, source: input.source }).slice(0, 24);
   const results: any[] = [];
 
   // Awaited on purpose: these calls already run inside a waitUntil task, and a
@@ -988,7 +976,7 @@ export async function notifyBookingEvent(input: NotifyInput) {
 
   async function sendCustomGroupInvite(attendee: any) {
     const recipient = cleanEmail(attendee?.email, "");
-    const token = cleanText(attendee?.token, "", 220);
+    const token = cleanString(attendee?.token, "", 220);
     if (!recipient || !token || attendee?.status !== "invited") return;
     const invite = customGroupInviteBody(attendee, serviceName, settings, variables);
     const kind = `${action}_custom_group_invite_email`;
@@ -1033,7 +1021,7 @@ export async function notifyBookingEvent(input: NotifyInput) {
   // moment), honour the coach's setting instead and stay quiet by default.
   const lessonTypeOnlyChange =
     Boolean(previous) &&
-    cleanText(previous?.serviceId) !== cleanText(appt.serviceId) &&
+    cleanString(previous?.serviceId, "", 800) !== cleanString(appt.serviceId, "", 800) &&
     Number(previous?.week ?? 0) === Number(appt.week ?? 0) &&
     Number(previous?.day ?? 0) === Number(appt.day ?? 0) &&
     Number(previous?.start ?? 0) === Number(appt.start ?? 0) &&
@@ -1098,11 +1086,11 @@ export async function notifyBookingEvent(input: NotifyInput) {
       action === "updated" && previous
         ? (previous.attendees || [])
             .filter((attendee: any) => attendee?.status === "invited")
-            .map((attendee: any) => cleanText(attendee?.token, "", 220) || cleanEmail(attendee?.email, ""))
+            .map((attendee: any) => cleanString(attendee?.token, "", 220) || cleanEmail(attendee?.email, ""))
         : [],
     );
     const invitees = (appt.attendees || []).filter((attendee: any) => {
-      const key = cleanText(attendee?.token, "", 220) || cleanEmail(attendee?.email, "");
+      const key = cleanString(attendee?.token, "", 220) || cleanEmail(attendee?.email, "");
       return attendee?.status === "invited" && key && !previousInvites.has(key);
     });
     for (const attendee of invitees) {
@@ -1157,10 +1145,10 @@ export function inferBookingAction(previous: any, next: any): BookingAction | nu
     Number(previous.duration ?? 0) !== Number(next.duration ?? 0);
   if (slotChanged) return "rescheduled";
   const contactChanged =
-    cleanText(previous.client || previous.title) !== cleanText(next.client || next.title) ||
+    cleanString(previous.client || previous.title, "", 800) !== cleanString(next.client || next.title, "", 800) ||
     cleanEmail(previous.email) !== cleanEmail(next.email) ||
-    cleanText(previous.phone) !== cleanText(next.phone) ||
-    cleanText(previous.serviceId || previous.service_id) !== cleanText(next.serviceId || next.service_id) ||
+    cleanString(previous.phone, "", 800) !== cleanString(next.phone, "", 800) ||
+    cleanString(previous.serviceId || previous.service_id, "", 800) !== cleanString(next.serviceId || next.service_id, "", 800) ||
     attendeeSignature(previous) !== attendeeSignature(next);
   return contactChanged ? "updated" : null;
 }

@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 
 import { getDatabase } from "@netlify/database";
 import { requireCoachActor } from "./_shared/coach-auth.mts";
+import { cleanString } from "./_shared/values.mts";
 
 
 function json(value, status = 200) {
@@ -15,11 +16,6 @@ function json(value, status = 200) {
   });
 }
 
-function cleanString(value, fallback = "", max = 600) {
-  if (typeof value !== "string") return fallback;
-  return value.trim().slice(0, max);
-}
-
 async function parseBody(req: Request) {
   const raw = await req.text();
   return raw ? JSON.parse(raw) : {};
@@ -30,11 +26,7 @@ function cleanPerson(person: any, source = "client_migration") {
   const joinedName = [person.firstName, person.lastName]
     .filter(Boolean)
     .join(" ");
-  const name = cleanString(
-    person.name || joinedName || person.client || person.title,
-    "",
-    180,
-  );
+  const name = cleanString(person.name || joinedName || person.client || person.title, "", 180);
   const email = cleanString(person.email, "", 180).toLowerCase();
   if (!name && !email) return null;
   return {
@@ -44,16 +36,8 @@ function cleanPerson(person: any, source = "client_migration") {
     phone: cleanString(person.phone, "", 80),
     notes: cleanString(person.notes || person.note, "", 1200),
     source: cleanString(person.source, source, 80),
-    caddyProfileId: cleanString(
-      person.caddyProfileId || person.caddyId,
-      "",
-      120,
-    ),
-    caddyProfileUrl: cleanString(
-      person.caddyProfileUrl || person.caddyUrl,
-      "",
-      600,
-    ),
+    caddyProfileId: cleanString(person.caddyProfileId || person.caddyId, "", 120),
+    caddyProfileUrl: cleanString(person.caddyProfileUrl || person.caddyUrl, "", 600),
   };
 }
 

@@ -3,16 +3,13 @@ import { resolvePublicAccount } from "./_shared/coach-auth.mts";
 import { settingsSelectQuery } from "./_shared/settings-scope.mts";
 
 import { handlePublicRescheduleRequest } from "./booking-core.mts";
+import { cleanString, env } from "./_shared/values.mts";
 
 const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
 const millisecondsPerDay = 24 * 60 * 60 * 1000;
 const minutesPerDay = 24 * 60;
 const defaultTimezone = "Pacific/Auckland";
 const defaultMinBookingNoticeMinutes = 240;
-
-function env(name: string, fallback = "") {
-  return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
-}
 
 function json(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), {
@@ -22,10 +19,6 @@ function json(value: unknown, status = 200) {
       "Cache-Control": "no-store",
     },
   });
-}
-
-function cleanString(value: unknown, fallback = "", max = 600) {
-  return typeof value === "string" ? value.trim().slice(0, max) : fallback;
 }
 
 function supabaseConfig() {

@@ -1,23 +1,4 @@
-// Stripe → billing tables sync (shared logic).
-//
-// Mirrors Stripe invoices and products into billing_invoices /
-// billing_invoice_items / billing_products_services. Used by
-// stripe-billing-sync.mts (admin backfill endpoint) and
-// stripe-billing-webhook.mts (live Stripe events).
-//
-// Follows billing-api.mts's protected rules: owns nothing outside the billing
-// tables, and keeps its own Supabase REST helper rather than importing the
-// local-db shim. Stripe rows are keyed by their Stripe ids (in_/il_/prod_...),
-// which keeps every sync idempotent and never collides with the app's own
-// randomUUID invoice ids.
 
-function env(name: string, fallback = "") {
-  return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
-}
-
-function nowIso() {
-  return new Date().toISOString();
-}
 
 function round2(value: number) {
   return Math.round((Number(value) || 0) * 100) / 100;
@@ -26,10 +7,6 @@ function round2(value: number) {
 /** Stripe minor units (cents) → the dollars the billing tables store. */
 function fromCents(value: unknown) {
   return round2((Number(value) || 0) / 100);
-}
-
-function cleanString(value: unknown, fallback = "", max = 600) {
-  return typeof value === "string" ? value.trim().slice(0, max) || fallback : fallback;
 }
 
 function toDateOnly(epoch: unknown) {
@@ -333,6 +310,7 @@ import {
   checkoutLineItemWording,
   mapLimit,
 } from "./stripe-voucher-scan.mts";
+import { cleanString, env, nowIso } from "./values.mts";
 
 // --- Charge mapping -----------------------------------------------------------
 // Sam Hale Golf's card payments arrive as Stripe *charges* (via the external

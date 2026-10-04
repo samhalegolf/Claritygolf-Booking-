@@ -17,6 +17,7 @@ import {
   setSettings,
 } from "./_shared/google-provider.mts";
 import { requireCoachActor } from "./_shared/coach-auth.mts";
+import { cleanString, env } from "./_shared/values.mts";
 
 const driveFileScope = googleDriveFileScope;
 // Drive is its own sign-in now, separate from each coach's calendar: it asks
@@ -30,10 +31,6 @@ type DriveStatusState =
   | "blocked"
   | "error";
 
-function env(name: string, fallback = "") {
-  return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
-}
-
 function json(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), {
     status,
@@ -42,10 +39,6 @@ function json(value: unknown, status = 200) {
       "Cache-Control": "no-store",
     },
   });
-}
-
-function cleanString(value: unknown, fallback = "", max = 1200) {
-  return typeof value === "string" ? value.trim().slice(0, max) || fallback : fallback;
 }
 
 function supabaseConfig() {

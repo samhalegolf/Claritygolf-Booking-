@@ -44,6 +44,7 @@ import {
   ruleIsUsable,
   type GoogleCalendarImportRule,
 } from "./_shared/google-calendar-import-rules.mts";
+import { cleanString, cleanText, env, nowIso } from "./_shared/values.mts";
 
 const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
 // Auto-sync every booking change to Google Calendar. Each booking mutation path
@@ -60,18 +61,6 @@ const googleCalendarManualSyncOnly = false;
 // coach's lesson names written into their own calendar events. A workspace with
 // no lesson types has no lesson types; the event falls back to a generic title.
 const defaultServices: Array<Record<string, unknown>> = [];
-
-function env(name: string, fallback = "") {
-  return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
-}
-
-function nowIso() {
-  return new Date().toISOString();
-}
-
-function cleanString(value: unknown, fallback = "", max = 1200) {
-  return typeof value === "string" ? value.trim().slice(0, max) || fallback : fallback;
-}
 
 function supabaseConfig() {
   const url = env("SUPABASE_URL").replace(/\/$/, "");
@@ -351,11 +340,11 @@ function debugErrorFromUnknown(error: any, fallbackStage: string): GoogleCalenda
         providerCode: "",
         rawBody: "",
       };
-  base.stage = cleanString(error?.debugStage, fallbackStage, 60);
-  base.message = cleanString(error instanceof Error ? error.message : String(error || ""), "Google Calendar sync failed.", 600);
+  base.stage = cleanText(error?.debugStage, fallbackStage, 60);
+  base.message = cleanText(error instanceof Error ? error.message : String(error || ""), "Google Calendar sync failed.", 600);
   // getGoogleAccessToken / the provider store tag their own failures
   // (GOOGLE_TOKEN_REFRESH_FAILED, GOOGLE_SCOPE_MISSING, ...).
-  base.providerCode = cleanString(error?.code, base.providerCode, 80);
+  base.providerCode = cleanText(error?.code, base.providerCode, 80);
   return base;
 }
 
@@ -464,13 +453,13 @@ function cleanBookingLocationSnapshot(raw: any, fallback: any = {}) {
   if (!base?.name) return null;
   return {
     locationId: cleanString(base.locationId, "", 120) || undefined,
-    name: cleanString(base.name, fallback.name || "", 140),
-    shortName: cleanString(base.shortName, fallback.shortName || base.name || "", 80) || undefined,
+    name: cleanText(base.name, fallback.name || "", 140),
+    shortName: cleanText(base.shortName, fallback.shortName || base.name || "", 80) || undefined,
     address: cleanString(base.address, "", 240) || undefined,
     mapUrl: cleanUrl(base.mapUrl, "") || undefined,
     arrivalInstructions: cleanString(base.arrivalInstructions, "", 500) || undefined,
     publicNotes: cleanString(base.publicNotes, "", 500) || undefined,
-    timezone: cleanString(base.timezone, fallback.timezone || "", 80) || undefined,
+    timezone: cleanText(base.timezone, fallback.timezone || "", 80) || undefined,
   };
 }
 
@@ -527,7 +516,7 @@ export function googleConfig(req?: Request) {
 }
 
 function cleanCalendarId(value: unknown) {
-  return cleanString(value, "primary", 320) || "primary";
+  return cleanText(value, "primary", 320) || "primary";
 }
 
 async function listGoogleCalendarSources(accessToken: string) {
@@ -545,7 +534,7 @@ async function listGoogleCalendarSources(accessToken: string) {
       if (!id || item?.deleted === true) continue;
       sources.push({
         id,
-        name: cleanString(item?.summaryOverride, "", 200) || cleanString(item?.summary, id, 200) || id,
+        name: cleanString(item?.summaryOverride, "", 200) || cleanText(item?.summary, id, 200) || id,
         primary: item?.primary === true,
         hidden: item?.hidden === true,
         accessRole: cleanString(item?.accessRole, "", 80),

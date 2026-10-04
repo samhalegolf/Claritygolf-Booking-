@@ -3,6 +3,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:
 import { legacyOriginalWorkspaceId } from "./account.mts";
 import { getDatabase } from "./database.mts";
 import { parseStripeConnection, STRIPE_CONNECTION_SETTING } from "./stripe.mts";
+import { trimmedEnv } from "./values.mts";
 
 /**
  * Per-business credentials for the integrations a coach connects themselves.
@@ -47,10 +48,6 @@ export function isTenantIntegration(id: string): id is TenantIntegrationId {
  */
 const PLATFORM_PASSTHROUGH = new Set(["CLARITY_TIMEZONE"]);
 
-function env(name: string): string {
-  return (globalThis.Netlify?.env?.get(name) || process.env[name] || "").trim();
-}
-
 function db() {
   return getDatabase();
 }
@@ -92,12 +89,12 @@ function decodeKey(raw: string): Buffer | null {
 
 function keyById(keyId: string): Buffer | null {
   const source = KEY_SOURCES.find((entry) => entry.keyId === keyId);
-  return source ? decodeKey(env(source.envName)) : null;
+  return source ? decodeKey(trimmedEnv(source.envName)) : null;
 }
 
 function sealingKey(): { keyId: string; key: Buffer } {
   for (const source of KEY_SOURCES) {
-    const key = decodeKey(env(source.envName));
+    const key = decodeKey(trimmedEnv(source.envName));
     if (key) return { keyId: source.keyId, key };
   }
   throw Object.assign(
@@ -208,7 +205,7 @@ export function credentialReaderFor(accountId: string, stored: Record<string, st
   return (name: string) => {
     const own = String(stored[name] ?? "").trim();
     if (own) return own;
-    if (original || PLATFORM_PASSTHROUGH.has(name)) return env(name);
+    if (original || PLATFORM_PASSTHROUGH.has(name)) return trimmedEnv(name);
     return "";
   };
 }

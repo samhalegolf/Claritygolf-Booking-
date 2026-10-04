@@ -6,6 +6,7 @@ import {
   settingsSelectQuery,
   settingsUpsertRows,
 } from "./settings-scope.mts";
+import { cleanString, cleanText, env, nowIso } from "./values.mts";
 
 export const googleCalendarScopes = [
   "https://www.googleapis.com/auth/calendar.events",
@@ -70,18 +71,6 @@ export type GoogleProviderConnection = {
   lastErrorCode: string;
   lastErrorAt: string;
 };
-
-function env(name: string, fallback = "") {
-  return globalThis.Netlify?.env?.get(name) || process.env[name] || fallback;
-}
-
-function nowIso() {
-  return new Date().toISOString();
-}
-
-function cleanString(value: unknown, fallback = "", max = 1200) {
-  return typeof value === "string" ? value.trim().slice(0, max) || fallback : fallback;
-}
 
 function base64UrlEncode(buffer: Buffer) {
   return buffer.toString("base64url");
@@ -396,8 +385,8 @@ export async function saveGoogleAuthorization(args: {
     account_id: args.accountId,
     provider,
     coach_id: coachId,
-    provider_user_id: cleanString(args.providerUserId, existingRow?.provider_user_id || "", 180),
-    provider_email: cleanString(args.providerEmail, existingRow?.provider_email || "", 180).toLowerCase(),
+    provider_user_id: cleanText(args.providerUserId, existingRow?.provider_user_id || "", 180),
+    provider_email: cleanText(args.providerEmail, existingRow?.provider_email || "", 180).toLowerCase(),
     encrypted_refresh_token_json: encryptedRefreshTokenJson,
     encrypted_refresh_token_version: encryptionVersion,
     granted_scopes_json: JSON.stringify(grantedScopes),

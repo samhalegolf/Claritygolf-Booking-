@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { text } from "./payload.mts";
+import { trimmedEnv } from "../values.mts";
 
 /**
  * Supabase access and person identity for everything any integration writes.
@@ -16,13 +17,9 @@ import { text } from "./payload.mts";
 
 type SupabaseConfig = { url: string; key: string };
 
-function env(name: string) {
-  return (globalThis.Netlify?.env?.get(name) || process.env[name] || "").trim();
-}
-
 function config(): SupabaseConfig {
-  const url = env("SUPABASE_URL").replace(/\/$/, "");
-  const key = env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY");
+  const url = trimmedEnv("SUPABASE_URL").replace(/\/$/, "");
+  const key = trimmedEnv("SUPABASE_SERVICE_ROLE_KEY") || trimmedEnv("SUPABASE_SERVICE_KEY");
   if (!url || !key) throw Object.assign(new Error("Supabase is not configured."), { code: "not_configured" });
   return { url, key };
 }

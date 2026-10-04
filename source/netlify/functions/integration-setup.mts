@@ -17,6 +17,7 @@ import { allIntegrations, integrationById, integrationsFor } from "./_shared/int
 import { integrationRequest } from "./_shared/integrations/db.mts";
 import { providerCapabilities } from "./_shared/integrations/registry.mts";
 import type { ConnectionSpec, FieldSpec, IntegrationDescriptor } from "./_shared/integrations/types.mts";
+import { env } from "./_shared/values.mts";
 
 /**
  * What the Integrations screens need to draw themselves, and where a business
@@ -43,10 +44,6 @@ const json = (value: unknown, status = 200) =>
     status,
     headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
   });
-
-function env(name: string) {
-  return globalThis.Netlify?.env?.get(name) || process.env[name] || "";
-}
 
 /** Field types a coach can type a value into. */
 const EDITABLE_TYPES = new Set(["text", "secret", "url", "choice"]);

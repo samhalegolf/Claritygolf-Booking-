@@ -29,6 +29,7 @@
  */
 
 import type { GoogleEvent } from "./google-calendar-import.mts";
+import { cleanString } from "./values.mts";
 
 export type GoogleCalendarImportRule = {
   id: string;
@@ -49,10 +50,6 @@ const maxNameLength = 80;
 const maxCalendarsPerRule = 50;
 const maxCalendarIdLength = 320;
 
-function text(value: unknown, max: number) {
-  return typeof value === "string" ? value.trim().slice(0, max) : "";
-}
-
 /**
  * Terms come from a UI where the coach types freely, so both a JSON array and a
  * comma or newline separated string have to land in the same place. Blank and
@@ -68,7 +65,7 @@ export function normalizeTerms(value: unknown, max = maxTermsPerField): string[]
   const seen = new Set<string>();
   const terms: string[] = [];
   for (const entry of raw) {
-    const term = text(entry, maxTermLength);
+    const term = cleanString(entry, "", maxTermLength);
     if (!term) continue;
     const key = term.toLowerCase();
     if (seen.has(key)) continue;
@@ -84,7 +81,7 @@ function normalizeCalendarIds(value: unknown): string[] {
   const seen = new Set<string>();
   const ids: string[] = [];
   for (const entry of raw) {
-    const id = text(entry, maxCalendarIdLength);
+    const id = cleanString(entry, "", maxCalendarIdLength);
     if (!id || seen.has(id)) continue;
     seen.add(id);
     ids.push(id);
@@ -94,7 +91,7 @@ function normalizeCalendarIds(value: unknown): string[] {
 }
 
 function ruleId(value: unknown, index: number) {
-  const id = text(value, 64).replace(/[^a-zA-Z0-9_-]/g, "");
+  const id = cleanString(value, "", 64).replace(/[^a-zA-Z0-9_-]/g, "");
   return id || `rule-${index + 1}`;
 }
 
@@ -102,7 +99,7 @@ export function cleanGoogleCalendarImportRule(value: unknown, index = 0): Google
   const candidate = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   return {
     id: ruleId(candidate.id, index),
-    name: text(candidate.name, maxNameLength),
+    name: cleanString(candidate.name, "", maxNameLength),
     aliases: normalizeTerms(candidate.aliases),
     keywords: normalizeTerms(candidate.keywords),
     calendarIds: normalizeCalendarIds(candidate.calendarIds),

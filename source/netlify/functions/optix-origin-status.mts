@@ -1,10 +1,6 @@
 import type { Config } from "@netlify/functions";
 import { requireCoachActor } from "./_shared/coach-auth.mts";
-
-
-function env(name: string) {
-  return (globalThis.Netlify?.env?.get(name) || process.env[name] || "").trim();
-}
+import { trimmedEnv } from "./_shared/values.mts";
 
 function json(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), {
@@ -22,8 +18,8 @@ async function requireAccountId(req: Request): Promise<string> {
 }
 
 async function supabaseRows(accountId: string) {
-  const url = env("SUPABASE_URL").replace(/\/$/, "");
-  const key = env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY");
+  const url = trimmedEnv("SUPABASE_URL").replace(/\/$/, "");
+  const key = trimmedEnv("SUPABASE_SERVICE_ROLE_KEY") || trimmedEnv("SUPABASE_SERVICE_KEY");
   if (!url || !key) throw new Error("Supabase is not configured.");
   const select = "id,title,client,status,origin,external_booking_id,external_booking_session_id,external_resource_id,external_updated_at,external_sync_state";
   const response = await fetch(
