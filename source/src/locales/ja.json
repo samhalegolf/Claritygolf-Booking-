@@ -4453,5 +4453,7 @@
   "Show today": "今日を表示",
   "Day": "日",
   "Pick a time": "時間を選択",
-  "No free times this week.": "今週は空き時間がありません。"
+  "No free times this week.": "今週は空き時間がありません。",
+  "No lines yet. Pull in a lesson or a product, or start a blank one.": "まだ明細がありません。レッスンや商品を取り込むか、空の行から始めてください。",
+  "Added to the invoice.": "請求書に追加しました。"
 }

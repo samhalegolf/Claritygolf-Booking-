@@ -310,6 +310,7 @@ import type {
   CSSProperties,
   FormEvent,
   PointerEvent as ReactPointerEvent,
+  ReactNode,
 } from "react";
 import { t, tn } from "./lib/i18n";
 import {
@@ -2264,6 +2265,8 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   // The section last open in each menu, for the phone's swipe forward.
   const lastSettingsSectionRef = useRef<SettingsTab>("none");
   const lastBillingSectionRef = useRef<BillingSection>("none");
+  // The Billing list an open invoice came from, for the phone's Back.
+  const [invoiceReturnSection, setInvoiceReturnSection] = useState<BillingSection>("none");
   const mainPanelRef = useRef<HTMLElement>(null);
   // Products first: adding something you sell is the most common reason to open
   // Billing, and it is the one screen that is useless if you have to find it.
@@ -11090,6 +11093,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   // Open the invoice editor on a fresh, blank invoice.
   function startNewInvoice() {
     resetInvoiceDraft();
+    setInvoiceReturnSection("none");
     setBillingSection("new-invoice");
   }
 
@@ -11222,7 +11226,12 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   // Open an invoice from the Recent invoices list. Drafts open editable (PUT on
   // save); already-issued invoices open in the confirmed/send state (read + Send/
   // Download/Mark paid), since their contents are committed.
-  async function openInvoiceForEdit(record: BillingInvoiceRecord) {
+  /**
+   * Open a saved invoice in the editor. `from` is the Billing list it was
+   * opened from, which the phone's Back returns to; anywhere else (a player or
+   * client profile) has no list to return to, so Back goes to the menu.
+   */
+  async function openInvoiceForEdit(record: BillingInvoiceRecord, from: BillingSection = "none") {
     try {
       const response = await fetch(`/api/billing/invoices/${encodeURIComponent(record.id)}`, {
         credentials: "same-origin",
@@ -11256,6 +11265,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
       // Open read-only (a view for drafts, a preview for committed invoices); the
       // Edit button unlocks it.
       setInvoiceEditing(false);
+      setInvoiceReturnSection(from);
       setBillingSection("new-invoice");
     } catch (error) {
       setToast({ message: error instanceof Error ? error.message : t("Could not open invoice.") });
@@ -16873,22 +16883,59 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   // swipe forward can open them again.
   const phonePlayerOpen = phoneLayout && activeView === "players" && Boolean(notesWorkspaceClient) && playerToolExpanded;
   const playerProfilesTitle = t("{customerSingular} Profiles", { customerSingular: terms.customerSingular });
+  // The invoice editor's one main action, for the bar a phone pins along the
+  // bottom with the total: the same button the action bar leads with.
+  const invoicePhonePrimary: { label: string; icon: ReactNode; run: () => void; disabled: boolean } = invoiceEditing
+    ? {
+        label: isRevisingInvoice ? t("Save & email") : t("Publish & email"),
+        icon: <ClarityEmail size={16} />,
+        run: () => void commitInvoice("publish-send"),
+        disabled: invoiceIssueState === "saving",
+      }
+    : openedInvoiceStatus === "draft"
+      ? {
+          label: t("Publish & email"),
+          icon: <ClarityEmail size={16} />,
+          run: () => void commitInvoice("publish-send"),
+          disabled: invoiceIssueState === "saving",
+        }
+      : {
+          label: invoiceSendState === "sending" ? t("Sending...") : openedInvoiceSentAt ? t("Resend") : t("Send"),
+          icon: <Send size={16} />,
+          run: () => void sendOpenedInvoice(),
+          disabled: invoiceSendState === "sending",
+        };
+
+  function scrollToInvoiceRail(id: string) {
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  // An invoice opened from a Billing list steps back to that list, not the menu.
+  const invoiceReturnList =
+    invoiceReturnSection === "none" || invoiceReturnSection === "new-invoice" ? null : invoiceReturnSection;
   const phoneBackStep: PhoneStep | null = !phoneLayout
     ? null
     : activeView === "settings" && settingsTab !== "none" && workspaceOverlay?.kind !== "settings"
       ? { label: t("Settings"), go: () => switchSettingsTab("none") }
       : activeView === "billing" && billingSection !== "none" && workspaceOverlay?.kind !== "billing"
-        ? { label: t("Billing"), go: () => setBillingSection("none") }
+        ? billingSection === "new-invoice" && invoiceReturnList
+          ? { label: billingSectionLabel(invoiceReturnList), go: () => switchBillingSection(invoiceReturnList) }
+          : { label: t("Billing"), go: () => setBillingSection("none") }
         : activeView === "book" && quickCreate
           ? { label: t("Book"), go: () => setQuickCreate(null) }
           : phonePlayerOpen
             ? { label: playerProfilesTitle, go: () => setPlayerToolExpanded(false) }
             : null;
   // And forward, for the swipe only: from a menu, back into the section you
-  // last had open there. A new invoice is never reopened this way -- it would
-  // start another one.
+  // last had open there. The invoice editor is resumed rather than reopened,
+  // so a swipe back by mistake never costs the invoice on it; the list an
+  // invoice was opened from resumes it the same way.
   if (settingsTab !== "none") lastSettingsSectionRef.current = settingsTab;
-  if (billingSection !== "none" && billingSection !== "new-invoice") lastBillingSectionRef.current = billingSection;
+  if (billingSection !== "none") lastBillingSectionRef.current = billingSection;
+  const resumeInvoice: PhoneStep = {
+    label: isNewInvoice ? billingSectionLabel("new-invoice") : activeInvoiceNumber,
+    go: () => setBillingSection("new-invoice"),
+  };
   const lastSettingsSection = lastSettingsSectionRef.current;
   const lastBillingSection = lastBillingSectionRef.current;
   const phoneForwardStep: PhoneStep | null = !phoneLayout
@@ -16898,8 +16945,12 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
           label: settingsSections.find((section) => section.key === lastSettingsSection)?.label ?? t("Settings"),
           go: () => switchSettingsTab(lastSettingsSection),
         }
-      : activeView === "billing" && billingSection === "none" && lastBillingSection !== "none"
+      : activeView === "billing" && billingSection === "none" && lastBillingSection === "new-invoice"
+        ? resumeInvoice
+        : activeView === "billing" && billingSection === "none" && lastBillingSection !== "none"
         ? { label: billingSectionLabel(lastBillingSection), go: () => switchBillingSection(lastBillingSection) }
+        : activeView === "billing" && invoiceReturnList && billingSection === invoiceReturnList
+        ? resumeInvoice
         : activeView === "players" && notesWorkspaceClient && !playerToolExpanded
           ? { label: notesWorkspaceClient.name, go: () => setPlayerToolExpanded(true) }
           : null;
@@ -16924,6 +16975,10 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
         (snapshot.view === "settings" && snapshot.settingsTab !== "none") ||
         (snapshot.view === "billing" && snapshot.billingSection !== "none"))
         ? 1
+        : 0) +
+      // An invoice opened from a list is a step further in than the list.
+      (phoneLayout && snapshot.view === "billing" && snapshot.billingSection === "new-invoice" && (snapshot.invoiceFrom ?? "none") !== "none"
+        ? 1
         : 0),
     state: {
       view: activeView,
@@ -16933,6 +16988,9 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
       overlay: workspaceOverlay,
       layers: backLayerIds,
       playerOpen: phonePlayerOpen,
+      // Only while the editor is open, so a list reads the same before an
+      // invoice is opened from it and after Back returns to it.
+      invoiceFrom: billingSection === "new-invoice" ? invoiceReturnSection : "none",
     },
     restore: (snapshot) => {
       // Topmost first, so a confirm standing over a modal goes before it.
@@ -16950,6 +17008,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
       setBillingSection(snapshot.billingSection);
       setRequestedSettingsGroup(snapshot.settingsGroup);
       if (phoneLayout && snapshot.view === "players") setPlayerToolExpanded(Boolean(snapshot.playerOpen));
+      if (snapshot.billingSection === "new-invoice") setInvoiceReturnSection(snapshot.invoiceFrom ?? "none");
       // Only when the overlay is staying: closing it is the layer's job above,
       // and doing it here as well would skip that unsaved-edit question.
       if (wanted.has("workspace-overlay")) setWorkspaceOverlay(snapshot.overlay);
@@ -19784,7 +19843,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                   {billingDataLoadState === "loading" && !recentInvoices.length ? (
                     <Loading what={t("invoices")} />
                   ) : recentInvoices.length ? (
-                    <table className="recent-invoices-table">
+                    <table className="recent-invoices-table invoice-list-table">
                       <thead>
                         <tr>
                           <th>{t("Invoice")}</th>
@@ -19803,11 +19862,11 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                             role="button"
                             tabIndex={0}
                             title={invoiceRecord.status === "draft" ? t("Open draft to edit") : t("Open invoice to send or download")}
-                            onClick={() => openInvoiceForEdit(invoiceRecord)}
+                            onClick={() => openInvoiceForEdit(invoiceRecord, "dashboard")}
                             onKeyDown={(event) => {
                               if (event.key === "Enter" || event.key === " ") {
                                 event.preventDefault();
-                                void openInvoiceForEdit(invoiceRecord);
+                                void openInvoiceForEdit(invoiceRecord, "dashboard");
                               }
                             }}
                           >
@@ -19863,7 +19922,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                     <p>{t("Could not load invoices.")}{" "}<button className="outline-button" type="button" onClick={() => void fetchAllInvoices()}>{t("Try again")}</button>
                     </p>
                   ) : filteredInvoices.length ? (
-                    <table className="recent-invoices-table">
+                    <table className="recent-invoices-table invoice-list-table">
                       <thead>
                         <tr>
                           <th>{t("Invoice")}</th>
@@ -19882,11 +19941,11 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                             role="button"
                             tabIndex={0}
                             title={invoiceRecord.status === "draft" ? t("Open draft to edit") : t("Open invoice to send or download")}
-                            onClick={() => openInvoiceForEdit(invoiceRecord)}
+                            onClick={() => openInvoiceForEdit(invoiceRecord, "invoices")}
                             onKeyDown={(event) => {
                               if (event.key === "Enter" || event.key === " ") {
                                 event.preventDefault();
-                                void openInvoiceForEdit(invoiceRecord);
+                                void openInvoiceForEdit(invoiceRecord, "invoices");
                               }
                             }}
                           >
@@ -20032,6 +20091,23 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                  sheet says which of its own lines are yours without a single
                  field label. */
               <div className="invoice-paper-layout">
+                {phoneLayout ? (
+                  <div className="ip-phone-bar">
+                    <span className="ip-phone-total">
+                      <em>{t("Total")}</em>
+                      <strong>{formatMoney(invoiceTotal, invoiceSettings.currency)}</strong>
+                    </span>
+                    <button
+                      className="primary-button"
+                      disabled={invoicePhonePrimary.disabled}
+                      onClick={invoicePhonePrimary.run}
+                      type="button"
+                    >
+                      {invoicePhonePrimary.icon}
+                      {invoicePhonePrimary.label}
+                    </button>
+                  </div>
+                ) : null}
                 <div className="ip-actionbar">
                   <p>{t("You are typing on the invoice itself. Dashed is editable; everything else comes from your template.")}</p>
                   <div className="ip-actionbar-buttons">
@@ -20615,12 +20691,27 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                         })}
 
                         {!invoiceDraft.lines.length && (
-                          <p className="ip-lines-empty">{t("No lines yet. Pull a lesson from the right, or start a blank one.")}</p>
+                          <p className="ip-lines-empty">
+                            {phoneLayout
+                              ? t("No lines yet. Pull in a lesson or a product, or start a blank one.")
+                              : t("No lines yet. Pull a lesson from the right, or start a blank one.")}
+                          </p>
                         )}
 
                         {!invoiceLocked && (
                           <button className="ip-add-line" onClick={addManualInvoiceLine} type="button">
                             <Plus size={14} />{t("Add a line")}</button>
+                        )}
+                        {/* On a phone the lessons and the catalog sit under the
+                            whole sheet, so they are a tap away from here rather
+                            than a long scroll. */}
+                        {phoneLayout && !invoiceLocked && (
+                          <div className="ip-phone-pull">
+                            <button className="outline-button" onClick={() => scrollToInvoiceRail("ip-rail-lessons")} type="button">
+                              <ClarityCalendar size={16} />{t("Completed lessons")}</button>
+                            <button className="outline-button" onClick={() => scrollToInvoiceRail("ip-rail-catalog")} type="button">
+                              <ClarityProducts size={16} />{t("Catalog")}</button>
+                          </div>
                         )}
                       </div>
 
@@ -20800,7 +20891,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                   </div>
 
                   <aside className="ip-rail">
-                    <article className="ip-card">
+                    <article className="ip-card" id="ip-rail-lessons">
                       <strong className="ip-card-title">{t("Completed lessons")}</strong>
                       {/* Same bookingPullFilter the Dashboard's list reads, so the
                           two can still never disagree about what they are showing -
@@ -20874,7 +20965,10 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                                 key={item.id}
                                 className={alreadyInvoiced ? "is-used" : ""}
                                 disabled={alreadyInvoiced}
-                                onClick={() => addCompletedBookingLine(item)}
+                                onClick={() => {
+                                  addCompletedBookingLine(item);
+                                  if (phoneLayout && !alreadyInvoiced) setToast({ message: t("Added to the invoice.") });
+                                }}
                                 type="button"
                               >
                                 <span className="ip-rail-row-main">
@@ -20917,7 +21011,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                       </div>
                     </article>
 
-                    <article className="ip-card">
+                    <article className="ip-card" id="ip-rail-catalog">
                       <strong className="ip-card-title">{t("Catalog")}</strong>
                       <label className="ip-search">
                         <Search size={14} />
@@ -20931,7 +21025,14 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                       <div className="ip-rail-list">
                         {visibleInvoiceCatalogOptions.length ? (
                           visibleInvoiceCatalogOptions.map((item) => (
-                            <button key={item.id} onClick={() => addCatalogInvoiceLine(item)} type="button">
+                            <button
+                              key={item.id}
+                              onClick={() => {
+                                addCatalogInvoiceLine(item);
+                                if (phoneLayout) setToast({ message: t("Added to the invoice.") });
+                              }}
+                              type="button"
+                            >
                               <span className="ip-rail-icon">
                                 {item.kind === "product" ? (
                                   <ClarityStore size={14} />
@@ -21767,7 +21868,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                               <td>
                                 <button
                                   className="link-button"
-                                  onClick={() => void openInvoiceForEdit(row.invoice)}
+                                  onClick={() => void openInvoiceForEdit(row.invoice, "transactions")}
                                   type="button"
                                 >
                                   {row.invoice.invoiceNumber}

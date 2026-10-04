@@ -17684,6 +17684,298 @@ button {
   white-space: nowrap;
 }
 
+/* ---- Invoices on a phone ---------------------------------------------------
+   The invoice lists are cards rather than a table that scrolls sideways: who
+   and how much on the top line, the number, date and status under it. A card
+   is one tap target, and a list that does not scroll sideways leaves the
+   swipe free to step back. */
+.app-shell.is-phone .invoice-list-table {
+  overflow: visible;
+}
+
+.app-shell.is-phone .invoice-list-table thead {
+  display: none;
+}
+
+.app-shell.is-phone .invoice-list-table tbody {
+  display: block;
+}
+
+.app-shell.is-phone .invoice-list-table tr {
+  min-height: 60px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "customer customer amount"
+    "number date status";
+  align-items: center;
+  gap: 4px 10px;
+  padding: 12px 4px;
+  border-bottom: 1px solid var(--c-border-soft);
+}
+
+.app-shell.is-phone .invoice-list-table td {
+  display: block;
+  padding: 0;
+  border: 0;
+  white-space: nowrap;
+}
+
+.app-shell.is-phone .invoice-list-table td:nth-child(1) {
+  grid-area: number;
+  color: var(--c-text-soft);
+  font-size: 13px;
+}
+
+.app-shell.is-phone .invoice-list-table td:nth-child(2) {
+  grid-area: customer;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.app-shell.is-phone .invoice-list-table td:nth-child(3) {
+  grid-area: date;
+  color: var(--c-text-soft);
+  font-size: 13px;
+}
+
+.app-shell.is-phone .invoice-list-table td:nth-child(4) {
+  grid-area: amount;
+  font-size: 15px;
+  font-weight: 700;
+  text-align: right;
+}
+
+.app-shell.is-phone .invoice-list-table td:nth-child(5) {
+  grid-area: status;
+  justify-self: end;
+}
+
+/* ---- The invoice editor on a phone -----------------------------------------
+   The total and the one button that finishes the job stay pinned along the
+   bottom, above the tab bar, wherever on the sheet the coach has scrolled to.
+   The action bar keeps everything else, laid out as big even buttons, and
+   loses the sentence about dashed fields: on a phone the fields say so. */
+.app-shell.is-phone .invoice-paper-layout {
+  gap: 14px;
+  padding-bottom: 76px;
+}
+
+.ip-phone-bar {
+  position: fixed;
+  left: 8px;
+  right: 8px;
+  bottom: calc(84px + env(safe-area-inset-bottom));
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 10px 10px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--c-radius-card);
+  background: var(--panel);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.16);
+}
+
+.ip-phone-total {
+  display: grid;
+  min-width: 0;
+}
+
+.ip-phone-total em {
+  color: var(--c-text-soft);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.ip-phone-total strong {
+  font-size: 20px;
+  white-space: nowrap;
+}
+
+.ip-phone-bar .primary-button {
+  min-height: 46px;
+  padding: 0 16px;
+}
+
+.app-shell.is-phone .ip-actionbar > p,
+.app-shell.is-phone .ip-actionbar-buttons > .primary-button {
+  display: none;
+}
+
+.app-shell.is-phone .ip-actionbar-buttons {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.app-shell.is-phone .ip-actionbar-buttons > .outline-button {
+  min-height: 44px;
+  justify-content: center;
+}
+
+/* Delete / Void and the payment-link switch are not peers of the buttons:
+   each takes a full row, the switch first. */
+.app-shell.is-phone .ip-actionbar-buttons > .ip-pay-toggle,
+.app-shell.is-phone .ip-actionbar-buttons > .text-button {
+  grid-column: 1 / -1;
+  min-height: 40px;
+}
+
+.app-shell.is-phone .ip-actionbar-buttons > .ip-pay-toggle {
+  order: -1;
+}
+
+.app-shell.is-phone .ip-actionbar-buttons > .text-button {
+  order: 1;
+  justify-self: start;
+}
+
+/* The heading stacks: business, then number and dates under it. */
+.app-shell.is-phone .ip-paper-head {
+  padding-top: 18px;
+}
+
+.app-shell.is-phone .ip-issue-meta {
+  flex-basis: 100%;
+  justify-items: start;
+  text-align: left;
+}
+
+.app-shell.is-phone .ip-date-field {
+  justify-items: start;
+}
+
+.app-shell.is-phone .ip-payer-results button {
+  min-height: 48px;
+}
+
+/* Each line is a small card of its own: what it is across the top with its
+   remove, then quantity, price, amount and the discount toggle under it.
+   Six columns across a phone left the description about 130px. */
+.app-shell.is-phone .ip-line-head {
+  display: none;
+}
+
+.app-shell.is-phone .ip-lines {
+  display: grid;
+  gap: 8px;
+  padding-top: 4px;
+  border: 0;
+  overflow: visible;
+}
+
+.app-shell.is-phone .ip-line {
+  grid-template-columns: 64px minmax(0, 1fr) auto 40px;
+  grid-template-areas:
+    "desc desc desc remove"
+    "qty unit amount toggle";
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--c-border-soft);
+  border-radius: var(--c-radius-control);
+}
+
+.app-shell.is-phone .ip-line .ip-line-desc {
+  grid-area: desc;
+}
+
+.app-shell.is-phone .ip-line .ip-line-qty {
+  grid-area: qty;
+}
+
+.app-shell.is-phone .ip-line .ip-line-unit {
+  grid-area: unit;
+}
+
+.app-shell.is-phone .ip-line .ip-line-desc,
+.app-shell.is-phone .ip-line .ip-line-qty,
+.app-shell.is-phone .ip-line .ip-line-unit {
+  min-height: 44px;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+
+.app-shell.is-phone .ip-line .ip-line-qty {
+  text-align: center;
+}
+
+.app-shell.is-phone .ip-line .ip-line-amount {
+  grid-area: amount;
+  padding-top: 0;
+}
+
+.app-shell.is-phone .ip-line .ip-line-amount strong {
+  font-size: 15px;
+}
+
+.app-shell.is-phone .ip-line-remove,
+.app-shell.is-phone .ip-line-toggle {
+  width: 40px;
+  height: 40px;
+}
+
+.app-shell.is-phone .ip-line-remove {
+  grid-area: remove;
+}
+
+.app-shell.is-phone .ip-line-toggle {
+  grid-area: toggle;
+}
+
+/* A saved invoice's lines read the same way, without the controls. */
+.app-shell.is-phone .ip-line.ip-line-plain {
+  grid-template-areas:
+    "desc desc desc desc"
+    "qty unit amount amount";
+}
+
+.app-shell.is-phone .ip-line-plain > span:empty {
+  display: none;
+}
+
+.app-shell.is-phone .ip-line-plain .ip-line-desc,
+.app-shell.is-phone .ip-line-plain .ip-line-qty,
+.app-shell.is-phone .ip-line-plain .ip-line-unit {
+  min-height: 0;
+  padding: 0;
+}
+
+.app-shell.is-phone .ip-add-line {
+  min-height: 44px;
+  border-radius: var(--c-radius-control);
+  font-size: 14px;
+}
+
+.ip-phone-pull {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.ip-phone-pull .outline-button {
+  min-height: 44px;
+  justify-content: center;
+}
+
+.app-shell.is-phone .ip-rail-list button {
+  min-height: 52px;
+}
+
+/* The rail's cards are jumped to from above the lines, so they stop short of
+   the topbar rather than under it. */
+.app-shell.is-phone .ip-card {
+  scroll-margin-top: 12px;
+}
+
 .app-shell.is-phone .bank-toolbar {
   padding: 8px;
 }

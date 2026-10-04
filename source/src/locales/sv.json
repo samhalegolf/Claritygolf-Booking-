@@ -4453,5 +4453,7 @@
   "Show today": "Visa idag",
   "Day": "Dag",
   "Pick a time": "Välj en tid",
-  "No free times this week.": "Inga lediga tider den här veckan."
+  "No free times this week.": "Inga lediga tider den här veckan.",
+  "No lines yet. Pull in a lesson or a product, or start a blank one.": "Inga rader än. Hämta in en lektion eller en produkt, eller börja på en tom rad.",
+  "Added to the invoice.": "Tillagd på fakturan."
 }
