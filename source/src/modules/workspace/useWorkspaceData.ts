@@ -48,8 +48,7 @@ import {
  * out from them alone, such as this business's coaches.
  *
  * Seeded from the session answer when there is one, so the first render is
- * already the right business. Loading and saving still live in App; this is
- * where they read and write.
+ * already the right business. useWorkspaceSync loads and saves it.
  */
 export function useWorkspaceData({ entrySession }: { entrySession: Session }) {
   // What the session answer said about this workspace, if it said anything.
