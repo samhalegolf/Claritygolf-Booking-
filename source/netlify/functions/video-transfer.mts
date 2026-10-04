@@ -56,6 +56,7 @@ import {
   snapshotUploadVerdict,
 } from "./_shared/swing-review-snapshots.mts";
 import { cleanString, cleanText, env } from "./_shared/values.mts";
+import { json } from "./_shared/http.mts";
 
 // Player portal sessions (see booking-core.mts). Player video routes are scoped
 // to the player's own player_id; the admin transfer surface is untouched.
@@ -419,16 +420,6 @@ function assertClarityCloudServerConfigured(req: Request) {
       503
     );
   }
-}
-
-function json(value: unknown, status = 200) {
-  return new Response(JSON.stringify(value), {
-    status,
-    headers: {
-      "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": "no-store",
-    },
-  });
 }
 
 function errorJson(
@@ -3528,10 +3519,7 @@ async function handlePlayerVideoRoute(
       return json({ error: "not_found", message: "Video not found for this player." }, 404);
     }
     if (!scope.portalPlayerId) {
-      return json(
-        { error: "forbidden", message: "Ask your coach to set up portal access before sending videos." },
-        403,
-      );
+      return json({ error: "forbidden", message: "Ask your coach to set up portal access before sending videos." }, 403);
     }
 
     const body = await req.clone().json().catch(() => ({})) as any;
@@ -4732,13 +4720,10 @@ async function routeVideoTransferRequest(
     if (error?.status === 401 || error?.status === 403) {
       // Same shape the old inline gate returned, so the client's handling of
       // "you are signed out" is unchanged.
-      return json(
-        {
+      return json({
           error: error.code || "unauthorized",
           message: error instanceof Error ? error.message : "Admin login required.",
-        },
-        error.status,
-      );
+        }, error.status);
     }
     const code =
       error?.code === "CLOUD_OAUTH_NOT_CONFIGURED"

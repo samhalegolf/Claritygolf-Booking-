@@ -2,17 +2,7 @@ import type { Config } from "@netlify/functions";
 
 import { holdResource } from "./_shared/resource-handler.mts";
 import { requireCoachActor } from "./_shared/coach-auth.mts";
-
-
-function json(value: unknown, status = 200) {
-  return new Response(JSON.stringify(value), {
-    status,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      "cache-control": "no-store",
-    },
-  });
-}
+import { json } from "./_shared/http.mts";
 
 /**
  * Booking an Optix resource acts on one Clarity booking by id. The old check
@@ -32,13 +22,10 @@ export default async function handler(req: Request) {
     accountId = await requireAccountId(req);
   } catch (error) {
     const status = (error as { status?: number })?.status === 403 ? 403 : 401;
-    return json(
-      {
+    return json({
         error: (error as { code?: string })?.code || "unauthorized",
         message: error instanceof Error ? error.message : "Admin login required.",
-      },
-      status,
-    );
+      }, status);
   }
 
   let body: any = null;
@@ -51,14 +38,11 @@ export default async function handler(req: Request) {
   const calendarItemId = String(body?.calendarItemId || "").trim();
   const source = String(body?.source || "").trim();
   if (!calendarItemId || source !== "manual-book-resource") {
-    return json(
-      {
+    return json({
         ok: false,
         error: "manual_booking_required",
         message: "Bays can only be booked from the Book bay button on a booking card.",
-      },
-      400,
-    );
+      }, 400);
   }
 
   try {
@@ -66,14 +50,11 @@ export default async function handler(req: Request) {
     return json(result, result.ok ? 200 : 207);
   } catch (error: any) {
     const code = String(error?.code || "resource_hold_failed");
-    return json(
-      {
+    return json({
         ok: false,
         error: code,
         message: error instanceof Error ? error.message : "Bay booking failed.",
-      },
-      code === "not_configured" ? 503 : 500,
-    );
+      }, code === "not_configured" ? 503 : 500);
   }
 }
 

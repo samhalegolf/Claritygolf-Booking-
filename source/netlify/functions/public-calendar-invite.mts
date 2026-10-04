@@ -4,6 +4,7 @@ import { resolvePublicAccount } from "./_shared/coach-auth.mts";
 import { settingsSelectQuery } from "./_shared/settings-scope.mts";
 import { cleanMessageLanguage, messageText } from "./_shared/message-language.mts";
 import { cleanEmail, cleanString, cleanText, env } from "./_shared/values.mts";
+import { json } from "./_shared/http.mts";
 
 const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
 
@@ -281,13 +282,6 @@ function generateInvite(appointment: any, settings: any) {
   return `${lines.map(foldLine).join("\r\n")}\r\n`;
 }
 
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
-  });
-}
-
 export default async function handler(req: Request) {
   try {
     if (req.method !== "GET") return json({ error: "method_not_allowed" }, 405);
@@ -333,13 +327,10 @@ export default async function handler(req: Request) {
     });
   } catch (error) {
     console.error("public_calendar_invite:failed", error);
-    return json(
-      {
+    return json({
         error: "public_calendar_invite_error",
         message: error instanceof Error ? error.message : "Calendar invite could not be created.",
-      },
-      500,
-    );
+      }, 500);
   }
 }
 

@@ -45,6 +45,7 @@ import {
   type GoogleCalendarImportRule,
 } from "./_shared/google-calendar-import-rules.mts";
 import { cleanString, cleanText, env, nowIso } from "./_shared/values.mts";
+import { json } from "./_shared/http.mts";
 
 const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
 // Auto-sync every booking change to Google Calendar. Each booking mutation path
@@ -1901,13 +1902,6 @@ export async function syncAllCoachCalendarsNow(accountId: string, trigger: strin
   return { ok: results.every((result) => result.ok), calendars: results };
 }
 
-function json(value: unknown, status = 200) {
-  return new Response(JSON.stringify(value), {
-    status,
-    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
-  });
-}
-
 export default async function googleCalendarSyncHandler(req: Request) {
   try {
     if (req.method === "GET" || req.method === "POST") {
@@ -1920,15 +1914,12 @@ export default async function googleCalendarSyncHandler(req: Request) {
     return json({ error: "method_not_allowed", message: "Use GET for status or POST to sync." }, 405);
   } catch (error: any) {
     console.error("google_calendar_sync:function_failed", error);
-    return json(
-      {
+    return json({
         error: "google_calendar_sync_error",
         message: error instanceof Error ? error.message : "Google Calendar sync failed.",
         failure: debugErrorFromUnknown(error, "sync"),
         request: error?.debugRequest || null,
-      },
-      error?.status || 500,
-    );
+      }, error?.status || 500);
   }
 }
 

@@ -5,19 +5,10 @@ import { bayBookingMatchesSlot } from "./_shared/optix-reconcile.mts";
 import { chosenResourceProviderId } from "./_shared/resource-handler.mts";
 import { readResourceWebhookSettings } from "./_shared/resource-webhook-provider.mts";
 import { env } from "./_shared/values.mts";
+import { json } from "./_shared/http.mts";
 
 function db() {
   return getDatabase();
-}
-
-function json(value: unknown, status = 200) {
-  return new Response(JSON.stringify(value), {
-    status,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      "cache-control": "no-store",
-    },
-  });
 }
 
 /**
@@ -167,13 +158,10 @@ export default async function handler(req: Request) {
     accountId = await requireAccountId(req);
   } catch (error) {
     const status = (error as { status?: number })?.status === 403 ? 403 : 401;
-    return json(
-      {
+    return json({
         error: (error as { code?: string })?.code || "unauthorized",
         message: error instanceof Error ? error.message : "Admin login required.",
-      },
-      status,
-    );
+      }, status);
   }
 
   await ensureTable();

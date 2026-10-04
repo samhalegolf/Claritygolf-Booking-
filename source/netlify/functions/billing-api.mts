@@ -66,13 +66,7 @@ import {
 } from "./_shared/terminal.mts";
 import { cleanPhoneCountry } from "./_shared/phone.mts";
 import { cleanString, cleanText, env, nowIso } from "./_shared/values.mts";
-
-function json(value: unknown, status = 200) {
-  return new Response(JSON.stringify(value), {
-    status,
-    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
-  });
-}
+import { json } from "./_shared/http.mts";
 
 // A calendar date on its way into a DATE column. Anything that isn't an actual
 // yyyy-mm-dd becomes null rather than reaching Postgres and 400-ing the whole
@@ -5917,16 +5911,13 @@ export default async function handler(req: Request) {
     console.error("billing_api:failed", action, error);
     const status = Number((error as { status?: unknown })?.status);
     const httpStatus = Number.isInteger(status) && status >= 400 && status <= 599 ? status : 500;
-    return json(
-      {
+    return json({
         error: (error as { code?: string })?.code || "billing_api_error",
         message: error instanceof Error ? error.message : "Billing request failed.",
         // Structured detail a caller can act on rather than only display - the
         // booking/invoice conflicts behind a 409, for one.
         ...((error as { details?: Record<string, unknown> })?.details || {}),
-      },
-      httpStatus,
-    );
+      }, httpStatus);
   }
 }
 

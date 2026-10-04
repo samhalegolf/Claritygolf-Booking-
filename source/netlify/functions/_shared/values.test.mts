@@ -4,7 +4,7 @@ import { dirname, join, relative } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { cleanString, cleanText, trimmedEnv } from "./values.mts";
+import { cleanString, cleanText, safeJsonStringify, trimmedEnv } from "./values.mts";
 
 const functionsDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -15,6 +15,19 @@ test("cleanString keeps a cleared value blank; cleanText falls back", () => {
   assert.equal(cleanText(42, "Busy"), "Busy");
   assert.equal(cleanString("  abcdef  ", "", 3), "abc");
   assert.equal(cleanText("  abcdef  ", "", 3), "abc");
+});
+
+test("safeJsonStringify writes a shared object every time it appears", () => {
+  // It used to mark the second appearance "[Circular]", which is how the
+  // public slots answer once had to copy every slot to stay readable.
+  const slots = [{ start: 540 }];
+  assert.equal(safeJsonStringify({ slots, services: { a: { slots } } }), '{"slots":[{"start":540}],"services":{"a":{"slots":[{"start":540}]}}}');
+});
+
+test("safeJsonStringify still survives a real cycle and a bigint", () => {
+  const node: Record<string, unknown> = { name: "a" };
+  node.self = node;
+  assert.equal(safeJsonStringify({ node, count: 12n }), '{"node":{"name":"a","self":"[Circular]"},"count":12}');
 });
 
 test("trimmedEnv drops whitespace pasted around a value", () => {

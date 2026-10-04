@@ -18,6 +18,7 @@ import {
 } from "./_shared/google-provider.mts";
 import { requireCoachActor } from "./_shared/coach-auth.mts";
 import { cleanString, env } from "./_shared/values.mts";
+import { json } from "./_shared/http.mts";
 
 const driveFileScope = googleDriveFileScope;
 // Drive is its own sign-in now, separate from each coach's calendar: it asks
@@ -30,16 +31,6 @@ type DriveStatusState =
   | "reconnect_required"
   | "blocked"
   | "error";
-
-function json(value: unknown, status = 200) {
-  return new Response(JSON.stringify(value), {
-    status,
-    headers: {
-      "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": "no-store",
-    },
-  });
-}
 
 function supabaseConfig() {
   const url = env("SUPABASE_URL").replace(/\/$/, "");
@@ -398,13 +389,10 @@ export default async function handler(
     if (req.method === "GET" && action === "callback") {
       return html(callbackPage(false, error instanceof Error ? error.message : "Google Drive connection failed."), status);
     }
-    return json(
-      {
+    return json({
         error: status === 500 ? "google_drive_error" : "request_error",
         message: error instanceof Error ? error.message : "Google Drive request failed.",
-      },
-      status,
-    );
+      }, status);
   }
 }
 

@@ -29,16 +29,32 @@ export function nowIso() {
   return new Date().toISOString();
 }
 
+/**
+ * JSON.stringify that cannot throw on what a database hands back: a bigint
+ * becomes a number (or a string when it would lose precision), and a real
+ * cycle becomes "[Circular]".
+ *
+ * Only a real cycle -- an object inside itself. The same object appearing
+ * twice side by side (one slot list under two keys) is ordinary data and is
+ * written out both times.
+ */
 export function safeJsonStringify(value) {
-  const seen = new WeakSet();
-  return JSON.stringify(value, (_key, current) => {
+  // The objects on the path from the root to the value being written. JSON
+  // calls the replacer with `this` set to the parent, so the path is trimmed
+  // back to that parent before each check.
+  const path = [];
+  return JSON.stringify(value, function (_key, current) {
     if (typeof current === "bigint") {
       const asNumber = Number(current);
       return Number.isSafeInteger(asNumber) ? asNumber : String(current);
     }
-    if (current && typeof current === "object") {
-      if (seen.has(current)) return "[Circular]";
-      seen.add(current);
+    if (path.length) {
+      const parentAt = path.indexOf(this);
+      if (parentAt === -1) path.push(this);
+      else path.length = parentAt + 1;
+      if (current && typeof current === "object" && path.includes(current)) return "[Circular]";
+    } else {
+      path.push(current);
     }
     return current;
   });

@@ -11,48 +11,7 @@ import {
   syncStripeInvoice,
 } from "./_shared/stripe-billing.mts";
 import { handleMembershipStripeEvent } from "./_shared/memberships.mts";
-
-// Stripe webhook: keeps billing_invoices / billing_invoice_items live-mirrored
-// from Stripe. All operations are idempotent upserts keyed on Stripe ids, so
-// Stripe's at-least-once delivery and retries are harmless. Failures return 500
-// so Stripe retries them.
-//
-// Products are deliberately not mirrored - see the note in
-// _shared/stripe-billing.mts. product.* events are acknowledged and ignored.
-//
-// One endpoint for every business. It is registered once, on Clarity's
-// platform Stripe account under Connect ("events on connected accounts"), with
-// the events below. Each event names the connected account it came from
-// (event.account) and whether it is live; that pair finds the business. The
-// signing secret is the platform's (STRIPE_CONNECT_WEBHOOK_SECRET, or the
-// _TEST_ one for the test-mode endpoint), never a business's.
-//
-// Events: invoice.created, invoice.updated, invoice.finalized, invoice.sent,
-// invoice.paid, invoice.payment_failed, invoice.voided,
-// invoice.marked_uncollectible, invoice.deleted, charge.succeeded,
-// charge.updated, charge.captured, charge.refunded,
-// account.application.deauthorized, account.updated, payment_intent.succeeded.
-//
-// account.updated is how a Clarity Pay account switches on once Stripe has
-// finished checking the business, even if they closed the tab mid-signup.
-//
-// payment_intent.succeeded settles a Tap to Pay sale whose phone never heard
-// the answer (app closed, signal lost). The phone settles the same payment
-// itself when it can; whichever gets there second finds it already done.
-//
-// Memberships (see _shared/memberships.mts) also listen here, and need
-// checkout.session.completed added to the endpoint's events: it banks a saved
-// card when the member closes the tab before Stripe's return page loads. A
-// renewal's payment_intent.succeeded settles a charge whose off-session
-// confirm timed out. Both carry clarity_membership_* metadata, which is how
-// they are told apart from till sales and portal purchases.
-
-function json(value: unknown, status = 200) {
-  return new Response(JSON.stringify(value), {
-    status,
-    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
-  });
-}
+import { json } from "./_shared/http.mts";
 
 /** Both modes' secrets: the live and test endpoints are signed separately. */
 function webhookSecrets() {
@@ -138,10 +97,7 @@ export default async function handler(req: Request) {
     return json({ received: true, results });
   } catch (error) {
     console.error("stripe_billing_webhook:failed", event?.type, error);
-    return json(
-      { error: "webhook_processing_failed", message: error instanceof Error ? error.message : "Processing failed." },
-      500,
-    );
+    return json({ error: "webhook_processing_failed", message: error instanceof Error ? error.message : "Processing failed." }, 500);
   }
 }
 

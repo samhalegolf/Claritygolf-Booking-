@@ -10,18 +10,12 @@ import {
   settingsUpsertRows,
 } from "./_shared/settings-scope.mts";
 import { cleanString, env, nowIso } from "./_shared/values.mts";
+import { json } from "./_shared/http.mts";
 
 function normalizeContact(value: unknown) {
   return cleanString(value, "", 180)
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "");
-}
-
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
-  });
 }
 
 /**
@@ -339,16 +333,13 @@ export default async function handler(req: Request, context: Context) {
   } catch (error: any) {
     console.error("public_cancel:failed", error);
     const status = error?.status || 500;
-    return json(
-      {
+    return json({
         error: status === 500 ? "public_cancel_error" : "request_error",
         message:
           error instanceof Error
             ? error.message
             : "Unknown public cancellation error",
-      },
-      status,
-    );
+      }, status);
   }
 }
 

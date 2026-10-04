@@ -4,17 +4,7 @@ import { randomUUID } from "node:crypto";
 import { getDatabase } from "@netlify/database";
 import { requireCoachActor } from "./_shared/coach-auth.mts";
 import { cleanString } from "./_shared/values.mts";
-
-
-function json(value, status = 200) {
-  return new Response(JSON.stringify(value), {
-    status,
-    headers: {
-      "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": "no-store",
-    },
-  });
-}
+import { json } from "./_shared/http.mts";
 
 async function parseBody(req: Request) {
   const raw = await req.text();
@@ -216,25 +206,19 @@ export default async (req: Request, _context: Context) => {
   } catch (error) {
     const status = (error as { status?: number })?.status;
     if (status === 401 || status === 403) {
-      return json(
-        {
+      return json({
           error: (error as { code?: string })?.code || "unauthorized",
           message: error instanceof Error ? error.message : "Admin login required.",
-        },
-        status,
-      );
+        }, status);
     }
     console.error("people_migrate_failed", error);
-    return json(
-      {
+    return json({
         error: "people_migrate_failed",
         message:
           error instanceof Error
             ? error.message
             : "Unknown client migration error",
-      },
-      500,
-    );
+      }, 500);
   }
 };
 

@@ -1,25 +1,7 @@
 import type { Config } from "@netlify/functions";
 import { requireCoachActor } from "./_shared/coach-auth.mts";
 import { DEFAULT_SINCE_EPOCH, syncChargesSince, syncInvoicesSince } from "./_shared/stripe-billing.mts";
-
-// Admin backfill endpoint: pulls Stripe invoices and charges (card payments
-// from the booking site) into the billing tables. Safe to re-run — everything
-// upserts on Stripe ids. Live updates arrive separately via
-// stripe-billing-webhook.mts; this endpoint is the manual catch-up/backfill.
-//
-// Products are NOT pulled — see _shared/stripe-billing.mts for why.
-//
-// POST /api/billing-stripe-sync
-//   { action?: "syncAll" | "syncInvoices" | "syncCharges",
-//     since?: string | number }   // since "all" (or 0) backfills full history
-
-
-function json(value: unknown, status = 200) {
-  return new Response(JSON.stringify(value), {
-    status,
-    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
-  });
-}
+import { json } from "./_shared/http.mts";
 
 // Same session check as billing-api.mts.
 /**
@@ -93,13 +75,10 @@ export default async function handler(req: Request) {
   } catch (error) {
     console.error("stripe_billing_sync:failed", error);
     const status = Number((error as { status?: unknown })?.status);
-    return json(
-      {
+    return json({
         error: (error as { code?: string })?.code || "stripe_billing_sync_error",
         message: error instanceof Error ? error.message : "Sync failed.",
-      },
-      Number.isInteger(status) && status >= 400 && status <= 599 ? status : 500,
-    );
+      }, Number.isInteger(status) && status >= 400 && status <= 599 ? status : 500);
   }
 }
 

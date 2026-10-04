@@ -8,13 +8,7 @@ import {
   settingsUpsertRows,
 } from "./_shared/settings-scope.mts";
 import { env, nowIso } from "./_shared/values.mts";
-
-function json(value: unknown, status = 200) {
-  return new Response(JSON.stringify(value), {
-    status,
-    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
-  });
-}
+import { json } from "./_shared/http.mts";
 
 function supabaseConfig() {
   const url = env("SUPABASE_URL").replace(/\/$/, "");

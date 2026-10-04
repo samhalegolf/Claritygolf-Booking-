@@ -3,12 +3,13 @@ import { randomUUID } from "node:crypto";
 import { filterCalendarStateForContext, readItems } from "./_shared/bookings.mts";
 import { requireCoachActor } from "./_shared/coach-auth.mts";
 import { readSettingsMap, settingValue } from "./_shared/settings-store.mts";
-import { cleanSlug, env, nowIso, safeJsonStringify } from "./_shared/values.mts";
+import { cleanSlug, env, nowIso } from "./_shared/values.mts";
 import {
   adminStateFromSettings,
   coachUserForMembership,
   publicCalendarState,
 } from "./_shared/workspace-state.mts";
+import { json } from "./_shared/http.mts";
 
 /**
  * GET /api/calendar-state: the coach calendar's first load.
@@ -22,16 +23,6 @@ import {
 type BookingCoreModule = {
   handleBookingApiRoute: (req: Request, forcedPathname?: string, context?: Context) => Promise<Response> | Response;
 };
-
-function json(value: unknown, status = 200) {
-  return new Response(safeJsonStringify(value), {
-    status,
-    headers: {
-      "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": "no-store",
-    },
-  });
-}
 
 function safeErrorDetail(error: unknown) {
   const raw = error instanceof Error ? error.message : String(error || "Unknown error");
@@ -49,8 +40,7 @@ function errorStatus(error: unknown) {
 
 function jsonError(req: Request, error: unknown, phase: "import" | "handler" | "shell") {
   const status = errorStatus(error);
-  return json(
-    {
+  return json({
       error: phase === "import" ? "calendar_state_import_error" : "calendar_state_error",
       phase,
       details: safeErrorDetail(error),
@@ -59,9 +49,7 @@ function jsonError(req: Request, error: unknown, phase: "import" | "handler" | "
         req.method === "PUT"
           ? "Your calendar change could not be saved. Please try again."
           : "Calendar data could not be loaded. Please refresh.",
-    },
-    status,
-  );
+    }, status);
 }
 
 async function readTinyCalendarShell(req: Request, requestStartedAt: number) {

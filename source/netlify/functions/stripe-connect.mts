@@ -20,6 +20,7 @@ import {
   stripePlatform,
   STRIPE_CONNECTION_SETTING,
 } from "./_shared/stripe.mts";
+import { json } from "./_shared/http.mts";
 
 /**
  * How a business sets up card payments. Two routes (see _shared/stripe.mts):
@@ -56,13 +57,6 @@ import {
 const STATE_SETTING = "stripeConnectOAuthState";
 /** Long enough to sign up to Stripe from scratch mid-flow; short enough to expire. */
 const STATE_TTL_MS = 60 * 60 * 1000;
-
-function json(value: unknown, status = 200) {
-  return new Response(JSON.stringify(value), {
-    status,
-    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
-  });
-}
 
 function db() {
   return getDatabase();

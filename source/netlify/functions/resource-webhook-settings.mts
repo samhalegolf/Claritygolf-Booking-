@@ -26,6 +26,7 @@ import {
   RESOURCE_WEBHOOK_SECRET_FIELD,
   RESOURCE_WEBHOOK_SETTINGS_KEY,
 } from "./_shared/resource-webhook-provider.mts";
+import { json } from "./_shared/http.mts";
 
 /**
  * Settings › Booking › Bay & room system.
@@ -40,13 +41,6 @@ const INBOUND_PATH = "/api/resource-webhook";
 
 function db() {
   return getDatabase();
-}
-
-function json(value: unknown, status = 200) {
-  return new Response(JSON.stringify(value), {
-    status,
-    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
-  });
 }
 
 async function writeSetting(accountId: string, key: string, value: string) {
@@ -112,10 +106,7 @@ export default async function handler(req: Request) {
     const rawUrl = String(body?.url ?? "").trim();
     const url = cleanResourceWebhookUrl(rawUrl);
     if (rawUrl && !url) {
-      return json(
-        { error: "invalid_url", message: "Use a public https:// address. Local and private addresses can't be reached." },
-        400,
-      );
+      return json({ error: "invalid_url", message: "Use a public https:// address. Local and private addresses can't be reached." }, 400);
     }
     const enabled = body?.enabled === true && Boolean(url);
     await writeSetting(accountId, RESOURCE_WEBHOOK_SETTINGS_KEY, JSON.stringify({ url, enabled }));

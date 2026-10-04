@@ -13,27 +13,7 @@ import {
 } from "./_shared/push-notify.mts";
 import { messageText } from "./_shared/message-language.mts";
 import { cleanString } from "./_shared/values.mts";
-
-/**
- * Browser notification subscriptions for the signed-in coach.
- *
- * GET    -> { configured, publicKey, subscribed, deviceCount }
- * POST   -> save this browser's subscription (upsert by endpoint)
- * POST   -> { test: true } sends a pop-up to every registered browser
- * POST   -> { endpoint, language } this browser now reads another language
- * DELETE -> forget this browser
- */
-
-
-function json(value: unknown, status = 200) {
-  return new Response(JSON.stringify(value), {
-    status,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      "cache-control": "no-store",
-    },
-  });
-}
+import { json } from "./_shared/http.mts";
 
 export default async function handler(req: Request) {
   // A push subscription belongs to one coach in one business: it is how that
@@ -48,13 +28,10 @@ export default async function handler(req: Request) {
     userId = actor.authUserId;
   } catch (error) {
     const status = (error as { status?: number })?.status === 403 ? 403 : 401;
-    return json(
-      {
+    return json({
         error: (error as { code?: string })?.code || "unauthorized",
         message: error instanceof Error ? error.message : "Admin login required.",
-      },
-      status,
-    );
+      }, status);
   }
 
   if (req.method === "GET") {
@@ -85,10 +62,7 @@ export default async function handler(req: Request) {
 
     if (body?.test === true) {
       if (!pushConfigured()) {
-        return json(
-          { error: "not_configured", message: "Browser notifications are not set up on the server yet." },
-          503,
-        );
+        return json({ error: "not_configured", message: "Browser notifications are not set up on the server yet." }, 503);
       }
       const result = await sendCoachPush(accountId, (language) => {
         const mt = messageText(language);

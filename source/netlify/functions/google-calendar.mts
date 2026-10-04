@@ -13,14 +13,7 @@ import {
   syncGoogleCalendarNow,
   updateGoogleCalendarSyncSettings,
 } from "./google-calendar-sync.mts";
-
-
-function json(value: unknown, status = 200) {
-  return new Response(JSON.stringify(value), {
-    status,
-    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
-  });
-}
+import { json } from "./_shared/http.mts";
 
 function html(value: string, status = 200) {
   return new Response(value, {
@@ -102,15 +95,12 @@ export default async function handler(req: Request) {
     if (req.method === "GET" && action === "callback") {
       return html(callbackPage(false, error instanceof Error ? error.message : "Google Calendar connection failed."), status);
     }
-    return json(
-      {
+    return json({
         error: status === 500 ? "google_calendar_error" : "request_error",
         message: error instanceof Error ? error.message : "Google Calendar request failed.",
         failure: googleCalendarDebugErrorFromUnknown(error, action),
         request: error?.debugRequest || null,
-      },
-      status,
-    );
+      }, status);
   }
 }
 
