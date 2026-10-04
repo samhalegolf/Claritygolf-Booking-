@@ -7,25 +7,22 @@
 // its one-off setup, and Apple's "How to Tap" guide is a tap away. Apple's
 // review looks for both.
 
-import { useState } from "react";
-import { Nfc } from "lucide-react";
+import { useState, type ReactNode } from "react";
 import { HowToTap } from "./TerminalPayment";
 import { defaultTerminalLocationId, prepareThisIphone, showHowToTap, useTapToPay } from "./terminal";
 import { t } from "../../lib/i18n";
 
-export function TapToPaySetup() {
+// `frame` is the collapsible group it sits in on Billing's Settings. Passed in
+// rather than drawn here so that when there is nothing to say, no empty group
+// is left behind.
+export function TapToPaySetup({ frame }: { frame: (body: ReactNode) => ReactNode }) {
   const tapToPay = useTapToPay();
   const [state, setState] = useState<"idle" | "working" | "ready">("idle");
   const [error, setError] = useState("");
   if (!tapToPay.ready) {
     // Say why Tap to Pay is off rather than leaving the coach to guess.
     if (!tapToPay.reason) return null;
-    return (
-      <article className="data-card">
-        <TapToPayHeader />
-        <p className="field-help">{tapToPay.reason}</p>
-      </article>
-    );
+    return frame(<p className="field-help">{tapToPay.reason}</p>);
   }
   const { status } = tapToPay;
 
@@ -43,9 +40,8 @@ export function TapToPaySetup() {
     }
   }
 
-  return (
-    <article className="data-card">
-      <TapToPayHeader />
+  return frame(
+    <>
       <p className="field-help">
         {t("Take contactless cards, Apple Pay and other digital wallets on this iPhone. No extra hardware. Set it up once here, before your first sale: Apple asks you to accept its terms and gets this iPhone ready, which can take a minute or two.")}
       </p>
@@ -58,18 +54,6 @@ export function TapToPaySetup() {
         </button>
         <HowToTap />
       </div>
-    </article>
-  );
-}
-
-function TapToPayHeader() {
-  return (
-    <div className="data-card-header">
-      <div>
-        <span>{t("On this iPhone")}</span>
-        <h2>{t("Tap to Pay on iPhone")}</h2>
-      </div>
-      <Nfc size={24} />
-    </div>
+    </>,
   );
 }

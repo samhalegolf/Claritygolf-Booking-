@@ -25,6 +25,7 @@ import {
   LogOut,
   Minimize2,
   Moon,
+  Nfc,
   Pause,
   Percent,
   Phone,
@@ -1216,23 +1217,6 @@ type BillingSection =
   | "memberships"
   | "settings";
 
-// Every Billing section, as values. BILLING_SECTION_LABELS below is keyed by
-// the same union, but a Record's keys are not available at runtime, and the
-// coach profile has to check a section exists before switching to it.
-const BILLING_SECTIONS: Exclude<BillingSection, "none">[] = [
-  "dashboard",
-  "new-invoice",
-  "invoices",
-  "expenses",
-  "products",
-  "coupons",
-  "reports",
-  "transactions",
-  "passes",
-  "memberships",
-  "settings",
-];
-
 // What an overlay is currently showing. A settings overlay carries the tab so
 // the section's own tab CSS still applies and the group to focus; a billing
 // overlay carries the section. Both carry the title they announce themselves
@@ -1245,21 +1229,32 @@ type WorkspaceOverlay =
 // "settings" and "billing" open over the profile rather than replacing it.
 const PROFILE_LINKED_VIEWS: View[] = ["calendar", "clients", "players", "sell", "billing", "video"];
 
-// The Billing sections named once, so the tab bar and the topbar's subtitle
-// cannot drift into two different words for the same place.
-const BILLING_SECTION_LABELS: Record<Exclude<BillingSection, "none">, string> = {
-  dashboard: t("Dashboard"),
-  "new-invoice": t("New Invoice"),
-  invoices: t("Invoices"),
-  expenses: t("Expenses"),
-  products: t("Products"),
-  coupons: t("Coupons"),
-  reports: t("Reports"),
-  transactions: t("Transaction History"),
-  passes: t("Passes"),
-  memberships: t("Memberships"),
-  settings: t("Settings"),
-};
+/**
+ * Billing's sub-nav, as data -- the same shape as SETTINGS_SECTIONS, so the
+ * side column, the topbar's subtitle and the coach profile's "does this
+ * section exist" check all read one list and cannot drift apart.
+ */
+const BILLING_SECTION_NAV: Array<{
+  key: Exclude<BillingSection, "none">;
+  label: string;
+  icon: IconComponent;
+}> = [
+  { key: "dashboard", label: t("Dashboard"), icon: ClarityDashboardHome },
+  { key: "new-invoice", label: t("New Invoice"), icon: ClarityBookingPages },
+  { key: "invoices", label: t("Invoices"), icon: ClarityInvoices },
+  { key: "expenses", label: t("Expenses"), icon: ClarityStore },
+  { key: "products", label: t("Products"), icon: ClarityProducts },
+  { key: "coupons", label: t("Coupons"), icon: ClarityPassesCredits },
+  { key: "transactions", label: t("Transaction History"), icon: ClarityPayments },
+  { key: "passes", label: t("Passes"), icon: ClarityPassesCredits },
+  { key: "memberships", label: t("Memberships"), icon: RefreshCw },
+  { key: "reports", label: t("Reports"), icon: ClarityReports },
+  { key: "settings", label: t("Settings"), icon: ClaritySettings },
+];
+
+function billingSectionLabel(section: Exclude<BillingSection, "none">) {
+  return BILLING_SECTION_NAV.find((entry) => entry.key === section)?.label ?? "";
+}
 
 // Which completed bookings the "ready to pull" lists show.
 //
@@ -12655,13 +12650,13 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     }
     setRequestedSettingsGroup("");
     if (target.kind === "billing") {
-      const section = BILLING_SECTIONS.find((candidate) => candidate === target.section);
+      const section = BILLING_SECTION_NAV.find((candidate) => candidate.key === target.section)?.key;
       if (!section) return;
       // Same as a settings card: the section opens over the profile. Billing's
       // own tab state follows so the page agrees with the overlay if the coach
       // goes there afterwards.
       setBillingSection(section);
-      setWorkspaceOverlay({ kind: "billing", section, title: label || BILLING_SECTION_LABELS[section] });
+      setWorkspaceOverlay({ kind: "billing", section, title: label || billingSectionLabel(section) });
       return;
     }
     setWorkspaceOverlay(null);
@@ -17913,6 +17908,32 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   function startNewInvoice() {
     resetInvoiceDraft();
     setBillingSection("new-invoice");
+  }
+
+  // Billing's sub-nav. Each section loads what it shows on the way in, so a
+  // visit is never a stale list; New Invoice always starts a blank invoice.
+  function switchBillingSection(section: Exclude<BillingSection, "none">) {
+    if (section === "new-invoice") {
+      startNewInvoice();
+      return;
+    }
+    setBillingSection(section);
+    if (section === "invoices") {
+      void fetchAllInvoices();
+      void fetchReconcileCandidates();
+    } else if (section === "expenses") {
+      void fetchBankCandidates();
+    } else if (section === "products") {
+      void fetchBillingProducts();
+    } else if (section === "coupons") {
+      void fetchCoupons();
+    } else if (section === "transactions") {
+      void fetchPosTransactions();
+      void fetchAllInvoices();
+    } else if (section === "passes") {
+      void fetchPassInbox();
+      void fetchIssuedPasses();
+    }
   }
 
   // Start a fresh, editable invoice.
@@ -24628,7 +24649,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
       : activeView === "billing"
         ? {
             title: t("Billing"),
-            subtitle: billingSection === "none" ? undefined : BILLING_SECTION_LABELS[billingSection],
+            subtitle: billingSection === "none" ? undefined : billingSectionLabel(billingSection),
           }
         : activeView === "settings"
           ? {
@@ -27544,127 +27565,32 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
             pageClassName="billing-page"
             onClose={closeWorkspaceOverlay}
           >
-            {/* Not drawn in the overlay, for the same reason the settings
-                sub-nav is not: one section was asked for, so a row of tabs
-                offers a journey nobody started. */}
+            {/* The same side column as Settings: one row per section, the
+                open one filled. Not drawn in the overlay, for the same reason
+                the settings sub-nav is not: one section was asked for, so a
+                column of others offers a journey nobody started. */}
             {workspaceOverlay?.kind !== "billing" && (
-            <div className="settings-tabs billing-tabs" role="tablist" aria-label={t("Billing sections")}>
-              <button
-                className={billingSection === "dashboard" ? "active" : ""}
-                onClick={() => setBillingSection("dashboard")}
-                role="tab"
-                aria-selected={billingSection === "dashboard"}
-                type="button"
-              >
-                <ClarityDashboardHome size={16} />{t("Dashboard")}</button>
-              <button
-                className={billingSection === "new-invoice" ? "active" : ""}
-                onClick={startNewInvoice}
-                role="tab"
-                aria-selected={billingSection === "new-invoice"}
-                type="button"
-              >
-                <ClarityBookingPages size={16} />{t("New Invoice")}</button>
-              <button
-                className={billingSection === "invoices" ? "active" : ""}
-                onClick={() => {
-                  setBillingSection("invoices");
-                  void fetchAllInvoices();
-                  void fetchReconcileCandidates();
-                }}
-                role="tab"
-                aria-selected={billingSection === "invoices"}
-                type="button"
-              >
-                <ClarityInvoices size={16} />{t("Invoices")}</button>
-              <button
-                className={billingSection === "expenses" ? "active" : ""}
-                onClick={() => {
-                  setBillingSection("expenses");
-                  void fetchBankCandidates();
-                }}
-                role="tab"
-                aria-selected={billingSection === "expenses"}
-                type="button"
-              >
-                <ClarityStore size={16} />{t("Expenses")}</button>
-              <button
-                className={billingSection === "products" ? "active" : ""}
-                onClick={() => {
-                  setBillingSection("products");
-                  void fetchBillingProducts();
-                }}
-                role="tab"
-                aria-selected={billingSection === "products"}
-                type="button"
-              >
-                <ClarityProducts size={16} />{t("Products")}</button>
-              <button
-                className={billingSection === "coupons" ? "active" : ""}
-                onClick={() => {
-                  setBillingSection("coupons");
-                  void fetchCoupons();
-                }}
-                role="tab"
-                aria-selected={billingSection === "coupons"}
-                type="button"
-              >
-                <ClarityPassesCredits size={16} />{t("Coupons")}</button>
-              <button
-                className={billingSection === "transactions" ? "active" : ""}
-                onClick={() => {
-                  setBillingSection("transactions");
-                  void fetchPosTransactions();
-                  void fetchAllInvoices();
-                }}
-                role="tab"
-                aria-selected={billingSection === "transactions"}
-                type="button"
-              >
-                <ClarityPayments size={16} />{t("Transaction History")}</button>
-              <button
-                className={billingSection === "passes" ? "active" : ""}
-                onClick={() => {
-                  setBillingSection("passes");
-                  void fetchPassInbox();
-                  void fetchIssuedPasses();
-                }}
-                role="tab"
-                aria-selected={billingSection === "passes"}
-                type="button"
-              >
-                <ClarityPassesCredits size={16} />{t("Passes")}{/* The count is what is waiting in the inbox below the list. An
-                    inbox you have to open to discover is empty is one nobody
-                    opens. */}
-                {passInboxCount > 0 && <span className="tab-count">{passInboxCount}</span>}
-              </button>
-              <button
-                className={billingSection === "memberships" ? "active" : ""}
-                onClick={() => setBillingSection("memberships")}
-                role="tab"
-                aria-selected={billingSection === "memberships"}
-                type="button"
-              >
-                <RefreshCw size={16} />{t("Memberships")}</button>
-              <button
-                className={billingSection === "reports" ? "active" : ""}
-                onClick={() => setBillingSection("reports")}
-                role="tab"
-                aria-selected={billingSection === "reports"}
-                type="button"
-              >
-                <ClarityReports size={16} />{t("Reports")}</button>
-              <button
-                className={billingSection === "settings" ? "active" : ""}
-                onClick={() => setBillingSection("settings")}
-                role="tab"
-                aria-selected={billingSection === "settings"}
-                type="button"
-              >
-                <ClaritySettings size={16} />{t("Settings")}</button>
-            </div>
+            <nav className="settings-subnav" aria-label={t("Billing sections")}>
+              {BILLING_SECTION_NAV.map((section) => (
+                <button
+                  key={section.key}
+                  className={billingSection === section.key ? "active" : ""}
+                  onClick={() => switchBillingSection(section.key)}
+                  aria-current={billingSection === section.key ? "page" : undefined}
+                  type="button"
+                >
+                  <section.icon size={16} />
+                  {section.label}
+                  {/* The count is what is waiting in the inbox below the pass
+                      list. An inbox you have to open to discover is empty is
+                      one nobody opens. */}
+                  {section.key === "passes" && passInboxCount > 0 && <span className="tab-count">{passInboxCount}</span>}
+                </button>
+              ))}
+            </nav>
             )}
 
+            <div className="billing-pane">
             {billingSection === "dashboard" && (
               <div className="billing-dashboard">
                 {overdueInvoiceRecords.length > 0 && invoiceSettings.unpaidLoudness >= 2 && (
@@ -29950,6 +29876,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
             )}
 
             {billingSection === "settings" && (
+              <SettingsGroups>
               <div className="billing-dashboard">
                 {clarityPayReturn && (activeView === "billing" || workspaceOverlay?.kind === "billing") && (
                   <ClarityPayReturnBanner
@@ -29959,20 +29886,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
                     onDismiss={() => setClarityPayReturn(null)}
                   />
                 )}
-                <article className="data-card">
-                  <div className="data-card-header">
-                    <div>
-                      <span>{t("Card payments")}</span>
-                      <h2>
-                        {stripeStatus?.route === "clarity_pay"
-                          ? t("Clarity Pay is on")
-                          : stripeStatus?.route === "own_stripe"
-                            ? t("Your own Stripe account")
-                            : t("Not set up")}
-                      </h2>
-                    </div>
-                    <ClarityPayments size={24} />
-                  </div>
+                <SettingsGroup id="billing-card-payments" section="billing" icon={ClarityPayments} title={`${t("Card payments")} · ${stripeStatus?.route === "clarity_pay" ? t("Clarity Pay is on") : stripeStatus?.route === "own_stripe" ? t("Your own Stripe account") : t("Not set up")}`}>
                   <p className="field-help">
                     {stripeStatus?.route === "clarity_pay" ? (
                       <>{t("Card payments at the till, on invoices and in the player portal go straight to your account ({account}), and Stripe pays them out to your bank. Clarity Pay keeps {fee} of each payment; Stripe's own card fee is separate.", { account: stripeStatus.account, fee: clarityPayFeeLabel(stripeStatus.fee) })}</>
@@ -30025,20 +29939,21 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
                       </button>
                     )}
                   </div>
-                </article>
+                </SettingsGroup>
 
-                {stripeStatus?.route === "clarity_pay" && <TapToPaySetup />}
+                {stripeStatus?.route === "clarity_pay" && (
+                  <TapToPaySetup
+                    frame={(body) => (
+                      <SettingsGroup id="billing-tap-to-pay" section="billing" icon={Nfc} title={t("Tap to Pay on iPhone")}>
+                        {body}
+                      </SettingsGroup>
+                    )}
+                  />
+                )}
 
                 {/* Repair, not import. Everything here has already been
                     pulled once; what this fixes is what was kept of it. */}
-                <article className="data-card">
-                  <div className="data-card-header">
-                    <div>
-                      <span>{t("From Stripe")}</span>
-                      <h2>{t("Re-read payment history")}</h2>
-                    </div>
-                    <RefreshCw size={24} />
-                  </div>
+                <SettingsGroup id="billing-stripe-resync" section="billing" icon={RefreshCw} title={t("Re-read payment history")}>
                   <p className="field-help">{t("Pulls every Stripe invoice and card payment again, from the beginning. Safe to run whenever — each one updates the record it already has rather than adding a second.")}</p>
                   <p className="field-help">{t("Worth running once: card payments used to be filed under Stripe's own label for them,")}{" "}<code>Charge for &lt;email&gt;</code>{t(", so the invoice list and the lesson-matching on a client's profile saw an email address where the product name should have been. Payments now keep what was actually bought — read from the payment, or from the basket behind it. The ones already recorded keep the old label until they are read again.")}</p>
                   <div className="panel-actions">
@@ -30060,16 +29975,9 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
                   {stripeResyncResult && !stripeResyncing && (
                     <p className="field-help">{stripeResyncResult}</p>
                   )}
-                </article>
+                </SettingsGroup>
 
-                <article className="data-card">
-                  <div className="data-card-header">
-                    <div>
-                      <span>{t("Billing Settings")}</span>
-                      <h2>{t("Defaults for new invoices")}</h2>
-                    </div>
-                    <ClaritySettings size={24} />
-                  </div>
+                <SettingsGroup id="billing-invoice-defaults" section="billing" icon={ClaritySettings} title={t("Defaults for new invoices")}>
                   <p className="field-help">{t("These defaults are used when creating a new invoice and are saved on your account record. Current next number: {invoiceNumber}", { invoiceNumber })}</p>
                   <EditableSettingsBlock
                     id="billing-settings-block"
@@ -30163,16 +30071,9 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
                     />
                   </label>
                   </EditableSettingsBlock>
-                </article>
+                </SettingsGroup>
 
-                <article className="data-card">
-                  <div className="data-card-header">
-                    <div>
-                      <span>{t("Point of sale")}</span>
-                      <h2>{t("Payment Methods")}</h2>
-                    </div>
-                    <ClarityPayments size={24} />
-                  </div>
+                <SettingsGroup id="billing-payment-methods" section="billing" icon={ClarityPayments} title={t("Payment Methods")}>
                   <p className="field-help">{t("The buttons shown in the checkout modal. Clarity Pay is the Stripe-backed method and is always available; add your own for Cash, Eftpos, On account and anything else you take.")}</p>
                   <div className="billing-catalog-editor">
                     <label className="settings-field">
@@ -30252,16 +30153,9 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
                       <Loading what={t("payment methods")} />
                     )}
                   </div>
-                </article>
+                </SettingsGroup>
 
-                <article className="data-card">
-                  <div className="data-card-header">
-                    <div>
-                      <span>{t("Presets")}</span>
-                      <h2>{t("Discount Settings")}</h2>
-                    </div>
-                    <Percent size={24} />
-                  </div>
+                <SettingsGroup id="billing-discounts" section="billing" icon={Percent} title={t("Discount Settings")}>
                   <p className="field-help">{t("Optional presets for discounts you use often (a percentage off, a flat amount, a named discount, or a coupon code). These are picked from the invoice's discount field when needed - creating an invoice never requires one.")}</p>
                   <div className="billing-catalog-editor">
                     <label className="settings-field">
@@ -30346,16 +30240,9 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
                       <p>{t("No discount presets yet.")}</p>
                     )}
                   </div>
-                </article>
+                </SettingsGroup>
 
-                <article className="data-card">
-                  <div className="data-card-header">
-                    <div>
-                      <span>{t("Presets")}</span>
-                      <h2>{t("Expense Categories")}</h2>
-                    </div>
-                    <ClarityInvoices size={24} />
-                  </div>
+                <SettingsGroup id="billing-expense-categories" section="billing" icon={ClarityInvoices} title={t("Expense Categories")}>
                   <p className="field-help">{t("Optional categories for logging expenses (Range fees, Coaching supplies, Travel, Software, etc). Every expense can also be left Uncategorised.")}</p>
                   <div className="billing-catalog-editor">
                     <label className="settings-field">
@@ -30405,9 +30292,11 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
                       <p>{t("No expense categories yet.")}</p>
                     )}
                   </div>
-                </article>
+                </SettingsGroup>
               </div>
+              </SettingsGroups>
             )}
+            </div>
           </WorkspaceSurface>
         )}
 
