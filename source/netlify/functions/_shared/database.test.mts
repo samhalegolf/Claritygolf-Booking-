@@ -19,7 +19,7 @@ test("no function imports the database through @netlify/database", () => {
     for (const name of readdirSync(dir)) {
       const path = join(dir, name);
       if (statSync(path).isDirectory()) {
-        if (name !== "node_modules" && name !== "local-db") walk(path);
+        if (name !== "node_modules") walk(path);
       } else if (/\.m?[jt]s$/.test(name) && !name.endsWith(".test.mts") && readFileSync(path, "utf8").includes('"@netlify/database"')) {
         offenders.push(relative(functionsDir, path));
       }

@@ -2,13 +2,9 @@ import pg from "pg";
 import { trimmedEnv } from "./values.mts";
 
 /**
- * Postgres access for the booking app.
+ * Postgres access for the booking app. Functions import this file directly.
+ * The SQL in this codebase is sent to Postgres as parameterised queries.
  *
- * This replaces the REST allowlist adapter that used to sit behind the
- * `@netlify/database` alias. The SQL in this codebase is sent directly to
- * Postgres using parameterised queries.
- *
- * Interface is unchanged:
  *   db().sql`SELECT ...`          -> array of rows
  *   db().pool.connect()           -> client with .query() and .release()
  */
