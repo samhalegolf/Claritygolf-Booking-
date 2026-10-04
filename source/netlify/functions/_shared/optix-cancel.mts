@@ -1,4 +1,4 @@
-import { getDatabase } from "@netlify/database";
+import { getDatabase } from "./database.mts";
 
 import {
   buildOptixAppointmentInput,

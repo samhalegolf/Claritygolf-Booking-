@@ -16,7 +16,7 @@
  *   - Rate limits are per key and reported in `RateLimit-*` headers.
  */
 import { createHash, randomUUID } from "node:crypto";
-import { getDatabase } from "@netlify/database";
+import { getDatabase } from "../database.mts";
 
 export const API_VERSION = "v1";
 

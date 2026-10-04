@@ -9,7 +9,7 @@
 // No default-account fallback. No account_id from request body, query string,
 // browser state, or JSON blobs is ever trusted. Missing membership = 403.
 
-import { getDatabase } from "@netlify/database";
+import { getDatabase } from "./database.mts";
 import { LEGACY_DEFAULT_ACCOUNT_ID } from "./account.mts";
 import { LIVE_KIND, SANDBOX_KIND, readSandboxAccount } from "./sandbox.mts";
 import type { AccountRole, AppUserRole, SessionRole } from "./auth-contract.mts";

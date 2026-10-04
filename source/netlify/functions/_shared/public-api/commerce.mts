@@ -10,7 +10,7 @@
  * Money: the pass engine stores cents and the billing tables store dollars.
  * Everything leaving the API is cents; the conversion is here and only here.
  */
-import { getDatabase } from "@netlify/database";
+import { getDatabase } from "../database.mts";
 import {
   grantPass,
   passTemplatesFromServices,

@@ -30,7 +30,7 @@
  * any venue's system can answer, and Optix (optix-book-resource.mts and
  * optix-cancel.mts, unchanged), for the business already connected to it.
  */
-import { getDatabase } from "@netlify/database";
+import { getDatabase } from "./database.mts";
 
 import {
   autoBookResourceForNewBooking,

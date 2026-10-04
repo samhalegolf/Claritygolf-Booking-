@@ -12,7 +12,7 @@
  * sweep all work the same way. The column names are Optix's for now; the
  * reference their system gives back lives in optix_booking_id.
  */
-import { getDatabase } from "@netlify/database";
+import { getDatabase } from "./database.mts";
 
 import { handednessFromNote } from "./handedness.mts";
 import { ensureOptixSyncTable } from "./optix-book-resource.mts";

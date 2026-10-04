@@ -140,11 +140,8 @@ function escapeHtml(value: string) {
 }
 
 // --- Supabase REST helper -------------------------------------------------
-// Self-contained on purpose: does not go through source/netlify/functions/
-// local-db (the hand-rolled SQL-string-pattern shim used by booking-core.mts)
-// so adding billing tables never requires touching that adapter or its
-// pattern list. See supabase-storage.mts's own header comment for context on
-// why that shim exists; billing intentionally avoids it.
+// Self-contained on purpose: billing talks to Supabase REST directly rather
+// than through _shared/database.mts.
 function supabaseConfig() {
   const url = env("SUPABASE_URL").replace(/\/$/, "");
   const key = env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY");

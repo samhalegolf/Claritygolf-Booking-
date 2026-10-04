@@ -7,7 +7,7 @@
  * confirmation emails, bay booking, Google sync and client matching all apply
  * to a booking made here exactly as to one made anywhere else.
  */
-import { getDatabase } from "@netlify/database";
+import { getDatabase } from "../database.mts";
 import {
   createPublicBooking,
   readCalendarState,

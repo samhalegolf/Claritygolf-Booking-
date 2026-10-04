@@ -33,7 +33,7 @@
 import { randomUUID } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
-import { getDatabase } from "@netlify/database";
+import { getDatabase } from "../database.mts";
 import { openCredential, sealCredential } from "../integration-credentials.mts";
 import {
   cleanResourceWebhookUrl,

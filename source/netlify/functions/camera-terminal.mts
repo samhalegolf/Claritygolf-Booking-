@@ -1,4 +1,4 @@
-import { getDatabase } from "@netlify/database";
+import { getDatabase } from "./_shared/database.mts";
 import type { Config } from "@netlify/functions";
 import { randomBytes, randomUUID } from "node:crypto";
 
