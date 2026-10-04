@@ -184,8 +184,6 @@ import {
   PLAYER_BOOKING_EMBED_MIN_HEIGHT,
 } from "../netlify/functions/_shared/player-booking-embed.mts";
 import { prefetchIntegrations } from "./modules/integrations/integrationsStore";
-import { WeekSlots } from "./modules/public-booking/WeekSlots";
-import { lookBusyStarts } from "../netlify/functions/_shared/look-busy.mts";
 import type {
   VideoWorkspaceNavigationContext,
   VideoWorkspacePlayerChoice,
@@ -308,7 +306,6 @@ import type {
   ChangeEvent,
   CSSProperties,
   FormEvent,
-  KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
 } from "react";
 import { t, tn } from "./lib/i18n";
@@ -325,7 +322,6 @@ import {
   adminCustomGroupAttendee,
   availabilityForCoach,
   AvailabilityWindow,
-  availabilityWindowCoversLocation,
   baseWeekDays,
   baseWeekStart,
   BookingCoachSnapshot,
@@ -333,7 +329,6 @@ import {
   bookingLocationDisplay,
   bookingLocationShortDisplay,
   bookingLocationSnapshotFor,
-  BookingSlot,
   BookingStatus,
   buildWeekDays,
   businessNow,
@@ -413,7 +408,6 @@ import {
   PeopleImportResult,
   PeopleUpdateResult,
   appointmentsForPerson,
-  bookingInputName,
   buildPeopleImportDiagnostic,
   caddyProfileUrl,
   cleanPeople,
@@ -421,17 +415,12 @@ import {
   clientMatchesSearchTerm,
   editorFromClient,
   emptyClientEditor,
-  findClientMatch,
   hasAnyProfileId,
-  hasClientMatchInput,
-  normalizeMatchText,
   notificationsForPerson,
   parsePeopleImport,
-  phoneValuesMatch,
   preferredVideoPlayerId,
   profileIdsForClient,
   profileNotesText,
-  splitClientName,
 } from "./modules/clients/clientMatching";
 import {
   EmailSendResult,
@@ -449,7 +438,6 @@ import {
   getBookingScreenId,
   getBookingScreenIframeCode,
   getBookingScreenPublicUrl,
-  isBookingLogoHiddenByUrl,
 } from "./modules/public-booking/bookingScreens";
 import {
   DEFAULT_CUSTOM_GROUP_BASE_PARTICIPANTS,
@@ -475,7 +463,6 @@ import {
   customGroupBasePrice,
   customGroupExtraPersonPrice,
   customGroupMaxParticipants,
-  customGroupMinParticipants,
   defaultGroupSchedule,
   defaultServiceColor,
   emptyServiceEditor,
@@ -553,6 +540,10 @@ import { CalendarView } from "./modules/calendar/CalendarView";
 import { useCalendarState } from "./modules/calendar/useCalendarState";
 import { useCalendarInteraction } from "./modules/calendar/useCalendarInteraction";
 import { useWorkspaceData } from "./modules/workspace/useWorkspaceData";
+import { PublicBookingSection, } from "./modules/booking/bookingModel";
+import { View } from "./modules/shared/appView";
+import { useBookingFlow } from "./modules/booking/useBookingFlow";
+import { BookingFlowView } from "./modules/booking/BookingFlowView";
 
 // Video analysis and voice notes are heavy, coach-only features (together well
 // over a third of the client bundle). They never render on the public booking
@@ -686,25 +677,6 @@ function prefetchPracticeForPlayer(playerId: string) {
 function cleanLessonNotes(notes: unknown[]): LessonNote[] {
   return cleanLessonNotesWith(notes, defaultWorkspaceAccountFromCoachAccount().id);
 }
-
-// The sidebar's destinations. Lesson types and availability used to be two of
-// them; they are Settings sections now (SETTINGS_SECTIONS "services" and the
-// "availability" group under Booking), reached by switchView("settings") plus a
-// settings tab, so they are not views any more.
-type View =
-  | "calendar"
-  | "clients"
-  | "sell"
-  | "billing"
-  // Who the coach is, and everything Clarity is plugged into on their behalf.
-  // Not a second Settings: every card here routes to where the setting really
-  // lives, so there is still one place each thing is edited.
-  | "profile"
-  | "settings"
-  | "video"
-  | "players"
-  // The overhead-camera putting gate.
-  | "putting-lab";
 type BillingSection =
   | "none"
   | "dashboard"
@@ -858,15 +830,6 @@ function bankCandidateSearchText(candidate: BankExpenseCandidate) {
 function bankCandidateSortText(value: string | null | undefined) {
   return (value || "").trim().toLowerCase();
 }
-
-type BookingForm = {
-  firstName: string;
-  lastName: string;
-  phone: string;
-  email: string;
-};
-
-type PublicBookingSection = "appointment" | "datetime" | "information";
 /* The nine sections of a player profile. The first four are the coach's
  * daily reads and sit on the bar; the last five are the record and live behind
  * its toggle -- see .player-tool-tabs.is-expanded. */
@@ -2206,37 +2169,6 @@ const defaultGoogleDriveTransferStatus: GoogleDriveTransferStatus = {
   incomingImportReady: false,
 };
 
-/**
- * Which palette the booking cards wear.
- *
- * This used to be a coach setting, which meant the cards were dark or light
- * according to a value saved on the coach's machine -- so changing it there did
- * nothing for a player on their own phone, and every visitor got one coach's
- * preference regardless of their own. The person looking at the page is the
- * only one who knows which they want, and their browser already says.
- */
-function useBookingCardScheme(): ThemeMode {
-  const query = "(prefers-color-scheme: dark)";
-  const read = (): ThemeMode =>
-    typeof window !== "undefined" &&
-    typeof window.matchMedia === "function" &&
-    window.matchMedia(query).matches
-      ? "dark"
-      : "light";
-  const [scheme, setScheme] = useState<ThemeMode>(read);
-
-  useEffect(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
-    const media = window.matchMedia(query);
-    const update = () => setScheme(media.matches ? "dark" : "light");
-    media.addEventListener("change", update);
-    update();
-    return () => media.removeEventListener("change", update);
-  }, []);
-
-  return scheme;
-}
-
 type AppProps = {
   /**
    * Called when the coach session goes away underneath the workspace. The entry
@@ -2253,7 +2185,6 @@ type AppProps = {
 };
 
 function App({ onSessionLost, session: entrySession }: AppProps = {}) {
-  const bookingCardScheme = useBookingCardScheme();
   const [themeMode, setThemeMode] = useState<ThemeMode>(getStoredTheme);
   const workspaceData = useWorkspaceData({ entrySession });
   const {
@@ -2964,21 +2895,10 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   } = calendarState;
   const [edgeCue, setEdgeCue] = useState<null | "prev" | "next">(null);
   const [bookingServiceId, setBookingServiceId] = useState("");
-  const [bookingDay, setBookingDay] = useState(0);
   const [bookingDaySelected, setBookingDaySelected] = useState(false);
   const [bookingStart, setBookingStart] = useState<number | null>(null);
   const [openPublicBookingSection, setOpenPublicBookingSection] = useState<PublicBookingSection>("appointment");
-  // A player's details come from their session. The effect below fills them in.
-  const [bookingForm, setBookingForm] = useState<BookingForm>({
-    firstName: "",
-    lastName: "",
-    phone: "",
-    email: "",
-  });
-  const [customGroupAttendees, setCustomGroupAttendees] = useState<CustomGroupAttendee[]>([]);
-  const [customGroupAttendeeDraft, setCustomGroupAttendeeDraft] = useState({ name: "", email: "" });
   const [selectedCustomGroupAttendeeDraft, setSelectedCustomGroupAttendeeDraft] = useState({ name: "", email: "" });
-  const [bookingSubmitError, setBookingSubmitError] = useState("");
   const [selectedBookingScreenId, setSelectedBookingScreenId] = useState<string>(BOOKING_SCREENS[0]?.id || "main");
   const [bookingScreenNames, setBookingScreenNames] = useState<Record<string, string>>(
     () =>
@@ -4075,17 +3995,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
             serviceBookingOptions(service).some((option) => option.coachId === selectedCalendarCoachId),
           )
         : appointmentServices;
-  const selectedBookingService =
-    currentScreenPublicServices.find((service) => service.id === bookingServiceId) ?? null;
-  const visiblePublicServices = selectedBookingService ? [selectedBookingService] : currentScreenPublicServices;
-  const isCustomGroupBooking = isCustomGroupService(selectedBookingService);
-  const customGroupParticipantCount = isCustomGroupBooking ? 1 + customGroupAttendees.length : 1;
-  const customGroupCalculatedPrice = isCustomGroupBooking
-    ? calculateCustomGroupPrice(selectedBookingService, customGroupParticipantCount)
-    : 0;
-  const customGroupRemainingAttendees = isCustomGroupBooking
-    ? Math.max(0, customGroupMaxParticipants(selectedBookingService) - customGroupParticipantCount)
-    : 0;
   // What the public sees in this business's links. The server resolves either
   // the id or the accounts-table slug, so the id is the safe answer -- except
   // for a sandbox, whose id is derived from the live business's
@@ -4150,9 +4059,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
   }, [clarityCloudHealth, savedVideoItems, uploadingSavedVideoIds]);
   const bookingBrandName = (brandSettings.coachName || coachAccount.businessName).trim();
   const bookingBrandWords = bookingBrandName.split(/\s+/);
-  const bookingBrandPrimary = bookingBrandWords.slice(0, -1).join(" ") || bookingBrandName;
-  const bookingBrandSecondary = bookingBrandWords.length > 1 ? bookingBrandWords.at(-1) : "";
-  const showBookingBrandLogo = brandSettings.showLogo && !isBookingLogoHiddenByUrl();
   // Which calendar you are pointed at. That is one level below the Calendar
   // destination itself, so it belongs in the topbar's subtitle rather than in
   // its title -- see pageHeading.
@@ -6029,36 +5935,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     return list;
   }, [clarityCloudImports, savedVideoItems]);
   const [assigningVideoId, setAssigningVideoId] = useState("");
-  const bookingClientInput = {
-    firstName: bookingForm.firstName,
-    lastName: bookingForm.lastName,
-    email: bookingForm.email,
-    phone: bookingForm.phone,
-  };
-  const bookingClientHasInput = hasClientMatchInput(bookingClientInput);
-  const bookingClientSuggestion = useMemo(() => {
-    if (!bookingClientHasInput) return null;
-    return findClientMatch(clients, bookingClientInput);
-  }, [
-    bookingClientHasInput,
-    clients,
-    bookingForm.firstName,
-    bookingForm.lastName,
-    bookingForm.email,
-    bookingForm.phone,
-  ]);
-  const bookingClientSuggestionApplied = Boolean(
-    bookingClientSuggestion &&
-      normalizeMatchText(bookingInputName(bookingClientInput)) ===
-        normalizeMatchText(bookingClientSuggestion.name) &&
-      (!bookingClientSuggestion.phone ||
-        phoneValuesMatch(bookingClientSuggestion.phone, bookingForm.phone, true)) &&
-      (!bookingClientSuggestion.email ||
-        normalizeMatchText(bookingClientSuggestion.email) === normalizeMatchText(bookingForm.email)),
-  );
-  const showBookingClientSuggestion = Boolean(
-    bookingClientSuggestion && bookingClientHasInput && !bookingClientSuggestionApplied,
-  );
 
   const notificationsByAppointment = useMemo(() => {
     const byAppointment = new Map<string, NotificationRecord[]>();
@@ -6533,142 +6409,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     if (!status) return true;
     return status === "booked" || status === "completed";
   }
-
-
-  const bookingSlots = useMemo<BookingSlot[]>(() => {
-    if (!selectedBookingService) return [];
-
-    const bookingOptions = serviceBookingOptions(selectedBookingService);
-
-    if (isScheduledGroupService(selectedBookingService)) {
-      const schedule = selectedBookingService.groupSchedule;
-      if (!schedule?.active) return [];
-      const candidate = {
-        week: activeWeek,
-        day: schedule.dayOfWeek,
-        start: schedule.startMinutes,
-        duration: selectedBookingService.duration,
-      };
-      // A scheduled group is one session, with the first coach at the first place.
-      const [{ coachId, locationId }] = bookingOptions;
-      if (!isGroupServiceSlotMatch(selectedBookingService, activeWeek, schedule.dayOfWeek, schedule.startMinutes)) return [];
-      if (hasCollision(candidate, undefined, selectedBookingService, { candidateCoachId: coachId, candidateLocationId: locationId })) return [];
-      const remainingSpots = getGroupSlotRemainingSpots(candidate, selectedBookingService);
-      if (!remainingSpots) return [];
-      return [
-        {
-          week: candidate.week,
-          day: candidate.day,
-          start: candidate.start,
-          remainingSpots,
-          coachId,
-          locationId,
-        },
-      ];
-    }
-
-    // Each time once, with the first coach and place (in the lesson type's
-    // order) who are free for it -- the same rule the booking server uses,
-    // Look busy included, across the whole week.
-    const duration = selectedBookingService.duration;
-    const slots: BookingSlot[] = [];
-    const offered = new Set<string>();
-    bookingOptions.forEach(({ coachId, locationId }) => {
-      const coachAvailability = availabilityForCoach(accountAvailability, coachId, fallbackCoachId);
-      for (let day = 0; day < 7; day += 1) {
-        const windows = (coachAvailability[day] ?? []).filter((window) =>
-          availabilityWindowCoversLocation(window, locationId),
-        );
-        const busy = lookBusy
-          ? items
-              .filter((item) => {
-                if (itemWeek(item) !== activeWeek || item.day !== day || isInactiveForConflict(item)) return false;
-                const service = itemService(item, services);
-                return isLocationOnlyBlock(item)
-                  ? resolvedCalendarItemLocationId(item, service, locations, coachAccount) === locationId
-                  : resolvedCalendarItemCoachId(item, service, coachProfiles) === coachId;
-              })
-              .map((item) => ({ start: item.start, end: item.start + item.duration }))
-          : [];
-        windows.forEach((window) => {
-          const starts: number[] = [];
-          if (lookBusy) starts.push(...lookBusyStarts(window, duration, busy));
-          else for (let start = window.start; start + duration <= window.end; start += 30) starts.push(start);
-          for (const start of starts) {
-            if (offered.has(`${day}:${start}`)) continue;
-            const candidate = { week: activeWeek, day, start, duration };
-            if (!hasCollision(candidate, undefined, selectedBookingService, { candidateCoachId: coachId, candidateLocationId: locationId })) {
-              offered.add(`${day}:${start}`);
-              slots.push({ week: activeWeek, day, start, remainingSpots: 0, coachId, locationId });
-            }
-          }
-        });
-      }
-    });
-    return slots.sort((a, b) => a.day - b.day || a.start - b.start);
-  }, [
-    accountAvailability,
-    accountCoachProfiles,
-    accountLocations,
-    activeWeek,
-    selectedBookingService,
-    coachAccount,
-    coachProfiles,
-    locations,
-    lookBusy,
-    services,
-    items,
-    fallbackCoachId,
-  ]);
-  const visibleBookingSlots =
-    bookingStart === null ? bookingSlots : bookingSlots.filter((slot) => slot.day === bookingDay && slot.start === bookingStart);
-
-  const isAppointmentStepComplete = Boolean(selectedBookingService);
-  const isDateTimeStepComplete = bookingDaySelected && bookingStart !== null;
-  const isBookingCustomerDetailsComplete =
-    bookingForm.firstName.trim() !== "" &&
-    bookingForm.lastName.trim() !== "" &&
-    bookingForm.email.trim() !== "";
-  const isBookingInformationComplete =
-    isBookingCustomerDetailsComplete &&
-    (!isCustomGroupBooking || customGroupAttendees.length >= customGroupMinParticipants(selectedBookingService) - 1);
-  const isInformationStepComplete = isDateTimeStepComplete && isBookingInformationComplete;
-  const showCapturedCustomerDetailsSummary =
-    isBookingCustomerDetailsComplete && (!isCustomGroupBooking || isBookingInformationComplete || !isDateTimeStepComplete);
-  const bookingCustomerSummaryName =
-    [bookingForm.firstName.trim(), bookingForm.lastName.trim()].filter(Boolean).join(" ") || t("Information complete");
-  const bookingCustomerSummaryContact =
-    [bookingForm.phone.trim(), bookingForm.email.trim()].filter(Boolean).join(" · ") || t("Customer details captured");
-
-  const isAppointmentSectionOpen = openPublicBookingSection === "appointment";
-  const isDateTimeSectionOpen = openPublicBookingSection === "datetime";
-  const isInformationSectionOpen = openPublicBookingSection === "information";
-
-  const appointmentSummaryName = selectedBookingService
-    ? selectedBookingService.name
-    : t("Choose an appointment type");
-  const appointmentSummaryDescription = selectedBookingService?.description?.trim() || "";
-  const appointmentSummaryLessonNote = selectedBookingService
-    ? (selectedBookingService.lessonNote || selectedBookingService.location || "").trim()
-    : "";
-  const selectedBookingLocation = selectedBookingService
-    ? bookingLocationSnapshotFor(selectedBookingService, locations, coachAccount)
-    : bookingLocationSnapshotFor(undefined, locations, coachAccount);
-  const appointmentSummaryDuration = selectedBookingService
-    ? t("{duration} min · {price}", {
-        duration: selectedBookingService.duration,
-        price: isCustomGroupService(selectedBookingService)
-          ? `${formatMoney(calculateCustomGroupPrice(selectedBookingService, customGroupMinParticipants(selectedBookingService)))}+`
-          : servicePriceLabel(selectedBookingService),
-      })
-    : t("Select a lesson to continue");
-  const dateTimeSummaryLocation = bookingLocationDisplay(selectedBookingLocation).slice(0, 180);
-  const bookingDaySummary = bookingDaySelected ? weekDays[bookingDay]?.label ?? "" : t("No day selected");
-  const dateTimeSummaryLine = isDateTimeStepComplete
-    ? `${bookingDaySummary}, ${formatTime(bookingStart ?? 0)}`
-    : bookingDaySelected
-      ? bookingDaySummary
-      : t("Choose a day");
 
   function slotFromClient(clientX: number, clientY: number) {
     const grid = gridRef.current;
@@ -7215,18 +6955,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     return sameServiceCount >= service.capacity;
   }
 
-  function getGroupSlotRemainingSpots(candidate: SlotCandidate, service?: Service) {
-    if (!service || !isScheduledGroupService(service)) return 0;
-    const bookedCount = items.filter(
-      (item) =>
-        item.kind === "appointment" &&
-        item.serviceId === service.id &&
-        overlaps(itemSlot(item), candidate) &&
-        isActiveGroupBooking(item.status),
-    ).length;
-    return Math.max(0, service.capacity - bookedCount);
-  }
-
   function isGroupSlotFull(candidate: SlotCandidate, service?: Service) {
     if (!service || !isScheduledGroupService(service)) return false;
     const sameServiceCount = items.filter(
@@ -7735,17 +7463,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     if (isSimpleChangeToItem(previousItems, finalItems, activeDraft.itemId)) {
       void persistUpsertItem(movedUpdatedItem, previousItems, finalItems);
     }
-  }
-
-  function applyBookingClient(client: ClientSummary) {
-    const { firstName, lastName } = splitClientName(client.name);
-    setBookingSubmitError("");
-    setBookingForm({
-      firstName,
-      lastName,
-      phone: client.phone,
-      email: client.email,
-    });
   }
 
   /**
@@ -9323,15 +9040,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     setQuickCreate(null);
   }
 
-  function updateBookingForm(field: keyof BookingForm, value: string) {
-    setBookingSubmitError("");
-    setBookingForm((current) => ({ ...current, [field]: value }));
-  }
-
-  function updateCustomGroupAttendeeDraft(field: "name" | "email", value: string) {
-    setCustomGroupAttendeeDraft((current) => ({ ...current, [field]: value }));
-  }
-
   function attendeeListWithBooker(item: CalendarItem): CustomGroupAttendee[] {
     const current = Array.isArray(item.attendees) ? item.attendees : [];
     const booker =
@@ -9390,69 +9098,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
           : item,
       ),
     );
-  }
-
-  function addCustomGroupAttendee() {
-    if (!isCustomGroupBooking) return;
-    const name = customGroupAttendeeDraft.name.trim();
-    const email = customGroupAttendeeDraft.email.trim().toLowerCase();
-    if (!name) {
-      setToast({ message: t("Add a name for the attendee.") });
-      return;
-    }
-    if (email && !email.includes("@")) {
-      setToast({ message: t("Enter a valid attendee email or leave it blank.") });
-      return;
-    }
-    if (customGroupParticipantCount >= customGroupMaxParticipants(selectedBookingService)) {
-      setToast({ message: t("This custom group is already at its maximum size.") });
-      return;
-    }
-    setCustomGroupAttendees((current) => [
-      ...current,
-      {
-        id: `attendee-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        name,
-        email: email || undefined,
-        status: email ? "invited" : "manual",
-      },
-    ]);
-    setCustomGroupAttendeeDraft({ name: "", email: "" });
-  }
-
-  function removeCustomGroupAttendee(attendeeId: string) {
-    setCustomGroupAttendees((current) => current.filter((attendee) => attendee.id !== attendeeId));
-  }
-
-  function setPublicBookingSection(section: PublicBookingSection) {
-    setOpenPublicBookingSection(section);
-  }
-
-  function handlePublicBookingServiceSelect(serviceId: string) {
-    const isCurrent = serviceId === bookingServiceId;
-    setBookingServiceId(isCurrent ? "" : serviceId);
-    setBookingSubmitError("");
-    setCustomGroupAttendees([]);
-    setCustomGroupAttendeeDraft({ name: "", email: "" });
-    setBookingDaySelected(false);
-    setBookingStart(null);
-    setOpenPublicBookingSection(isCurrent ? "appointment" : "datetime");
-  }
-
-  const isGroupBookingTimeSelection =
-    isScheduledGroupService(selectedBookingService);
-
-  function handlePublicBookingTimeSelect(slot: BookingSlot) {
-    const next = bookingDaySelected && bookingDay === slot.day && bookingStart === slot.start ? null : slot.start;
-    setBookingSubmitError("");
-    setBookingDay(slot.day);
-    setBookingDaySelected(next !== null);
-    setBookingStart(next);
-    setOpenPublicBookingSection(next === null ? "datetime" : "information");
-  }
-
-  function handleBookingMatchKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
-    if (event.key === "Escape") event.currentTarget.blur();
   }
 
   function insertNotificationSubjectToken(token: string) {
@@ -16031,109 +15676,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     }
   }
 
-  async function confirmPublicBooking() {
-    if (!selectedBookingService || bookingStart === null) {
-      const message = t("Choose a lesson time before confirming.");
-      setBookingSubmitError(message);
-      setToast({ message });
-      return;
-    }
-    setBookingSubmitError("");
-    // Typed values are authoritative. A saved-client suggestion only changes
-    // the booking after the user explicitly clicks it and fills these fields.
-    const firstName = bookingForm.firstName.trim();
-    const lastName = bookingForm.lastName.trim();
-    const phone = bookingForm.phone.trim();
-    const email = bookingForm.email.trim();
-    const client = [firstName, lastName].filter(Boolean).join(" ").trim();
-
-    if (!firstName || !lastName || !email) {
-      const message = t("First name, last name, and email are required.");
-      setBookingSubmitError(message);
-      setToast({ message });
-      return;
-    }
-    if (isCustomGroupBooking && customGroupAttendees.length < customGroupMinParticipants(selectedBookingService) - 1) {
-      const message = t("Add at least one other person before confirming.");
-      setBookingSubmitError(message);
-      setToast({ message });
-      return;
-    }
-
-    // The coach and place the chosen time was offered with.
-    const chosenSlot = bookingSlots.find((slot) => slot.day === bookingDay && slot.start === bookingStart);
-    const [firstOption] = serviceBookingOptions(selectedBookingService);
-    const chosenLocation = locationById(locations, chosenSlot?.locationId || firstOption.locationId);
-    const selectedBooking = {
-      service: selectedBookingService,
-      week: activeWeek,
-      day: bookingDay,
-      start: bookingStart,
-      duration: selectedBookingService.duration,
-      location: chosenLocation
-        ? locationSnapshot(chosenLocation)
-        : bookingLocationSnapshotFor(selectedBookingService, locations, coachAccount),
-      coachId: chosenSlot?.coachId || firstOption.coachId,
-    };
-    const selectedBookingCoach = bookingCoachSnapshotFor(selectedBooking.coachId, coachProfiles);
-    const candidate = {
-      week: selectedBooking.week,
-      day: selectedBooking.day,
-      start: selectedBooking.start,
-      duration: selectedBooking.duration,
-    };
-    if (
-      hasCollision(candidate, undefined, selectedBookingService, {
-        candidateCoachId: selectedBooking.coachId,
-        candidateLocationId: selectedBooking.location.locationId,
-      })
-    ) {
-      const message = t("That time has just been taken. Pick another slot.");
-      setBookingSubmitError(message);
-      setOpenPublicBookingSection("information");
-      setToast({ message });
-      return;
-    }
-
-    const item: CalendarItem = {
-      id: newCalendarItemId("appt"),
-      kind: "appointment",
-      accountId: activeAccountId,
-      ...candidate,
-      serviceId: selectedBooking.service.id,
-      coachId: selectedBooking.coachId,
-      locationId: selectedBooking.location.locationId,
-      coach: selectedBookingCoach,
-      client,
-      title: client,
-      phone,
-      email,
-      note: "Booked from public booking page.",
-      location: selectedBooking.location,
-      ...(isCustomGroupBooking
-        ? {
-            customGroup: true as const,
-            attendees: [
-              { id: `booker-${Date.now()}`, name: client, email, status: "booker" as const },
-              ...customGroupAttendees,
-            ],
-            calculatedPrice: customGroupCalculatedPrice,
-          }
-        : {}),
-    };
-    setItems(carveBusyBlocksForAppointment([...items, item], itemSlot(item)));
-    closeCalendarDetails();
-    setActiveView("calendar");
-    setBookingStart(null);
-    setCustomGroupAttendees([]);
-    setCustomGroupAttendeeDraft({ name: "", email: "" });
-    setBookingForm({ firstName: "", lastName: "", phone: "", email: "" });
-    setBookingSubmitError("");
-    setToast({
-      message: t("{client} booked {name} on {short} at {start}.", { client, name: selectedBooking.service.name, short: weekDays[item.day].short, start: formatTime(item.start) }),
-    });
-  }
-
   function copyBookingScreenValue(value: string, kind: "url" | "iframe", screenId: string) {
     if (!navigator.clipboard) {
       setToast({ message: t("Copy is not available in this browser. Select the value manually.") });
@@ -16425,69 +15967,6 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
       setDeleteInFlightId((current) => (current === calendarItemId ? "" : current));
     }
   }
-
-  const customGroupAttendeePanel = isCustomGroupBooking ? (
-    <div className="custom-group-panel">
-      <div className="custom-group-summary">
-        <span>{t("Attendees")}</span>
-        <strong>
-          {customGroupParticipantCount} / {customGroupMaxParticipants(selectedBookingService)}
-        </strong>
-        <em>{formatMoney(customGroupCalculatedPrice)}</em>
-      </div>
-      <div className="booking-form custom-group-attendee-form">
-        <input
-          value={customGroupAttendeeDraft.name}
-          onChange={(event) => updateCustomGroupAttendeeDraft("name", event.target.value)}
-          placeholder={t("Attendee name")}
-        />
-        <input
-          value={customGroupAttendeeDraft.email}
-          autoComplete="email"
-          inputMode="email"
-          onChange={(event) => updateCustomGroupAttendeeDraft("email", event.target.value)}
-          placeholder={t("Email optional")}
-          type="email"
-        />
-      </div>
-      <button
-        className="outline-button"
-        disabled={customGroupRemainingAttendees <= 0}
-        onClick={addCustomGroupAttendee}
-        type="button"
-      >
-        <Plus size={16} />{t("Add attendee")}</button>
-      <div className="custom-group-attendee-list">
-        <div className="custom-group-attendee-row">
-          <span>
-            <strong>{[bookingForm.firstName, bookingForm.lastName].filter(Boolean).join(" ").trim() || t("Booker")}</strong>
-            <em>{bookingForm.email || t("Email required")}</em>
-          </span>
-          <small>{customGroupStatusLabel("booker")}</small>
-        </div>
-        {customGroupAttendees.map((attendee) => (
-          <div className="custom-group-attendee-row" key={attendee.id}>
-            <span>
-              <strong>{attendee.name}</strong>
-              <em>{attendee.email || t("Manual attendee")}</em>
-            </span>
-            <small>{customGroupStatusLabel(attendee.status)}</small>
-            <button
-              className="icon-button small"
-              onClick={() => removeCustomGroupAttendee(attendee.id)}
-              aria-label={t("Remove {name}", { name: attendee.name })}
-              type="button"
-            >
-              <X size={15} />
-            </button>
-          </div>
-        ))}
-      </div>
-      {customGroupAttendees.length < customGroupMinParticipants(selectedBookingService) - 1 && (
-        <p className="field-help">{t("Add at least one other person before confirming.")}</p>
-      )}
-    </div>
-  ) : null;
 
   const servicesSettingsPanel = (
     <div className="settings-section settings-services">
@@ -18665,6 +18144,47 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
     </SettingsGroup>
   );
 
+  const bookingFlow = useBookingFlow({
+    currentScreenPublicServices,
+    bookingServiceId,
+    bookingBrandWords,
+    bookingBrandName,
+    brandSettings,
+    clients,
+    serviceBookingOptions,
+    activeWeek,
+    isGroupServiceSlotMatch,
+    hasCollision,
+    accountAvailability,
+    fallbackCoachId,
+    lookBusy,
+    items,
+    services,
+    locations,
+    coachAccount,
+    coachProfiles,
+    accountCoachProfiles,
+    accountLocations,
+    bookingStart,
+    bookingDaySelected,
+    openPublicBookingSection,
+    weekDays,
+    isActiveGroupBooking,
+    setToast,
+    setOpenPublicBookingSection,
+    setBookingServiceId,
+    setBookingDaySelected,
+    setBookingStart,
+    activeAccountId,
+    setItems,
+    carveBusyBlocksForAppointment,
+    closeCalendarDetails,
+    setActiveView,
+    moveWeek,
+    weekTitle,
+  });
+
+
   const bookingSettingsPanel = (
     <SettingsGroup id="booking-page" icon={ClarityBookingPages} section="booking" title={t("Booking page")} className="booking-page-settings">
       <details className="settings-subsection">
@@ -18675,268 +18195,7 @@ function App({ onSessionLost, session: entrySession }: AppProps = {}) {
             <strong>{t("As your device shows it")}</strong>
           </div>
         </summary>
-        <div className={`public-booking booking-theme-${bookingCardScheme}`}>
-      <div className={`booking-brand ${showBookingBrandLogo ? "" : "booking-brand-subtle"}`}>
-        {showBookingBrandLogo && brandSettings.logoPreview ? (
-          <img src={brandSettings.logoPreview} alt={`${bookingBrandName} logo`} />
-        ) : showBookingBrandLogo ? (
-          <>
-            <strong>{bookingBrandPrimary.toUpperCase()}</strong>
-            {bookingBrandSecondary && <span>{bookingBrandSecondary.toUpperCase()}</span>}
-          </>
-        ) : (
-          <strong>{bookingBrandName}</strong>
-        )}
-        <em>{coachAccount.venueShortName}</em>
-      </div>
-
-      <div className="booking-columns booking-progressive-flow">
-        <section className={`booking-progressive-section ${isAppointmentSectionOpen ? "is-open" : ""} ${
-          isAppointmentStepComplete ? "is-complete" : ""
-        }`}>
-          <button
-            className="booking-progressive-title"
-            onClick={() => setPublicBookingSection("appointment")}
-            type="button"
-          >
-            <span className="booking-progressive-title-label">{t("1. Appointment")}{" "}<span className="booking-required-mark" aria-hidden="true">*</span>
-            </span>
-            <span className="booking-progressive-title-state">{isAppointmentStepComplete ? t("Done") : t("In progress")}</span>
-          </button>
-          {isAppointmentSectionOpen ? (
-            <div className="booking-progressive-body">
-              <div className="service-picker">
-                {visiblePublicServices.length ? (
-                  visiblePublicServices.map((service) => (
-                    <button
-                      className={service.id === bookingServiceId ? "selected-service" : ""}
-                      key={service.id}
-                      onClick={() => handlePublicBookingServiceSelect(service.id)}
-                      type="button"
-                    >
-                      <strong>{service.name}</strong>
-                      <em>{t("{duration} minutes @ {service}", { duration: service.duration, service: servicePriceLabel(service) })}</em>
-                      {service.description && <small>{service.description}</small>}
-                      {(service.lessonNote || service.location) && <small>{service.lessonNote || service.location}</small>}
-                    </button>
-                  ))
-                ) : (
-                  <p>{t("No public lesson types are active.")}</p>
-                )}
-              </div>
-            </div>
-          ) : isAppointmentStepComplete ? (
-                    <button
-                      className="booking-summary booking-progressive-summary"
-                      onClick={() => setPublicBookingSection("appointment")}
-                      type="button"
-                    >
-                      <strong>{appointmentSummaryName}</strong>
-                      <span>{appointmentSummaryDuration}</span>
-                      {appointmentSummaryDescription ? <small>{appointmentSummaryDescription}</small> : null}
-                      {appointmentSummaryLessonNote ? <small>{appointmentSummaryLessonNote}</small> : null}
-                    </button>
-                  ) : (
-            <button
-              className="booking-progressive-summary booking-progressive-summary-empty"
-              onClick={() => setPublicBookingSection("appointment")}
-              type="button"
-            >
-              <strong>{t("Appointment not selected")}</strong>
-              <span>{t("Pick a lesson to continue")}</span>
-            </button>
-          )}
-        </section>
-
-        <section className={`booking-progressive-section ${isDateTimeSectionOpen ? "is-open" : ""} ${
-          isDateTimeStepComplete ? "is-complete" : ""
-        }`}>
-          <button
-            className="booking-progressive-title"
-            onClick={() => setPublicBookingSection("datetime")}
-            type="button"
-            disabled={!isAppointmentStepComplete}
-          >
-            <span className="booking-progressive-title-label">{t("2. Date & Time")}{" "}<span className="booking-required-mark" aria-hidden="true">*</span>
-            </span>
-            <span className="booking-progressive-title-state">{isDateTimeStepComplete ? t("Done") : isAppointmentStepComplete ? t("In progress") : t("Locked")}</span>
-          </button>
-          {isDateTimeSectionOpen ? (
-            <div className="booking-progressive-body">
-              <div className="booking-week-controls">
-                <button onClick={() => moveWeek(-1)} type="button">
-                  <ArrowLeft size={15} />
-                  <span>{t("Previous week")}</span>
-                </button>
-                <strong>{weekTitle}</strong>
-                <button onClick={() => moveWeek(1)} type="button">
-                  <span>{t("Next week")}</span>
-                  <ArrowRight size={15} />
-                </button>
-              </div>
-              {selectedBookingService ? (
-                <WeekSlots
-                  week={activeWeek}
-                  slots={visibleBookingSlots}
-                  dayLabel={(day) => weekDays[day]?.isToday ? `${weekDays[day].label} · ${t("Today")}` : weekDays[day]?.label ?? ""}
-                  slotLabel={(slot) =>
-                    isGroupBookingTimeSelection
-                      ? `${formatTime(slot.start)} · ${tn(slot.remainingSpots, "{count} spot left", "{count} spots left")}`
-                      : formatTime(slot.start)
-                  }
-                  isSelected={(slot) => bookingDaySelected && bookingDay === slot.day && bookingStart === slot.start}
-                  onSelect={handlePublicBookingTimeSelect}
-                  emptyLabel={isGroupBookingTimeSelection ? t("No upcoming group lesson times are available yet.") : t("No public times available this week.")}
-                />
-              ) : (
-                <p>{t("Choose an appointment type first.")}</p>
-              )}
-            </div>
-          ) : isDateTimeStepComplete ? (
-            <button
-                      className="booking-summary booking-progressive-summary"
-                      onClick={() => setPublicBookingSection("datetime")}
-                      type="button"
-                    >
-                      <span>{dateTimeSummaryLine}</span>
-                      {dateTimeSummaryLocation ? <small>{dateTimeSummaryLocation}</small> : null}
-                    </button>
-                  ) : (
-            <button
-              className="booking-progressive-summary booking-progressive-summary-empty"
-              onClick={() => setPublicBookingSection("datetime")}
-              type="button"
-              disabled={!isAppointmentStepComplete}
-            >
-              <strong>{isAppointmentStepComplete ? t("Date not selected") : t("Select appointment first")}</strong>
-              <span>{isAppointmentStepComplete ? t("Choose day and time") : t("Complete appointment step")}</span>
-            </button>
-          )}
-        </section>
-
-        <section className={`booking-progressive-section ${isInformationSectionOpen ? "is-open" : ""} ${
-          showCapturedCustomerDetailsSummary ? "is-complete" : ""
-        }`}>
-          <button
-            className="booking-progressive-title"
-            onClick={() => setPublicBookingSection("information")}
-            type="button"
-            disabled={!isDateTimeStepComplete}
-          >
-            <span className="booking-progressive-title-label">{t("3. Your Information")}</span>
-            <span className="booking-progressive-title-state">
-              {showCapturedCustomerDetailsSummary ? t("Done") : isDateTimeStepComplete ? t("In progress") : t("Locked")}
-            </span>
-          </button>
-          {isInformationSectionOpen ? (
-            <div className="booking-progressive-body">
-              <div className="booking-form">
-                <label className="booking-required-field w-name">
-                  <input
-                    value={bookingForm.firstName}
-                    aria-label={t("First name required")}
-                    aria-required="true"
-                    autoComplete="given-name"
-                    onChange={(event) => updateBookingForm("firstName", event.target.value)}
-                    onKeyDown={handleBookingMatchKeyDown}
-                    placeholder={t("First name")}
-                    required
-                  />
-                  <span className="booking-required-mark" aria-hidden="true">*</span>
-                </label>
-                <label className="booking-required-field w-name">
-                  <input
-                    value={bookingForm.lastName}
-                    aria-label={t("Last name required")}
-                    aria-required="true"
-                    autoComplete="family-name"
-                    onChange={(event) => updateBookingForm("lastName", event.target.value)}
-                    onKeyDown={handleBookingMatchKeyDown}
-                    placeholder={t("Last name")}
-                    required
-                  />
-                  <span className="booking-required-mark" aria-hidden="true">*</span>
-                </label>
-                <input
-                  className="w-name"
-                  value={bookingForm.phone}
-                  autoComplete="tel"
-                  inputMode="tel"
-                  onChange={(event) => updateBookingForm("phone", event.target.value)}
-                  onKeyDown={handleBookingMatchKeyDown}
-                  placeholder={t("Phone")}
-                  type="tel"
-                />
-                <label className="booking-required-field w-email">
-                  <input
-                    value={bookingForm.email}
-                    aria-label={t("Email required")}
-                    aria-required="true"
-                    autoComplete="email"
-                    inputMode="email"
-                    onChange={(event) => updateBookingForm("email", event.target.value)}
-                    onKeyDown={handleBookingMatchKeyDown}
-                    placeholder={t("Email")}
-                    required
-                    type="email"
-                  />
-                  <span className="booking-required-mark" aria-hidden="true">*</span>
-                </label>
-              </div>
-              {bookingClientSuggestion && showBookingClientSuggestion && (
-                <button
-                  className="client-match-prompt booking-client-match"
-                  onClick={() => applyBookingClient(bookingClientSuggestion)}
-                  type="button"
-                >
-                  <ClarityProfile size={15} />
-                  <span>
-                    <strong>{bookingClientSuggestion.name}</strong>
-                    <em>{[bookingClientSuggestion.phone, bookingClientSuggestion.email].filter(Boolean).join(" · ")}</em>
-                  </span>
-                </button>
-              )}
-              {customGroupAttendeePanel}
-              {bookingSubmitError && (
-                <div className="email-status failed" role="alert">
-                  <X size={17} />
-                  <span>{bookingSubmitError}</span>
-                </div>
-              )}
-              <button
-                className="primary-button confirm-booking"
-                disabled={!selectedBookingService || bookingStart === null || !isInformationStepComplete}
-                onClick={confirmPublicBooking}
-                type="button"
-              >
-                {t("Confirm Appointment")}
-              </button>
-            </div>
-          ) : showCapturedCustomerDetailsSummary ? (
-                    <button
-                      className="booking-summary booking-progressive-summary"
-                      onClick={() => setPublicBookingSection("information")}
-                      type="button"
-                      disabled={!isDateTimeStepComplete}
-                    >
-                      <strong>{bookingCustomerSummaryName}</strong>
-                      <span>{bookingCustomerSummaryContact}</span>
-                    </button>
-                  ) : (
-            <button
-              className="booking-progressive-summary booking-progressive-summary-empty"
-              onClick={() => setPublicBookingSection("information")}
-              type="button"
-              disabled={!isDateTimeStepComplete}
-            >
-              <strong>{isDateTimeStepComplete ? t("Customer details missing") : t("Complete time step first")}</strong>
-              <span>{isDateTimeStepComplete ? t("Enter your details to confirm") : t("Lock a time first")}</span>
-            </button>
-          )}
-        </section>
-      </div>
-
-        </div>
+        <BookingFlowView bookingFlow={bookingFlow} />
       </details>
       <EditableSettingsBlock
         id="booking-page-notice-block"
