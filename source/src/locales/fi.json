@@ -4453,5 +4453,7 @@
   "Show today": "Näytä tänään",
   "Day": "Päivä",
   "Pick a time": "Valitse aika",
-  "No free times this week.": "Ei vapaita aikoja tällä viikolla."
+  "No free times this week.": "Ei vapaita aikoja tällä viikolla.",
+  "No lines yet. Pull in a lesson or a product, or start a blank one.": "Ei vielä rivejä. Tuo tunti tai tuote, tai aloita tyhjä rivi.",
+  "Added to the invoice.": "Lisätty laskuun."
 }

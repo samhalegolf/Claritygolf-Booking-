@@ -4453,5 +4453,7 @@
   "Show today": "Afficher aujourd'hui",
   "Day": "Jour",
   "Pick a time": "Choisissez un créneau",
-  "No free times this week.": "Aucun créneau libre cette semaine."
+  "No free times this week.": "Aucun créneau libre cette semaine.",
+  "No lines yet. Pull in a lesson or a product, or start a blank one.": "Aucune ligne pour l'instant. Ajoutez un cours ou un produit, ou commencez une ligne vide.",
+  "Added to the invoice.": "Ajouté à la facture."
 }

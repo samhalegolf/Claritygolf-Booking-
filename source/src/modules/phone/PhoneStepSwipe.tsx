@@ -39,10 +39,17 @@ export function PhoneStepSwipe({
   panelRef,
   back,
   forward,
+  paper = true,
 }: {
   panelRef: RefObject<HTMLElement | null>;
   back: PhoneStep | null;
   forward: PhoneStep | null;
+  /**
+   * Draw the sheets underneath. Off for a page that already lies over the
+   * real screen it came from (the client profile over the list): sliding it
+   * uncovers that screen itself.
+   */
+  paper?: boolean;
 }) {
   // Which sheet is showing beside the page while a drag is under way.
   const [revealing, setRevealing] = useState<"back" | "forward" | null>(null);
@@ -146,16 +153,16 @@ export function PhoneStepSwipe({
   return (
     <>
       {/* The sheet underneath: its edge always, its face while a swipe uncovers it. */}
-      {back ? (
+      {back && paper ? (
         <div className={`phone-paper is-under ${revealing === "back" ? "is-revealed" : ""}`} aria-hidden="true">
           <strong>{back.label}</strong>
         </div>
       ) : null}
       {/* The sheet you were last on, waiting off to the right. */}
-      {forward ? (
+      {forward && paper ? (
         <div className="phone-paper-edge is-right" aria-hidden="true" />
       ) : null}
-      {revealing === "forward" && forward ? (
+      {revealing === "forward" && forward && paper ? (
         <div className="phone-paper is-incoming" ref={incomingRef} aria-hidden="true" style={{ transform: "translateX(100%)" }}>
           <strong>{forward.label}</strong>
         </div>

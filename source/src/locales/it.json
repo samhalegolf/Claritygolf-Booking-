@@ -4453,5 +4453,7 @@
   "Show today": "Mostra oggi",
   "Day": "Giorno",
   "Pick a time": "Scegli un orario",
-  "No free times this week.": "Nessun orario libero questa settimana."
+  "No free times this week.": "Nessun orario libero questa settimana.",
+  "No lines yet. Pull in a lesson or a product, or start a blank one.": "Ancora nessuna riga. Aggiungi una lezione o un prodotto, oppure inizia una riga vuota.",
+  "Added to the invoice.": "Aggiunto alla fattura."
 }
