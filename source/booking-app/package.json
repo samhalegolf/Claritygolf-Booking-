@@ -4,9 +4,12 @@
   "private": true,
   "description": "The Clarity Booking staff app (iPhone and Android): the live Booking workspace plus Tap to Pay. Its own package so the Player app (source/) never picks up the Terminal plugin.",
   "scripts": {
-    "ios": "npx cap sync ios && npx cap open ios",
-    "android": "npx cap sync android && npx cap open android",
-    "sync": "npx cap sync"
+    "native:version": "node ../scripts/sync-app-version.mjs booking-app",
+    "native:sync": "npm run native:version && npx cap sync",
+    "native:ios": "npm run native:sync && npx cap open ios",
+    "native:android": "npm run native:sync && npx cap open android",
+    "native:release:aab": "npm run native:version && npx cap sync android && node ../scripts/native-release.mjs aab booking-app",
+    "native:release:apk": "npm run native:version && npx cap sync android && node ../scripts/native-release.mjs apk booking-app"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.2",

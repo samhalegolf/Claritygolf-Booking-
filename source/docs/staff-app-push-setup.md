@@ -67,8 +67,8 @@ Redeploy after adding the variables.
 
 ## Trying it
 
-1. Run the staff app on a phone (`npm run ios` or `npm run android` in
-   `booking-app/`) and sign in.
+1. Run the staff app on a phone (`npm run native:ios` or `npm run
+   native:android` in `booking-app/`) and sign in.
 2. Settings → Email → **Phone notifications** → **Turn on for this phone**,
    and allow notifications when the phone asks.
 3. **Send a test**. The alert also goes to any browsers that have alerts on.

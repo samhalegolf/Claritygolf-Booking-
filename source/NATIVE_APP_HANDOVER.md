@@ -9,33 +9,56 @@ point and the way the session travels are different.
 
 ```bash
 npm install                 # picks up @capacitor/*
-npx cap add ios             # once — creates ios/, commit it
-npm run ios                 # build:app + cap sync ios + open Xcode
+npm run native:ios          # build:app + cap sync ios + open Xcode
 ```
 
-Then pick a simulator in Xcode and press run. `npm run android` is the same
-for Android: `android/` is committed, so there is no `cap add` step.
+Then pick a simulator in Xcode and press run. `npm run native:android` is the
+same for Android Studio. Both `ios/` and `android/` are committed, so there is
+no `cap add` step. `npm run native:sync` does everything but open the IDE.
+
+The staff app (`booking-app/`) has the same scripts under the same names, so
+the routine is the same in either folder, and the same as Clarity Caddy's:
+
+| | iPhone | Android for Play |
+|---|---|---|
+| Player app | `cd source && npm run native:ios` | `cd source && npm run native:release:aab` |
+| Staff app | `cd source/booking-app && npm run native:ios` | `cd source/booking-app && npm run native:release:aab` |
 
 ## Android bundle for Google Play
 
+`npm run native:release:aab` builds it locally and files it as
+`releases/player/clarity-player-<version>-<build>.aab` at the top of the repo
+(`releases/staff/clarity-booking-...` for the staff app). See
+`releases/README.md` for the naming and why the script refuses to overwrite a
+build. `native:release:apk` makes a sideloadable APK the same way.
+
 The **Android Player bundle** workflow (`.github/workflows/android-player-bundle.yml`)
-builds the `.aab`. Run it from the Actions tab and download the bundle from the
-run's artifacts; it is named `clarity-player-<version>-<build>`. Pull requests
-that touch `android/` build an unsigned bundle too, just to prove it still
-builds.
+builds the same `.aab` on GitHub. Run it from the Actions tab and download the
+bundle from the run's artifacts; it is named `clarity-player-<version>-<build>`.
+Pull requests that touch `android/` build an unsigned bundle too, just to prove
+it still builds.
 
 - **Version.** `scripts/sync-app-version.mjs` writes
   `android/app/version.properties` next to the iOS `Version.xcconfig`:
   `versionName` is package.json's version, `versionCode` is the commit count.
   Bump package.json to change what players see; the build number looks after
-  itself.
-- **Signing.** `android/app/build.gradle` signs a release bundle when
+  itself. The staff app runs the same script against its own folder
+  (`node ../scripts/sync-app-version.mjs booking-app`), so both apps count
+  the same commits; they never collide because each has its own bundle id,
+  and the files in `releases/` carry the app's name. Building the same commit
+  twice repeats the number, which the store refuses: commit, or
+  `BUILD_NUMBER=<n> npm run native:release:aab` for that one build.
+- **Signing.** `android/app/build.gradle` signs a release bundle from
+  `android/keystore.properties` (copy `keystore.properties.example`; both the
+  file and the `.jks` are gitignored) or, failing that, from
   `ANDROID_KEYSTORE_PATH`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and
-  `ANDROID_KEY_PASSWORD` are set, and leaves it unsigned otherwise. The
-  workflow fills them from four repository secrets: the same three passwords
-  and alias, plus `ANDROID_KEYSTORE_BASE64` (`base64 -w0 upload.jks`). This is
-  the *upload* key — let Play App Signing hold the real one, so a lost upload
-  key can be reset rather than ending the app.
+  `ANDROID_KEY_PASSWORD`, and leaves it unsigned otherwise (the file in
+  `releases/` then ends in `-unsigned`). The workflow fills the variables from
+  four repository secrets: the same three passwords and alias, plus
+  `ANDROID_KEYSTORE_BASE64` (`base64 -w0 upload.jks`). This is the *upload*
+  key — let Play App Signing hold the real one, so a lost upload key can be
+  reset rather than ending the app. The staff app has its own
+  `booking-app/android/keystore.properties.example`; give it its own key.
 - **Icon and splash.** Both are made from the iOS app icon
   (`ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png`) so the
   two stores match: the logo badge on Clarity green (`#01632F`) for the

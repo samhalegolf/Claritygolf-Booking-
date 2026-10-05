@@ -57,10 +57,13 @@ You need Android Studio (it brings the Android SDK and Java 21).
 ```bash
 cd source/booking-app
 npm install
-npm run android      # cap sync android + open Android Studio
+npm run native:android   # version numbers + cap sync android + open Android Studio
 ```
 
-Run it from Android Studio on a real phone. Point it at a deploy preview
+Run it from Android Studio on a real phone. For Play, `npm run
+native:release:aab` in the same folder builds the bundle and files it as
+`releases/staff/clarity-booking-<version>-<build>.aab` at the top of the repo
+(see `releases/README.md`). Point it at a deploy preview
 instead of production the same way as iPhone:
 
 ```bash

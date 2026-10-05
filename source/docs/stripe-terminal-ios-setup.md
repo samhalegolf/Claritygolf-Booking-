@@ -103,7 +103,7 @@ and Stripe lets an intent succeed only once.
 ```bash
 cd source/booking-app
 npm install          # its own install, separate from source/
-npm run ios          # cap sync ios + open Xcode
+npm run native:ios   # version numbers + cap sync ios + open Xcode
 ```
 
 Point it at a deploy preview instead of production:

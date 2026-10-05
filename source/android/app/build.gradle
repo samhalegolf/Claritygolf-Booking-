@@ -11,10 +11,28 @@ if (!appVersionFile.exists()) {
 }
 appVersionFile.withInputStream { appVersion.load(it) }
 
-// Upload-key signing for release bundles. Set all four to sign; leave them
-// unset and the release bundle comes out unsigned (fine for a local check,
-// not for Play). CI sets them from repository secrets.
-def releaseKeystore = System.getenv('ANDROID_KEYSTORE_PATH')
+// Upload-key signing for release bundles, read from android/keystore.properties
+// (local, gitignored -- copy keystore.properties.example) or from the four
+// ANDROID_KEYSTORE_* variables (CI sets them from repository secrets). The
+// file wins where both say something. With neither, the release comes out
+// unsigned: fine for proving it builds, refused by Play. The build log and the
+// file name scripts/native-release.mjs writes both say which you got.
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file('keystore.properties')
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withInputStream { keystoreProperties.load(it) }
+}
+def signingValue = { String propertyKey, String envKey ->
+    def fromFile = keystoreProperties.getProperty(propertyKey)
+    if (fromFile != null && !fromFile.trim().isEmpty()) return fromFile.trim()
+    def fromEnv = System.getenv(envKey)
+    if (fromEnv != null && !fromEnv.trim().isEmpty()) return fromEnv.trim()
+    return null
+}
+def releaseKeystore = signingValue('storeFile', 'ANDROID_KEYSTORE_PATH')
+def releaseStorePassword = signingValue('storePassword', 'ANDROID_KEYSTORE_PASSWORD')
+def releaseKeyAlias = signingValue('keyAlias', 'ANDROID_KEY_ALIAS')
+def releaseKeyPassword = signingValue('keyPassword', 'ANDROID_KEY_PASSWORD')
 
 android {
     namespace = "app.claritygolf.player"
@@ -35,9 +53,9 @@ android {
         if (releaseKeystore) {
             release {
                 storeFile file(releaseKeystore)
-                storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
-                keyAlias System.getenv('ANDROID_KEY_ALIAS')
-                keyPassword System.getenv('ANDROID_KEY_PASSWORD')
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
             }
         }
     }
@@ -49,6 +67,18 @@ android {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
+    }
+}
+
+// Printed so the number that goes to Play is in the build log rather than
+// something to dig for after an upload is refused.
+gradle.taskGraph.whenReady { graph ->
+    def buildingRelease = graph.allTasks.any { task ->
+        task.project == project && task.name ==~ /(?i).*(assemble|bundle)Release.*/
+    }
+    if (buildingRelease) {
+        def signedWith = releaseKeystore ? "signed with ${releaseKeystore}" : "UNSIGNED (Play will refuse it)"
+        logger.lifecycle("Clarity Player release: versionCode ${appVersion.getProperty('VERSION_CODE')}, versionName ${appVersion.getProperty('VERSION_NAME')}, ${signedWith}")
     }
 }
 

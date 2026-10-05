@@ -17,8 +17,11 @@
     "migrate:status": "node scripts/migrate.mjs --status",
     "migrate:dry-run": "node scripts/migrate.mjs --dry-run",
     "build:app": "node scripts/sync-app-version.mjs && tsc && vite build --config vite.app.config.ts",
-    "ios": "npm run build:app && npx cap sync ios && npx cap open ios",
-    "android": "npm run build:app && npx cap sync android && npx cap open android",
+    "native:sync": "npm run build:app && npx cap sync",
+    "native:ios": "npm run native:sync && npx cap open ios",
+    "native:android": "npm run native:sync && npx cap open android",
+    "native:release:aab": "npm run build:app && npx cap sync android && node scripts/native-release.mjs aab",
+    "native:release:apk": "npm run build:app && npx cap sync android && node scripts/native-release.mjs apk",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
