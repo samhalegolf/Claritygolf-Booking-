@@ -1,3 +1,4 @@
+import "../../appStyles";
 import { Loading, loadingLabel } from "../shared/Loading";
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { ArrowLeft, ArrowRight, Check, X } from "lucide-react";

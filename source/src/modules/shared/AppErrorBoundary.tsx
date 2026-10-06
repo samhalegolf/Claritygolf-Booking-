@@ -29,8 +29,8 @@ export class AppErrorBoundary extends Component<Props, State> {
     if (!error) return this.props.children;
     const stale = isChunkLoadError(error);
     return (
-      <main className="login-shell">
-        <div className="login-card" role="alert">
+      <main className="loading-screen">
+        <div className="loading-screen-card" role="alert">
           <h1>{stale ? t("Clarity has been updated") : t("Something went wrong")}</h1>
           <p>
             {stale

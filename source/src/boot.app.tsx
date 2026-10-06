@@ -10,6 +10,9 @@
 // cookie, so the token is read from native storage before the first request.
 // See src/modules/auth/apiFetch.ts for why.
 
+// Tokens first: every stylesheet reads --c-*.
+import "./tokens.css";
+import "./base.css";
 import { StrictMode, Suspense, useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 
@@ -18,11 +21,8 @@ import { Loading } from "./modules/shared/Loading";
 import { loadAuthToken, loadGuestToken } from "./modules/auth/apiFetch";
 import { fetchSession, guestSession, signOut, type Session } from "./modules/auth/session";
 import PlayerPortal from "./modules/player-portal/PlayerPortal";
-// Tokens first: styles.css and every module stylesheet read --c-*.
-import "./tokens.css";
-import "./styles.css";
-// Same app-wide switch as the web entry -- see switches.css.
-import "./switches.css";
+// After the app stylesheet, which LoginScreen and PlayerPortal bring in
+// (src/appStyles.ts): the native overrides have to win those ties.
 import "./nativeApp.css";
 import { t } from "./lib/i18n";
 

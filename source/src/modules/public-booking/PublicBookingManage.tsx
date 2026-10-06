@@ -1,3 +1,4 @@
+import "../../appStyles";
 import { Loading } from "../shared/Loading";
 import { useEffect, useState } from "react";
 import { ArrowLeft, ArrowRight, Check, X } from "lucide-react";

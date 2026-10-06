@@ -1,3 +1,4 @@
+import "../../appStyles";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { setTerminalCode } from "../auth/apiFetch";

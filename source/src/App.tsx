@@ -1,3 +1,4 @@
+import "./appStyles";
 import {
   AlertCircle,
   AlertTriangle,

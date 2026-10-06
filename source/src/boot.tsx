@@ -1,6 +1,10 @@
+// Tokens first: every stylesheet reads --c-*. The app stylesheet itself comes
+// in with the shell that draws with it (see appStyles.ts), so the public site
+// and the first paint of every page never download it.
+import "./tokens.css";
+import "./base.css";
 import { StrictMode, Suspense, lazy, useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import LoginScreen from "./modules/auth/LoginScreen";
 import PublicSite, { type PublicPage } from "./modules/public-site/PublicSite";
 import { Loading } from "./modules/shared/Loading";
 import { fetchSession, guestSession, type Session } from "./modules/auth/session";
@@ -11,12 +15,6 @@ import { installOptixOriginFeedback } from "./optix-origin-feedback";
 import { installBoxAudit } from "./lib/boxAudit";
 import { AppErrorBoundary } from "./modules/shared/AppErrorBoundary";
 import { installStaleDeployReload } from "./modules/shared/staleDeploy";
-// Tokens first: styles.css and every module stylesheet read --c-*.
-import "./tokens.css";
-import "./styles.css";
-// After styles.css: the app-wide switch settles the ties with the per-screen
-// rules that used to size these as tick boxes.
-import "./switches.css";
 
 // The nesting law is a property of the rendered page, not the stylesheet, so
 // it is checked in the browser rather than by uiRules.test.ts. Dev only.
@@ -28,9 +26,13 @@ installStaleDeployReload();
 
 // Both shells are lazy so a player never downloads the coach workspace, and a
 // visitor at the login screen downloads neither. This is why the login form
-// lives in its own module rather than inside App.
+// lives in its own module rather than inside App. The login screen is lazy
+// too: it is the one pre-auth screen that draws with the app stylesheet, and
+// a public page or a share link must not wait for that.
 const loadApp = () => import("./App");
 const App = lazy(loadApp);
+const loadLoginScreen = () => import("./modules/auth/LoginScreen");
+const LoginScreen = lazy(loadLoginScreen);
 const PublicBookingApp = lazy(() => import("./modules/public-booking/PublicBookingApp"));
 const PublicBookingManage = lazy(() => import("./modules/public-booking/PublicBookingManage"));
 const PlayerPortal = lazy(() => import("./modules/player-portal/PlayerPortal"));
@@ -90,7 +92,8 @@ const publicPage: PublicPage | null =
 // their workspace starts downloading now, alongside the session check, rather
 // than after it. The lazy import above reuses the same promise. A player or a
 // stranger never trips this: the hint is removed on logout.
-if (!publicPage && !publicBookingOnly && !videoShare && !reviewShare && !clarityTerminal && lastVisitorWasCoach()) {
+const willCheckSession = !publicPage && !publicBookingOnly && !videoShare && !reviewShare && !clarityTerminal;
+if (willCheckSession && lastVisitorWasCoach()) {
   void loadApp();
   // The client list too. It is the first thing Clients and Player Profiles
   // need, it is served by its own function, and nothing about the request
@@ -104,6 +107,10 @@ if (!publicPage && !publicBookingOnly && !videoShare && !reviewShare && !clarity
   void import("./modules/player-profiles/lessonNotesStore")
     .then((store) => store.prefetchLessonNotes())
     .catch(() => undefined);
+} else if (willCheckSession) {
+  // Most likely a sign-in: the form and its stylesheet download alongside the
+  // session check rather than after it says "guest".
+  void loadLoginScreen();
 }
 
 let adminHooksInstalled = false;
@@ -248,7 +255,11 @@ function Root() {
     );
   }
 
-  return <LoginScreen onSignedIn={setSession} />;
+  return (
+    <Suspense fallback={<Loading size="screen" label={t("Checking session…")} />}>
+      <LoginScreen onSignedIn={setSession} />
+    </Suspense>
+  );
 }
 
 createRoot(document.getElementById("root")!).render(

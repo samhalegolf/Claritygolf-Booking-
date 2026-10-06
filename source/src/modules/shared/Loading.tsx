@@ -19,7 +19,7 @@ export type LoadingSize =
   | "block"
   /** A centred card where a whole screen will be. */
   | "panel"
-  /** The whole page, before any shell exists. */
+  /** The whole page, before any shell exists. Needs only base.css. */
   | "screen";
 
 type LoadingProps = {
@@ -39,11 +39,9 @@ export function Loading({ what, label, size = "block", detail, className = "" }:
   const classes = (base: string) => ["loading", `loading-${size}`, base, className].filter(Boolean).join(" ");
   if (size === "screen") {
     return (
-      <main className={classes("login-shell")}>
-        <div className="login-card" role="status">
-          <p>{text}</p>
-          {detail ? <p>{detail}</p> : null}
-        </div>
+      <main className={classes("loading-screen")} role="status">
+        <p>{text}</p>
+        {detail ? <p>{detail}</p> : null}
       </main>
     );
   }

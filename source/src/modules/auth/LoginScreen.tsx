@@ -1,3 +1,4 @@
+import "../../appStyles";
 import { useCallback, useEffect, useState, type CSSProperties, type FormEvent } from "react";
 
 import { apiFetch } from "./apiFetch";
@@ -332,7 +333,7 @@ export default function LoginScreen({ onSignedIn, onCancel }: LoginScreenProps) 
       <form className="login-card" onSubmit={onSubmit}>
         <div className="brand">
           <div className="brand-mark">
-            <img src="/assets/clarity-golf-logo-208.png" alt={t("Clarity Golf")} />
+            <img src="/assets/clarity-golf-logo-208.webp" alt={t("Clarity Golf")} width={208} height={208} />
           </div>
           <div>
             <strong>{t("Clarity Golf")}</strong>
