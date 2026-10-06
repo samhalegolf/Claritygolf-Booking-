@@ -15738,13 +15738,59 @@ button {
   font-style: normal;
 }
 
-/* Their Google Calendar: the same controls Settings used to hold, now on the
-   profile of the coach whose Google account it is. */
+/* Their Google Calendar on the profile: one row in the Business Hub's
+   connection style -- the mark, who it is linked to, a quick sync, the status
+   chip and the gear to its settings. */
+.cp-gcal-head {
+  padding: var(--c-space-5) var(--c-space-6);
+}
+
+.cp-gcal-title {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.cp-gcal-title strong {
+  font-size: var(--c-size-card-heading);
+}
+
+.cp-gcal-title em {
+  overflow: hidden;
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cp-gcal-title em.is-error {
+  color: var(--c-danger);
+  white-space: normal;
+}
+
+.bh-gear:disabled,
+.bh-setup:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.bh-gear.is-syncing svg {
+  animation: resource-spin 0.9s linear infinite;
+}
+
+/* Settings › Booking › Google Calendar: what the profile card's gear opens. */
 .cp-google-calendar-body {
   display: grid;
   gap: var(--c-space-4);
   min-width: 0;
-  padding: 0 var(--c-space-6) var(--c-space-6);
+}
+
+.gcal-settings-owner {
+  margin: 0;
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
 }
 
 /* The coach list in Settings wears each coach's photo. */
