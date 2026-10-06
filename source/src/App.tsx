@@ -83,7 +83,7 @@ import { type PhoneDestination, PhoneTabBar } from "./modules/phone/PhoneTabBar"
 import { QuickBookScreen } from "./modules/quick-book/QuickBookScreen";
 import { quickBookSlots } from "./modules/quick-book/quickBookModel";
 import { TodayScreen } from "./modules/today/TodayScreen";
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "./modules/auth/apiFetch";
 import { SnapshotFrameViewer, type FrameViewerShot } from "./modules/shared/SnapshotFrameViewer";
 import type { SheetVideo } from "./modules/swing-review/SwingReviewSheet";
@@ -553,7 +553,9 @@ import { InvoicedBookingLink } from "./modules/clients/clientProfileModel";
 import {
   IssuedPassesPanel,
   MembershipsPanel,
+  PassClientPicker,
   PassInboxPanel,
+  PassTypesList,
 } from "./modules/passes/lazyPanels";
 import {
   PRIMARY_PLAYER_TOOL_TABS,
@@ -672,12 +674,22 @@ type BillingSection =
   | "dashboard"
   | "new-invoice"
   | "invoices"
-  | "expenses"
-  | "products"
-  | "coupons"
+  | "products-new"
+  | "products-catalog"
+  | "products-orders"
+  | "products-integrations"
+  | "expenses-log"
+  | "expenses-records"
+  | "expenses-integrations"
+  | "vouchers-issue"
+  | "vouchers-edit"
+  | "vouchers-records"
+  | "vouchers-integrations"
+  | "passes-issue"
+  | "passes-edit"
+  | "passes-records"
   | "reports"
   | "transactions"
-  | "passes"
   | "memberships"
   | "settings";
 
@@ -697,27 +709,50 @@ const PROFILE_LINKED_VIEWS: View[] = ["calendar", "clients", "players", "sell", 
  * Billing's sub-nav, as data -- the same shape as SETTINGS_SECTIONS, so the
  * side column, the topbar's subtitle and the coach profile's "does this
  * section exist" check all read one list and cannot drift apart.
+ *
+ * Products, Expenses, Vouchers and Passes are groups: a heading with its
+ * sections under it, each section one job. Nothing in a group is open or
+ * editable until its own row is picked.
  */
 const BILLING_SECTION_NAV: Array<{
   key: Exclude<BillingSection, "none">;
   label: string;
   icon: IconComponent;
+  group?: string;
 }> = [
   { key: "dashboard", label: t("Dashboard"), icon: ClarityDashboardHome },
   { key: "new-invoice", label: t("New Invoice"), icon: ClarityBookingPages },
   { key: "invoices", label: t("Invoices"), icon: ClarityInvoices },
-  { key: "expenses", label: t("Expenses"), icon: ClarityStore },
-  { key: "products", label: t("Products"), icon: ClarityProducts },
-  { key: "coupons", label: t("Coupons"), icon: ClarityPassesCredits },
+  { key: "products-new", label: t("New Product"), icon: Plus, group: t("Products") },
+  { key: "products-catalog", label: t("Catalog"), icon: ClarityProducts, group: t("Products") },
+  { key: "products-orders", label: t("Orders"), icon: ClarityPayments, group: t("Products") },
+  { key: "products-integrations", label: t("Integrations"), icon: ClarityIntegrations, group: t("Products") },
+  { key: "expenses-log", label: t("Log An Expense"), icon: Plus, group: t("Expenses") },
+  { key: "expenses-records", label: t("Expense Log"), icon: ClarityStore, group: t("Expenses") },
+  { key: "expenses-integrations", label: t("Integrations"), icon: ClarityIntegrations, group: t("Expenses") },
+  { key: "vouchers-issue", label: t("Issue Voucher"), icon: Plus, group: t("Vouchers") },
+  { key: "vouchers-edit", label: t("Create or Edit Vouchers"), icon: ClarityProducts, group: t("Vouchers") },
+  { key: "vouchers-records", label: t("Voucher Records"), icon: ClarityPassesCredits, group: t("Vouchers") },
+  { key: "vouchers-integrations", label: t("Integrations"), icon: ClarityIntegrations, group: t("Vouchers") },
+  { key: "passes-issue", label: t("Issue or Redeem Passes"), icon: Plus, group: t("Passes") },
+  { key: "passes-edit", label: t("Create or Edit Passes"), icon: ClarityProducts, group: t("Passes") },
+  { key: "passes-records", label: t("Pass Records"), icon: ClarityPassesCredits, group: t("Passes") },
   { key: "transactions", label: t("Transaction History"), icon: ClarityPayments },
-  { key: "passes", label: t("Passes"), icon: ClarityPassesCredits },
   { key: "memberships", label: t("Memberships"), icon: RefreshCw },
   { key: "reports", label: t("Reports"), icon: ClarityReports },
   { key: "settings", label: t("Settings"), icon: ClaritySettings },
 ];
 
+function isBillingSection(value: unknown): value is Exclude<BillingSection, "none"> {
+  return BILLING_SECTION_NAV.some((entry) => entry.key === value);
+}
+
+// A grouped section reads as "Group › Section" wherever it stands alone, so
+// three rows all called Integrations still say whose they are.
 function billingSectionLabel(section: Exclude<BillingSection, "none">) {
-  return BILLING_SECTION_NAV.find((entry) => entry.key === section)?.label ?? "";
+  const entry = BILLING_SECTION_NAV.find((candidate) => candidate.key === section);
+  if (!entry) return "";
+  return entry.group ? `${entry.group} › ${entry.label}` : entry.label;
 }
 
 // Which completed bookings the "ready to pull" lists show.
@@ -2270,19 +2305,19 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   const mainPanelRef = useRef<HTMLElement>(null);
   // Sell on a phone: the current sale open as its own page over the catalogue.
   const [sellSaleOpen, setSellSaleOpen] = useState(false);
-  // Products first: adding something you sell is the most common reason to open
-  // Billing, and it is the one screen that is useless if you have to find it.
+  // Billing opens on its Dashboard, the top of its menu: a summary, with
+  // nothing open or editable until a section is picked.
   const [billingSection, setBillingSection] = useState<BillingSection>(() =>
     typeof window !== "undefined" && new URLSearchParams(window.location.search).get("billing") === "settings"
       ? "settings"
-      : "products",
+      : "dashboard",
   );
   // The menus are a phone screen of their own. A window widened past the phone
   // width shows the menu beside a section, so it needs a section to show.
   useEffect(() => {
     if (phoneLayout) return;
     if (activeView === "settings" && settingsTab === "none") setSettingsTab("services");
-    if (activeView === "billing" && billingSection === "none") setBillingSection("products");
+    if (activeView === "billing" && billingSection === "none") setBillingSection("dashboard");
   }, [phoneLayout, activeView, settingsTab, billingSection]);
   const [invoiceDraft, setInvoiceDraft] = useState<InvoiceDraft>(() =>
     emptyInvoiceDraft(getStoredCoachAccount().invoiceSettings),
@@ -6196,7 +6231,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     // step in from it; the desktop shows the menu beside a section, so it
     // opens straight onto one.
     if (view === "settings") setSettingsTab(phoneLayout ? "none" : "services");
-    if (view === "billing") setBillingSection(phoneLayout ? "none" : "products");
+    if (view === "billing") setBillingSection(phoneLayout ? "none" : "dashboard");
     if (view === "sell") setSellSaleOpen(false);
     // Opening Video from the nav is the general workspace (no player context).
     if (view === "video") setVideoContext(null);
@@ -9886,7 +9921,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
       });
     }
     if (billingSection === "transactions") void fetchPosTransactions();
-    if (billingSection === "coupons" && !voucherRules.length) void fetchVoucherRules();
+    if (billingSection === "vouchers-integrations" && !voucherRules.length) void fetchVoucherRules();
     if (billingSection === "settings" && !stripeStatus) void fetchStripeStatus();
   }
 
@@ -11111,17 +11146,22 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     if (section === "invoices") {
       void fetchAllInvoices();
       void fetchReconcileCandidates();
-    } else if (section === "expenses") {
-      void fetchBankCandidates();
-    } else if (section === "products") {
+    } else if (section.startsWith("expenses-")) {
+      // A half-made edit belongs to the page it was started on.
+      resetExpenseDraft();
+      if (section === "expenses-integrations") void fetchBankCandidates();
+    } else if (section === "products-catalog" || section === "vouchers-edit") {
       void fetchBillingProducts();
-    } else if (section === "coupons") {
+    } else if (section === "vouchers-records") {
       void fetchCoupons();
+    } else if (section === "vouchers-integrations") {
+      if (!voucherRules.length) void fetchVoucherRules();
     } else if (section === "transactions") {
       void fetchPosTransactions();
       void fetchAllInvoices();
-    } else if (section === "passes") {
+    } else if (section === "passes-issue") {
       void fetchPassInbox();
+    } else if (section === "passes-records") {
       void fetchIssuedPasses();
     }
   }
@@ -17015,7 +17055,8 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
       }
       setActiveView(snapshot.view);
       setSettingsTab(snapshot.settingsTab);
-      setBillingSection(snapshot.billingSection);
+      // An entry saved before a section was renamed falls back to the menu.
+      setBillingSection(isBillingSection(snapshot.billingSection) ? snapshot.billingSection : "none");
       setRequestedSettingsGroup(snapshot.settingsGroup);
       if (phoneLayout && snapshot.view === "players") setPlayerToolExpanded(Boolean(snapshot.playerOpen));
       if (phoneLayout && snapshot.view === "sell") setSellSaleOpen(Boolean(snapshot.sellSale));
@@ -17226,8 +17267,8 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
         category: "Accounting",
         label: t("Products & stock"),
         summary: t("What you sell at the counter."),
-        path: t("Billing › Products"),
-        target: { kind: "billing", section: "products" },
+        path: t("Billing › Products › Catalog"),
+        target: { kind: "billing", section: "products-catalog" },
         facts: firstFew(
           catalogItems.filter((item) => item.kind === "product"),
           (item) => [item.name, formatMoney(item.price, invoiceSettings.currency)],
@@ -19628,21 +19669,24 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                 until a section is picked, and the topbar's Back returns to it. */}
             {workspaceOverlay?.kind !== "billing" && (!phoneLayout || billingSection === "none") && (
             <nav className="settings-subnav" aria-label={t("Billing sections")}>
-              {BILLING_SECTION_NAV.map((section) => (
-                <button
-                  key={section.key}
-                  className={billingSection === section.key ? "active" : ""}
-                  onClick={() => switchBillingSection(section.key)}
-                  aria-current={billingSection === section.key ? "page" : undefined}
-                  type="button"
-                >
-                  <section.icon size={16} />
-                  {section.label}
-                  {/* The count is what is waiting in the inbox below the pass
-                      list. An inbox you have to open to discover is empty is
-                      one nobody opens. */}
-                  {section.key === "passes" && passInboxCount > 0 && <span className="tab-count">{passInboxCount}</span>}
-                </button>
+              {BILLING_SECTION_NAV.map((section, index) => (
+                <Fragment key={section.key}>
+                  {section.group && section.group !== BILLING_SECTION_NAV[index - 1]?.group && (
+                    <span className="settings-subnav-group">{section.group}</span>
+                  )}
+                  <button
+                    className={[billingSection === section.key ? "active" : "", section.group ? "is-grouped" : ""].filter(Boolean).join(" ")}
+                    onClick={() => switchBillingSection(section.key)}
+                    aria-current={billingSection === section.key ? "page" : undefined}
+                    type="button"
+                  >
+                    <section.icon size={16} />
+                    {section.label}
+                    {/* The count is what is waiting in the pass inbox. An inbox
+                        you have to open to discover is empty is one nobody opens. */}
+                    {section.key === "passes-issue" && passInboxCount > 0 && <span className="tab-count">{passInboxCount}</span>}
+                  </button>
+                </Fragment>
               ))}
             </nav>
             )}
@@ -19835,7 +19879,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                     <button
                       className="outline-button"
                       onClick={() => {
-                        setBillingSection("products");
+                        setBillingSection("products-catalog");
                         void fetchBillingProducts();
                       }}
                       type="button"
@@ -21083,8 +21127,9 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
               </div>
             )}
 
-            {billingSection === "expenses" && (
+            {billingSection.startsWith("expenses-") && (
               <div className="billing-dashboard">
+                {(billingSection === "expenses-integrations") && (
                 <article className="data-card recent-invoices-card">
                   <div className="data-card-header">
                     <div>
@@ -21321,6 +21366,8 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                     </p>
                   )}
                 </article>
+                )}
+                {(billingSection === "expenses-integrations") && (
                 <article className="data-card">
                   <div className="data-card-header">
                     <div>
@@ -21442,7 +21489,9 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                     </p>
                   )}
                 </article>
+                )}
 
+                {(billingSection === "expenses-records") && (
                 <article className="data-card">
                   <div className="data-card-header">
                     <div>
@@ -21475,7 +21524,9 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                     {expenseRangeFrom || expenseRangeTo ? t(" in this range") : t(" (last 200)")}.
                   </p>
                 </article>
+                )}
 
+                {(billingSection === "expenses-log" || (billingSection === "expenses-records" && Boolean(expenseDraft.id))) && (
                 <article className="data-card">
                   <div className="data-card-header">
                     <div>
@@ -21559,7 +21610,9 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                     )}
                   </div>
                 </article>
+                )}
 
+                {(billingSection === "expenses-records") && (
                 <article className="data-card recent-invoices-card">
                   <div className="data-card-header">
                     <div>
@@ -21606,6 +21659,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                     <p>{t("No expenses logged")}{expenseRangeFrom || expenseRangeTo ? t(" in this date range") : t(" yet")}.</p>
                   )}
                 </article>
+                )}
               </div>
             )}
 
@@ -21613,9 +21667,10 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                 the invoice figures above - a lesson can be paid at the counter
                 and also appear on an invoice, so combining them would
                 double-count. */}
-            {billingSection === "products" && (
+            {(billingSection === "products-new" || billingSection === "products-catalog" || billingSection === "vouchers-edit") && (
               <Suspense fallback={<Loading what={t("products")} />}>
                 <ProductsPanel
+                  view={billingSection === "products-new" ? "new" : billingSection === "products-catalog" ? "catalog" : "vouchers"}
                   products={catalogItems}
                   loadState={catalogLoadState}
                   currency={invoiceSettings.currency}
@@ -21633,9 +21688,29 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
               </Suspense>
             )}
 
-            {billingSection === "coupons" && (
-              <Suspense fallback={<Loading what={t("coupons")} />}>
+            {(billingSection === "products-orders" || billingSection === "products-integrations") && (
+              <div className="billing-dashboard">
+                <article className="data-card wide">
+                  <div className="data-card-header">
+                    <div>
+                      <span>{billingSectionLabel(billingSection)}</span>
+                      <h2>{t("Coming soon")}</h2>
+                    </div>
+                    {billingSection === "products-orders" ? <ClarityPayments size={24} /> : <ClarityIntegrations size={24} />}
+                  </div>
+                  <p className="field-help">
+                    {billingSection === "products-orders"
+                      ? t("Product orders will show here.")
+                      : t("Connections to other shops and stock systems will show here.")}
+                  </p>
+                </article>
+              </div>
+            )}
+
+            {(billingSection === "vouchers-issue" || billingSection === "vouchers-records" || billingSection === "vouchers-integrations") && (
+              <Suspense fallback={<Loading what={t("vouchers")} />}>
                 <CouponsPanel
+                  view={billingSection === "vouchers-issue" ? "issue" : billingSection === "vouchers-records" ? "records" : "integrations"}
                   coupons={coupons}
                   loadState={couponsLoadState}
                   currency={invoiceSettings.currency}
@@ -21653,8 +21728,53 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
               </Suspense>
             )}
 
-            {billingSection === "passes" && (
+            {billingSection.startsWith("passes-") && (
               <div className="billing-dashboard">
+                {billingSection === "passes-issue" && (
+                <article className="data-card wide">
+                  <div className="data-card-header">
+                    <div>
+                      <span>{t("Issue or redeem")}</span>
+                      <h2>{t("Find the client")}</h2>
+                    </div>
+                    <ClarityClientsPlayers size={24} />
+                  </div>
+                  <p className="field-help">{t("Passes are granted and spent on the client's own Passes tab. Pick them here to open it.")}</p>
+                  <Suspense fallback={<Loading what={t("clients")} />}>
+                    <PassClientPicker
+                      people={clients.map((client) => ({ id: client.id, name: client.name, email: client.email }))}
+                      onPick={(personId) => {
+                        const linked = clients.find((entry) => entry.id === personId);
+                        if (!linked) return;
+                        openClientProfile(linked);
+                        setClientProfileTab("passes");
+                      }}
+                    />
+                  </Suspense>
+                </article>
+                )}
+
+                {billingSection === "passes-edit" && (
+                <article className="data-card wide">
+                  <div className="data-card-header">
+                    <div>
+                      <span>{t("Pass types")}</span>
+                      <h2>{t("What you sell as a pass")}</h2>
+                    </div>
+                    <ClarityProducts size={24} />
+                  </div>
+                  <p className="field-help">{t("A pass type is a package lesson type, so it is made and changed in Settings > Services. That keeps it in step with what the booking screen sells.")}</p>
+                  <Suspense fallback={<Loading what={t("pass types")} />}>
+                    <PassTypesList
+                      services={services}
+                      formatMoney={(amount) => formatMoney(amount, invoiceSettings.currency)}
+                      onEdit={() => openProfileTarget({ kind: "settings", tab: "services" }, `${terms.serviceSingular} types`)}
+                    />
+                  </Suspense>
+                </article>
+                )}
+
+                {billingSection === "passes-records" && (
                 <article className="data-card wide">
                   <div className="data-card-header">
                     <div>
@@ -21691,7 +21811,9 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                     />
                   </Suspense>
                 </article>
+                )}
 
+                {billingSection === "passes-issue" && (
                 <article className="data-card wide">
                   <div className="data-card-header">
                     <div>
@@ -21768,6 +21890,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                     />
                   </Suspense>
                 </article>
+                )}
               </div>
             )}
 

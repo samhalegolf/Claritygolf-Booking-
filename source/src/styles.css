@@ -498,6 +498,11 @@ button {
     border-right: 0;
     border-bottom: 1px solid var(--c-border-soft);
   }
+
+  /* A group heading starts its own line when the rows wrap. */
+  .settings-subnav-group {
+    flex-basis: 100%;
+  }
 }
 
 /* Rule 07: navigation keeps its boxes. */
@@ -536,6 +541,36 @@ button {
   background: var(--c-accent);
   color: var(--c-accent-text);
   font-weight: 700;
+}
+
+/* Billing's grouped rows: a quiet heading, its sections stepped in under it. */
+.settings-subnav-group {
+  margin: 12px 10px 2px;
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.settings-subnav button.is-grouped {
+  padding-left: 22px;
+}
+
+/* Issue or Redeem Passes: the clients matching the search. */
+.pass-client-matches {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pass-client-matches em {
+  margin-left: 8px;
+  color: var(--c-text-soft);
+  font-style: normal;
 }
 
 /* A count on a row (Billing's pass inbox) sits at the row's far end. */

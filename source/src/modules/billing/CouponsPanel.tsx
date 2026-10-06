@@ -1,6 +1,11 @@
 import { Loading } from "../shared/Loading";
-// Billing > Coupons. Gift vouchers: what has been issued, what is left on each,
-// and the Stripe purchases that still need one.
+// Billing > Vouchers. Gift vouchers: what has been issued, what is left on each,
+// and the Stripe purchases that still need one. One panel behind three menu
+// items, each showing only its own part:
+//
+//   issue         Issue Voucher - the form for issuing one by hand.
+//   records       Voucher Records - the outstanding total and the list.
+//   integrations  Integrations - vouchers bought online through Stripe.
 //
 // Presentational, like ProductsPanel and BillingReportsPanel: App.tsx owns the
 // list and every request; what lives here is form and disclosure state.
@@ -30,7 +35,10 @@ export type CouponIssueValues = {
   note: string;
 };
 
+export type CouponsPanelView = "issue" | "records" | "integrations";
+
 export type CouponsPanelProps = {
+  view: CouponsPanelView;
   coupons: BillingCoupon[];
   loadState: "idle" | "loading" | "loaded" | "error";
   currency: string;
@@ -76,6 +84,7 @@ function statusLabel(coupon: BillingCoupon) {
 }
 
 export function CouponsPanel({
+  view,
   coupons,
   loadState,
   currency,
@@ -382,6 +391,7 @@ export function CouponsPanel({
 
   return (
     <div className="billing-dashboard billing-coupons">
+      {view === "records" && (
       <article className="data-card">
         <div className="data-card-header">
           <div>
@@ -416,7 +426,9 @@ export function CouponsPanel({
           <button className="outline-button" onClick={onReload} type="button">{t("Refresh")}</button>
         </div>
       </article>
+      )}
 
+      {view === "integrations" && (
       <article className="data-card wide">
         <div className="data-card-header">
           <div>
@@ -761,12 +773,14 @@ export function CouponsPanel({
           </>
         )}
       </article>
+      )}
 
+      {view === "issue" && (
       <article className="data-card wide">
         <div className="data-card-header">
           <div>
             <span>{t("Issue")}</span>
-            <h2>{t("New coupon")}</h2>
+            <h2>{t("New voucher")}</h2>
           </div>
           <Plus size={24} />
         </div>
@@ -831,26 +845,28 @@ export function CouponsPanel({
             onClick={() => void submitIssue()}
             type="button"
           >
-            {issuing ? t("Issuing...") : t("Issue Coupon")}
+            {issuing ? t("Issuing...") : t("Issue Voucher")}
           </button>
         </div>
       </article>
+      )}
 
+      {view === "records" && (
       <article className="data-card wide recent-invoices-card">
         <div className="data-card-header">
           <div>
-            <span>{t("Coupons")}</span>
+            <span>{t("Vouchers")}</span>
             <h2>{t("{length} shown", { length: visible.length })}</h2>
           </div>
           <ClarityPassesCredits size={24} />
         </div>
-        {loadState === "loading" && <Loading what={t("coupons")} />}
+        {loadState === "loading" && <Loading what={t("vouchers")} />}
         {loadState === "error" && (
-          <p>{t("Could not load coupons.")}{" "}<button className="link-button" onClick={onReload} type="button">{t("Retry")}</button>
+          <p>{t("Could not load vouchers.")}{" "}<button className="link-button" onClick={onReload} type="button">{t("Retry")}</button>
           </p>
         )}
         {loadState !== "loading" && !visible.length && (
-          <p>{coupons.length ? t("Nothing matches that.") : t("No coupons yet.")}</p>
+          <p>{coupons.length ? t("Nothing matches that.") : t("No vouchers yet.")}</p>
         )}
         {visible.length > 0 && (
           <table className="recent-invoices-table product-table">
@@ -934,6 +950,7 @@ export function CouponsPanel({
           </table>
         )}
       </article>
+      )}
     </div>
   );
 }

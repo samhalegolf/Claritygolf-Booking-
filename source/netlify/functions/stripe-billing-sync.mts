@@ -73,7 +73,7 @@ export default async function handler(req: Request) {
     if (action === "syncProducts") {
       return json({
         error: "products_not_synced",
-        message: "Stripe products are no longer imported. Products are managed in Billing > Products.",
+        message: "Stripe products are no longer imported. Products are managed in Billing > Products > Catalog.",
       }, 410);
     }
     if (action === "syncAll") {
