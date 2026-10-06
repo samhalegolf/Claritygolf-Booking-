@@ -295,8 +295,14 @@ import {
   workspaceAccountsFromSettings,
 } from "./_shared/workspace-state.mts";
 import { json } from "./_shared/http.mts";
+import {
+  parseCookies,
+  playerSessionCookieName,
+  playerSessionTokenFromRequest,
+  sessionCookieName,
+  sessionTokenFromRequest,
+} from "./_shared/session-tokens.mts";
 
-const sessionCookieName = "clarity_session";
 const sessionDays = 7;
 const passwordResetMinutes = 30;
 const PUBLIC_SLOT_STEP_MINUTES = 30;
@@ -457,34 +463,6 @@ function escapeHtml(value) {
     .replace(/'/g, "&#039;");
 }
 
-function parseCookies(req) {
-  const cookieHeaderValue = req.headers.get("cookie") || "";
-  return Object.fromEntries(
-    cookieHeaderValue
-      .split(";")
-      .map((pair) => pair.trim())
-      .filter(Boolean)
-      .map((pair) => {
-        const index = pair.indexOf("=");
-        return index === -1
-          ? [decodeURIComponent(pair), ""]
-          : [
-              decodeURIComponent(pair.slice(0, index)),
-              decodeURIComponent(pair.slice(index + 1)),
-            ];
-      }),
-  );
-}
-
-function sessionTokenFromRequest(req) {
-  return parseCookies(req)[sessionCookieName] || "";
-}
-
-// Player portal sessions are a separate space from the admin session above --
-// a distinct cookie name so a coach who is also a player on the same browser
-// can hold both without one masquerading as the other. Same HttpOnly/SameSite
-// posture as the admin cookie.
-const playerSessionCookieName = "clarity_player_session";
 const playerSessionDays = 30;
 
 function playerCookieHeader(token, req, maxAgeSeconds) {
@@ -503,26 +481,6 @@ function playerCookieHeader(token, req, maxAgeSeconds) {
 
 function clearPlayerCookieHeader() {
   return `${playerSessionCookieName}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
-}
-
-/**
- * The native app cannot hold the cookie above.
- *
- * It is served from capacitor://localhost, so every request here is cross-site
- * and a SameSite=Lax cookie is never sent -- there is no cookie posture that
- * fixes that without opening the browser up too. It carries the same
- * player_sessions token in an Authorization header instead. Same token, same
- * table, same expiry and the same revocation check; only the transport differs,
- * so nothing downstream has to know which client it is answering.
- */
-function bearerTokenFromRequest(req) {
-  const header = req.headers.get("authorization") || "";
-  const match = /^Bearer\s+(\S+)$/i.exec(header.trim());
-  return match ? match[1] : "";
-}
-
-function playerSessionTokenFromRequest(req) {
-  return bearerTokenFromRequest(req) || parseCookies(req)[playerSessionCookieName] || "";
 }
 
 /**

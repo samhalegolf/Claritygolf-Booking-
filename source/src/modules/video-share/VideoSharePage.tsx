@@ -1,3 +1,4 @@
+import "../../appStyles";
 import { Loading } from "../shared/Loading";
 import { useCallback, useEffect, useState } from "react";
 

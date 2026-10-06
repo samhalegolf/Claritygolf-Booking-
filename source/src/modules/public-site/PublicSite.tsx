@@ -62,7 +62,7 @@ function PublicHeader() {
   return (
     <header className="public-site-header">
       <a className="public-site-brand" href="/" aria-label={t("Clarity Golf Booking home")}>
-        <img src="/assets/clarity-golf-logo-208.png" alt="" />
+        <img src="/assets/clarity-golf-logo-208.webp" alt="" width={208} height={208} />
         <span>
           <strong>{t("Clarity Golf")}</strong>
           <small>{t("Booking System")}</small>
@@ -106,7 +106,7 @@ function HomePage() {
           </div>
         </div>
         <div className="public-summary-card" aria-label={t("Product summary")}>
-          <img className="public-summary-logo" src="/assets/clarity-golf-logo-with-name.png" alt="Clarity Golf" />
+          <img className="public-summary-logo" src="/assets/clarity-golf-logo-with-name.webp" alt="Clarity Golf" width={224} height={224} fetchPriority="high" />
           <span>{t("For coaches and their players")}</span>
           <strong>{t("One place for the work around the lesson.")}</strong>
           <p>{t("Scheduling, player history, coaching notes, practice, passes, video reviews and optional Google integrations.")}</p>
