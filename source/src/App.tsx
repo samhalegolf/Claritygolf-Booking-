@@ -93,6 +93,7 @@ import type { TillLesson } from "./modules/billing/tillLessons";
 import { WORKSPACE_ACCOUNTS_STORAGE_KEY } from "./modules/shared/workspaceStorage";
 import { useBackNavigation } from "./modules/shared/backNavigation";
 import { Loading, loadingLabel } from "./modules/shared/Loading";
+import { DashboardPanel } from "./modules/billing/DashboardPanel";
 import { type Person } from "./modules/clients/clientsModel";
 import { isUnauthorizedClientsError, loadClients, replaceClients, resetClients, useClientsState } from "./modules/clients/clientsStore";
 import type { ClientsPanel as ClientsPanelComponent } from "./modules/clients/ClientsPanel";
@@ -256,7 +257,6 @@ import type {
   BillingInvoiceStatus,
   InvoicePaymentSource,
   BillingInvoiceRecord,
-  BillingRevenueReport,
   BillingReportSummary,
   BillingDiscountType,
   BillingDiscount,
@@ -920,6 +920,14 @@ type BookingConfirmationResendResponse = {
   results?: EmailSendResult[];
   notifications?: NotificationRecord[];
 };
+/** What goes from Clarity to this coach's Google Calendar. Mirrors google-calendar-export-rules.mts. */
+type GoogleCalendarExportRules = {
+  lessons: boolean;
+  blocks: boolean;
+  unavailable: boolean;
+  excludedServiceIds: string[];
+  clientDetails: boolean;
+};
 type GoogleCalendarSyncStatus = {
   configured: boolean;
   connected: boolean;
@@ -942,6 +950,7 @@ type GoogleCalendarSyncStatus = {
   sources?: GoogleCalendarSourceStatus[];
   sourceListError?: string;
   importRules?: GoogleCalendarImportRule[];
+  exportRules?: GoogleCalendarExportRules;
   ok?: boolean;
   skipped?: boolean;
 };
@@ -1890,6 +1899,7 @@ const defaultGoogleCalendarStatus: GoogleCalendarSyncStatus = {
   sources: [],
   sourceListError: "",
   importRules: [],
+  exportRules: { lessons: true, blocks: true, unavailable: true, excludedServiceIds: [], clientDetails: true },
 };
 
 /** The backend stores terms as an array; the field edits them as typed text. */
@@ -2466,9 +2476,6 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   const [allInvoices, setAllInvoices] = useState<BillingInvoiceRecord[]>([]);
   const [allInvoicesLoadState, setAllInvoicesLoadState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [invoiceSearch, setInvoiceSearch] = useState("");
-  const [revenuePeriod, setRevenuePeriod] = useState<"week" | "month" | "year">("month");
-  const [revenueReport, setRevenueReport] = useState<BillingRevenueReport | null>(null);
-  const [revenueLoadState, setRevenueLoadState] = useState<"idle" | "loading" | "loaded" | "error">("idle");
   // Billing > Reports tab: full P&L / GST / aging summary over a date range.
   const [reportPreset, setReportPreset] = useState<ReportRangePreset>("this-financial-year");
   const [reportRange, setReportRange] = useState<{ start: string; end: string }>(
@@ -4287,6 +4294,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
         : [],
       sourceListError: typeof status?.sourceListError === "string" ? status.sourceListError : "",
       importRules: Array.isArray(status?.importRules) ? status.importRules.map(cleanImportRule) : [],
+      exportRules: { ...defaultGoogleCalendarStatus.exportRules!, ...(status?.exportRules ?? {}) },
     });
   }
 
@@ -10448,30 +10456,6 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     window.localStorage.setItem(BOOKING_PULL_FILTER_STORAGE_KEY, bookingPullFilter);
   }, [bookingPullFilter]);
 
-  async function fetchRevenueReport(period: "week" | "month" | "year") {
-    setRevenueLoadState("loading");
-    try {
-      const response = await fetch(`/api/billing/reports/revenue?period=${period}`, { credentials: "same-origin", cache: "no-store" });
-      if (response.status === 401) {
-        setAuthStatus("guest");
-        return;
-      }
-      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not load revenue.")));
-      const data = (await response.json()) as BillingRevenueReport;
-      setRevenueReport(data);
-      setRevenueLoadState("loaded");
-    } catch (error) {
-      setRevenueLoadState("error");
-      setToast({ message: error instanceof Error ? error.message : t("Could not load revenue.") });
-    }
-  }
-
-  useEffect(() => {
-    if (authStatus !== "authenticated" || !billingWorkspaceEnabled) return;
-    void fetchRevenueReport(revenuePeriod);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authStatus, billingWorkspaceEnabled, revenuePeriod]);
-
   useEffect(() => {
     if (authStatus !== "authenticated" || !billingWorkspaceEnabled) return;
     if (expenseLoadState === "idle") return; // initial load already covered by loadBillingWorkspace()
@@ -10584,12 +10568,6 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
       "noopener",
     );
   }
-
-  const revenueMaxBucketTotal = Math.max(1, ...(revenueReport?.buckets.map((bucket) => bucket.total) ?? [0]));
-  const revenueYoyDeltaPct =
-    revenueReport && revenueReport.previousYearTotal !== null && revenueReport.previousYearTotal > 0
-      ? Math.round(((revenueReport.total - revenueReport.previousYearTotal) / revenueReport.previousYearTotal) * 100)
-      : null;
 
   // Unpaid/overdue is derived here rather than trusting invoiceRecord.status
   // alone: an invoice left as "sent" past its due date is just as overdue as
@@ -12828,6 +12806,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
           calendarId: nextStatus.calendarId,
           autoSync: nextStatus.autoSync,
           importRules: nextStatus.importRules || [],
+          exportRules: nextStatus.exportRules,
         }),
       });
       const data = (await response.json()) as Partial<GoogleCalendarSyncStatus> & { message?: string };
@@ -15149,6 +15128,13 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
    * connects their own Google account. The card says whether it is connected
    * and offers a quick sync; the gear opens the settings below.
    */
+  const googleCalendarExport = googleCalendar.exportRules ?? defaultGoogleCalendarStatus.exportRules!;
+  function updateGoogleCalendarExport(updates: Partial<GoogleCalendarExportRules>) {
+    setGoogleCalendar((current) => ({
+      ...current,
+      exportRules: { ...(current.exportRules ?? defaultGoogleCalendarStatus.exportRules!), ...updates },
+    }));
+  }
   const googleCalendarCoach = coachProfiles.find((coach) => coach.id === googleCalendarProfileCoachId);
   const googleCalendarCoachName = googleCalendarCoach?.displayName || googleCalendarCoach?.name || "";
   const googleCalendarFailing =
@@ -15551,18 +15537,85 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
             </div>
           </details>
 
-          {/* Not built yet. Today every lesson, block and unavailable hour
-              this coach owns goes to Google; this is where choosing which
-              of them will live. */}
+          {/* What goes the other way: which of this coach's items reach Google,
+              and whether a lesson shows who it is with. Anything switched off
+              is taken down from Google on the next sync. */}
           <details className="settings-subsection">
             <summary className="settings-subsection-title">
               <ExternalLink size={18} />
               <div>
                 <span>{t("Selective event export")}</span>
-                <strong>{t("Coming soon")}</strong>
+                <strong>
+                  {[
+                    googleCalendarExport.lessons ? t("Lessons") : "",
+                    googleCalendarExport.blocks ? t("Blocked time") : "",
+                    googleCalendarExport.unavailable ? t("Unavailable hours") : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" · ") || t("Nothing is sent to Google")}
+                </strong>
               </div>
             </summary>
-            <p className="google-calendar-source-intro">{t("Clarity currently sends every lesson, block and unavailable hour on this calendar to Google. Choosing which of them go across will be set here.")}</p>
+
+            <p className="google-calendar-source-intro">{t("Choose what Clarity sends to this Google calendar. Anything you switch off is removed from Google on the next sync.")}</p>
+
+            <div className="gcal-rule-toggles">
+              {(
+                [
+                  ["lessons", t("Lessons")],
+                  ["blocks", t("Blocked time")],
+                  ["unavailable", t("Unavailable hours")],
+                  ["clientDetails", t("Client name, phone and email on lessons")],
+                ] as const
+              ).map(([key, label]) => (
+                <label className="google-calendar-source-toggle" key={key}>
+                  <span>{label}</span>
+                  <input
+                    type="checkbox"
+                    checked={googleCalendarExport[key]}
+                    disabled={googleCalendarAction !== "idle" || (key === "clientDetails" && !googleCalendarExport.lessons)}
+                    onChange={(event) => updateGoogleCalendarExport({ [key]: event.target.checked })}
+                  />
+                </label>
+              ))}
+            </div>
+
+            {googleCalendarExport.lessons && services.length ? (
+              <div className="gcal-rule-field">
+                <span>{t("Lesson types sent")}</span>
+                <div className="gcal-rule-calendars">
+                  {services.map((service) => (
+                    <label className="gcal-rule-calendar" key={service.id}>
+                      <input
+                        type="checkbox"
+                        checked={!googleCalendarExport.excludedServiceIds.includes(service.id)}
+                        disabled={googleCalendarAction !== "idle"}
+                        onChange={(event) =>
+                          updateGoogleCalendarExport({
+                            excludedServiceIds: event.target.checked
+                              ? googleCalendarExport.excludedServiceIds.filter((id) => id !== service.id)
+                              : [...googleCalendarExport.excludedServiceIds, service.id],
+                          })
+                        }
+                      />
+                      <span>{service.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            <div className="gcal-rule-actions">
+              <button
+                className="primary-button"
+                type="button"
+                disabled={!googleCalendarSyncEnabled || googleCalendarAction !== "idle"}
+                onClick={() => void saveGoogleCalendarSettings()}
+              >
+                <Check size={16} />
+                {googleCalendarAction === "saving" ? t("Saving") : t("Save export")}
+              </button>
+            </div>
           </details>
 
           {/* Admin only: it shows raw Google payloads and failure codes. */}
@@ -20628,56 +20681,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                     </div>
                   </article>
                 )}
-                <article className="data-card revenue-card">
-                  <div className="data-card-header">
-                    <div>
-                      <span>{t("Revenue")}</span>
-                      <h2>{formatMoney(revenueReport?.total ?? 0, revenueReport?.currency ?? invoiceSettings.currency)}</h2>
-                    </div>
-                    <div className="revenue-period-toggle" role="tablist" aria-label={t("Revenue period")}>
-                      {(["week", "month", "year"] as const).map((period) => (
-                        <button
-                          key={period}
-                          className={revenuePeriod === period ? "active" : ""}
-                          onClick={() => setRevenuePeriod(period)}
-                          role="tab"
-                          aria-selected={revenuePeriod === period}
-                          type="button"
-                        >
-                          {period === "week" ? t("Weekly") : period === "month" ? t("Monthly") : t("Yearly")}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  {revenueLoadState === "loading" && !revenueReport ? (
-                    <Loading what={t("revenue")} />
-                  ) : revenueReport ? (
-                    <>
-                      <div className="revenue-chart" aria-hidden="true">
-                        {revenueReport.buckets.map((bucket) => (
-                          <div key={bucket.rangeStart} className="revenue-chart-bar-track" title={`${bucket.label}: ${formatMoney(bucket.total, revenueReport.currency)}`}>
-                            <div
-                              className="revenue-chart-bar"
-                              style={{ height: `${Math.max(2, Math.round((bucket.total / revenueMaxBucketTotal) * 100))}%` }}
-                            />
-                            <span>{bucket.label}</span>
-                          </div>
-                        ))}
-                      </div>
-                      <p className="revenue-comparison">
-                        {revenueReport.previousYearTotal === null
-                          ? t("No data from the same period last year yet.")
-                          : revenueYoyDeltaPct === null
-                            ? t("Same period last year: {previousYearTotal}", { previousYearTotal: formatMoney(revenueReport.previousYearTotal, revenueReport.currency) })
-                            : revenueYoyDeltaPct >= 0
-                              ? t("Up {pct}% vs. same period last year ({total})", { pct: Math.abs(revenueYoyDeltaPct), total: formatMoney(revenueReport.previousYearTotal, revenueReport.currency) })
-                              : t("Down {pct}% vs. same period last year ({total})", { pct: Math.abs(revenueYoyDeltaPct), total: formatMoney(revenueReport.previousYearTotal, revenueReport.currency) })}
-                      </p>
-                    </>
-                  ) : (
-                    <p>{t("No revenue yet. Issue an invoice to see it here.")}</p>
-                  )}
-                </article>
+                <DashboardPanel formatMoney={formatMoney} fallbackCurrency={invoiceSettings.currency} />
                 <div className="billing-dashboard-grid">
                   <article className="data-card">
                     <div className="data-card-header">

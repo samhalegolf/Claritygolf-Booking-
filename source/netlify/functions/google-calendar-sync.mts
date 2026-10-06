@@ -44,6 +44,11 @@ import {
   ruleIsUsable,
   type GoogleCalendarImportRule,
 } from "./_shared/google-calendar-import-rules.mts";
+import {
+  exportRulesAllow,
+  normalizeGoogleCalendarExportRules,
+  type GoogleCalendarExportRules,
+} from "./_shared/google-calendar-export-rules.mts";
 import { cleanString, cleanText, env, nowIso } from "./_shared/values.mts";
 import { json } from "./_shared/http.mts";
 
@@ -132,6 +137,7 @@ const COACH_SETTING_KEYS = [
   "googleCalendarEventHashMapJson",
   "googleCalendarAutoSync",
   "googleCalendarImportRulesJson",
+  "googleCalendarExportRulesJson",
   "googleCalendarImportBusy",
   "googleCalendarLastSyncAt",
   "googleCalendarLastSyncStatus",
@@ -204,6 +210,10 @@ function parseJson<T>(value: string | undefined, fallback: T): T {
 
 function readGoogleCalendarImportRules(settings: Record<string, string>) {
   return normalizeGoogleCalendarImportRules(parseJson<unknown[]>(settings[googleCalendarImportRulesSettingKey], []));
+}
+
+function readGoogleCalendarExportRules(settings: Record<string, string>): GoogleCalendarExportRules {
+  return normalizeGoogleCalendarExportRules(parseJson<unknown>(settings.googleCalendarExportRulesJson, {}));
 }
 
 // ---------------------------------------------------------------------------
@@ -595,6 +605,7 @@ export async function getGoogleCalendarSyncStatus(accountId: string, coachId: st
     sources,
     sourceListError,
     importRules,
+    exportRules: readGoogleCalendarExportRules(settings),
   };
 }
 
@@ -612,6 +623,9 @@ export async function updateGoogleCalendarSyncSettings(accountId: string, coachI
     values[googleCalendarImportRulesSettingKey] = JSON.stringify(
       normalizeGoogleCalendarImportRules(body.importRules),
     );
+  }
+  if (Object.prototype.hasOwnProperty.call(body || {}, "exportRules")) {
+    values.googleCalendarExportRulesJson = JSON.stringify(normalizeGoogleCalendarExportRules(body.exportRules));
   }
   await setCoachSettings(accountId, coachId, values);
   return getGoogleCalendarSyncStatus(accountId, coachId);
@@ -915,17 +929,23 @@ function accountFromSettings(accountId: string, settings: Record<string, string>
   };
 }
 
-function eventSummary(item: any, account: ReturnType<typeof accountFromSettings>, services: any[]) {
+function eventSummary(item: any, account: ReturnType<typeof accountFromSettings>, services: any[], clientDetails: boolean) {
   if (item.kind === "unavailable") return `Unavailable - ${account.businessName}`;
   if (item.kind === "block") return `Busy - ${account.businessName}`;
+  if (!clientDetails) return `Lesson - ${serviceName(item.serviceId, services)}`;
   return `${item.client || item.title} - ${serviceName(item.serviceId, services)}`;
 }
 
-function eventDescription(item: any, services: any[], location: any) {
+function eventDescription(item: any, services: any[], location: any, clientDetails: boolean) {
   if (item.kind === "unavailable") return "Outside booking hours. Set by your Clarity availability.";
   const rows =
     item.kind === "block"
       ? ["Blocked time", item.note]
+      : !clientDetails
+      ? [
+          `Service: ${serviceName(item.serviceId, services)}`,
+          location?.address ? `Address: ${location.address}` : "",
+        ]
       : [
           `Service: ${serviceName(item.serviceId, services)}`,
           `Client: ${item.client || item.title}`,
@@ -941,6 +961,7 @@ function eventDescription(item: any, services: any[], location: any) {
 
 function googleEventForItem(accountId: string, item: any, settings: Record<string, string>, services: any[], locations: any[], eventId: string) {
   const account = accountFromSettings(accountId, settings);
+  const exportRules = readGoogleCalendarExportRules(settings);
   const service = services.find((candidate) => candidate?.id === item.serviceId);
   const location = resolveLocation(item, service, locations, account);
   const week = Number(item.week ?? 0);
@@ -956,8 +977,8 @@ function googleEventForItem(accountId: string, item: any, settings: Record<strin
     : googleLocalDateTime(week, item.day, item.start + item.duration);
   return {
     id: eventId,
-    summary: eventSummary(item, account, services),
-    description: eventDescription(item, services, location),
+    summary: eventSummary(item, account, services, exportRules.clientDetails),
+    description: eventDescription(item, services, location, exportRules.clientDetails),
     location: unavailable ? "" : bookingLocationDisplay(location),
     start: { dateTime: start, timeZone: timezone },
     end: { dateTime: end, timeZone: timezone },
@@ -1405,13 +1426,21 @@ async function calendarSyncPayload(accountId: string, coachId: string) {
   const settings = coachScopedSettings(settingMap(settingsRows), coachId);
   const services = parseJson<any[]>(settings.servicesJson, defaultServices);
   const coaches = coachesFromSettings(accountId, settings);
+  const exportRules = readGoogleCalendarExportRules(settings);
   return {
     settings,
+    // What the export rules leave out is simply not in the list, so the full
+    // rebuild deletes any event it already holds for it.
     items: [
       ...itemRows
         .map(rowToItem)
-        .filter((item) => isBusyGoogleItem(item) && itemBelongsOnCoachCalendar(item, coachId, services, coaches)),
-      ...unavailableSyncItems(settings, coachId, coaches),
+        .filter(
+          (item) =>
+            isBusyGoogleItem(item) &&
+            exportRulesAllow(item, exportRules) &&
+            itemBelongsOnCoachCalendar(item, coachId, services, coaches),
+        ),
+      ...(exportRules.unavailable ? unavailableSyncItems(settings, coachId, coaches) : []),
     ],
     services,
     locations: parseJson(settings.locationsJson, []),
@@ -1728,10 +1757,13 @@ async function syncCoachCalendarChangesNow(
   // What this coach's calendar has to do: send what is theirs, and take down
   // what it holds that no longer is. Everything else is another coach's
   // business, and not even worth a request.
+  const exportRules = readGoogleCalendarExportRules(settings);
   const work = normalized.flatMap((change) => {
     const item = itemsById.get(change.id) || null;
     const ours = Boolean(item) && itemBelongsOnCoachCalendar(item, coachId, services, coaches);
-    if (change.action !== "delete" && ours && isBusyGoogleItem(item)) return [{ id: change.id, item }];
+    if (change.action !== "delete" && ours && isBusyGoogleItem(item) && exportRulesAllow(item, exportRules)) {
+      return [{ id: change.id, item }];
+    }
     return eventMap[change.id] || ours ? [{ id: change.id, item: null }] : [];
   });
   if (!work.length) return { ok: true, coachId, skipped: true, reason: "not_on_this_calendar" };

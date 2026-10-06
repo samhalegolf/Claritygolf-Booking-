@@ -67,6 +67,18 @@ import {
 import { cleanPhoneCountry } from "./_shared/phone.mts";
 import { cleanString, cleanText, env, nowIso } from "./_shared/values.mts";
 import { json } from "./_shared/http.mts";
+import {
+  computeDashboardMetric,
+  isDashboardMetricId,
+  metricSources,
+  normalizeDashboardConfig,
+  parseDateOnly,
+  periodBuckets,
+  periodRange,
+  shiftYears,
+  type DashboardPeriod,
+  type DashboardRows,
+} from "./_shared/dashboard-metrics.mts";
 
 // Billing is a new, isolated top-level app section. This function owns its
 // own tables (billing_products_services, billing_invoices,
@@ -1727,37 +1739,15 @@ export async function checkBookingLinks(accountId: string, bookingIds: string[])
 }
 
 // --- Revenue report -----------------------------------------------------------
-// Deliberately simple per the billing build plan ("Reports should be simple
-// summaries, not heavy accounting dashboards"): fetch the invoice rows for the
-// widest date range needed (current period + the matching period a year ago)
-// in one request and bucket/sum them here, rather than standing up SQL
-// aggregation. Revenue = invoiced totals for status in (sent, paid, overdue);
-// drafts and voided invoices are excluded since they aren't committed income.
-// All date math is done on plain "YYYY-MM-DD" values in UTC, matching how
-// issue_date is stored (a date column, no time/timezone component).
+// Revenue counts invoiced totals for status in (sent, paid, overdue); drafts
+// and voided invoices are excluded since they aren't committed income. Dates
+// are plain "YYYY-MM-DD" values in UTC, matching how issue_date is stored.
 
 const REVENUE_STATUSES = ["sent", "paid", "overdue"];
-const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-function parseDateOnly(value: unknown): Date | null {
-  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value ?? ""));
-  if (!match) return null;
-  return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
-}
 
 function formatDateOnly(date: Date) {
   return date.toISOString().slice(0, 10);
-}
-
-function addDaysUTC(date: Date, days: number) {
-  return new Date(date.getTime() + days * 86400000);
-}
-
-function startOfWeekUTC(date: Date) {
-  const day = date.getUTCDay();
-  const diff = (day === 0 ? -6 : 1) - day;
-  return addDaysUTC(date, diff);
 }
 
 function startOfMonthUTC(date: Date) {
@@ -1766,67 +1756,6 @@ function startOfMonthUTC(date: Date) {
 
 function endOfMonthUTC(date: Date) {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0));
-}
-
-function shiftYearsUTC(date: Date, years: number) {
-  return new Date(Date.UTC(date.getUTCFullYear() + years, date.getUTCMonth(), date.getUTCDate()));
-}
-
-type RevenuePeriod = "week" | "month" | "year";
-
-function periodRange(period: RevenuePeriod, refDate: Date) {
-  if (period === "week") {
-    const start = startOfWeekUTC(refDate);
-    return { start, end: addDaysUTC(start, 6) };
-  }
-  if (period === "year") {
-    return { start: new Date(Date.UTC(refDate.getUTCFullYear(), 0, 1)), end: new Date(Date.UTC(refDate.getUTCFullYear(), 11, 31)) };
-  }
-  return { start: startOfMonthUTC(refDate), end: endOfMonthUTC(refDate) };
-}
-
-function sumInvoiceTotals(rows: Array<{ issue_date: string; total: unknown }>, start: string, end: string) {
-  return round2(
-    rows
-      .filter((row) => row.issue_date >= start && row.issue_date <= end)
-      .reduce((sum, row) => sum + (Number(row.total) || 0), 0),
-  );
-}
-
-function bucketizeRevenue(period: RevenuePeriod, start: Date, end: Date, rows: Array<{ issue_date: string; total: unknown }>) {
-  if (period === "week") {
-    return Array.from({ length: 7 }, (_, i) => {
-      const day = addDaysUTC(start, i);
-      const key = formatDateOnly(day);
-      return { label: WEEKDAY_LABELS[i], rangeStart: key, rangeEnd: key, total: sumInvoiceTotals(rows, key, key) };
-    });
-  }
-  if (period === "year") {
-    const year = start.getUTCFullYear();
-    return Array.from({ length: 12 }, (_, i) => {
-      const monthStart = new Date(Date.UTC(year, i, 1));
-      const monthEnd = new Date(Date.UTC(year, i + 1, 0));
-      const rangeStart = formatDateOnly(monthStart);
-      const rangeEnd = formatDateOnly(monthEnd);
-      return { label: MONTH_LABELS[i], rangeStart, rangeEnd, total: sumInvoiceTotals(rows, rangeStart, rangeEnd) };
-    });
-  }
-  // Month: bucket by week so it stays readable (4-5 bars instead of 28-31).
-  const buckets: Array<{ label: string; rangeStart: string; rangeEnd: string; total: number }> = [];
-  let cursor = start;
-  while (cursor.getTime() <= end.getTime()) {
-    const bucketEnd = new Date(Math.min(addDaysUTC(cursor, 6).getTime(), end.getTime()));
-    const rangeStart = formatDateOnly(cursor);
-    const rangeEnd = formatDateOnly(bucketEnd);
-    buckets.push({
-      label: `${cursor.getUTCDate()}-${bucketEnd.getUTCDate()}`,
-      rangeStart,
-      rangeEnd,
-      total: sumInvoiceTotals(rows, rangeStart, rangeEnd),
-    });
-    cursor = addDaysUTC(bucketEnd, 1);
-  }
-  return buckets;
 }
 
 async function resolveDefaultCurrency(accountId: string) {
@@ -1850,44 +1779,157 @@ async function resolveDefaultCurrency(accountId: string) {
   }
 }
 
-async function revenueReport(accountId: string, url: URL) {
-  const period: RevenuePeriod = ["week", "month", "year"].includes(String(url.searchParams.get("period")))
-    ? (url.searchParams.get("period") as RevenuePeriod)
-    : "month";
-  const refDate = parseDateOnly(url.searchParams.get("date")) || parseDateOnly(formatDateOnly(new Date())) || new Date();
-  const { start, end } = periodRange(period, refDate);
-  const previousStart = shiftYearsUTC(start, -1);
-  const previousEnd = shiftYearsUTC(end, -1);
+// --- Dashboard ---------------------------------------------------------------
+// The Billing dashboard's screens. Each asks for the metrics it shows; this
+// reads only the tables those metrics need, for the period and the same range
+// a year earlier, and dashboard-metrics.mts does the sums.
 
-  const [currency, rows] = await Promise.all([
+// Calendar weeks count from this Monday, as everywhere else in Clarity.
+const CALENDAR_BASE_WEEK = Date.UTC(2026, 5, 1);
+
+function calendarItemDate(week: unknown, day: unknown) {
+  return formatDateOnly(new Date(CALENDAR_BASE_WEEK + (Number(week || 0) * 7 + Number(day || 0)) * 86400000));
+}
+
+function calendarWeekOf(date: Date) {
+  return Math.floor((date.getTime() - CALENDAR_BASE_WEEK) / (7 * 86400000));
+}
+
+async function readSettingValue(accountId: string, key: string) {
+  const rows = await supabase("settings", {
+    query: settingsSelectQuery(accountId, { select: "value", filters: [`key=eq.${encodeFilter(key)}`, "limit=1"] }),
+  });
+  return String(rows[0]?.value ?? "");
+}
+
+async function dashboardReport(accountId: string, url: URL) {
+  const periodParam = String(url.searchParams.get("period"));
+  const period: DashboardPeriod = periodParam === "week" || periodParam === "year" ? periodParam : "month";
+  const today = formatDateOnly(new Date());
+  const refDate = parseDateOnly(url.searchParams.get("date")) || parseDateOnly(today) || new Date();
+  const metrics = [...new Set((url.searchParams.get("metrics") || "").split(",").map((id) => id.trim()))]
+    .filter(isDashboardMetricId)
+    .slice(0, 20);
+  const { start, end } = periodRange(period, refDate);
+  const buckets = periodBuckets(period, start, end);
+  const previousStart = formatDateOnly(shiftYears(start, -1));
+  const previousEnd = formatDateOnly(shiftYears(end, -1));
+  const from = previousStart;
+  const to = formatDateOnly(end);
+  const needs = new Set(metrics.flatMap(metricSources));
+  // Returning customers needs everyone's first lesson, so it reads the whole
+  // history; everything else stops at the start of last year's range.
+  const wholeHistory = metrics.includes("returning-customers");
+
+  const [currency, servicesJson, itemRows, invoiceRows, transactionRows] = await Promise.all([
     resolveDefaultCurrency(accountId),
-    supabase("billing_invoices", {
-      query: `select=issue_date,total&account_id=eq.${encodeFilter(accountId)}&status=in.(${REVENUE_STATUSES.join(",")})&issue_date=gte.${encodeFilter(formatDateOnly(previousStart))}&issue_date=lte.${encodeFilter(formatDateOnly(end))}`,
-    }),
+    needs.has("items") ? readSettingValue(accountId, "servicesJson") : Promise.resolve(""),
+    needs.has("items")
+      ? supabase("calendar_items", {
+          query:
+            `select=week,day,kind,status,service_id,custom_group,person_id,email,client,origin,note` +
+            `&account_id=eq.${encodeFilter(accountId)}&kind=eq.appointment` +
+            (wholeHistory ? "" : `&week=gte.${calendarWeekOf(parseDateOnly(from)!) - 1}`) +
+            `&week=lte.${calendarWeekOf(end) + 1}`,
+        })
+      : Promise.resolve([]),
+    needs.has("invoices")
+      ? supabase("billing_invoices", {
+          query: `select=issue_date,total&account_id=eq.${encodeFilter(accountId)}&status=in.(${REVENUE_STATUSES.join(",")})&issue_date=gte.${encodeFilter(from)}&issue_date=lte.${encodeFilter(to)}`,
+        })
+      : Promise.resolve([]),
+    needs.has("transactions") || needs.has("productLines")
+      ? supabase("billing_pos_transactions", {
+          query: `select=id,amount,paid_at&account_id=eq.${encodeFilter(accountId)}&status=eq.paid&paid_at=gte.${encodeFilter(from)}&paid_at=lt.${encodeFilter(formatDateOnly(new Date(end.getTime() + 86400000)))}`,
+        })
+      : Promise.resolve([]),
   ]);
 
-  const rangeStart = formatDateOnly(start);
-  const rangeEnd = formatDateOnly(end);
-  const previousRangeStart = formatDateOnly(previousStart);
-  const previousRangeEnd = formatDateOnly(previousEnd);
+  const paidOn = new Map<string, string>(
+    (transactionRows as Array<Record<string, unknown>>).map((row) => [String(row.id), String(row.paid_at ?? "").slice(0, 10)]),
+  );
+  let productLines: Array<Record<string, unknown>> = [];
+  if (needs.has("productLines") && paidOn.size) {
+    const ids = [...paidOn.keys()];
+    for (let index = 0; index < ids.length; index += 200) {
+      const list = ids.slice(index, index + 200).map((id) => `"${id.replace(/"/g, "")}"`).join(",");
+      productLines = productLines.concat(
+        await supabase("billing_pos_transaction_items", {
+          query: `select=transaction_id,product_id,name,quantity,line_total&account_id=eq.${encodeFilter(accountId)}&transaction_id=in.(${encodeURIComponent(list)})`,
+        }),
+      );
+    }
+  }
 
-  const total = sumInvoiceTotals(rows, rangeStart, rangeEnd);
-  const previousYearRows = rows.filter((row: { issue_date: string }) => row.issue_date >= previousRangeStart && row.issue_date <= previousRangeEnd);
-  // null (not 0) means "no invoices at all in that period last year" so the
-  // frontend can show a soft empty state instead of claiming a 100% drop.
-  const previousYearTotal = previousYearRows.length ? sumInvoiceTotals(rows, previousRangeStart, previousRangeEnd) : null;
+  let services: DashboardRows["services"] = [];
+  try {
+    const parsed = servicesJson ? JSON.parse(servicesJson) : [];
+    services = Array.isArray(parsed)
+      ? parsed.map((service) => ({ id: String(service?.id ?? ""), name: String(service?.name ?? ""), price: Number(service?.price) || 0 }))
+      : [];
+  } catch {
+    console.error("billing_api:services_json_unparseable_for_dashboard");
+  }
+
+  const rows: DashboardRows = {
+    today,
+    services,
+    items: (itemRows as Array<Record<string, any>>).map((row) => ({
+      date: calendarItemDate(row.week, row.day),
+      kind: String(row.kind ?? ""),
+      status: String(row.status ?? ""),
+      serviceId: String(row.service_id ?? ""),
+      groupPrice: Number(row.custom_group?.calculatedPrice) || 0,
+      personKey: String(row.person_id || String(row.email ?? "").toLowerCase() || String(row.client ?? "").trim().toLowerCase()),
+      origin: String(row.origin ?? ""),
+      note: String(row.note ?? ""),
+    })),
+    invoices: (invoiceRows as Array<Record<string, unknown>>).map((row) => ({ date: String(row.issue_date ?? ""), total: Number(row.total) || 0 })),
+    transactions: (transactionRows as Array<Record<string, unknown>>).map((row) => ({
+      date: String(row.paid_at ?? "").slice(0, 10),
+      amount: Number(row.amount) || 0,
+    })),
+    productLines: productLines.map((row) => ({
+      date: paidOn.get(String(row.transaction_id)) || "",
+      productKey: String(row.product_id || row.name || ""),
+      name: String(row.name ?? ""),
+      quantity: Number(row.quantity) || 0,
+      total: Number(row.line_total) || 0,
+    })),
+  };
 
   return {
     period,
     currency,
-    rangeStart,
-    rangeEnd,
-    total,
-    previousYearTotal,
-    previousYearRangeStart: previousRangeStart,
-    previousYearRangeEnd: previousRangeEnd,
-    buckets: bucketizeRevenue(period, start, end, rows),
+    rangeStart: formatDateOnly(start),
+    rangeEnd: formatDateOnly(end),
+    buckets,
+    metrics: metrics.map((metric) => computeDashboardMetric(metric, rows, buckets, { start: previousStart, end: previousEnd })),
   };
+}
+
+const DASHBOARD_CONFIG_SETTING = "billingDashboardJson";
+
+async function readDashboardConfig(accountId: string) {
+  let raw: unknown = null;
+  try {
+    const value = await readSettingValue(accountId, DASHBOARD_CONFIG_SETTING);
+    raw = value ? JSON.parse(value) : null;
+  } catch {
+    raw = null;
+  }
+  return { config: normalizeDashboardConfig(raw) };
+}
+
+async function writeDashboardConfig(accountId: string, body: Record<string, unknown>) {
+  const config = normalizeDashboardConfig(body?.config);
+  await supabase("settings", {
+    method: "POST",
+    query: SETTINGS_UPSERT_QUERY,
+    prefer: "resolution=merge-duplicates",
+    body: settingsUpsertRows(accountId, { [DASHBOARD_CONFIG_SETTING]: JSON.stringify(config) }, nowIso()),
+  });
+  return { config };
 }
 
 // --- Financial reports (P&L, GST, A/R aging) ---------------------------------
@@ -5916,7 +5958,11 @@ export default async function handler(req: Request) {
       return json(await checkBookingLinks(accountId, ids));
     }
 
-    if (action === "reports/revenue" && req.method === "GET") return json(await revenueReport(accountId, url));
+    if (action === "reports/dashboard" && req.method === "GET") return json(await dashboardReport(accountId, url));
+    if (action === "reports/dashboard-config" && req.method === "GET") return json(await readDashboardConfig(accountId));
+    if (action === "reports/dashboard-config" && (req.method === "PUT" || req.method === "POST")) {
+      return json(await writeDashboardConfig(accountId, await parseBody(req)));
+    }
     if (action === "reports/summary" && req.method === "GET") return json(await buildReportSummary(accountId, url));
     if (action === "reports/summary/pdf" && req.method === "GET") return reportPdfResponse(accountId, url);
 
