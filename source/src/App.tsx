@@ -83,7 +83,7 @@ import { type PhoneDestination, PhoneTabBar } from "./modules/phone/PhoneTabBar"
 import { QuickBookScreen } from "./modules/quick-book/QuickBookScreen";
 import { quickBookSlots } from "./modules/quick-book/quickBookModel";
 import { TodayScreen } from "./modules/today/TodayScreen";
-import { Fragment, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "./modules/auth/apiFetch";
 import { SnapshotFrameViewer, type FrameViewerShot } from "./modules/shared/SnapshotFrameViewer";
 import type { SheetVideo } from "./modules/swing-review/SwingReviewSheet";
@@ -671,6 +671,7 @@ function cleanLessonNotes(notes: unknown[]): LessonNote[] {
 }
 type BillingSection =
   | "none"
+  | BillingGroup
   | "dashboard"
   | "new-invoice"
   | "invoices"
@@ -693,6 +694,10 @@ type BillingSection =
   | "memberships"
   | "settings";
 
+// Products, Expenses, Vouchers and Passes. A group on its own is the group's
+// page with every section folded shut.
+type BillingGroup = "products" | "expenses" | "vouchers" | "passes";
+
 // What an overlay is currently showing. A settings overlay carries the tab so
 // the section's own tab CSS still applies and the group to focus; a billing
 // overlay carries the section. Both carry the title they announce themselves
@@ -710,49 +715,67 @@ const PROFILE_LINKED_VIEWS: View[] = ["calendar", "clients", "players", "sell", 
  * side column, the topbar's subtitle and the coach profile's "does this
  * section exist" check all read one list and cannot drift apart.
  *
- * Products, Expenses, Vouchers and Passes are groups: a heading with its
- * sections under it, each section one job. Nothing in a group is open or
- * editable until its own row is picked.
+ * Products, Expenses, Vouchers and Passes are groups, laid out like a
+ * Settings tab: one row in the side column, and its sections as fold-out
+ * blocks beside it, all shut until one is opened.
  */
 const BILLING_SECTION_NAV: Array<{
   key: Exclude<BillingSection, "none">;
   label: string;
   icon: IconComponent;
-  group?: string;
+  group?: BillingGroup;
 }> = [
   { key: "dashboard", label: t("Dashboard"), icon: ClarityDashboardHome },
   { key: "new-invoice", label: t("New Invoice"), icon: ClarityBookingPages },
   { key: "invoices", label: t("Invoices"), icon: ClarityInvoices },
-  { key: "products-new", label: t("New Product"), icon: Plus, group: t("Products") },
-  { key: "products-catalog", label: t("Catalog"), icon: ClarityProducts, group: t("Products") },
-  { key: "products-orders", label: t("Orders"), icon: ClarityPayments, group: t("Products") },
-  { key: "products-integrations", label: t("Integrations"), icon: ClarityIntegrations, group: t("Products") },
-  { key: "expenses-log", label: t("Log An Expense"), icon: Plus, group: t("Expenses") },
-  { key: "expenses-records", label: t("Expense Log"), icon: ClarityStore, group: t("Expenses") },
-  { key: "expenses-integrations", label: t("Integrations"), icon: ClarityIntegrations, group: t("Expenses") },
-  { key: "vouchers-issue", label: t("Issue Voucher"), icon: Plus, group: t("Vouchers") },
-  { key: "vouchers-edit", label: t("Create or Edit Vouchers"), icon: ClarityProducts, group: t("Vouchers") },
-  { key: "vouchers-records", label: t("Voucher Records"), icon: ClarityPassesCredits, group: t("Vouchers") },
-  { key: "vouchers-integrations", label: t("Integrations"), icon: ClarityIntegrations, group: t("Vouchers") },
-  { key: "passes-issue", label: t("Issue or Redeem Passes"), icon: Plus, group: t("Passes") },
-  { key: "passes-edit", label: t("Create or Edit Passes"), icon: ClarityProducts, group: t("Passes") },
-  { key: "passes-records", label: t("Pass Records"), icon: ClarityPassesCredits, group: t("Passes") },
+  { key: "products-new", label: t("New Product"), icon: Plus, group: "products" },
+  { key: "products-catalog", label: t("Catalog"), icon: ClarityProducts, group: "products" },
+  { key: "products-orders", label: t("Orders"), icon: ClarityPayments, group: "products" },
+  { key: "products-integrations", label: t("Integrations"), icon: ClarityIntegrations, group: "products" },
+  { key: "expenses-log", label: t("Log An Expense"), icon: Plus, group: "expenses" },
+  { key: "expenses-records", label: t("Expense Log"), icon: ClarityStore, group: "expenses" },
+  { key: "expenses-integrations", label: t("Integrations"), icon: ClarityIntegrations, group: "expenses" },
+  { key: "vouchers-issue", label: t("Issue Voucher"), icon: Plus, group: "vouchers" },
+  { key: "vouchers-edit", label: t("Create or Edit Vouchers"), icon: ClarityProducts, group: "vouchers" },
+  { key: "vouchers-records", label: t("Voucher Records"), icon: ClarityPassesCredits, group: "vouchers" },
+  { key: "vouchers-integrations", label: t("Integrations"), icon: ClarityIntegrations, group: "vouchers" },
+  { key: "passes-issue", label: t("Issue or Redeem Passes"), icon: Plus, group: "passes" },
+  { key: "passes-edit", label: t("Create or Edit Passes"), icon: ClarityProducts, group: "passes" },
+  { key: "passes-records", label: t("Pass Records"), icon: ClarityPassesCredits, group: "passes" },
   { key: "transactions", label: t("Transaction History"), icon: ClarityPayments },
   { key: "memberships", label: t("Memberships"), icon: RefreshCw },
   { key: "reports", label: t("Reports"), icon: ClarityReports },
   { key: "settings", label: t("Settings"), icon: ClaritySettings },
 ];
 
+const BILLING_GROUPS: Array<{ key: BillingGroup; label: string; icon: IconComponent }> = [
+  { key: "products", label: t("Products"), icon: ClarityProducts },
+  { key: "expenses", label: t("Expenses"), icon: ClarityStore },
+  { key: "vouchers", label: t("Vouchers"), icon: ClarityPayments },
+  { key: "passes", label: t("Passes"), icon: ClarityPassesCredits },
+];
+
 function isBillingSection(value: unknown): value is Exclude<BillingSection, "none"> {
-  return BILLING_SECTION_NAV.some((entry) => entry.key === value);
+  return BILLING_SECTION_NAV.some((entry) => entry.key === value) || BILLING_GROUPS.some((group) => group.key === value);
+}
+
+/** The group a section is filed under -- or the group itself, when its page is open with nothing unfolded. */
+function billingGroupOf(section: BillingSection): BillingGroup | undefined {
+  const group = BILLING_GROUPS.find((candidate) => candidate.key === section);
+  if (group) return group.key;
+  return BILLING_SECTION_NAV.find((candidate) => candidate.key === section)?.group;
+}
+
+function billingGroupLabel(group: BillingGroup) {
+  return BILLING_GROUPS.find((candidate) => candidate.key === group)?.label ?? "";
 }
 
 // A grouped section reads as "Group › Section" wherever it stands alone, so
 // three rows all called Integrations still say whose they are.
 function billingSectionLabel(section: Exclude<BillingSection, "none">) {
   const entry = BILLING_SECTION_NAV.find((candidate) => candidate.key === section);
-  if (!entry) return "";
-  return entry.group ? `${entry.group} › ${entry.label}` : entry.label;
+  if (!entry) return billingGroupLabel(section as BillingGroup);
+  return entry.group ? `${billingGroupLabel(entry.group)} › ${entry.label}` : entry.label;
 }
 
 // Which completed bookings the "ready to pull" lists show.
@@ -17515,7 +17538,12 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
       : activeView === "billing"
         ? {
             title: t("Billing"),
-            subtitle: billingSection === "none" ? undefined : billingSectionLabel(billingSection),
+            subtitle:
+              billingSection === "none"
+                ? undefined
+                : billingGroupOf(billingSection)
+                  ? billingGroupLabel(billingGroupOf(billingSection)!)
+                  : billingSectionLabel(billingSection),
           }
         : activeView === "settings"
           ? {
@@ -17696,6 +17724,775 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
 
   // No guest branch here any more: the entry point renders the login screen
   // when there is no session, and only mounts this component for a coach.
+
+  /**
+   * The open section of a Billing group (Products, Expenses, Vouchers,
+   * Passes). Each block below draws itself only when its section is the one
+   * open, so at most one of them renders.
+   */
+  const billingGroupedSectionContent = (
+    <>
+    {billingSection.startsWith("expenses-") && (
+      <div className="billing-dashboard">
+        {(billingSection === "expenses-integrations") && (
+        <article className="data-card recent-invoices-card">
+          <div className="data-card-header">
+            <div>
+              <span>{t("Bank feed")}</span>
+              <h2>{t("Expenses from your bank")}{bankCandidates.length ? <span className="unpaid-count-badge">{bankCandidates.length}</span> : null}
+              </h2>
+            </div>
+            <button className="outline-button" type="button" onClick={() => void fetchBankCandidates()}>{t("Refresh")}</button>
+          </div>
+          <p className="field-help">{t("Money-out transactions from your connected bank accounts (Akahu). Approve the business ones to add them to your expenses, or dismiss the rest. Approved items can't be imported twice.")}</p>
+          <div className="bank-backfill-row">
+            <span className="field-help">{t("Pull older:")}</span>
+            {[3, 6, 12].map((months) => (
+              <button
+                key={months}
+                className="outline-button"
+                type="button"
+                disabled={bankBackfillBusy !== null}
+                onClick={() => void backfillBankTransactions(months)}
+              >
+                {bankBackfillBusy === months ? t("Pulling…") : t("Last {months} months", { months })}
+              </button>
+            ))}
+          </div>
+          <p className="field-help bank-backfill-note">{t("The bank feed only reaches back ~12 months (Akahu's history limit). For older expenses, use the CSV import below.")}</p>
+          {bankCandidatesLoadState === "loading" && !bankCandidates.length ? (
+            <Loading what={t("bank transactions")} />
+          ) : bankCandidatesLoadState === "error" ? (
+            <p>{t("Couldn't load the bank feed.")}{" "}<button className="outline-button" type="button" onClick={() => void fetchBankCandidates()}>{t("Try again")}</button>
+            </p>
+          ) : bankCandidates.length ? (
+            <>
+              <div className="bank-toolbar">
+                <div className="bank-filter bank-filter-group">
+                  <label className="bank-search-field">
+                    <Search size={15} aria-hidden="true" />
+                    <input
+                      type="search"
+                      value={bankSearch}
+                      onChange={(event) => {
+                        setBankSearch(event.target.value);
+                        setSelectedBankIds(new Set());
+                      }}
+                      placeholder={t("Search expenses")}
+                      aria-label={t("Search bank expense approvals")}
+                    />
+                  </label>
+                  <label className="bank-filter">
+                    <span className="field-help">{t("From")}</span>
+                    <input
+                      type="date"
+                      value={bankDateFromFilter}
+                      onChange={(event) => {
+                        setBankDateFromFilter(event.target.value);
+                        setSelectedBankIds(new Set());
+                      }}
+                      aria-label={t("Show bank expenses from this date")}
+                    />
+                  </label>
+                  <label className="bank-filter">
+                    <span className="field-help">{t("To")}</span>
+                    <input
+                      type="date"
+                      value={bankDateToFilter}
+                      onChange={(event) => {
+                        setBankDateToFilter(event.target.value);
+                        setSelectedBankIds(new Set());
+                      }}
+                      aria-label={t("Show bank expenses up to this date")}
+                    />
+                  </label>
+                  {bankCategoryOptions.length > 1 && (
+                    <label className="bank-filter">
+                      <span className="field-help">{t("Category")}</span>
+                      <select
+                        value={bankCategoryFilter}
+                        onChange={(event) => {
+                          setBankCategoryFilter(event.target.value);
+                          setSelectedBankIds(new Set());
+                        }}
+                      >
+                        <option value="">{t("All categories ({length})", { length: bankCandidates.length })}</option>
+                        {bankCategoryOptions.map((label) => (
+                          <option key={label} value={label}>
+                            {label} ({bankCategoryCounts[label]})
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  {hasBankFilters && (
+                    <button
+                      className="invoice-inline-edit"
+                      type="button"
+                      onClick={() => {
+                        setBankSearch("");
+                        setBankDateFromFilter("");
+                        setBankDateToFilter("");
+                        setBankCategoryFilter("");
+                        setSelectedBankIds(new Set());
+                      }}
+                    >{t("Clear")}</button>
+                  )}
+                </div>
+                <div className="bank-bulk-actions" role="group" aria-label={t("Bulk actions")}>
+                  <span className="field-help">
+                    {hasBankFilters
+                      ? tn(visibleBankCandidates.length, "{count} matching transaction ({loaded} loaded)", "{count} matching transactions ({loaded} loaded)", { loaded: bankCandidates.length })
+                      : selectedVisibleBankCount
+                        ? `${selectedVisibleBankCount} selected`
+                        : t("Tick rows to select")}
+                  </span>
+                  {hasBankFilters && selectedVisibleBankCount > 0 && (
+                    <span className="field-help">{t("{selectedVisibleBankCount} selected", { selectedVisibleBankCount })}</span>
+                  )}
+                  <button
+                    className="primary-button"
+                    type="button"
+                    disabled={bankBulkBusy || !selectedVisibleBankCount}
+                    onClick={() => void actionBankSelected("approve")}
+                  >
+                    {bankBulkBusy ? t("Working…") : t("Approve selected")}
+                  </button>
+                  <button
+                    className="outline-button"
+                    type="button"
+                    disabled={bankBulkBusy || !selectedVisibleBankCount}
+                    onClick={() => void actionBankSelected("ignore")}
+                  >
+                    {bankBulkBusy ? t("Working…") : t("Dismiss selected")}
+                  </button>
+                </div>
+              </div>
+              {visibleBankCandidates.length ? (
+                <table className="recent-invoices-table">
+                  <thead>
+                    <tr>
+                      <th className="bank-select-cell">
+                        <input
+                          type="checkbox"
+                          aria-label={t("Select all shown")}
+                          title={t("Select all")}
+                          checked={allVisibleBankSelected}
+                          onChange={() => toggleSelectAllVisibleBank()}
+                        />
+                      </th>
+                      <th aria-sort={bankSortAria("date")}>
+                        <button className="bank-sort-button" type="button" onClick={() => toggleBankSort("date")}>{t("Date")}{bankSortMarker("date")}
+                        </button>
+                      </th>
+                      <th aria-sort={bankSortAria("account")}>
+                        <button className="bank-sort-button" type="button" onClick={() => toggleBankSort("account")}>{t("Account")}{bankSortMarker("account")}
+                        </button>
+                      </th>
+                      <th aria-sort={bankSortAria("description")}>
+                        <button className="bank-sort-button" type="button" onClick={() => toggleBankSort("description")}>{t("Description")}{bankSortMarker("description")}
+                        </button>
+                      </th>
+                      <th aria-sort={bankSortAria("amount")}>
+                        <button className="bank-sort-button" type="button" onClick={() => toggleBankSort("amount")}>{t("Amount")}{bankSortMarker("amount")}
+                        </button>
+                      </th>
+                      <th aria-label={t("Actions")} />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleBankCandidates.map((candidate) => (
+                      <tr key={candidate.id}>
+                        <td className="bank-select-cell">
+                          <input
+                            type="checkbox"
+                            aria-label={t("Select {name}", { name: candidate.description || candidate.merchant || t("transaction") })}
+                            checked={selectedBankIds.has(candidate.id)}
+                            onChange={() => toggleBankSelection(candidate.id)}
+                          />
+                        </td>
+                        <td>{candidate.date}</td>
+                        <td>{candidate.account || "—"}</td>
+                        <td>
+                          {candidate.description || candidate.merchant || "—"}
+                          {candidate.suggestedCategory ? (
+                            <span className="field-help"> · {candidate.suggestedCategory}</span>
+                          ) : null}
+                        </td>
+                        <td>{formatMoney(candidate.amount, "NZD")}</td>
+                        <td style={{ whiteSpace: "nowrap", textAlign: "right" }}>
+                          <button
+                            className="outline-button"
+                            type="button"
+                            disabled={bankCandidateBusy === candidate.id || bankBulkBusy}
+                            onClick={() => void actionBankCandidate(candidate, "approve")}
+                          >{t("Approve")}</button>{" "}
+                          <button
+                            className="outline-button"
+                            type="button"
+                            disabled={bankCandidateBusy === candidate.id || bankBulkBusy}
+                            onClick={() => void actionBankCandidate(candidate, "ignore")}
+                          >{t("Dismiss")}</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <p>{t("No transactions match those filters.")}{" "}<button
+                    className="outline-button"
+                    type="button"
+                    onClick={() => {
+                      setBankSearch("");
+                      setBankDateFromFilter("");
+                      setBankDateToFilter("");
+                      setBankCategoryFilter("");
+                      setSelectedBankIds(new Set());
+                    }}
+                  >{t("Clear filters")}</button>
+                </p>
+              )}
+              {bankCandidates.length >= bankListLimit && bankListLimit < bankListMax ? (
+                <div className="bank-loadmore-row">
+                  <button
+                    className="outline-button"
+                    type="button"
+                    disabled={bankListBusy}
+                    onClick={() => void loadMoreBankCandidates()}
+                  >
+                    {bankListBusy ? t("Loading…") : t("Load older")}
+                  </button>
+                  <span className="field-help">{t("Showing the newest {length}.", { length: bankCandidates.length })}</span>
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <p>{t("No bank transactions waiting for review.")}{" "}<button className="outline-button" type="button" onClick={() => void fetchBankCandidates()}>{t("Check for new")}</button>
+            </p>
+          )}
+        </article>
+        )}
+        {(billingSection === "expenses-integrations") && (
+        <article className="data-card">
+          <div className="data-card-header">
+            <div>
+              <span>{t("Bank export")}</span>
+              <h2>{t("Import from bank CSV")}</h2>
+            </div>
+            <Upload size={24} />
+          </div>
+          <p className="field-help">{t("Export transactions from your bank and upload the CSV here. Nothing imports until you confirm the column mapping below - re-uploading the same file, or an export with overlapping dates, automatically skips transactions already imported.")}</p>
+          <div className="csv-import-uploader">
+            <label className="outline-button">
+              <Upload size={16} />{t("Choose CSV file")}<input
+                type="file"
+                accept=".csv,text/csv,text/plain"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = "";
+                  if (file) void handleExpenseCsvFile(file);
+                }}
+              />
+            </label>
+            <span>{expenseImportFileName || t("No file chosen")}</span>
+            <label className="csv-import-header-toggle">
+              <input
+                type="checkbox"
+                checked={expenseImportHasHeader}
+                onChange={(event) => {
+                  setExpenseImportHasHeader(event.target.checked);
+                  if (expenseImportFileName) resetExpenseCsvImport();
+                }}
+              />{t("First row is a header")}</label>
+          </div>
+
+          {expenseImportHeaders.length > 0 && (
+            <>
+              <div className="csv-import-mapping-grid">
+                {expenseImportHeaders.map((header, index) => (
+                  <label key={index} className="settings-field">
+                    <span>{header || t("Column {value}", { value: index + 1 })}</span>
+                    <select
+                      value={expenseImportMapping[index] || ""}
+                      onChange={(event) =>
+                        setExpenseImportMapping((current) => ({ ...current, [index]: event.target.value as ExpenseCsvField }))
+                      }
+                    >
+                      <option value="">{t("Ignore")}</option>
+                      <option value="date">{t("Date")}</option>
+                      <option value="description">{t("Description / Payee")}</option>
+                      <option value="debit">{t("Amount out (debit)")}</option>
+                      <option value="credit">{t("Amount in (credit)")}</option>
+                      <option value="reference">{t("Reference / Unique ID")}</option>
+                    </select>
+                    <em>{expenseImportRows.slice(0, 2).map((row) => row[index]).filter(Boolean).join(" / ") || t("No sample")}</em>
+                  </label>
+                ))}
+              </div>
+
+              <div className="service-form-row">
+                <label className="settings-field">
+                  <span>{t("Apply category to all imported rows")}</span>
+                  <select value={expenseImportCategoryId} onChange={(event) => setExpenseImportCategoryId(event.target.value)}>
+                    <option value="">{t("Uncategorised")}</option>
+                    {expenseCategories
+                      .filter((category) => category.active)
+                      .map((category) => (
+                        <option key={category.id} value={category.id}>
+                          {category.name}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              </div>
+
+              <p className="field-help">{t("{length} of {length2} rows will import ({expenseImportSelectedTotal}). Rows without a valid date, description, or amount-out are skipped automatically; use the checkboxes below to exclude any others.", { length: expenseImportSelectedCandidates.length, length2: expenseImportCandidates.length, expenseImportSelectedTotal: formatMoney(expenseImportSelectedTotal, invoiceSettings.currency) })}</p>
+
+              <div className="csv-import-preview">
+                {expenseImportCandidates.slice(0, 20).map((candidate) => (
+                  <label
+                    key={candidate.index}
+                    className={`csv-import-preview-row${candidate.valid ? "" : " invalid"}`}
+                  >
+                    <input
+                      type="checkbox"
+                      disabled={!candidate.valid}
+                      checked={candidate.valid && !expenseImportExcluded[candidate.index]}
+                      onChange={(event) =>
+                        setExpenseImportExcluded((current) => ({ ...current, [candidate.index]: !event.target.checked }))
+                      }
+                    />
+                    <span>{candidate.date || t("Invalid date")}</span>
+                    <span>{candidate.description || t("Missing description")}</span>
+                    <span>{candidate.valid ? formatMoney(candidate.amount, invoiceSettings.currency) : "-"}</span>
+                  </label>
+                ))}
+                {expenseImportCandidates.length > 20 && (
+                  <p className="field-help">{t("...and")}{" "}{expenseImportCandidates.length - 20}{" "}{t("more rows.")}</p>
+                )}
+              </div>
+
+              <div className="invoice-actions">
+                <button
+                  className="primary-button"
+                  disabled={expenseImportState === "importing" || !expenseImportSelectedCandidates.length}
+                  onClick={submitExpenseCsvImport}
+                  type="button"
+                >
+                  {expenseImportState === "importing"
+                    ? t("Importing...")
+                    : tn(expenseImportSelectedCandidates.length, "Import {count} transaction", "Import {count} transactions")}
+                </button>
+                <button className="outline-button" onClick={resetExpenseCsvImport} type="button">{t("Cancel")}</button>
+              </div>
+            </>
+          )}
+
+          {expenseImportResult && (
+            <p className="field-help">{t("Last import: {imported} added, {duplicate} already imported", { imported: expenseImportResult.imported, duplicate: expenseImportResult.duplicate })}{expenseImportResult.skipped ? t(", {skipped} skipped", { skipped: expenseImportResult.skipped }) : ""}
+              {expenseImportResult.failed ? t(", {failed} failed", { failed: expenseImportResult.failed }) : ""}.
+            </p>
+          )}
+        </article>
+        )}
+
+        {(billingSection === "expenses-records") && (
+        <article className="data-card">
+          <div className="data-card-header">
+            <div>
+              <span>{t("Expenses")}</span>
+              <h2>{formatMoney(expenseTotalForRange, invoiceSettings.currency)}</h2>
+            </div>
+            <ClarityInvoices size={24} />
+          </div>
+          <div className="ready-to-pull-range">
+            <label className="settings-field">
+              <span>{t("From")}</span>
+              <input type="date" value={expenseRangeFrom} onChange={(event) => setExpenseRangeFrom(event.target.value)} />
+            </label>
+            <label className="settings-field">
+              <span>{t("To")}</span>
+              <input type="date" value={expenseRangeTo} onChange={(event) => setExpenseRangeTo(event.target.value)} />
+            </label>
+            {(expenseRangeFrom || expenseRangeTo) && (
+              <button
+                className="outline-button small-action"
+                onClick={() => {
+                  setExpenseRangeFrom("");
+                  setExpenseRangeTo("");
+                }}
+                type="button"
+              >{t("Clear")}</button>
+            )}
+          </div>
+          <p className="field-help">{tn(activeExpenses.length, "{count} expense", "{count} expenses")}
+            {expenseRangeFrom || expenseRangeTo ? t(" in this range") : t(" (last 200)")}.
+          </p>
+        </article>
+        )}
+
+        {(billingSection === "expenses-log" || (billingSection === "expenses-records" && Boolean(expenseDraft.id))) && (
+        <article className="data-card">
+          <div className="data-card-header">
+            <div>
+              <span>{expenseDraft.id ? t("Edit") : t("Log")}</span>
+              <h2>{expenseDraft.id ? t("Edit expense") : t("Log an expense")}</h2>
+            </div>
+            <ClarityInvoices size={24} />
+          </div>
+          <div className="billing-catalog-editor">
+            <label className="settings-field">
+              <span>{t("Description")}</span>
+              <input
+                className="w-name"
+                value={expenseDraft.description}
+                onChange={(event) => setExpenseDraft((current) => ({ ...current, description: event.target.value }))}
+                placeholder={t("What did you pay for?")}
+              />
+            </label>
+            <div className="service-form-row">
+              <label className="settings-field">
+                <span>{t("Amount")}</span>
+                <input
+                  className="w-price"
+                  value={expenseDraft.amount}
+                  inputMode="decimal"
+                  onChange={(event) => setExpenseDraft((current) => ({ ...current, amount: parseMoneyInput(event.target.value) }))}
+                  type="text"
+                />
+              </label>
+              <label className="settings-field">
+                <span>{t("Date")}</span>
+                <input
+                  className="w-date"
+                  type="date"
+                  value={expenseDraft.expenseDate}
+                  onChange={(event) => setExpenseDraft((current) => ({ ...current, expenseDate: event.target.value }))}
+                />
+              </label>
+              <label className="settings-field">
+                <span>{t("Category")}</span>
+                <select
+                  value={expenseDraft.categoryId}
+                  onChange={(event) => setExpenseDraft((current) => ({ ...current, categoryId: event.target.value }))}
+                >
+                  <option value="">{t("Uncategorised")}</option>
+                  {expenseCategories
+                    .filter((category) => category.active || category.id === expenseDraft.categoryId)
+                    .map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {category.name}
+                      </option>
+                    ))}
+                </select>
+              </label>
+            </div>
+            <label className="settings-field">
+              <span>{t("Vendor")}</span>
+              <input
+                className="w-name"
+                value={expenseDraft.vendor}
+                onChange={(event) => setExpenseDraft((current) => ({ ...current, vendor: event.target.value }))}
+                placeholder={t("Optional")}
+              />
+            </label>
+            <label className="settings-field">
+              <span>{t("Note")}</span>
+              <textarea
+                className="w-prose"
+                value={expenseDraft.note}
+                onChange={(event) => setExpenseDraft((current) => ({ ...current, note: event.target.value }))}
+                rows={2}
+                placeholder={t("Optional")}
+              />
+            </label>
+            <button className="outline-button" disabled={expenseSaveState === "saving"} onClick={saveExpenseDraft} type="button">
+              <Plus size={16} />
+              {expenseDraft.id ? (expenseSaveState === "saving" ? t("Saving...") : t("Save Changes")) : expenseSaveState === "saving" ? t("Saving...") : t("Log Expense")}
+            </button>
+            {Boolean(expenseDraft.id) && (
+              <button className="text-button" onClick={resetExpenseDraft} type="button">{t("Cancel Edit")}</button>
+            )}
+          </div>
+        </article>
+        )}
+
+        {(billingSection === "expenses-records") && (
+        <article className="data-card recent-invoices-card">
+          <div className="data-card-header">
+            <div>
+              <span>{t("History")}</span>
+              <h2>{t("Recent expenses")}</h2>
+            </div>
+            <ClarityReports size={24} />
+          </div>
+          {expenseLoadState === "loading" && !expenses.length ? (
+            <Loading what={t("expenses")} />
+          ) : expenses.length ? (
+            <table className="recent-invoices-table">
+              <thead>
+                <tr>
+                  <th>{t("Date")}</th>
+                  <th>{t("Description")}</th>
+                  <th>{t("Category")}</th>
+                  <th>{t("Amount")}</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {expenses.map((expense) => (
+                  <tr key={expense.id} className={expense.voided ? "voided-row" : ""}>
+                    <td>{expense.expenseDate}</td>
+                    <td>
+                      <button className="text-link-button" onClick={() => editExpense(expense)} type="button">
+                        {expense.description}
+                      </button>
+                      {expense.vendor && <em className="expense-vendor">{expense.vendor}</em>}
+                    </td>
+                    <td>{expense.categoryName || t("Uncategorised")}</td>
+                    <td>{formatMoney(expense.amount, invoiceSettings.currency)}</td>
+                    <td>
+                      <button className="text-link-button" onClick={() => toggleExpenseVoided(expense)} type="button">
+                        {expense.voided ? t("Restore") : t("Void")}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p>{t("No expenses logged")}{expenseRangeFrom || expenseRangeTo ? t(" in this date range") : t(" yet")}.</p>
+          )}
+        </article>
+        )}
+      </div>
+    )}
+
+    {/* POS Transactions. Its own numbers, deliberately never mixed into
+        the invoice figures above - a lesson can be paid at the counter
+        and also appear on an invoice, so combining them would
+        double-count. */}
+    {(billingSection === "products-new" || billingSection === "products-catalog" || billingSection === "vouchers-edit") && (
+      <Suspense fallback={<Loading what={t("products")} />}>
+        <ProductsPanel
+          view={billingSection === "products-new" ? "new" : billingSection === "products-catalog" ? "catalog" : "vouchers"}
+          products={catalogItems}
+          loadState={catalogLoadState}
+          currency={invoiceSettings.currency}
+          defaultTaxRate={invoiceSettings.taxRate}
+          formatMoney={formatMoney}
+          onReload={() => void fetchBillingProducts()}
+          onSave={saveProduct}
+          onSetActive={setProductActive}
+          onAdjustStock={adjustProductStock}
+          onLoadMovements={fetchStockMovements}
+          onEditLessonTypes={() =>
+            openProfileTarget({ kind: "settings", tab: "services" }, `${terms.serviceSingular} types`)
+          }
+        />
+      </Suspense>
+    )}
+
+    {(billingSection === "products-orders" || billingSection === "products-integrations") && (
+      <div className="billing-dashboard">
+        <article className="data-card wide">
+          <p className="field-help">
+            {billingSection === "products-orders"
+              ? t("Product orders will show here.")
+              : t("Connections to other shops and stock systems will show here.")}
+          </p>
+        </article>
+      </div>
+    )}
+
+    {(billingSection === "vouchers-issue" || billingSection === "vouchers-records" || billingSection === "vouchers-integrations") && (
+      <Suspense fallback={<Loading what={t("vouchers")} />}>
+        <CouponsPanel
+          view={billingSection === "vouchers-issue" ? "issue" : billingSection === "vouchers-records" ? "records" : "integrations"}
+          coupons={coupons}
+          loadState={couponsLoadState}
+          currency={invoiceSettings.currency}
+          formatMoney={formatMoney}
+          onReload={() => void fetchCoupons()}
+          onIssue={issueCoupon}
+          onSetVoid={setCouponVoid}
+          onLoadRedemptions={fetchCouponRedemptions}
+          onScanStripe={findStripeCouponCandidates}
+          onImport={importStripeCoupons}
+          rules={voucherRules}
+          onSaveRules={saveVoucherRules}
+          onRepairOwners={repairVoucherOwners}
+        />
+      </Suspense>
+    )}
+
+    {billingSection.startsWith("passes-") && (
+      <div className="billing-dashboard">
+        {billingSection === "passes-issue" && (
+        <article className="data-card wide">
+          <div className="data-card-header">
+            <div>
+              <span>{t("Issue or redeem")}</span>
+              <h2>{t("Find the client")}</h2>
+            </div>
+            <ClarityClientsPlayers size={24} />
+          </div>
+          <p className="field-help">{t("Passes are granted and spent on the client's own Passes tab. Pick them here to open it.")}</p>
+          <Suspense fallback={<Loading what={t("clients")} />}>
+            <PassClientPicker
+              people={clients.map((client) => ({ id: client.id, name: client.name, email: client.email }))}
+              onPick={(personId) => {
+                const linked = clients.find((entry) => entry.id === personId);
+                if (!linked) return;
+                openClientProfile(linked);
+                setClientProfileTab("passes");
+              }}
+            />
+          </Suspense>
+        </article>
+        )}
+
+        {billingSection === "passes-edit" && (
+        <article className="data-card wide">
+          <div className="data-card-header">
+            <div>
+              <span>{t("Pass types")}</span>
+              <h2>{t("What you sell as a pass")}</h2>
+            </div>
+            <ClarityProducts size={24} />
+          </div>
+          <p className="field-help">{t("A pass type is a package lesson type, so it is made and changed in Settings > Services. That keeps it in step with what the booking screen sells.")}</p>
+          <Suspense fallback={<Loading what={t("pass types")} />}>
+            <PassTypesList
+              services={services}
+              formatMoney={(amount) => formatMoney(amount, invoiceSettings.currency)}
+              onEdit={() => openProfileTarget({ kind: "settings", tab: "services" }, `${terms.serviceSingular} types`)}
+            />
+          </Suspense>
+        </article>
+        )}
+
+        {billingSection === "passes-records" && (
+        <article className="data-card wide">
+          <div className="data-card-header">
+            <div>
+              <span>{t("Issued passes")}</span>
+              <h2>
+                {(() => {
+                  const live = issuedPasses.filter((pass) => pass.status === "active");
+                  const left = live.reduce((sum, pass) => sum + pass.creditsAvailable, 0);
+                  return live.length === 0
+                    ? t("No active passes")
+                    : left === 1
+                      ? t("{active} active · 1 credit left", { active: live.length })
+                      : t("{active} active · {left} credits left", { active: live.length, left });
+
+                })()}
+              </h2>
+            </div>
+            <ClarityPassesCredits size={24} />
+          </div>
+          <p className="field-help">{t("Every pass this business has issued and who holds it. A pass is spent from the lesson checkout, so a holder with credits left pays with it there.")}</p>
+          <Suspense fallback={<Loading what={t("passes")} />}>
+            <IssuedPassesPanel
+              passes={issuedPasses}
+              loadState={issuedPassesLoadState}
+              onRetry={() => void fetchIssuedPasses()}
+              onOpenPerson={(personId) => {
+                const linked = clients.find((entry) => entry.id === personId);
+                if (linked) openClientProfile(linked);
+                else setToast({ message: t("That client is not in the list yet. Try again after it loads.") });
+              }}
+              serviceName={(serviceId) =>
+                services.find((service) => service.id === serviceId)?.name || serviceId
+              }
+            />
+          </Suspense>
+        </article>
+        )}
+
+        {billingSection === "passes-issue" && (
+        <article className="data-card wide">
+          <div className="data-card-header">
+            <div>
+              <span>{t("Pass Inbox")}</span>
+              <h2>
+                {passInboxCount === 0
+                  ? t("Nothing waiting")
+                  : `${passInboxCount} waiting`}
+              </h2>
+            </div>
+            <Inbox size={24} />
+          </div>
+          <p className="field-help">{t("A pass sold outside Clarity arrives as a product name and a buyer, neither of which says how many credits it is worth or, always, who bought it. Nothing is issued or attached automatically — a wrong package hands somebody the wrong number of lessons, and nothing downstream can tell.")}</p>
+          <Suspense fallback={<Loading what={t("the pass inbox")} />}>
+            <PassInboxPanel
+              purchases={passInbox.waitingToIssue}
+              unassigned={passInbox.waitingForOwner}
+              templates={passInbox.templates}
+              people={clients.map((client) => ({ id: client.id, name: client.name }))}
+              dismissedTypes={passInbox.dismissedTypes}
+              loadState={passInboxLoadState}
+              busyId={passInboxBusyId}
+              onIssue={(purchaseId, templateServiceId, valueCents) =>
+                void postPassInbox(
+                  "/api/passes/inbox",
+                  // Omitted entirely when the coach left the suggested
+                  // price alone, so the server decides it rather than
+                  // trusting a number the browser worked out.
+                  valueCents === undefined
+                    ? { purchaseId, templateServiceId }
+                    : { purchaseId, templateServiceId, totalValueCents: valueCents },
+                  purchaseId,
+                  t("Could not issue that pass."),
+                  t("Pass issued."),
+                )
+              }
+              onDismiss={(purchaseId) =>
+                void postPassInbox(
+                  "/api/passes/inbox",
+                  { purchaseId, action: "dismiss" },
+                  purchaseId,
+                  t("Could not update that purchase."),
+                  t("Marked as not a pass."),
+                )
+              }
+              onDismissType={(itemName) =>
+                void postPassInbox(
+                  "/api/passes/inbox",
+                  { itemName, action: "dismissType" },
+                  itemName,
+                  t("Could not hide that product."),
+                  t("Hidden — sales of that product will not show here again."),
+                )
+              }
+              onRestoreType={(itemName) =>
+                void postPassInbox(
+                  "/api/passes/inbox",
+                  { itemName, action: "restoreType" },
+                  itemName,
+                  t("Could not restore that product."),
+                  t("Back in the queue."),
+                )
+              }
+              onAttach={(passId, personId) =>
+                void postPassInbox(
+                  "/api/passes/attach",
+                  { passId, personId },
+                  passId,
+                  t("Could not attach that pass."),
+                  t("Pass attached."),
+                )
+              }
+              onRetry={() => void fetchPassInbox()}
+            />
+          </Suspense>
+        </article>
+        )}
+      </div>
+    )}
+    </>
+  );
 
   return (
     <div className={`app-shell theme-${themeMode}${phoneLayout ? " is-phone" : ""}`} style={brandStyle}>
@@ -19779,25 +20576,41 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                 until a section is picked, and the topbar's Back returns to it. */}
             {workspaceOverlay?.kind !== "billing" && (!phoneLayout || billingSection === "none") && (
             <nav className="settings-subnav" aria-label={t("Billing sections")}>
-              {BILLING_SECTION_NAV.map((section, index) => (
-                <Fragment key={section.key}>
-                  {section.group && section.group !== BILLING_SECTION_NAV[index - 1]?.group && (
-                    <span className="settings-subnav-group">{section.group}</span>
-                  )}
+              {BILLING_SECTION_NAV.map((section, index) => {
+                // A group is one row, drawn where its first section stands.
+                if (section.group) {
+                  if (section.group === BILLING_SECTION_NAV[index - 1]?.group) return null;
+                  const group = BILLING_GROUPS.find((candidate) => candidate.key === section.group)!;
+                  const active = billingGroupOf(billingSection) === group.key;
+                  return (
+                    <button
+                      key={group.key}
+                      className={active ? "active" : ""}
+                      onClick={() => switchBillingSection(group.key)}
+                      aria-current={active ? "page" : undefined}
+                      type="button"
+                    >
+                      <group.icon size={16} />
+                      {group.label}
+                      {/* The count is what is waiting in the pass inbox. An inbox
+                          you have to open to discover is empty is one nobody opens. */}
+                      {group.key === "passes" && passInboxCount > 0 && <span className="tab-count">{passInboxCount}</span>}
+                    </button>
+                  );
+                }
+                return (
                   <button
-                    className={[billingSection === section.key ? "active" : "", section.group ? "is-grouped" : ""].filter(Boolean).join(" ")}
+                    key={section.key}
+                    className={billingSection === section.key ? "active" : ""}
                     onClick={() => switchBillingSection(section.key)}
                     aria-current={billingSection === section.key ? "page" : undefined}
                     type="button"
                   >
                     <section.icon size={16} />
                     {section.label}
-                    {/* The count is what is waiting in the pass inbox. An inbox
-                        you have to open to discover is empty is one nobody opens. */}
-                    {section.key === "passes-issue" && passInboxCount > 0 && <span className="tab-count">{passInboxCount}</span>}
                   </button>
-                </Fragment>
-              ))}
+                );
+              })}
             </nav>
             )}
 
@@ -21237,772 +22050,40 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
               </div>
             )}
 
-            {billingSection.startsWith("expenses-") && (
-              <div className="billing-dashboard">
-                {(billingSection === "expenses-integrations") && (
-                <article className="data-card recent-invoices-card">
-                  <div className="data-card-header">
-                    <div>
-                      <span>{t("Bank feed")}</span>
-                      <h2>{t("Expenses from your bank")}{bankCandidates.length ? <span className="unpaid-count-badge">{bankCandidates.length}</span> : null}
-                      </h2>
-                    </div>
-                    <button className="outline-button" type="button" onClick={() => void fetchBankCandidates()}>{t("Refresh")}</button>
-                  </div>
-                  <p className="field-help">{t("Money-out transactions from your connected bank accounts (Akahu). Approve the business ones to add them to your expenses, or dismiss the rest. Approved items can't be imported twice.")}</p>
-                  <div className="bank-backfill-row">
-                    <span className="field-help">{t("Pull older:")}</span>
-                    {[3, 6, 12].map((months) => (
-                      <button
-                        key={months}
-                        className="outline-button"
-                        type="button"
-                        disabled={bankBackfillBusy !== null}
-                        onClick={() => void backfillBankTransactions(months)}
-                      >
-                        {bankBackfillBusy === months ? t("Pulling…") : t("Last {months} months", { months })}
-                      </button>
-                    ))}
-                  </div>
-                  <p className="field-help bank-backfill-note">{t("The bank feed only reaches back ~12 months (Akahu's history limit). For older expenses, use the CSV import below.")}</p>
-                  {bankCandidatesLoadState === "loading" && !bankCandidates.length ? (
-                    <Loading what={t("bank transactions")} />
-                  ) : bankCandidatesLoadState === "error" ? (
-                    <p>{t("Couldn't load the bank feed.")}{" "}<button className="outline-button" type="button" onClick={() => void fetchBankCandidates()}>{t("Try again")}</button>
-                    </p>
-                  ) : bankCandidates.length ? (
-                    <>
-                      <div className="bank-toolbar">
-                        <div className="bank-filter bank-filter-group">
-                          <label className="bank-search-field">
-                            <Search size={15} aria-hidden="true" />
-                            <input
-                              type="search"
-                              value={bankSearch}
-                              onChange={(event) => {
-                                setBankSearch(event.target.value);
-                                setSelectedBankIds(new Set());
-                              }}
-                              placeholder={t("Search expenses")}
-                              aria-label={t("Search bank expense approvals")}
-                            />
-                          </label>
-                          <label className="bank-filter">
-                            <span className="field-help">{t("From")}</span>
-                            <input
-                              type="date"
-                              value={bankDateFromFilter}
-                              onChange={(event) => {
-                                setBankDateFromFilter(event.target.value);
-                                setSelectedBankIds(new Set());
-                              }}
-                              aria-label={t("Show bank expenses from this date")}
-                            />
-                          </label>
-                          <label className="bank-filter">
-                            <span className="field-help">{t("To")}</span>
-                            <input
-                              type="date"
-                              value={bankDateToFilter}
-                              onChange={(event) => {
-                                setBankDateToFilter(event.target.value);
-                                setSelectedBankIds(new Set());
-                              }}
-                              aria-label={t("Show bank expenses up to this date")}
-                            />
-                          </label>
-                          {bankCategoryOptions.length > 1 && (
-                            <label className="bank-filter">
-                              <span className="field-help">{t("Category")}</span>
-                              <select
-                                value={bankCategoryFilter}
-                                onChange={(event) => {
-                                  setBankCategoryFilter(event.target.value);
-                                  setSelectedBankIds(new Set());
-                                }}
-                              >
-                                <option value="">{t("All categories ({length})", { length: bankCandidates.length })}</option>
-                                {bankCategoryOptions.map((label) => (
-                                  <option key={label} value={label}>
-                                    {label} ({bankCategoryCounts[label]})
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                          )}
-                          {hasBankFilters && (
-                            <button
-                              className="invoice-inline-edit"
-                              type="button"
-                              onClick={() => {
-                                setBankSearch("");
-                                setBankDateFromFilter("");
-                                setBankDateToFilter("");
-                                setBankCategoryFilter("");
-                                setSelectedBankIds(new Set());
-                              }}
-                            >{t("Clear")}</button>
-                          )}
-                        </div>
-                        <div className="bank-bulk-actions" role="group" aria-label={t("Bulk actions")}>
-                          <span className="field-help">
-                            {hasBankFilters
-                              ? tn(visibleBankCandidates.length, "{count} matching transaction ({loaded} loaded)", "{count} matching transactions ({loaded} loaded)", { loaded: bankCandidates.length })
-                              : selectedVisibleBankCount
-                                ? `${selectedVisibleBankCount} selected`
-                                : t("Tick rows to select")}
-                          </span>
-                          {hasBankFilters && selectedVisibleBankCount > 0 && (
-                            <span className="field-help">{t("{selectedVisibleBankCount} selected", { selectedVisibleBankCount })}</span>
-                          )}
-                          <button
-                            className="primary-button"
-                            type="button"
-                            disabled={bankBulkBusy || !selectedVisibleBankCount}
-                            onClick={() => void actionBankSelected("approve")}
-                          >
-                            {bankBulkBusy ? t("Working…") : t("Approve selected")}
-                          </button>
-                          <button
-                            className="outline-button"
-                            type="button"
-                            disabled={bankBulkBusy || !selectedVisibleBankCount}
-                            onClick={() => void actionBankSelected("ignore")}
-                          >
-                            {bankBulkBusy ? t("Working…") : t("Dismiss selected")}
-                          </button>
-                        </div>
-                      </div>
-                      {visibleBankCandidates.length ? (
-                        <table className="recent-invoices-table">
-                          <thead>
-                            <tr>
-                              <th className="bank-select-cell">
-                                <input
-                                  type="checkbox"
-                                  aria-label={t("Select all shown")}
-                                  title={t("Select all")}
-                                  checked={allVisibleBankSelected}
-                                  onChange={() => toggleSelectAllVisibleBank()}
-                                />
-                              </th>
-                              <th aria-sort={bankSortAria("date")}>
-                                <button className="bank-sort-button" type="button" onClick={() => toggleBankSort("date")}>{t("Date")}{bankSortMarker("date")}
-                                </button>
-                              </th>
-                              <th aria-sort={bankSortAria("account")}>
-                                <button className="bank-sort-button" type="button" onClick={() => toggleBankSort("account")}>{t("Account")}{bankSortMarker("account")}
-                                </button>
-                              </th>
-                              <th aria-sort={bankSortAria("description")}>
-                                <button className="bank-sort-button" type="button" onClick={() => toggleBankSort("description")}>{t("Description")}{bankSortMarker("description")}
-                                </button>
-                              </th>
-                              <th aria-sort={bankSortAria("amount")}>
-                                <button className="bank-sort-button" type="button" onClick={() => toggleBankSort("amount")}>{t("Amount")}{bankSortMarker("amount")}
-                                </button>
-                              </th>
-                              <th aria-label={t("Actions")} />
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {visibleBankCandidates.map((candidate) => (
-                              <tr key={candidate.id}>
-                                <td className="bank-select-cell">
-                                  <input
-                                    type="checkbox"
-                                    aria-label={t("Select {name}", { name: candidate.description || candidate.merchant || t("transaction") })}
-                                    checked={selectedBankIds.has(candidate.id)}
-                                    onChange={() => toggleBankSelection(candidate.id)}
-                                  />
-                                </td>
-                                <td>{candidate.date}</td>
-                                <td>{candidate.account || "—"}</td>
-                                <td>
-                                  {candidate.description || candidate.merchant || "—"}
-                                  {candidate.suggestedCategory ? (
-                                    <span className="field-help"> · {candidate.suggestedCategory}</span>
-                                  ) : null}
-                                </td>
-                                <td>{formatMoney(candidate.amount, "NZD")}</td>
-                                <td style={{ whiteSpace: "nowrap", textAlign: "right" }}>
-                                  <button
-                                    className="outline-button"
-                                    type="button"
-                                    disabled={bankCandidateBusy === candidate.id || bankBulkBusy}
-                                    onClick={() => void actionBankCandidate(candidate, "approve")}
-                                  >{t("Approve")}</button>{" "}
-                                  <button
-                                    className="outline-button"
-                                    type="button"
-                                    disabled={bankCandidateBusy === candidate.id || bankBulkBusy}
-                                    onClick={() => void actionBankCandidate(candidate, "ignore")}
-                                  >{t("Dismiss")}</button>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      ) : (
-                        <p>{t("No transactions match those filters.")}{" "}<button
-                            className="outline-button"
-                            type="button"
-                            onClick={() => {
-                              setBankSearch("");
-                              setBankDateFromFilter("");
-                              setBankDateToFilter("");
-                              setBankCategoryFilter("");
-                              setSelectedBankIds(new Set());
-                            }}
-                          >{t("Clear filters")}</button>
-                        </p>
-                      )}
-                      {bankCandidates.length >= bankListLimit && bankListLimit < bankListMax ? (
-                        <div className="bank-loadmore-row">
-                          <button
-                            className="outline-button"
-                            type="button"
-                            disabled={bankListBusy}
-                            onClick={() => void loadMoreBankCandidates()}
-                          >
-                            {bankListBusy ? t("Loading…") : t("Load older")}
-                          </button>
-                          <span className="field-help">{t("Showing the newest {length}.", { length: bankCandidates.length })}</span>
-                        </div>
-                      ) : null}
-                    </>
-                  ) : (
-                    <p>{t("No bank transactions waiting for review.")}{" "}<button className="outline-button" type="button" onClick={() => void fetchBankCandidates()}>{t("Check for new")}</button>
-                    </p>
-                  )}
-                </article>
-                )}
-                {(billingSection === "expenses-integrations") && (
-                <article className="data-card">
-                  <div className="data-card-header">
-                    <div>
-                      <span>{t("Bank export")}</span>
-                      <h2>{t("Import from bank CSV")}</h2>
-                    </div>
-                    <Upload size={24} />
-                  </div>
-                  <p className="field-help">{t("Export transactions from your bank and upload the CSV here. Nothing imports until you confirm the column mapping below - re-uploading the same file, or an export with overlapping dates, automatically skips transactions already imported.")}</p>
-                  <div className="csv-import-uploader">
-                    <label className="outline-button">
-                      <Upload size={16} />{t("Choose CSV file")}<input
-                        type="file"
-                        accept=".csv,text/csv,text/plain"
-                        onChange={(event) => {
-                          const file = event.target.files?.[0];
-                          event.target.value = "";
-                          if (file) void handleExpenseCsvFile(file);
-                        }}
-                      />
-                    </label>
-                    <span>{expenseImportFileName || t("No file chosen")}</span>
-                    <label className="csv-import-header-toggle">
-                      <input
-                        type="checkbox"
-                        checked={expenseImportHasHeader}
-                        onChange={(event) => {
-                          setExpenseImportHasHeader(event.target.checked);
-                          if (expenseImportFileName) resetExpenseCsvImport();
-                        }}
-                      />{t("First row is a header")}</label>
-                  </div>
-
-                  {expenseImportHeaders.length > 0 && (
-                    <>
-                      <div className="csv-import-mapping-grid">
-                        {expenseImportHeaders.map((header, index) => (
-                          <label key={index} className="settings-field">
-                            <span>{header || t("Column {value}", { value: index + 1 })}</span>
-                            <select
-                              value={expenseImportMapping[index] || ""}
-                              onChange={(event) =>
-                                setExpenseImportMapping((current) => ({ ...current, [index]: event.target.value as ExpenseCsvField }))
-                              }
-                            >
-                              <option value="">{t("Ignore")}</option>
-                              <option value="date">{t("Date")}</option>
-                              <option value="description">{t("Description / Payee")}</option>
-                              <option value="debit">{t("Amount out (debit)")}</option>
-                              <option value="credit">{t("Amount in (credit)")}</option>
-                              <option value="reference">{t("Reference / Unique ID")}</option>
-                            </select>
-                            <em>{expenseImportRows.slice(0, 2).map((row) => row[index]).filter(Boolean).join(" / ") || t("No sample")}</em>
-                          </label>
-                        ))}
-                      </div>
-
-                      <div className="service-form-row">
-                        <label className="settings-field">
-                          <span>{t("Apply category to all imported rows")}</span>
-                          <select value={expenseImportCategoryId} onChange={(event) => setExpenseImportCategoryId(event.target.value)}>
-                            <option value="">{t("Uncategorised")}</option>
-                            {expenseCategories
-                              .filter((category) => category.active)
-                              .map((category) => (
-                                <option key={category.id} value={category.id}>
-                                  {category.name}
-                                </option>
-                              ))}
-                          </select>
-                        </label>
-                      </div>
-
-                      <p className="field-help">{t("{length} of {length2} rows will import ({expenseImportSelectedTotal}). Rows without a valid date, description, or amount-out are skipped automatically; use the checkboxes below to exclude any others.", { length: expenseImportSelectedCandidates.length, length2: expenseImportCandidates.length, expenseImportSelectedTotal: formatMoney(expenseImportSelectedTotal, invoiceSettings.currency) })}</p>
-
-                      <div className="csv-import-preview">
-                        {expenseImportCandidates.slice(0, 20).map((candidate) => (
-                          <label
-                            key={candidate.index}
-                            className={`csv-import-preview-row${candidate.valid ? "" : " invalid"}`}
-                          >
-                            <input
-                              type="checkbox"
-                              disabled={!candidate.valid}
-                              checked={candidate.valid && !expenseImportExcluded[candidate.index]}
-                              onChange={(event) =>
-                                setExpenseImportExcluded((current) => ({ ...current, [candidate.index]: !event.target.checked }))
-                              }
-                            />
-                            <span>{candidate.date || t("Invalid date")}</span>
-                            <span>{candidate.description || t("Missing description")}</span>
-                            <span>{candidate.valid ? formatMoney(candidate.amount, invoiceSettings.currency) : "-"}</span>
-                          </label>
-                        ))}
-                        {expenseImportCandidates.length > 20 && (
-                          <p className="field-help">{t("...and")}{" "}{expenseImportCandidates.length - 20}{" "}{t("more rows.")}</p>
-                        )}
-                      </div>
-
-                      <div className="invoice-actions">
+            {/* Products, Expenses, Vouchers and Passes: the group's sections as
+                fold-out blocks, like a Settings tab. Only the open one is
+                mounted. Opened from the Business Hub, the overlay asked for one
+                section, so it shows just that. */}
+            {billingGroupOf(billingSection) &&
+              (workspaceOverlay?.kind === "billing" ? (
+                billingGroupedSectionContent
+              ) : (
+                <div className="billing-group">
+                  {BILLING_SECTION_NAV.filter((entry) => entry.group === billingGroupOf(billingSection)).map((entry) => {
+                    const open = billingSection === entry.key;
+                    return (
+                      <article className={`data-card settings-group${open ? " is-open" : ""}`} key={entry.key}>
                         <button
-                          className="primary-button"
-                          disabled={expenseImportState === "importing" || !expenseImportSelectedCandidates.length}
-                          onClick={submitExpenseCsvImport}
+                          className="settings-group-header"
+                          aria-expanded={open}
+                          onClick={() => (open ? setBillingSection(entry.group!) : switchBillingSection(entry.key))}
                           type="button"
                         >
-                          {expenseImportState === "importing"
-                            ? t("Importing...")
-                            : tn(expenseImportSelectedCandidates.length, "Import {count} transaction", "Import {count} transactions")}
+                          <span className="settings-group-title">
+                            <entry.icon size={18} />
+                            {entry.label}
+                            {entry.key === "passes-issue" && passInboxCount > 0 && <span className="tab-count">{passInboxCount}</span>}
+                          </span>
+                          <span className="settings-group-caret" aria-hidden="true">▾</span>
                         </button>
-                        <button className="outline-button" onClick={resetExpenseCsvImport} type="button">{t("Cancel")}</button>
-                      </div>
-                    </>
-                  )}
-
-                  {expenseImportResult && (
-                    <p className="field-help">{t("Last import: {imported} added, {duplicate} already imported", { imported: expenseImportResult.imported, duplicate: expenseImportResult.duplicate })}{expenseImportResult.skipped ? t(", {skipped} skipped", { skipped: expenseImportResult.skipped }) : ""}
-                      {expenseImportResult.failed ? t(", {failed} failed", { failed: expenseImportResult.failed }) : ""}.
-                    </p>
-                  )}
-                </article>
-                )}
-
-                {(billingSection === "expenses-records") && (
-                <article className="data-card">
-                  <div className="data-card-header">
-                    <div>
-                      <span>{t("Expenses")}</span>
-                      <h2>{formatMoney(expenseTotalForRange, invoiceSettings.currency)}</h2>
-                    </div>
-                    <ClarityInvoices size={24} />
-                  </div>
-                  <div className="ready-to-pull-range">
-                    <label className="settings-field">
-                      <span>{t("From")}</span>
-                      <input type="date" value={expenseRangeFrom} onChange={(event) => setExpenseRangeFrom(event.target.value)} />
-                    </label>
-                    <label className="settings-field">
-                      <span>{t("To")}</span>
-                      <input type="date" value={expenseRangeTo} onChange={(event) => setExpenseRangeTo(event.target.value)} />
-                    </label>
-                    {(expenseRangeFrom || expenseRangeTo) && (
-                      <button
-                        className="outline-button small-action"
-                        onClick={() => {
-                          setExpenseRangeFrom("");
-                          setExpenseRangeTo("");
-                        }}
-                        type="button"
-                      >{t("Clear")}</button>
-                    )}
-                  </div>
-                  <p className="field-help">{tn(activeExpenses.length, "{count} expense", "{count} expenses")}
-                    {expenseRangeFrom || expenseRangeTo ? t(" in this range") : t(" (last 200)")}.
-                  </p>
-                </article>
-                )}
-
-                {(billingSection === "expenses-log" || (billingSection === "expenses-records" && Boolean(expenseDraft.id))) && (
-                <article className="data-card">
-                  <div className="data-card-header">
-                    <div>
-                      <span>{expenseDraft.id ? t("Edit") : t("Log")}</span>
-                      <h2>{expenseDraft.id ? t("Edit expense") : t("Log an expense")}</h2>
-                    </div>
-                    <ClarityInvoices size={24} />
-                  </div>
-                  <div className="billing-catalog-editor">
-                    <label className="settings-field">
-                      <span>{t("Description")}</span>
-                      <input
-                        className="w-name"
-                        value={expenseDraft.description}
-                        onChange={(event) => setExpenseDraft((current) => ({ ...current, description: event.target.value }))}
-                        placeholder={t("What did you pay for?")}
-                      />
-                    </label>
-                    <div className="service-form-row">
-                      <label className="settings-field">
-                        <span>{t("Amount")}</span>
-                        <input
-                          className="w-price"
-                          value={expenseDraft.amount}
-                          inputMode="decimal"
-                          onChange={(event) => setExpenseDraft((current) => ({ ...current, amount: parseMoneyInput(event.target.value) }))}
-                          type="text"
-                        />
-                      </label>
-                      <label className="settings-field">
-                        <span>{t("Date")}</span>
-                        <input
-                          className="w-date"
-                          type="date"
-                          value={expenseDraft.expenseDate}
-                          onChange={(event) => setExpenseDraft((current) => ({ ...current, expenseDate: event.target.value }))}
-                        />
-                      </label>
-                      <label className="settings-field">
-                        <span>{t("Category")}</span>
-                        <select
-                          value={expenseDraft.categoryId}
-                          onChange={(event) => setExpenseDraft((current) => ({ ...current, categoryId: event.target.value }))}
-                        >
-                          <option value="">{t("Uncategorised")}</option>
-                          {expenseCategories
-                            .filter((category) => category.active || category.id === expenseDraft.categoryId)
-                            .map((category) => (
-                              <option key={category.id} value={category.id}>
-                                {category.name}
-                              </option>
-                            ))}
-                        </select>
-                      </label>
-                    </div>
-                    <label className="settings-field">
-                      <span>{t("Vendor")}</span>
-                      <input
-                        className="w-name"
-                        value={expenseDraft.vendor}
-                        onChange={(event) => setExpenseDraft((current) => ({ ...current, vendor: event.target.value }))}
-                        placeholder={t("Optional")}
-                      />
-                    </label>
-                    <label className="settings-field">
-                      <span>{t("Note")}</span>
-                      <textarea
-                        className="w-prose"
-                        value={expenseDraft.note}
-                        onChange={(event) => setExpenseDraft((current) => ({ ...current, note: event.target.value }))}
-                        rows={2}
-                        placeholder={t("Optional")}
-                      />
-                    </label>
-                    <button className="outline-button" disabled={expenseSaveState === "saving"} onClick={saveExpenseDraft} type="button">
-                      <Plus size={16} />
-                      {expenseDraft.id ? (expenseSaveState === "saving" ? t("Saving...") : t("Save Changes")) : expenseSaveState === "saving" ? t("Saving...") : t("Log Expense")}
-                    </button>
-                    {Boolean(expenseDraft.id) && (
-                      <button className="text-button" onClick={resetExpenseDraft} type="button">{t("Cancel Edit")}</button>
-                    )}
-                  </div>
-                </article>
-                )}
-
-                {(billingSection === "expenses-records") && (
-                <article className="data-card recent-invoices-card">
-                  <div className="data-card-header">
-                    <div>
-                      <span>{t("History")}</span>
-                      <h2>{t("Recent expenses")}</h2>
-                    </div>
-                    <ClarityReports size={24} />
-                  </div>
-                  {expenseLoadState === "loading" && !expenses.length ? (
-                    <Loading what={t("expenses")} />
-                  ) : expenses.length ? (
-                    <table className="recent-invoices-table">
-                      <thead>
-                        <tr>
-                          <th>{t("Date")}</th>
-                          <th>{t("Description")}</th>
-                          <th>{t("Category")}</th>
-                          <th>{t("Amount")}</th>
-                          <th />
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {expenses.map((expense) => (
-                          <tr key={expense.id} className={expense.voided ? "voided-row" : ""}>
-                            <td>{expense.expenseDate}</td>
-                            <td>
-                              <button className="text-link-button" onClick={() => editExpense(expense)} type="button">
-                                {expense.description}
-                              </button>
-                              {expense.vendor && <em className="expense-vendor">{expense.vendor}</em>}
-                            </td>
-                            <td>{expense.categoryName || t("Uncategorised")}</td>
-                            <td>{formatMoney(expense.amount, invoiceSettings.currency)}</td>
-                            <td>
-                              <button className="text-link-button" onClick={() => toggleExpenseVoided(expense)} type="button">
-                                {expense.voided ? t("Restore") : t("Void")}
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  ) : (
-                    <p>{t("No expenses logged")}{expenseRangeFrom || expenseRangeTo ? t(" in this date range") : t(" yet")}.</p>
-                  )}
-                </article>
-                )}
-              </div>
-            )}
-
-            {/* POS Transactions. Its own numbers, deliberately never mixed into
-                the invoice figures above - a lesson can be paid at the counter
-                and also appear on an invoice, so combining them would
-                double-count. */}
-            {(billingSection === "products-new" || billingSection === "products-catalog" || billingSection === "vouchers-edit") && (
-              <Suspense fallback={<Loading what={t("products")} />}>
-                <ProductsPanel
-                  view={billingSection === "products-new" ? "new" : billingSection === "products-catalog" ? "catalog" : "vouchers"}
-                  products={catalogItems}
-                  loadState={catalogLoadState}
-                  currency={invoiceSettings.currency}
-                  defaultTaxRate={invoiceSettings.taxRate}
-                  formatMoney={formatMoney}
-                  onReload={() => void fetchBillingProducts()}
-                  onSave={saveProduct}
-                  onSetActive={setProductActive}
-                  onAdjustStock={adjustProductStock}
-                  onLoadMovements={fetchStockMovements}
-                  onEditLessonTypes={() =>
-                    openProfileTarget({ kind: "settings", tab: "services" }, `${terms.serviceSingular} types`)
-                  }
-                />
-              </Suspense>
-            )}
-
-            {(billingSection === "products-orders" || billingSection === "products-integrations") && (
-              <div className="billing-dashboard">
-                <article className="data-card wide">
-                  <div className="data-card-header">
-                    <div>
-                      <span>{billingSectionLabel(billingSection)}</span>
-                      <h2>{t("Coming soon")}</h2>
-                    </div>
-                    {billingSection === "products-orders" ? <ClarityPayments size={24} /> : <ClarityIntegrations size={24} />}
-                  </div>
-                  <p className="field-help">
-                    {billingSection === "products-orders"
-                      ? t("Product orders will show here.")
-                      : t("Connections to other shops and stock systems will show here.")}
-                  </p>
-                </article>
-              </div>
-            )}
-
-            {(billingSection === "vouchers-issue" || billingSection === "vouchers-records" || billingSection === "vouchers-integrations") && (
-              <Suspense fallback={<Loading what={t("vouchers")} />}>
-                <CouponsPanel
-                  view={billingSection === "vouchers-issue" ? "issue" : billingSection === "vouchers-records" ? "records" : "integrations"}
-                  coupons={coupons}
-                  loadState={couponsLoadState}
-                  currency={invoiceSettings.currency}
-                  formatMoney={formatMoney}
-                  onReload={() => void fetchCoupons()}
-                  onIssue={issueCoupon}
-                  onSetVoid={setCouponVoid}
-                  onLoadRedemptions={fetchCouponRedemptions}
-                  onScanStripe={findStripeCouponCandidates}
-                  onImport={importStripeCoupons}
-                  rules={voucherRules}
-                  onSaveRules={saveVoucherRules}
-                  onRepairOwners={repairVoucherOwners}
-                />
-              </Suspense>
-            )}
-
-            {billingSection.startsWith("passes-") && (
-              <div className="billing-dashboard">
-                {billingSection === "passes-issue" && (
-                <article className="data-card wide">
-                  <div className="data-card-header">
-                    <div>
-                      <span>{t("Issue or redeem")}</span>
-                      <h2>{t("Find the client")}</h2>
-                    </div>
-                    <ClarityClientsPlayers size={24} />
-                  </div>
-                  <p className="field-help">{t("Passes are granted and spent on the client's own Passes tab. Pick them here to open it.")}</p>
-                  <Suspense fallback={<Loading what={t("clients")} />}>
-                    <PassClientPicker
-                      people={clients.map((client) => ({ id: client.id, name: client.name, email: client.email }))}
-                      onPick={(personId) => {
-                        const linked = clients.find((entry) => entry.id === personId);
-                        if (!linked) return;
-                        openClientProfile(linked);
-                        setClientProfileTab("passes");
-                      }}
-                    />
-                  </Suspense>
-                </article>
-                )}
-
-                {billingSection === "passes-edit" && (
-                <article className="data-card wide">
-                  <div className="data-card-header">
-                    <div>
-                      <span>{t("Pass types")}</span>
-                      <h2>{t("What you sell as a pass")}</h2>
-                    </div>
-                    <ClarityProducts size={24} />
-                  </div>
-                  <p className="field-help">{t("A pass type is a package lesson type, so it is made and changed in Settings > Services. That keeps it in step with what the booking screen sells.")}</p>
-                  <Suspense fallback={<Loading what={t("pass types")} />}>
-                    <PassTypesList
-                      services={services}
-                      formatMoney={(amount) => formatMoney(amount, invoiceSettings.currency)}
-                      onEdit={() => openProfileTarget({ kind: "settings", tab: "services" }, `${terms.serviceSingular} types`)}
-                    />
-                  </Suspense>
-                </article>
-                )}
-
-                {billingSection === "passes-records" && (
-                <article className="data-card wide">
-                  <div className="data-card-header">
-                    <div>
-                      <span>{t("Issued passes")}</span>
-                      <h2>
-                        {(() => {
-                          const live = issuedPasses.filter((pass) => pass.status === "active");
-                          const left = live.reduce((sum, pass) => sum + pass.creditsAvailable, 0);
-                          return live.length === 0
-                            ? t("No active passes")
-                            : left === 1
-                              ? t("{active} active · 1 credit left", { active: live.length })
-                              : t("{active} active · {left} credits left", { active: live.length, left });
-
-                        })()}
-                      </h2>
-                    </div>
-                    <ClarityPassesCredits size={24} />
-                  </div>
-                  <p className="field-help">{t("Every pass this business has issued and who holds it. A pass is spent from the lesson checkout, so a holder with credits left pays with it there.")}</p>
-                  <Suspense fallback={<Loading what={t("passes")} />}>
-                    <IssuedPassesPanel
-                      passes={issuedPasses}
-                      loadState={issuedPassesLoadState}
-                      onRetry={() => void fetchIssuedPasses()}
-                      onOpenPerson={(personId) => {
-                        const linked = clients.find((entry) => entry.id === personId);
-                        if (linked) openClientProfile(linked);
-                        else setToast({ message: t("That client is not in the list yet. Try again after it loads.") });
-                      }}
-                      serviceName={(serviceId) =>
-                        services.find((service) => service.id === serviceId)?.name || serviceId
-                      }
-                    />
-                  </Suspense>
-                </article>
-                )}
-
-                {billingSection === "passes-issue" && (
-                <article className="data-card wide">
-                  <div className="data-card-header">
-                    <div>
-                      <span>{t("Pass Inbox")}</span>
-                      <h2>
-                        {passInboxCount === 0
-                          ? t("Nothing waiting")
-                          : `${passInboxCount} waiting`}
-                      </h2>
-                    </div>
-                    <Inbox size={24} />
-                  </div>
-                  <p className="field-help">{t("A pass sold outside Clarity arrives as a product name and a buyer, neither of which says how many credits it is worth or, always, who bought it. Nothing is issued or attached automatically — a wrong package hands somebody the wrong number of lessons, and nothing downstream can tell.")}</p>
-                  <Suspense fallback={<Loading what={t("the pass inbox")} />}>
-                    <PassInboxPanel
-                      purchases={passInbox.waitingToIssue}
-                      unassigned={passInbox.waitingForOwner}
-                      templates={passInbox.templates}
-                      people={clients.map((client) => ({ id: client.id, name: client.name }))}
-                      dismissedTypes={passInbox.dismissedTypes}
-                      loadState={passInboxLoadState}
-                      busyId={passInboxBusyId}
-                      onIssue={(purchaseId, templateServiceId, valueCents) =>
-                        void postPassInbox(
-                          "/api/passes/inbox",
-                          // Omitted entirely when the coach left the suggested
-                          // price alone, so the server decides it rather than
-                          // trusting a number the browser worked out.
-                          valueCents === undefined
-                            ? { purchaseId, templateServiceId }
-                            : { purchaseId, templateServiceId, totalValueCents: valueCents },
-                          purchaseId,
-                          t("Could not issue that pass."),
-                          t("Pass issued."),
-                        )
-                      }
-                      onDismiss={(purchaseId) =>
-                        void postPassInbox(
-                          "/api/passes/inbox",
-                          { purchaseId, action: "dismiss" },
-                          purchaseId,
-                          t("Could not update that purchase."),
-                          t("Marked as not a pass."),
-                        )
-                      }
-                      onDismissType={(itemName) =>
-                        void postPassInbox(
-                          "/api/passes/inbox",
-                          { itemName, action: "dismissType" },
-                          itemName,
-                          t("Could not hide that product."),
-                          t("Hidden — sales of that product will not show here again."),
-                        )
-                      }
-                      onRestoreType={(itemName) =>
-                        void postPassInbox(
-                          "/api/passes/inbox",
-                          { itemName, action: "restoreType" },
-                          itemName,
-                          t("Could not restore that product."),
-                          t("Back in the queue."),
-                        )
-                      }
-                      onAttach={(passId, personId) =>
-                        void postPassInbox(
-                          "/api/passes/attach",
-                          { passId, personId },
-                          passId,
-                          t("Could not attach that pass."),
-                          t("Pass attached."),
-                        )
-                      }
-                      onRetry={() => void fetchPassInbox()}
-                    />
-                  </Suspense>
-                </article>
-                )}
-              </div>
-            )}
+                        <div className={`disclosure-wrap${open ? " is-open" : ""}`} inert={!open}>
+                          <div className="disclosure-body settings-group-body">{open ? billingGroupedSectionContent : null}</div>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              ))}
 
             {billingSection === "memberships" && (
               <Suspense fallback={<Loading what={t("memberships")} />}>

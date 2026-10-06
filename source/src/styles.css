@@ -7752,6 +7752,15 @@ button {
   padding: 0;
 }
 
+/* A Billing group (Products, Expenses, Vouchers, Passes): its sections as a
+   stack of Settings-style fold-out blocks. */
+.billing-group {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: 14px;
+}
+
 .billing-dashboard,
 .billing-reports {
   display: grid;
