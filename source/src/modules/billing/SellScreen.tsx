@@ -739,7 +739,7 @@ export function SellScreen({
           </p>
         )}
         {catalogState === "loaded" && !tiles.length && !lessonGroups.length && (
-          <p className="field-help">{t("Nothing here. Try another category, or add items under Billing > Products.")}</p>
+          <p className="field-help">{t("Nothing here. Try another category, or add items under Billing > Products > New Product.")}</p>
         )}
 
         {lessonGroups.length > 0 && (

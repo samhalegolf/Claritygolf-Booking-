@@ -1,5 +1,14 @@
 import { Loading } from "../shared/Loading";
-// Products tab - the shop side of Billing, and the first screen Billing opens.
+// Products - the shop side of Billing. One panel behind three menu items:
+//
+//   new       Billing > Products > New Product. The add form and nothing else.
+//   catalog   Billing > Products > Catalog. The list; the form only appears
+//             while an existing product is being edited.
+//   vouchers  Billing > Vouchers > Create or Edit Vouchers. The list, narrowed
+//             to the products ticked as gift vouchers; the form only appears
+//             for "New voucher" or an edit.
+//
+// Nothing is open or editable until it is asked for.
 //
 // Presentational, like BillingReportsPanel: App.tsx owns the list and every
 // request. What lives here is form state, which is UI and nothing else.
@@ -15,7 +24,7 @@ import { Loading } from "../shared/Loading";
 // top, Enter saves, focus returns to the name. The full set of fields only
 // appears once you ask for it, or when you click an existing product to edit.
 
-import { Fragment, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { AlertTriangle, ChevronDown, ChevronRight, Lock, Plus, Search, X } from "lucide-react";
 import { ClarityProducts } from "../shared/ClarityIcons";
@@ -62,7 +71,10 @@ function toNumber(value: string, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+export type ProductsPanelView = "new" | "catalog" | "vouchers";
+
 export type ProductsPanelProps = {
+  view: ProductsPanelView;
   products: BillingCatalogItem[];
   loadState: "idle" | "loading" | "loaded" | "error";
   currency: string;
@@ -96,7 +108,9 @@ const MOVEMENT_LABELS: Record<StockMovement["kind"], string> = {
   sale_reversal: t("Returned"),
 };
 
-function emptyForm(taxRate: number): ProductFormDraft {
+// A new voucher is a voucher, and nobody keeps a shelf of them.
+function emptyForm(taxRate: number, view: ProductsPanelView): ProductFormDraft {
+  const voucher = view === "vouchers";
   return {
     id: "",
     active: true,
@@ -107,10 +121,10 @@ function emptyForm(taxRate: number): ProductFormDraft {
     price: "",
     costPrice: "",
     taxRate: String(taxRate),
-    trackStock: true,
+    trackStock: !voucher,
     lowStockThreshold: "",
     openingStock: "",
-    isVoucher: false,
+    isVoucher: voucher,
   };
 }
 
@@ -142,6 +156,7 @@ function marginLabel(product: BillingCatalogItem) {
 }
 
 export function ProductsPanel({
+  view,
   products,
   loadState,
   currency,
@@ -154,7 +169,7 @@ export function ProductsPanel({
   onLoadMovements,
   onEditLessonTypes,
 }: ProductsPanelProps) {
-  const [form, setForm] = useState<ProductFormDraft>(() => emptyForm(defaultTaxRate));
+  const [form, setForm] = useState<ProductFormDraft>(() => emptyForm(defaultTaxRate, view));
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
   const [showInactive, setShowInactive] = useState(false);
@@ -183,17 +198,22 @@ export function ProductsPanel({
 
   const searching = search.trim().length > 0;
   const editing = Boolean(form.id);
+  // New Product never shows the list. Elsewhere the form waits to be asked for.
+  const [adding, setAdding] = useState(false);
+  const showForm = view === "new" || editing || adding;
+  const showList = view !== "new";
 
   const visible = useMemo(() => {
     const needle = search.trim().toLowerCase();
     return products.filter((product) => {
+      if (view === "vouchers" && product.isVoucher !== true) return false;
       if (!showInactive && product.active === false) return false;
       if (!needle) return true;
       return [product.name, product.sku, product.supplier, product.description]
         .filter(Boolean)
         .some((field) => String(field).toLowerCase().includes(needle));
     });
-  }, [products, search, showInactive]);
+  }, [products, search, showInactive, view]);
 
   // One section per kind, in KIND_ORDER, skipping kinds with nothing in them.
   const groups = useMemo(
@@ -222,8 +242,9 @@ export function ProductsPanel({
   }
 
   function resetForm() {
-    setForm(emptyForm(defaultTaxRate));
+    setForm(emptyForm(defaultTaxRate, view));
     setShowDetail(false);
+    setAdding(false);
   }
 
   async function submit() {
@@ -262,8 +283,14 @@ export function ProductsPanel({
   function startEdit(product: BillingCatalogItem) {
     setForm(toForm(product, defaultTaxRate));
     setShowDetail(true);
-    nameRef.current?.focus();
   }
+
+  // The form only exists once it is asked for, so it takes focus (which also
+  // scrolls it into view) after it has rendered rather than in the click.
+  const formKey = editing ? form.id : adding ? "new" : "";
+  useEffect(() => {
+    if (formKey) nameRef.current?.focus();
+  }, [formKey]);
 
   async function loadMovementsFor(productId: string) {
     movementsForRef.current = productId;
@@ -308,13 +335,12 @@ export function ProductsPanel({
 
   return (
     <div className="billing-dashboard billing-products">
-      {/* Add first, list second. This is the screen Billing opens on, and the
-          most common reason to be here is putting something new in. */}
+      {showForm && (
       <article className="data-card wide product-quick-card">
         <div className="data-card-header">
           <div>
-            <span>{editing ? t("Editing product") : t("Add a product")}</span>
-            <h2>{editing ? form.name || t("Product") : t("What are you selling?")}</h2>
+            <span>{editing ? t("Editing product") : view === "vouchers" ? t("Add a gift voucher") : t("Add a product")}</span>
+            <h2>{editing ? form.name || t("Product") : view === "vouchers" ? t("What voucher are you selling?") : t("What are you selling?")}</h2>
           </div>
           <Plus size={24} />
         </div>
@@ -362,7 +388,7 @@ export function ProductsPanel({
           <button className="outline-button" onClick={() => setShowDetail((open) => !open)} type="button">
             {showDetail ? t("Less") : t("More")}
           </button>
-          {editing && (
+          {(editing || adding) && (
             <button className="text-link-button" onClick={resetForm} type="button">{t("Cancel")}</button>
           )}
         </div>
@@ -448,7 +474,7 @@ export function ProductsPanel({
         )}
 
         {form.isVoucher && (
-          <p className="field-help">{t("Selling this issues a coupon with a code for the amount paid, and it turns up under Billing > Coupons. Tick it on the products people buy on Squarespace so those purchases can be imported too.")}</p>
+          <p className="field-help">{t("Selling this issues a coupon with a code for the amount paid, and it turns up under Billing > Vouchers > Voucher Records. Tick it on the products people buy on Squarespace so those purchases can be imported too.")}</p>
         )}
         {showDetail && !form.trackStock && (
           <p className="field-help">{t("Not counted - use this for something like a fitting fee that you sell but never have on a shelf.")}</p>
@@ -456,16 +482,22 @@ export function ProductsPanel({
         {editing && !form.active && (
           <p className="field-help">{t("This one is retired. Saving leaves it retired - use Restore in the list to bring it back.")}</p>
         )}
-        {editing && <p className="field-help">{t("Stock is changed from the list below, not here, so a save can't undo a sale.")}</p>}
+        {editing && <p className="field-help">{t("Stock is changed from the list, not here, so a save can't undo a sale.")}</p>}
         {!editing && !showDetail && (
-          <p className="field-help">{t("Name and price is enough to start selling it. Press Enter to save. Lessons don't belong here - they come from your lesson types.")}</p>
+          <p className="field-help">
+            {view === "vouchers"
+              ? t("Name and price is enough to start selling it. Press Enter to save.")
+              : t("Name and price is enough to start selling it. Press Enter to save. Lessons don't belong here - they come from your lesson types.")}
+          </p>
         )}
       </article>
+      )}
 
+      {showList && (
       <article className="data-card wide recent-invoices-card">
         <div className="data-card-header">
           <div>
-            <span>{t("Catalog")}</span>
+            <span>{view === "vouchers" ? t("Gift vouchers") : t("Catalog")}</span>
             <h2>{t("{length} shown", { length: visible.length })}{lowStockCount > 0 && <span className="unpaid-count-badge">{t("{lowStockCount} low", { lowStockCount })}</span>}
             </h2>
           </div>
@@ -494,6 +526,12 @@ export function ProductsPanel({
             <span>{t("Show retired items")}</span>
           </label>
           <button className="outline-button" onClick={onReload} type="button">{t("Refresh")}</button>
+          {view === "vouchers" && !showForm && (
+            <button className="primary-button" onClick={() => setAdding(true)} type="button">
+              <Plus size={15} />
+              {t("New voucher")}
+            </button>
+          )}
         </div>
         {stockValueTotal > 0 && (
           <p className="field-help">{t("Stock on hand is worth about {stockValueTotal} at cost.", { stockValueTotal: formatMoney(stockValueTotal, currency) })}</p>
@@ -505,7 +543,7 @@ export function ProductsPanel({
           </p>
         )}
         {loadState !== "loading" && !visible.length && (
-          <p>{products.length ? t("Nothing matches that search.") : t("Nothing here yet - add your first product above.")}</p>
+          <p>{products.length ? t("Nothing matches that search.") : view === "vouchers" ? t("No gift vouchers yet - add one with New voucher.") : t("Nothing here yet - add one under Products > New Product.")}</p>
         )}
         {groups.map((group) => {
           const stocked = group.kind === "product";
@@ -689,6 +727,7 @@ export function ProductsPanel({
           );
         })}
       </article>
+      )}
     </div>
   );
 }

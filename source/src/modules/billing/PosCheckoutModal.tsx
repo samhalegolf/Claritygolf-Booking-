@@ -649,7 +649,7 @@ export function PosCheckoutModal({
                       <p className="field-help">
                         {productSearch.trim()
                           ? t("Nothing matches that. Packages are found by name -- try the package's own name.")
-                          : t("Nothing on the shelf yet? Add items under Billing > Products.")}
+                          : t("Nothing on the shelf yet? Add items under Billing > Products > New Product.")}
                       </p>
                     )}
                   </div>
