@@ -214,26 +214,6 @@ export type InvoicePaymentSource = {
   reference: string | null;
 };
 
-// Shape returned by GET /api/billing/reports/revenue.
-export type BillingRevenueBucket = {
-  label: string;
-  rangeStart: string;
-  rangeEnd: string;
-  total: number;
-};
-
-export type BillingRevenueReport = {
-  period: "week" | "month" | "year";
-  currency: string;
-  rangeStart: string;
-  rangeEnd: string;
-  total: number;
-  previousYearTotal: number | null;
-  previousYearRangeStart: string;
-  previousYearRangeEnd: string;
-  buckets: BillingRevenueBucket[];
-};
-
 // Shape returned by GET /api/billing/reports/summary - the Reports tab's
 // full P&L / GST / aging payload. Backend-owned (billing-api.mts
 // buildReportSummary); the frontend only reads it.

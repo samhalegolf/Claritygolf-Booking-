@@ -61,6 +61,18 @@
   --c-icon-accent: #00b85a;
   --c-danger-wash: #fff3f0;
 
+  /* Chart series, in fixed order: slot 1 is always the first thing plotted.
+     A validated categorical set (adjacent CVD and normal-vision separation
+     checked in both schemes); dark is the same hues stepped for the dark
+     surface. Never a status colour. */
+  --c-series-1: #2a78d6;
+  --c-series-2: #eb6834;
+  --c-series-3: #1baf7a;
+  --c-series-4: #eda100;
+  --c-series-5: #e87ba4;
+  --c-series-6: #008300;
+  --c-series-7: #4a3aa7;
+
   /* Pressure / load. One scale for both feet, so a heatmap can be read as an
      ordered thing rather than a set of unrelated colours: lightness rises
      with load, which keeps the order intact in greyscale and for a reader who
@@ -117,6 +129,13 @@
   --dark-text-disabled: rgba(244, 247, 242, 0.38);
   --dark-success-wash: rgba(183, 224, 189, 0.14);
   --dark-danger-wash: rgba(255, 138, 138, 0.14);
+  --dark-series-1: #3987e5;
+  --dark-series-2: #d95926;
+  --dark-series-3: #199e70;
+  --dark-series-4: #c98500;
+  --dark-series-5: #d55181;
+  --dark-series-6: #008300;
+  --dark-series-7: #9085e9;
   /* The ramp, flipped: the peak is the brightest stop here for the same
      reason it is the darkest one above. */
   --dark-load-0: #191d16;
@@ -258,6 +277,13 @@
   --c-text-disabled: var(--dark-text-disabled);
   --c-success-wash: var(--dark-success-wash);
   --c-danger-wash: var(--dark-danger-wash);
+  --c-series-1: var(--dark-series-1);
+  --c-series-2: var(--dark-series-2);
+  --c-series-3: var(--dark-series-3);
+  --c-series-4: var(--dark-series-4);
+  --c-series-5: var(--dark-series-5);
+  --c-series-6: var(--dark-series-6);
+  --c-series-7: var(--dark-series-7);
   --c-mortar: var(--dark-mortar);
   --c-brick-blank: var(--dark-brick-blank);
   --c-brick-blank-border: var(--dark-brick-blank-border);
@@ -306,6 +332,13 @@
     --c-text-disabled: var(--dark-text-disabled);
       --c-success-wash: var(--dark-success-wash);
     --c-danger-wash: var(--dark-danger-wash);
+    --c-series-1: var(--dark-series-1);
+    --c-series-2: var(--dark-series-2);
+    --c-series-3: var(--dark-series-3);
+    --c-series-4: var(--dark-series-4);
+    --c-series-5: var(--dark-series-5);
+    --c-series-6: var(--dark-series-6);
+    --c-series-7: var(--dark-series-7);
     --c-mortar: var(--dark-mortar);
     --c-brick-blank: var(--dark-brick-blank);
     --c-brick-blank-border: var(--dark-brick-blank-border);
@@ -350,6 +383,13 @@
     --c-text-disabled: var(--dark-text-disabled);
       --c-success-wash: var(--dark-success-wash);
     --c-danger-wash: var(--dark-danger-wash);
+    --c-series-1: var(--dark-series-1);
+    --c-series-2: var(--dark-series-2);
+    --c-series-3: var(--dark-series-3);
+    --c-series-4: var(--dark-series-4);
+    --c-series-5: var(--dark-series-5);
+    --c-series-6: var(--dark-series-6);
+    --c-series-7: var(--dark-series-7);
     --c-mortar: var(--dark-mortar);
     --c-brick-blank: var(--dark-brick-blank);
     --c-brick-blank-border: var(--dark-brick-blank-border);
