@@ -4546,5 +4546,6 @@
   "the billing dashboard": "la dashboard di fatturazione",
   "the bay and room system": "il sistema di postazioni e sale",
   "languages": "lingue",
-  "country and region settings": "le impostazioni di paese e regione"
+  "country and region settings": "le impostazioni di paese e regione",
+  "A booking you changed was also changed elsewhere. The latest version is shown; please make your change again.": "Una prenotazione che hai modificato è stata modificata anche altrove. Viene mostrata la versione più recente; ripeti la modifica."
 }

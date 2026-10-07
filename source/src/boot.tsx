@@ -11,6 +11,7 @@ import { fetchSession, guestSession, type Session } from "./modules/auth/session
 import { isBookingEmbedMode, isPlayerBookingMode, isReviewShareMode, isVideoShareMode } from "./modules/shared/bookingHandoff";
 import { isTerminalPath } from "./modules/clarity-terminal/terminalApi";
 import { lastVisitorWasCoach } from "./modules/shared/workspaceStorage";
+import { prefetchCalendarState } from "./modules/workspace/calendarStatePrefetch";
 import { installOptixOriginFeedback } from "./optix-origin-feedback";
 import { installBoxAudit } from "./lib/boxAudit";
 import { AppErrorBoundary } from "./modules/shared/AppErrorBoundary";
@@ -107,6 +108,10 @@ if (willCheckSession && lastVisitorWasCoach()) {
   void import("./modules/player-profiles/lessonNotesStore")
     .then((store) => store.prefetchLessonNotes())
     .catch(() => undefined);
+  // And the calendar itself, the page's largest paint. Sent directly rather
+  // than behind a dynamic import: that import would be one more round trip
+  // before the request even leaves.
+  prefetchCalendarState();
 } else if (willCheckSession) {
   // Most likely a sign-in: the form and its stylesheet download alongside the
   // session check rather than after it says "guest".

@@ -1,5 +1,7 @@
 import { type Dispatch, type RefObject, type SetStateAction, useEffect, useRef, useState } from "react";
 import type { AuthStatus } from "../auth/authStatus";
+import { takePrefetchedCalendarState } from "./calendarStatePrefetch";
+import { readCachedCalendar, writeCachedCalendar } from "./calendarCache";
 import { t } from "../../lib/i18n";
 import { whenIdle } from "../../lib/idle";
 import {
@@ -10,6 +12,7 @@ import {
   type CalendarSaveStatus,
   calendarStateFingerprint,
   cleanAvailability,
+  calendarItemsPatch,
   mergeCalendarItemsAfterConflict,
 } from "../calendar/calendarModel";
 import { cleanPeople } from "../clients/clientMatching";
@@ -46,6 +49,35 @@ import type { WorkspaceData } from "./useWorkspaceData";
 import type { Diagnostics } from "../diagnostics/useDiagnostics";
 import type { CalendarState } from "../calendar/useCalendarState";
 
+/** A GET /api/calendar-state answer, live or from the device cache. */
+type CalendarStateData = {
+  syncKey?: string;
+  items?: CalendarItem[];
+  people?: Person[];
+  notifications?: NotificationRecord[];
+  services?: Service[];
+  locations?: Location[];
+  coaches?: CoachProfile[];
+  workspaceAccounts?: WorkspaceAccount[];
+  currentUser?: AppUser;
+  availability?: AvailabilityWindow[][];
+  settings?: Partial<NotificationSettings>;
+  brand?: Partial<BrandSettings>;
+  account?: Partial<CoachAccount>;
+  updatedAt?: string;
+  diagnostics?: {
+    calendarState?: {
+      routeUsed?: string;
+      entrypoint?: string;
+      shellLoadDurationMs?: number;
+      itemCount?: number;
+      peopleDeferred?: boolean;
+      notificationsDeferred?: boolean;
+      googleSyncStatusDeferred?: boolean;
+    };
+  };
+};
+
 /**
  * Loading the workspace from the server and saving it back: the calendar
  * shell and the admin details that follow it, item and location writes,
@@ -77,6 +109,7 @@ export function useWorkspaceSync({
   scheduleAdminNotificationDebounceFlush,
   watchBayHold,
   setLocationEditorError,
+  calendarCacheAccountId,
 }: {
   workspace: WorkspaceData;
   diagnostics: Diagnostics;
@@ -101,6 +134,12 @@ export function useWorkspaceSync({
   scheduleAdminNotificationDebounceFlush: () => void;
   watchBayHold: (itemId: string, changedAtMs: number, reason: "move" | "new") => Promise<void>;
   setLocationEditorError: Dispatch<SetStateAction<string>>;
+  /**
+   * The business whose cached calendar may be drawn before the live read
+   * lands. Empty when the session did not confirm the account, so a device's
+   * remembered workspace alone never puts a calendar on screen.
+   */
+  calendarCacheAccountId: string;
 }) {
   const {
     items,
@@ -145,6 +184,17 @@ export function useWorkspaceSync({
   const settingsSaveVersionRef = useRef(0);
   const lastPersistedCalendarFingerprintRef = useRef("");
   const lastPersistedCalendarItemsRef = useRef<CalendarItem[]>([]);
+  // The calendar as currently drawn, for code that runs after an await.
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  // The bookings the cached calendar drew, while it is on screen and the live
+  // read has not landed. Non-null means: nothing is persisted yet, autosave is
+  // off, and any edit made meanwhile is folded onto the live calendar when it
+  // arrives (see loadAdminCalendarState).
+  const cachedCalendarItemsRef = useRef<CalendarItem[] | null>(null);
+  // The last live calendar answer, kept so a confirmed save can refresh the
+  // device cache without another read.
+  const lastLiveCalendarDataRef = useRef<{ accountId: string; data: CalendarStateData } | null>(null);
   const activeAdminSaveOwnersRef = useRef<Map<AdminSaveOwner, number>>(new Map());
   const adminBootStartedAtRef = useRef(typeof performance !== "undefined" ? performance.now() : Date.now());
 
@@ -197,23 +247,31 @@ export function useWorkspaceSync({
     setCalendarSaveError("");
 
     const saveTimer = window.setTimeout(() => {
+      // Only what changed against `requestBaseline` -- the list the server last
+      // confirmed, or after a conflict the live list the merge was built on.
+      // Retrying the same patch is safe: upserts are idempotent and deleting a
+      // booking that is already gone does nothing.
       const saveRequest = (
         requestItems = desiredItems,
+        requestBaseline = baselineItems,
         requestSyncKey = calendarSyncKey,
         requestUpdatedAt = calendarStateVersion,
-      ) =>
-        fetch("/api/calendar-state", {
+      ) => {
+        const { upserts, deletes } = calendarItemsPatch(requestBaseline, requestItems);
+        return fetch("/api/calendar-state", {
           method: "PUT",
           credentials: "same-origin",
           cache: "no-store",
           headers: { "Content-Type": "application/json", Accept: "application/json" },
           body: JSON.stringify({
-            items: requestItems,
-            replaceItems: true,
+            itemsOperation: "patch",
+            upserts,
+            deletes,
             syncKey: requestSyncKey,
             updatedAt: requestUpdatedAt,
           }),
         });
+      };
       const readLiveState = () =>
         fetch("/api/calendar-state", {
           credentials: "same-origin",
@@ -223,6 +281,7 @@ export function useWorkspaceSync({
       const retryDelay = (delay = 700) => new Promise((resolve) => window.setTimeout(resolve, delay));
       const saveWithRetries = async (
         requestItems = desiredItems,
+        requestBaseline = baselineItems,
         requestSyncKey = calendarSyncKey,
         requestUpdatedAt = calendarStateVersion,
       ) => {
@@ -230,7 +289,7 @@ export function useWorkspaceSync({
         for (const delay of [0, 700, 1400, 2600]) {
           if (delay) await retryDelay(delay);
           try {
-            return await saveRequest(requestItems, requestSyncKey, requestUpdatedAt);
+            return await saveRequest(requestItems, requestBaseline, requestSyncKey, requestUpdatedAt);
           } catch (error) {
             lastError = error;
           }
@@ -241,6 +300,7 @@ export function useWorkspaceSync({
       void (async () => {
         let response: Response;
         let submittedItems = desiredItems;
+        let submittedBaseline = baselineItems;
         let submittedSyncKey = calendarSyncKey;
         let submittedUpdatedAt = calendarStateVersion;
         let recoveredData: CalendarStateSaveResponse | null = null;
@@ -280,10 +340,12 @@ export function useWorkspaceSync({
           }
           recoveredFromConflict = true;
           submittedItems = mergedItems;
+          submittedBaseline = latestData.items;
           submittedSyncKey = typeof latestData.syncKey === "string" ? latestData.syncKey : calendarSyncKey;
           submittedUpdatedAt = typeof latestData.updatedAt === "string" ? latestData.updatedAt : "";
           response = await saveWithRetries(
             mergedItems,
+            submittedBaseline,
             submittedSyncKey,
             submittedUpdatedAt,
           );
@@ -292,7 +354,7 @@ export function useWorkspaceSync({
         }
         if (!response.ok && response.status >= 500) {
           await retryDelay(900);
-          response = await saveWithRetries(submittedItems, submittedSyncKey, submittedUpdatedAt);
+          response = await saveWithRetries(submittedItems, submittedBaseline, submittedSyncKey, submittedUpdatedAt);
           if (calendarSaveVersionRef.current !== saveVersion) return;
           data = (await response.json().catch(() => ({}))) as typeof data;
         }
@@ -311,6 +373,11 @@ export function useWorkspaceSync({
         const persistedItems = Array.isArray(data.items) ? data.items : submittedItems;
         lastPersistedCalendarFingerprintRef.current = calendarStateFingerprint(persistedItems, persistedSyncKey);
         lastPersistedCalendarItemsRef.current = persistedItems;
+        const liveCalendar = lastLiveCalendarDataRef.current;
+        if (liveCalendar) {
+          liveCalendar.data = { ...liveCalendar.data, items: persistedItems, syncKey: persistedSyncKey };
+          writeCachedCalendar(liveCalendar.accountId, liveCalendar.data);
+        }
         if (recoveredFromConflict && !calendarItemsEquivalent(persistedItems, desiredItems)) setItems(persistedItems);
         // The server picks each lesson's bay or room during the save. Copy that
         // back onto the cards; resourceId is outside the save fingerprint, so
@@ -661,12 +728,28 @@ export function useWorkspaceSync({
     window.setTimeout(() => void refreshPeopleList({ maxAgeMs: 30_000 }), 0);
     window.setTimeout(() => void refreshLessonNotes({ maxAgeMs: 30_000 }), 0);
     window.setTimeout(() => void refreshPortalPlayers(), 0);
+    // Draw the last calendar this device saw while the live read is in flight.
+    // Only if it arrives first; the live answer always wins.
+    cachedCalendarItemsRef.current = null;
+    const cacheAccountId = calendarCacheAccountId;
+    if (cacheAccountId) {
+      void readCachedCalendar(cacheAccountId).then((cached) => {
+        if (!cached || adminHydrationRunIdRef.current !== runId || hasLoadedCalendarApiRef.current) return;
+        const { accountItems } = applyCalendarStateData(cached as CalendarStateData);
+        cachedCalendarItemsRef.current = accountItems;
+        setItems(accountItems);
+        setAdminWorkspaceLoadStatus("loaded");
+      });
+    }
     setCalendarFeedStatus("checking");
     setCalendarSaveStatus("idle");
     setCalendarSaveError("");
     try {
       const applied = await loadAdminCalendarState(runId);
-      if (!applied || adminHydrationRunIdRef.current !== runId) return;
+      // A true answer was checked as current just before it applied. Not
+      // re-checked against runId here: with the cached calendar on screen, a
+      // save made meanwhile moves runId on, and the live calendar still applies.
+      if (!applied) return;
       setAdminWorkspaceLoadStatus("loaded");
       setAdminWorkspaceLoadError("");
       setCalendarFeedStatus("connected");
@@ -691,7 +774,10 @@ export function useWorkspaceSync({
         },
       });
     } catch (error) {
-      if (adminHydrationRunIdRef.current !== runId) return;
+      // Over the cached calendar there is nothing else to fall back to: a
+      // picture that can never save must not stay on screen looking live.
+      if (adminHydrationRunIdRef.current !== runId && cachedCalendarItemsRef.current === null) return;
+      cachedCalendarItemsRef.current = null;
       finishDiagnosticTimer(timer, "failed", {
         errorCode: "SUPABASE_READ_FAILED",
         humanMessage: adminWorkspaceLoadMessage(error),
@@ -714,8 +800,53 @@ export function useWorkspaceSync({
     }
   }
 
+  /**
+   * Puts a calendar-state answer on screen: the business, its services,
+   * people, coaches, settings. Not the items, and nothing about persistence:
+   * the caller decides those, because a cached answer must not count as saved.
+   */
+  function applyCalendarStateData(data: CalendarStateData) {
+    const loadedItems = Array.isArray(data.items) ? data.items : [];
+    const loadedAccounts = cleanWorkspaceAccounts(data.workspaceAccounts, data.account ?? coachAccount);
+    const loadedAccountId = defaultAccountId(loadedAccounts);
+    const accountItems = loadedItems.map((item) => ({ ...item, accountId: item.accountId || loadedAccountId }));
+    const loadedSyncKey =
+      typeof data.syncKey === "string" && data.syncKey.startsWith("cg_") ? data.syncKey : calendarSyncKey;
+    const calendarStateDiagnostics = data.diagnostics?.calendarState;
+    const peopleDeferred = calendarStateDiagnostics?.peopleDeferred === true;
+    const notificationsDeferred = calendarStateDiagnostics?.notificationsDeferred === true;
+    const googleSyncStatusDeferred = calendarStateDiagnostics?.googleSyncStatusDeferred === true;
+    setWorkspaceAccounts(loadedAccounts);
+    if (Array.isArray(data.people) && !peopleDeferred) setPeople(cleanPeople(data.people));
+    if (Array.isArray(data.notifications) && !notificationsDeferred) setNotifications(cleanNotificationRecords(data.notifications));
+    if (Array.isArray(data.services)) setServices(cleanServices(data.services).map((service) => ({ ...service, accountId: service.accountId || loadedAccountId })));
+    const fallbackAccount = data.account ?? coachAccount;
+    if (Array.isArray(data.locations) && data.locations.length) {
+      setLocations(cleanLocations(data.locations, fallbackAccount));
+    }
+    if (Array.isArray(data.coaches) && data.coaches.length) {
+      setCoachProfiles(cleanCoachProfiles(data.coaches, fallbackAccount));
+    }
+    if (data.currentUser) setCurrentAppUser(cleanAppUser(data.currentUser, defaultAppUserFromCoachAccount(data.account ?? coachAccount), loadedAccountId));
+    if (Array.isArray(data.availability)) {
+      setAvailability(cleanAvailability(data.availability).map((day) => day.map((window) => ({ ...window, accountId: window.accountId || loadedAccountId }))));
+    }
+    if (typeof data.syncKey === "string" && data.syncKey.startsWith("cg_")) {
+      setCalendarSyncKey(data.syncKey);
+    }
+    applyNotificationSettings(data.settings);
+    applyCoachAccount(data.account);
+    applyBrandSettings(data.brand);
+    return { accountItems, loadedAccountId, loadedSyncKey, peopleDeferred, notificationsDeferred, googleSyncStatusDeferred };
+  }
+
   async function loadAdminCalendarState(runId = ++adminHydrationRunIdRef.current) {
-    const isCurrentRun = () => adminHydrationRunIdRef.current === runId;
+    // Over the cached calendar, a save started meanwhile moves runId on but must
+    // not cancel this read: it is the only thing that can switch autosave on.
+    // Its edit is folded in below instead.
+    const overCache = () => cachedCalendarItemsRef.current !== null;
+    const isCurrentRun = () => adminHydrationRunIdRef.current === runId || overCache();
+    const blockedBySave = () => !overCache() && hasActiveAdminSave();
     const timer = startDiagnosticTimer({
       system: "supabase",
       action: "calendar_bookings_load",
@@ -727,7 +858,7 @@ export function useWorkspaceSync({
     setCalendarFeedStatus("checking");
     setCalendarSaveStatus("idle");
     setCalendarSaveError("");
-    if (!isCurrentRun() || hasActiveAdminSave()) return false;
+    if (!isCurrentRun() || blockedBySave()) return false;
     const visibleRangeStartedAt = performance.now();
     trackDiagnosticEvent({
       system: "calendar",
@@ -757,7 +888,8 @@ export function useWorkspaceSync({
           waitingFor: "calendar_shell_state",
         },
       });
-      response = await fetch("/api/calendar-state", { headers: { Accept: "application/json" } });
+      // The first hydration usually finds this already in flight from boot.
+      response = await (takePrefetchedCalendarState() ?? fetch("/api/calendar-state", { headers: { Accept: "application/json" } }));
     } catch {
       finishDiagnosticTimer(timer, "failed", {
         errorCode: "SUPABASE_READ_FAILED",
@@ -787,45 +919,32 @@ export function useWorkspaceSync({
       if (!isCurrentRun()) return false;
       throw new Error([apiMessage, healthMessage].filter(Boolean).join(" · "));
     }
-    const data = (await response.json()) as {
-      syncKey?: string;
-      items?: CalendarItem[];
-      people?: Person[];
-      notifications?: NotificationRecord[];
-      services?: Service[];
-      locations?: Location[];
-      coaches?: CoachProfile[];
-      workspaceAccounts?: WorkspaceAccount[];
-      currentUser?: AppUser;
-      availability?: AvailabilityWindow[][];
-      settings?: Partial<NotificationSettings>;
-      brand?: Partial<BrandSettings>;
-      account?: Partial<CoachAccount>;
-      updatedAt?: string;
-      diagnostics?: {
-        calendarState?: {
-          routeUsed?: string;
-          entrypoint?: string;
-          shellLoadDurationMs?: number;
-          itemCount?: number;
-          peopleDeferred?: boolean;
-          notificationsDeferred?: boolean;
-          googleSyncStatusDeferred?: boolean;
-        };
-      };
-    };
-    if (!isCurrentRun() || hasActiveAdminSave()) return false;
-    const loadedItems = Array.isArray(data.items) ? data.items : [];
-    const loadedAccounts = cleanWorkspaceAccounts(data.workspaceAccounts, data.account ?? coachAccount);
-    const loadedAccountId = defaultAccountId(loadedAccounts);
-    const accountItems = loadedItems.map((item) => ({ ...item, accountId: item.accountId || loadedAccountId }));
-    const loadedSyncKey =
-      typeof data.syncKey === "string" && data.syncKey.startsWith("cg_") ? data.syncKey : calendarSyncKey;
+    const data = (await response.json()) as CalendarStateData;
+    if (!isCurrentRun() || blockedBySave()) return false;
+    const { accountItems, loadedAccountId, loadedSyncKey, peopleDeferred, notificationsDeferred, googleSyncStatusDeferred } =
+      applyCalendarStateData(data);
     lastPersistedCalendarFingerprintRef.current = calendarStateFingerprint(accountItems, loadedSyncKey);
     lastPersistedCalendarItemsRef.current = accountItems;
     if (typeof data.updatedAt === "string") setCalendarStateVersion(data.updatedAt);
-    setWorkspaceAccounts(loadedAccounts);
-    if (Array.isArray(data.items)) setItems(accountItems);
+    // Edits made over the cached calendar are carried onto the live one: the
+    // cached list is their baseline, exactly as after a save conflict. If the
+    // same booking also changed elsewhere, the live booking wins and the coach
+    // is told. Anything carried over differs from what is persisted, so the
+    // autosave sends it once loading finishes below.
+    const cachedItems = cachedCalendarItemsRef.current;
+    cachedCalendarItemsRef.current = null;
+    let nextItems: CalendarItem[] = accountItems;
+    if (cachedItems) {
+      const merged = mergeCalendarItemsAfterConflict(accountItems, cachedItems, itemsRef.current);
+      if (merged) {
+        nextItems = merged;
+      } else {
+        setToast({ message: t("A booking you changed was also changed elsewhere. The latest version is shown; please make your change again.") });
+      }
+    }
+    if (Array.isArray(data.items)) setItems(nextItems);
+    lastLiveCalendarDataRef.current = { accountId: loadedAccountId, data: { ...data, items: accountItems } };
+    writeCachedCalendar(loadedAccountId, lastLiveCalendarDataRef.current.data);
     trackDiagnosticMilestone({
       system: "calendar",
       action: "CALENDAR_VISIBLE_RANGE_LOAD_COMPLETED",
@@ -844,9 +963,6 @@ export function useWorkspaceSync({
     });
     const calendarStateDiagnostics = data.diagnostics?.calendarState;
     const calendarStateRouteUsed = calendarStateDiagnostics?.routeUsed === "shell" ? "shell" : "full";
-    const peopleDeferred = calendarStateDiagnostics?.peopleDeferred === true;
-    const notificationsDeferred = calendarStateDiagnostics?.notificationsDeferred === true;
-    const googleSyncStatusDeferred = calendarStateDiagnostics?.googleSyncStatusDeferred === true;
     if (calendarStateRouteUsed === "shell") {
       trackDiagnosticEvent({
         system: "calendar",
@@ -916,26 +1032,6 @@ export function useWorkspaceSync({
         });
       }
     }
-    if (Array.isArray(data.people) && !peopleDeferred) setPeople(cleanPeople(data.people));
-    if (Array.isArray(data.notifications) && !notificationsDeferred) setNotifications(cleanNotificationRecords(data.notifications));
-    if (Array.isArray(data.services)) setServices(cleanServices(data.services).map((service) => ({ ...service, accountId: service.accountId || loadedAccountId })));
-    const fallbackAccount = data.account ?? coachAccount;
-    if (Array.isArray(data.locations) && data.locations.length) {
-      setLocations(cleanLocations(data.locations, fallbackAccount));
-    }
-    if (Array.isArray(data.coaches) && data.coaches.length) {
-      setCoachProfiles(cleanCoachProfiles(data.coaches, fallbackAccount));
-    }
-    if (data.currentUser) setCurrentAppUser(cleanAppUser(data.currentUser, defaultAppUserFromCoachAccount(data.account ?? coachAccount), loadedAccountId));
-    if (Array.isArray(data.availability)) {
-      setAvailability(cleanAvailability(data.availability).map((day) => day.map((window) => ({ ...window, accountId: window.accountId || loadedAccountId }))));
-    }
-    if (typeof data.syncKey === "string" && data.syncKey.startsWith("cg_")) {
-      setCalendarSyncKey(data.syncKey);
-    }
-    applyNotificationSettings(data.settings);
-    applyCoachAccount(data.account);
-    applyBrandSettings(data.brand);
     hasLoadedCalendarApiRef.current = true;
     finishDiagnosticTimer(timer, "success", {
       httpStatus: response.status,

@@ -10,6 +10,7 @@ import {
   publicCalendarState,
 } from "./_shared/workspace-state.mts";
 import { json } from "./_shared/http.mts";
+import { createServerTiming } from "./_shared/server-timing.mts";
 
 /**
  * GET /api/calendar-state: the coach calendar's first load.
@@ -56,9 +57,12 @@ function jsonError(req: Request, error: unknown, phase: "import" | "handler" | "
 }
 
 async function readTinyCalendarShell(req: Request, requestStartedAt: number) {
+  // Server-Timing shows in the browser's network panel, so a slow calendar can
+  // be split into auth and data without reading function logs.
+  const timing = createServerTiming();
   let actor: Awaited<ReturnType<typeof requireCoachActor>>;
   try {
-    actor = await requireCoachActor(req);
+    actor = await timing.measure("auth", () => requireCoachActor(req));
   } catch (error) {
     return jsonError(req, error, "shell");
   }
@@ -72,7 +76,9 @@ async function readTinyCalendarShell(req: Request, requestStartedAt: number) {
     role: actor.role,
   });
 
-  const [settingsMap, items] = await Promise.all([readSettingsMap(actor.accountId), readItems(actor.accountId)]);
+  const [settingsMap, items] = await timing.measure("data", () =>
+    Promise.all([readSettingsMap(actor.accountId), readItems(actor.accountId)]),
+  );
   const accountId = actor.accountId;
   const businessState = adminStateFromSettings(settingsMap, accountId);
   const coachName = settingValue(settingsMap, "accountCoachName") || businessState.account.coachName;
@@ -139,7 +145,9 @@ async function readTinyCalendarShell(req: Request, requestStartedAt: number) {
     },
   };
 
-  return json(publicCalendarState(filterCalendarStateForContext(state, context)));
+  return json(publicCalendarState(filterCalendarStateForContext(state, context)), 200, {
+    "Server-Timing": timing.header(),
+  });
 }
 
 async function delegateToBookingCore(req: Request, context: Context) {

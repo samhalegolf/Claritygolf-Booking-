@@ -4546,5 +4546,6 @@
   "the billing dashboard": "faktureringsoversikten",
   "the bay and room system": "systemet for bayer og rom",
   "languages": "språk",
-  "country and region settings": "land- og regioninnstillinger"
+  "country and region settings": "land- og regioninnstillinger",
+  "A booking you changed was also changed elsewhere. The latest version is shown; please make your change again.": "En booking du endret, ble også endret et annet sted. Den nyeste versjonen vises; gjør endringen din på nytt."
 }

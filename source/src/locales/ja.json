@@ -4546,5 +4546,6 @@
   "the billing dashboard": "請求ダッシュボード",
   "the bay and room system": "打席・部屋システム",
   "languages": "言語",
-  "country and region settings": "国と地域の設定"
+  "country and region settings": "国と地域の設定",
+  "A booking you changed was also changed elsewhere. The latest version is shown; please make your change again.": "変更した予約が別の場所でも変更されました。最新の内容を表示しています。もう一度変更してください。"
 }

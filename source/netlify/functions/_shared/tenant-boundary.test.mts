@@ -373,6 +373,22 @@ test("replacing a calendar deletes only the caller's stale rows", async () => {
   }
 });
 
+test("a patch save deletes only the named rows, and only the caller's", async () => {
+  const issued = fakeDatabase(() => []);
+  try {
+    await writeItems(
+      [{ id: "b-2", kind: "appointment", week: 0, day: 2, start: 600, duration: 60, title: "Moved" }],
+      { accountId: BUSINESS_B, deleteIds: ["b-9", "b-9", ""] },
+    );
+    const deletes = issued.filter((statement) => statement.text.startsWith("DELETE FROM calendar_items"));
+    assert.equal(deletes.length, 1, "one targeted delete, no stale-row sweep");
+    assert.equal(deletes[0].text, "DELETE FROM calendar_items WHERE account_id = $1 AND id = ANY($2::text[])");
+    assert.deepEqual(deletes[0].values, [BUSINESS_B, ["b-9"]]);
+  } finally {
+    restoreDatabase();
+  }
+});
+
 test("clearing a calendar cannot clear the whole table", async () => {
   const issued = fakeDatabase(() => []);
   try {

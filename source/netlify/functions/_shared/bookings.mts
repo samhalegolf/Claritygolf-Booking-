@@ -625,6 +625,18 @@ export async function writeItems(items, options = {}) {
         )),
       );
     }
+    // A patch save names the bookings it removed rather than sending every
+    // booking it kept. Same transaction as the upserts, and scoped to the
+    // account so an id from another business deletes nothing.
+    const deleteIds = Array.isArray(options.deleteIds)
+      ? Array.from(new Set(options.deleteIds.map((id) => cleanString(id, "", 140)).filter(Boolean)))
+      : [];
+    if (deleteIds.length) {
+      await client.query(
+        "DELETE FROM calendar_items WHERE account_id = $1 AND id = ANY($2::text[])",
+        [accountId, deleteIds],
+      );
+    }
     if (options.replaceItems === true && cleanItems.length) {
       const keepIds = Array.from(new Set(cleanItems.map((item) => item.id)));
       // One scoped statement instead of "read every row, filter in JS, delete
