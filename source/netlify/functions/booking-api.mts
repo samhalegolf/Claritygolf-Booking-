@@ -56,6 +56,8 @@ export const config: Config = {
     "/api/passes",
     "/api/memberships",
     "/api/memberships/*",
+    "/api/rewards",
+    "/api/rewards/*",
     "/api/people/import-lite",
     "/api/people/migrate",
     "/api/practice-blocks",

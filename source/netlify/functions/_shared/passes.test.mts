@@ -93,6 +93,8 @@ test("a package service is read as a pass template, coverage widened to a list",
       name: "5 Lesson Package",
       credits: 5,
       coversServiceIds: ["lesson-60"],
+      coversAllServices: false,
+      expiryMonths: null,
       crossRedeemable: false,
       priceCents: null,
     },
@@ -561,6 +563,35 @@ test("a pass covering nothing covers nothing, rather than everything", () => {
   const [option] = passOptionsForService([pass({ coversServiceIds: [] })], "lesson-60");
   assert.equal(option.covered, false);
   assert.equal(option.reason, "No covered service set");
+});
+
+test("a site-wide pass pays for any service, even with no list", () => {
+  const [option] = passOptionsForService(
+    [pass({ coversServiceIds: [], coversAllServices: true })],
+    "lesson-30",
+    "30 Minute Lesson",
+  );
+  assert.equal(option.covered, true);
+  assert.equal(option.paymentKind, "native");
+  assert.equal(option.reason, "Covers 30 Minute Lesson");
+});
+
+test("a site-wide pass type grants a site-wide pass with the type's own expiry", () => {
+  const [template] = passTemplatesFromServices([
+    { ...FIVE_LESSON_PACKAGE, coversAllServices: true, passExpiryMonths: 0 },
+  ]);
+  assert.equal(template.coversAllServices, true);
+  assert.equal(template.expiryMonths, 0);
+  const grant = normaliseGrant({ personId: "person-1", templateServiceId: "package-5" }, [template]);
+  assert.equal(grant.coversAllServices, true);
+  assert.deepEqual(grant.coversServiceIds, []);
+  assert.equal(grant.expiresAt, null, "0 months on the pass type means it never expires");
+});
+
+test("a site-wide pass never merges into a scoped one of the same type", () => {
+  const held = { templateServiceId: "package-5", coversServiceIds: ["lesson-60"], coversAllServices: false };
+  const wide = { templateServiceId: "package-5", coversServiceIds: ["lesson-60"], coversAllServices: true };
+  assert.equal(isCompatiblePass(held, wide), false);
 });
 
 test("void and expired passes are not offered at all", () => {

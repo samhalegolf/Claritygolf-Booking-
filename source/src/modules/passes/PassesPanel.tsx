@@ -6,7 +6,7 @@
 // come from the pass_balances view via /api/passes, because the server owning
 // that arithmetic is the whole point of the ledger underneath.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, MinusCircle, Plus } from "lucide-react";
 import { ClarityBookingPages, ClarityPassesCredits } from "../shared/ClarityIcons";
 
@@ -74,6 +74,8 @@ export type Pass = {
   name: string;
   templateServiceId: string | null;
   coversServiceIds: string[];
+  /** Pays for any service; coversServiceIds is then empty. */
+  coversAllServices?: boolean;
   crossRedeemable: boolean;
   creditsAvailable: number;
   creditsAllocated: number;
@@ -92,6 +94,8 @@ export type PassTemplate = {
   name: string;
   credits: number;
   coversServiceIds: string[];
+  coversAllServices?: boolean;
+  expiryMonths?: number | null;
   crossRedeemable: boolean;
   priceCents: number | null;
 };
@@ -103,6 +107,7 @@ export type PassGrant = {
   expiryMonths: number;
   note: string;
   coversServiceIds: string[];
+  coversAllServices?: boolean;
 };
 
 export type CoverableService = { id: string; name: string };
@@ -124,6 +129,16 @@ export type PassesPanelProps = {
   /** Credits added by hand to a pass that is still running. */
   onAddCredits: (passId: string, credits: number, note: string) => void;
   onReturnCredit: (redemptionId: string) => void;
+  /** Change what one pass pays for: everything, or the listed services. */
+  onChangeCoverage: (passId: string, coversAllServices: boolean, coversServiceIds: string[]) => void;
+  /**
+   * Bumped by the profile's balance card. Each new value opens the adjust form
+   * on the pass a coach most likely means -- or the Give pass form, when there
+   * is nothing to adjust.
+   */
+  adjustRequest?: number;
+  /** Called once a request has been acted on, so a later visit does not replay it. */
+  onAdjustHandled?: () => void;
   onRetry: () => void;
   /** Turns a covered service id into something a person would recognise. */
   serviceName: (serviceId: string) => string;
@@ -254,6 +269,9 @@ export function PassesPanel({
   onRedeem,
   onAddCredits,
   onReturnCredit,
+  onChangeCoverage,
+  adjustRequest = 0,
+  onAdjustHandled,
   onRetry,
   serviceName,
 }: PassesPanelProps) {
@@ -323,12 +341,62 @@ export function PassesPanel({
 
   const balance = passBalanceSummary(passes);
   const [formOpen, setFormOpen] = useState(false);
+  /** Which pass has its "what it covers" editor open, and the choice so far. */
+  const [scopePassId, setScopePassId] = useState("");
+  const [scopeAll, setScopeAll] = useState(false);
+  const [scopeIds, setScopeIds] = useState<string[]>([]);
+  const panelRef = useRef<HTMLDivElement>(null);
+  // The panel's own Adjust button and the profile card's share one path.
+  const [localAdjust, setLocalAdjust] = useState(0);
+  const adjustTrigger = adjustRequest + localAdjust;
+  const handledAdjust = useRef(0);
+
+  function openScope(pass: Pass) {
+    setScopePassId(pass.id);
+    setScopeAll(pass.coversAllServices === true);
+    setScopeIds(pass.coversServiceIds);
+  }
+
+  function saveScope(passId: string) {
+    if (!scopeAll && !scopeIds.length) return;
+    onChangeCoverage(passId, scopeAll, scopeAll ? [] : scopeIds);
+    setScopePassId("");
+  }
+
+  // The profile's "Adjust" lands here. The pass it opens is the one a coach
+  // means nine times in ten: a live one with credits, soonest to expire.
+  useEffect(() => {
+    if (!adjustTrigger || loadState !== "loaded" || handledAdjust.current === adjustTrigger) return;
+    handledAdjust.current = adjustTrigger;
+    if (adjustRequest) onAdjustHandled?.();
+    const candidates = passes.filter(adjustable);
+    const target =
+      [...candidates]
+        .filter((pass) => pass.creditsAvailable > 0)
+        .sort((a, b) => (a.nextExpiry || "9999").localeCompare(b.nextExpiry || "9999"))[0] || candidates[0];
+    if (target) {
+      setRedeemingPassId(target.id);
+      setRedeemNote("");
+      setRedeemCredits("1");
+      setAdjustDirection(target.creditsAvailable > 0 ? "remove" : "add");
+      window.setTimeout(() => {
+        panelRef.current
+          ?.querySelector(`[data-pass-id="${CSS.escape(target.id)}"]`)
+          ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      }, 0);
+    } else {
+      setFormOpen(true);
+    }
+    // Only a new request should reopen it; a reload of the passes must not.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adjustTrigger, loadState]);
   const [templateId, setTemplateId] = useState("");
   const [name, setName] = useState("");
   const [credits, setCredits] = useState("1");
   const [expiryMonths, setExpiryMonths] = useState(12);
   const [note, setNote] = useState("");
   const [covers, setCovers] = useState<string[]>([]);
+  const [coversAll, setCoversAll] = useState(false);
 
   const template = useMemo(
     () => templates.find((entry) => entry.serviceId === templateId),
@@ -344,6 +412,7 @@ export function PassesPanel({
     if (picked) {
       setName(picked.name);
       setCredits(String(picked.credits));
+      if (picked.expiryMonths !== null && picked.expiryMonths !== undefined) setExpiryMonths(picked.expiryMonths);
     }
   }
 
@@ -355,6 +424,7 @@ export function PassesPanel({
     setExpiryMonths(12);
     setNote("");
     setCovers([]);
+    setCoversAll(false);
   }
 
   function submit() {
@@ -367,7 +437,8 @@ export function PassesPanel({
       note: note.trim(),
       // A template brings its own coverage; the server uses that and ignores
       // this. It only matters for a free-form grant.
-      coversServiceIds: templateId ? [] : covers,
+      coversServiceIds: templateId || coversAll ? [] : covers,
+      coversAllServices: templateId ? undefined : coversAll,
     });
     resetForm();
   }
@@ -375,10 +446,10 @@ export function PassesPanel({
   // A free-form pass that covers nothing can never be spent, so the form will
   // not let one be created. A template supplies its own coverage.
   const canSubmit =
-    !granting && (Boolean(templateId) || (name.trim().length > 0 && covers.length > 0));
+    !granting && (Boolean(templateId) || (name.trim().length > 0 && (coversAll || covers.length > 0)));
 
   return (
-    <div className="pass-panel">
+    <div className="pass-panel" ref={panelRef}>
       {loadState === "loaded" && (
         <div className={`pass-balance-summary${balance.credits ? "" : " is-empty"}`}>
           <ClarityPassesCredits size={20} />
@@ -397,6 +468,10 @@ export function PassesPanel({
         <div className="pass-panel-actions">
           <button className="outline-button" type="button" onClick={() => setFormOpen(true)}>
             <Plus size={16} />{t("Give pass")}</button>
+          {passes.some(adjustable) && (
+            <button className="outline-button" type="button" onClick={() => setLocalAdjust((count) => count + 1)}>
+              <ClarityPassesCredits size={16} />{t("Adjust balance")}</button>
+          )}
         </div>
       )}
 
@@ -429,7 +504,15 @@ export function PassesPanel({
             <div className="pass-field pass-field-wide">
               <span>{t("Use for")}</span>
               <div className="pass-coverage">
-                {coverableServices.length ? (
+                <label className="pass-coverage-option">
+                  <input
+                    type="checkbox"
+                    checked={coversAll}
+                    onChange={(event) => setCoversAll(event.target.checked)}
+                  />
+                  {t("Every service")}
+                </label>
+                {coversAll ? null : coverableServices.length ? (
                   coverableServices.map((service) => (
                     <label className="pass-coverage-option" key={service.id}>
                       <input
@@ -507,17 +590,71 @@ export function PassesPanel({
           const spendable = pass.status === "active";
           const passInvoiced = invoicedForPass(pass.id);
           return (
-            <div className="profile-history-row pass-row" key={pass.id}>
+            <div className="profile-history-row pass-row" key={pass.id} data-pass-id={pass.id}>
               <div>
                 <strong>
                   <ClarityPassesCredits size={15} /> {pass.name}
                 </strong>
                 <span>
-                  {covers ? t("Covers {covers}", { covers }) : t("No covered service set")}
+                  {pass.coversAllServices
+                    ? t("Covers everything")
+                    : covers
+                      ? t("Covers {covers}", { covers })
+                      : t("No covered service set")}
                   {pass.crossRedeemable ? t(" · Cross redeemable") : t(" · Native use only")}
                   {pass.expiresAt ? t(" · Valid until {expiresAt}", { expiresAt: dateLabel(pass.expiresAt) }) : t(" · No expiry")}
                 </span>
                 {pass.note ? <span>{pass.note}</span> : null}
+
+                {/* What this pass pays for, changed for this pass only. A pass
+                    type edit never re-scopes passes already issued, so this is
+                    where "his pass should cover the 30-minute lesson too" is
+                    fixed. */}
+                {pass.status !== "void" &&
+                  (scopePassId === pass.id ? (
+                    <div className="pass-redeem-form">
+                      <div className="pass-field pass-field-wide">
+                        <span>{t("Can be spent on")}</span>
+                        <div className="pass-coverage">
+                          <label className="pass-coverage-option">
+                            <input type="checkbox" checked={scopeAll} onChange={(event) => setScopeAll(event.target.checked)} />
+                            {t("Every service")}
+                          </label>
+                          {scopeAll
+                            ? null
+                            : coverableServices.map((service) => (
+                                <label className="pass-coverage-option" key={service.id}>
+                                  <input
+                                    type="checkbox"
+                                    checked={scopeIds.includes(service.id)}
+                                    onChange={(event) =>
+                                      setScopeIds((current) =>
+                                        event.target.checked
+                                          ? [...current, service.id]
+                                          : current.filter((id) => id !== service.id),
+                                      )
+                                    }
+                                  />
+                                  {service.name}
+                                </label>
+                              ))}
+                        </div>
+                      </div>
+                      <div className="pass-panel-actions">
+                        <button
+                          className="primary-button"
+                          type="button"
+                          disabled={!scopeAll && !scopeIds.length}
+                          onClick={() => saveScope(pass.id)}
+                        >{t("Save")}</button>
+                        <button className="outline-button" type="button" onClick={() => setScopePassId("")}>{t("Cancel")}</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button className="link-button pass-redeem-open" type="button" onClick={() => openScope(pass)}>
+                      {t("Change what it covers")}
+                    </button>
+                  ))}
 
                 <ul className="pass-ledger">
                   {ledgerLines(pass).map((line) => (

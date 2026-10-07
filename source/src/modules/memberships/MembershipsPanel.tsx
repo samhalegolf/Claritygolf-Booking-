@@ -191,7 +191,7 @@ export function MembershipsPanel({ services, formatMoney, notify, onOpenPerson }
                       .map(
                         (entitlement) =>
                           `${tn(entitlement.credits, "{count} credit", "{count} credits")} · ${
-                            entitlement.serviceIds
+                            entitlement.allServices ? t("Every service") : entitlement.serviceIds
                               .map((id) => services.find((service) => service.id === id)?.name)
                               .filter(Boolean)
                               .join(", ") || entitlement.name

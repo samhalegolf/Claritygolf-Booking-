@@ -251,6 +251,24 @@ export function useClientProfileController(app: ClientProfileControllerInputs) {
     }
   }
 
+  async function changeClientPassCoverage(passId: string, coversAllServices: boolean, coversServiceIds: string[]) {
+    if (!selectedClientId) return;
+    try {
+      const response = await fetch("/api/passes/coverage", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ passId, coversAllServices, coversServiceIds }),
+      });
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not change what that pass covers.")));
+      const data = (await response.json()) as { passes?: Pass[] };
+      setClientPasses(Array.isArray(data.passes) ? data.passes : []);
+      setToast({ message: coversAllServices ? t("That pass now covers everything.") : t("Pass coverage updated.") });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : t("Could not change what that pass covers.") });
+    }
+  }
+
   async function returnClientPassCredit(redemptionId: string) {
     if (!selectedClientId) return;
     try {
@@ -339,6 +357,7 @@ export function useClientProfileController(app: ClientProfileControllerInputs) {
     redeemClientPassCredit,
     addClientPassCredits,
     returnClientPassCredit,
+    changeClientPassCoverage,
     selectedClientNotifications,
     saveClientProfile,
     startClientEdit,

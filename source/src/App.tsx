@@ -435,6 +435,7 @@ import {
   cleanGroupSchedule,
   cleanService,
   cleanServices,
+  passCoverageList,
   customGroupBaseParticipants,
   customGroupBasePrice,
   customGroupExtraPersonPrice,
@@ -537,7 +538,9 @@ import {
   PassClientPicker,
   PassInboxPanel,
   PassTypesList,
+  RewardsPanel,
 } from "./modules/passes/lazyPanels";
+import type { PassTypeDraft } from "./modules/passes/PassTypesList";
 import {
   PRIMARY_PLAYER_TOOL_TABS,
   PlayerPracticeSummary,
@@ -754,6 +757,7 @@ type BillingSection =
   | "reports"
   | "transactions"
   | "memberships"
+  | "rewards"
   | "settings";
 
 // Products, Expenses, Vouchers and Passes. A group on its own is the group's
@@ -806,6 +810,7 @@ const BILLING_SECTION_NAV: Array<{
   { key: "passes-records", label: t("Pass Records"), icon: ClarityPassesCredits, group: "passes" },
   { key: "transactions", label: t("Transaction History"), icon: ClarityPayments },
   { key: "memberships", label: t("Memberships"), icon: RefreshCw },
+  { key: "rewards", label: t("Rewards"), icon: Sparkles },
   { key: "reports", label: t("Reports"), icon: ClarityReports },
   { key: "settings", label: t("Settings"), icon: ClaritySettings },
 ];
@@ -3827,6 +3832,11 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   }
   const activeServices = managedAccountServices.filter((service) => service.archived !== true && serviceVisibleToCurrentUser(service));
   const archivedServices = managedAccountServices.filter((service) => service.archived === true && serviceVisibleToCurrentUser(service));
+  // Settings > Lesson types lists what can be booked. Pass types live in the
+  // same catalogue but are made and changed in Billing > Passes.
+  const listedLessonTypes = (serviceListTab === "active" ? activeServices : archivedServices).filter(
+    (service) => service.lessonFormat !== "package",
+  );
   const locationUsageCount = (locationId: string) =>
     managedAccountServices.filter(
       (service) =>
@@ -12063,7 +12073,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     // A package whose credits cover no lesson type cannot be spent on anything,
     // so selling one takes money for nothing. The player shop already refuses to
     // list one; catching it here means it never gets as far as a shelf.
-    if (editableEditor.lessonFormat === "package" && !(editableEditor.packageCoversServiceId || "").trim()) {
+    if (editableEditor.lessonFormat === "package" && !editableEditor.coversAllServices && !passCoverageList(editableEditor).length) {
       setToast({ message: t("Choose which lesson type this package covers before saving it.") });
       return;
     }
@@ -12101,16 +12111,16 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
       return;
     }
 
-    const packageReferenceCount = services.filter(
-      (candidate) => candidate.lessonFormat === "package" && candidate.packageCoversServiceId === service.id,
-    ).length;
+    const coversDeleted = (candidate: Service) =>
+      candidate.lessonFormat === "package" && passCoverageList(candidate).includes(service.id);
+    const packageReferenceCount = services.filter(coversDeleted).length;
     const nextServices = services
       .filter((candidate) => candidate.id !== service.id)
-      .map((candidate) =>
-        candidate.lessonFormat === "package" && candidate.packageCoversServiceId === service.id
-          ? { ...candidate, packageCoversServiceId: undefined }
-          : candidate,
-      );
+      .map((candidate) => {
+        if (!coversDeleted(candidate)) return candidate;
+        const remaining = passCoverageList(candidate).filter((id) => id !== service.id);
+        return { ...candidate, coversServiceIds: remaining, packageCoversServiceId: remaining[0] };
+      });
     if (editingServiceId === service.id) {
       setEditingServiceId(null);
       setShowServiceEditor(false);
@@ -12152,6 +12162,61 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     setPendingServiceAction(null);
     setServiceListTab("archived");
     void persistServices(nextServices, `${service.name} archived.`, service.id);
+  }
+
+  /* Pass types: written into the same catalogue as lesson types (a pass type
+   * is a `package` entry, which is what the till, the invoice picker and the
+   * player shop sell), but made and changed from Billing > Passes rather than
+   * the lesson-type form. */
+  function savePassType(draft: PassTypeDraft) {
+    const existing = draft.id ? services.find((service) => service.id === draft.id) : undefined;
+    if (!existing && !canCreateWithinLimit(activeAccount, managedAccountServices.filter((service) => service.archived !== true).length, "maxServices")) {
+      setToast({ message: limitReachedMessage("maxServices", accountLimit(activeAccount, "maxServices")) });
+      return;
+    }
+    const clean = cleanService(
+      {
+        ...(existing || {}),
+        id: existing?.id || `pass-type-${Date.now().toString(36)}`,
+        accountId: existing?.accountId || activeAccountId,
+        // Every coach can sell it unless it already says otherwise; a coach's
+        // own pass type is theirs.
+        coachIds: existing?.coachIds?.length
+          ? existing.coachIds
+          : !isAdminUser
+            ? [serviceScopeCoachId]
+            : activeCoachList.map((coach) => coach.id),
+        lessonFormat: "package",
+        visibility: "private",
+        name: draft.name,
+        description: draft.description,
+        price: draft.price,
+        packageAllowance: draft.credits,
+        coversAllServices: draft.coversAllServices,
+        coversServiceIds: draft.coversAllServices ? [] : draft.coversServiceIds,
+        packageCoversServiceId: draft.coversAllServices ? undefined : draft.coversServiceIds[0],
+        passExpiryMonths: draft.expiryMonths,
+        crossRedeemable: draft.crossRedeemable,
+        active: draft.active,
+        archived: false,
+        locationIds: existing?.locationIds || [],
+        location: existing?.location || "",
+        lessonNote: existing?.lessonNote || "",
+      },
+      services.length,
+    );
+    const nextServices = existing
+      ? services.map((service) => (service.id === clean.id ? clean : service))
+      : [...services, clean];
+    void persistServices(nextServices, existing ? t("{name} updated.", { name: clean.name }) : t("{name} added.", { name: clean.name }), clean.id);
+  }
+
+  function archivePassType(service: Service) {
+    if (!window.confirm(t("Archive {name}? It comes off sale. Passes already issued keep working.", { name: service.name }))) return;
+    const nextServices = services.map((candidate) =>
+      candidate.id === service.id ? { ...candidate, archived: true, active: false } : candidate,
+    );
+    void persistServices(nextServices, t("{name} archived.", { name: service.name }), service.id);
   }
 
   function restoreService(service: Service) {
@@ -14073,7 +14138,9 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                     <option value="group">{t("Group lesson")}</option>
                     <option value="custom-group">{t("Custom group lesson")}</option>
                     <option value="video-review">{t("Video review (no set time)")}</option>
-                    <option value="package">{t("Package")}</option>
+                    {/* Only an older package opened from somewhere else shows
+                        this; new pass types are made in Billing > Passes. */}
+                    {serviceEditor.lessonFormat === "package" && <option value="package">{t("Package")}</option>}
                   </select>
                 </label>
                 <label className="settings-field">
@@ -14621,7 +14688,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
             <ClarityServices size={18} />
             <div>
               <span>{t("{serviceSingular} types", { serviceSingular: terms.serviceSingular })}</span>
-              <strong>{t("{length} active", { length: activeServices.length })}</strong>
+              <strong>{t("{length} active", { length: activeServices.filter((service) => service.lessonFormat !== "package").length })}</strong>
             </div>
           </summary>
           <div className="service-list-tabs" role="tablist" aria-label={t("{serviceSingular} type status", { serviceSingular: terms.serviceSingular })}>
@@ -14637,7 +14704,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
             >{t("Archived")}</button>
           </div>
           <div className="service-list" aria-label={t("{serviceSingular} types", { serviceSingular: terms.serviceSingular })}>
-            {(serviceListTab === "active" ? activeServices : archivedServices).map((service) => (
+            {listedLessonTypes.map((service) => (
               <article className={`service-row ${service.active ? "" : "is-archived"}`} key={service.id}>
                 <button className="service-row-main" onClick={() => editService(service)} type="button">
                   <span>
@@ -14750,7 +14817,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                 </div>
               </article>
             ))}
-            {!(serviceListTab === "active" ? activeServices : archivedServices).length && (
+            {!listedLessonTypes.length && (
               <p className="service-list-empty">
                 {serviceListTab === "active" ? t("No active lesson types yet.") : t("No archived lesson types yet.")}
               </p>
@@ -18516,12 +18583,14 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
             </div>
             <ClarityProducts size={24} />
           </div>
-          <p className="field-help">{t("A pass type is a package lesson type, so it is made and changed in Settings > Services. That keeps it in step with what the booking screen sells.")}</p>
+          <p className="field-help">{t("What you sell as a pass: how many credits, what they can be spent on, and how long they last. A pass can cover every service or only the ones you pick.")}</p>
           <Suspense fallback={<Loading what={t("pass types")} />}>
             <PassTypesList
               services={services}
               formatMoney={(amount) => formatMoney(amount, invoiceSettings.currency)}
-              onEdit={() => openProfileTarget({ kind: "settings", tab: "services" }, `${terms.serviceSingular} types`)}
+              saving={serviceSaveState === "saving"}
+              onSave={savePassType}
+              onArchive={archivePassType}
             />
           </Suspense>
         </article>
@@ -22214,6 +22283,19 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                     if (linked) openClientProfile(linked);
                     else setToast({ message: t("That client is not in the list yet. Try again after it loads.") });
                   }}
+                />
+              </Suspense>
+            )}
+
+            {billingSection === "rewards" && (
+              <Suspense fallback={<Loading what={t("rewards")} />}>
+                <RewardsPanel
+                  services={services
+                    .filter((service) => service.lessonFormat !== "package" && service.active !== false && service.archived !== true)
+                    .map((service) => ({ id: service.id, name: service.name }))}
+                  currency={invoiceSettings.currency}
+                  formatMoney={formatMoney}
+                  notify={(message) => setToast({ message })}
                 />
               </Suspense>
             )}

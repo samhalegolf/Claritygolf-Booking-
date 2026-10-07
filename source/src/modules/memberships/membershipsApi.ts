@@ -11,6 +11,8 @@ export type MembershipEntitlement = {
   id: string;
   name: string;
   serviceIds: string[];
+  /** Site wide: the credits pay for any service. */
+  allServices?: boolean;
   credits: number;
   rollover: RolloverPolicy;
   maxBalance: number | null;

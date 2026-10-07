@@ -23,3 +23,9 @@ export const PassClientPicker = lazy(() =>
 export const PassTypesList = lazy(() =>
   import("./PassTypesList").then((module) => ({ default: module.PassTypesList })),
 );
+export const RewardsPanel = lazy(() =>
+  import("../rewards/RewardsPanel").then((module) => ({ default: module.RewardsPanel })),
+);
+export const PersonRewards = lazy(() =>
+  import("../rewards/PersonRewards").then((module) => ({ default: module.PersonRewards })),
+);

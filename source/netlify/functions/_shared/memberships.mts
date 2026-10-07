@@ -750,10 +750,11 @@ async function grantChargeEntitlements(client: Queryable, accountId: string, cha
          id, account_id, person_id, name, template_service_id, covers_service_ids,
          issued_at, expires_at, status, source, source_ref, allocation_mode,
          allocation_interval, allocation_interval_count, credits_per_period,
-         rollover_policy, max_balance, note, created_by, created_at, updated_at
+         rollover_policy, max_balance, note, created_by, created_at, updated_at,
+         covers_all_services
        ) VALUES (
          $1, $2, $3, $4, NULL, $5, NOW(), NULL, 'active', 'membership', $6, 'recurring',
-         $7, $8, $9, $10, $11, $12, 'membership', NOW(), NOW()
+         $7, $8, $9, $10, $11, $12, 'membership', NOW(), NOW(), $13
        )
        ON CONFLICT DO NOTHING`,
       [
@@ -769,6 +770,7 @@ async function grantChargeEntitlements(client: Queryable, accountId: string, cha
         entitlement.rollover,
         entitlement.rollover === "rollover_capped" ? entitlement.maxBalance : null,
         `Membership: ${plan.name}`,
+        entitlement.allServices === true,
       ],
     );
     const passRows = (
@@ -1635,6 +1637,7 @@ function entitlementLabels(plan: PlanSnapshot, serviceNames: Map<string, string>
   return plan.entitlements.map((entitlement) => ({
     name:
       entitlement.name ||
+      (entitlement.allServices ? "Any service" : "") ||
       entitlement.serviceIds.map((sid) => serviceNames.get(sid) || "").filter(Boolean).join(", ") ||
       plan.name,
     credits: entitlement.credits,

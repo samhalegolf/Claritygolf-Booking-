@@ -200,6 +200,7 @@ type PlayerPass = {
   expiresAt: string | null;
   status: "active" | "exhausted" | "expired" | "scheduled" | "void";
   covers: string[];
+  coversAllServices?: boolean;
   issuedAt: string;
   history: Array<{ id: string; redeemedAt: string; bookingId: string | null }>;
 };
@@ -2638,7 +2639,9 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                                         total: pass.creditsAllocated,
                                       })
                                     : "",
-                                  pass.covers.length ? t("Covers {services}", { services: pass.covers.join(", ") }) : "",
+                                  pass.coversAllServices
+                                    ? t("Covers everything")
+                                    : pass.covers.length ? t("Covers {services}", { services: pass.covers.join(", ") }) : "",
                                 ]
                                   .filter(Boolean)
                                   .join(" · ")}

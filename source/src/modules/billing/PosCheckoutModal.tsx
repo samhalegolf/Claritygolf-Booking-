@@ -33,7 +33,7 @@ import { onAndroid } from "../../native/clarityTerminal";
 import { tapToPayName, tenderLabel, useTapToPay, type PosTender, type TapState } from "./terminal";
 import { addToBasket, basketTotal, describeBasket, isLowStock, lineTotal, round2, setBasketQuantity } from "./stockMath";
 import type { BasketLine } from "./stockMath";
-import { t, readerLocale } from "../../lib/i18n";
+import { t, tn, readerLocale } from "../../lib/i18n";
 
 export type PosCheckoutModalProps = {
   context: PosCheckoutContext;
@@ -145,14 +145,27 @@ export function PosCheckoutModal({
   const selectedPassOption = passOptions.find((option) => option.passId === passId) || null;
   const usablePassOptions = passOptions.filter((option) => option.covered);
   const canSettleByPass = Boolean(context.bookingId && context.serviceId);
+  // The badge answers "can this lesson be paid with a pass", so on a lesson it
+  // counts only credits that cover it. Counting every credit the client holds
+  // is how a badge read "5" over a list where nothing could be chosen.
+  const lessonPassCredits = usablePassOptions
+    .filter((option) => option.paymentKind === "native")
+    .reduce((sum, option) => sum + Math.max(0, option.creditsAvailable), 0);
+  const passBadge = canSettleByPass && passBalance !== null ? lessonPassCredits : passBalance;
   // Why the Pass button is greyed, said on the button rather than left to guess.
+  // Credits that exist but do not cover this lesson do not grey it out: the
+  // list underneath says which pass covers what, which is the question.
   const passUnavailableReason = !canSettleByPass
     ? t("Passes pay for a booked lesson")
-    : passBalance === 0
+    : passBalance === 0 && !passOptions.length
       ? t("No credits left")
-      : !usablePassOptions.length
-        ? t("No pass covers this lesson")
-        : "";
+      : "";
+  const passCoverageNote =
+    canSettleByPass && !passUnavailableReason && passOptions.length > 0 && !usablePassOptions.length
+      ? passBalance
+        ? tn(passBalance, "1 credit, not for this lesson", "{count} credits, none for this lesson")
+        : t("No credits left")
+      : "";
   const linesTotal = basketTotal(lines);
   // Products are added *to* whatever opened the modal, not instead of it - a
   // lesson card with a glove rung up owes the lesson plus the glove.
@@ -757,11 +770,11 @@ export function PosCheckoutModal({
                     title={passUnavailableReason || undefined}
                     aria-pressed={payingByPass}
                     aria-label={
-                      passBalance === null
+                      passBadge === null
                         ? t("Pass")
-                        : passBalance === 1
+                        : passBadge === 1
                           ? t("Pass, 1 credit available")
-                          : t("Pass, {count} credits available", { count: passBalance })
+                          : t("Pass, {count} credits available", { count: passBadge })
                     }
                     onClick={() => {
                       setPayingByPass(true);
@@ -780,10 +793,12 @@ export function PosCheckoutModal({
                       <ClarityPassesCredits size={14} />
                       {t("Pass")}
                     </span>
-                    {passUnavailableReason ? <span className="pos-method-tag">{passUnavailableReason}</span> : null}
-                    {passBalance !== null && (
-                      <span className={`pos-method-badge${passBalance === 0 ? " is-empty" : ""}`} aria-hidden="true">
-                        {passBalance > 99 ? "99+" : passBalance}
+                    {passUnavailableReason || passCoverageNote ? (
+                      <span className="pos-method-tag">{passUnavailableReason || passCoverageNote}</span>
+                    ) : null}
+                    {passBadge !== null && (
+                      <span className={`pos-method-badge${passBadge === 0 ? " is-empty" : ""}`} aria-hidden="true">
+                        {passBadge > 99 ? "99+" : passBadge}
                       </span>
                     )}
                   </button>
@@ -855,6 +870,11 @@ export function PosCheckoutModal({
                       </span>
                     </button>
                   ))}
+                  {!usablePassOptions.length ? (
+                    <p className="field-help">
+                      {t("None of their passes covers this lesson. Change what a pass covers from the Passes tab on their profile, or pay another way.")}
+                    </p>
+                  ) : null}
                   {passId ? (
                     <p className="field-help">
                       {selectedPassOption?.paymentKind === "cross_redemption" ? (

@@ -1,11 +1,11 @@
 import { ArrowLeft, Check, ExternalLink, GitMerge, Phone, Plus, Trash2, X } from "lucide-react";
-import { Suspense, useRef } from "react";
+import { Suspense, useRef, useState } from "react";
 import { readerLocale, t, tn } from "../../lib/i18n";
 import { formatMoney } from "../../lib/money";
 import { posMethodLabel } from "../billing/terminal";
 import { buildWeekDays, formatRange, itemService, itemWeek } from "../calendar/calendarModel";
 import { notificationKindLabel, notificationStatusLabel, notificationTimeLabel } from "../notifications/notificationModel";
-import { PassesPanel, PersonMemberships } from "../passes/lazyPanels";
+import { PassesPanel, PersonMemberships, PersonRewards } from "../passes/lazyPanels";
 import { passBalanceSummary } from "../passes/passBalance";
 import { usePhoneLayout } from "../phone/phoneLayout";
 import { PhoneStepSwipe } from "../phone/PhoneStepSwipe";
@@ -62,6 +62,7 @@ export function ClientProfileView({ clientProfile }: { clientProfile: ClientProf
     redeemClientPassCredit,
     addClientPassCredits,
     returnClientPassCredit,
+    changeClientPassCoverage,
     selectedClientId,
     selectedClientNotifications,
     clientTransactionsLoadState,
@@ -82,6 +83,8 @@ export function ClientProfileView({ clientProfile }: { clientProfile: ClientProf
     personDeleteBusyId,
     hardDeletePerson,
   } = clientProfile;
+  /** Bumped by the balance card's Adjust; the Passes tab opens its form on it. */
+  const [passAdjustRequest, setPassAdjustRequest] = useState(0);
   // On a phone the profile is a page laid over the screen it was opened from,
   // not a box floating in the middle: Back arrow top left, swipe right to
   // slide it off, and that screen's edge showing down the left like the sheet
@@ -205,8 +208,13 @@ export function ClientProfileView({ clientProfile }: { clientProfile: ClientProf
               <button
                 type="button"
                 className={`client-pass-balance${passBalance.credits ? "" : " is-empty"}`}
-                onClick={() => setClientProfileTab("passes")}
-                aria-label={t("Pass balance: {count} credits. Open passes", { count: passBalance.credits })}
+                onClick={() => {
+                  // "Adjust" means adjust: open the tab with the balance form
+                  // already on the pass it would change, not just the tab.
+                  setClientProfileTab("passes");
+                  setPassAdjustRequest((count) => count + 1);
+                }}
+                aria-label={t("Pass balance: {count} credits. Adjust", { count: passBalance.credits })}
               >
                 <ClarityPassesCredits size={20} />
                 <span className="client-pass-balance-count">{passBalance.credits}</span>
@@ -402,6 +410,7 @@ export function ClientProfileView({ clientProfile }: { clientProfile: ClientProf
                         onPassesChanged={() => void fetchClientPasses(selectedClient.id)}
                       />
                     ) : null}
+                    {selectedClient ? <PersonRewards personId={selectedClient.id} /> : null}
                     <PassesPanel
                       passes={clientPasses}
                       invoicedLines={clientInvoicedLines}
@@ -417,6 +426,11 @@ export function ClientProfileView({ clientProfile }: { clientProfile: ClientProf
                       }
                       onAddCredits={(passId, credits, note) => void addClientPassCredits(passId, credits, note)}
                       onReturnCredit={(redemptionId) => void returnClientPassCredit(redemptionId)}
+                      onChangeCoverage={(passId, coversAll, coversIds) =>
+                        void changeClientPassCoverage(passId, coversAll, coversIds)
+                      }
+                      adjustRequest={passAdjustRequest}
+                      onAdjustHandled={() => setPassAdjustRequest(0)}
                       onRetry={() => selectedClientId && void fetchClientPasses(selectedClientId)}
                       serviceName={(serviceId) =>
                         services.find((service) => service.id === serviceId)?.name || serviceId

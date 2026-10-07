@@ -362,6 +362,31 @@ function cleanServiceResourceUse(service, canUseResources) {
   };
 }
 
+/**
+ * What a pass type covers, as a list. Older rows hold one id in
+ * packageCoversServiceId; newer ones a list in coversServiceIds. Either way the
+ * list is the answer, and the single id is its first entry.
+ */
+function cleanPassCoverage(service) {
+  const seen = new Set();
+  const raw = Array.isArray(service?.coversServiceIds) && service.coversServiceIds.length
+    ? service.coversServiceIds
+    : [service?.packageCoversServiceId];
+  for (const entry of raw) {
+    const id = cleanString(entry, "", 120);
+    if (id) seen.add(id);
+    if (seen.size >= 12) break;
+  }
+  const list = [...seen];
+  return { list, single: list[0] || "" };
+}
+
+function cleanPassExpiryMonths(value) {
+  if (value === null || value === undefined || value === "") return undefined;
+  const months = Number(value);
+  return Number.isFinite(months) ? Math.max(0, Math.min(120, Math.round(months))) : undefined;
+}
+
 function cleanService(service, index = 0, accountId = "") {
   const fallback = neutralServiceFallback;
   const descriptionFallback = service ? "" : fallback.description;
@@ -452,7 +477,13 @@ function cleanService(service, index = 0, accountId = "") {
     packageAllowance: lessonFormat === "package" ? packageAllowance : undefined,
     packageCoverageMode: lessonFormat === "package" ? packageCoverageMode : undefined,
     packageCoversServiceId:
-      lessonFormat === "package" ? cleanString(service?.packageCoversServiceId, "", 120) || undefined : undefined,
+      lessonFormat === "package" ? cleanPassCoverage(service).single || undefined : undefined,
+    // A pass type's scope: every service, or the listed ones. Kept beside the
+    // older single id so nothing that still reads that one breaks.
+    coversServiceIds: lessonFormat === "package" ? cleanPassCoverage(service).list : undefined,
+    coversAllServices: lessonFormat === "package" ? service?.coversAllServices === true || undefined : undefined,
+    // Months a pass of this type stays spendable; 0 = never.
+    passExpiryMonths: lessonFormat === "package" ? cleanPassExpiryMonths(service?.passExpiryMonths) : undefined,
     crossRedeemable: lessonFormat === "package" ? service?.crossRedeemable === true : undefined,
     acceptsCrossRedemption:
       lessonFormat !== "package" ? service?.acceptsCrossRedemption !== false : undefined,

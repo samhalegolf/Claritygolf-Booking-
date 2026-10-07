@@ -259,7 +259,17 @@ export function PlanEditor({ plan, currency, services, cardsReady, saving, onSav
             </div>
             <div className="membership-services" role="group" aria-label={t("Can be spent on")}>
               <span className="membership-services-label">{t("Can be spent on")}</span>
-              {services.length ? (
+              <label className="membership-check">
+                <input
+                  type="checkbox"
+                  checked={entitlement.allServices === true}
+                  onChange={(event) =>
+                    setEntitlement(index, { allServices: event.target.checked, serviceIds: [] })
+                  }
+                />
+                <span>{t("Every service")}</span>
+              </label>
+              {entitlement.allServices ? null : services.length ? (
                 services.map((service) => (
                   <label key={service.id} className="membership-check">
                     <input
