@@ -74,6 +74,7 @@ function toSession(data: SessionResponse | null | undefined): Session {
 }
 
 export async function fetchSession(): Promise<Session> {
+  const startedAt = typeof performance === "undefined" ? null : performance.now();
   try {
     const response = await apiFetch("/api/auth/session");
     if (!response.ok) return guestSession;
@@ -82,6 +83,13 @@ export async function fetchSession(): Promise<Session> {
     // Offline or the function is down. Treat it as signed out: the login screen
     // says so plainly, which beats a workspace that silently has no data.
     return guestSession;
+  } finally {
+    if (startedAt !== null && typeof performance.measure === "function") {
+      performance.measure("clarity:auth-session", {
+        start: startedAt,
+        end: performance.now(),
+      });
+    }
   }
 }
 

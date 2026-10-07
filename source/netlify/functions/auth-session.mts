@@ -1,6 +1,7 @@
 import type { Config, Context } from "@netlify/functions";
 
 import { json } from "./_shared/http.mts";
+import { createServerTiming } from "./_shared/server-timing.mts";
 import { playerSessionTokenFromRequest, sessionTokenFromRequest } from "./_shared/session-tokens.mts";
 
 /**
@@ -15,13 +16,21 @@ import { playerSessionTokenFromRequest, sessionTokenFromRequest } from "./_share
  * the core, loaded on first use and kept for the instance's lifetime.
  */
 export default async function handler(req: Request, context: Context) {
-  if (
-    req.method === "GET" &&
-    !req.headers.get("origin") &&
-    !sessionTokenFromRequest(req) &&
-    !playerSessionTokenFromRequest(req)
-  ) {
-    return json({ authenticated: false, role: "guest" });
+  const sameOriginGet = req.method === "GET" && !req.headers.get("origin");
+  const adminToken = sessionTokenFromRequest(req);
+  const playerToken = playerSessionTokenFromRequest(req);
+
+  if (sameOriginGet && !playerToken) {
+    if (!adminToken) {
+      const timing = createServerTiming();
+      return json(
+        { authenticated: false, role: "guest" },
+        200,
+        { "Server-Timing": timing.header() },
+      );
+    }
+    const { handleCoachAuthSession } = await import("./_shared/auth-session-handler.mts");
+    return handleCoachAuthSession(req);
   }
   const { handleBookingApiRoute } = await import("./booking-core.mts");
   return handleBookingApiRoute(req, "/api/auth/session", context);
