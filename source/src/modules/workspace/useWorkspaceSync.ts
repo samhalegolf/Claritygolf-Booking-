@@ -11,6 +11,7 @@ import {
   type CalendarSaveStatus,
   calendarStateFingerprint,
   cleanAvailability,
+  calendarItemsPatch,
   mergeCalendarItemsAfterConflict,
 } from "../calendar/calendarModel";
 import { cleanPeople } from "../clients/clientMatching";
@@ -198,23 +199,31 @@ export function useWorkspaceSync({
     setCalendarSaveError("");
 
     const saveTimer = window.setTimeout(() => {
+      // Only what changed against `requestBaseline` -- the list the server last
+      // confirmed, or after a conflict the live list the merge was built on.
+      // Retrying the same patch is safe: upserts are idempotent and deleting a
+      // booking that is already gone does nothing.
       const saveRequest = (
         requestItems = desiredItems,
+        requestBaseline = baselineItems,
         requestSyncKey = calendarSyncKey,
         requestUpdatedAt = calendarStateVersion,
-      ) =>
-        fetch("/api/calendar-state", {
+      ) => {
+        const { upserts, deletes } = calendarItemsPatch(requestBaseline, requestItems);
+        return fetch("/api/calendar-state", {
           method: "PUT",
           credentials: "same-origin",
           cache: "no-store",
           headers: { "Content-Type": "application/json", Accept: "application/json" },
           body: JSON.stringify({
-            items: requestItems,
-            replaceItems: true,
+            itemsOperation: "patch",
+            upserts,
+            deletes,
             syncKey: requestSyncKey,
             updatedAt: requestUpdatedAt,
           }),
         });
+      };
       const readLiveState = () =>
         fetch("/api/calendar-state", {
           credentials: "same-origin",
@@ -224,6 +233,7 @@ export function useWorkspaceSync({
       const retryDelay = (delay = 700) => new Promise((resolve) => window.setTimeout(resolve, delay));
       const saveWithRetries = async (
         requestItems = desiredItems,
+        requestBaseline = baselineItems,
         requestSyncKey = calendarSyncKey,
         requestUpdatedAt = calendarStateVersion,
       ) => {
@@ -231,7 +241,7 @@ export function useWorkspaceSync({
         for (const delay of [0, 700, 1400, 2600]) {
           if (delay) await retryDelay(delay);
           try {
-            return await saveRequest(requestItems, requestSyncKey, requestUpdatedAt);
+            return await saveRequest(requestItems, requestBaseline, requestSyncKey, requestUpdatedAt);
           } catch (error) {
             lastError = error;
           }
@@ -242,6 +252,7 @@ export function useWorkspaceSync({
       void (async () => {
         let response: Response;
         let submittedItems = desiredItems;
+        let submittedBaseline = baselineItems;
         let submittedSyncKey = calendarSyncKey;
         let submittedUpdatedAt = calendarStateVersion;
         let recoveredData: CalendarStateSaveResponse | null = null;
@@ -281,10 +292,12 @@ export function useWorkspaceSync({
           }
           recoveredFromConflict = true;
           submittedItems = mergedItems;
+          submittedBaseline = latestData.items;
           submittedSyncKey = typeof latestData.syncKey === "string" ? latestData.syncKey : calendarSyncKey;
           submittedUpdatedAt = typeof latestData.updatedAt === "string" ? latestData.updatedAt : "";
           response = await saveWithRetries(
             mergedItems,
+            submittedBaseline,
             submittedSyncKey,
             submittedUpdatedAt,
           );
@@ -293,7 +306,7 @@ export function useWorkspaceSync({
         }
         if (!response.ok && response.status >= 500) {
           await retryDelay(900);
-          response = await saveWithRetries(submittedItems, submittedSyncKey, submittedUpdatedAt);
+          response = await saveWithRetries(submittedItems, submittedBaseline, submittedSyncKey, submittedUpdatedAt);
           if (calendarSaveVersionRef.current !== saveVersion) return;
           data = (await response.json().catch(() => ({}))) as typeof data;
         }

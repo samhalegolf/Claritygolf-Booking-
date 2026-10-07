@@ -829,6 +829,25 @@ function calendarItemsById(itemList: CalendarItem[] = []) {
   return new Map(itemList.filter((item) => item.id).map((item) => [item.id, item]));
 }
 
+/**
+ * What a calendar save has to send: the bookings that are new or differ from
+ * what the server last confirmed, and the ids that are gone.
+ *
+ * "Differ" is the save fingerprint's notion of equal, so a field the server
+ * owns (resourceId, bayBooked, updatedAt) never turns into a write on its own.
+ * The save used to send every booking with replaceItems, which deleted anything
+ * the page did not hold -- this is what lets the page hold less than all of it.
+ */
+export function calendarItemsPatch(baselineItems: CalendarItem[] = [], desiredItems: CalendarItem[] = []) {
+  const baselineById = calendarItemsById(baselineItems);
+  const desiredById = calendarItemsById(desiredItems);
+  const upserts = desiredItems.filter(
+    (item) => item.id && !calendarItemEquivalent(baselineById.get(item.id), item),
+  );
+  const deletes = [...baselineById.keys()].filter((id) => !desiredById.has(id));
+  return { upserts, deletes };
+}
+
 export function mergeCalendarItemsAfterConflict(
   latestItems: CalendarItem[],
   baselineItems: CalendarItem[],

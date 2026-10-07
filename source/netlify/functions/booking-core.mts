@@ -3708,12 +3708,30 @@ async function writeCalendarState(accountId: string, nextState: Record<string, a
   if (context && nextState?.clearItems === true && !context.isAdmin) {
     throw permissionDenied("You do not have permission to clear the account calendar.");
   }
-  let requestedItems = nextState?.items ?? current.items;
+  // "patch" carries only what changed: the bookings to upsert and the ids to
+  // delete. Everything below still compares the whole calendar before and
+  // after (notifications, Google, bays, resources), because writeItems returns
+  // the full list either way -- only the write itself shrinks.
+  const patchMode = nextState?.itemsOperation === "patch";
+  const patchDeleteIds = patchMode && Array.isArray(nextState?.deletes)
+    ? Array.from(new Set(nextState.deletes.map((id) => cleanString(id, "", 140)).filter(Boolean)))
+    : [];
+  let requestedItems = patchMode
+    ? (Array.isArray(nextState?.upserts) ? nextState.upserts : [])
+    : nextState?.items ?? current.items;
+  if (patchMode && context) {
+    const currentById = new Map((current.items || []).map((item) => [item.id, item]));
+    for (const id of patchDeleteIds) {
+      const previous = currentById.get(id);
+      // Already gone (a retried save, or deleted elsewhere): nothing to check.
+      if (previous) assertCanWriteCalendarItem(context, previous, previous, current);
+    }
+  }
   if (context) {
     requestedItems = normalizeCalendarItemsForContext(requestedItems, context);
     const previousById = new Map((current.items || []).map((item) => [item.id, item]));
     requestedItems.forEach((item) => assertCanWriteCalendarItem(context, item, previousById.get(item.id), current));
-    if (!context.isAdmin && (nextState?.replaceItems === true || nextState?.itemsOperation === "replace")) {
+    if (!patchMode && !context.isAdmin && (nextState?.replaceItems === true || nextState?.itemsOperation === "replace")) {
       const preservedItems = current.items.filter((item) => !canReadCalendarItem(context, item, current));
       requestedItems = [...preservedItems, ...requestedItems];
     }
@@ -3768,8 +3786,9 @@ async function writeCalendarState(accountId: string, nextState: Record<string, a
   );
   const itemsToWrite = stampResolvedPersonIds(requestedItems, peopleSync.resolvedIds);
   const writtenItems = await writeItems(itemsToWrite, {
-    replaceItems: nextState?.replaceItems === true || nextState?.itemsOperation === "replace",
-    clearItems: nextState?.clearItems === true,
+    replaceItems: !patchMode && (nextState?.replaceItems === true || nextState?.itemsOperation === "replace"),
+    clearItems: !patchMode && nextState?.clearItems === true,
+    deleteIds: patchDeleteIds,
     accountId: context?.accountId,
   });
   // resource_id is the database's, never the client's: start from what was
@@ -10423,6 +10442,8 @@ async function routeBookingApiRequest(
         replaceItems: body.replaceItems === true,
         clearItems: body.clearItems === true,
         itemsOperation: body.itemsOperation,
+        upserts: Array.isArray(body.upserts) ? body.upserts : undefined,
+        deletes: Array.isArray(body.deletes) ? body.deletes : undefined,
         updatedAt: typeof body.updatedAt === "string" ? body.updatedAt : "",
       }, requestContext, context);
       let notificationResults = [];
