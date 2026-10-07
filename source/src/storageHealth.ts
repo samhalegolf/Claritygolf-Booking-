@@ -5,7 +5,7 @@ import type {
 import {
   getSavedVideoCloudCatalogueState,
   getSavedVideoDeviceState,
-} from "./modules/video-analysis/utils/savedVideoLibrary";
+} from "./modules/video-analysis/utils/savedVideoState";
 import { t } from "./lib/i18n";
 
 export type GoogleDriveTransferState =

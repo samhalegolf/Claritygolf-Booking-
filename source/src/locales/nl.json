@@ -4540,5 +4540,11 @@
   "Pick two to plot on the same chart.": "Kies er twee om in dezelfde grafiek te tonen.",
   "{count} of 2 picked.": "{count} van 2 gekozen.",
   "Switch something on first, then choose its chart here.": "Zet eerst iets aan en kies dan hier de grafiek ervoor.",
-  "Chart type": "Grafiektype"
+  "Chart type": "Grafiektype",
+  "time zones": "tijdzones",
+  "the saved frame": "het opgeslagen beeld",
+  "the billing dashboard": "het factuurdashboard",
+  "the bay and room system": "het bay- en ruimtesysteem",
+  "languages": "talen",
+  "country and region settings": "land- en regio-instellingen"
 }

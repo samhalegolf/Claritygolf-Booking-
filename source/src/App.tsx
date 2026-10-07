@@ -86,14 +86,13 @@ import { quickBookSlots } from "./modules/quick-book/quickBookModel";
 import { TodayScreen } from "./modules/today/TodayScreen";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "./modules/auth/apiFetch";
-import { SnapshotFrameViewer, type FrameViewerShot } from "./modules/shared/SnapshotFrameViewer";
+import type { FrameViewerShot } from "./modules/shared/SnapshotFrameViewer";
 import type { SheetVideo } from "./modules/swing-review/SwingReviewSheet";
 import type { Session } from "./modules/auth/session";
 import type { TillLesson } from "./modules/billing/tillLessons";
 import { WORKSPACE_ACCOUNTS_STORAGE_KEY } from "./modules/shared/workspaceStorage";
 import { useBackNavigation } from "./modules/shared/backNavigation";
 import { Loading, loadingLabel } from "./modules/shared/Loading";
-import { DashboardPanel } from "./modules/billing/DashboardPanel";
 import { type Person } from "./modules/clients/clientsModel";
 import { isUnauthorizedClientsError, loadClients, replaceClients, resetClients, useClientsState } from "./modules/clients/clientsStore";
 import type { ClientsPanel as ClientsPanelComponent } from "./modules/clients/ClientsPanel";
@@ -132,7 +131,6 @@ import {
   type BusinessTerminologyPreset,
 } from "../netlify/functions/_shared/business-terminology.mts";
 import { type CapabilityKey } from "../netlify/functions/_shared/market-profile.mts";
-import { ResourceSystemPanel } from "./modules/integrations/ResourceSystemPanel";
 import { availabilityConflicts, type AvailabilityConflict } from "./availabilityConflicts";
 import {
   cleanResourceType,
@@ -149,8 +147,7 @@ import { serviceIncludesCoach } from "../netlify/functions/_shared/service-scope
 import { activeLocale, } from "./lib/activeCountry";
 import { BusinessHubPanel, OwnerIdentityCard } from "./modules/business-hub/BusinessHubPanel";
 import { CoachAvatar, CoachProfilePanel, type CoachWeekDay, type CoachWeekEntry } from "./modules/business-hub/CoachProfilePanel";
-import { RegionSettings, TimeZoneSelect, type RegionValues } from "./modules/settings/RegionSettings";
-import { LanguageSelect } from "./modules/settings/LanguageSettings";
+import type { RegionValues } from "./modules/settings/RegionSettings";
 import { syncPushLanguage } from "./modules/notifications/browserPush";
 import { startNativePush } from "./native/nativePush";
 import type { ClarityPayCard, ProfileInternalJob, ProfileTarget } from "./modules/business-hub/BusinessHubPanel";
@@ -204,31 +201,14 @@ import {
 import type { PlayerVideo } from "./modules/video-analysis/models/Video";
 import type { VideoAnalysis } from "./modules/video-analysis/models/Analysis";
 import type { ComparisonSide, ComparisonWorkspaceState } from "./modules/video-analysis/utils/localPersistence";
-import {
-  createIndexedDbSavedVideoLibrary,
-  chooseManagedLocalVideoLibrary,
-  getManagedLocalVideoLibraryStatus,
-  migrateSavedVideosToManagedLocalLibrary,
-  moveManagedLocalVideoLibrary,
-  cancelSavedVideoCloudUpload,
-  importSavedVideoFromClarityCloud,
-  hydrateSnapshotImages,
-  listClarityCloudImportTransfers,
-  markClarityCloudSubmissionSeen,
-  pauseSavedVideoCloudUpload,
-  LEGACY_UNASSIGNED_PLAYER_ID,
-  reassignSavedVideoPlayer,
-  pairSavedVideoAngles,
-  reconnectManagedLocalVideoLibrary,
-  removeSavedVideoCloudTransfer,
-  saveSavedVideoToCloud,
-  verifyManagedLocalVideoLibrary,
-  type ManagedLocalVideoLibraryStatus,
-  type ClarityCloudImportTransfer,
-  type SavedVideoItem,
-  type SavedVideoLibraryStore,
+import type {
+  ManagedLocalVideoLibraryStatus,
+  ClarityCloudImportTransfer,
+  SavedVideoItem,
+  SavedVideoLibraryStore,
 } from "./modules/video-analysis/utils/savedVideoLibrary";
 import { groupSameSwingAngles } from "./modules/video-analysis/utils/sameSwingAngles";
+import { LEGACY_UNASSIGNED_PLAYER_ID, pairSavedVideoAngles } from "./modules/video-analysis/utils/savedVideoState";
 import {
   getClarityCloudActionLabel,
   getClarityCloudHealth,
@@ -274,7 +254,6 @@ import type {
 import { defaultInvoiceSettings, printableInvoiceCustomFields } from "./modules/billing/invoiceSettings";
 import { computeInvoiceTotals, invoiceLineNet, invoiceLineGross, lineDiscountAmount } from "./modules/billing/invoiceMath";
 import { cardRefundAmount, isClarityPayCardSale, keepTapToPayWarm, posMethodLabel, tapToPayName } from "./modules/billing/terminal";
-import { TapToPaySetup } from "./modules/billing/TapToPaySetup";
 import type { CouponIssueValues, CouponScanResult, VoucherRepairResult } from "./modules/billing/CouponsPanel";
 import type { VoucherAmountRule } from "./modules/billing/types";
 import type { ProductFormValues, StockAdjustInput } from "./modules/billing/ProductsPanel";
@@ -638,6 +617,87 @@ const BrowserNotificationsPanel = lazy(() => import("./modules/notifications/Bro
 const MessageTemplatesPanel = lazy(() =>
   import("./modules/notifications/MessageTemplatesPanel").then((module) => ({ default: module.MessageTemplatesPanel })),
 );
+
+// Secondary billing, settings and review surfaces. These were ordinary static
+// imports, so opening Today or Calendar downloaded them even though none could
+// render there. Keep the loading boundary beside each surface below so opening
+// one panel never blanks the workspace around it.
+const DashboardPanel = lazy(() =>
+  import("./modules/billing/DashboardPanel").then((module) => ({ default: module.DashboardPanel })),
+);
+const TapToPaySetup = lazy(() =>
+  import("./modules/billing/TapToPaySetup").then((module) => ({ default: module.TapToPaySetup })),
+);
+const ResourceSystemPanel = lazy(() =>
+  import("./modules/integrations/ResourceSystemPanel").then((module) => ({ default: module.ResourceSystemPanel })),
+);
+const RegionSettings = lazy(() =>
+  import("./modules/settings/RegionSettings").then((module) => ({ default: module.RegionSettings })),
+);
+const TimeZoneSelect = lazy(() =>
+  import("./modules/settings/RegionSettings").then((module) => ({ default: module.TimeZoneSelect })),
+);
+const LanguageSelect = lazy(() =>
+  import("./modules/settings/LanguageSettings").then((module) => ({ default: module.LanguageSelect })),
+);
+const SnapshotFrameViewer = lazy(() =>
+  import("./modules/shared/SnapshotFrameViewer").then((module) => ({ default: module.SnapshotFrameViewer })),
+);
+
+// Saved-video persistence is sizeable and the normal Today/Calendar startup
+// does not use it. Load it after first paint (or immediately when a player or
+// video action asks for it) instead of making it an initial App dependency.
+type SavedVideoLibraryModule = typeof import("./modules/video-analysis/utils/savedVideoLibrary");
+let savedVideoLibraryModulePromise: Promise<SavedVideoLibraryModule> | null = null;
+const loadSavedVideoLibraryModule = () =>
+  savedVideoLibraryModulePromise ??=
+    import("./modules/video-analysis/utils/savedVideoLibrary");
+
+const chooseManagedLocalVideoLibrary = (
+  ...args: Parameters<SavedVideoLibraryModule["chooseManagedLocalVideoLibrary"]>
+) => loadSavedVideoLibraryModule().then((module) => module.chooseManagedLocalVideoLibrary(...args));
+const getManagedLocalVideoLibraryStatus = (
+  ...args: Parameters<SavedVideoLibraryModule["getManagedLocalVideoLibraryStatus"]>
+) => loadSavedVideoLibraryModule().then((module) => module.getManagedLocalVideoLibraryStatus(...args));
+const migrateSavedVideosToManagedLocalLibrary = (
+  ...args: Parameters<SavedVideoLibraryModule["migrateSavedVideosToManagedLocalLibrary"]>
+) => loadSavedVideoLibraryModule().then((module) => module.migrateSavedVideosToManagedLocalLibrary(...args));
+const moveManagedLocalVideoLibrary = (
+  ...args: Parameters<SavedVideoLibraryModule["moveManagedLocalVideoLibrary"]>
+) => loadSavedVideoLibraryModule().then((module) => module.moveManagedLocalVideoLibrary(...args));
+const cancelSavedVideoCloudUpload = (
+  ...args: Parameters<SavedVideoLibraryModule["cancelSavedVideoCloudUpload"]>
+) => loadSavedVideoLibraryModule().then((module) => module.cancelSavedVideoCloudUpload(...args));
+const importSavedVideoFromClarityCloud = (
+  ...args: Parameters<SavedVideoLibraryModule["importSavedVideoFromClarityCloud"]>
+) => loadSavedVideoLibraryModule().then((module) => module.importSavedVideoFromClarityCloud(...args));
+const hydrateSnapshotImages = (
+  ...args: Parameters<SavedVideoLibraryModule["hydrateSnapshotImages"]>
+) => loadSavedVideoLibraryModule().then((module) => module.hydrateSnapshotImages(...args));
+const listClarityCloudImportTransfers = (
+  ...args: Parameters<SavedVideoLibraryModule["listClarityCloudImportTransfers"]>
+) => loadSavedVideoLibraryModule().then((module) => module.listClarityCloudImportTransfers(...args));
+const markClarityCloudSubmissionSeen = (
+  ...args: Parameters<SavedVideoLibraryModule["markClarityCloudSubmissionSeen"]>
+) => loadSavedVideoLibraryModule().then((module) => module.markClarityCloudSubmissionSeen(...args));
+const pauseSavedVideoCloudUpload = (
+  ...args: Parameters<SavedVideoLibraryModule["pauseSavedVideoCloudUpload"]>
+) => loadSavedVideoLibraryModule().then((module) => module.pauseSavedVideoCloudUpload(...args));
+const reassignSavedVideoPlayer = (
+  ...args: Parameters<SavedVideoLibraryModule["reassignSavedVideoPlayer"]>
+) => loadSavedVideoLibraryModule().then((module) => module.reassignSavedVideoPlayer(...args));
+const reconnectManagedLocalVideoLibrary = (
+  ...args: Parameters<SavedVideoLibraryModule["reconnectManagedLocalVideoLibrary"]>
+) => loadSavedVideoLibraryModule().then((module) => module.reconnectManagedLocalVideoLibrary(...args));
+const removeSavedVideoCloudTransfer = (
+  ...args: Parameters<SavedVideoLibraryModule["removeSavedVideoCloudTransfer"]>
+) => loadSavedVideoLibraryModule().then((module) => module.removeSavedVideoCloudTransfer(...args));
+const saveSavedVideoToCloud = (
+  ...args: Parameters<SavedVideoLibraryModule["saveSavedVideoToCloud"]>
+) => loadSavedVideoLibraryModule().then((module) => module.saveSavedVideoToCloud(...args));
+const verifyManagedLocalVideoLibrary = (
+  ...args: Parameters<SavedVideoLibraryModule["verifyManagedLocalVideoLibrary"]>
+) => loadSavedVideoLibraryModule().then((module) => module.verifyManagedLocalVideoLibrary(...args));
 
 /**
  * Starts a player's practice read the moment their profile opens, rather than
@@ -2269,22 +2329,32 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     videoStoreRef.current = createIndexedDbVideoStore();
   }
   const savedVideoLibraryRef = useRef<SavedVideoLibraryStore | null>(null);
-  if (savedVideoLibraryRef.current === null) {
-    savedVideoLibraryRef.current = createIndexedDbSavedVideoLibrary();
-  }
+  // The store is created once its module has loaded, after first paint. Until
+  // then this is `undefined`; `null` means loaded but IndexedDB is unavailable.
+  const [savedVideoLibrary, setSavedVideoLibrary] = useState<SavedVideoLibraryStore | null | undefined>(undefined);
+  const savedVideoLibraryLoadRef = useRef<Promise<SavedVideoLibraryStore | null> | null>(null);
+  const ensureSavedVideoLibrary = useCallback(
+    () =>
+      (savedVideoLibraryLoadRef.current ??= loadSavedVideoLibraryModule().then((module) => {
+        const store = module.createIndexedDbSavedVideoLibrary();
+        savedVideoLibraryRef.current = store;
+        setSavedVideoLibrary(store);
+        return store;
+      })),
+    [],
+  );
 
   useEffect(() => {
     setPlayerProfilesLocal(loadPlayerProfilesState());
   }, []);
 
   const refreshSavedVideoLibrary = useCallback(() => {
-    const savedStore = savedVideoLibraryRef.current;
     const transientStore = videoStoreRef.current;
     void getManagedLocalVideoLibraryStatus()
       .then((status) => setManagedLocalLibraryStatus(status))
       .catch(() => setManagedLocalLibraryStatus(defaultManagedLocalLibraryStatus));
-    const savedItemsLoaded = savedStore
-      ?.listItems()
+    const savedItemsLoaded = ensureSavedVideoLibrary()
+      .then((savedStore) => savedStore?.listItems() ?? [])
       .then((items) => setSavedVideoItems(items))
       .catch(() => {
         // Ignore; an empty list simply hides saved-library profile activity.
@@ -2298,11 +2368,29 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     void Promise.allSettled([savedItemsLoaded, legacyRecordsLoaded]).then(() =>
       markPlayerProfilesSourceReady("videos"),
     );
-  }, [markPlayerProfilesSourceReady]);
+  }, [ensureSavedVideoLibrary, markPlayerProfilesSourceReady]);
 
   useEffect(() => {
-    refreshSavedVideoLibrary();
+    // The local video index helps Player Profiles, but Today and Calendar do
+    // not need it for first paint. Use the browser's idle window, with a short
+    // fallback so the profile data is still warm before a coach normally asks.
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+    if (idleWindow.requestIdleCallback) {
+      const handle = idleWindow.requestIdleCallback(refreshSavedVideoLibrary, { timeout: 1500 });
+      return () => idleWindow.cancelIdleCallback?.(handle);
+    }
+    const handle = window.setTimeout(refreshSavedVideoLibrary, 0);
+    return () => window.clearTimeout(handle);
   }, [refreshSavedVideoLibrary]);
+
+  // However the video view is reached (deep link, back navigation, a player
+  // profile), its saved-video store must exist before the workspace mounts.
+  useEffect(() => {
+    if (activeView === "video") void ensureSavedVideoLibrary();
+  }, [activeView, ensureSavedVideoLibrary]);
 
   // Refresh player-profile derived data whenever the view opens, so uploads
   // and lesson notes made during this session show up without a reload.
@@ -4867,13 +4955,13 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   }, [openSwingReviewId, playerSwingReviewGroups]);
 
   const resolveReviewVideoUrl = useCallback(async (savedVideoId: string) => {
-    const blob = await savedVideoLibraryRef.current?.getBlob(savedVideoId).catch(() => null);
+    const blob = await (await ensureSavedVideoLibrary())?.getBlob(savedVideoId).catch(() => null);
     if (blob) return URL.createObjectURL(blob);
     // Not on this device: stream it out of Clarity Cloud instead.
     const response = await apiFetch(`/api/video-transfer/${encodeURIComponent(savedVideoId)}/download`);
     if (!response.ok) return null;
     return URL.createObjectURL(await response.blob());
-  }, []);
+  }, [ensureSavedVideoLibrary]);
 
   const linkedLessonVideoIds = useMemo(() => {
     const ids = new Set<string>();
@@ -6357,6 +6445,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     /** A video to load as a new clip, e.g. a drill's video being copied into a review. */
     initialVideoFile?: File;
   }) {
+    void ensureSavedVideoLibrary();
     setVideoContext({
       playerId: client.id,
       playerName: client.name,
@@ -6548,7 +6637,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
       return;
     }
     setToast({ message: t("Opening the drill video…") });
-    let blob = await savedVideoLibraryRef.current?.getBlob(drill.savedVideoId).catch(() => null);
+    let blob = await (await ensureSavedVideoLibrary())?.getBlob(drill.savedVideoId).catch(() => null);
     if (!blob) {
       const response = await apiFetch(`/api/video-transfer/${encodeURIComponent(drill.savedVideoId)}/download`).catch(() => null);
       blob = response?.ok ? await response.blob().catch(() => null) : null;
@@ -6773,7 +6862,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   }
 
   async function renameSavedVideo(item: SavedVideoItem) {
-    const store = savedVideoLibraryRef.current;
+    const store = await ensureSavedVideoLibrary();
     if (!store) {
       setToast({ message: t("Saved video library is unavailable in this browser.") });
       return;
@@ -6795,7 +6884,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   }
 
   async function deleteSavedVideo(item: SavedVideoItem) {
-    const store = savedVideoLibraryRef.current;
+    const store = await ensureSavedVideoLibrary();
     if (!store) {
       setToast({ message: t("Saved video library is unavailable in this browser.") });
       return;
@@ -6817,7 +6906,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   }
 
   async function removeSavedVideoFromDevice(item: SavedVideoItem) {
-    const store = savedVideoLibraryRef.current;
+    const store = await ensureSavedVideoLibrary();
     if (!store) {
       setToast({ message: t("Saved video library is unavailable in this browser.") });
       return;
@@ -6839,7 +6928,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     itemsToSend: SavedVideoItem[],
     options: { openSettingsOnConfigurationIssue?: boolean } = {},
   ) {
-    const store = savedVideoLibraryRef.current;
+    const store = await ensureSavedVideoLibrary();
     if (!store) {
       setToast({ message: t("Saved video library is unavailable in this browser.") });
       throw new Error(t("Transfer service unavailable"));
@@ -6922,7 +7011,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
    * to someone with nowhere to watch it.
    */
   async function sendSavedVideoToPlayer(item: SavedVideoItem, personId: string) {
-    const store = savedVideoLibraryRef.current;
+    const store = await ensureSavedVideoLibrary();
     if (!store) {
       setToast({ message: t("Saved video library is unavailable in this browser.") });
       return;
@@ -7010,7 +7099,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     review: { id: string; videos: SavedVideoItem[]; notes: unknown[]; practice: unknown[] },
     client: Pick<Person, "id" | "name">,
   ) {
-    const store = savedVideoLibraryRef.current;
+    const store = await ensureSavedVideoLibrary();
     if (!store) {
       setToast({ message: t("Saved video library is unavailable in this browser.") });
       return;
@@ -7148,7 +7237,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   }
 
   async function pauseSavedVideoTransfer(item: SavedVideoItem) {
-    const store = savedVideoLibraryRef.current;
+    const store = await ensureSavedVideoLibrary();
     if (!store) {
       setToast({ message: t("Saved video library is unavailable in this browser.") });
       return;
@@ -7170,7 +7259,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   }
 
   async function cancelSavedVideoTransfer(item: SavedVideoItem) {
-    const store = savedVideoLibraryRef.current;
+    const store = await ensureSavedVideoLibrary();
     if (!store) {
       setToast({ message: t("Saved video library is unavailable in this browser.") });
       return;
@@ -7192,7 +7281,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   }
 
   async function removeSavedVideoTransfer(item: SavedVideoItem) {
-    const store = savedVideoLibraryRef.current;
+    const store = await ensureSavedVideoLibrary();
     if (!store) {
       setToast({ message: t("Saved video library is unavailable in this browser.") });
       return;
@@ -7213,7 +7302,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   }
 
   async function migrateLegacyVideo(record: StoredVideoRecord) {
-    const store = savedVideoLibraryRef.current;
+    const store = await ensureSavedVideoLibrary();
     if (!store) {
       setToast({ message: t("Saved video library is unavailable in this browser.") });
       return;
@@ -7236,7 +7325,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   async function runManagedLibraryAction(
     action: "choose" | "reconnect" | "move" | "verify" | "rescan" | "migrate"
   ) {
-    const store = savedVideoLibraryRef.current;
+    const store = await ensureSavedVideoLibrary();
     try {
       if (action === "choose") {
         await chooseManagedLocalVideoLibrary();
@@ -7306,7 +7395,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   }
 
   async function importClarityCloudTransfer(transfer: ClarityCloudImportTransfer) {
-    const store = savedVideoLibraryRef.current;
+    const store = await ensureSavedVideoLibrary();
     if (!store) {
       setToast({ message: t("Saved video library is unavailable in this browser.") });
       return;
@@ -7355,7 +7444,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   }
 
   async function openCloudVideoFromCatalogue(transfer: ClarityCloudImportTransfer, playerName: string) {
-    const store = savedVideoLibraryRef.current;
+    const store = await ensureSavedVideoLibrary();
     if (!store) {
       setToast({ message: t("Saved video library is unavailable in this browser.") });
       return;
@@ -7389,7 +7478,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   }
 
   async function verifySavedVideoInLibrary(item: SavedVideoItem) {
-    const store = savedVideoLibraryRef.current;
+    const store = await ensureSavedVideoLibrary();
     if (!store) {
       setToast({ message: t("Saved video library is unavailable in this browser.") });
       return;
@@ -7417,7 +7506,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   }
 
   async function revealSavedVideoFile(item: SavedVideoItem) {
-    const store = savedVideoLibraryRef.current;
+    const store = await ensureSavedVideoLibrary();
     if (!store) {
       setToast({ message: t("Saved video library is unavailable in this browser.") });
       return;
@@ -7480,7 +7569,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     if (!choice) return;
     setAssigningVideoId(savedVideoId);
     try {
-      await reassignSavedVideoPlayer(savedVideoId, choice.playerId, savedVideoLibraryRef.current);
+      await reassignSavedVideoPlayer(savedVideoId, choice.playerId, await ensureSavedVideoLibrary());
       setToast({ message: t("Video moved to {playerName}.", { playerName: choice.playerName }) });
     } catch (error) {
       setToast({
@@ -14719,11 +14808,13 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
               ) : null}
               <label className="settings-field">
                 <span>{t("Time zone")}</span>
-                <TimeZoneSelect
-                  country={coachAccount.country}
-                  value={locationEditor.timezone}
-                  onChange={(timezone) => updateLocationEditor("timezone", timezone)}
-                />
+                <Suspense fallback={<Loading what={t("time zones")} size="inline" />}>
+                  <TimeZoneSelect
+                    country={coachAccount.country}
+                    value={locationEditor.timezone}
+                    onChange={(timezone) => updateLocationEditor("timezone", timezone)}
+                  />
+                </Suspense>
               </label>
               <label className="settings-field">
                 <span>{t("Sort order")}</span>
@@ -19381,22 +19472,24 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                                                   />
                                                 </Suspense>
                                                 {snapshotFrameView?.reviewId === review.id ? (
-                                                  <SnapshotFrameViewer
-                                                    shots={review.screenshots.map((snapshot): FrameViewerShot => ({
-                                                      key: `${snapshot.savedVideoId}-${snapshot.id}`,
-                                                      savedVideoId: snapshot.savedVideoId,
-                                                      videoTitle: snapshot.videoTitle,
-                                                      title: snapshot.title,
-                                                      note: snapshot.note,
-                                                      currentTime: snapshot.currentTime,
-                                                      captureKind: snapshot.captureKind,
-                                                      cropRect: snapshot.cropRect,
-                                                      imageUrl: snapshot.imageDataUrl || undefined,
-                                                    }))}
-                                                    initialKey={snapshotFrameView.key}
-                                                    resolveVideoUrl={resolveReviewVideoUrl}
-                                                    onClose={() => setSnapshotFrameView(null)}
-                                                  />
+                                                  <Suspense fallback={<Loading what={t("the saved frame")} size="panel" />}>
+                                                    <SnapshotFrameViewer
+                                                      shots={review.screenshots.map((snapshot): FrameViewerShot => ({
+                                                        key: `${snapshot.savedVideoId}-${snapshot.id}`,
+                                                        savedVideoId: snapshot.savedVideoId,
+                                                        videoTitle: snapshot.videoTitle,
+                                                        title: snapshot.title,
+                                                        note: snapshot.note,
+                                                        currentTime: snapshot.currentTime,
+                                                        captureKind: snapshot.captureKind,
+                                                        cropRect: snapshot.cropRect,
+                                                        imageUrl: snapshot.imageDataUrl || undefined,
+                                                      }))}
+                                                      initialKey={snapshotFrameView.key}
+                                                      resolveVideoUrl={resolveReviewVideoUrl}
+                                                      onClose={() => setSnapshotFrameView(null)}
+                                                    />
+                                                  </Suspense>
                                                 ) : null}
                                               </div>
                                             );
@@ -20549,7 +20642,13 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
           </section>
         )}
 
-        {adminWorkspaceReady && activeView === "video" && (
+        {adminWorkspaceReady && activeView === "video" && savedVideoLibrary === undefined && (
+          <section className="module-page video-analysis-page-host">
+            <Loading size="panel" what={t("video analysis")} />
+          </section>
+        )}
+
+        {adminWorkspaceReady && activeView === "video" && savedVideoLibrary !== undefined && (
           <section className="module-page video-analysis-page-host">
             <Suspense fallback={<Loading size="panel" what={t("video analysis")} />}>
               <VideoAnalysisPage
@@ -20561,7 +20660,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                 pairedSavedVideoId={videoContext?.pairedSavedVideoId}
                 autoStartLiveRecording={videoContext?.startRecording}
                 initialVideoFile={videoContext?.initialVideoFile}
-                savedVideoLibrary={savedVideoLibraryRef.current}
+                savedVideoLibrary={savedVideoLibrary}
                 libraryPlayers={videoLibraryPlayers}
                 onSavedVideoLibraryChange={refreshSavedVideoLibrary}
                 onNavigateBack={returnToPlayerProfileVideos}
@@ -20681,7 +20780,9 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                     </div>
                   </article>
                 )}
-                <DashboardPanel formatMoney={formatMoney} fallbackCurrency={invoiceSettings.currency} />
+                <Suspense fallback={<Loading what={t("the billing dashboard")} />}>
+                  <DashboardPanel formatMoney={formatMoney} fallbackCurrency={invoiceSettings.currency} />
+                </Suspense>
                 <div className="billing-dashboard-grid">
                   <article className="data-card">
                     <div className="data-card-header">
@@ -22360,13 +22461,15 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                 </SettingsGroup>
 
                 {stripeStatus?.route === "clarity_pay" && (
-                  <TapToPaySetup
-                    frame={(body) => (
-                      <SettingsGroup id="billing-tap-to-pay" section="billing" icon={Nfc} title={tapToPayName()}>
-                        {body}
-                      </SettingsGroup>
-                    )}
-                  />
+                  <Suspense fallback={<Loading what={tapToPayName()} />}>
+                    <TapToPaySetup
+                      frame={(body) => (
+                        <SettingsGroup id="billing-tap-to-pay" section="billing" icon={Nfc} title={tapToPayName()}>
+                          {body}
+                        </SettingsGroup>
+                      )}
+                    />
+                  </Suspense>
                 )}
 
                 {/* Repair, not import. Everything here has already been
@@ -22871,7 +22974,9 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
               {isAdminUser ? (
                 <SettingsGroup id="resource-system" icon={ClarityFacilitiesRooms} section="booking" title={t("Bay & room system")}>
                   <div className="data-card wide">
-                    <ResourceSystemPanel canEdit={isAdminUser} />
+                    <Suspense fallback={<Loading what={t("the bay and room system")} />}>
+                      <ResourceSystemPanel canEdit={isAdminUser} />
+                    </Suspense>
                   </div>
                 </SettingsGroup>
               ) : null}
@@ -22887,7 +22992,9 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
               {isAdminUser ? playerBookingEmbedPanel : null}
               {/* The coach's own, on this device -- unlike everything below it. */}
               <SettingsGroup id="language" icon={ClarityProfile} section="account" title={t("Language")} className="notification-card account-card">
-                <LanguageSelect />
+                <Suspense fallback={<Loading what={t("languages")} size="inline" />}>
+                  <LanguageSelect />
+                </Suspense>
               </SettingsGroup>
               {/* Where the business is. Not the coach's: every coach in the
                   workspace shares its time zone, currency and tax. */}
@@ -22902,20 +23009,22 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                   onCancel={() => cancelEditableBlock("region")}
                   onSave={() => void saveEditableBlock("region")}
                 >
-                  <RegionSettings
-                    values={{
-                      country: cleanPhoneCountry(regionDraft.country),
-                      messageLanguage: regionDraft.messageLanguage,
-                      timezone: regionDraft.timezone,
-                      currency: regionDraft.invoiceSettings.currency,
-                      taxName: regionDraft.invoiceSettings.taxName,
-                      taxRate: regionDraft.invoiceSettings.taxRate,
-                      taxInclusive: regionDraft.invoiceSettings.taxInclusive,
-                    }}
-                    locked={regionIsLocked}
-                    onChange={updateRegionDraft}
-                    parseRate={parseMoneyInput}
-                  />
+                  <Suspense fallback={<Loading what={t("country and region settings")} />}>
+                    <RegionSettings
+                      values={{
+                        country: cleanPhoneCountry(regionDraft.country),
+                        messageLanguage: regionDraft.messageLanguage,
+                        timezone: regionDraft.timezone,
+                        currency: regionDraft.invoiceSettings.currency,
+                        taxName: regionDraft.invoiceSettings.taxName,
+                        taxRate: regionDraft.invoiceSettings.taxRate,
+                        taxInclusive: regionDraft.invoiceSettings.taxInclusive,
+                      }}
+                      locked={regionIsLocked}
+                      onChange={updateRegionDraft}
+                      parseRate={parseMoneyInput}
+                    />
+                  </Suspense>
                 </EditableSettingsBlock>
               </SettingsGroup>
 

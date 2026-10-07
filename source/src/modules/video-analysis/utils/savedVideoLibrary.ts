@@ -3,13 +3,26 @@ import type { VideoAnalysis } from "../models/Analysis";
 import type { PlayerVideo } from "../models/Video";
 import type { ComparisonSide, ComparisonWorkspaceState } from "./localPersistence";
 import type { StoredVideo } from "./videoBlobStore";
-import { pairSameSwingAngles, type SwingAngleCandidate } from "./sameSwingAngles";
+import {
+  getSavedVideoCloudCatalogueState,
+  getSavedVideoDeviceState,
+} from "./savedVideoState";
 import {
   VIDEO_ANALYSIS_DB_STORES,
   isIndexedDbFactoryAvailable,
   openVideoAnalysisDatabase,
 } from "./videoAnalysisDatabase";
 import { t } from "../../../lib/i18n";
+
+// Pure, dependency-free helpers live in savedVideoState so the app shell can
+// use them without loading this module (IndexedDB and cloud transfers).
+export {
+  getSavedVideoCloudCatalogueState,
+  getSavedVideoDeviceState,
+  LEGACY_UNASSIGNED_PLAYER_ID,
+  pairSavedVideoAngles,
+  swingAngleCandidateOf,
+} from "./savedVideoState";
 
 const SAVED_ITEMS_STORE = VIDEO_ANALYSIS_DB_STORES.savedVideoItems;
 const SAVED_BLOBS_STORE = VIDEO_ANALYSIS_DB_STORES.savedVideoBlobs;
@@ -463,74 +476,7 @@ const analysisSummaryFromItem = (item: SavedVideoItem): SavedVideoAnalysisSummar
   noteCount: item.analysisSnapshot.notes.length,
 });
 
-export const getSavedVideoCloudCatalogueState = (item: SavedVideoItem): SavedVideoCloudCatalogueState => {
-  if (item.cloud?.status === "ready" || item.cloud?.status === "imported") return "ready";
-  if (item.cloud?.status === "preparing" || item.cloud?.status === "session-created") return "preparing";
-  if (item.cloud?.status === "uploading") return "uploading";
-  if (item.cloud?.status === "verifying") return "verifying";
-  if (item.cloud?.status === "paused") return "paused";
-  if (item.cloud?.status === "failed" || item.cloud?.status === "expired" || item.cloud?.status === "cancelled") return "failed";
-  if (item.local.managed?.status === "healthy" && item.cloud?.status === "not-uploaded") return "archived-locally";
-  return "waiting-to-upload";
-};
 
-export const getSavedVideoDeviceState = (item: SavedVideoItem): SavedVideoDeviceStateRecord => {
-  if (item.local.managed?.status === "healthy") {
-    return {
-      status: "permanent",
-      source: "my-library",
-      availableOnThisDevice: true,
-      keepOnDevice: true,
-      sizeBytes: item.source.sizeBytes,
-      checksumSha256: item.source.checksumSha256,
-      updatedAt: item.local.managed.verifiedAt || item.updatedAt,
-    };
-  }
-  if (item.local.status === "available") {
-    return {
-      status: "cached",
-      source: "device-cache",
-      availableOnThisDevice: true,
-      keepOnDevice: false,
-      sizeBytes: item.source.sizeBytes,
-      checksumSha256: item.source.checksumSha256,
-      updatedAt: item.updatedAt,
-    };
-  }
-  if (item.local.status === "recovery-only") {
-    return {
-      status: "recovery-only",
-      source: "temporary-recovery",
-      availableOnThisDevice: true,
-      keepOnDevice: false,
-      sizeBytes: item.source.sizeBytes,
-      checksumSha256: item.source.checksumSha256,
-      updatedAt: item.updatedAt,
-      errorMessage: item.local.managed?.lastError,
-    };
-  }
-  if (item.local.status === "error") {
-    return {
-      status: "download-failed",
-      source: "device-cache",
-      availableOnThisDevice: false,
-      keepOnDevice: false,
-      sizeBytes: item.source.sizeBytes,
-      checksumSha256: item.source.checksumSha256,
-      updatedAt: item.updatedAt,
-      errorMessage: item.local.managed?.lastError,
-    };
-  }
-  return {
-    status: "not-downloaded",
-    source: "clarity-cloud",
-    availableOnThisDevice: false,
-    keepOnDevice: false,
-    sizeBytes: item.source.sizeBytes,
-    checksumSha256: item.source.checksumSha256,
-    updatedAt: item.updatedAt,
-  };
-};
 
 const buildSavedVideoCloudCatalogueRecord = (item: SavedVideoItem): SavedVideoCloudCatalogueRecord => {
   const provider = item.cloud?.provider || "google-drive";
@@ -2324,12 +2270,6 @@ export const verifyManagedLocalVideoLibrary = async (store: SavedVideoLibrarySto
 };
 
 
-/**
- * The id the video workspace used to file saves under when it was opened
- * without a player. It matches no client, so those videos sat on no profile
- * until the coach reassigns them.
- */
-export const LEGACY_UNASSIGNED_PLAYER_ID = "player-demo-1";
 
 /**
  * Move a saved video to another player: the device copy (and its My Library
@@ -2673,19 +2613,6 @@ export const createMemorySavedVideoLibraryStore = (): SavedVideoLibraryStore => 
 
 /* ------------------------ same swing, two cameras ------------------------ */
 
-/** What `sameSwingAngles` needs to know about a saved video. */
-export const swingAngleCandidateOf = (item: SavedVideoItem): SwingAngleCandidate => ({
-  id: item.savedVideoId,
-  playerId: item.playerId,
-  recordedAt: item.source.recordedAt,
-  durationS: item.source.duration,
-  linkedTo: item.swingAngles?.linkedTo,
-  refused: item.swingAngles?.refused,
-});
-
-/** Each saved video's same-swing partner, both ways round. */
-export const pairSavedVideoAngles = (items: readonly SavedVideoItem[]): Map<string, string> =>
-  pairSameSwingAngles(items.map(swingAngleCandidateOf));
 
 /**
  * Record that two saved videos are the same swing. Any partner either had

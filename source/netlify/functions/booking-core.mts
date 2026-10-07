@@ -107,7 +107,8 @@ import {
   sandboxAccountIdFor,
 } from "./_shared/sandbox.mts";
 import type { CoachActor } from "./_shared/coach-auth.mts";
-import { authSessionResponse, type WorkspaceBootstrap } from "./_shared/auth-contract.mts";
+import { authSessionResponse } from "./_shared/auth-contract.mts";
+import { readWorkspaceBootstrap } from "./_shared/workspace-bootstrap.mts";
 import { currencyForAccountSettings, localeForCountry } from "./_shared/locale.mts";
 import { publicCoachAccount } from "./_shared/public-account.mts";
 import {
@@ -2923,39 +2924,6 @@ async function writeBrandSettings(accountId: string, settings) {
     updatedAt: nowIso(),
   });
   return readBrandSettings(accountId);
-}
-
-/**
- * What the coach shell needs to draw its frame correctly before the calendar
- * arrives: the business, its plan, its coaches and who the signed-in user is
- * inside it. Sent with the session answer so the sidebar is right on first
- * paint -- without it every load opened on a made-up solo account, and Sell
- * and Billing turned up whenever the calendar shell did. One settings read;
- * the shell still re-reads and overwrites all of this when it answers.
- *
- * Best effort by design. A session answer must never fail because settings
- * could not be read, so this returns undefined and the shell fills the gap.
- */
-async function readWorkspaceBootstrap(membership: CoachActor): Promise<WorkspaceBootstrap | undefined> {
-  try {
-    const { settings: settingsMap } = await readStateSettingsSnapshot(membership.accountId);
-    const account = coachAccountFromSettings(settingsMap, membership.accountId);
-    const coaches = coachProfilesFromSettings(settingsMap, account);
-    const coachName = settingValue(settingsMap, "accountCoachName") || account.coachName;
-    return {
-      accountId: membership.accountId,
-      workspaceAccounts: workspaceAccountsFromSettings(settingsMap, account),
-      account,
-      coaches,
-      currentUser: coachUserForMembership(membership, coaches, coachName),
-    };
-  } catch (error) {
-    console.warn("workspace_bootstrap_unavailable", {
-      accountId: membership.accountId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return undefined;
-  }
 }
 
 export async function readCalendarState(accountId: string) {

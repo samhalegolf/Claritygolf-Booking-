@@ -4540,5 +4540,11 @@
   "Pick two to plot on the same chart.": "同じグラフに表示する項目を2つ選んでください。",
   "{count} of 2 picked.": "{count}/2 選択済み。",
   "Switch something on first, then choose its chart here.": "まず項目をオンにしてから、ここでグラフを選んでください。",
-  "Chart type": "グラフの種類"
+  "Chart type": "グラフの種類",
+  "time zones": "タイムゾーン",
+  "the saved frame": "保存したフレーム",
+  "the billing dashboard": "請求ダッシュボード",
+  "the bay and room system": "打席・部屋システム",
+  "languages": "言語",
+  "country and region settings": "国と地域の設定"
 }
