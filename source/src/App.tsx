@@ -91,6 +91,7 @@ import type { SheetVideo } from "./modules/swing-review/SwingReviewSheet";
 import type { Session } from "./modules/auth/session";
 import type { TillLesson } from "./modules/billing/tillLessons";
 import { WORKSPACE_ACCOUNTS_STORAGE_KEY } from "./modules/shared/workspaceStorage";
+import { clearCalendarCache } from "./modules/workspace/calendarCache";
 import { useBackNavigation } from "./modules/shared/backNavigation";
 import { Loading, loadingLabel } from "./modules/shared/Loading";
 import { type Person } from "./modules/clients/clientsModel";
@@ -3284,6 +3285,9 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     scheduleAdminNotificationDebounceFlush,
     watchBayHold,
     setLocationEditorError,
+    // Only an account the server confirmed in the session answer; see
+    // calendarCache.ts.
+    calendarCacheAccountId: entrySession.workspace ? workspaceData.activeAccountId : "",
   });
   const {
     adminWorkspaceLoadStatus,
@@ -12402,6 +12406,8 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     } catch {
       // Storage unavailable: nothing was cached to begin with.
     }
+    // The cached calendar holds client names and numbers.
+    clearCalendarCache();
     adminHydrationRunIdRef.current += 1;
     hasLoadedCalendarApiRef.current = false;
     setAuthStatus("guest");

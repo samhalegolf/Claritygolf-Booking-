@@ -4546,5 +4546,6 @@
   "the billing dashboard": "laskutuksen koontinäyttö",
   "the bay and room system": "lyöntipaikka- ja huonejärjestelmä",
   "languages": "kielet",
-  "country and region settings": "maa- ja alueasetukset"
+  "country and region settings": "maa- ja alueasetukset",
+  "A booking you changed was also changed elsewhere. The latest version is shown; please make your change again.": "Muuttamaasi varausta muutettiin myös muualla. Uusin versio näytetään; tee muutoksesi uudelleen."
 }
