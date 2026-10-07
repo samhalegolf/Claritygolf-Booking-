@@ -233,6 +233,24 @@ export function useClientProfileController(app: ClientProfileControllerInputs) {
     }
   }
 
+  async function addClientPassCredits(passId: string, credits: number, note: string) {
+    if (!selectedClientId) return;
+    try {
+      const response = await fetch("/api/passes/add-credits", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ personId: selectedClientId, passId, credits, note }),
+      });
+      if (!response.ok) throw new Error(await readApiFailure(response, t("Could not add those credits.")));
+      const data = (await response.json()) as { passes?: Pass[] };
+      setClientPasses(Array.isArray(data.passes) ? data.passes : []);
+      setToast({ message: credits === 1 ? t("1 credit added.") : t("{credits} credits added.", { credits }) });
+    } catch (error) {
+      setToast({ message: error instanceof Error ? error.message : t("Could not add those credits.") });
+    }
+  }
+
   async function returnClientPassCredit(redemptionId: string) {
     if (!selectedClientId) return;
     try {
@@ -319,6 +337,7 @@ export function useClientProfileController(app: ClientProfileControllerInputs) {
     grantClientPass,
     voidClientPass,
     redeemClientPassCredit,
+    addClientPassCredits,
     returnClientPassCredit,
     selectedClientNotifications,
     saveClientProfile,

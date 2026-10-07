@@ -13453,11 +13453,15 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     }
   }
 
+  // Read on opening a profile, not only on the Passes tab: the balance sits in
+  // the profile header. Opening the tab reads it again, so a lesson settled by
+  // pass since the profile opened is not shown against a stale count.
+  const clientPassesTabOpen = clientProfileTab === "passes";
   useEffect(() => {
-    if (clientProfileTab !== "passes" || !selectedClientId || selectedClientId.startsWith("appointment-")) return;
+    if (!selectedClientId || selectedClientId.startsWith("appointment-")) return;
     void fetchClientPasses(selectedClientId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientProfileTab, selectedClientId]);
+  }, [clientPassesTabOpen, selectedClientId]);
 
   useEffect(() => {
     const playerId = notesContext?.playerId || "";

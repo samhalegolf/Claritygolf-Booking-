@@ -52,6 +52,14 @@ export type PosCheckoutModalProps = {
 
 const NO_CLIENT_NAMES: ReadonlyMap<string, string> = new Map();
 
+/** Credits the customer could spend today, across every live pass they hold. */
+function spendableCredits(passes: { status: string; creditsAvailable: number }[] | undefined) {
+  if (!Array.isArray(passes)) return null;
+  return passes
+    .filter((pass) => pass.status === "active")
+    .reduce((sum, pass) => sum + Math.max(0, Number(pass.creditsAvailable) || 0), 0);
+}
+
 function initialsOf(name: string) {
   const parts = name.trim().split(/[\s@.]+/).filter(Boolean);
   return ((parts[0]?.[0] || "") + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
@@ -71,10 +79,15 @@ export function PosCheckoutModal({
   const [methodsLoaded, setMethodsLoaded] = useState(false);
   const [methodId, setMethodId] = useState("");
 
-  // Passes this customer holds. Only ever fetched for a booking: a pass settles
-  // a lesson, and there is no booking to settle on a counter sale.
+  // Passes this customer holds. The options are only ever fetched for a
+  // booking: a pass settles a lesson, and there is no booking to settle on a
+  // counter sale. The balance is read for any named customer, so the Pass
+  // button can say how many credits they hold even when it cannot spend one.
   const [passOptions, setPassOptions] = useState<PassOption[]>([]);
+  const [passBalance, setPassBalance] = useState<number | null>(null);
   const [passId, setPassId] = useState("");
+  // The Pass button is chosen; the list of their passes opens under the grid.
+  const [payingByPass, setPayingByPass] = useState(false);
 
   const [description, setDescription] = useState(context.description);
   // Held as a string so the field can be cleared and retyped without the value
@@ -130,6 +143,16 @@ export function PosCheckoutModal({
   const appliedCoupon = couponApplied ? couponAmount : 0;
   const dueNow = amountValid ? remainingAfterCoupon(amount, appliedCoupon) : 0;
   const selectedPassOption = passOptions.find((option) => option.passId === passId) || null;
+  const usablePassOptions = passOptions.filter((option) => option.covered);
+  const canSettleByPass = Boolean(context.bookingId && context.serviceId);
+  // Why the Pass button is greyed, said on the button rather than left to guess.
+  const passUnavailableReason = !canSettleByPass
+    ? t("Passes pay for a booked lesson")
+    : passBalance === 0
+      ? t("No credits left")
+      : !usablePassOptions.length
+        ? t("No pass covers this lesson")
+        : "";
   const linesTotal = basketTotal(lines);
   // Products are added *to* whatever opened the modal, not instead of it - a
   // lesson card with a glove rung up owes the lesson plus the glove.
@@ -218,17 +241,25 @@ export function PosCheckoutModal({
   // what a credit may buy.
   useEffect(() => {
     const personId = context.customerId || "";
-    if (!personId || !context.bookingId || !context.serviceId) return;
+    if (!personId) return;
+    const forLesson = Boolean(context.bookingId && context.serviceId);
     let cancelled = false;
     (async () => {
       try {
         const response = await fetch(
-          `/api/passes?personId=${encodeURIComponent(personId)}&serviceId=${encodeURIComponent(context.serviceId || "")}`,
+          forLesson
+            ? `/api/passes?personId=${encodeURIComponent(personId)}&serviceId=${encodeURIComponent(context.serviceId || "")}`
+            : `/api/passes?personId=${encodeURIComponent(personId)}&balance=1`,
           { credentials: "same-origin", cache: "no-store" },
         );
         if (!response.ok) return;
-        const data = (await response.json()) as { options?: PassOption[] };
-        if (!cancelled) setPassOptions(Array.isArray(data.options) ? data.options : []);
+        const data = (await response.json()) as {
+          options?: PassOption[];
+          passes?: { status: string; creditsAvailable: number }[];
+        };
+        if (cancelled) return;
+        setPassOptions(forLesson && Array.isArray(data.options) ? data.options : []);
+        setPassBalance(spendableCredits(data.passes));
       } catch {
         // No passes offered this time; paying by any other method still works.
       }
@@ -707,10 +738,93 @@ export function PosCheckoutModal({
 
             <div className="pos-pay">
               <span className="pos-section-label">
-                {passId ? t("Paying with a pass") : appliedCoupon > 0 ? t("Remaining {dueNow} paid by", { dueNow: formatMoney(dueNow, currency) }) : t("Pay with")}
+                {payingByPass ? t("Paying with a pass") : appliedCoupon > 0 ? t("Remaining {dueNow} paid by", { dueNow: formatMoney(dueNow, currency) }) : t("Pay with")}
               </span>
 
-              {passOptions.length > 0 && (
+              {!methodsLoaded && <Loading what={t("payment methods")} className="field-help" />}
+              {methodsLoaded && !methods.length && (
+                <p className="field-help">{t("No payment methods yet - add one under Billing > Settings.")}</p>
+              )}
+              <div className="pos-method-grid">
+                {/* Passes are a way to pay like any other, with the customer's
+                    spendable credits on the corner so nobody has to open their
+                    profile to find out whether they have any left. */}
+                {context.customerId && methods.some((method) => method.kind === "pass") && (
+                  <button
+                    type="button"
+                    className={`pos-method-button pos-method-pass${payingByPass ? " active" : ""}`}
+                    disabled={Boolean(passUnavailableReason)}
+                    title={passUnavailableReason || undefined}
+                    aria-pressed={payingByPass}
+                    aria-label={
+                      passBalance === null
+                        ? t("Pass")
+                        : passBalance === 1
+                          ? t("Pass, 1 credit available")
+                          : t("Pass, {count} credits available", { count: passBalance })
+                    }
+                    onClick={() => {
+                      setPayingByPass(true);
+                      // The one that would be spent anyway is preselected: a
+                      // matching entitlement before balance, as the server orders them.
+                      setPassId((current) =>
+                        usablePassOptions.some((option) => option.passId === current)
+                          ? current
+                          : (usablePassOptions.find((option) => option.paymentKind === "native") || usablePassOptions[0])?.passId || "",
+                      );
+                      // A lesson is settled by a pass or by money, not both.
+                      releaseCoupon();
+                    }}
+                  >
+                    <span className="pos-method-pass-name">
+                      <ClarityPassesCredits size={14} />
+                      {t("Pass")}
+                    </span>
+                    {passUnavailableReason ? <span className="pos-method-tag">{passUnavailableReason}</span> : null}
+                    {passBalance !== null && (
+                      <span className={`pos-method-badge${passBalance === 0 ? " is-empty" : ""}`} aria-hidden="true">
+                        {passBalance > 99 ? "99+" : passBalance}
+                      </span>
+                    )}
+                  </button>
+                )}
+                {coupon && !couponApplied && !payingByPass && couponAmount > 0 && (
+                  <button
+                    type="button"
+                    className={`pos-method-button${payByCoupon ? " active" : ""}`}
+                    onClick={() => {
+                      setPayByCoupon(true);
+                      setConfirmingCoupon(false);
+                    }}
+                  >
+                    <span>{t("Coupon")}</span>
+                    <span className="pos-method-tag">{coupon.code}</span>
+                  </button>
+                )}
+                {methods.filter((method) => method.kind !== "pass" && method.kind !== "coupon").map((method) => (
+                  <button
+                    key={method.id}
+                    type="button"
+                    className={`pos-method-button${method.id === methodId && !payingByPass && !payByCoupon ? " active" : ""}`}
+                    onClick={() => {
+                      setPayingByPass(false);
+                      setPassId("");
+                      setPayByCoupon(false);
+                      setConfirmingCoupon(false);
+                      setMethodId(method.id);
+                    }}
+                  >
+                    <span>{method.name}</span>
+                    {method.kind === "clarity_pay" ? (
+                      <span className="pos-method-tag">{t("Card / QR")}</span>
+                    ) : (
+                      !method.settlesImmediately && <span className="pos-method-tag">{t("Owed")}</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+
+              {payingByPass && passOptions.length > 0 && (
                 <div className="pos-pass-list">
                   {passOptions.map((option) => (
                     <button
@@ -719,11 +833,7 @@ export function PosCheckoutModal({
                       className={`pos-pass-option${option.passId === passId ? " active" : ""}`}
                       disabled={!option.covered}
                       aria-pressed={option.passId === passId}
-                      onClick={() => {
-                        setPassId((current) => (current === option.passId ? "" : option.passId));
-                        // A lesson is settled by a pass or by money, not both.
-                        releaseCoupon();
-                      }}
+                      onClick={() => setPassId(option.passId)}
                     >
                       <span className="pos-pass-name">
                         <ClarityPassesCredits size={15} />
@@ -761,46 +871,6 @@ export function PosCheckoutModal({
                   ) : null}
                 </div>
               )}
-
-              {!methodsLoaded && <Loading what={t("payment methods")} className="field-help" />}
-              {methodsLoaded && !methods.length && (
-                <p className="field-help">{t("No payment methods yet - add one under Billing > Settings.")}</p>
-              )}
-              <div className="pos-method-grid">
-                {coupon && !couponApplied && !passId && couponAmount > 0 && (
-                  <button
-                    type="button"
-                    className={`pos-method-button${payByCoupon ? " active" : ""}`}
-                    onClick={() => {
-                      setPayByCoupon(true);
-                      setConfirmingCoupon(false);
-                    }}
-                  >
-                    <span>{t("Coupon")}</span>
-                    <span className="pos-method-tag">{coupon.code}</span>
-                  </button>
-                )}
-                {methods.filter((method) => method.kind !== "pass" && method.kind !== "coupon").map((method) => (
-                  <button
-                    key={method.id}
-                    type="button"
-                    className={`pos-method-button${method.id === methodId && !passId && !payByCoupon ? " active" : ""}`}
-                    onClick={() => {
-                      setPassId("");
-                      setPayByCoupon(false);
-                      setConfirmingCoupon(false);
-                      setMethodId(method.id);
-                    }}
-                  >
-                    <span>{method.name}</span>
-                    {method.kind === "clarity_pay" ? (
-                      <span className="pos-method-tag">{t("Card / QR")}</span>
-                    ) : (
-                      !method.settlesImmediately && <span className="pos-method-tag">{t("Owed")}</span>
-                    )}
-                  </button>
-                ))}
-              </div>
             </div>
 
             {/* Everything a sale rarely needs, folded into one row. The row says
@@ -888,7 +958,7 @@ export function PosCheckoutModal({
             <div className="pos-checkout-footer">
               <button
                 className="primary-button"
-                disabled={busy || confirmingCoupon || (!selectedMethod && !passId && !payByCoupon)}
+                disabled={busy || confirmingCoupon || (payingByPass ? !passId : !selectedMethod && !payByCoupon)}
                 onClick={takePayment}
                 type="button"
               >

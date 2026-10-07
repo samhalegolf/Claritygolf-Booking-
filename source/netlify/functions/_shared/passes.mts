@@ -1948,6 +1948,57 @@ export async function redeemPassManually(input: {
   }
 }
 
+/**
+ * Add credits to one pass by hand -- the other half of a manual balance
+ * adjustment, beside redeemPassManually.
+ *
+ * Unlike grantPass this names the pass rather than looking for a compatible
+ * one, because the coach is looking at it. The credits arrive as a new
+ * allocation that inherits the pass's own expiry, so topping up can never
+ * quietly move a date. A void or expired pass is refused: credits put there
+ * could never be spent, and the balance on screen would not move.
+ */
+export async function addPassCredits(input: {
+  accountId: string;
+  passId: string;
+  credits?: number;
+  note: string;
+  actorId?: string;
+}): Promise<{ allocationId: string }> {
+  const accountId = cleanString(input.accountId, "", 120);
+  const passId = cleanString(input.passId, "", 120);
+  const note = cleanString(input.note, "", 300);
+  const credits = Math.max(1, Math.min(MAX_CREDITS, Math.round(Number(input.credits) || 1)));
+  if (!accountId) fail("No account.", 403, "forbidden");
+  if (!passId) fail("Which pass?");
+  // Same rule as spending by hand: a balance that moved with no reason is the
+  // one nobody can explain later.
+  if (!note) fail("Say why these credits are being added.", 400, "note_required");
+
+  const allocationId = `alloc-${randomUUID()}`;
+  const added = await db().sql`
+    INSERT INTO public.pass_allocations (
+      id, account_id, pass_id, credits, available_from, expires_at,
+      source, note, created_by, created_at,
+      entitlement_service_id, total_value_cents, currency
+    )
+    SELECT ${allocationId}, p.account_id, p.id, ${credits}::int, NOW(), p.expires_at,
+           'manual', ${note}, ${cleanString(input.actorId, "", 160)}, NOW(),
+           CASE WHEN cardinality(p.covers_service_ids) = 1 THEN p.covers_service_ids[1] END,
+           NULL, NULL
+    FROM public.passes p
+    WHERE p.id = ${passId}
+      AND p.account_id = ${accountId}
+      AND p.status = 'active'
+      AND (p.expires_at IS NULL OR p.expires_at > NOW())
+    RETURNING id
+  `;
+  if (!added.length) {
+    fail("Credits can only be added to a pass that is still active.", 409, "pass_not_active");
+  }
+  return { allocationId };
+}
+
 export async function reversePassRedemption(
   accountId: string,
   redemptionId: string,
