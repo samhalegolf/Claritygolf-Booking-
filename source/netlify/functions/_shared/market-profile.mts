@@ -225,7 +225,7 @@ export const PRODUCT_IDENTITIES: Readonly<Record<ProductKey, ProductIdentity>> =
     key: "clarity-golf",
     name: "Clarity Golf",
     tagline: "Booking System",
-    logoSrc: "/assets/clarity-golf-logo-208.png",
+    logoSrc: "/assets/clarity-golf-logo-208.webp",
     supportEmail: "support@claritygolf.app",
     documentTitle: "Clarity Golf Booking",
   },

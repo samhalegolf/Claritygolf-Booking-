@@ -1,5 +1,6 @@
 import { type Dispatch, type RefObject, type SetStateAction, useEffect, useRef, useState } from "react";
 import type { AuthStatus } from "../auth/authStatus";
+import { takePrefetchedCalendarState } from "./calendarStatePrefetch";
 import { t } from "../../lib/i18n";
 import { whenIdle } from "../../lib/idle";
 import {
@@ -757,7 +758,8 @@ export function useWorkspaceSync({
           waitingFor: "calendar_shell_state",
         },
       });
-      response = await fetch("/api/calendar-state", { headers: { Accept: "application/json" } });
+      // The first hydration usually finds this already in flight from boot.
+      response = await (takePrefetchedCalendarState() ?? fetch("/api/calendar-state", { headers: { Accept: "application/json" } }));
     } catch {
       finishDiagnosticTimer(timer, "failed", {
         errorCode: "SUPABASE_READ_FAILED",
