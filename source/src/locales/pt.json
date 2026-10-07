@@ -4540,5 +4540,11 @@
   "Pick two to plot on the same chart.": "Escolha dois para mostrar no mesmo gráfico.",
   "{count} of 2 picked.": "{count} de 2 escolhidos.",
   "Switch something on first, then choose its chart here.": "Ative primeiro algo e depois escolha aqui o respetivo gráfico.",
-  "Chart type": "Tipo de gráfico"
+  "Chart type": "Tipo de gráfico",
+  "time zones": "fusos horários",
+  "the saved frame": "o fotograma guardado",
+  "the billing dashboard": "o painel de faturação",
+  "the bay and room system": "o sistema de bays e salas",
+  "languages": "idiomas",
+  "country and region settings": "as definições de país e região"
 }

@@ -4540,5 +4540,11 @@
   "Pick two to plot on the same chart.": "Wybierz dwie pozycje do pokazania na jednym wykresie.",
   "{count} of 2 picked.": "Wybrano {count} z 2.",
   "Switch something on first, then choose its chart here.": "Najpierw coś włącz, a potem wybierz tutaj wykres.",
-  "Chart type": "Typ wykresu"
+  "Chart type": "Typ wykresu",
+  "time zones": "strefy czasowe",
+  "the saved frame": "zapisana klatka",
+  "the billing dashboard": "panel rozliczeń",
+  "the bay and room system": "system stanowisk i sal",
+  "languages": "języki",
+  "country and region settings": "ustawienia kraju i regionu"
 }

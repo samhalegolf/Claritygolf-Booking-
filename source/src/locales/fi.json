@@ -4540,5 +4540,11 @@
   "Pick two to plot on the same chart.": "Valitse kaksi samaan kaavioon.",
   "{count} of 2 picked.": "{count}/2 valittu.",
   "Switch something on first, then choose its chart here.": "Kytke ensin jotain päälle ja valitse sitten sen kaavio täältä.",
-  "Chart type": "Kaaviotyyppi"
+  "Chart type": "Kaaviotyyppi",
+  "time zones": "aikavyöhykkeet",
+  "the saved frame": "tallennettu kuva",
+  "the billing dashboard": "laskutuksen koontinäyttö",
+  "the bay and room system": "lyöntipaikka- ja huonejärjestelmä",
+  "languages": "kielet",
+  "country and region settings": "maa- ja alueasetukset"
 }

@@ -4540,5 +4540,11 @@
   "Pick two to plot on the same chart.": "Vælg to, der skal vises i samme diagram.",
   "{count} of 2 picked.": "{count} af 2 valgt.",
   "Switch something on first, then choose its chart here.": "Slå først noget til, og vælg derefter dets diagram her.",
-  "Chart type": "Diagramtype"
+  "Chart type": "Diagramtype",
+  "time zones": "tidszoner",
+  "the saved frame": "det gemte billede",
+  "the billing dashboard": "faktureringsoversigten",
+  "the bay and room system": "bås- og lokalesystemet",
+  "languages": "sprog",
+  "country and region settings": "land- og regionsindstillinger"
 }
