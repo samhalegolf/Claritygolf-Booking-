@@ -66,6 +66,12 @@ export type Service = {
   packageAllowance?: number;
   packageCoverageMode?: PackageCoverageMode;
   packageCoversServiceId?: string;
+  /** Pass types only: the services a pass of this type pays for. */
+  coversServiceIds?: string[];
+  /** Pass types only: pays for any service; coversServiceIds is then ignored. */
+  coversAllServices?: boolean;
+  /** Pass types only: months a pass stays spendable; 0 = never. Unset = 12. */
+  passExpiryMonths?: number;
   /** Packages only: purchased units may fund other eligible services by value. */
   crossRedeemable?: boolean;
   /** Services only: may be funded by value from a cross-redeemable pass. */
@@ -86,6 +92,24 @@ export type PendingServiceAction =
   | { serviceId: string; mode: "archive" }
   | { serviceId: string; mode: "delete" }
   | null;
+
+/**
+ * What a pass type covers, as a list. Older pass types hold one id in
+ * packageCoversServiceId; newer ones a list in coversServiceIds.
+ */
+export function passCoverageList(service?: Partial<Service> | null): string[] {
+  const raw =
+    Array.isArray(service?.coversServiceIds) && service.coversServiceIds.length
+      ? service.coversServiceIds
+      : [service?.packageCoversServiceId];
+  const seen = new Set<string>();
+  for (const entry of raw) {
+    const id = typeof entry === "string" ? entry.trim().slice(0, 120) : "";
+    if (id) seen.add(id);
+    if (seen.size >= 12) break;
+  }
+  return [...seen];
+}
 
 export function hasCustomGroupFlag(service?: Partial<Service> | null) {
   return service?.customGroup === true || service?.customGroupEnabled === true;
@@ -461,9 +485,12 @@ export function cleanService(service?: Partial<Service>, index = 0): Service {
     location: cleanEditableServiceText(service?.location, locationFallback, 160),
     packageAllowance: lessonFormat === "package" ? packageAllowance : undefined,
     packageCoverageMode: lessonFormat === "package" ? packageCoverageMode : undefined,
-    packageCoversServiceId:
-      lessonFormat === "package" && typeof service?.packageCoversServiceId === "string"
-        ? service.packageCoversServiceId.trim().slice(0, 120)
+    packageCoversServiceId: lessonFormat === "package" ? passCoverageList(service)[0] || undefined : undefined,
+    coversServiceIds: lessonFormat === "package" ? passCoverageList(service) : undefined,
+    coversAllServices: lessonFormat === "package" && service?.coversAllServices === true ? true : undefined,
+    passExpiryMonths:
+      lessonFormat === "package" && service?.passExpiryMonths !== undefined && Number.isFinite(Number(service.passExpiryMonths))
+        ? clamp(Math.round(Number(service.passExpiryMonths)), 0, 120)
         : undefined,
     crossRedeemable: lessonFormat === "package" ? service?.crossRedeemable === true : undefined,
     acceptsCrossRedemption:

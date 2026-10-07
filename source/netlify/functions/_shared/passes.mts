@@ -44,7 +44,9 @@ export type PassSource =
   | "stripe_subscription"
   | "promotion"
   /** A recurring pass topped up by a paid membership period -- see memberships.mts. */
-  | "membership";
+  | "membership"
+  /** Credits earned through a rewards programme -- see rewards.mts. */
+  | "reward";
 
 const PASS_SOURCES: PassSource[] = [
   "manual",
@@ -55,6 +57,7 @@ const PASS_SOURCES: PassSource[] = [
   "stripe_subscription",
   "promotion",
   "membership",
+  "reward",
 ];
 
 export type PassAllocationView = {
@@ -94,6 +97,8 @@ export type PassView = {
   name: string;
   templateServiceId: string | null;
   coversServiceIds: string[];
+  /** Pays for any service; coversServiceIds is then ignored. */
+  coversAllServices: boolean;
   crossRedeemable: boolean;
   flexibleValueCents: number;
   currency: string | null;
@@ -116,6 +121,8 @@ export type PassGrantInput = {
   name?: unknown;
   credits?: unknown;
   coversServiceIds?: unknown;
+  /** Site wide: the pass pays for any service. */
+  coversAllServices?: unknown;
   expiryMonths?: unknown;
   note?: unknown;
   /** Default true: fold into a compatible pass the person already holds. */
@@ -145,6 +152,10 @@ export type PassTemplate = {
   name: string;
   credits: number;
   coversServiceIds: string[];
+  /** Site wide: a pass of this type pays for any service. */
+  coversAllServices: boolean;
+  /** Months a pass of this type stays spendable; 0 = never expires; null = the default. */
+  expiryMonths: number | null;
   crossRedeemable: boolean;
   priceCents: number | null;
 };
@@ -194,6 +205,30 @@ export function cleanCredits(value: unknown, fallback = 0): number {
 }
 
 /**
+ * Whether a pass pays for a service.
+ *
+ * The one place that question is answered, so the checkout, the player portal
+ * and the reservation SQL cannot disagree. A site-wide pass covers anything; a
+ * scoped one covers exactly its list, and an empty list still covers nothing.
+ */
+export function passCoversService(
+  pass: { coversServiceIds: string[]; coversAllServices?: boolean },
+  serviceId: string,
+): boolean {
+  const wanted = cleanString(serviceId, "", 120);
+  if (!wanted) return false;
+  return pass.coversAllServices === true || pass.coversServiceIds.includes(wanted);
+}
+
+/** Months a pass type stays spendable: 0 = never, null = not set (use the default). */
+export function cleanExpiryMonths(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const months = Number(value);
+  if (!Number.isFinite(months)) return null;
+  return Math.max(0, Math.min(120, Math.round(months)));
+}
+
+/**
  * Read the pass templates out of the service catalogue.
  *
  * Services live in the settings blob, not a table, so this is the only place
@@ -219,6 +254,8 @@ export function passTemplatesFromServices(services: unknown): PassTemplate[] {
       name: cleanString(entry?.name, "", 180) || "Pass",
       credits: cleanCredits(entry?.packageAllowance, 5),
       coversServiceIds: covers.length ? covers : single ? [single] : [],
+      coversAllServices: entry?.coversAllServices === true,
+      expiryMonths: cleanExpiryMonths(entry?.passExpiryMonths),
       crossRedeemable: entry?.crossRedeemable === true,
       priceCents: Number.isFinite(Number(entry?.price))
         ? Math.max(0, Math.round(Number(entry.price) * 100))
@@ -438,10 +475,11 @@ export function planTenderRefund(
  * by the back door, silently widening or narrowing what the older credits buy.
  */
 export function isCompatiblePass(
-  pass: { templateServiceId: string | null; coversServiceIds: string[]; crossRedeemable?: boolean },
-  grant: { templateServiceId: string | null; coversServiceIds: string[]; crossRedeemable?: boolean },
+  pass: { templateServiceId: string | null; coversServiceIds: string[]; coversAllServices?: boolean; crossRedeemable?: boolean },
+  grant: { templateServiceId: string | null; coversServiceIds: string[]; coversAllServices?: boolean; crossRedeemable?: boolean },
 ): boolean {
   if (!pass.templateServiceId || pass.templateServiceId !== grant.templateServiceId) return false;
+  if (Boolean(pass.coversAllServices) !== Boolean(grant.coversAllServices)) return false;
   if (pass.coversServiceIds.length !== grant.coversServiceIds.length) return false;
   const held = new Set(pass.coversServiceIds);
   return (
@@ -455,6 +493,7 @@ export type NormalisedGrant = {
   name: string;
   templateServiceId: string | null;
   coversServiceIds: string[];
+  coversAllServices: boolean;
   credits: number;
   expiresAt: string | null;
   note: string;
@@ -492,7 +531,15 @@ export function normaliseGrant(input: PassGrantInput, templates: PassTemplate[])
   if (!name) fail("Give this pass a name.");
 
   const requestedCovers = idList(input?.coversServiceIds);
-  const coversServiceIds = requestedCovers.length ? requestedCovers : template?.coversServiceIds || [];
+  const coversAllServices =
+    input?.coversAllServices === undefined
+      ? !requestedCovers.length && template?.coversAllServices === true
+      : input.coversAllServices === true;
+  const coversServiceIds = coversAllServices
+    ? []
+    : requestedCovers.length
+      ? requestedCovers
+      : template?.coversServiceIds || [];
 
   const credits = cleanCredits(input?.credits, template?.credits || 0);
   if (!credits) fail("How many credits is this pass worth?");
@@ -512,16 +559,16 @@ export function normaliseGrant(input: PassGrantInput, templates: PassTemplate[])
     (coversServiceIds.length === 1 ? coversServiceIds[0] : "") ||
     null;
 
-  const months = Number(input?.expiryMonths);
-  const expiryMonths = Number.isFinite(months)
-    ? Math.max(0, Math.min(120, Math.round(months)))
-    : DEFAULT_EXPIRY_MONTHS;
+  // What the coach picked, then what the pass type says, then the default.
+  const expiryMonths =
+    cleanExpiryMonths(input?.expiryMonths) ?? template?.expiryMonths ?? DEFAULT_EXPIRY_MONTHS;
 
   return {
     personId,
     name,
     templateServiceId: template?.serviceId || null,
     coversServiceIds,
+    coversAllServices,
     credits,
     // 0 months means never. An unbounded liability is a real choice a coach can
     // make; it just should not be the one nobody picked.
@@ -601,6 +648,7 @@ function rowToPass(row: Record<string, unknown>): PassView {
     coversServiceIds: Array.isArray(row.covers_service_ids)
       ? (row.covers_service_ids as string[]).map(String)
       : [],
+    coversAllServices: row.covers_all_services === true,
     crossRedeemable: row.cross_redeemable === true,
     flexibleValueCents: Number(row.flexible_value_cents) || 0,
     currency: (row.value_currency as string) || null,
@@ -651,6 +699,7 @@ async function readPassesWhere(accountId: string, by: "person" | "pass", value: 
       p.note,
       p.issued_at,
       p.cross_redeemable,
+      p.covers_all_services,
       COALESCE((
         SELECT SUM(m.amount_cents)
         FROM public.pass_value_movements m
@@ -686,7 +735,7 @@ async function readPassesWhere(accountId: string, by: "person" | "pass", value: 
 async function readPassRow(accountId: string, passId: string) {
   const rows = await db().sql`
     SELECT id, person_id, template_service_id, covers_service_ids, status,
-           cross_redeemable
+           cross_redeemable, covers_all_services
     FROM public.passes
     WHERE id = ${passId} AND account_id = ${accountId}
     LIMIT 1
@@ -733,11 +782,11 @@ export async function grantPass(
            id, account_id, person_id, name, template_service_id, covers_service_ids,
            issued_at, expires_at, status, source, source_ref, allocation_mode,
            credits_per_period, rollover_policy, note, created_by, created_at, updated_at,
-           cross_redeemable
+           cross_redeemable, covers_all_services
          ) VALUES (
            $1, $2, NULLIF($3, ''), $4, $5, $6,
            NOW(), $7, 'active', $8, NULLIF($9, ''), 'one_off',
-           $10, 'rollover', $11, $12, NOW(), NOW(), $13
+           $10, 'rollover', $11, $12, NOW(), NOW(), $13, $14
          )`,
         [
           passId,
@@ -753,6 +802,7 @@ export async function grantPass(
           grant.note,
           actor.actorId,
           grant.crossRedeemable,
+          grant.coversAllServices,
         ],
       );
     }
@@ -924,6 +974,7 @@ export async function readUnassignedPasses(accountId: string): Promise<PassView[
       p.source,
       p.note,
       p.issued_at,
+      p.covers_all_services,
       COALESCE((
         SELECT json_agg(a ORDER BY a.expires_at NULLS LAST, a.available_from)
         FROM public.pass_allocation_balances a
@@ -963,6 +1014,7 @@ export async function readIssuedPasses(accountId: string): Promise<IssuedPassVie
       p.note,
       p.issued_at,
       p.cross_redeemable,
+      p.covers_all_services,
       COALESCE(pe.name, '') AS person_name,
       COALESCE((
         SELECT json_agg(a ORDER BY a.expires_at NULLS LAST, a.available_from)
@@ -1104,7 +1156,7 @@ export function passOptionsForService(
     (pass) =>
       pass.status === "active" &&
       pass.creditsAvailable > 0 &&
-      pass.coversServiceIds.includes(wanted),
+      passCoversService(pass, wanted),
   );
   const currency = cleanCurrency(value?.currency);
   const exchangeAllocations: ExchangeAllocation[] = passes.flatMap((pass) =>
@@ -1152,12 +1204,12 @@ export function passOptionsForService(
   return passes
     .filter((pass) => pass.status === "active" || pass.status === "exhausted")
     .map((pass) => {
-      const covered = Boolean(wanted) && pass.coversServiceIds.includes(wanted);
+      const covered = passCoversService(pass, wanted);
       const crossCovered = Boolean(
         !hasNativeEntitlement && !covered && pass.crossRedeemable && exchangePlan,
       );
       let reason = "";
-      if (!pass.coversServiceIds.length) reason = "No covered service set";
+      if (!pass.coversAllServices && !pass.coversServiceIds.length) reason = "No covered service set";
       else if (!covered && hasNativeEntitlement) reason = "A matching entitlement is used first";
       else if (!covered && !pass.crossRedeemable) reason = "Covers something else";
       else if (!covered && !value?.acceptsCrossRedemption) reason = "This service does not accept balance";
@@ -1330,6 +1382,8 @@ export type PlayerPassView = {
   status: PassView["status"];
   /** Service names, not ids -- the player has no catalogue to look ids up in. */
   covers: string[];
+  /** Pays for anything; `covers` is then empty. */
+  coversAllServices: boolean;
   issuedAt: string;
   /** Live redemptions only, newest first. A reversed one is a credit they got
    *  back, and showing it as spent would be a lie about their balance. */
@@ -1355,6 +1409,7 @@ export function playerPassView(pass: PassView, serviceNames: Map<string, string>
     covers: pass.coversServiceIds
       .map((id) => serviceNames.get(id) || "")
       .filter((name) => Boolean(name)),
+    coversAllServices: pass.coversAllServices,
     issuedAt: pass.issuedAt,
     history: pass.redemptions
       .filter((entry) => !entry.reversedAt)
@@ -1548,7 +1603,13 @@ export async function reserveCrossRedemption(input: {
        FROM public.pass_balances b
        WHERE b.account_id = $1
          AND b.person_id = $2
-         AND $3 = ANY(b.covers_service_ids)
+         AND (
+           $3 = ANY(b.covers_service_ids)
+           OR EXISTS (
+             SELECT 1 FROM public.passes wide
+             WHERE wide.id = b.pass_id AND wide.account_id = b.account_id AND wide.covers_all_services
+           )
+         )
          AND b.effective_status = 'active'
          AND b.credits_available > 0
        LIMIT 1`,
@@ -1701,7 +1762,7 @@ export async function reservePassForService(input: {
   actorId?: string;
 }): Promise<ReservedPassPayment> {
   const rows = await db().sql`
-    SELECT covers_service_ids
+    SELECT covers_service_ids, covers_all_services
     FROM public.passes
     WHERE id = ${cleanString(input.passId, "", 120)}
       AND account_id = ${cleanString(input.accountId, "", 120)}
@@ -1712,7 +1773,7 @@ export async function reservePassForService(input: {
   const covers = Array.isArray(pass.covers_service_ids)
     ? (pass.covers_service_ids as unknown[]).map(String)
     : [];
-  if (covers.includes(cleanString(input.serviceId, "", 120))) {
+  if (passCoversService({ coversServiceIds: covers, coversAllServices: pass.covers_all_services === true }, input.serviceId)) {
     return {
       kind: "native",
       ...(await reservePassCredit({
@@ -1997,6 +2058,42 @@ export async function addPassCredits(input: {
     fail("Credits can only be added to a pass that is still active.", 409, "pass_not_active");
   }
   return { allocationId };
+}
+
+/**
+ * Change what one pass pays for.
+ *
+ * Coverage is snapshotted at issue so that editing a pass type never re-scopes
+ * passes already in people's hands behind the coach's back. This is the
+ * deliberate, one-pass version of that: the coach is looking at it and says
+ * "this one covers the 30-minute lesson too", or "this one is good for
+ * anything". Credits already spent are untouched -- only what the remaining
+ * ones can buy moves.
+ */
+export async function updatePassCoverage(input: {
+  accountId: string;
+  passId: string;
+  coversAllServices: unknown;
+  coversServiceIds: unknown;
+}): Promise<{ personId: string | null }> {
+  const accountId = cleanString(input.accountId, "", 120);
+  const passId = cleanString(input.passId, "", 120);
+  if (!accountId) fail("No account.", 403, "forbidden");
+  if (!passId) fail("Which pass?");
+  const all = input.coversAllServices === true;
+  const ids = all ? [] : idList(input.coversServiceIds);
+  if (!all && !ids.length) fail("Choose at least one service, or let it cover everything.", 400, "coverage_required");
+  const rows = await db().sql`
+    UPDATE public.passes
+    SET covers_all_services = ${all},
+        covers_service_ids = ${ids},
+        updated_at = NOW()
+    WHERE id = ${passId} AND account_id = ${accountId} AND status <> 'void'
+    RETURNING person_id
+  `;
+  const row = (rows as Record<string, unknown>[])[0];
+  if (!row) fail("That pass was not found, or it has been voided.", 404, "not_found");
+  return { personId: (row.person_id as string) || null };
 }
 
 export async function reversePassRedemption(

@@ -21,8 +21,10 @@ export type MembershipEntitlement = {
   /** Stable within the plan; part of the pass's source_ref. */
   id: string;
   name: string;
-  /** Services the credits may be spent on. */
+  /** Services the credits may be spent on. Empty when allServices. */
   serviceIds: string[];
+  /** Site wide: the credits pay for any service. */
+  allServices?: boolean;
   /** Credits granted for each paid period. */
   credits: number;
   rollover: RolloverPolicy;
@@ -107,10 +109,13 @@ export function normaliseEntitlements(value: unknown, knownServiceIds?: Set<stri
     while (seen.has(id)) id = `${id}x`;
     seen.add(id);
 
-    const serviceIds = Array.isArray(entry.serviceIds)
-      ? [...new Set(entry.serviceIds.map((sid) => cleanString(sid, "", 120)).filter(Boolean))].slice(0, 12)
-      : [];
-    if (!serviceIds.length) fail("Each entitlement needs at least one lesson type it can be spent on.");
+    const allServices = entry.allServices === true;
+    const serviceIds = allServices
+      ? []
+      : Array.isArray(entry.serviceIds)
+        ? [...new Set(entry.serviceIds.map((sid) => cleanString(sid, "", 120)).filter(Boolean))].slice(0, 12)
+        : [];
+    if (!allServices && !serviceIds.length) fail("Each entitlement needs at least one lesson type it can be spent on.");
     if (knownServiceIds) {
       const missing = serviceIds.find((sid) => !knownServiceIds.has(sid));
       if (missing) fail("An entitlement covers a lesson type that no longer exists.");
@@ -129,6 +134,7 @@ export function normaliseEntitlements(value: unknown, knownServiceIds?: Set<stri
       id,
       name: cleanString(entry.name, "", 120),
       serviceIds,
+      ...(allServices ? { allServices: true } : {}),
       credits,
       rollover,
       maxBalance,

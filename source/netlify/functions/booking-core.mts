@@ -73,6 +73,7 @@ import {
   readUnassignedPasses,
   redeemPassManually,
   addPassCredits,
+  updatePassCoverage,
   resolveInboxPassValue,
   reserveFlexibleValueForPurchase,
   reversePassRedemption,
@@ -11945,6 +11946,22 @@ async function readPassInbox(accountId: string, services) {
         actorId: requestContext.userId || requestContext.user?.email || "",
       });
       return json({ passes: await readPassesForPerson(requestContext.accountId, personId) });
+    }
+
+    // Widen or narrow what one pass pays for -- "this one covers the 30 too",
+    // or "this one is good for anything".
+    if (req.method === "POST" && pathname === "/api/passes/coverage") {
+      const body = await parseBody(req);
+      const state = await readSettingsState(await currentAccountId(req));
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountFeature(requestContext.account, "clients");
+      const { personId } = await updatePassCoverage({
+        accountId: requestContext.accountId,
+        passId: cleanString(body?.passId, "", 120),
+        coversAllServices: body?.coversAllServices === true,
+        coversServiceIds: body?.coversServiceIds,
+      });
+      return json({ passes: personId ? await readPassesForPerson(requestContext.accountId, personId) : [] });
     }
 
     if (req.method === "POST" && pathname === "/api/passes/redeem/reverse") {

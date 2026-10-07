@@ -48,6 +48,7 @@ test("the coach's private fields do not cross into the player's view", () => {
   const keys = Object.keys(view).sort();
   assert.deepEqual(keys, [
     "covers",
+    "coversAllServices",
     "creditsAllocated",
     "creditsAvailable",
     "creditsRedeemed",

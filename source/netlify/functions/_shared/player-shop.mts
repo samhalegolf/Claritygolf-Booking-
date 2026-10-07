@@ -36,6 +36,8 @@ export type PlayerShopItem = {
   credits: number;
   /** Service ids the resulting credits may be spent on. */
   coversServiceIds: string[];
+  /** Site wide: the credits pay for any service, and coversServiceIds is empty. */
+  coversAllServices: boolean;
   kind: "package" | "video-review";
   crossRedeemable: boolean;
 };
@@ -72,19 +74,22 @@ export function playerShopItems(services: unknown, currency: string): PlayerShop
 
     const covers = idList(entry?.coversServiceIds);
     const single = text(entry?.packageCoversServiceId, 120);
+    const coversAllServices = format === "package" && entry?.coversAllServices === true;
     const coversServiceIds =
       format === "video-review"
         ? [serviceId]
-        : covers.length
-          ? covers
-          : single
-            ? [single]
-            : [];
+        : coversAllServices
+          ? []
+          : covers.length
+            ? covers
+            : single
+              ? [single]
+              : [];
 
     // A package covering nothing can never be spent. Selling it would take
     // money for a credit with nowhere to go, so it is left off the shelf
     // rather than sold and argued about later.
-    if (!coversServiceIds.length) continue;
+    if (!coversAllServices && !coversServiceIds.length) continue;
 
     const credits =
       format === "video-review"
@@ -99,6 +104,7 @@ export function playerShopItems(services: unknown, currency: string): PlayerShop
       currency: text(currency, 10) || "NZD",
       credits,
       coversServiceIds,
+      coversAllServices,
       kind: format === "video-review" ? "video-review" : "package",
       crossRedeemable: entry?.crossRedeemable === true,
     });
