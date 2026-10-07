@@ -1662,6 +1662,62 @@
   color: var(--text);
 }
 
+/* The pass balance on a client profile: the number large enough to read across
+   a counter, and the whole card a way into the Passes tab to change it. */
+.client-pass-balance {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--c-space-2);
+  width: 100%;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
+  color: var(--c-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.client-pass-balance:hover {
+  border-color: var(--c-accent);
+}
+
+.client-pass-balance-count {
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.client-pass-balance.is-empty .client-pass-balance-count {
+  color: var(--c-muted);
+}
+
+.client-pass-balance-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.client-pass-balance-text strong {
+  font-size: 13px;
+}
+
+.client-pass-balance-text span {
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+}
+
+.client-pass-balance-action {
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+  font-weight: 600;
+  text-decoration: underline;
+}
+
 .client-profile-tabs {
   display: grid;
   gap: 12px;
@@ -1812,6 +1868,82 @@
   border: 1px solid var(--c-border);
   border-radius: var(--c-radius-card);
   background: var(--c-surface-soft);
+}
+
+/* Total spendable credits across the person's passes, above the list. */
+.pass-panel .pass-balance-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--c-space-2);
+  padding: var(--c-space-2) var(--c-space-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+}
+
+.pass-panel .pass-balance-summary > div {
+  display: grid;
+  gap: 2px;
+}
+
+.pass-panel .pass-balance-summary strong {
+  font-size: 15px;
+}
+
+.pass-panel .pass-balance-summary span {
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+}
+
+.pass-panel .pass-balance-summary.is-empty strong {
+  color: var(--c-muted);
+}
+
+/* Add / Remove in the adjust-balance form: one choice, two halves. */
+.pass-panel .pass-adjust-toggle {
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  max-width: 320px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  overflow: hidden;
+}
+
+.pass-panel .pass-adjust-toggle button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: var(--c-h-control);
+  padding: 0 var(--c-space-2);
+  border: 0;
+  background: var(--c-surface);
+  color: var(--c-text);
+  font: inherit;
+  font-size: var(--c-size-meta);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pass-panel .pass-adjust-toggle button + button {
+  border-left: 1px solid var(--c-border);
+}
+
+.pass-panel .pass-adjust-toggle button.active {
+  background: var(--c-accent);
+  color: var(--c-accent-text);
+}
+
+.pass-panel .pass-adjust-toggle button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.pass-panel .pass-adjust-preview {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--c-text-soft);
+  font-size: var(--c-size-meta);
+  font-variant-numeric: tabular-nums;
 }
 
 .pass-grant-form .pass-panel-actions {
@@ -12184,6 +12316,51 @@
   border-color: var(--c-accent);
   background: var(--c-accent);
   color: var(--c-accent-text);
+}
+
+.pos-method-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* The Pass method carries the customer's spendable credits on its corner. */
+.pos-method-pass {
+  position: relative;
+}
+
+.pos-method-pass-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pos-method-badge {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border: 2px solid var(--c-surface);
+  border-radius: 999px;
+  background: var(--c-accent);
+  color: var(--c-accent-text);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.pos-method-pass.active .pos-method-badge {
+  background: var(--c-surface);
+  color: var(--c-accent);
+  border-color: var(--c-accent);
+}
+
+.pos-method-badge.is-empty {
+  background: var(--c-border);
+  color: var(--c-text);
 }
 
 .pos-method-tag {

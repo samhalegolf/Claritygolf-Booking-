@@ -1,11 +1,12 @@
 import { ArrowLeft, Check, ExternalLink, GitMerge, Phone, Plus, Trash2, X } from "lucide-react";
 import { Suspense, useRef } from "react";
-import { t, tn } from "../../lib/i18n";
+import { readerLocale, t, tn } from "../../lib/i18n";
 import { formatMoney } from "../../lib/money";
 import { posMethodLabel } from "../billing/terminal";
 import { buildWeekDays, formatRange, itemService, itemWeek } from "../calendar/calendarModel";
 import { notificationKindLabel, notificationStatusLabel, notificationTimeLabel } from "../notifications/notificationModel";
 import { PassesPanel, PersonMemberships } from "../passes/lazyPanels";
+import { passBalanceSummary } from "../passes/passBalance";
 import { usePhoneLayout } from "../phone/phoneLayout";
 import { PhoneStepSwipe } from "../phone/PhoneStepSwipe";
 import {
@@ -59,6 +60,7 @@ export function ClientProfileView({ clientProfile }: { clientProfile: ClientProf
     grantClientPass,
     voidClientPass,
     redeemClientPassCredit,
+    addClientPassCredits,
     returnClientPassCredit,
     selectedClientId,
     selectedClientNotifications,
@@ -86,6 +88,12 @@ export function ClientProfileView({ clientProfile }: { clientProfile: ClientProf
   // underneath (the phone's back rule, see PhoneStepSwipe).
   const phoneLayout = usePhoneLayout();
   const panelRef = useRef<HTMLElement>(null);
+  // The pass balance up top, so "how many has she got left" is answered on
+  // opening the profile rather than two clicks in. A booking contact that was
+  // never saved as a client cannot hold a pass, so it gets no card at all.
+  const showPassBalance =
+    Boolean(selectedClient) && !selectedClient?.id.startsWith("appointment-") && clientPassesLoadState === "loaded";
+  const passBalance = passBalanceSummary(clientPasses);
 
   return (
     <div className="details-overlay client-profile-overlay" role="presentation" onPointerDown={closeClientModal}>
@@ -193,6 +201,35 @@ export function ClientProfileView({ clientProfile }: { clientProfile: ClientProf
                 </div>
               )}
             </div>
+            {showPassBalance && (
+              <button
+                type="button"
+                className={`client-pass-balance${passBalance.credits ? "" : " is-empty"}`}
+                onClick={() => setClientProfileTab("passes")}
+                aria-label={t("Pass balance: {count} credits. Open passes", { count: passBalance.credits })}
+              >
+                <ClarityPassesCredits size={20} />
+                <span className="client-pass-balance-count">{passBalance.credits}</span>
+                <span className="client-pass-balance-text">
+                  <strong>{passBalance.credits === 1 ? t("Pass credit available") : t("Pass credits available")}</strong>
+                  <span>
+                    {passBalance.livePasses
+                      ? tn(passBalance.livePasses, "On {count} active pass", "Across {count} active passes") +
+                        (passBalance.nextExpiry
+                          ? t(" · next expiry {date}", {
+                              date: new Date(passBalance.nextExpiry).toLocaleDateString(readerLocale(), {
+                                day: "numeric",
+                                month: "short",
+                                year: "numeric",
+                              }),
+                            })
+                          : "")
+                      : t("No active passes")}
+                  </span>
+                </span>
+                <span className="client-pass-balance-action">{t("Adjust")}</span>
+              </button>
+            )}
             {selectedClient && profileNotesText(selectedClient) && (
               <div className="client-profile-note-block">
                 <strong>{t("Profile notes")}</strong>
@@ -378,6 +415,7 @@ export function ClientProfileView({ clientProfile }: { clientProfile: ClientProf
                       onRedeem={(passId, credits, note) =>
                         void redeemClientPassCredit(passId, credits, note)
                       }
+                      onAddCredits={(passId, credits, note) => void addClientPassCredits(passId, credits, note)}
                       onReturnCredit={(redemptionId) => void returnClientPassCredit(redemptionId)}
                       onRetry={() => selectedClientId && void fetchClientPasses(selectedClientId)}
                       serviceName={(serviceId) =>

@@ -72,6 +72,7 @@ import {
   readPassesForPerson,
   readUnassignedPasses,
   redeemPassManually,
+  addPassCredits,
   resolveInboxPassValue,
   reserveFlexibleValueForPurchase,
   reversePassRedemption,
@@ -11338,7 +11339,9 @@ async function routeBookingApiRequest(
       // asking "can this person pay with a pass", and answering it with three
       // hundred invoice lines would put a billing query on the booking path
       // for a screen that never shows them.
-      const invoiced = url.searchParams.get("serviceId")
+      // `balance=1` is the checkout asking only for the count on its Pass
+      // button when no lesson is on the sale, so it skips them too.
+      const invoiced = url.searchParams.get("serviceId") || url.searchParams.get("balance")
         ? { invoicedLines: [], unmatchedInvoicedLines: [] }
         : await readInvoicedLessonsForPerson(requestContext.accountId, personId, passes);
       // A checkout asks about one service, and whether a pass covers it is the
@@ -11917,6 +11920,24 @@ async function readPassInbox(accountId: string, services) {
       assertAccountFeature(requestContext.account, "clients");
       const personId = cleanString(body?.personId, "", 160);
       await redeemPassManually({
+        accountId: requestContext.accountId,
+        passId: cleanString(body?.passId, "", 120),
+        credits: Number(body?.credits) || 1,
+        note: cleanString(body?.note, "", 300),
+        actorId: requestContext.userId || requestContext.user?.email || "",
+      });
+      return json({ passes: await readPassesForPerson(requestContext.accountId, personId) });
+    }
+
+    // The other direction of a manual adjustment: credits added to a pass the
+    // coach is looking at, with the reason on the ledger beside them.
+    if (req.method === "POST" && pathname === "/api/passes/add-credits") {
+      const body = await parseBody(req);
+      const state = await readSettingsState(await currentAccountId(req));
+      const requestContext = await resolveBackendRequestContext(req, state);
+      assertAccountFeature(requestContext.account, "clients");
+      const personId = cleanString(body?.personId, "", 160);
+      await addPassCredits({
         accountId: requestContext.accountId,
         passId: cleanString(body?.passId, "", 120),
         credits: Number(body?.credits) || 1,

@@ -12,6 +12,7 @@ import { ClarityBookingPages, ClarityPassesCredits } from "../shared/ClarityIcon
 
 import { Loading } from "../shared/Loading";
 import { invoicedSessions } from "./invoicedSessions";
+import { passBalanceSummary } from "./passBalance";
 import { t, tn, readerLocale } from "../../lib/i18n";
 
 export type PassAllocation = {
@@ -120,6 +121,8 @@ export type PassesPanelProps = {
   onGrant: (grant: PassGrant) => void;
   onVoid: (pass: Pass) => void;
   onRedeem: (passId: string, credits: number, note: string) => void;
+  /** Credits added by hand to a pass that is still running. */
+  onAddCredits: (passId: string, credits: number, note: string) => void;
   onReturnCredit: (redemptionId: string) => void;
   onRetry: () => void;
   /** Turns a covered service id into something a person would recognise. */
@@ -146,6 +149,11 @@ function statusLabel(pass: Pass) {
   if (pass.status === "scheduled") return t("Not started yet");
   if (pass.status === "exhausted") return t("All used");
   return t("{available} of {allocated} left", { available: pass.creditsAvailable, allocated: pass.creditsAllocated });
+}
+
+/** A pass whose count can still be moved by hand: not void, not past its date. */
+function adjustable(pass: Pass) {
+  return pass.status === "active" || pass.status === "exhausted";
 }
 
 function creditCount(count: number) {
@@ -244,12 +252,14 @@ export function PassesPanel({
   onGrant,
   onVoid,
   onRedeem,
+  onAddCredits,
   onReturnCredit,
   onRetry,
   serviceName,
 }: PassesPanelProps) {
-  /** Which pass has its "use a credit" form open, and what is typed into it. */
+  /** Which pass has its "adjust balance" form open, and what is typed into it. */
   const [redeemingPassId, setRedeemingPassId] = useState("");
+  const [adjustDirection, setAdjustDirection] = useState<"add" | "remove">("remove");
   const [redeemNote, setRedeemNote] = useState("");
   const [redeemCredits, setRedeemCredits] = useState("1");
   /** Invoiced lines that matched nothing, shut by default. */
@@ -302,13 +312,16 @@ export function PassesPanel({
     setRedeemCredits("1");
   }
 
-  function submitRedeem(passId: string) {
+  function submitAdjust(passId: string) {
     const credits = Math.max(1, Math.round(Number(redeemCredits) || 1));
     const note = redeemNote.trim();
     if (!note) return;
-    onRedeem(passId, credits, note);
+    if (adjustDirection === "add") onAddCredits(passId, credits, note);
+    else onRedeem(passId, credits, note);
     closeRedeem();
   }
+
+  const balance = passBalanceSummary(passes);
   const [formOpen, setFormOpen] = useState(false);
   const [templateId, setTemplateId] = useState("");
   const [name, setName] = useState("");
@@ -366,6 +379,20 @@ export function PassesPanel({
 
   return (
     <div className="pass-panel">
+      {loadState === "loaded" && (
+        <div className={`pass-balance-summary${balance.credits ? "" : " is-empty"}`}>
+          <ClarityPassesCredits size={20} />
+          <div>
+            <strong>{balance.credits === 1 ? t("1 credit available") : t("{count} credits available", { count: balance.credits })}</strong>
+            <span>
+              {balance.livePasses
+                ? tn(balance.livePasses, "On {count} active pass", "Across {count} active passes") +
+                  (balance.nextExpiry ? t(" · next expiry {date}", { date: dateLabel(balance.nextExpiry) }) : "")
+                : t("No active passes")}
+            </span>
+          </div>
+        </div>
+      )}
       {!formOpen && (
         <div className="pass-panel-actions">
           <button className="outline-button" type="button" onClick={() => setFormOpen(true)}>
@@ -514,34 +541,73 @@ export function PassesPanel({
                     The reason is required, not optional: a credit that
                     vanished with no lesson and no explanation is what gets
                     argued about at a counter months later. */}
-                {spendable &&
+                {adjustable(pass) &&
                   (redeemingPassId === pass.id ? (
                     <div className="pass-redeem-form">
+                      <div className="pass-field pass-field-wide">
+                        <span>{t("Adjust balance")}</span>
+                        <div className="pass-adjust-toggle" role="radiogroup" aria-label={t("Add or remove credits")}>
+                          <button
+                            type="button"
+                            role="radio"
+                            aria-checked={adjustDirection === "add"}
+                            className={adjustDirection === "add" ? "active" : ""}
+                            onClick={() => setAdjustDirection("add")}
+                          >
+                            <Plus size={14} />{t("Add credits")}</button>
+                          <button
+                            type="button"
+                            role="radio"
+                            aria-checked={adjustDirection === "remove"}
+                            className={adjustDirection === "remove" ? "active" : ""}
+                            disabled={pass.creditsAvailable < 1}
+                            onClick={() => setAdjustDirection("remove")}
+                          >
+                            <MinusCircle size={14} />{t("Remove credits")}</button>
+                        </div>
+                      </div>
                       <label className="pass-field">
                         <span>{t("Credits")}</span>
                         <input
                           type="number"
                           min={1}
-                          max={pass.creditsAvailable || 1}
+                          max={adjustDirection === "remove" ? pass.creditsAvailable || 1 : 100}
                           value={redeemCredits}
                           onChange={(event) => setRedeemCredits(event.target.value)}
                         />
                       </label>
                       <label className="pass-field pass-field-wide">
-                        <span>{t("What for")}</span>
+                        <span>{adjustDirection === "add" ? t("Reason") : t("What for")}</span>
                         <input
                           value={redeemNote}
                           onChange={(event) => setRedeemNote(event.target.value)}
-                          placeholder={t("Lesson on the 4th, never booked in")}
+                          placeholder={
+                            adjustDirection === "add"
+                              ? t("Comped after the rained-out session")
+                              : t("Lesson on the 4th, never booked in")
+                          }
                         />
                       </label>
+                      <p className="pass-adjust-preview">
+                        {(() => {
+                          const step = Math.max(1, Math.round(Number(redeemCredits) || 1));
+                          const after = adjustDirection === "add"
+                            ? pass.creditsAvailable + step
+                            : Math.max(0, pass.creditsAvailable - step);
+                          return t("{before} → {after} left on this pass", { before: pass.creditsAvailable, after });
+                        })()}
+                      </p>
                       <div className="pass-panel-actions">
                         <button
                           className="primary-button"
                           type="button"
-                          disabled={!redeemNote.trim()}
-                          onClick={() => submitRedeem(pass.id)}
-                        >{t("Use credit")}</button>
+                          disabled={
+                            !redeemNote.trim() ||
+                            (adjustDirection === "remove" &&
+                              Math.max(1, Math.round(Number(redeemCredits) || 1)) > pass.creditsAvailable)
+                          }
+                          onClick={() => submitAdjust(pass.id)}
+                        >{adjustDirection === "add" ? t("Add credits") : t("Remove credits")}</button>
                         <button className="outline-button" type="button" onClick={closeRedeem}>{t("Cancel")}</button>
                       </div>
                     </div>
@@ -553,9 +619,10 @@ export function PassesPanel({
                         setRedeemingPassId(pass.id);
                         setRedeemNote("");
                         setRedeemCredits("1");
+                        setAdjustDirection(pass.creditsAvailable > 0 ? "remove" : "add");
                       }}
                     >
-                      <MinusCircle size={14} />{" "}{t("Use a credit without a booking")}</button>
+                      <ClarityPassesCredits size={14} />{" "}{t("Adjust balance")}</button>
                   ))}
 
                 {/* What they were billed for, beside what they hold.

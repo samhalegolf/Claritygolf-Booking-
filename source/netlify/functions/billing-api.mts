@@ -3244,6 +3244,22 @@ function cleanPaymentMethodPayload(raw: Record<string, unknown>) {
 }
 
 export async function listPaymentMethods(accountId: string) {
+  const [paymentMethods, stripeConnection] = await Promise.all([
+    listPaymentMethodRows(accountId),
+    accountStripeConnection(accountId),
+  ]);
+  return {
+    paymentMethods,
+    // The Clarity Pay row is seeded for every account whether or not Stripe is
+    // wired up, so its presence proves nothing. This is the real answer, and it
+    // is what decides whether "Include payment link" arrives ticked.
+    clarityPayConfigured: stripeCredentialStatus(stripeConnection).configured,
+  };
+}
+
+// The methods alone. Recording a sale only needs to find the one it was paid
+// by, so it skips the Stripe settings read the list screen needs.
+async function listPaymentMethodRows(accountId: string) {
   let rows = await supabase("billing_payment_methods", {
     query: `select=*&account_id=eq.${encodeFilter(accountId)}&order=sort_order.asc,name.asc`,
   });
@@ -3270,13 +3286,7 @@ export async function listPaymentMethods(accountId: string) {
   }
   rows = await ensurePassPaymentMethod(accountId, rows);
   rows = await ensureCouponPaymentMethod(accountId, rows);
-  return {
-    paymentMethods: rows.map(paymentMethodRowToApi),
-    // The Clarity Pay row is seeded for every account whether or not Stripe is
-    // wired up, so its presence proves nothing. This is the real answer, and it
-    // is what decides whether "Include payment link" arrives ticked.
-    clarityPayConfigured: stripeCredentialStatus(await accountStripeConnection(accountId)).configured,
-  };
+  return rows.map(paymentMethodRowToApi);
 }
 
 async function createPaymentMethod(accountId: string, body: Record<string, unknown>) {
@@ -3516,8 +3526,19 @@ async function insertPosItems(accountId: string, transactionId: string, items: R
 // flag is flipped with a conditional PATCH (`stock_applied=is.false`), so two
 // requests arriving together produce one winner - the loser gets no rows back
 // and does nothing.
-async function movePosStock(accountId: string, transactionId: string, direction: "apply" | "reverse") {
+type StockLine = { productId: string; quantity: number };
+
+async function movePosStock(
+  accountId: string,
+  transactionId: string,
+  direction: "apply" | "reverse",
+  knownItems?: StockLine[],
+) {
   const applying = direction === "apply";
+  // A sale of lessons only (or no basket at all, which is every Eftpos lesson
+  // checkout) has nothing on a shelf, so there is no flag worth claiming and no
+  // second read of items the caller already holds.
+  if (knownItems && !knownItems.some(stockMovable)) return;
   const claimed = await supabase("billing_pos_transactions", {
     method: "PATCH",
     query:
@@ -3528,12 +3549,9 @@ async function movePosStock(accountId: string, transactionId: string, direction:
   });
   if (!claimed.length) return;
 
-  const items = (await posItemsForTransactions(accountId, [transactionId]))[transactionId] || [];
+  const items = knownItems || (await posItemsForTransactions(accountId, [transactionId]))[transactionId] || [];
   for (const item of items) {
-    if (!item.productId || !item.quantity) continue;
-    // A lesson has no shelf. The RPC would return null for it anyway, but
-    // asking is a round-trip per lesson line on every sale.
-    if (item.productId.startsWith(LESSON_ITEM_PREFIX)) continue;
+    if (!stockMovable(item)) continue;
     const delta = applying ? -item.quantity : item.quantity;
     try {
       // Returns null when the product stopped tracking stock (or was deleted),
@@ -3554,8 +3572,14 @@ async function movePosStock(accountId: string, transactionId: string, direction:
   }
 }
 
-async function syncPosStock(accountId: string, transactionId: string, status: string) {
-  await movePosStock(accountId, transactionId, status === "paid" ? "apply" : "reverse");
+// A lesson has no shelf. The RPC would return null for it anyway, but asking is
+// a round-trip per lesson line on every sale.
+function stockMovable(item: StockLine) {
+  return Boolean(item.productId && item.quantity) && !item.productId.startsWith(LESSON_ITEM_PREFIX);
+}
+
+async function syncPosStock(accountId: string, transactionId: string, status: string, knownItems?: StockLine[]) {
+  await movePosStock(accountId, transactionId, status === "paid" ? "apply" : "reverse", knownItems);
 }
 
 async function listPosTransactions(accountId: string, url: URL) {
@@ -3749,19 +3773,29 @@ async function syncPosCoupon(accountId: string, row: Record<string, unknown>, st
 }
 
 export async function createPosTransaction(accountId: string, body: Record<string, unknown>) {
+  // Everything here depends only on the account and the request, so it is read
+  // in one go rather than one after another: at ~200 ms a round trip, the
+  // serial version was most of why recording an Eftpos sale took two seconds.
+  //
   // Prices come back off the product rows, not the request body, so a basket
-  // can't be re-priced by whoever is holding the till's browser open.
-  const items = await resolvePosItems(accountId, body?.items);
+  // can't be re-priced by whoever is holding the till's browser open. The
+  // account's selected invoice currency is authoritative for both the receipt
+  // and any value lot issued from it -- the browser does not get to relabel a
+  // purchase into another currency. The receipt number is read before anything
+  // is reserved; another till taking it first is the 409 retry below.
+  const [items, accountCurrency, methods, firstReceipt, customerId] = await Promise.all([
+    resolvePosItems(accountId, body?.items),
+    resolveDefaultCurrency(accountId),
+    listPaymentMethodRows(accountId),
+    nextReceiptNumber(accountId),
+    cleanString(body?.customerId, "", 160) || resolveCustomerIdByEmail(accountId, body?.customerEmail),
+  ]);
   const itemsTotal = round2(items.reduce((total, item) => total + item.lineTotal, 0));
 
   // An explicit amount still wins - that is how a discount at the counter is
   // given - but a basket no longer needs one typed in.
   const requestedAmount = round2(cleanNumber(body?.amount, 0, { min: 0 }));
   const amount = requestedAmount > 0 ? requestedAmount : itemsTotal;
-  // The account's selected invoice currency is authoritative for both the
-  // receipt and any value lot issued from it. The browser does not get to
-  // relabel a purchase into another currency.
-  const accountCurrency = await resolveDefaultCurrency(accountId);
 
   const description =
     cleanString(body?.description, "", 300) ||
@@ -3769,7 +3803,6 @@ export async function createPosTransaction(accountId: string, body: Record<strin
   if (!description) throw Object.assign(new Error("A description is required."), { status: 400 });
 
   const methodId = cleanString(body?.paymentMethodId, "", 160);
-  const methods = (await listPaymentMethods(accountId)).paymentMethods;
   const method = methods.find((entry) => entry.id === methodId);
   if (!method) throw Object.assign(new Error("Choose a payment method."), { status: 400 });
   if (!method.active) throw Object.assign(new Error(`${method.name} is no longer available.`), { status: 400 });
@@ -3861,7 +3894,7 @@ export async function createPosTransaction(accountId: string, body: Record<strin
   const row = {
     id: randomUUID(),
     account_id: accountId,
-    receipt_number: (await nextReceiptNumber(accountId)).receiptNumber,
+    receipt_number: firstReceipt.receiptNumber,
     status,
     coupon_id: couponId || null,
     coupon_amount: couponAmount,
@@ -3883,8 +3916,7 @@ export async function createPosTransaction(accountId: string, body: Record<strin
           : null
         : round2(cleanNumber(listedAmountRaw, 0, { min: 0 })),
     currency: accountCurrency,
-    customer_id: cleanString(body?.customerId, "", 160)
-      || await resolveCustomerIdByEmail(accountId, body?.customerEmail),
+    customer_id: customerId,
     customer_name: cleanString(body?.customerName, "", 140) || null,
     customer_email: cleanString(body?.customerEmail, "", 180) || null,
     booking_id: bookingIds[0] || null,
@@ -3963,7 +3995,7 @@ export async function createPosTransaction(accountId: string, body: Record<strin
   // the shelf and the passes are issued now. Clarity Pay and On account wait
   // for their status change: a pending Clarity Pay payment is not a purchase,
   // and credits handed out before it clears are credits handed out for nothing.
-  const { issuedPasses } = status === "paid" ? await applyPosPaidEffects(accountId, row) : { issuedPasses: [] };
+  const { issuedPasses } = status === "paid" ? await applyPosPaidEffects(accountId, row, items) : { issuedPasses: [] };
 
   return {
     issuedCoupons,
@@ -4202,11 +4234,17 @@ export async function emailPosReceipt(accountId: string, id: string, body: Recor
 // around them. Every effect here is idempotent on its own, so a retry finishes
 // whatever an interrupted call left undone.
 
-async function applyPosPaidEffects(accountId: string, row: Record<string, unknown>) {
+// `knownItems` is the basket the caller just wrote, when it has one -- recording
+// a sale does -- so the items are not read straight back from the database.
+async function applyPosPaidEffects(
+  accountId: string,
+  row: Record<string, unknown>,
+  knownItems?: Array<StockLine & { lineTotal?: number }>,
+) {
   const id = String(row.id ?? "");
-  await syncPosStock(accountId, id, "paid");
+  const items = knownItems || (await posItemsForTransactions(accountId, [id]))[id] || [];
+  await syncPosStock(accountId, id, "paid", items);
   await syncPosCoupon(accountId, row, "paid");
-  const items = (await posItemsForTransactions(accountId, [id]))[id] || [];
   return { issuedPasses: await issuePassesForPosSale(accountId, row, items) };
 }
 
