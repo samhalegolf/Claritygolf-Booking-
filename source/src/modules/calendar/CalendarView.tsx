@@ -1,5 +1,5 @@
 import { GripVertical, Minimize2, X } from "lucide-react";
-import type { CSSProperties } from "react";
+import { type CSSProperties, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { formatDurationLabel, WEEK_PANEL_OFFSETS } from "../../calendar-axis";
 import { t } from "../../lib/i18n";
 import { notificationStatusLabel } from "../notifications/notificationModel";
@@ -111,7 +111,6 @@ export function CalendarView({ calendar }: { calendar: CalendarController }) {
     terms,
     quickCreate,
     hasMoved,
-    quickCreatePopoverStyle,
   } = calendar;
 
   return (
@@ -665,22 +664,54 @@ export function CalendarView({ calendar }: { calendar: CalendarController }) {
           </div>
         </div>
 
-        {quickCreate && !hasMoved && (
-          <div
-            className="quick-create"
-            style={quickCreatePopoverStyle()}
-          >
-            <button className="popover-close" aria-label={t("Close quick create")} onClick={() => setQuickCreate(null)}>
-              <X size={15} />
-            </button>
-            <span>{`${weekDays[quickCreate.day].short}, ${formatTime(quickCreate.start)}`}</span>
-            <strong>{t("Quick create")}</strong>
-            <QuickCreateForm calendar={calendar} allowBlocks />
-          </div>
-        )}
+        {quickCreate && !hasMoved && <QuickCreatePopover calendar={calendar} />}
       </div>
       </div>
 
     </section>
+  );
+}
+
+/**
+ * The quick-create popover over the time tapped. It measures itself so the
+ * controller can keep all of it on screen, and follows the keyboard on a
+ * phone. The header and close button stay put; only the body scrolls.
+ */
+function QuickCreatePopover({ calendar }: { calendar: CalendarController }) {
+  const { quickCreate, quickCreatePopoverStyle, setQuickCreate, weekDays } = calendar;
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const [height, setHeight] = useState(0);
+  const [, setViewportChanges] = useState(0);
+
+  useLayoutEffect(() => {
+    const measured = popoverRef.current?.offsetHeight ?? 0;
+    if (Math.abs(measured - height) > 1) setHeight(measured);
+  });
+
+  useEffect(() => {
+    const onViewportChange = () => setViewportChanges((count) => count + 1);
+    const viewport = window.visualViewport;
+    viewport?.addEventListener("resize", onViewportChange);
+    viewport?.addEventListener("scroll", onViewportChange);
+    window.addEventListener("resize", onViewportChange);
+    return () => {
+      viewport?.removeEventListener("resize", onViewportChange);
+      viewport?.removeEventListener("scroll", onViewportChange);
+      window.removeEventListener("resize", onViewportChange);
+    };
+  }, []);
+
+  if (!quickCreate) return null;
+  return (
+    <div className="quick-create" ref={popoverRef} style={quickCreatePopoverStyle(height)}>
+      <button className="popover-close" aria-label={t("Close quick create")} onClick={() => setQuickCreate(null)}>
+        <X size={15} />
+      </button>
+      <span>{`${weekDays[quickCreate.day].short}, ${formatTime(quickCreate.start)}`}</span>
+      <strong>{t("Quick create")}</strong>
+      <div className="quick-create-body">
+        <QuickCreateForm calendar={calendar} allowBlocks />
+      </div>
+    </div>
   );
 }
