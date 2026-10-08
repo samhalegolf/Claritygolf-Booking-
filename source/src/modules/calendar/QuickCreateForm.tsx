@@ -9,8 +9,11 @@ import { locationById } from "../workspace/workspaceModel";
 import { bookingCoachSnapshotFor, type CalendarItem, customGroupStatusLabel } from "./calendarModel";
 import type { CalendarController } from "./useCalendarController";
 
-/** How many lesson types a phone sheet lists before "more". */
-const PHONE_SERVICE_COUNT = 3;
+/** How many lesson types a phone sheet, or a short screen, lists before "more". */
+const SHORT_SERVICE_COUNT = 3;
+
+/** Below this window height a desktop popover lists the short set too. */
+const SHORT_SCREEN_HEIGHT = 700;
 
 /**
  * Making a booking at a time already picked: the lesson type first, then who
@@ -59,10 +62,11 @@ export function QuickCreateForm({
   const [showAllServices, setShowAllServices] = useState(false);
   if (!quickCreate) return null;
 
-  // A phone sheet holds the first few lesson types; the rest are one tap away
-  // rather than pushing the sheet up over the time that was tapped.
-  const shortList = phoneLayout && !showAllServices && quickCreateServices.length > PHONE_SERVICE_COUNT + 1;
-  const listedServices = shortList ? quickCreateServices.slice(0, PHONE_SERVICE_COUNT) : quickCreateServices;
+  // A phone sheet or a short screen holds the first few lesson types; the rest
+  // are one tap away rather than pushing the popover over the time tapped.
+  const smallSpace = phoneLayout || window.innerHeight < SHORT_SCREEN_HEIGHT;
+  const shortList = smallSpace && !showAllServices && quickCreateServices.length > SHORT_SERVICE_COUNT + 1;
+  const listedServices = shortList ? quickCreateServices.slice(0, SHORT_SERVICE_COUNT) : quickCreateServices;
 
   function submit() {
     const created = confirmQuickAppointment();
@@ -71,22 +75,25 @@ export function QuickCreateForm({
 
   return !quickCreateService ? (
     <>
-      {listedServices.map((service) => (
-        <button key={service.id} onClick={() => selectQuickService(service.id)}>
-          <Plus size={16} />
-          <span>
-            <strong>{service.name}</strong>
-            <em>{t("{duration} min · {price}", { duration: service.duration, price: formatMoney(service.price) })}</em>
-          </span>
-        </button>
-      ))}
-      {shortList ? (
-        <button className="quick-create-more" onClick={() => setShowAllServices(true)} type="button">
-          <ChevronDown size={16} />
-          {t("More")}
-          <em>{quickCreateServices.length - PHONE_SERVICE_COUNT}</em>
-        </button>
-      ) : null}
+      {/* Two columns on a phone: three lesson types and More fill two rows. */}
+      <div className="quick-create-services">
+        {listedServices.map((service) => (
+          <button key={service.id} onClick={() => selectQuickService(service.id)}>
+            <Plus size={16} />
+            <span>
+              <strong>{service.name}</strong>
+              <em>{t("{duration} min · {price}", { duration: service.duration, price: formatMoney(service.price) })}</em>
+            </span>
+          </button>
+        ))}
+        {shortList ? (
+          <button className="quick-create-more" onClick={() => setShowAllServices(true)} type="button">
+            <ChevronDown size={16} />
+            {t("More")}
+            <em>{quickCreateServices.length - SHORT_SERVICE_COUNT}</em>
+          </button>
+        ) : null}
+      </div>
       {/* Blocking time out is the odd one out here, so it is a slim row under
           the lesson types rather than another card the same size as them. */}
       {!allowBlocks ? null : effectiveCalendarPerspective === "location" ? (

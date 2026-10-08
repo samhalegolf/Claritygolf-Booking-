@@ -4272,13 +4272,16 @@
   max-width: 240px;
 }
 
+/* The header and close button stay put; .quick-create-body scrolls under
+   them, so the way out is always in reach. */
 .quick-create {
   position: fixed;
   z-index: 5;
   width: min(320px, calc(100vw - 24px));
   max-height: calc(100dvh - 24px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   padding: 16px;
   border: 1px solid #d7d7cf;
   background: #fff;
@@ -4300,6 +4303,24 @@
 .quick-create > strong {
   margin: 4px 0 12px;
   font-size: 18px;
+}
+
+/* Padded out a little so focus rings at its edges are not clipped. */
+.quick-create-body {
+  min-height: 0;
+  margin: 0 -4px;
+  padding: 0 4px 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.quick-create-services {
+  display: grid;
+  gap: 7px;
+}
+
+.quick-create .quick-create-services > button:not(.popover-close):not(.quick-client-ghost) {
+  margin-top: 0;
 }
 
 .quick-client-search {
@@ -17789,8 +17810,8 @@
 }
 
 /* On a phone quick-create is a sheet along the bottom, just above the tab bar,
-   wherever the tap was. It is short -- three lesson types, More, and a slim
-   Block row -- so it covers the end of the day and not the time picked. Book
+   wherever the tap was. It is short -- three lesson types and More in two
+   columns, and a slim Block row -- so it covers the end of the day and not the time picked. Book
    shows the same form in its page, so it is left out. */
 .app-shell.is-phone .quick-create:not(.quick-book-form) {
   top: auto;
@@ -17807,6 +17828,15 @@
 .app-shell.is-phone .quick-create > span,
 .app-shell.is-phone .quick-create > strong {
   padding-right: 48px;
+}
+
+/* Two narrower columns of lesson types keep the sheet low. */
+.app-shell.is-phone .quick-create-services {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.app-shell.is-phone .quick-create .quick-create-services > button:not(.popover-close):not(.quick-client-ghost) {
+  min-height: 52px;
 }
 
 /* ---- Back and close on a phone ---------------------------------------------
@@ -18130,6 +18160,7 @@
 
 .quick-create.quick-book-form {
   position: static;
+  display: block;
   width: auto;
   max-height: none;
   overflow: visible;

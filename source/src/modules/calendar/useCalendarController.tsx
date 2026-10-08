@@ -1197,21 +1197,31 @@ export function useCalendarController(app: CalendarControllerInputs) {
     });
   }
 
-  function quickCreatePopoverStyle(): CSSProperties {
+  /**
+   * Where the quick-create popover sits. `height` is the popover's measured
+   * height, so a long list of lesson types is lifted to fit on screen rather
+   * than running off the bottom.
+   */
+  function quickCreatePopoverStyle(height: number): CSSProperties {
     if (!quickCreate) return {};
     const zIndex = selectedGroupSession ? 120 : undefined;
-    // A phone gets a sheet along the bottom, above the tab bar, wherever the
-    // tap was: the stylesheet places it (.app-shell.is-phone .quick-create).
-    if (isPhoneLayout()) return { zIndex };
     const viewport = window.visualViewport;
     const viewportWidth = viewport?.width ?? window.innerWidth;
     const viewportHeight = viewport?.height ?? window.innerHeight;
     const margin = 12;
+    if (isPhoneLayout()) {
+      // A phone gets a sheet along the bottom, above the tab bar, wherever the
+      // tap was: the stylesheet places it (.app-shell.is-phone .quick-create).
+      // With the keyboard up the bottom of the page is behind it, so the sheet
+      // moves into the space left above the keyboard, close button and all.
+      const keyboardUp = viewport && viewport.height < window.innerHeight - 120;
+      if (!keyboardUp) return { zIndex };
+      return { zIndex, top: viewport.offsetTop + 8, bottom: "auto", maxHeight: viewport.height - 16 };
+    }
     const availableWidth = Math.max(280, viewportWidth - margin * 2);
     const availableHeight = Math.max(280, viewportHeight - margin * 2);
     const popoverWidth = Math.min(340, availableWidth);
-    const estimatedHeight = quickCreateService ? 560 : 360;
-    const usableHeight = Math.min(estimatedHeight, availableHeight);
+    const usableHeight = Math.min(height, availableHeight);
     const left = clamp(quickCreate.x + 10, margin, Math.max(margin, viewportWidth - popoverWidth - margin));
     const top = clamp(quickCreate.y + 10, margin, Math.max(margin, viewportHeight - usableHeight - margin));
 
