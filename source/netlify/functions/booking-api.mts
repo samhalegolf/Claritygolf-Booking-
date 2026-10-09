@@ -70,7 +70,6 @@ export const config: Config = {
     "/api/practice-block-types",
     "/api/public-booking",
     "/api/public-booking-catalog",
-    "/api/public-booking-notifications",
     "/api/public-booking-slots",
     "/api/public-booking-state",
     "/api/public-calendar-invite",

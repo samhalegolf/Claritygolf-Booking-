@@ -23,7 +23,8 @@ export type NotificationVariantId =
   | "reminder"
   | "cancelled"
   | "group"
-  | "package";
+  | "package"
+  | "groupInvite";
 
 export type NotificationTemplateField =
   | "subject"
@@ -44,6 +45,8 @@ export const NOTIFICATION_VARIANTS: Array<{
   id: NotificationVariantId;
   label: string;
   when: string;
+  /** Never sent as a text, so there is no text message to write. */
+  emailOnly?: boolean;
 }> = [
   { id: "booked", label: "New booking", when: "Sent the moment a lesson is booked" },
   { id: "reschedule", label: "Rescheduled", when: "Sent when a lesson moves" },
@@ -51,6 +54,12 @@ export const NOTIFICATION_VARIANTS: Array<{
   { id: "cancelled", label: "Cancelled", when: "Sent immediately on cancellation" },
   { id: "group", label: "Group session", when: "Sent instead of New booking when the lesson type is a group" },
   { id: "package", label: "Package", when: "Sent instead of New booking when the lesson type is a package" },
+  {
+    id: "groupInvite",
+    label: "Group invite",
+    when: "Sent to each person the booker invites to a custom group lesson",
+    emailOnly: true,
+  },
 ];
 
 export const NOTIFICATION_TEMPLATE_FIELDS: NotificationTemplateField[] = [
@@ -87,7 +96,12 @@ export const DEFAULT_MAP_LINK_LABEL = "Take me there";
  * locationAddress, mapUrl, phone, email, rescheduleUrl, bookingUrl,
  * googleCalendarUrl, appleCalendarUrl, packageAllowance.
  *
- * `cta` names the primary button, which links to the manage/reschedule page.
+ * A custom group lesson adds groupSize, totalPrice and sharePrice (the total
+ * split evenly across everyone in the group), and the group invite adds
+ * inviteeFirstName, the person the invite is addressed to.
+ *
+ * `cta` names the primary button, which links to the manage/reschedule page --
+ * except on the group invite, where it confirms the invitee is coming.
  * The label is the coach's; where that link goes is not, so the default says
  * what the button actually does. Cancellation emails carry no button, so its
  * cta is blank.
@@ -145,6 +159,16 @@ export const DEFAULT_NOTIFICATION_TEMPLATES: NotificationTemplates = {
     signoff: "Let's get to work, {{coachFirstName}}",
     smsText: "{{business}}: your package is ready — book your lessons any time. {{bookingUrl}}",
   },
+  groupInvite: {
+    subject: "{{client}} invited you to {{service}} on {{date}}",
+    heading: "You're invited, {{inviteeFirstName}}",
+    body:
+      "{{client}} has booked {{service}} with {{coach}} and saved you a place. The lesson is {{totalPrice}} for the group of {{groupSize}}, so your share is {{sharePrice}}. Let us know you're coming with the button below.",
+    cta: "I'm coming",
+    signoff: "See you there, {{coachFirstName}}",
+    // Invites go by email only.
+    smsText: "",
+  },
 };
 
 /**
@@ -165,12 +189,13 @@ export function emptyNotificationTemplates(): NotificationTemplates {
     cancelled: emptyNotificationTemplate(),
     group: emptyNotificationTemplate(),
     package: emptyNotificationTemplate(),
+    groupInvite: emptyNotificationTemplate(),
   };
 }
 
 /**
  * Normalises whatever came out of storage (or off the wire) into a complete set
- * of six templates. Unknown variants and unknown fields are dropped; missing
+ * of templates, one per variant. Unknown variants and unknown fields are dropped; missing
  * ones become blank, so a template saved before a field existed still loads.
  *
  * Values are not trimmed. A body is prose - trailing spaces and blank lines are
@@ -237,7 +262,9 @@ export function isNotificationTemplateEdited(
  * Which template a message uses. The four booking actions map straight across;
  * a new booking splits three ways on what was booked, because "you're in the
  * group" and "your package is ready" are not the same message as a private
- * lesson confirmation.
+ * lesson confirmation. A custom group is the booker's own lesson, not a place in
+ * the coach's session, so its booker gets the ordinary confirmation. (The
+ * people they invite get groupInvite, which the engine picks itself.)
  *
  * "updated" and "test" have no wording of their own and read as a new booking -
  * an update is a confirmation of the current details, and a test should show
@@ -246,11 +273,12 @@ export function isNotificationTemplateEdited(
 export function notificationVariantFor(
   action: string,
   lessonFormat?: string,
+  customGroup = false,
 ): NotificationVariantId {
   if (action === "rescheduled") return "reschedule";
   if (action === "cancelled") return "cancelled";
   if (action === "reminder") return "reminder";
-  if (lessonFormat === "group") return "group";
+  if (lessonFormat === "group" && !customGroup) return "group";
   if (lessonFormat === "package") return "package";
   return "booked";
 }

@@ -30,6 +30,13 @@ test("the other actions map straight across, whatever was booked", () => {
   }
 });
 
+test("a custom group's booker gets the ordinary confirmation, not the group session one", () => {
+  // The booker organised the lesson; "you're in the group, numbers are capped"
+  // is wording for a place in the coach's own session.
+  assert.equal(notificationVariantFor("booking", "group", true), "booked");
+  assert.equal(notificationVariantFor("reminder", "group", true), "reminder");
+});
+
 test("updated and test read as a new booking", () => {
   assert.equal(notificationVariantFor("updated", "private"), "booked");
   assert.equal(notificationVariantFor("test", "private"), "booked");
@@ -40,6 +47,8 @@ test("every variant ships a complete default", () => {
     const template = DEFAULT_NOTIFICATION_TEMPLATES[variant.id];
     assert.ok(template, `${variant.id} has no default`);
     for (const field of ["subject", "heading", "body", "signoff", "smsText"] as const) {
+      // An email-only message is never texted, so it has no text to ship.
+      if (field === "smsText" && variant.emailOnly) continue;
       assert.ok(template[field].trim(), `${variant.id}.${field} is empty`);
     }
   }
@@ -134,6 +143,8 @@ test("every default only uses merge fields the engine supplies", () => {
     "previousDate", "previousTime", "venue", "location", "locationShortName", "locationAddress",
     "mapUrl", "arrivalInstructions", "publicNotes", "phone", "email", "action", "rescheduleUrl",
     "bookingUrl", "packageAllowance", "googleCalendarUrl", "appleCalendarUrl",
+    // A custom group's (customGroupPricing), and the invite's own.
+    "groupSize", "totalPrice", "sharePrice", "inviteeFirstName",
   ]);
   const unknown: string[] = [];
   for (const variant of NOTIFICATION_VARIANTS) {

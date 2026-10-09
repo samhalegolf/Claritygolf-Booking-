@@ -267,7 +267,6 @@ import {
 import {
   accountTimeZoneFor,
   cleanCoachPhoto,
-  coachById,
   defaultAppUserFromAccount,
   defaultCoachProfileFromAccount,
   filterCoachesForContext,
@@ -326,18 +325,6 @@ function text(value, status = 200, contentType = "text/plain; charset=utf-8") {
   });
 }
 
-function formatTime(minutes) {
-  const hour24 = Math.floor(minutes / 60);
-  const mins = minutes % 60;
-  const period = hour24 >= 12 ? "PM" : "AM";
-  const hour = hour24 % 12 || 12;
-  return `${hour}:${String(mins).padStart(2, "0")} ${period}`;
-}
-
-function formatRange(start, duration) {
-  return `${formatTime(start)}-${formatTime(start + duration)}`;
-}
-
 function formatBookingDate(week, day, country = FALLBACK_PHONE_COUNTRY, language = "en") {
   const date = dateForSlot(week, day);
   return new Date(
@@ -347,18 +334,6 @@ function formatBookingDate(week, day, country = FALLBACK_PHONE_COUNTRY, language
     month: "short",
     day: "numeric",
   });
-}
-
-function renderTemplate(template, variables) {
-  return String(template || "").replace(
-    /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g,
-    (_match, key) => variables[key] ?? "",
-  );
-}
-
-function servicePriceLabel(service) {
-  if (!service) return "No charge";
-  return `NZ$${service.price}.00${service.priceMode === "per-person" ? " pp" : ""}`;
 }
 
 function cleanLogoPreview(value) {
@@ -1685,18 +1660,6 @@ async function readPublicAppointmentsForContact({ accountId, email, phone } = {}
   return { items, rowsFetched: rows.length, query, queryMode: "account_email" };
 }
 
-function notificationPersonKey({ name = "", email = "", phone = "" } = {}) {
-  const cleanEmailValue = cleanString(email, "", 180).toLowerCase();
-  if (cleanEmailValue) return `email:${cleanEmailValue}`;
-  const phoneDigits = cleanString(phone, "", 80).replace(/\D/g, "");
-  if (phoneDigits) return `phone:${phoneDigits}`;
-  const cleanName = cleanString(name, "", 180)
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim();
-  return cleanName ? `name:${cleanName}` : "";
-}
-
 function notificationStatusPriority(status = "") {
   return (
     {
@@ -1809,45 +1772,6 @@ async function readNotificationHistoryForAppointment(accountId: string, appointm
     LIMIT 50
   `;
   return rows.map(rowToNotification);
-}
-
-async function recordNotification({
-  accountId = "",
-  personKey = "",
-  calendarItemId = "",
-  recipient = "",
-  subject = "",
-  kind = "",
-  status = "",
-  provider = "",
-  providerId = "",
-  error = "",
-}) {
-  const owner = cleanSlug(accountId, "");
-  if (!owner) throw missingAccountScope("record_notification");
-  const record = {
-    id: randomUUID(),
-    accountId: owner,
-    personKey,
-    calendarItemId,
-    recipient: cleanString(recipient, "", 180),
-    subject: cleanString(subject, "", 220),
-    kind: cleanString(kind, "", 80),
-    status: cleanString(status, "", 80),
-    provider: cleanString(provider, "", 80),
-    providerId: cleanString(providerId, "", 180),
-    error: cleanString(error, "", 500),
-  };
-  await db().sql`
-    INSERT INTO notification_history (
-      id, account_id, person_key, calendar_item_id, recipient, subject, kind, status, provider, provider_id, error, created_at
-    )
-    VALUES (
-      ${record.id}, ${record.accountId}, ${record.personKey}, ${record.calendarItemId}, ${record.recipient}, ${record.subject},
-      ${record.kind}, ${record.status}, ${record.provider}, ${record.providerId}, ${record.error}, NOW()
-    )
-  `;
-  return record;
 }
 
 /* --- Practice blocks --------------------------------------------------------
@@ -2805,17 +2729,6 @@ async function readWorkspaceAccounts(accountId: string) {
 async function readDefaultWorkspaceAccount(accountId: string) {
   const accounts = await readWorkspaceAccounts(accountId);
   return accounts.find((account) => account.id === accountId) || neutralWorkspaceAccount(accountId);
-}
-
-async function readCoachProfiles(accountId: string) {
-  await ensureSeeded();
-  const account = await readCoachAccount(accountId);
-  try {
-    const stored = await getSetting(accountId, "coachProfilesJson");
-    return normalizeCoachProfiles(stored ? JSON.parse(stored) : null, account);
-  } catch {
-    return normalizeCoachProfiles(null, account);
-  }
 }
 
 async function writeCoachProfiles(accountId: string, coaches, context = null) {
@@ -4142,7 +4055,7 @@ function schedulePublicBookingSideEffects(accountId: string, context, appointmen
   const task = (async () => {
     // Send the booking confirmation from the server, first thing. It used to
     // be triggered only by the client's browser calling
-    // /api/public-booking-notifications after the confirmation screen
+    // a separate notifications endpoint after the confirmation screen
     // rendered — so closing the tab (or a dropped mobile request) right after
     // booking meant no email until something poked the appointment later.
     // The history check keeps this idempotent against retries and replays.
@@ -4156,7 +4069,7 @@ function schedulePublicBookingSideEffects(accountId: string, context, appointmen
           (notification) => notification.kind.startsWith("booking_") && notification.status === "sent",
         );
         if (!alreadySent) {
-          await sendBookingNotifications(accountId, appointment, { kind: "booking" });
+          await notifyBookingEvent({ action: "booking", appointment: { ...appointment, accountId }, source: "public-booking" });
         }
       } catch (error) {
         console.error("public_booking:confirmation_email_failed", appointment?.id, error);
@@ -4199,10 +4112,10 @@ function schedulePublicBookingSideEffects(accountId: string, context, appointmen
     if (options.rebookResource === true) {
       await runResourceAction(accountId, appointment.id, "move");
     }
-    // A client just booked. This path sends its confirmation through
-    // sendBookingNotifications above rather than notifyBookingEvent, so the
-    // coach's browser pop-up is sent explicitly here — same composer, so the
-    // wording matches the cancel and reschedule pop-ups.
+    // A client just booked. The pop-up is sent here rather than with the
+    // confirmation above, so it still goes when a retry finds the confirmation
+    // already sent -- same composer, so the wording matches the cancel and
+    // reschedule pop-ups.
     if (options.coachPush === true) {
       await sendCoachPushForBooking({ action: "booking", appointment, source: "public-booking" });
     }
@@ -4303,7 +4216,21 @@ export function publicBookingCatalog(state) {
         service.lessonFormat !== "package",
     ),
     workspaceAccounts: (state.workspaceAccounts || []).filter((account) => recordBelongsToAccountStrict(account, workspaceAccount.id)),
-    coaches: (state.coaches || []).filter((coach) => recordBelongsToAccountStrict(coach, workspaceAccount.id)),
+    // Who the player can pick on a lesson type taught by more than one coach.
+    // A name and a photo only: this is a public page, and a coach's email and
+    // phone are not the public's.
+    coaches: (state.coaches || [])
+      .filter(
+        (coach) =>
+          recordBelongsToAccountStrict(coach, workspaceAccount.id) &&
+          coach.active !== false &&
+          coach.archived !== true,
+      )
+      .map((coach) => ({
+        id: coach.id,
+        name: coach.displayName || coach.name,
+        ...(coach.photoUrl ? { photoUrl: coach.photoUrl } : {}),
+      })),
     locations: (state.locations || []).filter((location) => recordBelongsToAccountStrict(location, workspaceAccount.id)),
     brand: state.brand,
     account: publicCoachAccount(state.account),
@@ -5066,501 +4993,6 @@ async function sendPasswordResetEmail(accountId, reset, req) {
   });
 }
 
-function bookingGoogleCalendarUrl({ appointment, service, account, rescheduleUrl }) {
-  const week = itemWeek(appointment);
-  const location = cleanBookingLocationSnapshot(appointment.location, {
-    name: account.venueName,
-    shortName: account.venueShortName,
-    timezone: account.timezone,
-  });
-  const start = formatLocalDateTime(week, appointment.day, appointment.start);
-  const end = formatLocalDateTime(
-    week,
-    appointment.day,
-    Number(appointment.start || 0) + Number(appointment.duration || 0),
-  );
-  const params = new URLSearchParams({
-    action: "TEMPLATE",
-    text: `${service?.name || "Golf Lesson"} with ${appointment.coach?.displayName || appointment.coach?.name || account.businessName}`,
-    dates: `${start}/${end}`,
-    details: [
-      `${service?.name || "Golf Lesson"} for ${appointment.client || appointment.title || "Client"}.`,
-      location?.address ? `Address: ${location.address}` : "",
-      location?.arrivalInstructions ? `Arrival: ${location.arrivalInstructions}` : "",
-      location?.mapUrl ? `Map: ${location.mapUrl}` : "",
-      rescheduleUrl ? `Manage or reschedule: ${rescheduleUrl}` : "",
-    ]
-      .filter(Boolean)
-      .join("\n"),
-    location: bookingLocationDisplay(location),
-    ctz: location?.timezone || account.timezone || defaultTimeZone(),
-  });
-  return `https://calendar.google.com/calendar/render?${params.toString()}`;
-}
-
-function bookingAppleCalendarUrl({ appointment }) {
-  const siteUrl =
-    env("URL") ||
-    env("DEPLOY_PRIME_URL") ||
-    env("CLARITY_SITE_URL", "https://claritygolf.app");
-  try {
-    const url = new URL("/api/public-calendar-invite", siteUrl);
-    url.searchParams.set("booking", appointment.id);
-    if (appointment.email) url.searchParams.set("email", appointment.email);
-    if (appointment.phone) url.searchParams.set("phone", appointment.phone);
-    return url.toString();
-  } catch {
-    return "";
-  }
-}
-
-function customGroupConfirmUrl(token) {
-  const siteUrl =
-    env("URL") ||
-    env("DEPLOY_PRIME_URL") ||
-    env("CLARITY_SITE_URL", "https://claritygolf.app");
-  try {
-    const url = new URL("/api/custom-group-confirm", siteUrl);
-    url.searchParams.set("token", token);
-    return url.toString();
-  } catch {
-    return "";
-  }
-}
-
-function customGroupInviteEmail({ appointment, attendee, service, account, coach = null }) {
-  const variables = bookingEmailVariables({ appointment, service, account, coach });
-  const mt = messageText(account.messageLanguage);
-  const confirmUrl = customGroupConfirmUrl(attendee.token);
-  const title = mt("{client} invited you to {service}", {
-    client: appointment.client || mt("A golfer"),
-    service: variables.service,
-  });
-  const intro = mt("{name}, you have been invited to join {client} for {service}.", {
-    name: attendee.name || mt("Hi"),
-    client: appointment.client || mt("the booker"),
-    service: variables.service,
-  });
-  const detailRows = `
-    <tr><td style="padding:8px;border-bottom:1px solid #dfe5d8;color:#697166">${escapeHtml(mt("When"))}</td><td style="padding:8px;border-bottom:1px solid #dfe5d8">${escapeHtml(variables.date)}, ${escapeHtml(variables.time)}</td></tr>
-    <tr><td style="padding:8px;border-bottom:1px solid #dfe5d8;color:#697166">${escapeHtml(mt("Where"))}</td><td style="padding:8px;border-bottom:1px solid #dfe5d8">${escapeHtml(variables.venue)}</td></tr>
-    <tr><td style="padding:8px;color:#697166">${escapeHtml(mt("Group price"))}</td><td style="padding:8px">${escapeHtml(variables.price)}</td></tr>
-  `;
-  return {
-    subject: title,
-    html: `
-      <div style="font-family:Arial,sans-serif;line-height:1.55;color:#101612">
-        <h2>${escapeHtml(title)}</h2>
-        <p>${escapeHtml(intro)}</p>
-        <table style="border-collapse:collapse;margin:18px 0;width:100%;max-width:520px">${detailRows}</table>
-        ${confirmUrl ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:22px 0 14px"><tr><td><a href="${escapeHtml(confirmUrl)}" style="display:inline-block;background:#07100a;color:#ffffff;padding:12px 18px;text-decoration:none;border-radius:6px;font-weight:700">${escapeHtml(mt("Confirm attendance"))}</a></td></tr></table>` : ""}
-        <p>${escapeHtml(mt("Confirmation is helpful, but the booking is already in place."))}</p>
-      </div>
-    `,
-    text: [
-      title,
-      "",
-      intro,
-      "",
-      mt("When: {date}, {time}", { date: variables.date, time: variables.time }),
-      mt("Where: {venue}", { venue: variables.venue }),
-      mt("Group price: {price}", { price: variables.price }),
-      confirmUrl ? mt("Confirm attendance: {url}", { url: confirmUrl }) : "",
-      "",
-      mt("Confirmation is helpful, but the booking is already in place."),
-    ].filter(Boolean).join("\n"),
-  };
-}
-
-// Coach emails used to go to a single global `settings.coachEmail`, ignoring the coach who
-// actually owns the booking. Resolve from the live coach profile first (so profile edits take
-// effect on existing bookings), then the snapshot stored on the appointment, then the legacy
-// account-wide setting as a last resort.
-function resolveAppointmentCoach(appointment, coaches = [], account = defaultCoachAccount(), settings = {}) {
-  const snapshot = appointment?.coach || null;
-  const coachId = cleanSlug(appointment?.coachId || snapshot?.coachId || "", "") || firstCoachId(coaches);
-  const profile = coachById(coaches, coachId);
-  const email =
-    cleanEmail(profile?.email, "") ||
-    cleanEmail(snapshot?.email, "") ||
-    cleanEmail(settings?.coachEmail, "") ||
-    cleanEmail(account?.contactEmail, "");
-  const name =
-    cleanString(profile?.displayName || profile?.name, "", 120) ||
-    cleanString(snapshot?.displayName || snapshot?.name, "", 120) ||
-    cleanString(account?.businessName, "", 120);
-  return { coachId, email, name };
-}
-
-function bookingEmailVariables({ appointment, service, account, coach = null }) {
-  const mt = messageText(account.messageLanguage);
-  const client = appointment.client || appointment.title || mt("Client");
-  const location = cleanBookingLocationSnapshot(appointment.location, {
-    name: account.venueName,
-    shortName: account.venueShortName,
-    timezone: account.timezone,
-  });
-  const rescheduleUrl = new URL(
-    account.bookingUrl || "https://book.claritygolf.app",
-  );
-  rescheduleUrl.searchParams.set("embed", "booking");
-  rescheduleUrl.searchParams.set("mode", "reschedule");
-  if (appointment.id) rescheduleUrl.searchParams.set("booking", appointment.id);
-  if (appointment.email)
-    rescheduleUrl.searchParams.set("email", appointment.email);
-  if (appointment.phone)
-    rescheduleUrl.searchParams.set("phone", appointment.phone);
-  return {
-    client,
-    firstName: client.split(/\s+/)[0] || client,
-    coach: coach?.name || account.businessName,
-    service: service?.name || mt("Golf Lesson"),
-    date: formatBookingDate(itemWeek(appointment), appointment.day, FALLBACK_PHONE_COUNTRY, account.messageLanguage),
-    // A review's slot is a deadline, so the clock range it happens to occupy
-    // is not a time to be anywhere. The templates are the coach's to edit, so
-    // {{time}} keeps working -- it just stops naming an hour that means
-    // nothing. {{date}}, the part that does mean something, is unchanged.
-    time: isVideoReviewService(service)
-      ? mt("end of day")
-      : formatRange(appointment.start, appointment.duration),
-    venue: location?.name || account.venueName,
-    location: location?.name || account.venueName,
-    locationShortName: location?.shortName || location?.name || account.venueShortName || account.venueName,
-    locationAddress: location?.address || "",
-    mapUrl: location?.mapUrl || "",
-    arrivalInstructions: location?.arrivalInstructions || "",
-    publicNotes: location?.publicNotes || "",
-    price: appointment.customGroup && Number.isFinite(Number(appointment.calculatedPrice))
-      ? `NZ$${Number(appointment.calculatedPrice)}.00`
-      : servicePriceLabel(service),
-    duration: mt("{minutes} minutes", { minutes: appointment.duration }),
-    replyTo: account.contactEmail,
-    rescheduleUrl: rescheduleUrl.toString(),
-    googleCalendarUrl: bookingGoogleCalendarUrl({
-      appointment,
-      service,
-      account,
-      rescheduleUrl: rescheduleUrl.toString(),
-    }),
-    appleCalendarUrl: bookingAppleCalendarUrl({ appointment }),
-  };
-}
-
-function bookingEmailHtml({ title, intro, footer, variables, language = "en" }) {
-  const mt = messageText(language);
-  const manageButton = variables.rescheduleUrl
-    ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:22px 0 14px"><tr><td><a href="${escapeHtml(variables.rescheduleUrl)}" style="display:inline-block;background:#07100a;color:#ffffff;padding:12px 18px;text-decoration:none;border-radius:6px;font-weight:700">${escapeHtml(mt("Manage / Reschedule"))}</a></td></tr></table>`
-    : "";
-  const calendarButtons = variables.googleCalendarUrl || variables.appleCalendarUrl
-    ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 20px"><tr>${
-        variables.googleCalendarUrl
-          ? `<td style="padding:0 8px 8px 0"><a href="${escapeHtml(variables.googleCalendarUrl)}" style="display:inline-block;border:1px solid #cfd8ca;color:#101612;padding:10px 13px;text-decoration:none;border-radius:7px;font-weight:600"><span style="font-size:15px;vertical-align:-1px;margin-right:6px">&#128197;</span>Google Calendar</a></td>`
-          : ""
-      }${
-        variables.appleCalendarUrl
-          ? `<td style="padding:0 0 8px 0"><a href="${escapeHtml(variables.appleCalendarUrl)}" style="display:inline-block;border:1px solid #cfd8ca;color:#101612;padding:10px 13px;text-decoration:none;border-radius:7px;font-weight:600"><span style="font-size:15px;vertical-align:-1px;margin-right:6px">&#128467;&#65039;</span>Apple Calendar</a></td>`
-          : ""
-      }</tr></table>`
-    : "";
-  return `
-    <div style="font-family:Arial,sans-serif;line-height:1.55;color:#101612">
-      <h2>${escapeHtml(title)}</h2>
-      <p>${escapeHtml(intro)}</p>
-      <table style="border-collapse:collapse;margin:18px 0;width:100%;max-width:520px">
-        <tr><td style="padding:8px;border-bottom:1px solid #dfe5d8;color:#697166">${escapeHtml(mt("Lesson"))}</td><td style="padding:8px;border-bottom:1px solid #dfe5d8"><strong>${escapeHtml(variables.service)}</strong></td></tr>
-        <tr><td style="padding:8px;border-bottom:1px solid #dfe5d8;color:#697166">${escapeHtml(mt("When"))}</td><td style="padding:8px;border-bottom:1px solid #dfe5d8">${escapeHtml(variables.date)}, ${escapeHtml(variables.time)}</td></tr>
-        <tr><td style="padding:8px;border-bottom:1px solid #dfe5d8;color:#697166">${escapeHtml(mt("Where"))}</td><td style="padding:8px;border-bottom:1px solid #dfe5d8">${escapeHtml(variables.venue)}</td></tr>
-        <tr><td style="padding:8px;color:#697166">${escapeHtml(mt("Price"))}</td><td style="padding:8px">${escapeHtml(variables.price)}</td></tr>
-      </table>
-      ${manageButton}
-      ${calendarButtons}
-      <p>${escapeHtml(footer).replace(/\n/g, "<br/>")}</p>
-    </div>
-  `;
-}
-
-function bookingEmailText({ title, intro, footer, variables, language = "en" }) {
-  const mt = messageText(language);
-  return [
-    title,
-    "",
-    intro,
-    "",
-    mt("Lesson: {service}", { service: variables.service }),
-    mt("When: {date}, {time}", { date: variables.date, time: variables.time }),
-    mt("Where: {venue}", { venue: variables.venue }),
-    mt("Price: {price}", { price: variables.price }),
-    "",
-    variables.rescheduleUrl
-      ? mt("Manage / Reschedule: {url}", { url: variables.rescheduleUrl })
-      : "",
-    variables.googleCalendarUrl
-      ? `Google Calendar: ${variables.googleCalendarUrl}`
-      : "",
-    variables.appleCalendarUrl
-      ? `Apple Calendar: ${variables.appleCalendarUrl}`
-      : "",
-    "",
-    footer,
-  ]
-    .filter((line, index, lines) => !(line === "" && lines[index - 1] === ""))
-    .join("\n");
-}
-
-async function sendBookingNotifications(
-  accountId: string,
-  appointment: Record<string, any>,
-  { kind = "booking", testRecipient = "", clientOnly = false, idempotencyNonce = "" } = {},
-) {
-  if (!accountId) throw missingAccountScope("booking_notifications");
-  const sharedSettingsMap = await readSettingsMap(accountId);
-  const [settings, account, services, coaches] = await Promise.all([
-    readAdminSettings(accountId, sharedSettingsMap),
-    readCoachAccount(accountId, sharedSettingsMap),
-    readServices(accountId),
-    readCoachProfiles(accountId),
-  ]);
-  const service = services.find(
-    (candidate) => candidate.id === appointment.serviceId,
-  );
-  const coach = resolveAppointmentCoach(appointment, coaches, account, settings);
-  const variables = bookingEmailVariables({ appointment, service, account, coach });
-  const personKey = notificationPersonKey({
-    name: appointment.client || appointment.title,
-    email: appointment.email,
-    phone: appointment.phone,
-  });
-  const replyTo = settings.replyToEmail || account.contactEmail;
-  const language = account.messageLanguage;
-  const mt = messageText(language);
-  const jobs = [];
-
-  async function sendAndRecord(channel, recipient, subject, html, text, key) {
-    const notificationKind = `${kind}_${channel}_email`;
-    const deliveryKey = idempotencyNonce ? `${key}-${idempotencyNonce}` : key;
-    const result = await deliverEmail({
-      accountId,
-      to: recipient,
-      subject,
-      html,
-      text,
-      replyTo,
-      idempotencyKey: deliveryKey,
-    });
-    const status = result.sent ? "sent" : "failed";
-
-    try {
-      await recordNotification({
-        accountId,
-        personKey,
-        calendarItemId: appointment.id,
-        recipient,
-        subject,
-        kind: notificationKind,
-        status,
-        provider: "resend",
-        providerId: result.id || "",
-        error: result.reason || result.error || "",
-      });
-    } catch (error) {
-      console.error("Notification history write failed", channel, error);
-    }
-
-    if (result.sent) {
-      console.log(
-        "Booking email sent",
-        channel,
-        recipient,
-        result.id || "no-provider-id",
-      );
-    }
-
-    return {
-      channel,
-      recipient,
-      subject,
-      kind: notificationKind,
-      status,
-      ...result,
-    };
-  }
-
-  async function recordSkipped(channel, recipient, subject, reason) {
-    const notificationKind = `${kind}_${channel}_email`;
-    try {
-      await recordNotification({
-        accountId,
-        personKey,
-        calendarItemId: appointment.id,
-        recipient,
-        subject,
-        kind: notificationKind,
-        status: "skipped",
-        provider: "settings",
-        providerId: "",
-        error: reason,
-      });
-    } catch (error) {
-      console.error(
-        "Notification skipped history write failed",
-        channel,
-        error,
-      );
-    }
-    return {
-      channel,
-      recipient,
-      subject,
-      kind: notificationKind,
-      status: "skipped",
-      sent: false,
-      reason,
-    };
-  }
-
-  if (
-    (settings.sendClientEmail || kind === "test") &&
-    (testRecipient || appointment.email)
-  ) {
-    const subject = renderTemplate(settings.clientEmailSubject, variables);
-    const intro = renderTemplate(settings.clientEmailIntro, variables);
-    const footerBase = modernClientEmailFooter(
-      renderTemplate(settings.clientEmailFooter, variables),
-      language,
-    );
-    const recipient = testRecipient || appointment.email;
-    const clientVariables = testRecipient
-      ? {
-          ...variables,
-          rescheduleUrl: "",
-          googleCalendarUrl: "",
-          appleCalendarUrl: "",
-        }
-      : variables;
-    jobs.push(
-      sendAndRecord(
-        "client",
-        recipient,
-        subject,
-        bookingEmailHtml({
-          title: subject,
-          intro,
-          footer: footerBase,
-          variables: clientVariables,
-          language,
-        }),
-        bookingEmailText({
-          title: subject,
-          intro,
-          footer: footerBase,
-          variables: clientVariables,
-          language,
-        }),
-        `${kind}-client-${appointment.id}-${hashToken(recipient).slice(0, 12)}`,
-      ),
-    );
-  } else if (kind !== "test") {
-    const recipient = appointment.email || "";
-    const subject = renderTemplate(settings.clientEmailSubject, variables);
-    jobs.push(
-      recordSkipped(
-        "client",
-        recipient,
-        subject,
-        settings.sendClientEmail
-          ? "missing_client_email"
-          : "disabled_in_notification_settings",
-      ),
-    );
-  }
-
-  const inviteAttendees = Array.isArray(appointment.attendees)
-    ? appointment.attendees.filter((attendee) => attendee?.email && attendee?.token && attendee.status === "invited")
-    : [];
-  if (!clientOnly && (kind === "booking" || kind === "updated") && inviteAttendees.length) {
-    for (const attendee of inviteAttendees) {
-      const invite = customGroupInviteEmail({ appointment, attendee, service, account, coach });
-      if (settings.sendClientEmail) {
-        jobs.push(
-          sendAndRecord(
-            "custom_group_invite",
-            attendee.email,
-            invite.subject,
-            invite.html,
-            invite.text,
-            `${kind}-custom-group-invite-${appointment.id}-${hashToken(attendee.email).slice(0, 12)}`,
-          ),
-        );
-      } else {
-        jobs.push(recordSkipped("custom_group_invite", attendee.email, invite.subject, "disabled_in_notification_settings"));
-      }
-    }
-  }
-
-  if (!clientOnly && settings.sendCoachEmail && kind !== "test") {
-    const recipient = coach.email || "";
-    const subject = renderTemplate(settings.adminEmailSubject, variables);
-    const intro = renderTemplate(settings.adminEmailIntro, variables);
-    if (recipient) {
-      jobs.push(
-        sendAndRecord(
-          "coach",
-          recipient,
-          subject,
-          bookingEmailHtml({ title: subject, intro, footer: mt("Coach booking alert."), variables, language }),
-          bookingEmailText({ title: subject, intro, footer: mt("Coach booking alert."), variables, language }),
-          `${kind}-coach-${appointment.id}-${hashToken(recipient).slice(0, 12)}`,
-        ),
-      );
-    } else {
-      jobs.push(recordSkipped("coach", "", subject, "missing_coach_email"));
-    }
-  } else if (!clientOnly && kind !== "test") {
-    const subject = renderTemplate(settings.adminEmailSubject, variables);
-    jobs.push(recordSkipped("coach", coach.email || "", subject, "disabled_in_notification_settings"));
-  }
-
-  if (!clientOnly && settings.sendAdminEmail && kind !== "test") {
-    const recipient = settings.notificationEmail || account.contactEmail;
-    const subject = renderTemplate(settings.adminEmailSubject, variables);
-    const intro = renderTemplate(settings.adminEmailIntro, variables);
-    jobs.push(
-      sendAndRecord(
-        "admin",
-        recipient,
-        subject,
-        bookingEmailHtml({
-          title: subject,
-          intro,
-          footer: "Admin booking alert.",
-          variables,
-        }),
-        bookingEmailText({
-          title: subject,
-          intro,
-          footer: "Admin booking alert.",
-          variables,
-        }),
-        `${kind}-admin-${appointment.id}-${hashToken(recipient).slice(0, 12)}`,
-      ),
-    );
-  } else if (!clientOnly && kind !== "test") {
-    const recipient = settings.notificationEmail || account.contactEmail;
-    const subject = renderTemplate(settings.adminEmailSubject, variables);
-    jobs.push(
-      recordSkipped(
-        "admin",
-        recipient,
-        subject,
-        "disabled_in_notification_settings",
-      ),
-    );
-  }
-
-  if (!jobs.length) return [];
-  return Promise.all(jobs);
-}
-
 async function resendBookingConfirmation(appointmentId, context, state = null) {
   assertAccountAdminContext(context, "You do not have permission to resend booking confirmations.");
   assertAccountFeature(context.account, "notifications");
@@ -5574,8 +5006,10 @@ async function resendBookingConfirmation(appointmentId, context, state = null) {
     throw Object.assign(new Error("This booking does not have a customer email address."), { status: 400 });
   }
 
-  const results = await sendBookingNotifications(context.accountId, appointment, {
-    kind: "booking",
+  const results = await notifyBookingEvent({
+    action: "booking",
+    appointment: { ...appointment, accountId: context.accountId },
+    source: "admin-resend",
     clientOnly: true,
     idempotencyNonce: `admin-resend-${Date.now()}-${randomUUID().slice(0, 8)}`,
   });
@@ -7658,12 +7092,22 @@ function serviceBookingOptions(service, state = {}) {
 }
 
 /**
+ * The options narrowed to the coach the player picked on the booking page.
+ * No pick means any coach. A pick this lesson type is not offered with leaves
+ * nothing, rather than quietly booking someone the player did not choose.
+ */
+function optionsWithChosenCoach(options, chosenCoachId = "") {
+  return chosenCoachId ? options.filter((option) => option.coachId === chosenCoachId) : options;
+}
+
+/**
  * The first coach and location, among those this lesson type is offered with,
  * who are free for this slot -- or null when none are. The one the page
  * offered goes first, so a booking lands where it was shown when it still can.
+ * A coach the player chose is held to: nobody else is tried in their place.
  */
-function freeBookingOption(accountState, service, slot, preferred = {}) {
-  const options = serviceBookingOptions(service, accountState);
+function freeBookingOption(accountState, service, slot, preferred = {}, chosenCoachId = "") {
+  const options = optionsWithChosenCoach(serviceBookingOptions(service, accountState), chosenCoachId);
   const preferredIndex = options.findIndex(
     (option) => option.coachId === preferred.coachId && option.locationId === preferred.locationId,
   );
@@ -7687,7 +7131,7 @@ function freeBookingOption(accountState, service, slot, preferred = {}) {
     }
     return { option, rejection: null };
   }
-  return { option: null, rejection: firstRejection || { reason: "outside_availability", option: options[0] } };
+  return { option: null, rejection: firstRejection || { reason: "outside_availability", option: options[0] || null } };
 }
 
 function publicSlotItemMayAffectService(item, service, state = {}) {
@@ -7765,10 +7209,14 @@ function lookBusyRanges(items, state, { week, day, coachId, locationId }) {
     .map((item) => ({ start: Number(item.start), end: Number(item.start) + Number(item.duration) }));
 }
 
-function publicSlotsForService(accountState, service, week, ignoreId = "", handedness = null) {
+function publicSlotsForService(accountState, service, week, ignoreId = "", handedness = null, chosenCoachId = "") {
   const ignoredItemId = cleanString(ignoreId, "", 160);
   const items = ignoredItemId ? accountState.items.filter((item) => item.id !== ignoredItemId) : accountState.items;
-  const options = serviceBookingOptions(service, accountState);
+  // A scheduled group is one session with one coach, so there is no choosing.
+  const options = isScheduledGroupService(service)
+    ? serviceBookingOptions(service, accountState)
+    : optionsWithChosenCoach(serviceBookingOptions(service, accountState), chosenCoachId);
+  if (!options.length) return [];
   // Past times must never be offered to the public. Use the location's timezone
   // when it has one, otherwise the workspace timezone — the same precedence the
   // calendar invite (ctz) uses — so "now" is computed where the lesson happens.
@@ -7863,6 +7311,8 @@ export function publicBookingSlots(state, options = {}) {
   const week = publicBookingSlotsWeek(options.week);
   const serviceId = cleanString(options.serviceId, "", 140);
   const ignoreId = cleanString(options.ignoreId, "", 160);
+  // The coach the player picked, for lesson types offered with more than one.
+  const coachId = cleanSlug(options.coachId, "");
   const metrics = options.metrics;
   const services = publicBookableServices(accountState.services);
   // The player's handedness when the page sends it; for a reschedule, the one
@@ -7906,7 +7356,7 @@ export function publicBookingSlots(state, options = {}) {
     // hours would offer the player a choice that means nothing.
     const serviceSlots = isVideoReviewService(service)
       ? []
-      : publicSlotsForService(serviceState, service, week, ignoreId, handedness);
+      : publicSlotsForService(serviceState, service, week, ignoreId, handedness, coachId);
     servicesById[service.id] = { serviceId: service.id, week, slots: serviceSlots };
   }
   // `slots` is the legacy top-level field: the one requested service's slots.
@@ -7956,6 +7406,7 @@ export async function handlePublicBookingSlotsRequest(req, options = {}) {
       week,
       ignoreId: url.searchParams.get("ignoreId") || "",
       handedness: url.searchParams.get("handedness") || "",
+      coachId: url.searchParams.get("coachId") || "",
       metrics,
     });
     metrics.slotCalculationMs = Date.now() - slotCalculationStartedAt;
@@ -8108,13 +7559,15 @@ export async function createPublicBooking(
       });
     }
     // The coach and place the page showed go first; if they have since been
-    // taken, any other the lesson type is offered with who is free will do.
+    // taken, any other the lesson type is offered with who is free will do --
+    // unless the player picked the coach, who is then the only one tried.
     // The player's handedness narrows which bays count as free.
     const { option, rejection } = freeBookingOption(
       accountState,
       service,
       { ...slot, handedness: payload?.handedness ? handedness : null },
       { coachId: cleanSlug(payload?.coachId, ""), locationId: cleanSlug(payload?.locationId, "") },
+      payload?.coachChosen === true ? cleanSlug(payload?.coachId, "") : "",
     );
     if (!option) {
       throw publicSlotUnavailableError({
@@ -8577,62 +8030,6 @@ function clientNotificationRecords(records = [], appointmentId = "") {
       (!appointmentId || record.calendarItemId === appointmentId) &&
       cleanString(record.kind, "", 120).includes("client_email"),
   );
-}
-
-async function triggerPublicBookingNotifications(accountId: string, payload: Record<string, any>) {
-  const appointmentId = cleanString(
-    payload?.appointmentId || payload?.appointment || "",
-    "",
-    120,
-  );
-  const email = normalizeRescheduleContact(payload?.email);
-  const phone = normalizeRescheduleContact(payload?.phone);
-  const kind = payload?.kind === "reschedule" ? "reschedule" : "booking";
-
-  if (!appointmentId || !email) {
-    throw Object.assign(new Error("Booking email details are missing."), {
-      status: 400,
-    });
-  }
-
-  const state = await readPublicCatalogState(accountId);
-  const workspaceAccount = publicWorkspaceAccount(state);
-  assertAccountFeature(workspaceAccount, "publicBooking");
-  const appointment = await readPublicAppointmentById(appointmentId, workspaceAccount.id);
-  if (!appointment || !matchesNotificationContact(appointment, email, phone)) {
-    throw Object.assign(
-      new Error("That booking could not be verified for email notification."),
-      { status: 404 },
-    );
-  }
-
-  const existing = clientNotificationRecords(
-    await readNotificationHistoryForAppointment(accountId, appointmentId),
-    appointmentId,
-  ).filter((notification) => notification.kind.startsWith(`${kind}_`));
-  const alreadySent = existing.some(
-    (notification) => notification.status === "sent",
-  );
-  if (alreadySent) {
-    return {
-      ok: true,
-      alreadySent: true,
-      results: existing.map(notificationResultFromRecord),
-    };
-  }
-
-  const results = clientNotificationResults(
-    await sendBookingNotifications(accountId, appointment, { kind }),
-  );
-  return {
-    ok: results.some((result) => result.sent),
-    alreadySent: false,
-    results,
-    notifications: clientNotificationRecords(
-      await readNotificationHistoryForAppointment(accountId, appointmentId),
-      appointmentId,
-    ),
-  };
 }
 
 async function lookupPublicReschedule(accountId: string, payload: Record<string, any>) {
@@ -9146,15 +8543,6 @@ async function routeBookingApiRequest(
       return handlePublicNotificationStatusRequest(req);
     }
 
-    if (
-      req.method === "POST" &&
-      pathname === "/api/public-booking-notifications"
-    ) {
-      return json(
-        await triggerPublicBookingNotifications(await resolvePublicAccountId(req), await parseBody(req)),
-      );
-    }
-
     if (pathname.startsWith("/api/auth/")) {
       await ensureAuthReady();
     } else {
@@ -9561,15 +8949,6 @@ async function routeBookingApiRequest(
 
     if (req.method === "GET" && pathname === "/api/public-notification-status") {
       return handlePublicNotificationStatusRequest(req);
-    }
-
-    if (
-      req.method === "POST" &&
-      pathname === "/api/public-booking-notifications"
-    ) {
-      return json(
-        await triggerPublicBookingNotifications(await resolvePublicAccountId(req), await parseBody(req)),
-      );
     }
 
     if (req.method === "GET" && pathname === "/api/public-diagnostics") {
@@ -10701,8 +10080,10 @@ async function routeBookingApiRequest(
         phone: "",
         note: "Test email from Clarity Golf Booking.",
       };
-      const results = await sendBookingNotifications(requestContext.accountId, appointment, {
-        kind: "test",
+      const results = await notifyBookingEvent({
+        action: "test",
+        appointment,
+        source: "test-email",
         testRecipient: recipient,
       });
       const sent = results.some((result) => result.sent);

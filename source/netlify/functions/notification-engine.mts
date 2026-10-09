@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { deliverEmail } from "./_shared/email-delivery.mts";
 import { settingsSelectQuery } from "./_shared/settings-scope.mts";
-import { localeForCountry } from "./_shared/locale.mts";
+import { currencyForAccountSettings, localeForCountry } from "./_shared/locale.mts";
 import { cleanPhoneCountry } from "./_shared/phone.mts";
 import { cleanMessageLanguage, messageText } from "./_shared/message-language.mts";
 import { sendCoachPush, type CoachPushMessage } from "./_shared/push-notify.mts";
@@ -41,6 +41,10 @@ type NotifyInput = {
    * next time a call site is added.
    */
   coachPush?: boolean;
+  /** The client's copy only: a coach resending a confirmation, not a new booking. */
+  clientOnly?: boolean;
+  /** Makes a deliberate resend a new send rather than a replay of the first. */
+  idempotencyNonce?: string;
 };
 
 export function sameNotificationRecipient(left: unknown, right: unknown) {
@@ -246,10 +250,57 @@ async function readSettings(accountId: string) {
     siteUrl,
     contactEmail: cleanEmail(s.accountContactEmail, env("CLARITY_CONTACT_EMAIL", "")),
     coachProfiles: parseCoachProfiles(s.coachProfilesJson),
+    // From Settings > Invoices: the currency prices are written in, and how a
+    // client can pay ahead, for the group invite's "paying ahead" section.
+    ...invoicePaymentSettings(s.accountInvoiceSettingsJson, s.accountCountry),
     // Per-variant wording. Blank fields fall back to the shared defaults, so a
     // workspace that has never opened the editor still sends Clarity's copy.
     notificationTemplates: parseNotificationTemplates(s.notificationTemplatesJson),
     mapLinkLabel: cleanText(s.mapLinkLabel, DEFAULT_MAP_LINK_LABEL, 40),
+  };
+}
+
+function invoicePaymentSettings(raw: unknown, country: unknown) {
+  let invoice: Record<string, unknown> = {};
+  try {
+    invoice = typeof raw === "string" && raw.trim() ? JSON.parse(raw) : {};
+  } catch {
+    invoice = {};
+  }
+  return {
+    currency: currencyForAccountSettings(invoice.currency, country),
+    bankAccount: cleanString(invoice.bankAccount, "", 120),
+    paymentInstructions: cleanString(invoice.paymentInstructions, "", 600),
+  };
+}
+
+/** An amount in the business's own currency, written the way its country writes money. */
+function moneyLabel(amount: number, settings: any) {
+  if (!Number.isFinite(amount) || amount <= 0) return "";
+  try {
+    return new Intl.NumberFormat(localeForCountry(settings.country, settings.messageLanguage), {
+      style: "currency",
+      currency: settings.currency,
+      minimumFractionDigits: Number.isInteger(amount) ? 0 : 2,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch {
+    return `${settings.currency} ${amount.toFixed(2)}`;
+  }
+}
+
+/**
+ * A custom group's price, and each person's even share of it. Everyone on the
+ * booking counts, the booker included. Empty for any other booking.
+ */
+function customGroupPricing(appt: any, settings: any) {
+  const groupSize = appt.customGroup && Array.isArray(appt.attendees) ? appt.attendees.length : 0;
+  const total = Number(appt.calculatedPrice) || 0;
+  if (!groupSize || total <= 0) return { groupSize: groupSize ? String(groupSize) : "", totalPrice: "", sharePrice: "" };
+  return {
+    groupSize: String(groupSize),
+    totalPrice: moneyLabel(total, settings),
+    sharePrice: moneyLabel(Math.round((total / groupSize) * 100) / 100, settings),
   };
 }
 
@@ -398,6 +449,21 @@ function attendeeSignature(appt: any) {
   );
 }
 
+/** Who is in a custom group and what it costs, for the emails about it. */
+function customGroupRows(appt: any, variables: Record<string, string>, mt: ReturnType<typeof messageText>): Array<[string, string]> {
+  if (!appt.customGroup) return [];
+  const names = (appt.attendees || []).map((attendee: any) => attendee.name).filter(Boolean).join(", ");
+  return [
+    [mt("Group"), names],
+    [
+      mt("Price"),
+      variables.totalPrice
+        ? mt("{total} for the group · {share} each", { total: variables.totalPrice, share: variables.sharePrice })
+        : "",
+    ],
+  ];
+}
+
 function customGroupConfirmUrl(token: string, settings: any) {
   try {
     const url = new URL("/api/custom-group-confirm", settings.siteUrl || "https://claritygolf.app");
@@ -408,28 +474,68 @@ function customGroupConfirmUrl(token: string, settings: any) {
   }
 }
 
-function customGroupInviteBody(attendee: any, serviceName: string, settings: any, variables: Record<string, string>) {
+/**
+ * The email to someone a booker added to their custom group: what the lesson
+ * is, their share of the price, a button to say they are coming, and how to pay
+ * ahead if the business has said how. The wording is the coach's (the
+ * groupInvite template); the table, the button's link and the paying-ahead
+ * section are filled in per invite.
+ */
+function customGroupInviteBody(attendee: any, appt: any, settings: any, baseVariables: Record<string, string>) {
   const mt = messageText(settings.messageLanguage);
+  const variables = {
+    ...baseVariables,
+    inviteeFirstName: String(attendee.name || "").split(/\s+/)[0] || "",
+  };
+  const text = (field: NotificationTemplateField) => clientText("groupInvite", field, settings, variables);
   const confirmUrl = customGroupConfirmUrl(attendee.token, settings);
-  const subject = mt("{client} invited you to {service}", { client: variables.client, service: serviceName });
-  const intro = mt("{client} added you to a custom group lesson with {coach}.", {
-    client: variables.client,
-    coach: settings.coachName || settings.businessName,
-  });
-  const heading = mt("Confirm your spot");
-  const confirmLabel = mt("Confirm attendance");
-  const rows = [
-    [mt("Lesson"), serviceName],
+  const subject = text("subject");
+  const heading = text("heading");
+  const intro = text("body");
+  const confirmLabel = text("cta").trim();
+  const signoff = text("signoff");
+  const rows: Array<[string, string]> = [
+    [mt("Lesson"), variables.service],
+    [mt("With"), variables.coach],
     [mt("When"), `${variables.date}, ${variables.time}`],
     [mt("Where"), variables.venue],
-    [mt("Invited attendee"), attendee.name],
-  ] as Array<[string, string]>;
-  const button = confirmUrl
+    ...customGroupRows(appt, variables, mt),
+  ];
+  const payAhead = settings.bankAccount || settings.paymentInstructions
+    ? [
+        variables.sharePrice
+          ? mt("Paying ahead is optional. To pay your share of {share} before the lesson:", { share: variables.sharePrice })
+          : mt("Paying ahead is optional. To pay before the lesson:"),
+        settings.paymentInstructions,
+        settings.bankAccount ? mt("Bank account: {account}", { account: settings.bankAccount }) : "",
+        settings.bankAccount ? mt("Use your name as the reference so we know it's from you.") : "",
+      ].filter(Boolean)
+    : [];
+  const brandName = escapeHtml(settings.businessName || settings.coachName || "Clarity Golf");
+  const button = confirmUrl && confirmLabel
     ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:16px 0 12px"><tr><td><a href="${escapeHtml(confirmUrl)}" style="display:inline-block;background:#07100a;color:#ffffff;padding:13px 20px;text-decoration:none;border-radius:7px;font-weight:700">${escapeHtml(confirmLabel)}</a></td></tr></table>`
     : "";
-  const html = `<div style="font-family:Arial,sans-serif;line-height:1.55;color:#0f1a13;background:#eff3ec;padding:18px 10px"><div style="max-width:620px;margin:0 auto"><div style="background:#fff;border:1px solid #e3e9df;border-radius:12px;padding:24px"><p style="margin:0;font-size:12px;letter-spacing:.03em;text-transform:uppercase;color:#667066">${escapeHtml(settings.businessName || settings.coachName || "Clarity Golf")}</p><h1 style="margin:8px 0 12px;font-size:30px;line-height:1.15;color:#121d14">${escapeHtml(heading)}</h1><p style="margin:0;color:#3a473a;font-size:15px;line-height:1.7">${escapeHtml(intro)}</p><div style="margin:18px 0">${detailTable(rows)}</div>${button}<p style="margin:16px 0 0;color:#526054">${escapeHtml(mt("If the button does not work, paste this link into your browser: {url}", { url: confirmUrl }))}</p></div></div></div>`;
-  const text = [heading, "", intro, "", ...rows.map(([label, value]) => `${label}: ${value}`), "", confirmUrl ? `${confirmLabel}: ${confirmUrl}` : ""].filter(Boolean).join("\n");
-  return { subject, html, text };
+  const payAheadHtml = payAhead.length
+    ? `<div style="margin:18px 0 0;padding:14px 16px;background:#f6f9f3;border:1px solid #e6ecdf;border-radius:8px"><p style="margin:0 0 6px;font-size:12px;letter-spacing:.03em;text-transform:uppercase;color:#667066">${escapeHtml(mt("Paying ahead"))}</p>${payAhead
+        .map((line) => `<p style="margin:0 0 6px;color:#26332a;font-size:14px">${escapeHtml(line).replace(/\n/g, "<br/>")}</p>`)
+        .join("")}</div>`
+    : "";
+  const html = `<div style="font-family:Arial,sans-serif;line-height:1.55;color:#0f1a13;background:#eff3ec;padding:18px 10px"><div style="max-width:620px;margin:0 auto"><div style="background:#fff;border:1px solid #e3e9df;border-radius:12px;padding:24px"><p style="margin:0;font-size:12px;letter-spacing:.03em;text-transform:uppercase;color:#667066">${brandName}</p><h1 style="margin:8px 0 12px;font-size:30px;line-height:1.15;color:#121d14">${escapeHtml(heading)}</h1><p style="margin:0;color:#3a473a;font-size:15px;line-height:1.7">${escapeHtml(intro)}</p><div style="margin:18px 0">${detailTable(rows)}</div>${button}${payAheadHtml}<p style="margin:16px 0 0;color:#526054">${escapeHtml(signoff).replace(/\n/g, "<br/>")}</p>${confirmUrl && confirmLabel ? `<p style="margin:16px 0 0;color:#8e9a8d;font-size:12px">${escapeHtml(mt("If the button does not work, paste this link into your browser: {url}", { url: confirmUrl }))}</p>` : ""}</div></div></div>`;
+  const plain = [
+    heading,
+    "",
+    intro,
+    "",
+    ...rows.filter(([, value]) => Boolean(value)).map(([label, value]) => `${label}: ${value}`),
+    "",
+    confirmUrl && confirmLabel ? `${confirmLabel}: ${confirmUrl}` : "",
+    "",
+    ...(payAhead.length ? [mt("Paying ahead"), ...payAhead, ""] : []),
+    signoff,
+  ]
+    .filter((line, index, lines) => !(line === "" && lines[index - 1] === ""))
+    .join("\n");
+  return { subject, html, text: plain };
 }
 
 function rescheduleUrlFor(appt: any, settings: any) {
@@ -575,6 +681,7 @@ function variablesFor(action: BookingAction, appt: any, previous: any, serviceNa
     // somewhere useful without inventing a link.
     bookingUrl: settings.bookingUrl || "",
     packageAllowance: service?.packageAllowance ? String(service.packageAllowance) : "",
+    ...customGroupPricing(appt, settings),
     googleCalendarUrl: googleCalendarUrlFor(appt, serviceName, settings, rescheduleUrl),
     appleCalendarUrl: appleCalendarUrlFor(appt, settings),
   };
@@ -764,9 +871,11 @@ function bodyFor(
   const rows: Array<[string, string]> = isClient
     ? [
         [mt("Lesson"), serviceName],
+        [mt("With"), variables.coach],
         [mt("When"), `${variables.date}, ${variables.time}`],
         [mt("Previous"), previousValue],
         [mt("Where"), whereValue],
+        ...customGroupRows(appt, variables, mt),
       ]
     : [
         [mt("Client"), variables.client],
@@ -926,10 +1035,12 @@ export async function notifyBookingEvent(input: NotifyInput) {
   const serviceName = cleanText(service?.name, mt("Golf Lesson"), 160);
   const variables = variablesFor(action, appt, previous, serviceName, settings, service);
   // A new booking splits three ways on what was booked - see notificationVariantFor.
-  const variant = notificationVariantFor(action, service?.lessonFormat);
+  const variant = notificationVariantFor(action, service?.lessonFormat, appt.customGroup);
   const subjects = templateSubjects(action, variant, settings, variables);
   const personKey = appt.email ? `email:${appt.email}` : appt.phone ? `phone:${appt.phone}` : `name:${appt.client.toLowerCase()}`;
-  const signature = cleanString(input.notificationJobId, "", 180) || hash({ action, appt, previous, source: input.source }).slice(0, 24);
+  const signature =
+    cleanString(input.notificationJobId, "", 180) ||
+    hash({ action, appt, previous, source: input.source, nonce: input.idempotencyNonce || "" }).slice(0, 24);
   const results: any[] = [];
 
   // Awaited on purpose: these calls already run inside a waitUntil task, and a
@@ -978,7 +1089,7 @@ export async function notifyBookingEvent(input: NotifyInput) {
     const recipient = cleanEmail(attendee?.email, "");
     const token = cleanString(attendee?.token, "", 220);
     if (!recipient || !token || attendee?.status !== "invited") return;
-    const invite = customGroupInviteBody(attendee, serviceName, settings, variables);
+    const invite = customGroupInviteBody(attendee, appt, settings, variables);
     const kind = `${action}_custom_group_invite_email`;
     if (!settings.sendClientEmail) {
       const skipped = { channel: "custom_group_invite", recipient, subject: invite.subject, kind, status: "skipped", sent: false, reason: "disabled_client_email" };
@@ -1046,6 +1157,13 @@ export async function notifyBookingEvent(input: NotifyInput) {
         notificationJobId: input.notificationJobId,
       });
     }
+    return results;
+  }
+
+  // A resend is something the coach asked for, so it goes whatever the
+  // automatic-confirmation setting says.
+  if (input.clientOnly) {
+    await sendAndRecord("client", appt.email, subjects.client);
     return results;
   }
 

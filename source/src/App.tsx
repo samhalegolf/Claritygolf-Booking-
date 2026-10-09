@@ -4196,6 +4196,11 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     rescheduleUrl: t("[reschedule link]"),
 
     packageAllowance: "6",
+    // A custom group lesson's, for the Group invite preview.
+    inviteeFirstName: t("[invitee]"),
+    groupSize: "3",
+    totalPrice: "$240",
+    sharePrice: "$80",
   };
   const emailSubjectTemplatePreview = notificationSettings.notificationSubjectLine.trim()
     ? renderTemplate(notificationSettings.notificationSubjectLine, emailTemplateVariables)

@@ -1229,6 +1229,32 @@ test("a lesson type with several coaches offers a time when any of them is free,
   assert.deepEqual(slotStarts(bothBusy), [secondSlot, thirdSlot]);
 });
 
+test("a coach the player picks is the only one whose times are offered", () => {
+  const shared = service({ coachIds: [coachId, otherCoachId], coachId: undefined });
+  const days = availability();
+  days[day].push({ accountId, coachId: otherCoachId, start: firstSlot, end: minutes(10, 30) });
+  const state = calendarState({
+    services: [shared],
+    availability: days,
+    // The first coach is busy at the first time; the second is free.
+    items: [item({ id: "a-busy", serviceId: otherServiceId })],
+  });
+
+  const second = publicBookingSlots(state, { serviceId, week: testWeek, coachId: otherCoachId });
+  assert.ok(second.slots.length > 0);
+  assert.ok(second.slots.every((slot: any) => slot.coachId === otherCoachId));
+  assert.ok(slotStarts(second).includes(firstSlot));
+
+  // Picking the busy coach does not quietly hand the time to the other one.
+  const first = publicBookingSlots(state, { serviceId, week: testWeek, coachId });
+  assert.ok(first.slots.every((slot: any) => slot.coachId === coachId));
+  assert.ok(!slotStarts(first).includes(firstSlot));
+
+  // A coach who does not teach this lesson type has no times for it.
+  const stranger = publicBookingSlots(state, { serviceId, week: testWeek, coachId: "someone-else" });
+  assert.deepEqual(stranger.slots, []);
+});
+
 test("a lesson type that only uses a resource is still offered when every one is held", () => {
   const withBay = (overrides = {}) =>
     calendarState({

@@ -2815,6 +2815,126 @@
   resize: vertical;
 }
 
+/* A custom group's people on the public booking page: a row each, with the
+   invite envelopes in a column of their own under a small heading. An
+   envelope that is on asks for that person's email on a line beneath them. */
+.booking-group {
+  gap: 6px;
+}
+
+.booking-group-head,
+.booking-group-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 42px 34px;
+  gap: 6px;
+  align-items: center;
+}
+
+.booking-group-head {
+  font-size: var(--c-size-meta);
+  font-weight: 700;
+}
+
+.booking-group-invite-head {
+  grid-column: 2 / 4;
+  justify-self: start;
+  color: var(--booking-muted, var(--c-text-soft));
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.booking-group-row.is-booker {
+  min-height: 42px;
+  padding: 0 10px;
+  border: 1px dashed var(--booking-border, var(--c-border));
+  border-radius: 8px;
+}
+
+.booking-group-row.is-booker small {
+  grid-column: 2 / 4;
+  color: var(--booking-muted, var(--c-text-soft));
+}
+
+.booking-group-row input {
+  min-width: 0;
+}
+
+.booking-group-email {
+  grid-column: 1 / -1;
+}
+
+.booking-group-invite,
+.booking-group-remove {
+  display: grid;
+  place-items: center;
+  height: 42px;
+  border: 1px solid var(--booking-border, var(--c-border));
+  border-radius: 8px;
+  background: transparent;
+  color: var(--booking-muted, var(--c-text-soft));
+  cursor: pointer;
+}
+
+.booking-group-remove {
+  border-color: transparent;
+}
+
+.booking-group-invite[aria-pressed="true"] {
+  border-color: var(--coach-primary);
+  background: color-mix(in srgb, var(--coach-primary) 16%, transparent);
+  color: var(--booking-text, var(--c-text));
+}
+
+.booking-group-remove:disabled {
+  visibility: hidden;
+}
+
+.booking-group-add {
+  display: inline-flex;
+  justify-self: start;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px dashed var(--booking-border, var(--c-border));
+  border-radius: 999px;
+  background: transparent;
+  color: var(--booking-text, var(--c-text));
+  font: inherit;
+  font-size: var(--c-size-meta);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.booking-group-add:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.booking-group-summary {
+  display: grid;
+  gap: 2px;
+  margin: 4px 0 0;
+  font-size: var(--c-size-meta);
+}
+
+.booking-group-summary span {
+  color: var(--booking-muted, var(--c-text-soft));
+}
+
+/* Who a picked time is with, when the player could have chosen. */
+.booking-slot-coach {
+  margin: 6px 0 0;
+  font-size: var(--c-size-meta);
+  font-weight: 600;
+}
+
+/* The coach picker borrows the handedness toggle's look; it only needs to
+   fit more than two names. */
+.booking-coach-picker .booking-handedness-options {
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+}
+
 /* The asterisk is positioned against this wrapper, so the wrapper has to be
    the width of the input rather than the width of the row -- otherwise the
    mark floats off to the right of a field it no longer belongs to. Grid, so
