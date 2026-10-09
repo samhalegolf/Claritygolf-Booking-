@@ -8,8 +8,8 @@ import { handleBookingApiRoute } from "./booking-core.mts";
 // `public_booking_lean:*`) with its own Supabase REST client, written to keep
 // this route off the large booking-core bundle. It saved the appointment but
 // never sent the client's confirmation email: the only Resend call in it was a
-// fallback alert to the coach when the *save* failed. Combined with the browser
-// no longer calling /api/public-booking-notifications, that left public booking
+// fallback alert to the coach when the *save* failed. With the browser no
+// longer asking for the email separately, that left public booking
 // confirmations with no trigger at all — bookings landed on the calendar and the
 // client heard nothing.
 //

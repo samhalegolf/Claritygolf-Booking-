@@ -1,7 +1,7 @@
 import "../../appStyles";
 import { Loading, loadingLabel } from "../shared/Loading";
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
-import { ArrowLeft, ArrowRight, Check, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Mail, Plus, X } from "lucide-react";
 import { apiFetch } from "../auth/apiFetch";
 import { appearsOnCurrentPublicBookingScreen, publicApi } from "./bookingScreen";
 import { WeekSlots } from "./WeekSlots";
@@ -9,9 +9,14 @@ import { forgetRememberedBooker, readRememberedBooker, saveRememberedBooker, typ
 import { currencyForAccountSettings, localeForCountry } from "../../../netlify/functions/_shared/locale.mts";
 import type { BusinessTerminology } from "../../../netlify/functions/_shared/business-terminology.mts";
 import { resolvedMarketFromWire } from "../../../netlify/functions/_shared/market-profile.mts";
-import { t, readerLocale } from "../../lib/i18n";
+import { t, tn, readerLocale } from "../../lib/i18n";
+import { calculateCustomGroupPrice, customGroupMaxParticipants, customGroupMinParticipants, type Service as ModelService } from "../services/serviceModel";
 
-type Service = { id: string; name: string; duration: number; price: number; priceMode?: string; description?: string; lessonNote?: string; location?: string; lessonFormat?: string; reviewTurnaroundDays?: number; customGroup?: boolean; customGroupEnabled?: boolean; minParticipants?: number; bookingScreenIds?: string[] };
+type Service = { id: string; name: string; duration: number; price: number; priceMode?: string; description?: string; lessonNote?: string; location?: string; lessonFormat?: string; reviewTurnaroundDays?: number; customGroup?: boolean; customGroupEnabled?: boolean; minParticipants?: number; capacity?: number; baseParticipants?: number; basePrice?: number; extraPersonPrice?: number; coachIds?: string[]; bookingScreenIds?: string[] };
+/** A coach as the public catalogue names them: no contact details. */
+type Coach = { id: string; name: string; photoUrl?: string };
+/** Someone the booker is bringing to a custom group. The email is only asked for, and only sent, when they tick the invite. */
+type Attendee = { name: string; email: string; invite: boolean };
 type Slot = { week: number; day: number; start: number; remainingSpots?: number; locationId?: string; coachId?: string };
 type Brand = { logoPreview?: string; showLogo?: boolean; neutral?: string; primary?: string; secondary?: string; accent?: string; bookingTheme?: string };
 type Account = { businessName?: string; coachName?: string; venueShortName?: string; country?: string; terminology?: BusinessTerminology; market?: unknown; invoiceSettings?: { currency?: string; taxName?: string; taxRate?: number; taxInclusive?: boolean } };
@@ -31,22 +36,25 @@ function currentWeek() {
 }
 function dateFor(week: number, day: number) { const date = new Date(BASE_WEEK_START); date.setDate(date.getDate() + week * 7 + day); return date; }
 function time(minutes: number) { const hour = Math.floor(minutes / 60); return `${hour % 12 || 12}:${String(minutes % 60).padStart(2, "0")} ${hour >= 12 ? "PM" : "AM"}`; }
+/** An amount in the business's own currency. */
+function money(value: number, account: Account) {
+  const currency = currencyForAccountSettings(account.invoiceSettings?.currency, account.country);
+  try {
+    return new Intl.NumberFormat(localeForCountry(account.country), {
+      style: "currency",
+      currency,
+      minimumFractionDigits: Number.isInteger(value) ? 0 : 2,
+      maximumFractionDigits: 2,
+    }).format(value);
+  } catch {
+    return `${currency} ${value}`;
+  }
+}
 /** The lesson's price in the business's own currency, with its tax named when
  *  prices are quoted before it ("$80 + GST"). */
 function price(service: Service, account: Account) {
   if (service.priceMode === "free" || !service.price) return t("Free");
-  const currency = currencyForAccountSettings(account.invoiceSettings?.currency, account.country);
-  let amount: string;
-  try {
-    amount = new Intl.NumberFormat(localeForCountry(account.country), {
-      style: "currency",
-      currency,
-      minimumFractionDigits: Number.isInteger(service.price) ? 0 : 2,
-      maximumFractionDigits: 2,
-    }).format(service.price);
-  } catch {
-    amount = `${currency} ${service.price}`;
-  }
+  const amount = money(service.price, account);
   const tax = account.invoiceSettings;
   return tax && tax.taxInclusive === false && Number(tax.taxRate) > 0 && tax.taxName ? `${amount} + ${tax.taxName}` : amount;
 }
@@ -94,14 +102,63 @@ function customerForm(customer?: PublicBookingCustomer): Form {
   return { firstName: names[0] ?? "", lastName: names.slice(1).join(" "), phone: customer?.phone ?? "", email: customer?.email ?? "" };
 }
 
+/** The catalogue's lesson type, read by the shared custom group pricing rules. */
+function groupModel(service: Service) {
+  return service as unknown as Partial<ModelService>;
+}
+const VALID_EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+function blankAttendees(service: Service | null): Attendee[] {
+  if (!service || !(service.customGroup || service.customGroupEnabled)) return [];
+  // One row per person still needed to make the group up.
+  return Array.from({ length: Math.max(1, customGroupMinParticipants(groupModel(service)) - 1) }, () => ({ name: "", email: "", invite: false }));
+}
+
+/**
+ * Who else is coming to a custom group. A row per person: their name, and an
+ * envelope to send them an invite, which asks for their email only once it is
+ * ticked. The booker is the first row and is not edited here. The price for the
+ * group as it stands, and each person's share, sit underneath.
+ */
+function GroupAttendees({ service, account, bookerName, attendees, onChange }: { service: Service; account: Account; bookerName: string; attendees: Attendee[]; onChange: (next: Attendee[]) => void }) {
+  const model = groupModel(service);
+  const min = customGroupMinParticipants(model);
+  const max = customGroupMaxParticipants(model);
+  const size = 1 + attendees.filter((attendee) => attendee.name.trim()).length;
+  const total = calculateCustomGroupPrice(model, size);
+  const share = Math.round((total / size) * 100) / 100;
+  const update = (index: number, patch: Partial<Attendee>) => onChange(attendees.map((attendee, position) => (position === index ? { ...attendee, ...patch } : attendee)));
+  return <div className="booking-form booking-group">
+    <div className="booking-group-head"><span>{t("Who's coming")}</span><span className="booking-group-invite-head">{t("Send optional invite")}</span></div>
+    <div className="booking-group-row is-booker"><span className="booking-group-name">{bookerName.trim() || t("You")}</span><small>{t("You")}</small></div>
+    {attendees.map((attendee, index) => {
+      const label = attendee.name.trim() || t("Person {number}", { number: index + 2 });
+      return <div className={`booking-group-row${attendee.invite ? " is-inviting" : ""}`} key={index}>
+        <input aria-label={t("Name of person {number}", { number: index + 2 })} autoComplete="off" className="booking-group-name" onChange={(event) => update(index, { name: event.target.value })} placeholder={t("Name")} value={attendee.name} />
+        <button aria-label={attendee.invite ? t("Don't send {name} an invite", { name: label }) : t("Send {name} an invite", { name: label })} aria-pressed={attendee.invite} className="booking-group-invite" onClick={() => update(index, { invite: !attendee.invite })} title={attendee.invite ? t("Invite on") : t("Send optional invite")} type="button"><Mail size={16} /></button>
+        <button aria-label={t("Remove {name}", { name: label })} className="booking-group-remove" disabled={attendees.length <= 1} onClick={() => onChange(attendees.filter((_, position) => position !== index))} type="button"><X size={15} /></button>
+        {attendee.invite ? <input aria-label={t("Email for {name}", { name: label })} autoComplete="off" className="booking-group-email" onChange={(event) => update(index, { email: event.target.value })} placeholder={t("Their email, for the invite")} type="email" value={attendee.email} /> : null}
+      </div>;
+    })}
+    <button className="booking-group-add" disabled={1 + attendees.length >= max} onClick={() => onChange([...attendees, { name: "", email: "", invite: false }])} type="button"><Plus size={15} />{t("Add another person")}</button>
+    <p className="booking-group-summary">
+      <strong>{tn(size, "{count} person", "{count} people")} · {money(total, account)}</strong>
+      <span>{size > 1 ? t("{share} each if you split it evenly", { share: money(share, account) }) : null}</span>
+      {size < min ? <span>{tn(min - size, "Add {count} more person to book this lesson.", "Add {count} more people to book this lesson.")}</span> : <span>{t("Up to {max} people.", { max })}</span>}
+    </p>
+  </div>;
+}
+
 export default function PublicBookingApp({ customer, onBookingComplete }: PublicBookingAppProps) {
-  const [catalogue, setCatalogue] = useState<{ services: Service[]; brand: Brand; account: Account }>({ services: [], brand: {}, account: {} });
+  const [catalogue, setCatalogue] = useState<{ services: Service[]; coaches: Coach[]; brand: Brand; account: Account }>({ services: [], coaches: [], brand: {}, account: {} });
   const [catalogueState, setCatalogueState] = useState<"loading" | "ready" | "error">("loading");
   const [week, setWeek] = useState(currentWeek);
   const [slotsByService, setSlotsByService] = useState<Record<string, Slot[]>>({});
   const [slotsState, setSlotsState] = useState<"loading" | "ready" | "error">("loading");
   const [serviceId, setServiceId] = useState("");
   const [slot, setSlot] = useState<Slot | null>(null);
+  // The coach the player picked, for a lesson type taught by more than one.
+  // Blank is anyone: each time then goes to whoever is free.
+  const [coachId, setCoachId] = useState("");
   // Remember me is for the public page and widget only. The Player Portal
   // passes its signed-in customer and has a proper login of its own.
   const [remembered, setRemembered] = useState<RememberedBooker | null>(() => (customer ? null : readRememberedBooker()));
@@ -114,7 +171,7 @@ export default function PublicBookingApp({ customer, onBookingComplete }: Public
   const [form, setForm] = useState<Form>(() => (remembered ? rememberedForm(remembered) : customerForm(customer)));
   const [handedness, setHandedness] = useState<Handedness>(() => remembered?.handedness ?? "right");
   const [notes, setNotes] = useState("");
-  const [attendees, setAttendees] = useState<Array<{ name: string; email: string }>>([]);
+  const [attendees, setAttendees] = useState<Attendee[]>([]);
   const [submitState, setSubmitState] = useState<"idle" | "saving" | "done" | "error">("idle");
   const [error, setError] = useState("");
 
@@ -122,7 +179,7 @@ export default function PublicBookingApp({ customer, onBookingComplete }: Public
     let cancelled = false;
     apiFetch(publicApi("/api/public-booking-catalog"))
       .then(async (response) => { if (!response.ok) throw new Error(t("Booking is unavailable.")); return response.json(); })
-      .then((data) => { if (!cancelled) { setCatalogue({ services: Array.isArray(data.services) ? data.services : [], brand: data.brand ?? {}, account: data.account ?? {} }); setCatalogueState("ready"); } })
+      .then((data) => { if (!cancelled) { setCatalogue({ services: Array.isArray(data.services) ? data.services : [], coaches: Array.isArray(data.coaches) ? data.coaches : [], brand: data.brand ?? {}, account: data.account ?? {} }); setCatalogueState("ready"); } })
       .catch(() => { if (!cancelled) setCatalogueState("error"); });
     return () => { cancelled = true; };
   }, []);
@@ -141,8 +198,9 @@ export default function PublicBookingApp({ customer, onBookingComplete }: Public
     // Deliberately one request for the active week. The endpoint returns every
     // public service keyed by id; do not turn this back into an N+1 loop.
     // Handedness decides which bays count as free where a business has
-    // left- or right-handed-only bays, so a change re-asks for the week.
-    apiFetch(publicApi(`/api/public-booking-slots?week=${week}&handedness=${handedness}`))
+    // left- or right-handed-only bays, so a change re-asks for the week. So
+    // does picking a coach: their times are asked for, not anyone's.
+    apiFetch(publicApi(`/api/public-booking-slots?week=${week}&handedness=${handedness}${coachId ? `&coachId=${encodeURIComponent(coachId)}` : ""}`))
       .then(async (response) => { if (!response.ok) throw new Error(t("Availability is unavailable.")); return response.json(); })
       .then((data) => {
         if (cancelled) return;
@@ -152,7 +210,7 @@ export default function PublicBookingApp({ customer, onBookingComplete }: Public
       })
       .catch(() => { if (!cancelled) setSlotsState("error"); });
     return () => { cancelled = true; };
-  }, [week, handedness]);
+  }, [week, handedness, coachId]);
 
   // A time picked as a right-hander may have no bay for a left-hander. Say so
   // here, where the player is, instead of letting Confirm fail. The time stays
@@ -178,8 +236,18 @@ export default function PublicBookingApp({ customer, onBookingComplete }: Public
   const readyForDetails = Boolean(service && (videoReview || slot));
   const customGroup = service?.customGroup || service?.customGroupEnabled;
   const availableSlots = service ? slotsByService[service.id] ?? [] : [];
-  const canSubmit = Boolean(service && (videoReview || slot) && form.firstName.trim() && form.lastName.trim() && form.email.trim() && (!customGroup || attendees.length + 1 >= (service.minParticipants ?? 1)));
-  const chooseService = (id: string) => { setServiceId(id); setSlot(null); setAttendees([]); };
+  const namedAttendees = attendees.filter((attendee) => attendee.name.trim());
+  const canSubmit = Boolean(service && (videoReview || slot) && form.firstName.trim() && form.lastName.trim() && form.email.trim() && (!customGroup || namedAttendees.length + 1 >= customGroupMinParticipants(groupModel(service))));
+  // The coaches the player can choose between: only where there is a choice,
+  // and not for a review (no time to be anywhere) or a scheduled group (one
+  // session, one coach).
+  const scheduledGroup = service?.lessonFormat === "group" && !customGroup;
+  const coachChoices = service && !videoReview && !scheduledGroup
+    ? (service.coachIds ?? []).map((id) => catalogue.coaches.find((coach) => coach.id === id)).filter((coach): coach is Coach => Boolean(coach))
+    : [];
+  const slotCoach = slot && coachChoices.length > 1 ? catalogue.coaches.find((coach) => coach.id === slot.coachId) : undefined;
+  const chooseService = (id: string) => { setServiceId(id); setSlot(null); setCoachId(""); setAttendees(blankAttendees(services.find((candidate) => candidate.id === id) ?? null)); };
+  const chooseCoach = (id: string) => { setCoachId(id); setSlot(null); };
   // Once a choice is made the other options step aside, so the player sees
   // only what they picked and the next thing to fill in. "Change" brings the
   // full list back.
@@ -191,9 +259,11 @@ export default function PublicBookingApp({ customer, onBookingComplete }: Public
   async function submit() {
     if (!service || !canSubmit) return;
     if (!videoReview && !slot) return;
+    const missingInviteEmail = customGroup ? namedAttendees.find((attendee) => attendee.invite && !VALID_EMAIL.test(attendee.email.trim())) : undefined;
+    if (missingInviteEmail) { setError(t("Add an email for {name}, or untick their invite.", { name: missingInviteEmail.name.trim() })); return; }
     setSubmitState("saving"); setError("");
     try {
-      const response = await apiFetch(publicApi("/api/public-booking"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serviceId: service.id, ...(videoReview || !slot ? {} : { week: slot.week, day: slot.day, start: slot.start, coachId: slot.coachId, locationId: slot.locationId }), duration: service.duration, ...form, ...(market.capabilities.handedness ? { handedness } : {}), notes: notes.trim() || undefined, attendees: customGroup ? attendees : undefined, ...(!customer && !forSomeoneElse && (remembered || rememberMe) ? { remember: true, rememberToken: remembered?.token } : {}) }) });
+      const response = await apiFetch(publicApi("/api/public-booking"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serviceId: service.id, ...(videoReview || !slot ? {} : { week: slot.week, day: slot.day, start: slot.start, coachId: slot.coachId, locationId: slot.locationId, ...(coachId ? { coachChosen: true } : {}) }), duration: service.duration, ...form, ...(market.capabilities.handedness ? { handedness } : {}), notes: notes.trim() || undefined, attendees: customGroup ? namedAttendees.map((attendee) => ({ name: attendee.name.trim(), email: attendee.invite ? attendee.email.trim() : "" })) : undefined, ...(!customer && !forSomeoneElse && (remembered || rememberMe) ? { remember: true, rememberToken: remembered?.token } : {}) }) });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.appointment?.id) throw new Error(data.message || t("That time is no longer available."));
       if (typeof data.rememberToken === "string" && data.rememberToken) {
@@ -213,15 +283,15 @@ export default function PublicBookingApp({ customer, onBookingComplete }: Public
   const terms = market.terminology;
   const askHandedness = market.capabilities.handedness;
   if (catalogueState === "ready" && !market.capabilities.publicBooking) return <BookingFrame brand={catalogue.brand}><main className={`public-booking booking-theme-${theme}`}><div className="booking-brand"><strong>{brandName}</strong></div><div className="booking-card booking-confirmation"><h1>{t("This booking page is not available.")}</h1></div></main></BookingFrame>;
-  if (submitState === "done") return <BookingFrame brand={catalogue.brand}><main className={`public-booking booking-theme-${theme}`}><div className="booking-brand"><strong>{brandName}</strong></div><div className="booking-card booking-confirmation"><Check size={24} /><h1>{t("Booking confirmed")}</h1><p>{videoReview ? t("Your confirmation is on its way by email. Send your swing from the {customerSingular} portal whenever you are ready — your {staffSingular} works to the turnaround from there.", { customerSingular: terms.customerSingular.toLowerCase(), staffSingular: terms.staffSingular.toLowerCase() }) : t("Your confirmation is on its way by email.")}</p><button className="primary-button" onClick={() => { setSubmitState("idle"); setSlot(null); setNotes(""); }} type="button">{t("Book another {serviceSingular}", { serviceSingular: terms.serviceSingular.toLowerCase() })}</button></div></main></BookingFrame>;
+  if (submitState === "done") return <BookingFrame brand={catalogue.brand}><main className={`public-booking booking-theme-${theme}`}><div className="booking-brand"><strong>{brandName}</strong></div><div className="booking-card booking-confirmation"><Check size={24} /><h1>{t("Booking confirmed")}</h1><p>{videoReview ? t("Your confirmation is on its way by email. Send your swing from the {customerSingular} portal whenever you are ready — your {staffSingular} works to the turnaround from there.", { customerSingular: terms.customerSingular.toLowerCase(), staffSingular: terms.staffSingular.toLowerCase() }) : t("Your confirmation is on its way by email.")}</p><button className="primary-button" onClick={() => { setSubmitState("idle"); setSlot(null); setNotes(""); setAttendees(blankAttendees(service)); }} type="button">{t("Book another {serviceSingular}", { serviceSingular: terms.serviceSingular.toLowerCase() })}</button></div></main></BookingFrame>;
 
   return <BookingFrame brand={catalogue.brand}><main className={`public-booking booking-theme-${theme}`}>
     <div className="booking-brand">{catalogue.brand.showLogo && catalogue.brand.logoPreview ? <img src={catalogue.brand.logoPreview} alt={t("{brandName} logo", { brandName })} /> : <strong>{brandName}</strong>}<em>{catalogue.account.venueShortName}</em></div>
     <div className="booking-toolbar"><a className="booking-login-trigger" href={manageBookingUrl()}>{t("Manage / reschedule a booking")}</a></div>
     <div className="booking-columns booking-progressive-flow">
       <section className="booking-progressive-section is-open"><div className="booking-progressive-title"><span className="booking-progressive-title-label">1. {terms.serviceSingular}</span><span className="booking-progressive-title-state">{catalogueState === "loading" ? loadingLabel() : service ? changeButton(() => chooseService("")) : t("In progress")}</span></div><div className="booking-progressive-body"><div className="service-picker">{catalogueState === "error" ? <p role="alert">{t("Booking is unavailable. Please try again shortly.")}</p> : catalogueState === "loading" ? <Loading what={t("{serviceSingular} types", { serviceSingular: terms.serviceSingular.toLowerCase() })} /> : services.length ? (service ? [service] : services).map((candidate) => <button className={candidate.id === serviceId ? "selected-service" : ""} key={candidate.id} onClick={() => chooseService(candidate.id === serviceId ? "" : candidate.id)} type="button"><strong>{candidate.name}</strong><em>{t("{duration} minutes @ {candidate}", { duration: candidate.duration, candidate: price(candidate, catalogue.account) })}</em>{candidate.description ? <small>{candidate.description}</small> : null}{candidate.lessonNote || candidate.location ? <small>{candidate.lessonNote || candidate.location}</small> : null}</button>) : <p>{t("No public {serviceSingular} types are active.", { serviceSingular: terms.serviceSingular.toLowerCase() })}</p>}</div></div></section>
-      <section className={`booking-progressive-section ${service ? "is-open" : ""}`}><div className="booking-progressive-title"><span className="booking-progressive-title-label">{videoReview ? t("2. Turnaround") : t("2. Date & Time")}</span><span className="booking-progressive-title-state">{!service ? t("Locked") : videoReview ? t("No time needed") : slot ? changeButton(() => setSlot(null)) : slotsState === "loading" ? loadingLabel() : t("In progress")}</span></div>{service && videoReview ? <div className="booking-progressive-body"><div className="booking-review-turnaround"><p>{t("Send your swing from the player portal once you have booked. There is no appointment to attend.")}</p><p><strong>{t("Back with you by {label}", { label: reviewDueDate(service).label })}</strong>{" "}{reviewDueDate(service).days === 1 ? t("— within 1 day.") : t("— within {days} days.", { days: reviewDueDate(service).days })}</p></div></div> : service && slot ? <div className="booking-progressive-body"><WeekSlots week={week} slots={[slot]} dayLabel={(day) => dateFor(week, day).toLocaleDateString(readerLocale(), { weekday: "long", month: "short", day: "numeric" })} slotLabel={(candidate) => time(candidate.start)} isSelected={() => true} onSelect={() => setSlot(null)} emptyLabel="" /></div> : service ? <div className="booking-progressive-body"><div className="booking-week-controls"><button onClick={() => { setWeek((value) => value - 1); setSlot(null); }} type="button"><ArrowLeft size={15} /><span>{t("Previous week")}</span></button><strong>{weekLabel}</strong><button onClick={() => { setWeek((value) => value + 1); setSlot(null); }} type="button"><span>{t("Next week")}</span><ArrowRight size={15} /></button></div><WeekSlots week={week} placeholder={slotsState === "loading" ? <Loading what={t("available times")} /> : slotsState === "error" ? <p role="alert">{t("Available times could not be loaded.")}</p> : null} slots={availableSlots} dayLabel={(day) => dateFor(week, day).toLocaleDateString(readerLocale(), { weekday: "long", month: "short", day: "numeric" })} slotLabel={(candidate) => `${time(candidate.start)}${candidate.remainingSpots ? t(" · {remainingSpots} spots left", { remainingSpots: candidate.remainingSpots }) : ""}`} isSelected={(candidate) => slot?.week === candidate.week && slot?.day === candidate.day && slot?.start === candidate.start} onSelect={(candidate) => { setSlot(candidate); setError((current) => (current === NO_BAY_FOR_SWING ? "" : current)); }} emptyLabel={t("No public times available this week.")} /></div> : null}</section>
-      <section className={`booking-progressive-section ${readyForDetails ? "is-open" : ""}`}><div className="booking-progressive-title"><span className="booking-progressive-title-label">{t("3. Your Information")}</span><span className="booking-progressive-title-state">{readyForDetails ? t("In progress") : t("Locked")}</span></div>{readyForDetails ? <div className="booking-progressive-body"><div className="booking-form">{remembered && forSomeoneElse ? <div className="booking-remembered"><p><strong>{t("Booking for someone else")}</strong></p><div className="booking-remembered-actions"><button className="booking-progressive-change" onClick={bookAsRemembered} type="button">{t("Book as {name} instead", { name: remembered.firstName })}</button></div></div> : null}{remembered && !forSomeoneElse && !editingDetails ? <div className="booking-remembered"><p><strong>{t("Booking as {name}", { name: `${form.firstName} ${form.lastName}`.trim() })}</strong><small>{form.email}</small></p><div className="booking-remembered-actions"><button className="booking-progressive-change" onClick={() => setEditingDetails(true)} type="button">{t("Edit details")}</button><button className="booking-progressive-change" onClick={bookForSomeoneElse} type="button">{t("Book for someone else")}</button><button className="booking-progressive-change" onClick={forgetMe} type="button">{t("Forget me")}</button></div></div> : (["firstName", "lastName", "phone", "email"] as const).map((key) => <input className={key === "email" ? "w-email" : "w-name"} key={key} value={form[key]} type={key === "email" ? "email" : key === "phone" ? "tel" : "text"} autoComplete={key === "firstName" ? "given-name" : key === "lastName" ? "family-name" : key === "phone" ? "tel" : "email"} onChange={(event) => setForm((current) => ({ ...current, [key]: event.target.value }))} placeholder={key === "firstName" ? t("First name *") : key === "lastName" ? t("Last name *") : key === "phone" ? t("Phone") : t("Email *")} />)}{!customer && !remembered ? <label className="booking-remember"><input checked={rememberMe} onChange={(event) => setRememberMe(event.target.checked)} type="checkbox" />{t("Remember me on this device")}</label> : null}{askHandedness ? <fieldset className="booking-handedness"><legend>{t("Which way do you swing?")}</legend><div className="booking-handedness-options" role="radiogroup" aria-label={t("Handedness")}>{handednessOptions.map((option) => <button aria-checked={handedness === option.value} aria-describedby={`handedness-tip-${option.value}`} className={handedness === option.value ? "selected-handedness" : ""} key={option.value} onClick={() => setHandedness(option.value)} role="radio" type="button">{option.label}<span className="booking-handedness-tip" id={`handedness-tip-${option.value}`} role="tooltip">{option.explainer}</span></button>)}</div></fieldset> : null}<textarea aria-label={t("Notes for your {staffSingular}", { staffSingular: terms.staffSingular.toLowerCase() })} className="booking-notes" maxLength={800} onChange={(event) => setNotes(event.target.value)} placeholder={t("Notes for your {staffSingular} (optional) — anything useful before the booking", { staffSingular: terms.staffSingular.toLowerCase() })} value={notes} /></div>{customGroup ? <div className="booking-form"><p>{t("Additional attendees")}</p>{attendees.map((attendee, index) => <div key={index}><input value={attendee.name} onChange={(event) => setAttendees((current) => current.map((item, position) => position === index ? { ...item, name: event.target.value } : item))} placeholder={t("Name")} /><input value={attendee.email} onChange={(event) => setAttendees((current) => current.map((item, position) => position === index ? { ...item, email: event.target.value } : item))} placeholder={t("Email")} type="email" /><button onClick={() => setAttendees((current) => current.filter((_, position) => position !== index))} type="button">{t("Remove")}</button></div>)}<button onClick={() => setAttendees((current) => [...current, { name: "", email: "" }])} type="button">{t("Add attendee")}</button></div> : null}{error ? <p className="email-status failed" role="alert"><X size={17} />{error}</p> : null}<button className="primary-button confirm-booking" disabled={!canSubmit || submitState === "saving"} onClick={() => void submit()} type="button">{submitState === "saving" ? t("Confirming…") : t("Confirm {serviceSingular}", { serviceSingular: terms.serviceSingular })}</button></div> : null}</section>
+      <section className={`booking-progressive-section ${service ? "is-open" : ""}`}><div className="booking-progressive-title"><span className="booking-progressive-title-label">{videoReview ? t("2. Turnaround") : t("2. Date & Time")}</span><span className="booking-progressive-title-state">{!service ? t("Locked") : videoReview ? t("No time needed") : slot ? changeButton(() => setSlot(null)) : slotsState === "loading" ? loadingLabel() : t("In progress")}</span></div>{service && videoReview ? <div className="booking-progressive-body"><div className="booking-review-turnaround"><p>{t("Send your swing from the player portal once you have booked. There is no appointment to attend.")}</p><p><strong>{t("Back with you by {label}", { label: reviewDueDate(service).label })}</strong>{" "}{reviewDueDate(service).days === 1 ? t("— within 1 day.") : t("— within {days} days.", { days: reviewDueDate(service).days })}</p></div></div> : service && slot ? <div className="booking-progressive-body"><WeekSlots week={week} slots={[slot]} dayLabel={(day) => dateFor(week, day).toLocaleDateString(readerLocale(), { weekday: "long", month: "short", day: "numeric" })} slotLabel={(candidate) => time(candidate.start)} isSelected={() => true} onSelect={() => setSlot(null)} emptyLabel="" />{slotCoach ? <p className="booking-slot-coach">{t("With {name}", { name: slotCoach.name })}</p> : null}</div> : service ? <div className="booking-progressive-body">{coachChoices.length > 1 ? <fieldset className="booking-handedness booking-coach-picker"><legend>{t("Who would you like?")}</legend><div className="booking-handedness-options" role="radiogroup" aria-label={terms.staffSingular}><button aria-checked={!coachId} className={!coachId ? "selected-handedness" : ""} onClick={() => chooseCoach("")} role="radio" type="button">{t("Anyone available")}</button>{coachChoices.map((coach) => <button aria-checked={coachId === coach.id} className={coachId === coach.id ? "selected-handedness" : ""} key={coach.id} onClick={() => chooseCoach(coach.id)} role="radio" type="button">{coach.name}</button>)}</div></fieldset> : null}<div className="booking-week-controls"><button onClick={() => { setWeek((value) => value - 1); setSlot(null); }} type="button"><ArrowLeft size={15} /><span>{t("Previous week")}</span></button><strong>{weekLabel}</strong><button onClick={() => { setWeek((value) => value + 1); setSlot(null); }} type="button"><span>{t("Next week")}</span><ArrowRight size={15} /></button></div><WeekSlots week={week} placeholder={slotsState === "loading" ? <Loading what={t("available times")} /> : slotsState === "error" ? <p role="alert">{t("Available times could not be loaded.")}</p> : null} slots={availableSlots} dayLabel={(day) => dateFor(week, day).toLocaleDateString(readerLocale(), { weekday: "long", month: "short", day: "numeric" })} slotLabel={(candidate) => `${time(candidate.start)}${candidate.remainingSpots ? t(" · {remainingSpots} spots left", { remainingSpots: candidate.remainingSpots }) : ""}`} isSelected={(candidate) => slot?.week === candidate.week && slot?.day === candidate.day && slot?.start === candidate.start} onSelect={(candidate) => { setSlot(candidate); setError((current) => (current === NO_BAY_FOR_SWING ? "" : current)); }} emptyLabel={t("No public times available this week.")} /></div> : null}</section>
+      <section className={`booking-progressive-section ${readyForDetails ? "is-open" : ""}`}><div className="booking-progressive-title"><span className="booking-progressive-title-label">{t("3. Your Information")}</span><span className="booking-progressive-title-state">{readyForDetails ? t("In progress") : t("Locked")}</span></div>{readyForDetails ? <div className="booking-progressive-body"><div className="booking-form">{remembered && forSomeoneElse ? <div className="booking-remembered"><p><strong>{t("Booking for someone else")}</strong></p><div className="booking-remembered-actions"><button className="booking-progressive-change" onClick={bookAsRemembered} type="button">{t("Book as {name} instead", { name: remembered.firstName })}</button></div></div> : null}{remembered && !forSomeoneElse && !editingDetails ? <div className="booking-remembered"><p><strong>{t("Booking as {name}", { name: `${form.firstName} ${form.lastName}`.trim() })}</strong><small>{form.email}</small></p><div className="booking-remembered-actions"><button className="booking-progressive-change" onClick={() => setEditingDetails(true)} type="button">{t("Edit details")}</button><button className="booking-progressive-change" onClick={bookForSomeoneElse} type="button">{t("Book for someone else")}</button><button className="booking-progressive-change" onClick={forgetMe} type="button">{t("Forget me")}</button></div></div> : (["firstName", "lastName", "phone", "email"] as const).map((key) => <input className={key === "email" ? "w-email" : "w-name"} key={key} value={form[key]} type={key === "email" ? "email" : key === "phone" ? "tel" : "text"} autoComplete={key === "firstName" ? "given-name" : key === "lastName" ? "family-name" : key === "phone" ? "tel" : "email"} onChange={(event) => setForm((current) => ({ ...current, [key]: event.target.value }))} placeholder={key === "firstName" ? t("First name *") : key === "lastName" ? t("Last name *") : key === "phone" ? t("Phone") : t("Email *")} />)}{!customer && !remembered ? <label className="booking-remember"><input checked={rememberMe} onChange={(event) => setRememberMe(event.target.checked)} type="checkbox" />{t("Remember me on this device")}</label> : null}{askHandedness ? <fieldset className="booking-handedness"><legend>{t("Which way do you swing?")}</legend><div className="booking-handedness-options" role="radiogroup" aria-label={t("Handedness")}>{handednessOptions.map((option) => <button aria-checked={handedness === option.value} aria-describedby={`handedness-tip-${option.value}`} className={handedness === option.value ? "selected-handedness" : ""} key={option.value} onClick={() => setHandedness(option.value)} role="radio" type="button">{option.label}<span className="booking-handedness-tip" id={`handedness-tip-${option.value}`} role="tooltip">{option.explainer}</span></button>)}</div></fieldset> : null}<textarea aria-label={t("Notes for your {staffSingular}", { staffSingular: terms.staffSingular.toLowerCase() })} className="booking-notes" maxLength={800} onChange={(event) => setNotes(event.target.value)} placeholder={t("Notes for your {staffSingular} (optional) — anything useful before the booking", { staffSingular: terms.staffSingular.toLowerCase() })} value={notes} /></div>{customGroup && service ? <GroupAttendees account={catalogue.account} attendees={attendees} bookerName={`${form.firstName} ${form.lastName}`} onChange={setAttendees} service={service} /> : null}{error ? <p className="email-status failed" role="alert"><X size={17} />{error}</p> : null}<button className="primary-button confirm-booking" disabled={!canSubmit || submitState === "saving"} onClick={() => void submit()} type="button">{submitState === "saving" ? t("Confirming…") : t("Confirm {serviceSingular}", { serviceSingular: terms.serviceSingular })}</button></div> : null}</section>
     </div>
   </main></BookingFrame>;
 }

@@ -34,28 +34,41 @@ import { t, tn } from "../../lib/i18n";
 const PREVIEW_ROWS: Record<NotificationVariantId, Array<[string, string]>> = {
   booked: [
     [t("Lesson"), t("45 min private lesson")],
+    [t("With"), t("[coach name]")],
     [t("When"), "Tue 8 Sep, 9:00am"],
   ],
   reschedule: [
     [t("Lesson"), t("45 min private lesson")],
+    [t("With"), t("[coach name]")],
     [t("Previous"), "Tue 8 Sep, 9:00am"],
     [t("When"), "Thu 10 Sep, 2:30pm"],
   ],
   reminder: [
     [t("Lesson"), t("45 min private lesson")],
+    [t("With"), t("[coach name]")],
     [t("When"), "Tomorrow, 9:00am"],
   ],
   cancelled: [
     [t("Lesson"), t("45 min private lesson")],
+    [t("With"), t("[coach name]")],
     [t("Previous"), "Tue 8 Sep, 9:00am"],
   ],
   group: [
     [t("Lesson"), t("Short game clinic")],
+    [t("With"), t("[coach name]")],
     [t("When"), "Sat 12 Sep, 8:00am"],
   ],
   package: [
     [t("Lesson"), t("Six lesson block")],
+    [t("With"), t("[coach name]")],
     [t("When"), t("Book as you go")],
+  ],
+  groupInvite: [
+    [t("Lesson"), t("Custom group lesson")],
+    [t("With"), t("[coach name]")],
+    [t("When"), "Sat 12 Sep, 8:00am"],
+    [t("Group"), t("[booker], [invitee], [invitee]")],
+    [t("Price"), t("$240 for the group · $80 each")],
   ],
 };
 
@@ -76,6 +89,8 @@ function variantScreenText(id: NotificationVariantId): { label: string; when: st
       return { label: t("Group session"), when: t("Sent instead of New booking when the lesson type is a group") };
     case "package":
       return { label: t("Package"), when: t("Sent instead of New booking when the lesson type is a package") };
+    case "groupInvite":
+      return { label: t("Group invite"), when: t("Sent to each person the booker invites to a custom group lesson") };
     default:
       return { label: String(id), when: "" };
   }
@@ -130,7 +145,8 @@ export function MessageTemplatesPanel({
 
   const active = NOTIFICATION_VARIANTS.find((entry) => entry.id === variant) ?? NOTIFICATION_VARIANTS[0];
   const activeScreen = variantScreenText(active.id);
-  const isText = channel === "text";
+  // An email-only message has no text to write, whichever channel was last open.
+  const isText = channel === "text" && !active.emailOnly;
   const phoneFrame = isText || narrow;
 
   /** The effective wording: what the coach wrote, or Clarity's default in the language the client gets. */
@@ -240,11 +256,13 @@ export function MessageTemplatesPanel({
             <ClarityEmail size={15} />{t("Email")}</button>
           <button
             className={isText ? "is-active" : ""}
+            disabled={active.emailOnly}
             onClick={() => {
               setChannel("text");
               cancelEdit();
             }}
             aria-pressed={isText}
+            title={active.emailOnly ? t("This message is only sent by email") : undefined}
             type="button"
           >
             <ClarityMessages size={15} />{t("Text")}</button>
@@ -371,7 +389,11 @@ export function MessageTemplatesPanel({
                       label: t("Button"),
                       value: ctaLabel || t("No button on this message"),
                     })}
-                    <span className="mt-cta-note">{t("Links to the manage / reschedule page. Clear it to drop the button.")}</span>
+                    <span className="mt-cta-note">
+                      {variant === "groupInvite"
+                        ? t("Lets the invited person confirm they are coming. Clear it to drop the button.")
+                        : t("Links to the manage / reschedule page. Clear it to drop the button.")}
+                    </span>
                   </div>
 
                   {field("signoff", { className: "mt-signoff", label: t("Sign-off"), value: renderPreview(text("signoff")) })}
