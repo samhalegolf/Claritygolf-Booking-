@@ -36,14 +36,18 @@ type Fixture = {
   portalPlayers: Record<string, unknown>[];
   /** account_memberships rows visible to the lookup. */
   memberships: Record<string, unknown>[];
+  /** Live businesses on the platform. One unless a test says otherwise. */
+  liveAccounts?: string[];
 };
 
 function installDatabase(fixture: Fixture) {
   const answer = (raw: string): unknown[] => {
     const text = raw.replace(/\s+/g, " ").trim();
     // resolvePublicAccountId: exactly one active account means no ?business= is
-    // needed, which is the shape of this deployment.
-    if (/FROM accounts/i.test(text)) return [{ id: ACCOUNT, status: "active" }];
+    // needed; two or more and a request that names none cannot be resolved.
+    if (/FROM accounts/i.test(text)) {
+      return (fixture.liveAccounts || [ACCOUNT]).map((id) => ({ id, status: "active" }));
+    }
     if (/FROM account_memberships/i.test(text)) return fixture.memberships;
     if (/FROM portal_players/i.test(text)) return fixture.portalPlayers;
     if (/FROM people/i.test(text)) {
@@ -165,6 +169,27 @@ test("a portal player with the right password gets a player session, not a works
       );
       assert.equal(status, 200);
       assert.equal(body.authenticated, true);
+      assert.equal(body.role, "player");
+    },
+  );
+});
+
+test("a player still signs in when a second business is live and the app names neither", async () => {
+  // The Clarity Player app posts to /api/auth/login with no ?business=. Once a
+  // second live business existed, that request could not be resolved to one,
+  // and every app login with a correct password answered 403.
+  await withFixture(
+    {
+      authUserId: PLAYER_AUTH_USER,
+      portalPlayers: [activePortalPlayer()],
+      memberships: [],
+      liveAccounts: [ACCOUNT, "another-golf-business"],
+    },
+    async () => {
+      const { status, body } = await login(PLAYER_EMAIL);
+
+      assert.equal(body.error, undefined, `a player was refused: ${JSON.stringify(body)}`);
+      assert.equal(status, 200);
       assert.equal(body.role, "player");
     },
   );

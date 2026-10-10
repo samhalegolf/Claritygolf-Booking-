@@ -5406,6 +5406,30 @@ async function readPortalPlayerByAuthUser(authUserId, accountId) {
 }
 
 /**
+ * The business a player signs in to when the request does not name one.
+ *
+ * The Clarity Player app has no business in its URL, and once a second live
+ * business exists resolvePublicAccountId cannot guess one. The player's own
+ * portal access can: it names the business they belong to. A player of more
+ * than one business lands in the one they used most recently.
+ */
+async function portalPlayerHomeAccountId(authUserId) {
+  if (!authUserId) return "";
+  await ensurePlayerSessionsTable();
+  const rows = await db().sql`
+    SELECT portal_players.account_id
+    FROM portal_players
+    JOIN accounts ON accounts.id = portal_players.account_id
+    WHERE portal_players.auth_user_id = ${authUserId}
+      AND portal_players.status <> 'disabled'
+      AND accounts.status = 'active'
+    ORDER BY portal_players.last_login_at DESC NULLS LAST, portal_players.created_at DESC
+    LIMIT 1
+  `;
+  return cleanSlug(rows[0]?.account_id, "");
+}
+
+/**
  * The email is the only thing a signed-out player can offer, so this is what
  * "forgot password" has to look up. Scoped to the account for the same reason
  * the login is: portal access is access to one business.
@@ -8589,7 +8613,13 @@ async function routeBookingApiRequest(
           // check above. Returning 403 here sent them away with "this login is
           // not attached to a business workspace yet" and left the player
           // branch below unreachable for anyone whose password was right.
-          const playerAccountId = await resolvePublicAccountId(req).catch(() => "");
+          //
+          // A request that names no business (the Clarity Player app never
+          // does) falls back to the business the player belongs to. Without
+          // that, a second live business made every app login answer 403.
+          const playerAccountId =
+            (await resolvePublicAccountId(req).catch(() => "")) ||
+            (await portalPlayerHomeAccountId(coachAuthUserId));
           const portalPlayer = coachAuthUserId
             ? await portalPlayerSessionIdentity(coachAuthUserId, loginEmail, playerAccountId)
             : null;
