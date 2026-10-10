@@ -4532,9 +4532,11 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   // Whatever moved the week — a swipe that landed on a neighbour, the toolbar
   // arrows, Today, or edge navigation during a drag — the pager ends up back
   // on the middle panel. A resize changes the step, so it has to re-centre for
-  // that too or the strip is left parked between two weeks.
+  // that too or the strip is left parked between two weeks. The calendar is
+  // only mounted once the workspace has loaded, so that is a trigger too:
+  // without it a cold open left the strip at its first panel, last week.
   useEffect(() => {
-    if (activeView !== "calendar") return;
+    if (activeView !== "calendar" || adminWorkspaceLoadStatus !== "loaded") return;
     centreWeekPager();
     const onResize = () => centreWeekPager();
     window.addEventListener("resize", onResize);
@@ -4542,7 +4544,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     // centreWeekPager reads only refs; re-centring is keyed off the week and
     // the layout switches that change the strip's width.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeView, activeWeek, calendarDetailMode, effectiveCalendarPerspective]);
+  }, [activeView, activeWeek, adminWorkspaceLoadStatus, calendarDetailMode, effectiveCalendarPerspective]);
 
   const selectedPerson = useMemo(() => {
     if (!selected || selected.kind !== "appointment") return null;

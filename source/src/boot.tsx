@@ -78,6 +78,12 @@ const authLinkAtRoot =
   publicPath === "/" &&
   (new URLSearchParams(window.location.search).has("portalInvite") ||
     new URLSearchParams(window.location.search).has("reset"));
+// A coach who never signed out goes straight to their workspace from the home
+// page (and the installed app, which opens at /), rather than being shown the
+// landing page and a Sign in button that then lets them straight in. Everyone
+// else -- Google's reviewers included -- still gets the public home page. If
+// the hint is stale and the session has gone, they get the login screen.
+const homeSkipsToWorkspace = publicPath === "/" && !authLinkAtRoot && lastVisitorWasCoach();
 const publicPage: PublicPage | null =
   publicPath === "/privacy"
     ? "privacy"
@@ -85,7 +91,7 @@ const publicPage: PublicPage | null =
       ? "terms"
       : publicPath === "/support"
         ? "support"
-        : publicPath === "/" && !authLinkAtRoot
+        : publicPath === "/" && !authLinkAtRoot && !homeSkipsToWorkspace
           ? "home"
           : null;
 
