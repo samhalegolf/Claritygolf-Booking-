@@ -18249,6 +18249,34 @@
   font-size: 20px;
 }
 
+/* Another day: the date is a pill that goes back to today. */
+.today-back-button {
+  justify-self: center;
+  max-width: 100%;
+  padding: 4px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel-soft);
+  color: var(--text);
+  font: inherit;
+  font-size: 18px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* The day slides like a card (TodayScreen.tsx moves it); the viewport clips it
+   at the page edges without becoming a scroll box. */
+.today-viewport {
+  overflow: hidden;
+  overflow: clip;
+}
+
+.today-card {
+  display: grid;
+  gap: 16px;
+  will-change: transform;
+}
+
 .today-header span {
   color: var(--c-text-soft, #76736d);
   font-size: 13px;
