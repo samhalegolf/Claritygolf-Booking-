@@ -1235,7 +1235,6 @@
   "clients": "asiakkaat",
   "{customerPlural} with {serviceSingular} notes or video, plus anyone you add.": "{customerPlural}, joilla on muistiinpanoja tai videoita ({serviceSingular}), sekä lisäämäsi henkilöt.",
   "Add {customerSingular}": "Lisää {customerSingular}",
-  "Open video analysis": "Avaa videoanalyysi",
   "1 video was saved without a player.": "1 video tallennettiin ilman pelaajaa.",
   "{length} videos were saved without a player.": "{length} videota tallennettiin ilman pelaajaa.",
   "Saved video": "Tallennettu video",
@@ -4669,5 +4668,7 @@
   "Add an email for {name}, or untick their invite.": "Lisää sähköposti henkilölle {name} tai poista kutsu.",
   "With {name}": "Valmentaja: {name}",
   "Who would you like?": "Kenen kanssa haluat harjoitella?",
-  "Anyone available": "Kuka tahansa vapaa"
+  "Anyone available": "Kuka tahansa vapaa",
+  "Previous day": "Edellinen päivä",
+  "Next day": "Seuraava päivä"
 }

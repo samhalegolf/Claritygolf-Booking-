@@ -1235,7 +1235,6 @@
   "clients": "klienter",
   "{customerPlural} with {serviceSingular} notes or video, plus anyone you add.": "{customerPlural} med {serviceSingular}-notater eller video, pluss alle du legger til.",
   "Add {customerSingular}": "Legg til {customerSingular}",
-  "Open video analysis": "Åpne videoanalyse",
   "1 video was saved without a player.": "1 video ble lagret uten spiller.",
   "{length} videos were saved without a player.": "{length} videoer ble lagret uten spiller.",
   "Saved video": "Lagret video",
@@ -4669,5 +4668,7 @@
   "Add an email for {name}, or untick their invite.": "Legg inn en e-post for {name}, eller fjern invitasjonen.",
   "With {name}": "Med {name}",
   "Who would you like?": "Hvem vil du booke hos?",
-  "Anyone available": "Hvem som helst"
+  "Anyone available": "Hvem som helst",
+  "Previous day": "Forrige dag",
+  "Next day": "Neste dag"
 }

@@ -1235,7 +1235,6 @@
   "clients": "klanten",
   "{customerPlural} with {serviceSingular} notes or video, plus anyone you add.": "{customerPlural} met notities of video's bij een {serviceSingular}, plus iedereen die je toevoegt.",
   "Add {customerSingular}": "{customerSingular} toevoegen",
-  "Open video analysis": "Videoanalyse openen",
   "1 video was saved without a player.": "1 video is opgeslagen zonder speler.",
   "{length} videos were saved without a player.": "{length} video's zijn opgeslagen zonder speler.",
   "Saved video": "Opgeslagen video",
@@ -4669,5 +4668,7 @@
   "Add an email for {name}, or untick their invite.": "Vul een e-mail in voor {name} of zet de uitnodiging uit.",
   "With {name}": "Met {name}",
   "Who would you like?": "Bij wie wil je les?",
-  "Anyone available": "Maakt niet uit"
+  "Anyone available": "Maakt niet uit",
+  "Previous day": "Vorige dag",
+  "Next day": "Volgende dag"
 }

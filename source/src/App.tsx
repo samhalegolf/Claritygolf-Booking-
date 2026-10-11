@@ -2275,6 +2275,11 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   useEffect(() => {
     if (!viewAllowedByCapabilities(activeView, capabilities)) setActiveView("profile");
   }, [activeView, capabilities]);
+  // Bumped each time Today is chosen from the tab bar, so a coach who has
+  // swiped off to another day lands back on today.
+  const [todayVisit, setTodayVisit] = useState(0);
+  // The general Video workspace (no player) opened straight onto the camera.
+  const [videoCameraRequested, setVideoCameraRequested] = useState(false);
   const [videoContext, setVideoContext] = useState<{
     playerId: string;
     playerName: string;
@@ -6380,6 +6385,8 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     if (view === "sell") setSellSaleOpen(false);
     // Opening Video from the nav is the general workspace (no player context).
     if (view === "video") setVideoContext(null);
+    setVideoCameraRequested(false);
+    if (view === "today") setTodayVisit((visit) => visit + 1);
     if (view !== "calendar") closeCalendarDetails();
     // Settings › Coaches opens on the list again, not on whoever was open last.
     openCoachProfile(null);
@@ -6467,6 +6474,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     initialVideoFile?: File;
   }) {
     void ensureSavedVideoLibrary();
+    setVideoCameraRequested(false);
     setVideoContext({
       playerId: client.id,
       playerName: client.name,
@@ -16748,6 +16756,16 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
               <Pencil size={13} />
             </button>
           )}
+          <button
+            className="icon-button small new-video-button booking-client-new-video"
+            onClick={() => void startSelectedBookingRecording()}
+            aria-label={t("Record a video")}
+            title={t("Record a video")}
+            type="button"
+          >
+            <Plus size={13} />
+            <ClarityVideoAnalysis size={16} />
+          </button>
         </div>
       ) : (
         <h2 id="appointment-details-title">{selected.title}</h2>
@@ -16938,17 +16956,6 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
             rel="noreferrer"
           >
             <ClarityIntegrations size={16} />{t("Caddy")}</a>
-        </div>
-      )}
-
-      {selected.kind === "appointment" && selectedPerson && !hasSelectedPersonCaddyProfile && (
-        <div className="linked-profile">
-          <div>
-            <span>{t("Shared profile")}</span>
-            <strong>{t("Not connected")}</strong>
-          </div>
-          <button className="outline-button" type="button">
-            <ClarityIntegrations size={16} />{t("Add Clarity Caddy")}</button>
         </div>
       )}
 
@@ -19071,6 +19078,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
 
         {adminWorkspaceReady && activeView === "today" && (
           <TodayScreen
+            key={todayVisit}
             items={accountItems}
             services={services}
             inScope={itemInCoachScope}
@@ -19136,11 +19144,15 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                 {capabilities.videoAnalysis && (
                   <button
                     type="button"
-                    className="icon-button"
-                    onClick={() => switchView("video")}
-                    title={t("Open video analysis")}
-                    aria-label={t("Open video analysis")}
+                    className="icon-button new-video-button"
+                    onClick={() => {
+                      switchView("video");
+                      setVideoCameraRequested(true);
+                    }}
+                    title={t("Record a video")}
+                    aria-label={t("Record a video")}
                   >
+                    <Plus size={16} />
                     <ClarityVideoAnalysis size={18} />
                   </button>
                 )}
@@ -20744,7 +20756,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                 lessonTitle={videoContext?.lessonTitle}
                 savedVideoId={videoContext?.savedVideoId}
                 pairedSavedVideoId={videoContext?.pairedSavedVideoId}
-                autoStartLiveRecording={videoContext?.startRecording}
+                autoStartLiveRecording={videoContext ? videoContext.startRecording : videoCameraRequested}
                 initialVideoFile={videoContext?.initialVideoFile}
                 savedVideoLibrary={savedVideoLibrary}
                 libraryPlayers={videoLibraryPlayers}

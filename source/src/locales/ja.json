@@ -1235,7 +1235,6 @@
   "clients": "クライアント",
   "{customerPlural} with {serviceSingular} notes or video, plus anyone you add.": "{serviceSingular}のメモや動画がある{customerPlural}と、追加した人。",
   "Add {customerSingular}": "{customerSingular}を追加",
-  "Open video analysis": "スイング分析を開く",
   "1 video was saved without a player.": "プレーヤー未指定で保存された動画が1件あります。",
   "{length} videos were saved without a player.": "プレーヤー未指定で保存された動画が{length}件あります。",
   "Saved video": "保存済み動画",
@@ -4669,5 +4668,7 @@
   "Add an email for {name}, or untick their invite.": "{name}さんのメールアドレスを入力するか、招待をオフにしてください。",
   "With {name}": "担当：{name}",
   "Who would you like?": "どのコーチを希望しますか？",
-  "Anyone available": "どなたでも"
+  "Anyone available": "どなたでも",
+  "Previous day": "前の日",
+  "Next day": "次の日"
 }

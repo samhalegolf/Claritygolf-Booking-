@@ -374,15 +374,16 @@ export function ClientProfileView({ clientProfile }: { clientProfile: ClientProf
                         </button>
                         <button
                           type="button"
-                          className="icon-button"
+                          className="icon-button new-video-button"
                           onClick={() =>
                             openVideoAnalysisForClient({
                               id: preferredVideoPlayerId(selectedClient, videoPlayerIds),
                               name: selectedClient.name,
+                              startRecording: true,
                             })
                           }
-                          title={t("Add video")}
-                          aria-label={t("Add video")}
+                          title={t("Record a video")}
+                          aria-label={t("Record a video")}
                         >
                           <Plus size={16} />
                           <ClarityVideoAnalysis size={15} />
