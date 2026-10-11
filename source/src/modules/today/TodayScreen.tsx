@@ -210,6 +210,18 @@ export function TodayScreen({
         </button>
       </header>
 
+      {/* Not part of the day, so they stay put while the day slides. */}
+      <div className="today-actions">
+        <button type="button" className="outline-button" onClick={onNewBooking}>
+          <ClarityNewBooking size={18} />
+          {t("New booking")}
+        </button>
+        <button type="button" className="outline-button" onClick={onOpenCalendar}>
+          <ClarityCalendar size={18} />
+          {t("Open calendar")}
+        </button>
+      </div>
+
       <div className="today-viewport">
         <div className="today-card" ref={cardRef}>
           {featured && (
@@ -225,17 +237,6 @@ export function TodayScreen({
               </button>
             </article>
           )}
-
-          <div className="today-actions">
-            <button type="button" className="outline-button" onClick={onNewBooking}>
-              <ClarityNewBooking size={18} />
-              {t("New booking")}
-            </button>
-            <button type="button" className="outline-button" onClick={onOpenCalendar}>
-              <ClarityCalendar size={18} />
-              {t("Open calendar")}
-            </button>
-          </div>
 
           {rows.length > 0 && (
             <ol className="today-list">
