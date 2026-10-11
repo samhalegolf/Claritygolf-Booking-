@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { t } from "../../lib/i18n";
 import {
   buildWeekDays,
@@ -29,10 +30,26 @@ const STATE_LABEL: Record<TodayBooking["state"], string> = {
   later: "",
 };
 
+/** How far a finger has to travel sideways, more than up or down, to count as a swipe. */
+const SWIPE_MIN_PX = 50;
+
+/** The week and weekday `offset` days from today, in the calendar's week/day terms. */
+function dayFromToday(offset: number) {
+  const currentWeek = getCurrentWeekOffset();
+  const todayIndex = Math.max(0, buildWeekDays(currentWeek).findIndex((weekDay) => weekDay.isToday));
+  const index = todayIndex + offset;
+  const week = currentWeek + Math.floor(index / 7);
+  const day = ((index % 7) + 7) % 7;
+  return { week, day, label: buildWeekDays(week)[day]?.label ?? "" };
+}
+
 /**
  * The phone layout's first screen: today's bookings for this coach (or the
  * whole business, for an admin), the one on now or coming next, and the two
  * things a coach most often does from here.
+ *
+ * Swipe sideways (or use the arrows) to look at the days either side. Tapping
+ * Today in the tab bar again remounts this screen, which brings it back.
  */
 export function TodayScreen({
   items,
@@ -50,24 +67,68 @@ export function TodayScreen({
   onOpenCalendar: () => void;
 }) {
   const nowMinutes = useBusinessMinute();
-  const week = getCurrentWeekOffset();
-  const weekDays = buildWeekDays(week);
-  const day = Math.max(0, weekDays.findIndex((weekDay) => weekDay.isToday));
-  const rows = todaysBookings(items, { week, day, nowMinutes, inScope });
-  const featured = featuredBooking(rows);
+  const [offset, setOffset] = useState(0);
+  const touchStart = useRef<{ x: number; y: number } | null>(null);
+  const isToday = offset === 0;
+  const { week, day, label } = dayFromToday(offset);
+  // Another day is read against its own end (past) or start (future): all
+  // done, or nothing yet on now.
+  const clock = isToday ? nowMinutes : offset < 0 ? Number.POSITIVE_INFINITY : -1;
+  const rows = todaysBookings(items, { week, day, nowMinutes: clock, inScope }).map((row) =>
+    isToday || row.state === "done" ? row : { ...row, state: "later" as const },
+  );
+  const featured = isToday ? featuredBooking(rows) : undefined;
   const summary = todaySummary(rows);
   const who = (item: CalendarItem) => item.client || item.title;
   const what = (item: CalendarItem) => itemService(item, services)?.name ?? "";
 
   return (
-    <section className="module-page today-page">
+    <section
+      className="module-page today-page"
+      onTouchStart={(event) => {
+        const touch = event.touches[0];
+        touchStart.current = touch ? { x: touch.clientX, y: touch.clientY } : null;
+      }}
+      onTouchEnd={(event) => {
+        const start = touchStart.current;
+        const touch = event.changedTouches[0];
+        touchStart.current = null;
+        if (!start || !touch) return;
+        const dx = touch.clientX - start.x;
+        const dy = touch.clientY - start.y;
+        if (Math.abs(dx) < SWIPE_MIN_PX || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+        setOffset((current) => current + (dx < 0 ? 1 : -1));
+      }}
+    >
       <header className="today-header">
-        <strong>{weekDays[day]?.label}</strong>
-        <span>
-          {summary.total
-            ? t("{total} booked · {done} done · {remaining} to go", summary)
-            : t("Nothing booked today")}
-        </span>
+        <button
+          type="button"
+          className="icon-button"
+          onClick={() => setOffset((current) => current - 1)}
+          aria-label={t("Previous day")}
+          title={t("Previous day")}
+        >
+          <ChevronLeft size={20} />
+        </button>
+        <div className="today-header-day">
+          <strong>{label}</strong>
+          <span>
+            {summary.total
+              ? t("{total} booked · {done} done · {remaining} to go", summary)
+              : isToday
+                ? t("Nothing booked today")
+                : t("Nothing booked")}
+          </span>
+        </div>
+        <button
+          type="button"
+          className="icon-button"
+          onClick={() => setOffset((current) => current + 1)}
+          aria-label={t("Next day")}
+          title={t("Next day")}
+        >
+          <ChevronRight size={20} />
+        </button>
       </header>
 
       {featured && (

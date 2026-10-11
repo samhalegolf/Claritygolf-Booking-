@@ -1235,7 +1235,6 @@
   "clients": "clients",
   "{customerPlural} with {serviceSingular} notes or video, plus anyone you add.": "{customerPlural} avec des notes ou vidéos de {serviceSingular}, plus toute personne que vous ajoutez.",
   "Add {customerSingular}": "Ajouter {customerSingular}",
-  "Open video analysis": "Ouvrir l’analyse vidéo",
   "1 video was saved without a player.": "1 vidéo a été enregistrée sans joueur.",
   "{length} videos were saved without a player.": "{length} vidéos ont été enregistrées sans joueur.",
   "Saved video": "Vidéo enregistrée",
@@ -4669,5 +4668,7 @@
   "Add an email for {name}, or untick their invite.": "Ajoutez un e-mail pour {name} ou décochez son invitation.",
   "With {name}": "Avec {name}",
   "Who would you like?": "Avec qui souhaitez-vous réserver ?",
-  "Anyone available": "Peu importe"
+  "Anyone available": "Peu importe",
+  "Previous day": "Jour précédent",
+  "Next day": "Jour suivant"
 }

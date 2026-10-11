@@ -2366,6 +2366,19 @@
   opacity: 1;
 }
 
+/* Plus + camera: opens the recorder straight onto the camera. Two glyphs
+   need a little more room than a square icon button gives. */
+.icon-button.new-video-button {
+  width: auto;
+  padding: 0 8px;
+  gap: 2px;
+}
+
+.booking-client-new-video {
+  align-self: center;
+  margin-left: auto;
+}
+
 .booking-client-notes-preview,
 .booking-client-history {
   margin: 0 0 8px;
@@ -18214,11 +18227,22 @@
   display: grid;
   gap: 16px;
   padding: 16px;
+  /* Sideways swipes change the day (TodayScreen.tsx); the page still scrolls. */
+  touch-action: pan-y;
 }
 
 .today-header {
   display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.today-header-day {
+  display: grid;
   gap: 2px;
+  min-width: 0;
+  text-align: center;
 }
 
 .today-header strong {

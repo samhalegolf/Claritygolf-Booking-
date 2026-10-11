@@ -1235,7 +1235,6 @@
   "clients": "kunder",
   "{customerPlural} with {serviceSingular} notes or video, plus anyone you add.": "{customerPlural} med anteckningar eller video från {serviceSingular}, plus alla du lägger till.",
   "Add {customerSingular}": "Lägg till {customerSingular}",
-  "Open video analysis": "Öppna videoanalys",
   "1 video was saved without a player.": "1 video sparades utan spelare.",
   "{length} videos were saved without a player.": "{length} videor sparades utan spelare.",
   "Saved video": "Sparad video",
@@ -4669,5 +4668,7 @@
   "Add an email for {name}, or untick their invite.": "Ange en e-post för {name} eller ta bort inbjudan.",
   "With {name}": "Med {name}",
   "Who would you like?": "Vem vill du boka med?",
-  "Anyone available": "Vem som helst"
+  "Anyone available": "Vem som helst",
+  "Previous day": "Föregående dag",
+  "Next day": "Nästa dag"
 }
