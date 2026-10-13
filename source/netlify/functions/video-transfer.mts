@@ -2768,13 +2768,15 @@ async function handleReassignPlayer(req: Request, accountId: string, savedVideoI
   return json({ ok: true, updated: Array.isArray(rows) ? rows.length : 0 });
 }
 
-async function listImportableSessions(accountId: string, playerId?: string) {
+async function listImportableSessions(accountId: string, playerId?: string, { forPlayer = false } = {}) {
   // playerId narrows the query in Postgres rather than after the fact, so a
   // busy account's 50-row cap doesn't silently drop an older video that
   // belongs to the one player a coach is actually picking for.
   const playerFilter = playerId ? `&player_id=eq.${encodeURIComponent(playerId)}` : "";
+  // What a player removed from their own list stays in everyone else's.
+  const hiddenFilter = forPlayer ? "&player_hidden_at=is.null" : "";
   const rows = await supabase(transferSessionTable, {
-    query: `select=*&account_id=eq.${encodeURIComponent(accountId)}${playerFilter}&catalogue_status=in.(ready_to_import,importing,imported,cleanup_scheduled,complete,repair_required)&order=ready_to_import_at.desc.nullslast,updated_at.desc&limit=50`,
+    query: `select=*&account_id=eq.${encodeURIComponent(accountId)}${playerFilter}${hiddenFilter}&catalogue_status=in.(ready_to_import,importing,imported,cleanup_scheduled,complete,repair_required)&order=ready_to_import_at.desc.nullslast,updated_at.desc&limit=50`,
   });
   return rows.map(rowToSession);
 }
@@ -3504,7 +3506,9 @@ async function handlePlayerVideoRoute(
   if (req.method === "GET" && sub[0] === "imports") {
     const accessToken = await ensureDriveReady(accountId, diagnostics);
     const provider = googleDriveProviderAdapter(accessToken, settings, diagnostics);
-    const sessions = (await listImportableSessions(accountId)).filter((s) => candidates.has(s.playerId));
+    const sessions = (await listImportableSessions(accountId, undefined, { forPlayer: true })).filter((s) =>
+      candidates.has(s.playerId),
+    );
     const transfers = await Promise.all(
       sessions.map(async (s) => importSummaryFromManifest(s, await readManifestForSession(provider, s))),
     );
@@ -3570,6 +3574,18 @@ async function handlePlayerVideoRoute(
 
   if (!owned || !candidates.has(owned.playerId)) {
     return json({ error: "not_found", message: "Video not found for this player." }, 404);
+  }
+
+  // Removing a cloud video from the player's own list. Allowed on any row
+  // filed under them, whoever sent it, because it changes nothing but what
+  // they see: the Drive file and the coach's library are not touched.
+  if (req.method === "POST" && sub[1] === "hide") {
+    await supabase(transferSessionTable, {
+      method: "PATCH",
+      query: `transfer_id=eq.${encodeURIComponent(owned.transferId)}`,
+      body: { player_hidden_at: new Date().toISOString() },
+    });
+    return json({ ok: true });
   }
 
   // Everything below acts on a transfer the player already owns. Mutating one

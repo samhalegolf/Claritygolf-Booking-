@@ -19,6 +19,7 @@ import {
   ClarityLessonsProgrammes,
   ClarityNewBooking,
   ClarityPassesCredits,
+  ClarityProfile,
   ClarityVideoAnalysis,
   type IconComponent,
 } from "../shared/ClarityIcons";
@@ -32,7 +33,8 @@ export type PlayerTerminalDestination =
   | "practice"
   | "notes"
   | "videos"
-  | "book";
+  | "book"
+  | "account";
 
 type NavLink = {
   id: PlayerTerminalDestination;
@@ -232,6 +234,20 @@ export function PlayerTerminalNav({
               onClick={onRecord}
             >
               <span className="player-terminal-nav-record-dot" aria-hidden="true" />
+            </button>
+          )}
+          {/* Account sits with the other things that are about the person
+              rather than the coaching, so it is not one of the links. */}
+          {!back && (
+            <button
+              type="button"
+              className={`player-terminal-nav-account${active === "account" ? " active" : ""}`}
+              aria-label={t("Account")}
+              aria-current={active === "account" ? "page" : undefined}
+              title={t("Account")}
+              onClick={() => onNavigate("account")}
+            >
+              <ClarityProfile size={16} />
             </button>
           )}
           {guest ? (
