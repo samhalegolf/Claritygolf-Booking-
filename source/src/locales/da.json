@@ -4695,7 +4695,6 @@
   "Dark": "Mørk",
   "We couldn't save your details.": "Vi kunne ikke gemme dine oplysninger.",
   "Your details": "Dine oplysninger",
-  "Your email is how you sign in. To change it, ask your coach.": "Du logger ind med din e-mail. Spørg din træner, hvis den skal ændres.",
   "Save details": "Gem oplysninger",
   "Details saved.": "Oplysningerne er gemt.",
   "The new passwords don't match.": "De nye adgangskoder er ikke ens.",
@@ -4708,5 +4707,18 @@
   "{count} videos are no longer on this device.": "{count} videoer er ikke længere på denne enhed.",
   "Clear empty": "Ryd tomme",
   "Remove {title} from your list": "Fjern {title} fra din liste",
-  "Removed “{title}”": "“{title}” fjernet"
+  "Removed “{title}”": "“{title}” fjernet",
+  "Could not change the email.": "E-mailen kunne ikke ændres.",
+  "Email changed": "E-mail ændret",
+  "Confirm your new email": "Bekræft din nye e-mail",
+  "From now on, sign in with {email}.": "Log ind med {email} fra nu af.",
+  "This finishes changing the email you sign in with. It is your Clarity Caddy sign-in email too.": "Det afslutter ændringen af den e-mail, du logger ind med. Det er også din login-e-mail til Clarity Caddy.",
+  "Confirm new email": "Bekræft ny e-mail",
+  "Could not start the email change.": "Ændringen af e-mail kunne ikke startes.",
+  "Sign-in email": "Login-e-mail",
+  "Check {email} for a link to confirm the change. Until then, keep signing in with your current email.": "Tjek {email} for et bekræftelseslink. Indtil da logger du ind med din nuværende e-mail.",
+  "New email": "Ny e-mail",
+  "This is your sign-in email for Clarity Caddy too.": "Det er også din login-e-mail til Clarity Caddy.",
+  "Send confirmation link": "Send bekræftelseslink",
+  "Change email": "Skift e-mail"
 }

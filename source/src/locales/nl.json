@@ -4695,7 +4695,6 @@
   "Dark": "Donker",
   "We couldn't save your details.": "We konden je gegevens niet opslaan.",
   "Your details": "Je gegevens",
-  "Your email is how you sign in. To change it, ask your coach.": "Je logt in met je e-mailadres. Vraag je coach om het te wijzigen.",
   "Save details": "Gegevens opslaan",
   "Details saved.": "Gegevens opgeslagen.",
   "The new passwords don't match.": "De nieuwe wachtwoorden komen niet overeen.",
@@ -4708,5 +4707,18 @@
   "{count} videos are no longer on this device.": "{count} video's staan niet meer op dit apparaat.",
   "Clear empty": "Lege wissen",
   "Remove {title} from your list": "{title} uit je lijst verwijderen",
-  "Removed “{title}”": "‘{title}’ verwijderd"
+  "Removed “{title}”": "‘{title}’ verwijderd",
+  "Could not change the email.": "Kon het e-mailadres niet wijzigen.",
+  "Email changed": "E-mailadres gewijzigd",
+  "Confirm your new email": "Bevestig je nieuwe e-mailadres",
+  "From now on, sign in with {email}.": "Log voortaan in met {email}.",
+  "This finishes changing the email you sign in with. It is your Clarity Caddy sign-in email too.": "Hiermee rond je de wijziging van je inlog-e-mailadres af. Het is ook je inlog-e-mailadres voor Clarity Caddy.",
+  "Confirm new email": "Nieuw e-mailadres bevestigen",
+  "Could not start the email change.": "Kon de e-mailwijziging niet starten.",
+  "Sign-in email": "Inlog-e-mailadres",
+  "Check {email} for a link to confirm the change. Until then, keep signing in with your current email.": "Kijk in {email} voor een bevestigingslink. Log tot die tijd in met je huidige e-mailadres.",
+  "New email": "Nieuw e-mailadres",
+  "This is your sign-in email for Clarity Caddy too.": "Dit is ook je inlog-e-mailadres voor Clarity Caddy.",
+  "Send confirmation link": "Bevestigingslink sturen",
+  "Change email": "E-mailadres wijzigen"
 }

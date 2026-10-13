@@ -4695,7 +4695,6 @@
   "Dark": "ダーク",
   "We couldn't save your details.": "詳細を保存できませんでした。",
   "Your details": "あなたの詳細",
-  "Your email is how you sign in. To change it, ask your coach.": "メールアドレスはサインインに使います。変更はコーチに依頼してください。",
   "Save details": "詳細を保存",
   "Details saved.": "詳細を保存しました。",
   "The new passwords don't match.": "新しいパスワードが一致しません。",
@@ -4708,5 +4707,18 @@
   "{count} videos are no longer on this device.": "{count} 本の動画がこの端末にありません。",
   "Clear empty": "空の項目を削除",
   "Remove {title} from your list": "{title} をリストから削除",
-  "Removed “{title}”": "「{title}」を削除しました"
+  "Removed “{title}”": "「{title}」を削除しました",
+  "Could not change the email.": "メールアドレスを変更できませんでした。",
+  "Email changed": "メールアドレスを変更しました",
+  "Confirm your new email": "新しいメールアドレスを確認",
+  "From now on, sign in with {email}.": "今後は {email} でサインインしてください。",
+  "This finishes changing the email you sign in with. It is your Clarity Caddy sign-in email too.": "サインイン用メールアドレスの変更を完了します。Clarity Caddy のサインインにも使われます。",
+  "Confirm new email": "新しいメールアドレスを確認",
+  "Could not start the email change.": "メールアドレスの変更を開始できませんでした。",
+  "Sign-in email": "サインイン用メールアドレス",
+  "Check {email} for a link to confirm the change. Until then, keep signing in with your current email.": "{email} に届く確認リンクを開いてください。それまでは現在のメールアドレスでサインインしてください。",
+  "New email": "新しいメールアドレス",
+  "This is your sign-in email for Clarity Caddy too.": "Clarity Caddy のサインイン用メールアドレスにもなります。",
+  "Send confirmation link": "確認リンクを送信",
+  "Change email": "メールアドレスを変更"
 }

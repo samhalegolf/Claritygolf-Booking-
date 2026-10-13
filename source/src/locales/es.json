@@ -4695,7 +4695,6 @@
   "Dark": "Oscuro",
   "We couldn't save your details.": "No hemos podido guardar tus datos.",
   "Your details": "Tus datos",
-  "Your email is how you sign in. To change it, ask your coach.": "Tu correo es con lo que inicias sesión. Para cambiarlo, pídeselo a tu entrenador.",
   "Save details": "Guardar datos",
   "Details saved.": "Datos guardados.",
   "The new passwords don't match.": "Las contraseñas nuevas no coinciden.",
@@ -4708,5 +4707,18 @@
   "{count} videos are no longer on this device.": "{count} vídeos ya no están en este dispositivo.",
   "Clear empty": "Limpiar vacíos",
   "Remove {title} from your list": "Quitar {title} de tu lista",
-  "Removed “{title}”": "Se ha quitado «{title}»"
+  "Removed “{title}”": "Se ha quitado «{title}»",
+  "Could not change the email.": "No se ha podido cambiar el correo.",
+  "Email changed": "Correo cambiado",
+  "Confirm your new email": "Confirma tu nuevo correo",
+  "From now on, sign in with {email}.": "A partir de ahora, inicia sesión con {email}.",
+  "This finishes changing the email you sign in with. It is your Clarity Caddy sign-in email too.": "Así terminas de cambiar el correo con el que inicias sesión. También es tu correo de acceso a Clarity Caddy.",
+  "Confirm new email": "Confirmar nuevo correo",
+  "Could not start the email change.": "No se ha podido iniciar el cambio de correo.",
+  "Sign-in email": "Correo de acceso",
+  "Check {email} for a link to confirm the change. Until then, keep signing in with your current email.": "Revisa {email} para encontrar el enlace de confirmación. Hasta entonces, sigue iniciando sesión con tu correo actual.",
+  "New email": "Nuevo correo",
+  "This is your sign-in email for Clarity Caddy too.": "También es tu correo de acceso a Clarity Caddy.",
+  "Send confirmation link": "Enviar enlace de confirmación",
+  "Change email": "Cambiar correo"
 }

@@ -56,7 +56,8 @@ export function PlayerAccountPanel({
         </section>
       ) : (
         <>
-          <DetailsForm name={name} email={email} phone={phone} onSaved={onDetailsSaved} onSignedOut={onSignedOut} />
+          <DetailsForm name={name} phone={phone} onSaved={onDetailsSaved} onSignedOut={onSignedOut} />
+          <EmailForm email={email} onSignedOut={onSignedOut} />
           <PasswordForm onSignedOut={onSignedOut} />
         </>
       )}
@@ -82,13 +83,11 @@ export function PlayerAccountPanel({
 
 function DetailsForm({
   name,
-  email,
   phone,
   onSaved,
   onSignedOut,
 }: {
   name: string;
-  email: string;
   phone: string;
   onSaved: PlayerAccountPanelProps["onDetailsSaved"];
   onSignedOut: () => void;
@@ -153,15 +152,95 @@ function DetailsForm({
           }}
         />
       </label>
-      <label className="player-portal-field">
-        <span>{t("Email")}</span>
-        <input type="email" value={email} readOnly disabled />
-      </label>
-      <p className="player-account-hint">{t("Your email is how you sign in. To change it, ask your coach.")}</p>
       <button className="player-portal-primary player-account-action" type="submit" disabled={busy || !changed || !draftName.trim()}>
         {busy ? t("Saving…") : t("Save details")}
       </button>
       {saved && <p className="player-account-success" role="status">{t("Details saved.")}</p>}
+      {error && <p className="player-portal-error-line" role="alert">{error}</p>}
+    </form>
+  );
+}
+
+/**
+ * The email is the login for Booking and Caddy both, so it only changes once
+ * the new address has proved it receives mail: this sends the link, and the
+ * link finishes the change.
+ */
+function EmailForm({ email, onSignedOut }: { email: string; onSignedOut: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [newEmail, setNewEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [sentTo, setSentTo] = useState("");
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (busy) return;
+    setError("");
+    setBusy(true);
+    try {
+      const { response, data } = await postJson("/api/player/email-change", {
+        newEmail: newEmail.trim(),
+        currentPassword: password,
+      });
+      if (response.status === 401) return onSignedOut();
+      if (!response.ok) throw new Error(String(data.message || "") || t("Could not start the email change."));
+      setSentTo(String(data.pendingEmail || newEmail.trim()));
+      setNewEmail("");
+      setPassword("");
+      setOpen(false);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : t("Could not start the email change."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="player-portal-section player-account-form" onSubmit={(event) => void submit(event)}>
+      <h2>{t("Email")}</h2>
+      <label className="player-portal-field">
+        <span>{t("Sign-in email")}</span>
+        <input type="email" value={email} readOnly disabled />
+      </label>
+      {sentTo && (
+        <p className="player-account-success" role="status">
+          {t("Check {email} for a link to confirm the change. Until then, keep signing in with your current email.", { email: sentTo })}
+        </p>
+      )}
+      {open ? (
+        <>
+          <label className="player-portal-field">
+            <span>{t("New email")}</span>
+            <input type="email" value={newEmail} autoComplete="email" required onChange={(event) => setNewEmail(event.target.value)} />
+          </label>
+          <label className="player-portal-field">
+            <span>{t("Current password")}</span>
+            <input type="password" value={password} autoComplete="current-password" required onChange={(event) => setPassword(event.target.value)} />
+          </label>
+          <p className="player-account-hint">{t("This is your sign-in email for Clarity Caddy too.")}</p>
+          <div className="player-account-row">
+            <button className="player-portal-primary player-account-action" type="submit" disabled={busy || !newEmail.trim() || !password}>
+              {busy ? t("Sending…") : t("Send confirmation link")}
+            </button>
+            <button className="player-portal-ghost" type="button" onClick={() => setOpen(false)}>
+              {t("Cancel")}
+            </button>
+          </div>
+        </>
+      ) : (
+        <button
+          className="player-portal-ghost player-account-action"
+          type="button"
+          onClick={() => {
+            setOpen(true);
+            setError("");
+          }}
+        >
+          {t("Change email")}
+        </button>
+      )}
       {error && <p className="player-portal-error-line" role="alert">{error}</p>}
     </form>
   );
@@ -180,7 +259,7 @@ function PasswordForm({ onSignedOut }: { onSignedOut: () => void }) {
     if (busy) return;
     setError("");
     setDone(false);
-    if (next.length < 8) return setError(t("Use at least 8 characters."));
+    if (next.length < 10) return setError(t("Use at least 10 characters."));
     if (next !== confirm) return setError(t("The new passwords don't match."));
     setBusy(true);
     try {
