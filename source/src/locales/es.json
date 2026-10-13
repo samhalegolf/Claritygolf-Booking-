@@ -4687,5 +4687,20 @@
   "Add pass type": "Añadir tipo de bono",
   "Search pass types": "Buscar tipos de bono",
   "No pass types match.": "Ningún tipo de bono coincide.",
-  "Archived pass type": "Tipo de bono archivado"
+  "Archived pass type": "Tipo de bono archivado",
+  "Sign in to manage your name, contact details and password.": "Inicia sesión para gestionar tu nombre, tus datos de contacto y tu contraseña.",
+  "Account settings": "Ajustes de la cuenta",
+  "Appearance": "Apariencia",
+  "Light": "Claro",
+  "Dark": "Oscuro",
+  "We couldn't save your details.": "No hemos podido guardar tus datos.",
+  "Your details": "Tus datos",
+  "Your email is how you sign in. To change it, ask your coach.": "Tu correo es con lo que inicias sesión. Para cambiarlo, pídeselo a tu entrenador.",
+  "Save details": "Guardar datos",
+  "Details saved.": "Datos guardados.",
+  "The new passwords don't match.": "Las contraseñas nuevas no coinciden.",
+  "If you use Clarity Caddy, this changes your password there too.": "Si usas Clarity Caddy, esto también cambia tu contraseña allí.",
+  "Change password": "Cambiar contraseña",
+  "Password changed. Other devices have been signed out.": "Contraseña cambiada. Se ha cerrado la sesión en los demás dispositivos.",
+  "your account": "tu cuenta"
 }

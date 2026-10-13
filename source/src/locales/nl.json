@@ -4687,5 +4687,20 @@
   "Add pass type": "Passtype toevoegen",
   "Search pass types": "Passtypes zoeken",
   "No pass types match.": "Geen passtypes gevonden.",
-  "Archived pass type": "Gearchiveerd passtype"
+  "Archived pass type": "Gearchiveerd passtype",
+  "Sign in to manage your name, contact details and password.": "Log in om je naam, contactgegevens en wachtwoord te beheren.",
+  "Account settings": "Accountinstellingen",
+  "Appearance": "Weergave",
+  "Light": "Licht",
+  "Dark": "Donker",
+  "We couldn't save your details.": "We konden je gegevens niet opslaan.",
+  "Your details": "Je gegevens",
+  "Your email is how you sign in. To change it, ask your coach.": "Je logt in met je e-mailadres. Vraag je coach om het te wijzigen.",
+  "Save details": "Gegevens opslaan",
+  "Details saved.": "Gegevens opgeslagen.",
+  "The new passwords don't match.": "De nieuwe wachtwoorden komen niet overeen.",
+  "If you use Clarity Caddy, this changes your password there too.": "Als je Clarity Caddy gebruikt, verandert je wachtwoord daar ook.",
+  "Change password": "Wachtwoord wijzigen",
+  "Password changed. Other devices have been signed out.": "Wachtwoord gewijzigd. Andere apparaten zijn uitgelogd.",
+  "your account": "je account"
 }

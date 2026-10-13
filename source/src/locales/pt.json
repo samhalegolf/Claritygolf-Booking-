@@ -4687,5 +4687,20 @@
   "Add pass type": "Adicionar tipo de passe",
   "Search pass types": "Pesquisar tipos de passe",
   "No pass types match.": "Nenhum tipo de passe corresponde.",
-  "Archived pass type": "Tipo de passe arquivado"
+  "Archived pass type": "Tipo de passe arquivado",
+  "Sign in to manage your name, contact details and password.": "Inicie sessão para gerir o seu nome, contactos e palavra-passe.",
+  "Account settings": "Definições da conta",
+  "Appearance": "Aparência",
+  "Light": "Claro",
+  "Dark": "Escuro",
+  "We couldn't save your details.": "Não foi possível guardar os seus dados.",
+  "Your details": "Os seus dados",
+  "Your email is how you sign in. To change it, ask your coach.": "O seu email é o que usa para iniciar sessão. Para o alterar, fale com o seu treinador.",
+  "Save details": "Guardar dados",
+  "Details saved.": "Dados guardados.",
+  "The new passwords don't match.": "As novas palavras-passe não coincidem.",
+  "If you use Clarity Caddy, this changes your password there too.": "Se usa o Clarity Caddy, isto também altera a sua palavra-passe lá.",
+  "Change password": "Alterar palavra-passe",
+  "Password changed. Other devices have been signed out.": "Palavra-passe alterada. Os outros dispositivos terminaram sessão.",
+  "your account": "a sua conta"
 }

@@ -4687,5 +4687,20 @@
   "Add pass type": "Tilføj klippekorttype",
   "Search pass types": "Søg i klippekorttyper",
   "No pass types match.": "Ingen klippekorttyper matcher.",
-  "Archived pass type": "Arkiveret klippekorttype"
+  "Archived pass type": "Arkiveret klippekorttype",
+  "Sign in to manage your name, contact details and password.": "Log ind for at administrere dit navn, dine kontaktoplysninger og din adgangskode.",
+  "Account settings": "Kontoindstillinger",
+  "Appearance": "Udseende",
+  "Light": "Lys",
+  "Dark": "Mørk",
+  "We couldn't save your details.": "Vi kunne ikke gemme dine oplysninger.",
+  "Your details": "Dine oplysninger",
+  "Your email is how you sign in. To change it, ask your coach.": "Du logger ind med din e-mail. Spørg din træner, hvis den skal ændres.",
+  "Save details": "Gem oplysninger",
+  "Details saved.": "Oplysningerne er gemt.",
+  "The new passwords don't match.": "De nye adgangskoder er ikke ens.",
+  "If you use Clarity Caddy, this changes your password there too.": "Hvis du bruger Clarity Caddy, ændres din adgangskode også der.",
+  "Change password": "Skift adgangskode",
+  "Password changed. Other devices have been signed out.": "Adgangskoden er ændret. Andre enheder er logget ud.",
+  "your account": "din konto"
 }

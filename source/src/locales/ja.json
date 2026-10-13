@@ -4687,5 +4687,20 @@
   "Add pass type": "パスタイプを追加",
   "Search pass types": "パスタイプを検索",
   "No pass types match.": "一致するパスタイプはありません。",
-  "Archived pass type": "アーカイブ済みのパスタイプ"
+  "Archived pass type": "アーカイブ済みのパスタイプ",
+  "Sign in to manage your name, contact details and password.": "サインインすると、名前・連絡先・パスワードを管理できます。",
+  "Account settings": "アカウント設定",
+  "Appearance": "表示",
+  "Light": "ライト",
+  "Dark": "ダーク",
+  "We couldn't save your details.": "詳細を保存できませんでした。",
+  "Your details": "あなたの詳細",
+  "Your email is how you sign in. To change it, ask your coach.": "メールアドレスはサインインに使います。変更はコーチに依頼してください。",
+  "Save details": "詳細を保存",
+  "Details saved.": "詳細を保存しました。",
+  "The new passwords don't match.": "新しいパスワードが一致しません。",
+  "If you use Clarity Caddy, this changes your password there too.": "Clarity Caddy をお使いの場合、そちらのパスワードも変更されます。",
+  "Change password": "パスワードを変更",
+  "Password changed. Other devices have been signed out.": "パスワードを変更しました。他のデバイスはサインアウトされました。",
+  "your account": "アカウント"
 }

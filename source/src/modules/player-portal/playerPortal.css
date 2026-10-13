@@ -1837,6 +1837,26 @@
   cursor: pointer;
 }
 
+.player-terminal-nav-account {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--pt-border);
+  border-radius: 999px;
+  background: var(--pt-surface);
+  color: var(--pt-text-soft);
+  cursor: pointer;
+}
+
+.player-terminal-nav-account:hover,
+.player-terminal-nav-account.active {
+  background: var(--pt-hover);
+  color: var(--pt-text);
+}
+
 .player-terminal-nav-theme:hover {
   background: var(--pt-hover);
   color: var(--pt-text);
@@ -2232,15 +2252,86 @@
   font-weight: 700;
 }
 
-/* The language picker under the legal links: as quiet as they are. */
-.player-portal-legal .settings-field {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--pt-text-soft);
-  font-size: 12px;
+/* The Account tab. */
+.player-account {
+  display: grid;
+  gap: 28px;
+  max-width: 520px;
 }
 
-.player-portal-legal .settings-field select {
+.player-account-form {
+  gap: 12px;
+}
+
+.player-account-action {
+  justify-self: start;
+  align-self: flex-start;
+  padding: 0 18px;
+}
+
+.player-account-hint {
+  margin: 0;
+  color: var(--pt-text-soft);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.player-account-success {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pt-text);
+}
+
+.player-portal-field input:disabled {
+  color: var(--pt-text-soft);
+  cursor: default;
+}
+
+.player-account-settings {
+  display: grid;
+  gap: 12px;
+}
+
+.player-account-settings .settings-field {
+  display: grid;
+  gap: 6px;
+}
+
+.player-account-settings .settings-field span {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+  color: var(--pt-muted);
+}
+
+.player-account-settings .settings-field select {
+  min-height: 44px;
+  border: 1px solid var(--pt-border);
+  border-radius: 9px;
+  padding: 0 10px;
+  background: var(--pt-surface-soft);
+  color: var(--pt-text);
   font: inherit;
+}
+
+.player-account-danger {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--pt-border-soft);
+}
+
+.player-account-deletion-toggle {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--c-danger);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
 }

@@ -4687,5 +4687,20 @@
   "Add pass type": "Ajouter un type de forfait",
   "Search pass types": "Rechercher des types de forfait",
   "No pass types match.": "Aucun type de forfait ne correspond.",
-  "Archived pass type": "Type de forfait archivé"
+  "Archived pass type": "Type de forfait archivé",
+  "Sign in to manage your name, contact details and password.": "Connectez-vous pour gérer votre nom, vos coordonnées et votre mot de passe.",
+  "Account settings": "Paramètres du compte",
+  "Appearance": "Apparence",
+  "Light": "Clair",
+  "Dark": "Sombre",
+  "We couldn't save your details.": "Nous n'avons pas pu enregistrer vos informations.",
+  "Your details": "Vos informations",
+  "Your email is how you sign in. To change it, ask your coach.": "Votre e-mail sert à vous connecter. Pour le modifier, demandez à votre coach.",
+  "Save details": "Enregistrer",
+  "Details saved.": "Informations enregistrées.",
+  "The new passwords don't match.": "Les nouveaux mots de passe ne correspondent pas.",
+  "If you use Clarity Caddy, this changes your password there too.": "Si vous utilisez Clarity Caddy, votre mot de passe y sera aussi modifié.",
+  "Change password": "Changer le mot de passe",
+  "Password changed. Other devices have been signed out.": "Mot de passe modifié. Les autres appareils ont été déconnectés.",
+  "your account": "votre compte"
 }

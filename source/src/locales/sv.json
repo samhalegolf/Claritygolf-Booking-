@@ -4687,5 +4687,20 @@
   "Add pass type": "Lägg till klippkortstyp",
   "Search pass types": "Sök klippkortstyper",
   "No pass types match.": "Inga klippkortstyper matchar.",
-  "Archived pass type": "Arkiverad klippkortstyp"
+  "Archived pass type": "Arkiverad klippkortstyp",
+  "Sign in to manage your name, contact details and password.": "Logga in för att hantera ditt namn, dina kontaktuppgifter och ditt lösenord.",
+  "Account settings": "Kontoinställningar",
+  "Appearance": "Utseende",
+  "Light": "Ljust",
+  "Dark": "Mörkt",
+  "We couldn't save your details.": "Vi kunde inte spara dina uppgifter.",
+  "Your details": "Dina uppgifter",
+  "Your email is how you sign in. To change it, ask your coach.": "Du loggar in med din e-post. Be din tränare om du vill ändra den.",
+  "Save details": "Spara uppgifter",
+  "Details saved.": "Uppgifterna har sparats.",
+  "The new passwords don't match.": "De nya lösenorden matchar inte.",
+  "If you use Clarity Caddy, this changes your password there too.": "Om du använder Clarity Caddy ändras ditt lösenord där också.",
+  "Change password": "Byt lösenord",
+  "Password changed. Other devices have been signed out.": "Lösenordet har ändrats. Andra enheter har loggats ut.",
+  "your account": "ditt konto"
 }

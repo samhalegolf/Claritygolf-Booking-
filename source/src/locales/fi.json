@@ -4687,5 +4687,20 @@
   "Add pass type": "Lisää passityyppi",
   "Search pass types": "Hae passityyppejä",
   "No pass types match.": "Ei vastaavia passityyppejä.",
-  "Archived pass type": "Arkistoitu passityyppi"
+  "Archived pass type": "Arkistoitu passityyppi",
+  "Sign in to manage your name, contact details and password.": "Kirjaudu sisään hallitaksesi nimeäsi, yhteystietojasi ja salasanaasi.",
+  "Account settings": "Tilin asetukset",
+  "Appearance": "Ulkoasu",
+  "Light": "Vaalea",
+  "Dark": "Tumma",
+  "We couldn't save your details.": "Tietojasi ei voitu tallentaa.",
+  "Your details": "Tietosi",
+  "Your email is how you sign in. To change it, ask your coach.": "Kirjaudut sisään sähköpostillasi. Pyydä valmentajaasi vaihtamaan se.",
+  "Save details": "Tallenna tiedot",
+  "Details saved.": "Tiedot tallennettu.",
+  "The new passwords don't match.": "Uudet salasanat eivät täsmää.",
+  "If you use Clarity Caddy, this changes your password there too.": "Jos käytät Clarity Caddya, salasanasi vaihtuu myös siellä.",
+  "Change password": "Vaihda salasana",
+  "Password changed. Other devices have been signed out.": "Salasana vaihdettu. Muut laitteet on kirjattu ulos.",
+  "your account": "tilisi"
 }

@@ -5615,6 +5615,52 @@ async function requestPlayerAccountDeletion(session) {
 }
 
 /**
+ * The player's own name and phone, as their coach's client record holds them.
+ *
+ * Only the `people` row changes. The session keeps the phone it signed in
+ * with, because that is what the booking lookup matches on -- editing a number
+ * here must not make their past lessons disappear from the portal.
+ */
+async function updatePlayerAccountDetails(session, body) {
+  const accountId = cleanSlug(session?.accountId, "");
+  const personId = cleanString(session?.personId, "", 160);
+  if (!accountId || !personId) {
+    throw Object.assign(new Error("This account cannot be edited from the app yet."), { status: 400 });
+  }
+  const name = cleanString(body?.name, "", 160);
+  const phone = cleanString(body?.phone, "", 80);
+  if (!name) throw Object.assign(new Error("Enter your name."), { status: 400 });
+  const rows = await db().sql`
+    UPDATE people
+    SET name = ${name}, phone = ${phone || null}, updated_at = NOW()
+    WHERE id = ${personId} AND account_id = ${accountId}
+    RETURNING name, phone
+  `;
+  if (!rows[0]) throw Object.assign(new Error("We couldn't find your details."), { status: 404 });
+  return { name: rows[0].name || "", phone: rows[0].phone || "" };
+}
+
+/**
+ * Changes the password on the player's Supabase Auth login -- the same login
+ * Clarity Caddy uses, so it changes there too. Every other portal session for
+ * this login ends; the one that made the change stays signed in.
+ */
+async function changePlayerPassword(session, token, currentPassword, nextPassword) {
+  // A coach viewing the sandbox as a player is not that player.
+  if (session.sandboxActorAuthUser || !session.authUserId) return { error: "not_allowed" };
+  if (typeof nextPassword !== "string" || nextPassword.length < 8) return { error: "weak_password" };
+  const email = session.email || (await supabaseAuthEmail(session.authUserId));
+  const provedUserId = await verifySupabaseAuthPassword(email, currentPassword || "");
+  if (!provedUserId || provedUserId !== session.authUserId) return { error: "invalid_current_password" };
+  await setSupabaseAuthPassword(session.authUserId, nextPassword);
+  await db().sql`
+    DELETE FROM player_sessions
+    WHERE auth_user_id = ${session.authUserId}::uuid AND token_hash <> ${hashToken(token)}
+  `;
+  return { ok: true };
+}
+
+/**
  * The portal half of a login, for an auth user whose password /api/auth/login
  * has already checked.
  *
@@ -6334,6 +6380,16 @@ async function readPlayerProfile(session) {
   // appointment) so the client can pre-fill the booking form on hand-off
   // without ever re-asking the player for their details.
   const primary = itemRead.items[0];
+  // What the player saved in their Account panel wins over the latest booking.
+  const personRow = session.personId
+    ? (
+        await db().sql`
+          SELECT name, phone FROM people
+          WHERE id = ${session.personId} AND account_id = ${accountId}
+          LIMIT 1
+        `
+      )[0]
+    : null;
 
   // The business's own booking widget, if it runs one somewhere else. Read
   // straight from settings rather than off `state`: readPublicCatalogState is
@@ -6428,8 +6484,8 @@ async function readPlayerProfile(session) {
       // on the coach side.
       id: session.personId || "",
       email: session.email,
-      name: primary?.client || primary?.title || "",
-      phone: primary?.phone || session.phone || "",
+      name: personRow?.name || primary?.client || primary?.title || "",
+      phone: personRow?.phone || primary?.phone || session.phone || "",
     },
     bookings,
     notes,
@@ -9055,6 +9111,51 @@ async function routeBookingApiRequest(
         return json({ error: "unauthorized", message: "Player login required." }, 401);
       }
       return json({ ...(await requestPlayerAccountDeletion(session)), expectedCompletionDays: 7 }, 202);
+    }
+
+    // The player's own name and phone, from the Account panel.
+    if (req.method === "POST" && pathname === "/api/player/account") {
+      const session = await readPlayerSession(playerSessionTokenFromRequest(req));
+      if (!session) {
+        return json({ error: "unauthorized", message: "Player login required." }, 401);
+      }
+      const body = await parseBody(req);
+      return json({ ok: true, player: await updatePlayerAccountDetails(session, body) });
+    }
+
+    if (req.method === "POST" && pathname === "/api/player/change-password") {
+      const token = playerSessionTokenFromRequest(req);
+      const session = await readPlayerSession(token);
+      if (!session) {
+        return json({ error: "unauthorized", message: "Player login required." }, 401);
+      }
+      const body = await parseBody(req);
+      let result;
+      try {
+        result = await changePlayerPassword(session, token, body.currentPassword || "", body.newPassword || "");
+      } catch (error) {
+        // Supabase refusing the new password under its own policy is the
+        // player's to fix, so say what it said.
+        const status = Number((error as { status?: number })?.status);
+        if (!(status >= 400 && status < 500)) throw error;
+        return json(
+          {
+            error: "change_password_failed",
+            message: error instanceof Error && error.message ? error.message : "Could not change password.",
+          },
+          400,
+        );
+      }
+      if (result.error === "weak_password") {
+        return json({ error: "weak_password", message: "Use at least 8 characters." }, 400);
+      }
+      if (result.error === "invalid_current_password") {
+        return json({ error: "invalid_current_password", message: "Current password is incorrect." }, 400);
+      }
+      if (result.error === "not_allowed") {
+        return json({ error: "not_allowed", message: "The password can't be changed from this session." }, 403);
+      }
+      return json({ ok: true });
     }
 
     // Player-side "Mark Complete." Player-session-authenticated, ahead of the

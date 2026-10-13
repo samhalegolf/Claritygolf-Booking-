@@ -4687,5 +4687,20 @@
   "Add pass type": "Dodaj typ karnetu",
   "Search pass types": "Szukaj typów karnetów",
   "No pass types match.": "Brak pasujących typów karnetów.",
-  "Archived pass type": "Zarchiwizowany typ karnetu"
+  "Archived pass type": "Zarchiwizowany typ karnetu",
+  "Sign in to manage your name, contact details and password.": "Zaloguj się, aby zarządzać imieniem, danymi kontaktowymi i hasłem.",
+  "Account settings": "Ustawienia konta",
+  "Appearance": "Wygląd",
+  "Light": "Jasny",
+  "Dark": "Ciemny",
+  "We couldn't save your details.": "Nie udało się zapisać Twoich danych.",
+  "Your details": "Twoje dane",
+  "Your email is how you sign in. To change it, ask your coach.": "Logujesz się adresem e-mail. Aby go zmienić, poproś trenera.",
+  "Save details": "Zapisz dane",
+  "Details saved.": "Dane zapisane.",
+  "The new passwords don't match.": "Nowe hasła nie są takie same.",
+  "If you use Clarity Caddy, this changes your password there too.": "Jeśli korzystasz z Clarity Caddy, hasło zmieni się również tam.",
+  "Change password": "Zmień hasło",
+  "Password changed. Other devices have been signed out.": "Hasło zmienione. Inne urządzenia zostały wylogowane.",
+  "your account": "Twoje konto"
 }

@@ -4687,5 +4687,20 @@
   "Add pass type": "Passart hinzufügen",
   "Search pass types": "Passarten suchen",
   "No pass types match.": "Keine passenden Passarten.",
-  "Archived pass type": "Archivierte Passart"
+  "Archived pass type": "Archivierte Passart",
+  "Sign in to manage your name, contact details and password.": "Melde dich an, um deinen Namen, deine Kontaktdaten und dein Passwort zu verwalten.",
+  "Account settings": "Kontoeinstellungen",
+  "Appearance": "Darstellung",
+  "Light": "Hell",
+  "Dark": "Dunkel",
+  "We couldn't save your details.": "Deine Daten konnten nicht gespeichert werden.",
+  "Your details": "Deine Daten",
+  "Your email is how you sign in. To change it, ask your coach.": "Mit deiner E-Mail meldest du dich an. Um sie zu ändern, wende dich an deinen Coach.",
+  "Save details": "Daten speichern",
+  "Details saved.": "Daten gespeichert.",
+  "The new passwords don't match.": "Die neuen Passwörter stimmen nicht überein.",
+  "If you use Clarity Caddy, this changes your password there too.": "Wenn du Clarity Caddy nutzt, ändert sich dein Passwort dort ebenfalls.",
+  "Change password": "Passwort ändern",
+  "Password changed. Other devices have been signed out.": "Passwort geändert. Andere Geräte wurden abgemeldet.",
+  "your account": "dein Konto"
 }
