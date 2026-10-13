@@ -459,8 +459,8 @@ export async function issuePassesForPurchase(
           templateServiceId: template.serviceId,
           // Two of the same package on one docket is twice the credits, not two
           // cards: the allowance is multiplied and the merge below folds it into
-          // whatever they already hold.
-          credits: template.credits * Math.max(1, line.quantity),
+          // whatever they already hold. A bundle multiplies each of its parts.
+          quantity: Math.max(1, line.quantity),
           note,
           source,
           // One reference per line, not per sale: a docket can legitimately

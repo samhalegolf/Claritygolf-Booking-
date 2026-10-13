@@ -14,7 +14,7 @@ import {
   type SavedVideoItem,
 } from "../video-analysis/utils/savedVideoLibrary";
 import { groupSameSwingAngles } from "../video-analysis/utils/sameSwingAngles";
-import { t } from "../../lib/i18n";
+import { t, tn } from "../../lib/i18n";
 
 /* The player's video library, and the way videos leave it.
  *
@@ -26,10 +26,9 @@ import { t } from "../../lib/i18n";
  *
  * Two rules keep it honest:
  *
- *   - Only videos on this device can go. A cloud tile is a video sitting in
- *     the coach's Drive that this phone has not downloaded; deleting one would
- *     be reaching into somebody else's storage, so those tiles stay still
- *     while the rest shake.
+ *   - A cloud tile is a video sitting in the coach's Drive. Binning one only
+ *     takes it off this player's list -- it never reaches into the coach's
+ *     storage.
  *   - Nothing is destroyed while Undo is on screen. The drop hides the tile
  *     and starts a clock; the actual delete runs when the clock runs out. So
  *     Undo has nothing to restore -- the video was never touched -- and a
@@ -106,10 +105,12 @@ const IconBin = () => (
 );
 
 export type PlayerVideoShelfProps = {
-  /** Videos held on this device. These are the deletable ones. */
+  /** Videos held on this device. */
   savedVideos: SavedVideoItem[];
-  /** In the cloud, not on this device. Read-only here. */
+  /** In the cloud, not on this device. Binning one hides it for this player. */
   cloudVideos: ClarityCloudImportTransfer[];
+  /** Records whose file has gone from this device. Offered for clearing only. */
+  brokenVideos: SavedVideoItem[];
   sendingIds: Set<string>;
   sendProgress: Record<string, number>;
   downloadingIds: Set<string>;
@@ -123,7 +124,12 @@ export type PlayerVideoShelfProps = {
   onDownload: (savedVideoId: string) => void;
   /** Runs when the undo window closes. This is the destructive step. */
   onDelete: (savedVideoId: string) => void | Promise<void>;
+  /** Same, for a cloud tile: removes it from this player's list. */
+  onHideCloud: (savedVideoId: string) => void | Promise<void>;
+  onClearBroken: () => void;
 };
+
+type TileKind = "saved" | "cloud";
 
 export function PlayerVideoShelf({
   savedVideos,
@@ -139,24 +145,28 @@ export function PlayerVideoShelf({
   onSend,
   onDownload,
   onDelete,
+  brokenVideos,
+  onHideCloud,
+  onClearBroken,
 }: PlayerVideoShelfProps) {
   const [editing, setEditing] = useState(false);
   const [dragging, setDragging] = useState<{ id: string; dx: number; dy: number } | null>(null);
   const [overTrash, setOverTrash] = useState(false);
-  const [pending, setPending] = useState<{ id: string; title: string } | null>(null);
+  const [pending, setPending] = useState<{ id: string; title: string; kind: TileKind } | null>(null);
 
   const trashRef = useRef<HTMLDivElement | null>(null);
   const holdTimerRef = useRef<number | null>(null);
-  const pressRef = useRef<{ id: string; x: number; y: number; dragging: boolean } | null>(null);
+  const pressRef = useRef<{ id: string; kind: TileKind; x: number; y: number; dragging: boolean } | null>(null);
   const undoTimerRef = useRef<number | null>(null);
 
-  // onDelete is called from a timer, so the timer must not capture a stale one.
-  const onDeleteRef = useRef(onDelete);
-  onDeleteRef.current = onDelete;
+  // The removal runs from a timer, so the timer must not capture a stale one.
+  const remove = (id: string, kind: TileKind) => (kind === "cloud" ? onHideCloud(id) : onDelete(id));
+  const removeRef = useRef(remove);
+  removeRef.current = remove;
   // Read by the unmount handler and by a second delete. Kept in a ref because
   // both of those run outside the render that would see the state.
-  const pendingIdRef = useRef<string | null>(null);
-  pendingIdRef.current = pending?.id ?? null;
+  const pendingRef = useRef<{ id: string; kind: TileKind } | null>(null);
+  pendingRef.current = pending ? { id: pending.id, kind: pending.kind } : null;
 
   const clearHold = useCallback(() => {
     if (holdTimerRef.current !== null) {
@@ -166,25 +176,25 @@ export function PlayerVideoShelf({
   }, []);
 
   /** Runs the delete for real and takes the undo bar down. */
-  const commitPending = useCallback((id: string) => {
+  const commitPending = useCallback((id: string, kind: TileKind) => {
     if (undoTimerRef.current !== null) {
       window.clearTimeout(undoTimerRef.current);
       undoTimerRef.current = null;
     }
     setPending((current) => (current?.id === id ? null : current));
-    void onDeleteRef.current(id);
+    void removeRef.current(id, kind);
   }, []);
 
   const beginDelete = useCallback(
-    (id: string, title: string) => {
+    (id: string, title: string, kind: TileKind) => {
       // One undo bar at a time. A second delete lets the first one through
       // straight away rather than quietly cancelling it.
-      const outstanding = pendingIdRef.current;
-      if (outstanding && outstanding !== id) commitPending(outstanding);
-      pendingIdRef.current = id;
-      setPending({ id, title });
+      const outstanding = pendingRef.current;
+      if (outstanding && outstanding.id !== id) commitPending(outstanding.id, outstanding.kind);
+      pendingRef.current = { id, kind };
+      setPending({ id, title, kind });
       if (undoTimerRef.current !== null) window.clearTimeout(undoTimerRef.current);
-      undoTimerRef.current = window.setTimeout(() => commitPending(id), UNDO_WINDOW_MS);
+      undoTimerRef.current = window.setTimeout(() => commitPending(id, kind), UNDO_WINDOW_MS);
     },
     [commitPending],
   );
@@ -212,17 +222,20 @@ export function PlayerVideoShelf({
   );
   useEffect(
     () => () => {
-      if (pendingIdRef.current) void onDeleteRef.current(pendingIdRef.current);
+      const outstanding = pendingRef.current;
+      if (outstanding) void removeRef.current(outstanding.id, outstanding.kind);
     },
     [],
   );
 
   const visibleSaved = savedVideos.filter((item) => item.savedVideoId !== pending?.id);
+  const visibleCloud = cloudVideos.filter((transfer) => transfer.savedVideoId !== pending?.id);
+  const tileCount = visibleSaved.length + visibleCloud.length;
 
   // Nothing left to shake.
   useEffect(() => {
-    if (editing && visibleSaved.length === 0) setEditing(false);
-  }, [editing, visibleSaved.length]);
+    if (editing && tileCount === 0) setEditing(false);
+  }, [editing, tileCount]);
 
   useEffect(() => {
     if (!editing) return;
@@ -244,11 +257,11 @@ export function PlayerVideoShelf({
     );
   };
 
-  const handlePointerDown = (event: ReactPointerEvent<HTMLElement>, id: string) => {
+  const handlePointerDown = (event: ReactPointerEvent<HTMLElement>, id: string, kind: TileKind) => {
     // A mouse right-click, or a second finger mid-drag, is not a press.
     if (event.button !== 0 || pressRef.current) return;
     const target = event.currentTarget;
-    pressRef.current = { id, x: event.clientX, y: event.clientY, dragging: false };
+    pressRef.current = { id, kind, x: event.clientX, y: event.clientY, dragging: false };
 
     const lift = () => {
       holdTimerRef.current = null;
@@ -301,7 +314,7 @@ export function PlayerVideoShelf({
     setDragging(null);
     setOverTrash(false);
     if (!press?.dragging) return;
-    if (isOverTrash(event.clientX, event.clientY)) beginDelete(press.id, title);
+    if (isOverTrash(event.clientX, event.clientY)) beginDelete(press.id, title, press.kind);
   };
 
   const handlePointerCancel = () => {
@@ -349,7 +362,7 @@ export function PlayerVideoShelf({
           onClick={() => {
             if (!editing) onOpen(id);
           }}
-          onPointerDown={(event) => handlePointerDown(event, id)}
+          onPointerDown={(event) => handlePointerDown(event, id, "saved")}
           onPointerMove={handlePointerMove}
           onPointerUp={(event) => endPress(event, title)}
           onPointerCancel={handlePointerCancel}
@@ -380,7 +393,7 @@ export function PlayerVideoShelf({
           <button
             type="button"
             className="player-portal-video-remove"
-            onClick={() => beginDelete(id, title)}
+            onClick={() => beginDelete(id, title, "saved")}
             aria-label={t("Delete {title}", { title })}
           >
             <span aria-hidden="true">−</span>
@@ -414,11 +427,26 @@ export function PlayerVideoShelf({
     );
   };
 
-  const hasAnything = visibleSaved.length > 0 || cloudVideos.length > 0;
+  const hasAnything = tileCount > 0;
 
   return (
     <>
-      {visibleSaved.length > 0 && (
+      {brokenVideos.length > 0 && (
+        <div className="player-portal-shelf-broken">
+          <span>
+            {tn(
+              brokenVideos.length,
+              "{count} video is no longer on this device.",
+              "{count} videos are no longer on this device.",
+            )}
+          </span>
+          <button className="player-portal-shelf-done" type="button" onClick={onClearBroken}>
+            {t("Clear empty")}
+          </button>
+        </div>
+      )}
+
+      {tileCount > 0 && (
         <div className="player-portal-shelf-bar">
           {editing ? (
             <>
@@ -437,20 +465,28 @@ export function PlayerVideoShelf({
 
       {hasAnything ? (
         <ul className={`player-portal-video-grid${editing ? " is-editing" : ""}`}>
-          {cloudVideos.map((transfer) => {
+          {visibleCloud.map((transfer) => {
             const downloading = downloadingIds.has(transfer.savedVideoId);
             const title = transfer.savedVideo?.title || t("Swing video");
             const size = formatSize(transfer.video?.sizeBytes || transfer.expectedSizeBytes);
             const unseen = isUnseenReturn(transfer);
             const coachNote = transfer.direction === "coach-return" ? transfer.coachMessage : "";
+            const id = transfer.savedVideoId;
+            const isDragging = dragging?.id === id;
             return (
-              // Not deletable and so never shaken: this video lives in the
-              // coach's Drive, and this phone is only borrowing a view of it.
               <li
                 className={`player-portal-video-tile player-portal-video-tile-cloud${
                   transfer.direction === "coach-return" ? " is-coach-return" : ""
-                }${unseen ? " is-unseen" : ""}`}
-                key={transfer.savedVideoId}
+                }${unseen ? " is-unseen" : ""}${isDragging ? " is-dragging" : ""}`}
+                key={id}
+                style={
+                  isDragging
+                    ? ({
+                        "--tile-dx": `${dragging.dx}px`,
+                        "--tile-dy": `${dragging.dy}px`,
+                      } as CSSProperties)
+                    : undefined
+                }
               >
                 {/* The tile and the pill both download -- the tile because it
                     is the thing your thumb goes to, the pill because it says
@@ -459,8 +495,15 @@ export function PlayerVideoShelf({
                   type="button"
                   className="player-portal-video-media player-portal-video-media-cloud"
                   disabled={downloading}
-                  onClick={() => onDownload(transfer.savedVideoId)}
-                  aria-label={t("Download {title} to this device", { title })}
+                  onClick={() => {
+                    if (!editing) onDownload(id);
+                  }}
+                  onPointerDown={(event) => handlePointerDown(event, id, "cloud")}
+                  onPointerMove={handlePointerMove}
+                  onPointerUp={(event) => endPress(event, title)}
+                  onPointerCancel={handlePointerCancel}
+                  onContextMenu={(event) => event.preventDefault()}
+                  aria-label={editing ? title : t("Download {title} to this device", { title })}
                 >
                   <span className="player-portal-video-cloud-glyph" aria-hidden="true" />
                   {transfer.video?.duration != null && (
@@ -469,6 +512,16 @@ export function PlayerVideoShelf({
                     </span>
                   )}
                 </button>
+                {editing && (
+                  <button
+                    type="button"
+                    className="player-portal-video-remove"
+                    onClick={() => beginDelete(id, title, "cloud")}
+                    aria-label={t("Remove {title} from your list", { title })}
+                  >
+                    <span aria-hidden="true">−</span>
+                  </button>
+                )}
                 <div className="player-portal-video-meta">
                   <strong>{title}</strong>
                   <span>{formatDate(transfer.savedVideo?.createdAt || transfer.readyToImportAt)}</span>
@@ -481,14 +534,16 @@ export function PlayerVideoShelf({
                     <span className="player-portal-video-coach-note">“{coachNote}”</span>
                   )}
                 </div>
-                <button
-                  className="player-portal-video-action"
-                  type="button"
-                  disabled={downloading}
-                  onClick={() => onDownload(transfer.savedVideoId)}
-                >
-                  {downloading ? t("Downloading…") : t("Download")}
-                </button>
+                {!editing && (
+                  <button
+                    className="player-portal-video-action"
+                    type="button"
+                    disabled={downloading}
+                    onClick={() => onDownload(id)}
+                  >
+                    {downloading ? t("Downloading…") : t("Download")}
+                  </button>
+                )}
               </li>
             );
           })}
@@ -537,7 +592,11 @@ export function PlayerVideoShelf({
 
       {pending && (
         <div className="player-portal-undo" role="status">
-          <span>{t("Deleted “{title}”", { title: pending.title })}</span>
+          <span>
+            {pending.kind === "cloud"
+              ? t("Removed “{title}”", { title: pending.title })
+              : t("Deleted “{title}”", { title: pending.title })}
+          </span>
           <button type="button" onClick={undoDelete}>{t("Undo")}</button>
         </div>
       )}

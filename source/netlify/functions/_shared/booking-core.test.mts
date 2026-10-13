@@ -8,6 +8,7 @@ import {
   publicSlotCalendarItemsQuery,
   publicBookableServices,
   publicBookingSlots,
+  playerEmailChangeContent,
   portalInviteEmailContent,
   readPublicSlotContext,
   readPublicSlotItemsForWeek,
@@ -1300,4 +1301,39 @@ test("stored lesson types are read with coach and location lists and a resource 
   assert.equal("coachId" in clean, false);
   assert.equal("locationId" in clean, false);
   assert.equal("needsResource" in clean, false);
+});
+
+// --- Player email change ---------------------------------------------------
+//
+// The email is the shared Booking + Caddy login. The confirmation goes to the
+// new address and carries the only link; the notice to the old address must
+// never carry one, or a hijacker's change would hand the victim a button that
+// looks like "undo" and does nothing of the kind.
+
+test("an email-change confirmation carries the link and says it is safe to ignore", () => {
+  const linkUrl = "https://book.example.com/?confirmEmail=tok&x=1";
+  const confirm = playerEmailChangeContent({
+    businessName: "Sam Hale Golf",
+    name: "Jordan Fisher",
+    newEmail: "new@example.com",
+    linkUrl,
+    variant: "confirm",
+  });
+  assert.match(confirm.subject, /Confirm your new Sam Hale Golf sign-in email/);
+  assert.ok(confirm.html.includes(linkUrl.replace(/&/g, "&amp;")), "the html link must be entity-escaped");
+  assert.ok(confirm.text.includes(linkUrl), "the text link must be raw");
+  assert.match(confirm.text, /ignore this email and nothing will change/);
+  assert.match(confirm.text, /Clarity Caddy/);
+});
+
+test("the changed-email notice to the old address names the new one and has no link", () => {
+  const notice = playerEmailChangeContent({
+    businessName: "Sam Hale Golf",
+    name: "Jordan Fisher",
+    newEmail: "new@example.com",
+    variant: "notice",
+  });
+  assert.match(notice.text, /was changed to new@example\.com/);
+  assert.match(notice.text, /did not make this change/);
+  assert.doesNotMatch(notice.html, /<a /, "the notice must not offer a button");
 });

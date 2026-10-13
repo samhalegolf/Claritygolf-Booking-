@@ -5615,6 +5615,248 @@ async function requestPlayerAccountDeletion(session) {
 }
 
 /**
+ * The player's own name and phone, as their coach's client record holds them.
+ *
+ * Only the `people` row changes. The session keeps the phone it signed in
+ * with, because that is what the booking lookup matches on -- editing a number
+ * here must not make their past lessons disappear from the portal.
+ */
+async function updatePlayerAccountDetails(session, body) {
+  const accountId = cleanSlug(session?.accountId, "");
+  const personId = cleanString(session?.personId, "", 160);
+  if (!accountId || !personId) {
+    throw Object.assign(new Error("This account cannot be edited from the app yet."), { status: 400 });
+  }
+  const name = cleanString(body?.name, "", 160);
+  const phone = cleanString(body?.phone, "", 80);
+  if (!name) throw Object.assign(new Error("Enter your name."), { status: 400 });
+  const rows = await db().sql`
+    UPDATE people
+    SET name = ${name}, phone = ${phone || null}, updated_at = NOW()
+    WHERE id = ${personId} AND account_id = ${accountId}
+    RETURNING name, phone
+  `;
+  if (!rows[0]) throw Object.assign(new Error("We couldn't find your details."), { status: 404 });
+  return { name: rows[0].name || "", phone: rows[0].phone || "" };
+}
+
+const playerEmailChangeMinutes = 60;
+
+function looksLikeEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function playerEmailChangeUrl(req, token) {
+  const origin = env("CLARITY_APP_URL", new URL(req.url).origin).replace(/\/$/, "");
+  const url = new URL(origin || new URL(req.url).origin);
+  url.searchParams.set("confirmEmail", token);
+  return url.toString();
+}
+
+/**
+ * The two emails an email change sends: the link to the new address, and the
+ * heads-up to the old one once it has gone through. Pure and exported so the
+ * wording can be checked without a database or an email provider.
+ */
+export function playerEmailChangeContent({ businessName, name, newEmail, linkUrl = "", variant, language = "en" }) {
+  const mt = messageText(language);
+  const greeting = name ? mt("Hi {name},", { name: escapeHtml(String(name).split(/\s+/)[0]) }) : mt("Hi,");
+  const isConfirm = variant === "confirm";
+  const heading = isConfirm ? mt("Confirm your new email") : mt("Your sign-in email was changed");
+  const opening = isConfirm
+    ? mt("You asked to sign in to your {business} player portal with this address. Confirm it to finish the change.", { business: businessName })
+    : mt("The email you sign in with for your {business} player portal was changed to {email}.", { business: businessName, email: newEmail });
+  const caddyLine = mt("If you use Clarity Caddy, this is your sign-in email there too.");
+  const lastLine = isConfirm
+    ? mt("This link expires in {minutes} minutes. If you did not ask for this, ignore this email and nothing will change.", { minutes: playerEmailChangeMinutes })
+    : mt("If you did not make this change, contact your coach straight away.");
+  const subject = isConfirm
+    ? mt("Confirm your new {business} sign-in email", { business: businessName })
+    : mt("Your {business} sign-in email was changed", { business: businessName });
+  const buttonLabel = mt("Confirm new email");
+
+  const html = `
+    <div style="font-family:Arial,sans-serif;line-height:1.5;color:#111">
+      <h2>${escapeHtml(heading)}</h2>
+      <p>${greeting}</p>
+      <p>${escapeHtml(opening)}</p>
+      <p>${escapeHtml(caddyLine)}</p>
+      ${
+        isConfirm
+          ? `<p><a href="${escapeHtml(linkUrl)}" style="display:inline-block;background:#07100a;color:#fff;padding:12px 16px;text-decoration:none;border-radius:6px">${escapeHtml(buttonLabel)}</a></p>
+      <p>${escapeHtml(mt("If the button does not work, paste this link into your browser:"))}</p>
+      <p><a href="${escapeHtml(linkUrl)}">${escapeHtml(linkUrl)}</a></p>`
+          : ""
+      }
+      <p>${escapeHtml(lastLine)}</p>
+    </div>
+  `;
+  const text = [heading, "", opening, caddyLine, "", isConfirm ? linkUrl : "", lastLine]
+    .filter((line) => line !== "")
+    .join("\n");
+  return { subject, html, text };
+}
+
+/**
+ * Starts an email change. Checks the current password, makes sure the new
+ * address is not another login's, and mails a confirmation link to it.
+ * Nothing about the login changes here.
+ */
+async function requestPlayerEmailChange(req, session, rawNewEmail, currentPassword) {
+  if (session.sandboxActorAuthUser || !session.authUserId || !session.personId) {
+    return { error: "not_allowed", status: 403, message: "The email can't be changed from this session." };
+  }
+  const newEmail = cleanEmail(rawNewEmail, "");
+  if (!newEmail || !looksLikeEmail(newEmail)) {
+    return { error: "invalid_email", message: "Enter a valid email address." };
+  }
+  const currentEmail = cleanEmail(session.email, "") || (await supabaseAuthEmail(session.authUserId));
+  if (newEmail === currentEmail) {
+    return { error: "same_email", message: "That is already your email." };
+  }
+  const provedUserId = await verifySupabaseAuthPassword(currentEmail, currentPassword);
+  if (!provedUserId || provedUserId !== session.authUserId) {
+    return { error: "invalid_current_password", message: "Current password is incorrect." };
+  }
+  const owner = await findSupabaseAuthUserId(newEmail);
+  if (owner && owner !== session.authUserId) {
+    return { error: "email_in_use", message: "That email is already used by another account." };
+  }
+
+  const token = randomBytes(32).toString("base64url");
+  const expiresAt = new Date(Date.now() + playerEmailChangeMinutes * 60 * 1000).toISOString();
+  // One open request at a time: asking again replaces the last link.
+  await db().sql`
+    DELETE FROM player_email_changes
+    WHERE auth_user_id = ${session.authUserId}::uuid AND confirmed_at IS NULL
+  `;
+  await db().sql`
+    INSERT INTO player_email_changes (
+      id, account_id, person_id, portal_player_id, auth_user_id,
+      old_email, new_email, token_hash, expires_at, created_at
+    ) VALUES (
+      ${randomUUID()}, ${session.accountId}, ${session.personId}, ${session.portalPlayerId || null},
+      ${session.authUserId}::uuid, ${currentEmail}, ${newEmail}, ${hashToken(token)}, ${expiresAt}, NOW()
+    )
+  `;
+
+  const account = await readCoachAccount(session.accountId);
+  const contact = (await readPeople(session.accountId)).find((person) => person.id === session.personId);
+  const content = playerEmailChangeContent({
+    businessName: account.businessName || "Clarity Golf",
+    name: contact?.name || "",
+    newEmail,
+    linkUrl: playerEmailChangeUrl(req, token),
+    variant: "confirm",
+    language: account.messageLanguage,
+  });
+  const sent = await deliverEmail({
+    accountId: session.accountId,
+    to: newEmail,
+    ...content,
+    idempotencyKey: `player-email-change-${hashToken(token).slice(0, 24)}`,
+  });
+  if (!sent?.sent) {
+    return { error: "email_not_sent", status: 502, message: "Could not send the confirmation email. Try again in a minute." };
+  }
+  return { pendingEmail: newEmail };
+}
+
+/**
+ * Finishes an email change from its link. The login moves first -- Supabase
+ * Auth is what Booking and Caddy both sign in against -- and then every copy
+ * Booking keeps: the portal access rows, the coach's client records (a re-sent
+ * invite reads the email from there), and the live sessions.
+ */
+async function confirmPlayerEmailChange(req, token) {
+  const invalid = { error: "invalid_token", message: "This link has expired or has already been used." };
+  if (!token) return invalid;
+  const rows = await db().sql`
+    SELECT * FROM player_email_changes WHERE token_hash = ${hashToken(token)} LIMIT 1
+  `;
+  const change = rows[0];
+  if (!change || change.confirmed_at || new Date(change.expires_at).getTime() <= Date.now()) return invalid;
+
+  const authUserId = cleanString(change.auth_user_id, "", 80);
+  const newEmail = cleanEmail(change.new_email, "");
+  // Someone may have taken the address in the hour since it was asked for.
+  const owner = await findSupabaseAuthUserId(newEmail);
+  if (owner && owner !== authUserId) {
+    return { error: "email_in_use", message: "That email is already used by another account." };
+  }
+
+  const { ok, status, payload } = await supabaseAuthFetch(`/admin/users/${encodeURIComponent(authUserId)}`, {
+    method: "PUT",
+    body: { email: newEmail, email_confirm: true },
+  });
+  if (!ok) throw supabaseAuthError(payload, "Could not change the email.", status);
+
+  await db().sql`UPDATE portal_players SET email = ${newEmail}, updated_at = NOW() WHERE auth_user_id = ${authUserId}::uuid`;
+  await db().sql`UPDATE player_sessions SET email = ${newEmail} WHERE auth_user_id = ${authUserId}::uuid`;
+  // Each business this player belongs to has its own client record for them.
+  const linked = await db().sql`SELECT account_id, person_id FROM portal_players WHERE auth_user_id = ${authUserId}::uuid`;
+  for (const row of linked) {
+    try {
+      await db().sql`
+        UPDATE people SET email = ${newEmail}, updated_at = NOW()
+        WHERE id = ${row.person_id} AND account_id = ${row.account_id}
+      `;
+    } catch (error) {
+      // Another client in that business already uses the address (a shared
+      // family inbox, say). The login has moved; that one record keeps its old
+      // email for the coach to tidy, rather than failing the whole change.
+      console.warn("player_email_change:people_update_skipped", {
+        accountId: row.account_id,
+        message: error instanceof Error ? error.message.slice(0, 200) : String(error),
+      });
+    }
+  }
+  await db().sql`UPDATE player_email_changes SET confirmed_at = NOW() WHERE id = ${change.id}`;
+
+  // Tell the old address. If the change was not theirs, this is how they find out.
+  try {
+    const account = await readCoachAccount(change.account_id);
+    const contact = (await readPeople(change.account_id)).find((person) => person.id === change.person_id);
+    await deliverEmail({
+      accountId: change.account_id,
+      to: change.old_email,
+      ...playerEmailChangeContent({
+        businessName: account.businessName || "Clarity Golf",
+        name: contact?.name || "",
+        newEmail,
+        variant: "notice",
+        language: account.messageLanguage,
+      }),
+      idempotencyKey: `player-email-changed-${change.id}`,
+    });
+  } catch (error) {
+    console.warn("player_email_change:notice_failed", error instanceof Error ? error.message : error);
+  }
+  return { email: newEmail };
+}
+
+/**
+ * Changes the password on the player's Supabase Auth login -- the same login
+ * Clarity Caddy uses, so it changes there too. Every other portal session for
+ * this login ends; the one that made the change stays signed in.
+ */
+async function changePlayerPassword(session, token, currentPassword, nextPassword) {
+  // A coach viewing the sandbox as a player is not that player.
+  if (session.sandboxActorAuthUser || !session.authUserId) return { error: "not_allowed" };
+  // The same minimum the portal's own set-password screen uses.
+  if (typeof nextPassword !== "string" || nextPassword.length < 10) return { error: "weak_password" };
+  const email = session.email || (await supabaseAuthEmail(session.authUserId));
+  const provedUserId = await verifySupabaseAuthPassword(email, currentPassword || "");
+  if (!provedUserId || provedUserId !== session.authUserId) return { error: "invalid_current_password" };
+  await setSupabaseAuthPassword(session.authUserId, nextPassword);
+  await db().sql`
+    DELETE FROM player_sessions
+    WHERE auth_user_id = ${session.authUserId}::uuid AND token_hash <> ${hashToken(token)}
+  `;
+  return { ok: true };
+}
+
+/**
  * The portal half of a login, for an auth user whose password /api/auth/login
  * has already checked.
  *
@@ -6296,7 +6538,27 @@ async function readPlayerProfile(session) {
     email: session.email,
     phone: session.phone,
   });
-  const bookings = itemRead.items
+  // Bookings linked to their own client record too. Email + phone alone loses
+  // every past lesson the moment either one changes in the Account tab; the
+  // person id does not change. Both reads are kept because a few older
+  // bookings carry contact details but no person id.
+  const linkedItems = session.personId
+    ? (
+        await requestSupabaseRows("calendar_items", {
+          query: [
+            "select=*",
+            "kind=eq.appointment",
+            `person_id=eq.${encodeURIComponent(session.personId)}`,
+            `account_id=eq.${encodeURIComponent(accountId)}`,
+            "limit=200",
+          ].join("&"),
+        })
+      )
+        .map(rowToItem)
+        .filter((item) => recordBelongsToAccountStrict(item, accountId))
+    : [];
+  const seenItemIds = new Set(itemRead.items.map((item) => item.id));
+  const bookings = [...itemRead.items, ...linkedItems.filter((item) => !seenItemIds.has(item.id))]
     .sort((a, b) => itemWeek(a) - itemWeek(b) || a.day - b.day || a.start - b.start)
     .map((item) => publicRescheduleItem(item, serviceList));
 
@@ -6334,6 +6596,16 @@ async function readPlayerProfile(session) {
   // appointment) so the client can pre-fill the booking form on hand-off
   // without ever re-asking the player for their details.
   const primary = itemRead.items[0];
+  // What the player saved in their Account panel wins over the latest booking.
+  const personRow = session.personId
+    ? (
+        await db().sql`
+          SELECT name, phone FROM people
+          WHERE id = ${session.personId} AND account_id = ${accountId}
+          LIMIT 1
+        `
+      )[0]
+    : null;
 
   // The business's own booking widget, if it runs one somewhere else. Read
   // straight from settings rather than off `state`: readPublicCatalogState is
@@ -6428,8 +6700,8 @@ async function readPlayerProfile(session) {
       // on the coach side.
       id: session.personId || "",
       email: session.email,
-      name: primary?.client || primary?.title || "",
-      phone: primary?.phone || session.phone || "",
+      name: personRow?.name || primary?.client || primary?.title || "",
+      phone: personRow?.phone || primary?.phone || session.phone || "",
     },
     bookings,
     notes,
@@ -9057,6 +9329,76 @@ async function routeBookingApiRequest(
       return json({ ...(await requestPlayerAccountDeletion(session)), expectedCompletionDays: 7 }, 202);
     }
 
+    // The player's own name and phone, from the Account panel.
+    if (req.method === "POST" && pathname === "/api/player/account") {
+      const session = await readPlayerSession(playerSessionTokenFromRequest(req));
+      if (!session) {
+        return json({ error: "unauthorized", message: "Player login required." }, 401);
+      }
+      const body = await parseBody(req);
+      return json({ ok: true, player: await updatePlayerAccountDetails(session, body) });
+    }
+
+    if (req.method === "POST" && pathname === "/api/player/change-password") {
+      const token = playerSessionTokenFromRequest(req);
+      const session = await readPlayerSession(token);
+      if (!session) {
+        return json({ error: "unauthorized", message: "Player login required." }, 401);
+      }
+      const body = await parseBody(req);
+      let result;
+      try {
+        result = await changePlayerPassword(session, token, body.currentPassword || "", body.newPassword || "");
+      } catch (error) {
+        // Supabase refusing the new password under its own policy is the
+        // player's to fix, so say what it said.
+        const status = Number((error as { status?: number })?.status);
+        if (!(status >= 400 && status < 500)) throw error;
+        return json(
+          {
+            error: "change_password_failed",
+            message: error instanceof Error && error.message ? error.message : "Could not change password.",
+          },
+          400,
+        );
+      }
+      if (result.error === "weak_password") {
+        return json({ error: "weak_password", message: "Use at least 10 characters." }, 400);
+      }
+      if (result.error === "invalid_current_password") {
+        return json({ error: "invalid_current_password", message: "Current password is incorrect." }, 400);
+      }
+      if (result.error === "not_allowed") {
+        return json({ error: "not_allowed", message: "The password can't be changed from this session." }, 403);
+      }
+      return json({ ok: true });
+    }
+
+    // Step one of an email change: prove it is them, then mail the new address.
+    if (req.method === "POST" && pathname === "/api/player/email-change") {
+      const session = await readPlayerSession(playerSessionTokenFromRequest(req));
+      if (!session) {
+        return json({ error: "unauthorized", message: "Player login required." }, 401);
+      }
+      const body = await parseBody(req);
+      const result = await requestPlayerEmailChange(req, session, body.newEmail || "", body.currentPassword || "");
+      if (result.error) {
+        return json({ error: result.error, message: result.message }, result.status || 400);
+      }
+      return json({ ok: true, pendingEmail: result.pendingEmail });
+    }
+
+    // Step two, from the link in that email. No session needed: the link is
+    // often opened on a different device from the one that asked.
+    if (req.method === "POST" && pathname === "/api/player/email-change/confirm") {
+      const body = await parseBody(req);
+      const result = await confirmPlayerEmailChange(req, body.token || "");
+      if (result.error) {
+        return json({ error: result.error, message: result.message }, 400);
+      }
+      return json({ ok: true, email: result.email });
+    }
+
     // Player-side "Mark Complete." Player-session-authenticated, ahead of the
     // admin gate below, same shape as /api/player/profile above.
     if (req.method === "POST" && pathname === "/api/practice-blocks/complete") {
@@ -9358,8 +9700,9 @@ async function routeBookingApiRequest(
           amount: cardValueCents / 100,
           currency: item.currency,
           productName: item.name,
-          productDescription:
-            item.credits === 1 ? "1 credit" : `${item.credits} credits`,
+          productDescription: item.includes.length
+            ? item.includes.join(" + ")
+            : item.credits === 1 ? "1 credit" : `${item.credits} credits`,
           customerEmail: session.email || "",
           clientReferenceId: session.personId,
           // Read back on confirm and checked against the session doing the
@@ -11262,7 +11605,7 @@ async function readPassInbox(accountId: string, services) {
           // entitlement is real either way.
           personId: sale.personId,
           templateServiceId: template.serviceId,
-          credits: template.credits * quantity,
+          quantity,
           source: sale.provider,
           sourceRef: sale.sourceRef,
           // Both halves or neither -- never a number with no currency, which is

@@ -29,6 +29,7 @@ import {
   reverseRedemptionsForBooking,
   reversePassRedemption,
   spendOrder,
+  splitBundleValue,
   sweepReturnableCredits,
 } from "./passes.mts";
 
@@ -97,6 +98,7 @@ test("a package service is read as a pass template, coverage widened to a list",
       expiryMonths: null,
       crossRedeemable: false,
       priceCents: null,
+      bundleItems: [],
     },
   ]);
 });
@@ -645,6 +647,11 @@ test("taking a credit locks the pass and lets the database pick the allocation",
   );
   assert.match(insert.text, /a\.is_live/, "expired allocations cannot pay");
   assert.match(insert.text, /p\.status = 'active'/, "a voided pass cannot pay");
+  assert.match(
+    insert.text,
+    /credits_available >= \$5::int/,
+    "the credit count is typed: untyped, Postgres refuses it as both integer and bigint",
+  );
   assert.ok(issued.some((entry) => entry.text === "COMMIT"));
 });
 
@@ -944,4 +951,104 @@ test("a price with no currency to put it in is not half-sent", () => {
     resolveInboxPassValue({ purchaseCents: 0, templatePriceCents: 65_000, accountCurrency: "" }),
     undefined,
   );
+});
+
+// --- Bundles ----------------------------------------------------------------
+
+const ONE_HOUR = { id: "lesson-60", name: "1 Hour Lesson", lessonFormat: "private", price: 160 };
+const REVIEW = { id: "review", name: "Swing Review", lessonFormat: "video-review", price: 50 };
+const LESSON_PASS = {
+  id: "pass-lessons",
+  name: "5 x 1 Hour Lessons",
+  lessonFormat: "package",
+  packageAllowance: 5,
+  coversServiceIds: ["lesson-60", "lesson-30"],
+  price: 700,
+};
+const REVIEW_PASS = {
+  id: "pass-review",
+  name: "Swing Review Credit",
+  lessonFormat: "package",
+  packageAllowance: 1,
+  coversServiceIds: ["review"],
+  price: 50,
+};
+const BUNDLE = {
+  id: "bundle-1",
+  name: "Lessons + Review",
+  lessonFormat: "package",
+  price: 650,
+  bundleItems: [
+    { passTypeId: "pass-lessons", quantity: 1 },
+    { passTypeId: "pass-review", quantity: 1 },
+  ],
+};
+const BUNDLE_CATALOGUE = [ONE_HOUR, REVIEW, LESSON_PASS, REVIEW_PASS, BUNDLE];
+
+test("a bundle's value is shared by catalogue price and adds back exactly", () => {
+  assert.deepEqual(splitBundleValue(65000, [70000, 5000]), [60667, 4333]);
+  assert.deepEqual(splitBundleValue(100, [0, 0, 0]), [34, 33, 33], "no prices: split evenly");
+  for (const total of [1, 99, 65000, 12345]) {
+    const shares = splitBundleValue(total, [3, 7, 11]);
+    assert.equal(shares.reduce((sum, share) => sum + share, 0), total);
+  }
+});
+
+test("issuing a bundle issues each pass type in it, with its own cover and a part reference", async (t) => {
+  const issued = fakeDatabase(() => []);
+  t.after(() => setDatabaseForTests(null));
+
+  await grantPass(
+    {
+      personId: "person-1",
+      templateServiceId: "bundle-1",
+      quantity: 2,
+      source: "clarity_pos",
+      sourceRef: "pos:42:0",
+      totalValueCents: 130000,
+      currency: "NZD",
+    },
+    passTemplatesFromServices(BUNDLE_CATALOGUE),
+    ACTOR,
+  );
+
+  const passes = issued.filter((entry) => entry.text.includes("INSERT INTO public.passes"));
+  assert.equal(passes.length, 2, "one pass per pass type; the bundle itself is never a pass");
+  assert.deepEqual(passes.map((entry) => entry.values[4]), ["pass-lessons", "pass-review"]);
+  assert.deepEqual(passes[0].values[5], ["lesson-60", "lesson-30"]);
+  assert.deepEqual(passes[1].values[5], ["review"]);
+  assert.deepEqual(
+    passes.map((entry) => entry.values[8]),
+    ["pos:42:0#pass-lessons", "pos:42:0#pass-review"],
+    "each part is idempotent on its own reference",
+  );
+
+  const allocations = issued.filter((entry) => entry.text.includes("INSERT INTO public.pass_allocations"));
+  assert.deepEqual(allocations.map((entry) => entry.values[3]), [10, 2], "two bundles: twice each part");
+  const values = allocations.map((entry) => entry.values[10] as number);
+  assert.equal(values[0] + values[1], 130000, "the parts add back to what was paid");
+});
+
+test("a bundle naming another bundle is refused before anything is written", async (t) => {
+  const issued = fakeDatabase(() => []);
+  t.after(() => setDatabaseForTests(null));
+  const nested = {
+    id: "bundle-2",
+    name: "Nested",
+    lessonFormat: "package",
+    bundleItems: [
+      { passTypeId: "pass-review", quantity: 1 },
+      { passTypeId: "bundle-1", quantity: 1 },
+    ],
+  };
+
+  await assert.rejects(
+    grantPass(
+      { personId: "person-1", templateServiceId: "bundle-2" },
+      passTemplatesFromServices([...BUNDLE_CATALOGUE, nested]),
+      ACTOR,
+    ),
+    /another bundle/,
+  );
+  assert.equal(issued.filter((entry) => entry.text.startsWith("INSERT")).length, 0);
 });

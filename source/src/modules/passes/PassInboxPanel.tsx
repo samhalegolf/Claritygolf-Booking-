@@ -97,6 +97,8 @@ export type PassInboxTemplate = {
   credits: number;
   /** The catalogue price, used when the external sale carried none. */
   priceCents: number | null;
+  /** Non-empty for a bundle, whose credits come from the pass types inside it. */
+  bundleItems?: Array<{ passTypeId: string; quantity: number }>;
 };
 
 export type PassInboxPerson = { id: string; name: string };
@@ -292,7 +294,9 @@ export function PassInboxPanel({
               >
                 <option value="">{t("Pick a package…")}</option>
                 {templates.map((template) => (
-                  <option key={template.serviceId} value={template.serviceId}>{tn(template.credits, "{name} · {count} credit", "{name} · {count} credits", { name: template.name })}
+                  <option key={template.serviceId} value={template.serviceId}>{template.bundleItems?.length
+                    ? `${template.name} · ${t("Bundle")}`
+                    : tn(template.credits, "{name} · {count} credit", "{name} · {count} credits", { name: template.name })}
                   </option>
                 ))}
             </select>

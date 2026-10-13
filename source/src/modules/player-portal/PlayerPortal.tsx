@@ -25,7 +25,6 @@ import {
 } from "../shared/ClarityIcons";
 import { apiFetch } from "../auth/apiFetch";
 import { signOut, type Session } from "../auth/session";
-import { LanguageSelect } from "../settings/LanguageSettings";
 import { hasGuestToken, NATIVE } from "../auth/apiFetch";
 import { isPlayerBookingMode, slotDate } from "../shared/bookingHandoff";
 import { useBackNavigation } from "../shared/backNavigation";
@@ -35,6 +34,7 @@ import {
   type PlayerTerminalDestination,
 } from "./PlayerTerminalNav";
 import { PlayerVideoShelf } from "./PlayerVideoShelf";
+import { PlayerAccountPanel } from "./PlayerAccountPanel";
 import {
   PlayerBookingEmbed,
   isPlayerBookingEmbedConfigured,
@@ -76,6 +76,7 @@ import {
   importSavedVideoFromClarityCloud,
   listCloudSnapshots,
   listClarityCloudImportTransfers,
+  hideClarityCloudVideoForPlayer,
   markClarityCloudReturnSeen,
   registerGuestSender,
   removeSavedVideoCloudTransfer,
@@ -137,16 +138,6 @@ type Note = {
   createdAt?: string;
   updatedAt?: string;
 };
-
-type PortalTab =
-  | "home"
-  | "lessons"
-  | "reviews"
-  | "passes"
-  | "practice"
-  | "notes"
-  | "videos"
-  | "book";
 
 type PracticeExpiryType = "next_lesson" | "set_date" | "none";
 type PracticeStatus = "active" | "completed" | "expired" | "archived";
@@ -216,6 +207,8 @@ type ShopItem = {
   credits: number;
   coversServiceIds: string[];
   kind: "package" | "video-review";
+  /** A bundle's contents, as "5 × 1 Hour Lessons". */
+  includes?: string[];
 };
 
 type CaddyAccess = {
@@ -305,7 +298,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   // The deep-link check is still real (a push notification can land straight
   // on booking) -- it now just selects Lessons + the Book subtab instead of
   // the old separate full-screen mode.
-  const [tab, setTab] = useState<PortalTab>(() => (!isGuest && isPlayerBookingMode() ? "lessons" : "home"));
+  const [tab, setTab] = useState<PlayerTerminalDestination>(() => (!isGuest && isPlayerBookingMode() ? "lessons" : "home"));
   const [lessonsSubtab, setLessonsSubtab] = useState<"book" | "upcoming">(() =>
     !isGuest && isPlayerBookingMode() ? "book" : "upcoming",
   );
@@ -341,10 +334,6 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   const [purchaseNote, setPurchaseNote] = useState("");
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileError, setProfileError] = useState("");
-  const [deletionOpen, setDeletionOpen] = useState(false);
-  const [deletionBusy, setDeletionBusy] = useState(false);
-  const [deletionMessage, setDeletionMessage] = useState("");
-  const [deletionError, setDeletionError] = useState("");
   const [expandedPracticeId, setExpandedPracticeId] = useState<string | null>(null);
   /** Which swing review is open. Empty means the list, which is how it lands. */
   const [openReviewId, setOpenReviewId] = useState("");
@@ -378,6 +367,9 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   const savedVideoLibrary = savedVideoLibraryRef.current;
 
   const [savedVideos, setSavedVideos] = useState<SavedVideoItem[]>([]);
+  /** Records whose video file is no longer on this device -- the empty
+   *  shells. Kept apart so nothing else in the portal offers to open one. */
+  const [brokenVideos, setBrokenVideos] = useState<SavedVideoItem[]>([]);
   const [videoError, setVideoError] = useState("");
   const [sendingIds, setSendingIds] = useState<Set<string>>(() => new Set());
   const [sendProgress, setSendProgress] = useState<Record<string, number>>({});
@@ -587,7 +579,18 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   const refreshSavedVideos = useCallback(async () => {
     if (!savedVideoLibrary) return;
     try {
-      setSavedVideos(await savedVideoLibrary.listItems());
+      const items = await savedVideoLibrary.listItems();
+      // The phone can clear stored video under storage pressure and leave the
+      // record behind. Asking for the file is the only honest test.
+      const hasFile = await Promise.all(
+        items.map(async (item) =>
+          item.local.status === "missing"
+            ? false
+            : Boolean(await savedVideoLibrary.getBlob(item.savedVideoId).catch(() => null)),
+        ),
+      );
+      setSavedVideos(items.filter((_, index) => hasFile[index]));
+      setBrokenVideos(items.filter((_, index) => !hasFile[index]));
     } catch (error) {
       setVideoError(error instanceof Error ? error.message : t("Could not read your saved videos."));
     }
@@ -693,42 +696,6 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
     await signOut();
     onSignedOut();
   }
-
-  const requestAccountDeletion = useCallback(async () => {
-    if (isGuest || deletionBusy) return;
-    const confirmed = window.confirm(
-      t(
-        "Request deletion of your Clarity Player account and associated personal data? Some booking or payment records may be retained where legally required. We will email you when the review is complete.",
-      ),
-    );
-    if (!confirmed) return;
-
-    setDeletionBusy(true);
-    setDeletionError("");
-    setDeletionMessage("");
-    try {
-      const response = await apiFetch("/api/player/account-deletion", { method: "POST" });
-      const data = (await response.json().catch(() => ({}))) as {
-        message?: string;
-        requestedAt?: string;
-        expectedCompletionDays?: number;
-      };
-      if (response.status === 401) {
-        onSignedOut();
-        return;
-      }
-      if (!response.ok) throw new Error(data.message || t("Could not submit the deletion request."));
-      setDeletionMessage(
-        t("Request received. We will review it and email you within {value} days.", { value: data.expectedCompletionDays || 7 }),
-      );
-    } catch (error) {
-      setDeletionError(
-        error instanceof Error ? error.message : t("Could not submit the deletion request."),
-      );
-    } finally {
-      setDeletionBusy(false);
-    }
-  }, [deletionBusy, isGuest, onSignedOut]);
 
   const openCaddy = useCallback(() => {
     if (!caddy?.appUrl) return;
@@ -905,6 +872,11 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
       return next;
     });
   }, [prefersDark]);
+
+  const chooseTheme = useCallback((next: PortalTheme) => {
+    writePortalTheme(next);
+    setTheme(next);
+  }, []);
 
   const navigateTerminal = useCallback((destination: PlayerTerminalDestination) => {
     setRecording(false);
@@ -1109,6 +1081,31 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
    * a video this device is about to stop holding is how a transfer ends up
    * stuck half-finished for good.
    */
+  /** Clears every empty shell in one go. Their files are already gone, so
+   *  this only removes the records; any cloud copy shows up to download. */
+  const clearBrokenVideos = useCallback(async () => {
+    if (!savedVideoLibrary) return;
+    setVideoError("");
+    try {
+      for (const item of brokenVideos) await savedVideoLibrary.deleteItem(item.savedVideoId);
+    } catch (error) {
+      setVideoError(error instanceof Error ? error.message : t("Could not delete that video. Try again."));
+    } finally {
+      await refreshSavedVideos();
+    }
+  }, [brokenVideos, refreshSavedVideos, savedVideoLibrary]);
+
+  /** Takes a cloud video off this player's list. The coach's copy stays. */
+  const hideCloudVideo = useCallback(async (savedVideoId: string) => {
+    setVideoError("");
+    try {
+      await hideClarityCloudVideoForPlayer(savedVideoId);
+      setCloudVideos((current) => current.filter((transfer) => transfer.savedVideoId !== savedVideoId));
+    } catch (error) {
+      setVideoError(error instanceof Error ? error.message : t("Could not remove that video. Try again."));
+    }
+  }, []);
+
   const deleteSavedVideo = useCallback(
     async (savedVideoId: string) => {
       if (!savedVideoLibrary) return;
@@ -2240,6 +2237,26 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
 
               {tab === "book" && bookingEmbed && <PlayerBookingEmbed config={bookingEmbed} />}
 
+              {tab === "account" &&
+                (profileLoading && !isGuest ? (
+                  <Loading what={t("your account")} className="player-portal-empty" />
+                ) : (
+                  <PlayerAccountPanel
+                    guest={isGuest}
+                    name={playerName}
+                    email={playerEmail}
+                    phone={playerPhone}
+                    onDetailsSaved={(details) => {
+                      setPlayerName(details.name);
+                      setPlayerPhone(details.phone);
+                    }}
+                    theme={theme}
+                    onThemeChange={chooseTheme}
+                    onSignedOut={onSignedOut}
+                    onRequestSignIn={onRequestSignIn}
+                  />
+                ))}
+
               {tab === "notes" && isGuest && (
                 <section className="player-portal-section">
                   <h2>{t("Notes")}</h2>
@@ -2689,9 +2706,11 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                             <div className="player-portal-shop-main">
                               <strong>{item.name}</strong>
                               <span>
-                                {item.credits === 1
-                                  ? t("1 credit")
-                                  : `${item.credits} credits`}
+                                {item.includes?.length
+                                  ? item.includes.join(" + ")
+                                  : item.credits === 1
+                                    ? t("1 credit")
+                                    : `${item.credits} credits`}
                                 {item.description ? ` · ${item.description}` : ""}
                               </span>
                             </div>
@@ -2946,6 +2965,9 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                         onSend={(id) => void sendToCoach(id)}
                         onDownload={(id) => void downloadFromCloud(id)}
                         onDelete={(id) => void deleteSavedVideo(id)}
+                        brokenVideos={brokenVideos}
+                        onClearBroken={() => void clearBrokenVideos()}
+                        onHideCloud={(id) => void hideCloudVideo(id)}
                       />
                     </>
                   )}
@@ -2959,39 +2981,7 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
               <a href={PRIVACY_URL} target="_blank" rel="noreferrer noopener">{t("Privacy Policy")}</a>
               <a href={SUPPORT_URL} target="_blank" rel="noreferrer noopener">{t("Support")}</a>
               <a href={TERMS_URL} target="_blank" rel="noreferrer noopener">{t("Terms")}</a>
-              {!isGuest && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDeletionOpen((current) => !current);
-                    setDeletionError("");
-                  }}
-                  aria-expanded={deletionOpen}
-                >{t("Delete account")}</button>
-              )}
             </nav>
-
-            <LanguageSelect />
-
-            {!isGuest && deletionOpen && (
-              <section className="player-account-deletion" aria-label={t("Delete account")}>
-                <strong>{t("Delete your account")}</strong>
-                <p>{t("This requests deletion of your player login and associated personal data. We review booking and payment records before removal because some records may need to be retained by law. Your Clarity Caddy login may use the same identity and will be included in that review.")}</p>
-                {deletionMessage ? (
-                  <p className="player-account-deletion-success" role="status">{deletionMessage}</p>
-                ) : (
-                  <button
-                    className="player-account-deletion-submit"
-                    type="button"
-                    disabled={deletionBusy}
-                    onClick={() => void requestAccountDeletion()}
-                  >
-                    {deletionBusy ? t("Submitting…") : t("Request account deletion")}
-                  </button>
-                )}
-                {deletionError && <p className="player-portal-error-line" role="alert">{deletionError}</p>}
-              </section>
-            )}
           </footer>
         </div>
       </div>

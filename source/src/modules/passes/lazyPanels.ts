@@ -20,6 +20,9 @@ export const IssuedPassesPanel = lazy(() =>
 export const PassClientPicker = lazy(() =>
   import("./PassClientPicker").then((module) => ({ default: module.PassClientPicker })),
 );
+export const BundlesList = lazy(() =>
+  import("./BundlesList").then((module) => ({ default: module.BundlesList })),
+);
 export const PassTypesList = lazy(() =>
   import("./PassTypesList").then((module) => ({ default: module.PassTypesList })),
 );

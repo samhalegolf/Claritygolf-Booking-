@@ -20,7 +20,7 @@ type AuthMode = "login" | "forgot" | "reset" | "invite";
 const THEME_STORAGE_KEY = "clarity-booking-theme";
 const BRAND_STORAGE_KEY = "clarity-booking-brand";
 
-function storedThemeMode(): "light" | "dark" {
+export function storedThemeMode(): "light" | "dark" {
   if (typeof window === "undefined") return "light";
   return window.localStorage.getItem(THEME_STORAGE_KEY) === "dark" ? "dark" : "light";
 }
@@ -28,7 +28,7 @@ function storedThemeMode(): "light" | "dark" {
 // Pre-auth there is no brand API call to make, so the login screen reuses
 // whatever the last signed-in session stored. A first-time visitor just gets
 // the stylesheet defaults.
-function storedBrandStyle(): CSSProperties {
+export function storedBrandStyle(): CSSProperties {
   if (typeof window === "undefined") return {};
   try {
     const raw = window.localStorage.getItem(BRAND_STORAGE_KEY);

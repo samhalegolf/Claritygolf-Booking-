@@ -1618,6 +1618,19 @@ export const markClarityCloudReturnSeen = async (savedVideoId: string): Promise<
   }
 };
 
+/**
+ * Removes a cloud video from the player's own list. Not best effort: the
+ * player asked for it gone, so a failure has to say so rather than let it
+ * quietly reappear on the next refresh.
+ */
+export const hideClarityCloudVideoForPlayer = async (savedVideoId: string): Promise<void> => {
+  const response = await apiFetch(transferUrl("player", savedVideoId, "hide"), {
+    method: "POST",
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) throw new Error(t("Could not remove that video. Try again."));
+};
+
 export const listClarityCloudImportTransfers = async (
   scope: VideoTransferScope = "coach",
   playerId?: string

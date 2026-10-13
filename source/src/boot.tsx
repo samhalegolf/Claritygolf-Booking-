@@ -40,6 +40,7 @@ const PlayerPortal = lazy(() => import("./modules/player-portal/PlayerPortal"));
 const VideoSharePage = lazy(() => import("./modules/video-share/VideoSharePage"));
 const SwingReviewSharePage = lazy(() => import("./modules/review-share/SwingReviewSharePage"));
 const ClarityTerminalPage = lazy(() => import("./modules/clarity-terminal/ClarityTerminalPage"));
+const ConfirmEmailScreen = lazy(() => import("./modules/auth/ConfirmEmailScreen"));
 // Not lazy: it is small, and a testing workspace that renders its warning a
 // beat after the workspace it warns about is a workspace someone acts in first.
 import SandboxBar from "./modules/sandbox/SandboxBar";
@@ -74,10 +75,13 @@ const clarityTerminal = isTerminalPath();
 // a player, or anyone deciding whether to use Clarity must be able to read
 // these without possessing a Clarity session.
 const publicPath = window.location.pathname.replace(/\/+$/, "") || "/";
+// A player confirming a new sign-in email. Answered whoever is signed in, or nobody.
+const emailChangeToken = new URLSearchParams(window.location.search).get("confirmEmail") || "";
 const authLinkAtRoot =
   publicPath === "/" &&
   (new URLSearchParams(window.location.search).has("portalInvite") ||
-    new URLSearchParams(window.location.search).has("reset"));
+    new URLSearchParams(window.location.search).has("reset") ||
+    Boolean(emailChangeToken));
 // A coach who never signed out goes straight to their workspace from the home
 // page (and the installed app, which opens at /), rather than being shown the
 // landing page and a Sign in button that then lets them straight in. Everyone
@@ -99,7 +103,8 @@ const publicPage: PublicPage | null =
 // their workspace starts downloading now, alongside the session check, rather
 // than after it. The lazy import above reuses the same promise. A player or a
 // stranger never trips this: the hint is removed on logout.
-const willCheckSession = !publicPage && !publicBookingOnly && !videoShare && !reviewShare && !clarityTerminal;
+const willCheckSession =
+  !publicPage && !publicBookingOnly && !videoShare && !reviewShare && !clarityTerminal && !emailChangeToken;
 if (willCheckSession && lastVisitorWasCoach()) {
   void loadApp();
   // The client list too. It is the first thing Clients and Player Profiles
@@ -142,7 +147,7 @@ function Root() {
   useEffect(() => {
     // The share page never asks who is looking -- that is the whole point of
     // it -- so it must not make a session call either.
-    if (publicPage || publicBookingOnly || videoShare || reviewShare || clarityTerminal) return;
+    if (publicPage || publicBookingOnly || videoShare || reviewShare || clarityTerminal || emailChangeToken) return;
     let cancelled = false;
     void fetchSession().then((next) => {
       if (!cancelled) setSession(next);
@@ -196,6 +201,14 @@ function Root() {
     return (
       <Suspense fallback={<Loading size="screen" what={t("your review")} />}>
         <SwingReviewSharePage />
+      </Suspense>
+    );
+  }
+
+  if (emailChangeToken) {
+    return (
+      <Suspense fallback={<Loading size="screen" label={t("Checking session…")} />}>
+        <ConfirmEmailScreen token={emailChangeToken} />
       </Suspense>
     );
   }
