@@ -4702,5 +4702,11 @@
   "If you use Clarity Caddy, this changes your password there too.": "Wenn du Clarity Caddy nutzt, ändert sich dein Passwort dort ebenfalls.",
   "Change password": "Passwort ändern",
   "Password changed. Other devices have been signed out.": "Passwort geändert. Andere Geräte wurden abgemeldet.",
-  "your account": "dein Konto"
+  "your account": "dein Konto",
+  "Could not remove that video. Try again.": "Das Video konnte nicht entfernt werden. Versuche es erneut.",
+  "{count} video is no longer on this device.": "{count} Video ist nicht mehr auf diesem Gerät.",
+  "{count} videos are no longer on this device.": "{count} Videos sind nicht mehr auf diesem Gerät.",
+  "Clear empty": "Leere entfernen",
+  "Remove {title} from your list": "{title} aus deiner Liste entfernen",
+  "Removed “{title}”": "„{title}“ entfernt"
 }

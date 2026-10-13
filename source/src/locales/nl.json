@@ -4702,5 +4702,11 @@
   "If you use Clarity Caddy, this changes your password there too.": "Als je Clarity Caddy gebruikt, verandert je wachtwoord daar ook.",
   "Change password": "Wachtwoord wijzigen",
   "Password changed. Other devices have been signed out.": "Wachtwoord gewijzigd. Andere apparaten zijn uitgelogd.",
-  "your account": "je account"
+  "your account": "je account",
+  "Could not remove that video. Try again.": "Kon die video niet verwijderen. Probeer het opnieuw.",
+  "{count} video is no longer on this device.": "{count} video staat niet meer op dit apparaat.",
+  "{count} videos are no longer on this device.": "{count} video's staan niet meer op dit apparaat.",
+  "Clear empty": "Lege wissen",
+  "Remove {title} from your list": "{title} uit je lijst verwijderen",
+  "Removed “{title}”": "‘{title}’ verwijderd"
 }

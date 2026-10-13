@@ -688,6 +688,16 @@
   background: var(--pt-hover);
 }
 
+/* Records whose video has gone from the phone. One quiet line, not tiles. */
+.player-portal-shelf-broken {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--pt-text-soft);
+}
+
 /* A long press must not also select the title or raise iOS's own callout. */
 .player-portal-video-grid.is-editing .player-portal-video-tile {
   -webkit-touch-callout: none;
@@ -732,12 +742,6 @@
 
 .player-portal-video-grid.is-editing .player-portal-video-tile:nth-child(3n) {
   animation-duration: 0.22s;
-}
-
-/* A cloud tile is somebody else's video. It stays still while the rest shake,
-   which is the whole explanation of why it has no minus badge. */
-.player-portal-video-grid.is-editing .player-portal-video-tile-cloud {
-  animation: none;
 }
 
 /* The tile under the finger. It leaves the shake, lifts, and follows. */

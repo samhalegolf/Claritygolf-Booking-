@@ -76,6 +76,7 @@ import {
   importSavedVideoFromClarityCloud,
   listCloudSnapshots,
   listClarityCloudImportTransfers,
+  hideClarityCloudVideoForPlayer,
   markClarityCloudReturnSeen,
   registerGuestSender,
   removeSavedVideoCloudTransfer,
@@ -366,6 +367,9 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   const savedVideoLibrary = savedVideoLibraryRef.current;
 
   const [savedVideos, setSavedVideos] = useState<SavedVideoItem[]>([]);
+  /** Records whose video file is no longer on this device -- the empty
+   *  shells. Kept apart so nothing else in the portal offers to open one. */
+  const [brokenVideos, setBrokenVideos] = useState<SavedVideoItem[]>([]);
   const [videoError, setVideoError] = useState("");
   const [sendingIds, setSendingIds] = useState<Set<string>>(() => new Set());
   const [sendProgress, setSendProgress] = useState<Record<string, number>>({});
@@ -575,7 +579,18 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
   const refreshSavedVideos = useCallback(async () => {
     if (!savedVideoLibrary) return;
     try {
-      setSavedVideos(await savedVideoLibrary.listItems());
+      const items = await savedVideoLibrary.listItems();
+      // The phone can clear stored video under storage pressure and leave the
+      // record behind. Asking for the file is the only honest test.
+      const hasFile = await Promise.all(
+        items.map(async (item) =>
+          item.local.status === "missing"
+            ? false
+            : Boolean(await savedVideoLibrary.getBlob(item.savedVideoId).catch(() => null)),
+        ),
+      );
+      setSavedVideos(items.filter((_, index) => hasFile[index]));
+      setBrokenVideos(items.filter((_, index) => !hasFile[index]));
     } catch (error) {
       setVideoError(error instanceof Error ? error.message : t("Could not read your saved videos."));
     }
@@ -1066,6 +1081,31 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
    * a video this device is about to stop holding is how a transfer ends up
    * stuck half-finished for good.
    */
+  /** Clears every empty shell in one go. Their files are already gone, so
+   *  this only removes the records; any cloud copy shows up to download. */
+  const clearBrokenVideos = useCallback(async () => {
+    if (!savedVideoLibrary) return;
+    setVideoError("");
+    try {
+      for (const item of brokenVideos) await savedVideoLibrary.deleteItem(item.savedVideoId);
+    } catch (error) {
+      setVideoError(error instanceof Error ? error.message : t("Could not delete that video. Try again."));
+    } finally {
+      await refreshSavedVideos();
+    }
+  }, [brokenVideos, refreshSavedVideos, savedVideoLibrary]);
+
+  /** Takes a cloud video off this player's list. The coach's copy stays. */
+  const hideCloudVideo = useCallback(async (savedVideoId: string) => {
+    setVideoError("");
+    try {
+      await hideClarityCloudVideoForPlayer(savedVideoId);
+      setCloudVideos((current) => current.filter((transfer) => transfer.savedVideoId !== savedVideoId));
+    } catch (error) {
+      setVideoError(error instanceof Error ? error.message : t("Could not remove that video. Try again."));
+    }
+  }, []);
+
   const deleteSavedVideo = useCallback(
     async (savedVideoId: string) => {
       if (!savedVideoLibrary) return;
@@ -2925,6 +2965,9 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                         onSend={(id) => void sendToCoach(id)}
                         onDownload={(id) => void downloadFromCloud(id)}
                         onDelete={(id) => void deleteSavedVideo(id)}
+                        brokenVideos={brokenVideos}
+                        onClearBroken={() => void clearBrokenVideos()}
+                        onHideCloud={(id) => void hideCloudVideo(id)}
                       />
                     </>
                   )}

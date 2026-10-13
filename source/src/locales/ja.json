@@ -4702,5 +4702,11 @@
   "If you use Clarity Caddy, this changes your password there too.": "Clarity Caddy をお使いの場合、そちらのパスワードも変更されます。",
   "Change password": "パスワードを変更",
   "Password changed. Other devices have been signed out.": "パスワードを変更しました。他のデバイスはサインアウトされました。",
-  "your account": "アカウント"
+  "your account": "アカウント",
+  "Could not remove that video. Try again.": "動画を削除できませんでした。もう一度お試しください。",
+  "{count} video is no longer on this device.": "{count} 本の動画がこの端末にありません。",
+  "{count} videos are no longer on this device.": "{count} 本の動画がこの端末にありません。",
+  "Clear empty": "空の項目を削除",
+  "Remove {title} from your list": "{title} をリストから削除",
+  "Removed “{title}”": "「{title}」を削除しました"
 }

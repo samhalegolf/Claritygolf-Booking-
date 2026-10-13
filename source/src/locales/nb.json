@@ -4702,5 +4702,11 @@
   "If you use Clarity Caddy, this changes your password there too.": "Hvis du bruker Clarity Caddy, endres passordet ditt der også.",
   "Change password": "Bytt passord",
   "Password changed. Other devices have been signed out.": "Passordet er endret. Andre enheter er logget ut.",
-  "your account": "kontoen din"
+  "your account": "kontoen din",
+  "Could not remove that video. Try again.": "Kunne ikke fjerne videoen. Prøv igjen.",
+  "{count} video is no longer on this device.": "{count} video er ikke lenger på denne enheten.",
+  "{count} videos are no longer on this device.": "{count} videoer er ikke lenger på denne enheten.",
+  "Clear empty": "Fjern tomme",
+  "Remove {title} from your list": "Fjern {title} fra listen din",
+  "Removed “{title}”": "«{title}» fjernet"
 }

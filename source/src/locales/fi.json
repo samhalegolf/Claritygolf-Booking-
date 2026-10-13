@@ -4702,5 +4702,11 @@
   "If you use Clarity Caddy, this changes your password there too.": "Jos käytät Clarity Caddya, salasanasi vaihtuu myös siellä.",
   "Change password": "Vaihda salasana",
   "Password changed. Other devices have been signed out.": "Salasana vaihdettu. Muut laitteet on kirjattu ulos.",
-  "your account": "tilisi"
+  "your account": "tilisi",
+  "Could not remove that video. Try again.": "Videota ei voitu poistaa. Yritä uudelleen.",
+  "{count} video is no longer on this device.": "{count} video ei ole enää tällä laitteella.",
+  "{count} videos are no longer on this device.": "{count} videota ei ole enää tällä laitteella.",
+  "Clear empty": "Tyhjennä tyhjät",
+  "Remove {title} from your list": "Poista {title} listaltasi",
+  "Removed “{title}”": "”{title}” poistettu"
 }
