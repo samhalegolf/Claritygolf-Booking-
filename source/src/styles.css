@@ -2185,6 +2185,80 @@
   margin: 0;
 }
 
+.bundle-items {
+  display: grid;
+  gap: var(--c-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bundle-item {
+  display: flex;
+  align-items: center;
+  gap: var(--c-space-2);
+  font-size: var(--c-size-secondary);
+}
+
+.bundle-item input {
+  width: 4.5em;
+  height: auto;
+  margin: 0;
+}
+
+.bundle-item span {
+  flex: 1;
+  min-width: 0;
+}
+
+.bundle-add-button {
+  justify-self: start;
+}
+
+.bundle-picker {
+  display: grid;
+  gap: var(--c-space-2);
+  max-width: 420px;
+}
+
+.bundle-picker-search {
+  display: flex;
+  align-items: center;
+  gap: var(--c-space-1);
+  color: var(--c-text-soft);
+}
+
+.bundle-picker-search input {
+  flex: 1;
+  margin: 0;
+}
+
+.bundle-picker-results {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bundle-picker-results button {
+  width: 100%;
+  padding: var(--c-space-1) var(--c-space-2);
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--c-text);
+  font: inherit;
+  font-size: var(--c-size-secondary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.bundle-picker-results button:hover,
+.bundle-picker-results button:focus-visible {
+  background: var(--c-hover);
+}
+
 .pass-coverage-empty {
   color: var(--c-text-soft);
   font-size: var(--c-size-meta);

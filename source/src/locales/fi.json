@@ -4683,5 +4683,9 @@
   "Worth {amount} bought separately.": "Arvo {amount} erikseen ostettuna.",
   "Selling a bundle gives the client each pass inside it, with that pass type's own credits, cover and expiry.": "Kun paketti myydään, asiakas saa jokaisen sen sisältämän passin passityypin omilla krediiteillä, kattavuudella ja voimassaololla.",
   "Create bundle": "Luo paketti",
-  "Includes {items}": "Sisältää {items}"
+  "Includes {items}": "Sisältää {items}",
+  "Add pass type": "Lisää passityyppi",
+  "Search pass types": "Hae passityyppejä",
+  "No pass types match.": "Ei vastaavia passityyppejä.",
+  "Archived pass type": "Arkistoitu passityyppi"
 }

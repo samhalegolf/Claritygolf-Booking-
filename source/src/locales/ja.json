@@ -4683,5 +4683,9 @@
   "Worth {amount} bought separately.": "個別に購入すると {amount} 相当。",
   "Selling a bundle gives the client each pass inside it, with that pass type's own credits, cover and expiry.": "バンドルを販売すると、お客様には含まれる各パスが、そのパスタイプのクレジット・対象・有効期限のまま付与されます。",
   "Create bundle": "バンドルを作成",
-  "Includes {items}": "{items} を含む"
+  "Includes {items}": "{items} を含む",
+  "Add pass type": "パスタイプを追加",
+  "Search pass types": "パスタイプを検索",
+  "No pass types match.": "一致するパスタイプはありません。",
+  "Archived pass type": "アーカイブ済みのパスタイプ"
 }

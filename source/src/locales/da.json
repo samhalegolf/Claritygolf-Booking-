@@ -4683,5 +4683,9 @@
   "Worth {amount} bought separately.": "Værd {amount} købt enkeltvis.",
   "Selling a bundle gives the client each pass inside it, with that pass type's own credits, cover and expiry.": "Når en pakke sælges, får kunden hvert klippekort i den, med klippekorttypens egne klip, dækning og udløbsdato.",
   "Create bundle": "Opret pakke",
-  "Includes {items}": "Indeholder {items}"
+  "Includes {items}": "Indeholder {items}",
+  "Add pass type": "Tilføj klippekorttype",
+  "Search pass types": "Søg i klippekorttyper",
+  "No pass types match.": "Ingen klippekorttyper matcher.",
+  "Archived pass type": "Arkiveret klippekorttype"
 }

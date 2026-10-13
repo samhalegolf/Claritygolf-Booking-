@@ -10,7 +10,7 @@
 // that spends or reverses a credit needs to know bundles exist.
 
 import { useState } from "react";
-import { Plus } from "lucide-react";
+import { Plus, Search } from "lucide-react";
 
 import { cleanBundleItems, isBundle, type BundleItem, type Service } from "../services/serviceModel";
 import { t } from "../../lib/i18n";
@@ -198,23 +198,42 @@ function BundleEditor({
 
       <div className="pass-field pass-field-wide">
         <span>{t("Includes")}</span>
-        <div className="pass-coverage">
-          {passTypes.map((service) => (
-            <label className="pass-coverage-option" key={service.id}>
-              <input
-                type="number"
-                min={0}
-                max={20}
-                value={quantityOf(service.id) || ""}
-                placeholder="0"
-                aria-label={service.name}
-                style={{ width: "4.5em" }}
-                onChange={(event) => setQuantity(service.id, event.target.value)}
-              />
-              × {service.name}
-            </label>
-          ))}
-        </div>
+        {draft.items.length ? (
+          <ul className="bundle-items">
+            {draft.items.map((item) => {
+              const part = passTypes.find((service) => service.id === item.passTypeId);
+              return (
+                <li className="bundle-item" key={item.passTypeId}>
+                  <input
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={item.quantity}
+                    aria-label={part?.name || item.passTypeId}
+                    // Never below one here: clearing the box to retype must
+                    // not drop the line. Remove is the way out.
+                    onChange={(event) => setQuantity(item.passTypeId, String(Math.max(1, Number(event.target.value) || 1)))}
+                  />
+                  <span>× {part?.name || t("Archived pass type")}</span>
+                  <button
+                    className="text-link-button"
+                    type="button"
+                    onClick={() => setQuantity(item.passTypeId, "0")}
+                  >
+                    {t("Remove")}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
+        <PassTypePicker
+          passTypes={passTypes.filter((service) => !draft.items.some((item) => item.passTypeId === service.id))}
+          onPick={(id) => {
+            rememberPassType(id);
+            setQuantity(id, "1");
+          }}
+        />
         {separately > 0 ? (
           <span className="field-help">{t("Worth {amount} bought separately.", { amount: formatMoney(separately) })}</span>
         ) : null}
@@ -243,5 +262,104 @@ function BundleEditor({
         </button>
       </div>
     </form>
+  );
+}
+
+/* The pass types this coach last put in a bundle, newest first. Kept in this
+ * browser only: it is a convenience for the picker, never a record, so losing
+ * it just means the picker suggests the catalogue's first few instead. */
+const RECENT_KEY = "clarity.bundle.recentPassTypes";
+const SUGGESTED = 4;
+
+function readRecentPassTypes(): string[] {
+  try {
+    const stored = JSON.parse(globalThis.localStorage?.getItem(RECENT_KEY) || "[]");
+    return Array.isArray(stored) ? stored.filter((id): id is string => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberPassType(id: string) {
+  try {
+    const next = [id, ...readRecentPassTypes().filter((entry) => entry !== id)].slice(0, 12);
+    globalThis.localStorage?.setItem(RECENT_KEY, JSON.stringify(next));
+  } catch {
+    // Private window or blocked storage: the picker still works without it.
+  }
+}
+
+/** "+ Add pass type", opening to a search box with a few recent picks under it. */
+function PassTypePicker({ passTypes, onPick }: { passTypes: Service[]; onPick: (id: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+
+  if (!open) {
+    return (
+      <button
+        className="outline-button bundle-add-button"
+        type="button"
+        disabled={!passTypes.length}
+        onClick={() => setOpen(true)}
+      >
+        <Plus size={16} /> {t("Add pass type")}
+      </button>
+    );
+  }
+
+  const wanted = query.trim().toLowerCase();
+  let shown: Service[];
+  if (wanted) {
+    shown = passTypes.filter((service) => service.name.toLowerCase().includes(wanted)).slice(0, 8);
+  } else {
+    const recent = readRecentPassTypes()
+      .map((id) => passTypes.find((service) => service.id === id))
+      .filter((service): service is Service => Boolean(service));
+    const rest = passTypes.filter((service) => !recent.includes(service));
+    shown = [...recent, ...rest].slice(0, SUGGESTED);
+  }
+
+  function pick(id: string) {
+    onPick(id);
+    setQuery("");
+    setOpen(false);
+  }
+
+  return (
+    <div className="bundle-picker">
+      <label className="bundle-picker-search">
+        <Search size={16} aria-hidden="true" />
+        <input
+          autoFocus
+          value={query}
+          placeholder={t("Search pass types")}
+          aria-label={t("Search pass types")}
+          onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") setOpen(false);
+            if (event.key === "Enter") {
+              event.preventDefault();
+              if (shown[0]) pick(shown[0].id);
+            }
+          }}
+        />
+      </label>
+      {shown.length ? (
+        <ul className="bundle-picker-results">
+          {shown.map((service) => (
+            <li key={service.id}>
+              <button type="button" onClick={() => pick(service.id)}>
+                {service.name}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <span className="pass-coverage-empty">{t("No pass types match.")}</span>
+      )}
+      <button className="text-link-button" type="button" onClick={() => setOpen(false)}>
+        {t("Cancel")}
+      </button>
+    </div>
   );
 }
