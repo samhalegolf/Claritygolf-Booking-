@@ -4683,5 +4683,9 @@
   "Worth {amount} bought separately.": "Warte {amount} przy zakupie osobno.",
   "Selling a bundle gives the client each pass inside it, with that pass type's own credits, cover and expiry.": "Sprzedaż pakietu daje klientowi każdy zawarty w nim karnet, z kredytami, zakresem i ważnością jego typu karnetu.",
   "Create bundle": "Utwórz pakiet",
-  "Includes {items}": "Zawiera {items}"
+  "Includes {items}": "Zawiera {items}",
+  "Add pass type": "Dodaj typ karnetu",
+  "Search pass types": "Szukaj typów karnetów",
+  "No pass types match.": "Brak pasujących typów karnetów.",
+  "Archived pass type": "Zarchiwizowany typ karnetu"
 }

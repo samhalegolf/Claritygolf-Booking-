@@ -4683,5 +4683,9 @@
   "Worth {amount} bought separately.": "Vale {amount} se acquistato separatamente.",
   "Selling a bundle gives the client each pass inside it, with that pass type's own credits, cover and expiry.": "Vendendo un pacchetto il cliente riceve ogni pass incluso, con crediti, copertura e scadenza del proprio tipo di pass.",
   "Create bundle": "Crea pacchetto",
-  "Includes {items}": "Include {items}"
+  "Includes {items}": "Include {items}",
+  "Add pass type": "Aggiungi tipo di pass",
+  "Search pass types": "Cerca tipi di pass",
+  "No pass types match.": "Nessun tipo di pass corrisponde.",
+  "Archived pass type": "Tipo di pass archiviato"
 }

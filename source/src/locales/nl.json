@@ -4683,5 +4683,9 @@
   "Worth {amount} bought separately.": "{amount} waard als je ze los koopt.",
   "Selling a bundle gives the client each pass inside it, with that pass type's own credits, cover and expiry.": "Bij verkoop van een bundel krijgt de klant elke pas erin, met de eigen credits, dekking en vervaldatum van dat passtype.",
   "Create bundle": "Bundel maken",
-  "Includes {items}": "Bevat {items}"
+  "Includes {items}": "Bevat {items}",
+  "Add pass type": "Passtype toevoegen",
+  "Search pass types": "Passtypes zoeken",
+  "No pass types match.": "Geen passtypes gevonden.",
+  "Archived pass type": "Gearchiveerd passtype"
 }
