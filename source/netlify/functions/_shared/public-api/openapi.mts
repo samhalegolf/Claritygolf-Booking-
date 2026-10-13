@@ -190,6 +190,11 @@ export function openApiSpec(origin: string) {
             credits: { type: "integer", description: "Credits a pass of this type starts with." },
             covers_service_ids: { type: "array", items: { type: "string" } },
             price: { type: ["object", "null"], properties: { amount: { type: "integer" }, currency: { type: "string" } } },
+            includes: {
+              type: "array",
+              description: "Set on a bundle: issuing it issues each of these pass types instead, and its own credits and covers_service_ids do not apply.",
+              items: { type: "object", properties: { pass_type_id: { type: "string" }, quantity: { type: "integer" } } },
+            },
           },
         },
         Pass: {

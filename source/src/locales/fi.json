@@ -4671,5 +4671,17 @@
   "Anyone available": "Kuka tahansa vapaa",
   "Previous day": "Edellinen päivä",
   "Next day": "Seuraava päivä",
-  "Back to today": "Takaisin tähän päivään"
+  "Back to today": "Takaisin tähän päivään",
+  "Bundles": "Paketit",
+  "Several passes sold together": "Useita passeja myytynä yhdessä",
+  "Put pass types together for one price, like 5 lessons and a swing review. The client gets each pass, and each keeps its own cover and expiry.": "Yhdistä passityyppejä yhteen hintaan, esim. 5 tuntia ja svinganalyysi. Asiakas saa jokaisen passin, ja jokainen säilyttää oman kattavuutensa ja voimassaolonsa.",
+  "bundles": "paketit",
+  "Bundle": "Paketti",
+  "No bundles yet.": "Ei vielä paketteja.",
+  "New bundle": "Uusi paketti",
+  "e.g. 5 Lessons + Swing Review": "esim. 5 tuntia + svinganalyysi",
+  "Worth {amount} bought separately.": "Arvo {amount} erikseen ostettuna.",
+  "Selling a bundle gives the client each pass inside it, with that pass type's own credits, cover and expiry.": "Kun paketti myydään, asiakas saa jokaisen sen sisältämän passin passityypin omilla krediiteillä, kattavuudella ja voimassaololla.",
+  "Create bundle": "Luo paketti",
+  "Includes {items}": "Sisältää {items}"
 }

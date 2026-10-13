@@ -533,6 +533,7 @@ import { AuthStatus } from "./modules/auth/authStatus";
 import { useClients } from "./modules/clients/useClients";
 import { InvoicedBookingLink } from "./modules/clients/clientProfileModel";
 import {
+  BundlesList,
   IssuedPassesPanel,
   MembershipsPanel,
   PassClientPicker,
@@ -541,6 +542,7 @@ import {
   RewardsPanel,
 } from "./modules/passes/lazyPanels";
 import type { PassTypeDraft } from "./modules/passes/PassTypesList";
+import type { BundleDraft } from "./modules/passes/BundlesList";
 import {
   PRIMARY_PLAYER_TOOL_TABS,
   PlayerPracticeSummary,
@@ -12226,6 +12228,48 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     void persistServices(nextServices, existing ? t("{name} updated.", { name: clean.name }) : t("{name} added.", { name: clean.name }), clean.id);
   }
 
+  /* Bundles: also `package` entries, so every till and shop sells them as it
+   * sells a pass type, but carrying bundleItems -- the pass types that selling
+   * one issues. They have no credits or cover of their own. */
+  function saveBundle(draft: BundleDraft) {
+    const existing = draft.id ? services.find((service) => service.id === draft.id) : undefined;
+    if (!existing && !canCreateWithinLimit(activeAccount, managedAccountServices.filter((service) => service.archived !== true).length, "maxServices")) {
+      setToast({ message: limitReachedMessage("maxServices", accountLimit(activeAccount, "maxServices")) });
+      return;
+    }
+    const clean = cleanService(
+      {
+        ...(existing || {}),
+        id: existing?.id || `bundle-${Date.now().toString(36)}`,
+        accountId: existing?.accountId || activeAccountId,
+        coachIds: existing?.coachIds?.length
+          ? existing.coachIds
+          : !isAdminUser
+            ? [serviceScopeCoachId]
+            : activeCoachList.map((coach) => coach.id),
+        lessonFormat: "package",
+        visibility: "private",
+        name: draft.name,
+        description: draft.description,
+        price: draft.price,
+        bundleItems: draft.items,
+        coversAllServices: false,
+        coversServiceIds: [],
+        packageCoversServiceId: undefined,
+        active: draft.active,
+        archived: false,
+        locationIds: existing?.locationIds || [],
+        location: existing?.location || "",
+        lessonNote: existing?.lessonNote || "",
+      },
+      services.length,
+    );
+    const nextServices = existing
+      ? services.map((service) => (service.id === clean.id ? clean : service))
+      : [...services, clean];
+    void persistServices(nextServices, existing ? t("{name} updated.", { name: clean.name }) : t("{name} added.", { name: clean.name }), clean.id);
+  }
+
   function archivePassType(service: Service) {
     if (!window.confirm(t("Archive {name}? It comes off sale. Passes already issued keep working.", { name: service.name }))) return;
     const nextServices = services.map((candidate) =>
@@ -18604,6 +18648,28 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
               formatMoney={(amount) => formatMoney(amount, invoiceSettings.currency)}
               saving={serviceSaveState === "saving"}
               onSave={savePassType}
+              onArchive={archivePassType}
+            />
+          </Suspense>
+        </article>
+        )}
+
+        {billingSection === "passes-edit" && (
+        <article className="data-card wide">
+          <div className="data-card-header">
+            <div>
+              <span>{t("Bundles")}</span>
+              <h2>{t("Several passes sold together")}</h2>
+            </div>
+            <ClarityProducts size={24} />
+          </div>
+          <p className="field-help">{t("Put pass types together for one price, like 5 lessons and a swing review. The client gets each pass, and each keeps its own cover and expiry.")}</p>
+          <Suspense fallback={<Loading what={t("bundles")} />}>
+            <BundlesList
+              services={services}
+              formatMoney={(amount) => formatMoney(amount, invoiceSettings.currency)}
+              saving={serviceSaveState === "saving"}
+              onSave={saveBundle}
               onArchive={archivePassType}
             />
           </Suspense>

@@ -9358,8 +9358,9 @@ async function routeBookingApiRequest(
           amount: cardValueCents / 100,
           currency: item.currency,
           productName: item.name,
-          productDescription:
-            item.credits === 1 ? "1 credit" : `${item.credits} credits`,
+          productDescription: item.includes.length
+            ? item.includes.join(" + ")
+            : item.credits === 1 ? "1 credit" : `${item.credits} credits`,
           customerEmail: session.email || "",
           clientReferenceId: session.personId,
           // Read back on confirm and checked against the session doing the
@@ -11262,7 +11263,7 @@ async function readPassInbox(accountId: string, services) {
           // entitlement is real either way.
           personId: sale.personId,
           templateServiceId: template.serviceId,
-          credits: template.credits * quantity,
+          quantity,
           source: sale.provider,
           sourceRef: sale.sourceRef,
           // Both halves or neither -- never a number with no currency, which is

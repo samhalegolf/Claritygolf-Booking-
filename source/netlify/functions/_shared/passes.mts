@@ -144,6 +144,18 @@ export type PassGrantInput = {
   currency?: unknown;
   crossRedeemable?: unknown;
   entitlementServiceId?: unknown;
+  /**
+   * How many of the pass type were bought. A bundle multiplies each of its
+   * parts by this; a plain pass type multiplies its allowance unless the
+   * caller names `credits` outright.
+   */
+  quantity?: unknown;
+};
+
+/** One line of a bundle: a pass type, and how many of it the bundle holds. */
+export type BundleItem = {
+  passTypeId: string;
+  quantity: number;
 };
 
 /** What a `lessonFormat: "package"` service says about the pass it sells. */
@@ -158,6 +170,12 @@ export type PassTemplate = {
   expiryMonths: number | null;
   crossRedeemable: boolean;
   priceCents: number | null;
+  /**
+   * Non-empty when this is a bundle: selling it issues each of these pass
+   * types rather than a pass of its own, so its own credits and coverage mean
+   * nothing.
+   */
+  bundleItems: BundleItem[];
 };
 
 export type PassActor = {
@@ -167,6 +185,8 @@ export type PassActor = {
 
 const MAX_CREDITS = 100;
 const DEFAULT_EXPIRY_MONTHS = 12;
+const MAX_BUNDLE_ITEMS = 12;
+const MAX_BUNDLE_QUANTITY = 20;
 
 function fail(message: string, status = 400, code = "invalid"): never {
   throw Object.assign(new Error(message), { status, code });
@@ -220,6 +240,25 @@ export function passCoversService(
   return pass.coversAllServices === true || pass.coversServiceIds.includes(wanted);
 }
 
+/**
+ * A bundle's lines, cleaned: each pass type once, a whole quantity of 1-20,
+ * at most twelve lines. Anything unreadable is dropped rather than guessed at.
+ */
+export function cleanBundleItems(value: unknown): BundleItem[] {
+  if (!Array.isArray(value)) return [];
+  const items: BundleItem[] = [];
+  for (const entry of value) {
+    const record = entry as Record<string, unknown>;
+    const passTypeId = cleanString(record?.passTypeId, "", 120);
+    if (!passTypeId || items.some((item) => item.passTypeId === passTypeId)) continue;
+    const quantity = Math.round(Number(record?.quantity));
+    if (!Number.isFinite(quantity) || quantity < 1) continue;
+    items.push({ passTypeId, quantity: Math.min(MAX_BUNDLE_QUANTITY, quantity) });
+    if (items.length >= MAX_BUNDLE_ITEMS) break;
+  }
+  return items;
+}
+
 /** Months a pass type stays spendable: 0 = never, null = not set (use the default). */
 export function cleanExpiryMonths(value: unknown): number | null {
   if (value === null || value === undefined || value === "") return null;
@@ -260,9 +299,40 @@ export function passTemplatesFromServices(services: unknown): PassTemplate[] {
       priceCents: Number.isFinite(Number(entry?.price))
         ? Math.max(0, Math.round(Number(entry.price) * 100))
         : null,
+      bundleItems: cleanBundleItems(entry?.bundleItems),
     });
   }
   return templates;
+}
+
+/**
+ * Share a bundle's price out across the passes it issues.
+ *
+ * Each pass needs its own value so cross-redemption and refunds can price its
+ * credits, and the shares must add back to exactly what was paid. They follow
+ * the catalogue: five $160 lessons and one $50 review split a $650 bundle
+ * roughly 94/6, not 50/50. With no catalogue prices to go on, credits decide.
+ */
+export function splitBundleValue(totalCents: number, weights: number[]): number[] {
+  if (!weights.length) return [];
+  const usable = weights.map((weight) => (Number.isFinite(weight) && weight > 0 ? weight : 0));
+  const sum = usable.reduce((total, weight) => total + weight, 0);
+  const basis = sum > 0 ? usable : weights.map(() => 1);
+  const basisSum = sum > 0 ? sum : weights.length;
+  const exact = basis.map((weight) => (totalCents * weight) / basisSum);
+  const shares = exact.map(Math.floor);
+  // Largest remainder: the leftover cents go to the shares that were rounded
+  // down the furthest, so the total is exact and no share is skewed.
+  let left = totalCents - shares.reduce((total, share) => total + share, 0);
+  const order = exact
+    .map((value, index) => ({ index, remainder: value - Math.floor(value) }))
+    .sort((a, b) => b.remainder - a.remainder || a.index - b.index);
+  for (const { index } of order) {
+    if (left <= 0) break;
+    shares[index] += 1;
+    left -= 1;
+  }
+  return shares;
 }
 
 /**
@@ -541,7 +611,8 @@ export function normaliseGrant(input: PassGrantInput, templates: PassTemplate[])
       ? requestedCovers
       : template?.coversServiceIds || [];
 
-  const credits = cleanCredits(input?.credits, template?.credits || 0);
+  const quantity = Math.max(1, Math.round(Number(input?.quantity) || 1));
+  const credits = cleanCredits(input?.credits, Math.min(MAX_CREDITS, (template?.credits || 0) * quantity));
   if (!credits) fail("How many credits is this pass worth?");
 
   const totalValueCents = cleanCents(input?.totalValueCents);
@@ -756,6 +827,12 @@ export async function grantPass(
   templates: PassTemplate[],
   actor: PassActor,
 ): Promise<{ passes: PassView[]; merged: boolean; duplicate: boolean; passId: string }> {
+  const templateServiceId = cleanString(input?.templateServiceId, "", 120);
+  const bundle = templateServiceId
+    ? templates.find((entry) => entry.serviceId === templateServiceId && entry.bundleItems.length)
+    : undefined;
+  if (bundle) return grantBundle(bundle, input, templates, actor);
+
   const grant = normaliseGrant(input, templates);
   const { accountId } = actor;
   if (!accountId) fail("No account.", 403, "forbidden");
@@ -859,6 +936,75 @@ export async function grantPass(
     duplicate: false,
     passId,
   };
+}
+
+/**
+ * Issue a bundle: each of its pass types, as if each had been sold on its own.
+ *
+ * A bundle is not a pass. It is a way of selling several pass types at once,
+ * so what the person ends up holding is exactly what they would hold had the
+ * coach rung each one up separately -- the same coverage, expiry and top-up
+ * behaviour, spent through the same checkout. Nothing downstream has to know
+ * bundles exist.
+ *
+ * Every part is worked out before any is written, so a bundle naming a pass
+ * type that is gone, or another bundle, is refused whole rather than issued
+ * half. Each part carries its own reference (`<ref>#<pass type>`), which keeps
+ * a retried webhook or a double-tapped Mark paid idempotent part by part.
+ */
+async function grantBundle(
+  bundle: PassTemplate,
+  input: PassGrantInput,
+  templates: PassTemplate[],
+  actor: PassActor,
+): Promise<{ passes: PassView[]; merged: boolean; duplicate: boolean; passId: string }> {
+  const quantity = Math.max(1, Math.round(Number(input?.quantity) || 1));
+  const parts = bundle.bundleItems.map((item) => {
+    const part = templates.find((entry) => entry.serviceId === item.passTypeId);
+    if (!part) fail(`${bundle.name} includes a pass type that no longer exists.`, 404, "unknown_template");
+    if (part.bundleItems.length) fail(`${bundle.name} cannot include another bundle.`);
+    return { template: part, count: item.quantity * quantity };
+  });
+
+  const totalValueCents = cleanCents(input?.totalValueCents);
+  const shares =
+    totalValueCents === null
+      ? null
+      : splitBundleValue(
+          totalValueCents,
+          parts.map(({ template, count }) =>
+            template.priceCents ? template.priceCents * count : 0,
+          ),
+        );
+  const sourceRef = cleanString(input?.sourceRef, "", 160);
+  const note = [cleanString(input?.note, "", 400), `Part of ${bundle.name}`].filter(Boolean).join(" · ");
+
+  const grants: PassGrantInput[] = parts.map(({ template, count }, index) => ({
+    personId: input?.personId,
+    templateServiceId: template.serviceId,
+    quantity: count,
+    note,
+    merge: input?.merge,
+    source: input?.source,
+    sourceRef: sourceRef ? `${sourceRef}#${template.serviceId}` : "",
+    allowUnassigned: input?.allowUnassigned,
+    ...(shares ? { totalValueCents: shares[index], currency: input?.currency } : {}),
+  }));
+  // Refuse the whole bundle before writing any of it.
+  for (const grant of grants) normaliseGrant(grant, templates);
+
+  let passId = "";
+  let merged = true;
+  let duplicate = true;
+  let passes: PassView[] = [];
+  for (const grant of grants) {
+    const result = await grantPass(grant, templates, actor);
+    passId ||= result.passId;
+    merged &&= result.merged;
+    duplicate &&= result.duplicate;
+    passes = result.passes;
+  }
+  return { passes, merged, duplicate, passId };
 }
 
 /**
@@ -1505,6 +1651,10 @@ export async function reservePassCredit(input: {
     // One statement, so the allocation that is chosen is the allocation that is
     // written. The unique index on (booking_id) where reversed_at is null is
     // what catches the same booking being settled twice.
+    //
+    // $5 is cast because it is used twice: as the integer `credits` column and
+    // against the view's bigint `credits_available`. Left untyped, Postgres
+    // refuses the statement ("inconsistent types deduced for parameter $5").
     const reserved = await client.query(
       `INSERT INTO public.pass_redemptions (
          id, account_id, pass_id, allocation_id, booking_id, credits, redeemed_at, redeemed_by, created_at
@@ -1515,7 +1665,7 @@ export async function reservePassCredit(input: {
        WHERE a.pass_id = $3
          AND a.account_id = $2
          AND a.is_live
-         AND a.credits_available >= $5
+         AND a.credits_available >= $5::int
          AND p.status = 'active'
          AND (p.expires_at IS NULL OR p.expires_at > NOW())
          AND (p.starts_at IS NULL OR p.starts_at <= NOW())

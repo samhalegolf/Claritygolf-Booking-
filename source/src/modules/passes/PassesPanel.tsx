@@ -98,6 +98,8 @@ export type PassTemplate = {
   expiryMonths?: number | null;
   crossRedeemable: boolean;
   priceCents: number | null;
+  /** Non-empty for a bundle: granting it issues each of these pass types. */
+  bundleItems?: Array<{ passTypeId: string; quantity: number }>;
 };
 
 export type PassGrant = {
@@ -402,6 +404,17 @@ export function PassesPanel({
     () => templates.find((entry) => entry.serviceId === templateId),
     [templateId, templates],
   );
+  // A bundle brings its own credits and expiry, one set per pass type inside
+  // it, so the form shows what it includes instead of asking for them.
+  const bundleIncludes = template?.bundleItems?.length
+    ? template.bundleItems
+        .map((item) => {
+          const part = templates.find((entry) => entry.serviceId === item.passTypeId);
+          return part ? `${item.quantity} × ${part.name}` : "";
+        })
+        .filter(Boolean)
+        .join(" + ")
+    : "";
 
   // Picking a template fills the form in rather than replacing it: a coach can
   // still grant three of a five-credit package without leaving the template
@@ -483,7 +496,7 @@ export function PassesPanel({
               <option value="">{t("Something else")}</option>
               {templates.map((entry) => (
                 <option key={entry.serviceId} value={entry.serviceId}>
-                  {entry.name} · {creditCount(entry.credits)}
+                  {entry.name} · {entry.bundleItems?.length ? t("Bundle") : creditCount(entry.credits)}
                 </option>
               ))}
             </select>
@@ -536,6 +549,9 @@ export function PassesPanel({
             </div>
           )}
 
+          {template?.bundleItems?.length ? (
+            <p className="field-help pass-field-wide">{t("Includes {items}", { items: bundleIncludes })}</p>
+          ) : (
           <label className="pass-field">
             <span>{t("Credits")}</span>
             <input
@@ -546,7 +562,9 @@ export function PassesPanel({
               onChange={(event) => setCredits(event.target.value)}
             />
           </label>
+          )}
 
+          {template?.bundleItems?.length ? null : (
           <label className="pass-field">
             <span>{t("Expires")}</span>
             <select
@@ -560,6 +578,7 @@ export function PassesPanel({
               ))}
             </select>
           </label>
+          )}
 
           <label className="pass-field pass-field-wide">
             <span>{t("Reason")}</span>
