@@ -216,6 +216,8 @@ type ShopItem = {
   credits: number;
   coversServiceIds: string[];
   kind: "package" | "video-review";
+  /** A bundle's contents, as "5 × 1 Hour Lessons". */
+  includes?: string[];
 };
 
 type CaddyAccess = {
@@ -2689,9 +2691,11 @@ export default function PlayerPortal({ session, onSignedOut, onRequestSignIn }: 
                             <div className="player-portal-shop-main">
                               <strong>{item.name}</strong>
                               <span>
-                                {item.credits === 1
-                                  ? t("1 credit")
-                                  : `${item.credits} credits`}
+                                {item.includes?.length
+                                  ? item.includes.join(" + ")
+                                  : item.credits === 1
+                                    ? t("1 credit")
+                                    : `${item.credits} credits`}
                                 {item.description ? ` · ${item.description}` : ""}
                               </span>
                             </div>

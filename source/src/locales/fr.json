@@ -4671,5 +4671,17 @@
   "Anyone available": "Peu importe",
   "Previous day": "Jour précédent",
   "Next day": "Jour suivant",
-  "Back to today": "Revenir à aujourd’hui"
+  "Back to today": "Revenir à aujourd’hui",
+  "Bundles": "Lots",
+  "Several passes sold together": "Plusieurs forfaits vendus ensemble",
+  "Put pass types together for one price, like 5 lessons and a swing review. The client gets each pass, and each keeps its own cover and expiry.": "Regroupez des types de forfait pour un seul prix, par exemple 5 leçons et une analyse de swing. Le client reçoit chaque forfait, et chacun garde sa propre couverture et son expiration.",
+  "bundles": "lots",
+  "Bundle": "Lot",
+  "No bundles yet.": "Aucun lot pour l’instant.",
+  "New bundle": "Nouveau lot",
+  "e.g. 5 Lessons + Swing Review": "ex. 5 leçons + analyse de swing",
+  "Worth {amount} bought separately.": "Vaut {amount} acheté séparément.",
+  "Selling a bundle gives the client each pass inside it, with that pass type's own credits, cover and expiry.": "Vendre un lot donne au client chaque forfait qu’il contient, avec les crédits, la couverture et l’expiration de son type de forfait.",
+  "Create bundle": "Créer le lot",
+  "Includes {items}": "Comprend {items}"
 }

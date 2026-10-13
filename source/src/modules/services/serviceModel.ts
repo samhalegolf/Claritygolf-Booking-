@@ -74,6 +74,8 @@ export type Service = {
   passExpiryMonths?: number;
   /** Packages only: purchased units may fund other eligible services by value. */
   crossRedeemable?: boolean;
+  /** Bundles only: the pass types selling this one issues, and how many of each. */
+  bundleItems?: BundleItem[];
   /** Services only: may be funded by value from a cross-redeemable pass. */
   acceptsCrossRedemption?: boolean;
   /** Video reviews only: days between booking and the clip being owed back. */
@@ -86,6 +88,28 @@ export type Service = {
   extraPersonPrice?: number;
   archived?: boolean;
 };
+
+export type BundleItem = { passTypeId: string; quantity: number };
+
+/** A bundle's lines, cleaned the way the server cleans them (cleanBundleItems in _shared/passes.mts). */
+export function cleanBundleItems(value: unknown): BundleItem[] {
+  if (!Array.isArray(value)) return [];
+  const items: BundleItem[] = [];
+  for (const entry of value) {
+    const passTypeId = typeof entry?.passTypeId === "string" ? entry.passTypeId.trim().slice(0, 120) : "";
+    if (!passTypeId || items.some((item) => item.passTypeId === passTypeId)) continue;
+    const quantity = Math.round(Number(entry?.quantity));
+    if (!Number.isFinite(quantity) || quantity < 1) continue;
+    items.push({ passTypeId, quantity: Math.min(20, quantity) });
+    if (items.length >= 12) break;
+  }
+  return items;
+}
+
+/** A bundle is a package that sells other pass types rather than credits of its own. */
+export function isBundle(service?: Partial<Service> | null) {
+  return service?.lessonFormat === "package" && cleanBundleItems(service.bundleItems).length > 0;
+}
 
 export type ServiceListTab = "active" | "archived";
 export type PendingServiceAction =
@@ -493,6 +517,10 @@ export function cleanService(service?: Partial<Service>, index = 0): Service {
         ? clamp(Math.round(Number(service.passExpiryMonths)), 0, 120)
         : undefined,
     crossRedeemable: lessonFormat === "package" ? service?.crossRedeemable === true : undefined,
+    bundleItems:
+      lessonFormat === "package" && cleanBundleItems(service?.bundleItems).length
+        ? cleanBundleItems(service?.bundleItems)
+        : undefined,
     acceptsCrossRedemption:
       lessonFormat !== "package" ? service?.acceptsCrossRedemption !== false : undefined,
     reviewTurnaroundDays: videoReview

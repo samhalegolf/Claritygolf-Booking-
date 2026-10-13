@@ -1,5 +1,6 @@
 import { isOriginalWorkspace } from "./coach-account.mts";
 import { recordBelongsToAccountStrict } from "./coach-auth.mts";
+import { cleanBundleItems } from "./passes.mts";
 import { hasPermission, permissionDenied } from "./permissions.mts";
 import {
   cleanResourceMode,
@@ -485,6 +486,12 @@ function cleanService(service, index = 0, accountId = "") {
     // Months a pass of this type stays spendable; 0 = never.
     passExpiryMonths: lessonFormat === "package" ? cleanPassExpiryMonths(service?.passExpiryMonths) : undefined,
     crossRedeemable: lessonFormat === "package" ? service?.crossRedeemable === true : undefined,
+    // A bundle: selling it issues each of these pass types instead of a pass
+    // of its own. Absent on an ordinary pass type.
+    bundleItems:
+      lessonFormat === "package" && cleanBundleItems(service?.bundleItems).length
+        ? cleanBundleItems(service?.bundleItems)
+        : undefined,
     acceptsCrossRedemption:
       lessonFormat !== "package" ? service?.acceptsCrossRedemption !== false : undefined,
     // A review is one player's swing, reviewed once. Carrying a turnaround on

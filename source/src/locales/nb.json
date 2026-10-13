@@ -4671,5 +4671,17 @@
   "Anyone available": "Hvem som helst",
   "Previous day": "Forrige dag",
   "Next day": "Neste dag",
-  "Back to today": "Tilbake til i dag"
+  "Back to today": "Tilbake til i dag",
+  "Bundles": "Pakker",
+  "Several passes sold together": "Flere klippekort solgt sammen",
+  "Put pass types together for one price, like 5 lessons and a swing review. The client gets each pass, and each keeps its own cover and expiry.": "Sett sammen klippekorttyper til én pris, f.eks. 5 timer og en svinganalyse. Kunden får hvert klippekort, og hvert beholder sin egen dekning og utløpsdato.",
+  "bundles": "pakker",
+  "Bundle": "Pakke",
+  "No bundles yet.": "Ingen pakker ennå.",
+  "New bundle": "Ny pakke",
+  "e.g. 5 Lessons + Swing Review": "f.eks. 5 timer + svinganalyse",
+  "Worth {amount} bought separately.": "Verdt {amount} kjøpt hver for seg.",
+  "Selling a bundle gives the client each pass inside it, with that pass type's own credits, cover and expiry.": "Når en pakke selges, får kunden hvert klippekort i den, med klippekorttypens egne klipp, dekning og utløpsdato.",
+  "Create bundle": "Opprett pakke",
+  "Includes {items}": "Inneholder {items}"
 }

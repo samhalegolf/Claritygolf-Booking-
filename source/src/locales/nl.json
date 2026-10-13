@@ -4671,5 +4671,17 @@
   "Anyone available": "Maakt niet uit",
   "Previous day": "Vorige dag",
   "Next day": "Volgende dag",
-  "Back to today": "Terug naar vandaag"
+  "Back to today": "Terug naar vandaag",
+  "Bundles": "Bundels",
+  "Several passes sold together": "Meerdere passen samen verkocht",
+  "Put pass types together for one price, like 5 lessons and a swing review. The client gets each pass, and each keeps its own cover and expiry.": "Combineer passtypes voor één prijs, zoals 5 lessen en een swinganalyse. De klant krijgt elke pas, en elke pas houdt zijn eigen dekking en vervaldatum.",
+  "bundles": "bundels",
+  "Bundle": "Bundel",
+  "No bundles yet.": "Nog geen bundels.",
+  "New bundle": "Nieuwe bundel",
+  "e.g. 5 Lessons + Swing Review": "bijv. 5 lessen + swinganalyse",
+  "Worth {amount} bought separately.": "{amount} waard als je ze los koopt.",
+  "Selling a bundle gives the client each pass inside it, with that pass type's own credits, cover and expiry.": "Bij verkoop van een bundel krijgt de klant elke pas erin, met de eigen credits, dekking en vervaldatum van dat passtype.",
+  "Create bundle": "Bundel maken",
+  "Includes {items}": "Bevat {items}"
 }

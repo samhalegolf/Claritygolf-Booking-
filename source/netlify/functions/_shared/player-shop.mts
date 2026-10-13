@@ -40,6 +40,8 @@ export type PlayerShopItem = {
   coversAllServices: boolean;
   kind: "package" | "video-review";
   crossRedeemable: boolean;
+  /** A bundle's contents, as "5 × 1 Hour Lessons". Empty for anything else. */
+  includes: string[];
 };
 
 const text = (value: unknown, max = 200) => String(value ?? "").trim().slice(0, max);
@@ -71,6 +73,44 @@ export function playerShopItems(services: unknown, currency: string): PlayerShop
 
     const format = text(entry?.lessonFormat, 40);
     if (format !== "package" && format !== "video-review") continue;
+
+    // A bundle sells the pass types it names, so what it covers and how many
+    // credits it brings are theirs. One whose parts are all gone sells nothing.
+    if (format === "package" && Array.isArray(entry?.bundleItems) && entry.bundleItems.length) {
+      const parts = (entry.bundleItems as Array<Record<string, unknown>>)
+        .map((line) => ({
+          part: services.find((candidate) => text((candidate as Record<string, unknown>)?.id, 120) === text(line?.passTypeId, 120)) as
+            | Record<string, unknown>
+            | undefined,
+          quantity: Math.max(1, Math.round(Number(line?.quantity) || 1)),
+        }))
+        .filter(({ part }) => part && text(part.lessonFormat, 40) === "package" && !Array.isArray(part.bundleItems));
+      if (!parts.length) continue;
+      const partCovers = parts.map(({ part }) => {
+        const listed = idList(part!.coversServiceIds);
+        const single = text(part!.packageCoversServiceId, 120);
+        return listed.length ? listed : single ? [single] : [];
+      });
+      const bundleCoversAll = parts.some(({ part }) => part!.coversAllServices === true);
+      items.push({
+        serviceId,
+        name: text(entry?.name, 180) || "Bundle",
+        description: text(entry?.description, 300),
+        price,
+        currency: text(currency, 10) || "NZD",
+        credits: parts.reduce(
+          (sum, { part, quantity }) =>
+            sum + Math.max(1, Math.min(100, Math.round(Number(part!.packageAllowance) || 5))) * quantity,
+          0,
+        ),
+        coversServiceIds: bundleCoversAll ? [] : [...new Set(partCovers.flat())],
+        coversAllServices: bundleCoversAll,
+        kind: "package",
+        crossRedeemable: false,
+        includes: parts.map(({ part, quantity }) => `${quantity} × ${text(part!.name, 180) || "Pass"}`),
+      });
+      continue;
+    }
 
     const covers = idList(entry?.coversServiceIds);
     const single = text(entry?.packageCoversServiceId, 120);
@@ -107,6 +147,7 @@ export function playerShopItems(services: unknown, currency: string): PlayerShop
       coversAllServices,
       kind: format === "video-review" ? "video-review" : "package",
       crossRedeemable: entry?.crossRedeemable === true,
+      includes: [],
     });
   }
 

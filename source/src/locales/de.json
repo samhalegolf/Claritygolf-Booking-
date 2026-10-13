@@ -4671,5 +4671,17 @@
   "Anyone available": "Egal, wer frei ist",
   "Previous day": "Vorheriger Tag",
   "Next day": "Nächster Tag",
-  "Back to today": "Zurück zu heute"
+  "Back to today": "Zurück zu heute",
+  "Bundles": "Bundles",
+  "Several passes sold together": "Mehrere Pässe zusammen verkauft",
+  "Put pass types together for one price, like 5 lessons and a swing review. The client gets each pass, and each keeps its own cover and expiry.": "Fasse Passarten zu einem Preis zusammen, z. B. 5 Stunden und eine Schwunganalyse. Der Kunde erhält jeden Pass, und jeder behält seine eigene Abdeckung und Laufzeit.",
+  "bundles": "Bundles",
+  "Bundle": "Bundle",
+  "No bundles yet.": "Noch keine Bundles.",
+  "New bundle": "Neues Bundle",
+  "e.g. 5 Lessons + Swing Review": "z. B. 5 Stunden + Schwunganalyse",
+  "Worth {amount} bought separately.": "Einzeln gekauft {amount} wert.",
+  "Selling a bundle gives the client each pass inside it, with that pass type's own credits, cover and expiry.": "Beim Verkauf eines Bundles erhält der Kunde jeden enthaltenen Pass mit den eigenen Guthaben, der Abdeckung und Laufzeit seiner Passart.",
+  "Create bundle": "Bundle erstellen",
+  "Includes {items}": "Enthält {items}"
 }

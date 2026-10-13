@@ -15,7 +15,7 @@
 import { useState } from "react";
 import { Plus } from "lucide-react";
 
-import { passCoverageList, type Service } from "../services/serviceModel";
+import { isBundle, passCoverageList, type Service } from "../services/serviceModel";
 import { t, tn } from "../../lib/i18n";
 
 export type PassTypeDraft = {
@@ -65,7 +65,10 @@ function draftFrom(service: Service | null): PassTypeDraft {
 
 export function PassTypesList({ services, formatMoney, saving, onSave, onArchive }: PassTypesListProps) {
   const [editing, setEditing] = useState<Service | "new" | null>(null);
-  const passTypes = services.filter((service) => service.lessonFormat === "package" && service.archived !== true);
+  // Bundles are packages too, but they have their own list (BundlesList).
+  const passTypes = services.filter(
+    (service) => service.lessonFormat === "package" && !isBundle(service) && service.archived !== true,
+  );
   // What a pass can be spent on: anything bookable that is not itself a pass.
   const coverable = services.filter(
     (service) => service.lessonFormat !== "package" && service.archived !== true && service.active !== false,
