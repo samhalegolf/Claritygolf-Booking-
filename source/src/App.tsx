@@ -6194,6 +6194,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
       duration: service.duration,
       phone: selected.phone,
       email: selected.email,
+      personId: selected.personId,
       note: `Follow-up ${service.name}`,
     };
     closeCalendarDetails();
@@ -6326,6 +6327,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
       coach: bookingCoachSnapshotFor(coachId, coachProfiles),
       phone: booking.phone,
       email: booking.email,
+      personId: booking.personId,
       note: booking.note ?? "Placed from dock.",
       location,
       customGroup: booking.customGroup,

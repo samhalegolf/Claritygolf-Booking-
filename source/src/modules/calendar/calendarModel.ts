@@ -140,6 +140,7 @@ export type PendingBooking = {
   duration: number;
   phone?: string;
   email?: string;
+  personId?: string;
   note?: string;
   sourceItemId?: string;
   customGroup?: true;
