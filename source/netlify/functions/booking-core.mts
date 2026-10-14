@@ -5430,6 +5430,31 @@ async function portalPlayerHomeAccountId(authUserId) {
 }
 
 /**
+ * portalPlayerHomeAccountId for a signed-out player, who has only an email.
+ *
+ * "Forgot password" from the Clarity Player app names no business either. The
+ * password lives on the Supabase auth user, which every business the player
+ * belongs to shares, so one reset is enough: it goes to the business they used
+ * most recently, the same one the login fallback would sign them in to.
+ */
+async function portalPlayerHomeAccountIdByEmail(rawEmail) {
+  const email = cleanEmail(rawEmail, "");
+  if (!email) return "";
+  await ensurePlayerSessionsTable();
+  const rows = await db().sql`
+    SELECT portal_players.account_id
+    FROM portal_players
+    JOIN accounts ON accounts.id = portal_players.account_id
+    WHERE LOWER(portal_players.email) = LOWER(${email})
+      AND portal_players.status <> 'disabled'
+      AND accounts.status = 'active'
+    ORDER BY portal_players.last_login_at DESC NULLS LAST, portal_players.created_at DESC
+    LIMIT 1
+  `;
+  return cleanSlug(rows[0]?.account_id, "");
+}
+
+/**
  * The email is the only thing a signed-out player can offer, so this is what
  * "forgot password" has to look up. Scoped to the account for the same reason
  * the login is: portal access is access to one business.
@@ -8714,7 +8739,14 @@ async function routeBookingApiRequest(
         // resolvePublicAccountId needs a ?business= slug, and a coach resetting
         // their own password on the bare domain must not start getting a 404
         // from a route that answered them fine the day before.
-        const playerAccountId = await resolvePublicAccountId(req).catch(() => "");
+        //
+        // Nowhere to look is also what the Clarity Player app got: it never
+        // names a business, so after 2 Oct every app reset answered "sent" and
+        // sent nothing. Such a request falls back to the player's own business,
+        // found by email, as the login falls back by auth user.
+        const playerAccountId =
+          (await resolvePublicAccountId(req).catch(() => "")) ||
+          (await portalPlayerHomeAccountIdByEmail(body.email || ""));
         const playerReset = playerAccountId
           ? await issuePortalPasswordReset({
               req,
