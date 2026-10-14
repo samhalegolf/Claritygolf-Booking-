@@ -7173,7 +7173,16 @@ function appUserForActor(actor, settings = {}) {
  * consequences as one changed on the calendar. Permission checks are the
  * caller's job; `accountId` is already authoritative when it arrives.
  */
-export async function upsertCalendarItemForAccount(accountId, item, current, context = null) {
+export async function upsertCalendarItemForAccount(accountId, incomingItem, current, context = null) {
+  // A lesson arriving here without a client link (one placed from the dock,
+  // say) is matched to its person the same way a whole-calendar save does it.
+  // Without the link the lesson card cannot see the client's passes, so the
+  // Pass button never appears at checkout.
+  let item = incomingItem;
+  if (item.kind === "appointment" && !item.personId) {
+    const peopleSync = await importPeople([personFromAppointment(item, accountId)], "appointment", accountId);
+    [item] = stampResolvedPersonIds([item], peopleSync.resolvedIds);
+  }
   const previousItem = current.items.find((existing) => existing.id === item.id) || null;
   const nextItems = previousItem
     ? current.items.map((existing) => (existing.id === item.id ? item : existing))
