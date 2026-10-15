@@ -18851,7 +18851,8 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
               {pageHeading.subtitle ? <span>{pageHeading.subtitle}</span> : null}
             </div>
           </div>
-          {activeView === "calendar" && (
+          {/* A phone swipes between weeks instead. */}
+          {activeView === "calendar" && !phoneLayout && (
             <div className="top-actions">
               <button className="outline-button" onClick={() => moveWeek(-1)}>
                 <ArrowLeft size={16} />{t("Prev")}</button>

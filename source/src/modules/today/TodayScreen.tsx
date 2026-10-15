@@ -1,4 +1,3 @@
-import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { t } from "../../lib/i18n";
 import {
@@ -56,11 +55,10 @@ function dayFromToday(offset: number) {
  * whole business, for an admin), the one on now or coming next, and the two
  * things a coach most often does from here.
  *
- * Swipe sideways (or use the arrows) to look at the days either side. The day
- * moves like a card: it follows the finger, slides off, and the next day slides
- * in from the other side. On another day the date becomes a button back to
- * today; tapping Today in the tab bar again (which remounts this screen) does
- * the same.
+ * Swipe sideways to look at the days either side. The day moves like a card:
+ * it follows the finger, slides off, and the next day slides in from the other
+ * side. Tapping Today in the tab bar again (which remounts this screen) comes
+ * back to today.
  */
 export function TodayScreen({
   items,
@@ -168,46 +166,14 @@ export function TodayScreen({
       }}
     >
       <header className="today-header">
-        <button
-          type="button"
-          className="icon-button"
-          onClick={() => moveDays(-1)}
-          aria-label={t("Previous day")}
-          title={t("Previous day")}
-        >
-          <ChevronLeft size={20} />
-        </button>
-        <div className="today-header-day">
-          {isToday ? (
-            <strong>{label}</strong>
-          ) : (
-            <button
-              type="button"
-              className="today-back-button"
-              onClick={() => moveDays(-offset)}
-              aria-label={t("Back to today")}
-              title={t("Back to today")}
-            >
-              {label}
-            </button>
-          )}
-          <span>
-            {summary.total
-              ? t("{total} booked · {done} done · {remaining} to go", summary)
-              : isToday
-                ? t("Nothing booked today")
-                : t("Nothing booked")}
-          </span>
-        </div>
-        <button
-          type="button"
-          className="icon-button"
-          onClick={() => moveDays(1)}
-          aria-label={t("Next day")}
-          title={t("Next day")}
-        >
-          <ChevronRight size={20} />
-        </button>
+        <strong>{label}</strong>
+        <span>
+          {summary.total
+            ? t("{total} booked · {done} done · {remaining} to go", summary)
+            : isToday
+              ? t("Nothing booked today")
+              : t("Nothing booked")}
+        </span>
       </header>
 
       {/* Not part of the day, so they stay put while the day slides. */}
