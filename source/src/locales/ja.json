@@ -4717,5 +4717,6 @@
   "New email": "新しいメールアドレス",
   "This is your sign-in email for Clarity Caddy too.": "Clarity Caddy のサインイン用メールアドレスにもなります。",
   "Send confirmation link": "確認リンクを送信",
-  "Change email": "メールアドレスを変更"
+  "Change email": "メールアドレスを変更",
+  "Could not download that file. Try again.": "ファイルをダウンロードできませんでした。もう一度お試しください。"
 }

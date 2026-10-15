@@ -4717,5 +4717,6 @@
   "New email": "Nuevo correo",
   "This is your sign-in email for Clarity Caddy too.": "También es tu correo de acceso a Clarity Caddy.",
   "Send confirmation link": "Enviar enlace de confirmación",
-  "Change email": "Cambiar correo"
+  "Change email": "Cambiar correo",
+  "Could not download that file. Try again.": "No se pudo descargar el archivo. Inténtalo de nuevo."
 }

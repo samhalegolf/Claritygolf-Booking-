@@ -4717,5 +4717,6 @@
   "New email": "Ny e-postadress",
   "This is your sign-in email for Clarity Caddy too.": "Det här är också din inloggningsadress för Clarity Caddy.",
   "Send confirmation link": "Skicka bekräftelselänk",
-  "Change email": "Byt e-postadress"
+  "Change email": "Byt e-postadress",
+  "Could not download that file. Try again.": "Det gick inte att ladda ned filen. Försök igen."
 }

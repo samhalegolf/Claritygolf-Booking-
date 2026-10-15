@@ -82,12 +82,18 @@ const authLinkAtRoot =
   (new URLSearchParams(window.location.search).has("portalInvite") ||
     new URLSearchParams(window.location.search).has("reset") ||
     Boolean(emailChangeToken));
+// The Clarity Booking staff app (booking-app/) loads this page at / and injects
+// window.Capacitor. Nobody installs it to read the landing page: it opens on
+// sign-in, first launch and after every sign-out alike.
+function inStaffApp() {
+  return Boolean((globalThis as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.());
+}
 // A coach who never signed out goes straight to their workspace from the home
 // page (and the installed app, which opens at /), rather than being shown the
 // landing page and a Sign in button that then lets them straight in. Everyone
 // else -- Google's reviewers included -- still gets the public home page. If
 // the hint is stale and the session has gone, they get the login screen.
-const homeSkipsToWorkspace = publicPath === "/" && !authLinkAtRoot && lastVisitorWasCoach();
+const homeSkipsToWorkspace = publicPath === "/" && !authLinkAtRoot && (lastVisitorWasCoach() || inStaffApp());
 const publicPage: PublicPage | null =
   publicPath === "/privacy"
     ? "privacy"

@@ -4717,5 +4717,6 @@
   "New email": "Uusi sähköposti",
   "This is your sign-in email for Clarity Caddy too.": "Tämä on myös Clarity Caddyn kirjautumissähköpostisi.",
   "Send confirmation link": "Lähetä vahvistuslinkki",
-  "Change email": "Vaihda sähköposti"
+  "Change email": "Vaihda sähköposti",
+  "Could not download that file. Try again.": "Tiedostoa ei voitu ladata. Yritä uudelleen."
 }
