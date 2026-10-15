@@ -6886,16 +6886,6 @@
     font-size: clamp(28px, 9vw, 36px);
   }
 
-  .top-actions {
-    width: 100%;
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .top-actions .outline-button {
-    width: 100%;
-  }
-
   .calendar-toolbar p {
     text-align: left;
   }
@@ -18008,6 +17998,52 @@
 .app-shell.is-phone .main-panel {
   /* Room for the tab bar, so the last row of any screen can scroll above it. */
   padding-bottom: calc(76px + env(safe-area-inset-bottom));
+  /* Clear the status bar and notch. The staff app's webview runs edge to edge
+     (contentInset "never"), so without this the heading sat under the clock;
+     in a phone browser the inset is 0 and this is just the 12px. */
+  padding-top: calc(12px + env(safe-area-inset-top));
+}
+
+/* A compact header: the screen's name and its one line of context, then the
+   screen. The desktop's 70px band and 36px title cost a phone a fifth of its
+   height before anything useful showed. */
+.app-shell.is-phone .topbar {
+  min-height: 0;
+  margin-bottom: 12px;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-shell.is-phone .topbar h1 {
+  margin-top: 0;
+  font-size: 24px;
+  line-height: 1.15;
+}
+
+.app-shell.is-phone .topbar span {
+  margin-top: 2px;
+  font-size: 13px;
+}
+
+/* The calendar's own row -- Week/Day, the dates, the save state -- on one
+   line rather than stacked. */
+.app-shell.is-phone .calendar-toolbar {
+  min-height: 0;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+}
+
+.app-shell.is-phone .calendar-toolbar h2 {
+  font-size: 17px;
+}
+
+.app-shell.is-phone .calendar-save-pill {
+  padding: 5px 10px;
+  box-shadow: none;
 }
 
 /* Quick-create and the toast are fixed to the viewport; on a phone they would
@@ -18145,14 +18181,16 @@
 .phone-paper {
   left: 0;
   right: 0;
-  padding: max(28px, env(safe-area-inset-top)) 28px 0;
+  /* Lines its title up with the page header above it (.is-phone .topbar). */
+  padding: calc(12px + env(safe-area-inset-top)) 22px 0;
   background: linear-gradient(to right, var(--panel-soft) 0 4px, var(--border) 4px 5px, var(--page) 5px);
 }
 
 .phone-paper strong {
   display: block;
   color: var(--text);
-  font-size: 30px;
+  font-size: 24px;
+  line-height: 1.15;
   font-weight: 800;
   opacity: 0.45;
 }
@@ -18300,42 +18338,22 @@
 .today-page {
   display: grid;
   gap: 16px;
-  padding: 16px;
+  /* The main panel already pads the page; this only adds a little at the sides. */
+  padding: 0 4px 16px;
   /* Sideways swipes change the day (TodayScreen.tsx); the page still scrolls. */
   touch-action: pan-y;
 }
 
+/* The day on show and how it is going. Swiping is the only way to another
+   day; the Today tab brings it back. */
 .today-header {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: 8px;
-}
-
-.today-header-day {
   display: grid;
   gap: 2px;
   min-width: 0;
-  text-align: center;
 }
 
 .today-header strong {
   font-size: 20px;
-}
-
-/* Another day: the date is a pill that goes back to today. */
-.today-back-button {
-  justify-self: center;
-  max-width: 100%;
-  padding: 4px 14px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--panel-soft);
-  color: var(--text);
-  font: inherit;
-  font-size: 18px;
-  font-weight: 700;
-  cursor: pointer;
 }
 
 /* The day slides like a card (TodayScreen.tsx moves it); the viewport clips it
