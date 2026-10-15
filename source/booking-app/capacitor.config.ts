@@ -25,6 +25,12 @@ const config: CapacitorConfig = {
   },
   ios: {
     contentInset: "never",
+    // Tap to Pay is out of the iPhone build until Apple grants the
+    // distribution entitlement (docs/tap-to-pay-apple-review.md). Without the
+    // ClarityTerminal plugin the page hides every Tap to Pay control. To bring
+    // it back: delete this line, restore the proximity-reader key in
+    // ios/App/App/App.entitlements, then `npm run native:sync`.
+    includePlugins: ["@capacitor/push-notifications"],
   },
   plugins: {
     // A booking alert that arrives while the app is open still shows as a
