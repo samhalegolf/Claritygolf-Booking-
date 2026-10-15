@@ -162,7 +162,7 @@ export async function enableNativePush(): Promise<NativePushStatus> {
   return loadNativePushStatus();
 }
 
-export async function disableNativePush(): Promise<NativePushStatus> {
+async function forgetThisPhone() {
   const token = storedToken();
   if (token) {
     await fetch(API, {
@@ -173,7 +173,21 @@ export async function disableNativePush(): Promise<NativePushStatus> {
     });
   }
   storeToken("");
+}
+
+export async function disableNativePush(): Promise<NativePushStatus> {
+  await forgetThisPhone();
   return loadNativePushStatus();
+}
+
+/**
+ * Signing out: this phone must stop showing alerts (client names included) for
+ * a business nobody is signed in to here any more. Call it before the logout
+ * request -- the server needs the session to know whose phone this is.
+ */
+export async function forgetNativePushOnSignOut() {
+  if (!nativePush()) return;
+  await forgetThisPhone().catch(() => undefined);
 }
 
 /**

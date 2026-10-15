@@ -150,7 +150,8 @@ import { BusinessHubPanel, OwnerIdentityCard } from "./modules/business-hub/Busi
 import { CoachAvatar, CoachProfilePanel, type CoachWeekDay, type CoachWeekEntry } from "./modules/business-hub/CoachProfilePanel";
 import type { RegionValues } from "./modules/settings/RegionSettings";
 import { syncPushLanguage } from "./modules/notifications/browserPush";
-import { startNativePush } from "./native/nativePush";
+import { forgetNativePushOnSignOut, startNativePush } from "./native/nativePush";
+import { shareFileInApp } from "./native/nativeFiles";
 import type { ClarityPayCard, ProfileInternalJob, ProfileTarget } from "./modules/business-hub/BusinessHubPanel";
 import {
   cleanNotificationTemplates,
@@ -7550,6 +7551,8 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
         setToast({ message: t("Saved video file is missing. Reconnect the library or use the cache recovery copy.") });
         return;
       }
+      const extension = item.source.mimeType.includes("quicktime") ? "mov" : item.source.mimeType.includes("webm") ? "webm" : "mp4";
+      if (await shareFileInApp({ blob }, item.source.originalFileName || `${item.title || "clarity-video"}.${extension}`)) return;
       const url = URL.createObjectURL(blob);
       window.open(url, "_blank", "noopener,noreferrer");
       window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
@@ -10666,29 +10669,34 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     );
   }
 
-  function handleExportReportCsv() {
+  async function handleExportReportCsv() {
     if (!reportSummary) return;
     const csv = buildReportCsv(reportSummary, reportSections, reportExcludedCategories);
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const fileName = `financial-report-${reportSummary.rangeStart}-to-${reportSummary.rangeEnd}.csv`;
+    if (await shareFileInApp({ blob }, fileName).catch(() => false)) return;
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `financial-report-${reportSummary.rangeStart}-to-${reportSummary.rangeEnd}.csv`;
+    link.download = fileName;
     link.click();
     URL.revokeObjectURL(url);
   }
 
-  function handleDownloadReportPdf() {
+  async function handleDownloadReportPdf() {
     if (!reportRange.start || !reportRange.end) return;
     const sectionsParam = reportSections.length ? `&sections=${encodeURIComponent(reportSections.join(","))}` : "&sections=none";
     const excludeParam = reportExcludedCategories.length
       ? `&excludeCategories=${encodeURIComponent(reportExcludedCategories.join(","))}`
       : "";
-    window.open(
-      `/api/billing/reports/summary/pdf?start=${encodeURIComponent(reportRange.start)}&end=${encodeURIComponent(reportRange.end)}${sectionsParam}${excludeParam}`,
-      "_blank",
-      "noopener",
-    );
+    const url = `/api/billing/reports/summary/pdf?start=${encodeURIComponent(reportRange.start)}&end=${encodeURIComponent(reportRange.end)}${sectionsParam}${excludeParam}`;
+    try {
+      if (await shareFileInApp({ url }, `financial-report-${reportRange.start}-to-${reportRange.end}.pdf`)) return;
+    } catch {
+      setToast({ message: t("Could not download that file. Try again.") });
+      return;
+    }
+    window.open(url, "_blank", "noopener");
   }
 
   // Unpaid/overdue is derived here rather than trusting invoiceRecord.status
@@ -11854,13 +11862,22 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   }
 
   // Download the server-rendered PDF (opens the attachment endpoint in a new tab;
-  // the admin session cookie rides along on the same-origin request).
-  function downloadInvoicePdf() {
+  // the admin session cookie rides along on the same-origin request). Inside the
+  // staff app a new tab would land in Safari, signed out, so it is fetched and
+  // handed to the share sheet instead.
+  async function downloadInvoicePdf() {
     if (!activeInvoiceId) {
       setToast({ message: t("Save the invoice before downloading a PDF.") });
       return;
     }
-    window.open(`/api/billing/invoices/${encodeURIComponent(activeInvoiceId)}/pdf`, "_blank", "noopener");
+    const url = `/api/billing/invoices/${encodeURIComponent(activeInvoiceId)}/pdf`;
+    try {
+      if (await shareFileInApp({ url }, `${activeInvoiceNumber || "invoice"}.pdf`)) return;
+    } catch {
+      setToast({ message: t("Could not download that file. Try again.") });
+      return;
+    }
+    window.open(url, "_blank", "noopener");
   }
 
   async function markActiveInvoicePaid() {
@@ -12524,6 +12541,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   }
 
   async function handleAdminLogout() {
+    await forgetNativePushOnSignOut();
     await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
     // The next person to sign in here may run a different business. Their
     // sidebar must not open on this one's plan.

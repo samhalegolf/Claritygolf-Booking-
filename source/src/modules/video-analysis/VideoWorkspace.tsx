@@ -117,6 +117,7 @@ import { DrawingTool } from "./models/Drawing";
 import { TimelineMarker } from "./models/Timeline";
 import { activeLocale } from "../../lib/activeCountry";
 import { t } from "../../lib/i18n";
+import { shareFileInApp } from "../../native/nativeFiles";
 
 /**
  * Give a freshly opened camera a moment to produce its first frame.
@@ -2716,7 +2717,8 @@ export function VideoWorkspace({
     setFocusArtifactEditingId(null);
   }, [focusSnapshotStats.total, leftStore, rightStore]);
 
-  const downloadFocusSnapshot = useCallback((snapshot: FocusSnapshot) => {
+  const downloadFocusSnapshot = useCallback(async (snapshot: FocusSnapshot) => {
+    if (await shareFileInApp({ url: snapshot.imageDataUrl }, toDownloadFileName(snapshot)).catch(() => false)) return;
     const link = document.createElement("a");
     link.href = snapshot.imageDataUrl;
     link.download = toDownloadFileName(snapshot);
@@ -5044,7 +5046,7 @@ export function VideoWorkspace({
                         download={toDownloadFileName(snapshot)}
                         onClick={(event) => {
                           event.preventDefault();
-                          downloadFocusSnapshot(snapshot);
+                          void downloadFocusSnapshot(snapshot);
                         }}
                       >{t("Download")}</a>
                       <button
