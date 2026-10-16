@@ -20,11 +20,11 @@ import { formatClipDuration, formatTimestampForDisplay, formatVideoDurationLabel
 import type { BusinessTerminology } from "../../../netlify/functions/_shared/business-terminology.mts";
 import type { MarketCapabilities } from "../../../netlify/functions/_shared/market-profile.mts";
 import type { ReviewBlock, ReviewDocument, ReviewDrillBlock } from "../../../netlify/functions/_shared/review-document.mts";
-import type { BillingSection } from "../../App";
 import type { SheetVideo } from "../swing-review/SwingReviewSheet";
 import type { FrameViewerShot } from "../shared/SnapshotFrameViewer";
 import type { ClarityCloudHealth, GoogleDriveTransferStatus } from "../../storageHealth";
 import type { AuthStatus } from "../auth/authStatus";
+import type { BillingSection } from "../billing/billingSections";
 import type { BillingInvoiceRecord } from "../billing/types";
 import type { CalendarItem } from "../calendar/calendarModel";
 import type { ClientSummary, ClientTransactionRow } from "../clients/clientMatching";
