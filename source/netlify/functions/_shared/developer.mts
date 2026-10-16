@@ -7,12 +7,12 @@
 //
 // CLARITY_DEVELOPER_EMAILS is a comma-separated list. Unset means nobody.
 
-import { env } from "./values.mts";
-
 export function isDeveloperEmail(email: unknown) {
   if (typeof email !== "string" || !email.trim()) return false;
   const target = email.trim().toLowerCase();
-  return String(env("CLARITY_DEVELOPER_EMAILS", ""))
+  // process.env, not values.mts's env(): this file is reached from the app's
+  // type check through auth-contract, and values.mts is untyped.
+  return (process.env.CLARITY_DEVELOPER_EMAILS || "")
     .split(",")
-    .some((entry: string) => entry.trim().toLowerCase() === target);
+    .some((entry) => entry.trim().toLowerCase() === target);
 }
