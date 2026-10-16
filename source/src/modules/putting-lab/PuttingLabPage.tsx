@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "../../lib/i18n";
+import { useIsDeveloper } from "../auth/developer";
 import { openRearCamera, pumpFrames, startMotion } from "./capture";
 import { PRACTICE_GATES, type PracticeLevel } from "./engine/coordinates";
 import { defaultConfiguration, type PromptCode, type PuttingLabSnapshot, type WarningCode } from "./engine/engine";
@@ -231,6 +232,7 @@ function PuttingLabLive({
   const strokesRef = useRef<PuttingStroke[]>([]);
   const keptTraces = useRef<PutterSample[][]>([]);
   const layersRef = useRef<Set<DebugLayer>>(new Set());
+  const isDeveloper = useIsDeveloper();
   const [view, setView] = useState<PuttingLabSnapshot | null>(null);
   const [aim, setAim] = useState(0);
   const [layers, setLayers] = useState<Set<DebugLayer>>(new Set());
@@ -498,9 +500,11 @@ function PuttingLabLive({
           <button type="button" onClick={() => setPanel(panel === "validate" ? "none" : "validate")}>
             {t("Validate")}
           </button>
-          <button type="button" onClick={() => setPanel(panel === "debug" ? "none" : "debug")}>
-            {t("Debug")}
-          </button>
+          {isDeveloper && (
+            <button type="button" onClick={() => setPanel(panel === "debug" ? "none" : "debug")}>
+              {t("Debug")}
+            </button>
+          )}
         </div>
       </div>
 
@@ -570,7 +574,7 @@ function PuttingLabLive({
         </div>
       )}
 
-      {panel === "debug" && (
+      {isDeveloper && panel === "debug" && (
         <div className="putting-lab-sheet">
           <p>
             <strong>{t("Debug overlay")}</strong>

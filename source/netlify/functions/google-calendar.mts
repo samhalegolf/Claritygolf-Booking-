@@ -13,6 +13,8 @@ import {
   syncGoogleCalendarNow,
   updateGoogleCalendarSyncSettings,
 } from "./google-calendar-sync.mts";
+import { readAdminSessionAuthUserId } from "./_shared/coach-auth.mts";
+import { isDeveloperEmail } from "./_shared/developer.mts";
 import { json } from "./_shared/http.mts";
 
 
@@ -81,7 +83,10 @@ export default async function handler(req: Request) {
     }
 
     // Sync diagnostics: every trigger, the Google failure code, and the event
-    // body that was sent. Read by the coach profile's debug window.
+    // body that was sent. Developer only -- see _shared/developer.mts.
+    if (action.startsWith("debug") && !isDeveloperEmail((await readAdminSessionAuthUserId(req))?.email)) {
+      return json({ error: "forbidden", message: "Google Calendar debug is not available on this account." }, 403);
+    }
     if (req.method === "GET" && action === "debug") return json(await getGoogleCalendarDebugLog(accountId, coachId));
     if (req.method === "POST" && action === "debug/clear") return json(await clearGoogleCalendarDebugLog(accountId, coachId));
     if (req.method === "POST" && action === "debug/toggle") {

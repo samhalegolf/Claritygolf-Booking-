@@ -1198,7 +1198,6 @@
   "Put {client} back on the calendar": "Palauta {client} kalenteriin",
   "Remove {client} from dock": "Poista {client} telakasta",
   "All": "Kaikki",
-  "Live database": "Ajantasainen tietokanta",
   "The delete didn't go through, so the lesson was put back on the calendar. Delete it again to retry.": "Poisto ei mennyt läpi, joten tunti palautettiin kalenteriin. Yritä poistaa se uudelleen.",
   "Your latest change was not saved. Please try again; the app will retry when you make another change.": "Viimeisintä muutostasi ei tallennettu. Yritä uudelleen; sovellus yrittää uudelleen, kun teet seuraavan muutoksen.",
   "No active coaches are assigned to this location yet.": "Tähän sijaintiin ei ole vielä määritetty aktiivisia valmentajia.",

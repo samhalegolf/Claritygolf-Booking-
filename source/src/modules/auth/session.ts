@@ -50,6 +50,8 @@ export type Session = {
    * Absent when the server could not read settings; the shell then fills it.
    */
   workspace?: WorkspaceBootstrap;
+  /** The server's call, from the signed-in email. Gates the developer tools. */
+  isDeveloper?: boolean;
 };
 
 export const guestSession: Session = { role: "guest", email: "", name: "", accountKind: "live" };
@@ -70,6 +72,7 @@ function toSession(data: SessionResponse | null | undefined): Session {
   if (data.liveAccountId) session.liveAccountId = data.liveAccountId;
   if (data.viewingAs) session.viewingAs = data.viewingAs;
   if (role === "coach" && data.workspace) session.workspace = data.workspace;
+  if (data.isDeveloper) session.isDeveloper = true;
   return session;
 }
 

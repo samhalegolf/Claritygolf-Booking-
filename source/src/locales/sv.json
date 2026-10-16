@@ -1198,7 +1198,6 @@
   "Put {client} back on the calendar": "Lägg tillbaka {client} i kalendern",
   "Remove {client} from dock": "Ta bort {client} från dockan",
   "All": "Alla",
-  "Live database": "Livedatabas",
   "The delete didn't go through, so the lesson was put back on the calendar. Delete it again to retry.": "Raderingen gick inte igenom, så lektionen lades tillbaka i kalendern. Radera den igen för att försöka på nytt.",
   "Your latest change was not saved. Please try again; the app will retry when you make another change.": "Din senaste ändring sparades inte. Försök igen; appen försöker igen när du gör en ny ändring.",
   "No active coaches are assigned to this location yet.": "Inga aktiva tränare är kopplade till den här platsen än.",

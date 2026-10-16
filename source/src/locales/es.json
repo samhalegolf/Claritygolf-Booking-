@@ -1198,7 +1198,6 @@
   "Put {client} back on the calendar": "Volver a poner a {client} en el calendario",
   "Remove {client} from dock": "Quitar a {client} de la bandeja",
   "All": "Todo",
-  "Live database": "Base de datos en vivo",
   "The delete didn't go through, so the lesson was put back on the calendar. Delete it again to retry.": "La eliminación no se ha completado, así que la clase ha vuelto al calendario. Elimínala otra vez para reintentarlo.",
   "Your latest change was not saved. Please try again; the app will retry when you make another change.": "Tu último cambio no se ha guardado. Inténtalo de nuevo; la app lo reintentará cuando hagas otro cambio.",
   "No active coaches are assigned to this location yet.": "Aún no hay profesores activos asignados a este centro.",

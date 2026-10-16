@@ -1198,7 +1198,6 @@
   "Put {client} back on the calendar": "Przywróć do kalendarza: {client}",
   "Remove {client} from dock": "Usuń z doku: {client}",
   "All": "Wszystkie",
-  "Live database": "Baza produkcyjna",
   "The delete didn't go through, so the lesson was put back on the calendar. Delete it again to retry.": "Usunięcie się nie powiodło, więc lekcja wróciła do kalendarza. Usuń ją ponownie, aby spróbować jeszcze raz.",
   "Your latest change was not saved. Please try again; the app will retry when you make another change.": "Twoja ostatnia zmiana nie została zapisana. Spróbuj ponownie; aplikacja ponowi próbę przy kolejnej zmianie.",
   "No active coaches are assigned to this location yet.": "Do tej lokalizacji nie przypisano jeszcze aktywnych trenerów.",

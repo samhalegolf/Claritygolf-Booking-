@@ -47,8 +47,6 @@ export function CalendarView({ calendar }: { calendar: CalendarController }) {
     toggleCalendarDayView,
     weekTitle,
     calendarSaveStatus,
-    calendarFeedStatus,
-    calendarSaveError,
     calendarSaveFailureKind,
     locationCalendarCoachGroups,
     locationCalendarHasAppointments,
@@ -201,20 +199,6 @@ export function CalendarView({ calendar }: { calendar: CalendarController }) {
               <span>{t("Day")}</span>
             </button>
             <h2>{weekTitle}</h2>
-          </div>
-          <div className={`calendar-save-pill ${calendarSaveStatus}`}>
-            <strong>
-              {calendarSaveStatus === "saving"
-                ? t("Saving")
-                : calendarSaveStatus === "saved"
-                  ? t("Saved")
-                  : calendarSaveStatus === "failed"
-                    ? t("Not saved")
-                    : calendarFeedStatus === "connected"
-                      ? t("Live database")
-                      : t("Not connected")}
-            </strong>
-            {calendarSaveStatus === "failed" && calendarSaveError ? <span>{calendarSaveError}</span> : null}
           </div>
         </div>
         {calendarSaveStatus === "failed" && (
