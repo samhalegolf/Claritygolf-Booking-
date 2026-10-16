@@ -1761,7 +1761,6 @@
   "Update password": "Uppdatera lösenord",
   "Value": "Värde",
   "Footer": "Sidfot",
-  "Calendar feed & video storage": "Kalenderflöde och videolagring",
   "VIDEO STORAGE": "VIDEOLAGRING",
   "My Library and Clarity Cloud": "My Library och Clarity Cloud",
   "My Library": "My Library",
@@ -1931,8 +1930,6 @@
   "A booking card is filled with its lesson type's colour, which you set on the lesson type itself. These two are the outlines it can wear on top: a border once the lesson is done, and a ring around the card while a bay is held for it. They sit on different edges, so a completed lesson with a live bay shows both.": "Ett bokningskort fylls med lektionstypens färg, som du anger på själva lektionstypen. De här två är ramarna som kan läggas ovanpå: en kant när lektionen är klar och en ring runt kortet medan en bay är reserverad för den. De ligger på olika kanter, så en genomförd lektion med en aktiv bay visar båda.",
   "Reset calendar colours": "Återställ kalenderfärger",
   "Import clients": "Importera kunder",
-  "CSV paste": "Klistra in CSV",
-  "{peopleImportPreview} ready": "{peopleImportPreview} redo",
   "name,email,phone,notes,caddyProfileUrl": "name,email,phone,notes,caddyProfileUrl",
   "CSV file": "CSV-fil",
   "Importing": "Importerar",
@@ -4698,5 +4695,6 @@
   "invoice": "faktura",
   "billing settings": "faktureringsinställningar",
   "Invoicing defaults, payment methods, discounts and expense categories are in Billing › Settings.": "Faktureringsstandarder, betalningsmetoder, rabatter och utgiftskategorier finns under Fakturering › Inställningar.",
-  "Open Billing Settings": "Öppna faktureringsinställningar"
+  "Open Billing Settings": "Öppna faktureringsinställningar",
+  "Video storage": "Videolagring"
 }

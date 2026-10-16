@@ -1761,7 +1761,6 @@
   "Update password": "Wachtwoord bijwerken",
   "Value": "Waarde",
   "Footer": "Voettekst",
-  "Calendar feed & video storage": "Agendafeed & video-opslag",
   "VIDEO STORAGE": "VIDEO-OPSLAG",
   "My Library and Clarity Cloud": "My Library en Clarity Cloud",
   "My Library": "My Library",
@@ -1931,8 +1930,6 @@
   "A booking card is filled with its lesson type's colour, which you set on the lesson type itself. These two are the outlines it can wear on top: a border once the lesson is done, and a ring around the card while a bay is held for it. They sit on different edges, so a completed lesson with a live bay shows both.": "Een boekingskaart krijgt de kleur van het lestype, die je bij het lestype zelf instelt. Dit zijn de twee randen die er bovenop kunnen komen: een rand zodra de les klaar is, en een ring om de kaart zolang er een bay voor wordt vastgehouden. Ze zitten aan verschillende kanten, dus een voltooide les met een actieve bay toont ze allebei.",
   "Reset calendar colours": "Agendakleuren resetten",
   "Import clients": "Klanten importeren",
-  "CSV paste": "CSV plakken",
-  "{peopleImportPreview} ready": "{peopleImportPreview} klaar",
   "name,email,phone,notes,caddyProfileUrl": "name,email,phone,notes,caddyProfileUrl",
   "CSV file": "CSV-bestand",
   "Importing": "Importeren",
@@ -4698,5 +4695,6 @@
   "invoice": "factuur",
   "billing settings": "factuurinstellingen",
   "Invoicing defaults, payment methods, discounts and expense categories are in Billing › Settings.": "Factuurstandaarden, betaalmethoden, kortingen en uitgavencategorieën staan onder Facturering › Instellingen.",
-  "Open Billing Settings": "Factuurinstellingen openen"
+  "Open Billing Settings": "Factuurinstellingen openen",
+  "Video storage": "Video-opslag"
 }

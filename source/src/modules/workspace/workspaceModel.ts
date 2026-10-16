@@ -61,7 +61,7 @@ type SubscriptionStatus =
   | "comped"
   | "internal";
 type AccountPlanKey = "solo" | "studio" | "academy" | "enterprise" | "founder";
-type AccountFeatureKey =
+export type AccountFeatureKey =
   | "publicBooking"
   | "coachCalendar"
   | "locationCalendar"
@@ -86,7 +86,7 @@ export type AccountLimits = {
   maxServices: number;
   maxBookingScreens: number;
 };
-type AccountEntitlements = {
+export type AccountEntitlements = {
   features: Record<AccountFeatureKey, boolean>;
   limits: AccountLimits;
 };

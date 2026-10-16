@@ -1761,7 +1761,6 @@
   "Update password": "Aggiorna password",
   "Value": "Valore",
   "Footer": "Piè di pagina",
-  "Calendar feed & video storage": "Feed del calendario e archiviazione video",
   "VIDEO STORAGE": "ARCHIVIAZIONE VIDEO",
   "My Library and Clarity Cloud": "My Library e Clarity Cloud",
   "My Library": "My Library",
@@ -1931,8 +1930,6 @@
   "A booking card is filled with its lesson type's colour, which you set on the lesson type itself. These two are the outlines it can wear on top: a border once the lesson is done, and a ring around the card while a bay is held for it. They sit on different edges, so a completed lesson with a live bay shows both.": "Una scheda di prenotazione ha il colore del suo tipo di lezione, che imposti nel tipo di lezione stesso. Questi due sono i contorni che può avere in più: un bordo quando la lezione è conclusa e un anello attorno alla scheda mentre una postazione è riservata. Stanno su bordi diversi, quindi una lezione completata con una postazione attiva li mostra entrambi.",
   "Reset calendar colours": "Reimposta colori del calendario",
   "Import clients": "Importa clienti",
-  "CSV paste": "Incolla CSV",
-  "{peopleImportPreview} ready": "{peopleImportPreview} pronti",
   "name,email,phone,notes,caddyProfileUrl": "name,email,phone,notes,caddyProfileUrl",
   "CSV file": "File CSV",
   "Importing": "Importazione",
@@ -4698,5 +4695,6 @@
   "invoice": "fattura",
   "billing settings": "impostazioni di fatturazione",
   "Invoicing defaults, payment methods, discounts and expense categories are in Billing › Settings.": "Impostazioni predefinite di fatturazione, metodi di pagamento, sconti e categorie di spesa si trovano in Fatturazione › Impostazioni.",
-  "Open Billing Settings": "Apri impostazioni di fatturazione"
+  "Open Billing Settings": "Apri impostazioni di fatturazione",
+  "Video storage": "Archiviazione video"
 }

@@ -1761,7 +1761,6 @@
   "Update password": "Passwort ändern",
   "Value": "Wert",
   "Footer": "Fußzeile",
-  "Calendar feed & video storage": "Kalender-Feed & Videospeicher",
   "VIDEO STORAGE": "VIDEOSPEICHER",
   "My Library and Clarity Cloud": "My Library und Clarity Cloud",
   "My Library": "My Library",
@@ -1931,8 +1930,6 @@
   "A booking card is filled with its lesson type's colour, which you set on the lesson type itself. These two are the outlines it can wear on top: a border once the lesson is done, and a ring around the card while a bay is held for it. They sit on different edges, so a completed lesson with a live bay shows both.": "Eine Buchungskarte ist mit der Farbe ihrer Stundenart gefüllt, die du an der Stundenart selbst festlegst. Diese beiden sind die Rahmen, die sie zusätzlich tragen kann: ein Rand, sobald die Stunde abgeschlossen ist, und ein Ring um die Karte, solange eine Bay für sie reserviert ist. Sie liegen an unterschiedlichen Kanten, eine abgeschlossene Stunde mit aktiver Bay zeigt also beide.",
   "Reset calendar colours": "Kalenderfarben zurücksetzen",
   "Import clients": "Kunden importieren",
-  "CSV paste": "CSV einfügen",
-  "{peopleImportPreview} ready": "{peopleImportPreview} bereit",
   "name,email,phone,notes,caddyProfileUrl": "name,email,phone,notes,caddyProfileUrl",
   "CSV file": "CSV-Datei",
   "Importing": "Wird importiert",
@@ -4698,5 +4695,6 @@
   "invoice": "Rechnung",
   "billing settings": "Abrechnungseinstellungen",
   "Invoicing defaults, payment methods, discounts and expense categories are in Billing › Settings.": "Rechnungsvorgaben, Zahlungsarten, Rabatte und Ausgabenkategorien finden Sie unter Abrechnung › Einstellungen.",
-  "Open Billing Settings": "Abrechnungseinstellungen öffnen"
+  "Open Billing Settings": "Abrechnungseinstellungen öffnen",
+  "Video storage": "Videospeicher"
 }

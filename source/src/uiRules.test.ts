@@ -112,7 +112,7 @@ const SET_FROM_JS: Array<{ name: string; setBy: string }> = [
   { name: "--coach-neutral", setBy: "App.tsx" },
   // The hue of the location an availability band, key chip or window picker
   // stands for, set inline per element from LOCATION_BAND_HUES.
-  { name: "--location-hue", setBy: "App.tsx" },
+  { name: "--location-hue", setBy: "CalendarView.tsx" },
   // The video workspace's tokens, applied by its theme module. The chrome
   // aliases onto --c-*; the signal colours are its own -- see the module.
   { name: "--va-bg", setBy: "videoAnalysisTheme.ts" },
@@ -652,7 +652,15 @@ test("every notification setting the API accepts is editable somewhere", () => {
   const accepted = [...write.matchAll(/hasOwn\(settings,\s*"([A-Za-z]+)"\)/g)].map((match) => match[1]);
   assert.ok(accepted.length > 10, "writeAdminSettings not found — has admin-settings.mts been restructured?");
 
-  const app = readFileSync(path.join(SRC, "App.tsx"), "utf8");
+  // The fields live in the settings and notifications panels; App.tsx keeps the
+  // handlers. Read all of them, so a field can move between panels freely.
+  const app = [
+    path.join(SRC, "App.tsx"),
+    ...sourceFiles(path.join(SRC, "modules", "settings")),
+    ...sourceFiles(path.join(SRC, "modules", "notifications")),
+  ]
+    .map((file) => readFileSync(file, "utf8"))
+    .join("\n");
   // Two binding shapes, because a setting reaches the server two ways.
   //
   //   updateNotificationBlockDraft(someEditor, "field", value)
@@ -680,7 +688,7 @@ test("every notification setting the API accepts is editable somewhere", () => {
   assert.deepEqual(
     stranded,
     [],
-    `Setting(s) the API accepts with no input left in App.tsx: ${stranded.join(", ")}. ` +
+    `Setting(s) the API accepts with no input left in the settings panels: ${stranded.join(", ")}. ` +
       "Give each one a field, or add it to notEditable above with the reason.",
   );
 

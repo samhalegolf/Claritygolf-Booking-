@@ -1761,7 +1761,6 @@
   "Update password": "パスワードを更新",
   "Value": "値",
   "Footer": "フッター",
-  "Calendar feed & video storage": "カレンダーフィードと動画ストレージ",
   "VIDEO STORAGE": "動画ストレージ",
   "My Library and Clarity Cloud": "My LibraryとClarity Cloud",
   "My Library": "My Library",
@@ -1931,8 +1930,6 @@
   "A booking card is filled with its lesson type's colour, which you set on the lesson type itself. These two are the outlines it can wear on top: a border once the lesson is done, and a ring around the card while a bay is held for it. They sit on different edges, so a completed lesson with a live bay shows both.": "予約カードはレッスンの種類の色で塗りつぶされます（色はレッスンの種類で設定します）。ここで設定する2つは、その上に表示される枠線です：レッスン完了後の枠線と、打席を確保中のカードを囲むリングです。別々の縁に表示されるため、打席確保中の完了レッスンには両方が表示されます。",
   "Reset calendar colours": "カレンダーの色をリセット",
   "Import clients": "クライアントをインポート",
-  "CSV paste": "CSVを貼り付け",
-  "{peopleImportPreview} ready": "{peopleImportPreview}件準備完了",
   "name,email,phone,notes,caddyProfileUrl": "name,email,phone,notes,caddyProfileUrl",
   "CSV file": "CSVファイル",
   "Importing": "インポート中",
@@ -4698,5 +4695,6 @@
   "invoice": "請求書",
   "billing settings": "請求設定",
   "Invoicing defaults, payment methods, discounts and expense categories are in Billing › Settings.": "請求書の既定値、支払い方法、割引、経費カテゴリは「請求 › 設定」にあります。",
-  "Open Billing Settings": "請求設定を開く"
+  "Open Billing Settings": "請求設定を開く",
+  "Video storage": "動画ストレージ"
 }

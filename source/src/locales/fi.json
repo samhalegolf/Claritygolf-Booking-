@@ -1761,7 +1761,6 @@
   "Update password": "Päivitä salasana",
   "Value": "Arvo",
   "Footer": "Alatunniste",
-  "Calendar feed & video storage": "Kalenterisyöte ja videoiden tallennus",
   "VIDEO STORAGE": "VIDEOIDEN TALLENNUS",
   "My Library and Clarity Cloud": "My Library ja Clarity Cloud",
   "My Library": "My Library",
@@ -1931,8 +1930,6 @@
   "A booking card is filled with its lesson type's colour, which you set on the lesson type itself. These two are the outlines it can wear on top: a border once the lesson is done, and a ring around the card while a bay is held for it. They sit on different edges, so a completed lesson with a live bay shows both.": "Varauskortti täytetään tuntityypin värillä, jonka asetat itse tuntityypissä. Nämä kaksi ovat sen päälle tulevat reunukset: reunus, kun tunti on pidetty, ja kehä kortin ympärillä, kun sille on varattu lyöntipaikka. Ne ovat eri reunoilla, joten pidetyssä tunnissa, jolla on voimassa oleva lyöntipaikka, näkyvät molemmat.",
   "Reset calendar colours": "Palauta kalenterin värit",
   "Import clients": "Tuo asiakkaat",
-  "CSV paste": "CSV-liitos",
-  "{peopleImportPreview} ready": "{peopleImportPreview} valmiina",
   "name,email,phone,notes,caddyProfileUrl": "name,email,phone,notes,caddyProfileUrl",
   "CSV file": "CSV-tiedosto",
   "Importing": "Tuodaan",
@@ -4698,5 +4695,6 @@
   "invoice": "lasku",
   "billing settings": "laskutusasetukset",
   "Invoicing defaults, payment methods, discounts and expense categories are in Billing › Settings.": "Laskutuksen oletukset, maksutavat, alennukset ja kululuokat ovat kohdassa Laskutus › Asetukset.",
-  "Open Billing Settings": "Avaa laskutusasetukset"
+  "Open Billing Settings": "Avaa laskutusasetukset",
+  "Video storage": "Videotallennus"
 }
