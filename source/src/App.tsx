@@ -7,16 +7,10 @@ import {
   ArrowRight,
   Check,
   Cloud,
-  CloudOff,
-  CloudUpload,
   Copy,
   Download,
   ChevronDown,
-  ChevronLeft,
-  ChevronRight,
   ChevronUp,
-  LayoutGrid,
-  List,
   Eye,
   ExternalLink,
   GripVertical,
@@ -25,10 +19,8 @@ import {
   LogOut,
   Moon,
   Nfc,
-  Pause,
   Percent,
   Phone,
-  Play,
   Plus,
   Pencil,
   RefreshCw,
@@ -60,7 +52,6 @@ import {
   ClarityLessonsProgrammes,
   ClarityLocations,
   ClarityMessages,
-  ClarityMore,
   ClarityNewBooking,
   ClarityNotifications,
   ClarityPassesCredits,
@@ -86,8 +77,6 @@ import { quickBookSlots } from "./modules/quick-book/quickBookModel";
 import { TodayScreen } from "./modules/today/TodayScreen";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "./modules/auth/apiFetch";
-import type { FrameViewerShot } from "./modules/shared/SnapshotFrameViewer";
-import type { SheetVideo } from "./modules/swing-review/SwingReviewSheet";
 import type { Session } from "./modules/auth/session";
 import { DeveloperContext } from "./modules/auth/developer";
 import type { TillLesson } from "./modules/billing/tillLessons";
@@ -217,7 +206,7 @@ import {
   getClarityCloudHealth,
   getLocalStorageActionLabel,
   getLocalStorageHealth,
-  getSavedVideoCloudStatusLabel,
+  isClarityCloudOperational,
   type ClarityCloudHealth,
   type ClarityCloudAction,
   type GoogleDriveTransferStatus,
@@ -305,6 +294,12 @@ import {
   parseQuantityInput,
 } from "./lib/money";
 import { safeText } from "./lib/text";
+import {
+  profileRecordDateLabel,
+  savedVideoCloudErrorLabel,
+} from "./modules/player-profiles/profileFormat";
+import type { CaddyStatus, PortalPlayer } from "./modules/player-profiles/portalAccess";
+import type { ShelfClip } from "./modules/player-profiles/PlayerProfilesScreen";
 import {
   adminCustomGroupAttendee,
   availabilityForCoach,
@@ -546,11 +541,9 @@ import {
 import type { PassTypeDraft } from "./modules/passes/PassTypesList";
 import type { BundleDraft } from "./modules/passes/BundlesList";
 import {
-  PRIMARY_PLAYER_TOOL_TABS,
   PlayerPracticeSummary,
   PlayerProfileTool,
   SECONDARY_PLAYER_TOOLS,
-  SECONDARY_PLAYER_TOOL_TABS,
   playerToolAllowed,
 } from "./modules/player-profiles/playerTools";
 import { useClientProfileController } from "./modules/clients/useClientProfileController";
@@ -563,6 +556,13 @@ import { ClientProfileView } from "./modules/clients/ClientProfileView";
 // /book-a-lesson page and the initial admin paint from downloading them.
 // The Profile view's panels, and the coach editor the Settings coaches list
 // opens. Loaded with the view rather than with the shell.
+// The Player Profiles screen and its add-player dialog, in one chunk.
+const PlayerProfilesScreen = lazy(() =>
+  import("./modules/player-profiles/PlayerProfilesScreen").then((module) => ({ default: module.PlayerProfilesScreen })),
+);
+const PlayerAddDialog = lazy(() =>
+  import("./modules/player-profiles/PlayerProfilesScreen").then((module) => ({ default: module.PlayerAddDialog })),
+);
 const BusinessHubPanel = lazy(() =>
   import("./modules/business-hub/BusinessHubPanel").then((module) => ({ default: module.BusinessHubPanel })),
 );
@@ -577,10 +577,6 @@ const CoachProfilePanel = lazy(() =>
 const VideoAnalysisPage = lazy(() =>
   import("./modules/video-analysis/VideoAnalysisPage").then((module) => ({ default: module.VideoAnalysisPage })),
 );
-// A swing review's page, and the drill library it draws on.
-const SwingReviewSheet = lazy(() =>
-  import("./modules/swing-review/SwingReviewSheet").then((module) => ({ default: module.SwingReviewSheet })),
-);
 const DrillLibrary = lazy(() =>
   import("./modules/swing-review/DrillLibrary").then((module) => ({ default: module.DrillLibrary })),
 );
@@ -589,11 +585,6 @@ const DrillLibrary = lazy(() =>
 const PuttingLabPage = lazy(() => import("./modules/putting-lab/PuttingLabPage"));
 const ClarityVoiceTextPanel = lazy(() =>
   import("./modules/clarity-voice/ClarityVoiceTextPanel").then((module) => ({ default: module.ClarityVoiceTextPanel })),
-);
-// Owns its own loading and its own writes. The console only tells it which
-// player is open.
-const PracticeBlockPanel = lazy(() =>
-  import("./modules/practice/PracticeBlockPanel").then((module) => ({ default: module.PracticeBlockPanel })),
 );
 
 // The kinds of block, and the favourites rail. Preferences, not work -- see
@@ -660,9 +651,6 @@ const TimeZoneSelect = lazy(() =>
 );
 const LanguageSelect = lazy(() =>
   import("./modules/settings/LanguageSettings").then((module) => ({ default: module.LanguageSelect })),
-);
-const SnapshotFrameViewer = lazy(() =>
-  import("./modules/shared/SnapshotFrameViewer").then((module) => ({ default: module.SnapshotFrameViewer })),
 );
 
 // Saved-video persistence is sizeable and the normal Today/Calendar startup
@@ -751,7 +739,7 @@ function prefetchPracticeForPlayer(playerId: string) {
 function cleanLessonNotes(notes: unknown[]): LessonNote[] {
   return cleanLessonNotesWith(notes, defaultWorkspaceAccountFromCoachAccount().id);
 }
-type BillingSection =
+export type BillingSection =
   | "none"
   | BillingGroup
   | "dashboard"
@@ -1125,25 +1113,7 @@ type GoogleCalendarActionState = "idle" | "connecting" | "saving" | "syncing" | 
 type GoogleDriveActionState = "idle" | "connecting" | "testing" | "disconnecting";
 
 /** What Clarity Caddy knows about a player, for the profile card. */
-type CaddyStatus = {
-  connected: boolean;
-  coachLinked?: boolean;
-  coachCount?: number;
-  access: string;
-  active?: boolean;
-  expiresAt?: string | null;
-  unavailable?: string;
-};
 
-/** A client the coach has given player portal access to. */
-type PortalPlayer = {
-  id: string;
-  personId: string;
-  email: string;
-  status: "invited" | "active" | "disabled";
-  invitedAt?: string | null;
-  lastLoginAt?: string | null;
-};
 
 type PasswordChangeForm = {
   currentPassword: string;
@@ -1327,86 +1297,9 @@ function getDefaultSyncBaseUrl() {
   return window.location.origin;
 }
 
-function profileRecordDateLabel(createdAt = "") {
-  if (!createdAt) return "";
-  const time = new Date(createdAt);
-  if (Number.isNaN(time.getTime())) return "";
-  return new Intl.DateTimeFormat(activeLocale(), {
-    day: "2-digit",
-    month: "short",
-    year: "2-digit",
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  })
-    .format(time)
-    .replace(",", "")
-    .replace(/\s(am|pm)$/i, (match) => match.toUpperCase());
-}
 
-function profileRecordTitle(playerName = "", createdAt = "") {
-  const name = safeText(playerName).trim() || t("Player");
-  const date = profileRecordDateLabel(createdAt);
-  return date ? `${name} - ${date}` : name;
-}
 
-function formatVideoDurationLabel(seconds?: number) {
-  if (!Number.isFinite(seconds ?? NaN) || !seconds) return t("Duration unknown");
-  const totalSeconds = Math.max(0, Math.round(seconds));
-  const minutes = Math.floor(totalSeconds / 60);
-  const remainder = totalSeconds % 60;
-  return `${minutes}:${String(remainder).padStart(2, "0")}`;
-}
 
-function savedVideoCloudErrorLabel(code?: string, fallback?: string) {
-  switch (code) {
-    case "CLOUD_OAUTH_NOT_CONFIGURED":
-      return t("Clarity Cloud is not configured for this environment.");
-    case "PROVIDER_STORAGE_UNAVAILABLE":
-      return t("Clarity Cloud setup is incomplete.");
-    case "DRIVE_API_DISABLED":
-      return t("Clarity Cloud is not enabled for this connection.");
-    case "DRIVE_UPLOAD_PROXY_FAILED":
-      return t("Clarity Cloud could not complete the upload.");
-    case "DRIVE_UPLOAD_TOO_LARGE":
-      return t("This transfer chunk was too large.");
-    case "DRIVE_SCOPE_MISSING":
-      return t("Clarity Cloud permission is required.");
-    case "GOOGLE_RECONNECT_REQUIRED":
-      return t("Reconnect Clarity Cloud to continue.");
-    case "GOOGLE_TOKEN_REFRESH_FAILED":
-      return t("Clarity Cloud could not refresh the Google connection.");
-    case "DRIVE_TRANSFER_FOLDER_FAILED":
-    case "DRIVE_FOLDER_PROVISION_FAILED":
-      return t("Clarity Cloud could not prepare the transfer folder.");
-    case "DRIVE_UPLOAD_SESSION_EXPIRED":
-      return t("Start a new upload session before retrying.");
-    case "DRIVE_UPLOAD_SESSION_FAILED":
-      return t("Clarity Cloud could not start the video upload.");
-    case "DRIVE_TRANSFER_STATE_FAILED":
-      return t("Clarity Cloud could not store the upload session.");
-    case "DRIVE_UPLOAD_VERIFY_FAILED":
-      return t("Clarity Cloud could not verify the uploaded video.");
-    case "DRIVE_UPLOAD_INTERRUPTED":
-      return t("Video upload was interrupted.");
-    case "SAVED_VIDEO_SOURCE_MISSING":
-      return t("Source unavailable.");
-    case "CLARITY_CLOUD_IMPORT_NOT_READY":
-      return t("This video is not ready to download from Clarity Cloud.");
-    case "CLARITY_CLOUD_IMPORT_VERIFY_FAILED":
-      return t("Imported video did not match the Clarity Cloud catalogue.");
-    case "CLARITY_CLOUD_IMPORT_RECEIPT_FAILED":
-      return t("Local import was verified, but the receipt could not be recorded.");
-    case "CLARITY_CLOUD_PROVIDER_FAILED":
-      return t("Your local video is safe. The cloud transfer service could not be reached.");
-    case "TRANSFER_PAUSED":
-      return t("Transfer paused.");
-    default:
-      return fallback && !/[{}<>]|https?:\/\//i.test(fallback) && fallback.length < 140
-        ? fallback
-        : t("Clarity Cloud could not complete the upload.");
-  }
-}
 
 function mergeSavedVideoItems(current: SavedVideoItem[], incoming: SavedVideoItem[]) {
   const byId = new Map(current.map((item) => [item.savedVideoId, item]));
@@ -1447,9 +1340,6 @@ function shouldOpenClarityCloudSettings(health: ClarityCloudHealth) {
   return "action" in health && health.action !== "retry";
 }
 
-function isClarityCloudOperational(health: ClarityCloudHealth) {
-  return health.state === "ready";
-}
 
 function sourceSideFromSlotKey(slotKey: string): ComparisonSide {
   return slotKey.endsWith(".right") ? "right" : "left";
@@ -1638,34 +1528,8 @@ function formatDateForDisplay(value: string) {
   return date.toLocaleDateString(activeLocale(), { day: "numeric", month: "short", year: "numeric" });
 }
 
-// An ISO timestamp -> "15 Jul 2026". Used where only the day matters.
-function formatTimestampForDisplay(value?: string | null) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleDateString(activeLocale(), { day: "numeric", month: "short", year: "numeric" });
-}
 
-/* The two-line date cell every player profile row leads with: the day on top,
- * the clock time under it. Returns both parts rather than a formatted string
- * because the row prints them at different weights. `time` is empty for a
- * record that only has a date, and the cell then shows the day on its own. */
-/** Seconds to "m:ss", for the duration badge on a shelf card. */
-function formatClipDuration(seconds: number) {
-  if (!Number.isFinite(seconds) || seconds <= 0) return "";
-  const whole = Math.round(seconds);
-  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
-}
 
-function profileWhenParts(value?: string | null) {
-  if (!value) return { day: "", time: "" };
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return { day: "", time: "" };
-  return {
-    day: date.toLocaleDateString(activeLocale(), { day: "numeric", month: "short" }),
-    time: date.toLocaleTimeString(activeLocale(), { hour: "2-digit", minute: "2-digit", hour12: false }),
-  };
-}
 
 // Whole days between two "YYYY-MM-DD" strings, computed via UTC midnight so
 // it isn't affected by daylight saving or the browser's local time zone.
@@ -4818,19 +4682,6 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
    * says what state it is in.
    */
   const playerVideoShelfGroups = useMemo(() => {
-    type ShelfClip = {
-      key: string;
-      savedVideoId: string;
-      title: string;
-      thumbnail: string;
-      duration: number;
-      at: string;
-      kind: "saved" | "submission" | "recovery";
-      unseen: boolean;
-      playable: boolean;
-      /** The same swing from the other camera: shown and opened as one package. */
-      partner?: ShelfClip;
-    };
     const loose: ShelfClip[] = [
       ...playerToolVideos.map((video) => ({
         key: `saved-${video.savedVideoId}`,
@@ -19229,1610 +19080,140 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
         )}
 
         {adminWorkspaceReady && activeView === "players" && (
-          <section className={`module-page player-profiles-page${phonePlayerOpen ? " is-phone-detail" : ""}`}>
-            <div className="player-profiles-toolbar">
-              <div className="player-profiles-heading">
-                <p>{t("{customerPlural} with {serviceSingular} notes or video, plus anyone you add.", { customerPlural: terms.customerPlural, serviceSingular: terms.serviceSingular.toLowerCase() })}</p>
-              </div>
-              <div className="player-profiles-actions">
-                <button
-                  type="button"
-                  className="icon-button"
-                  onClick={openPlayerAddDialog}
-                  title={t("Add {customerSingular}", { customerSingular: terms.customerSingular.toLowerCase() })}
-                  aria-label={t("Add {customerSingular}", { customerSingular: terms.customerSingular.toLowerCase() })}
-                >
-                  <Plus size={18} />
-                </button>
-                {capabilities.videoAnalysis && (
-                  <button
-                    type="button"
-                    className="icon-button new-video-button"
-                    onClick={() => {
-                      switchView("video");
-                      setVideoCameraRequested(true);
-                    }}
-                    title={t("Record a video")}
-                    aria-label={t("Record a video")}
-                  >
-                    <Plus size={16} />
-                    <ClarityVideoAnalysis size={18} />
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {unassignedVideos.length > 0 && (
-              <div className="player-unassigned-videos">
-                <p>
-                  {unassignedVideos.length === 1
-                    ? t("1 video was saved without a player.")
-                    : t("{length} videos were saved without a player.", { length: unassignedVideos.length })}
-                </p>
-                {unassignedVideos.map((video) => (
-                  <div className="player-unassigned-video" key={video.savedVideoId}>
-                    <span>
-                      {video.title || t("Saved video")}
-                      <span className="muted"> · {formatTimestampForDisplay(video.createdAt)}</span>
-                    </span>
-                    <button
-                      type="button"
-                      className="outline-button"
-                      disabled={Boolean(assigningVideoId)}
-                      onClick={() => void assignUnassignedVideo(video.savedVideoId)}
-                    >
-                      {assigningVideoId === video.savedVideoId ? t("Moving…") : t("Assign to player")}
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <div className="player-profiles-layout">
-              <div className="player-profiles-list">
-                {playerProfiles.length === 0 && playerProfilesDataReady ? (
-                  <div className="player-profiles-empty">
-                    <h2>{t("No {customerSingular} profiles yet", { customerSingular: terms.customerSingular.toLowerCase() })}</h2>
-                    <p>{t("Add a {serviceSingular} note or video to a {customerSingular}, or use + to add one.", { serviceSingular: terms.serviceSingular.toLowerCase(), customerSingular: terms.customerSingular.toLowerCase() })}</p>
-                  </div>
-                ) : (
-                  playerProfiles.map((player) => {
-                    const isSelectedPlayer = notesWorkspaceClient?.id === player.id;
-                    return (
-                      <div
-                        className={`player-profile-entry${isSelectedPlayer ? " is-expanded" : ""}${
-                          isSelectedPlayer && !playerToolExpanded ? " is-collapsed" : ""
-                        }`}
-                        key={player.id}
-                      >
-                        <article
-                          className={`player-profile-card${isSelectedPlayer ? " active" : ""}`}
-                          onClick={() => {
-                            if (isSelectedPlayer) {
-                              setPlayerToolExpanded((expanded) => !expanded);
-                            } else {
-                              selectPlayerProfileTool(player);
-                            }
-                          }}
-                        >
-                          <div className="player-profile-avatar">
-                            <ClarityProfile size={18} />
-                          </div>
-                          <div className="player-profile-body">
-                            <h3>{player.name}</h3>
-                            <span>{player.email || player.phone || t("No contact yet")}</span>
-                            <div className="player-profile-tags">
-                              {hasAnyProfileId(videoPlayerIds, player) && (
-                                <span className="tag">
-                                  <ClarityVideoAnalysis size={12} />{" "}{t("Video")}</span>
-                              )}
-                              {hasAnyProfileId(lessonNotePlayerIds, player) && (
-                                <span className="tag">
-                                  <ClarityBookingPages size={12} />{" "}{t("Lesson notes")}</span>
-                              )}
-                              {unseenSubmissionCounts.get(player.id) ? (
-                                <span className="tag is-unseen-submission">
-                                  <ClarityVideoAnalysis size={12} /> {unseenSubmissionCounts.get(player.id)}{" "}{t("new")}</span>
-                              ) : null}
-                            </div>
-                          </div>
-                          <button
-                            type="button"
-                            className="icon-button"
-                            title={t("Show videos")}
-                            aria-label={t("Show videos for {name}", { name: player.name })}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              selectPlayerProfileTool(
-                                { id: preferredVideoPlayerId(player, videoPlayerIds), name: player.name },
-                                "videos",
-                              );
-                            }}
-                          >
-                            <ClarityVideoAnalysis size={16} />
-                          </button>
-                        </article>
-
-                        {isSelectedPlayer && notesWorkspaceClient ? (
-                          <div className={`player-profile-tool-panel${playerToolExpanded ? "" : " collapsed"}`}>
-                            <div className="player-tool-header">
-                              <div>
-                                <span>{t("Player")}</span>
-                                <h3>{notesWorkspaceClient.name}</h3>
-                                <p>{notesWorkspaceClient.email || notesWorkspaceClient.phone || t("No contact yet")}</p>
-                                <p
-                                  className="player-tool-id"
-                                  title={t("Copy this player's id")}
-                                  onClick={() => {
-                                    void navigator.clipboard?.writeText(notesWorkspaceClient.id).catch(() => {});
-                                    setToast({ message: t("Player id copied.") });
-                                  }}
-                                >{t("ID: {id}", { id: notesWorkspaceClient.id })}</p>
-                              </div>
-                            </div>
-
-                            {playerToolExpanded && (
-                              <div
-                                className={`player-tool-tabs${playerToolTabsExpanded ? " is-expanded" : ""}`}
-                                role="tablist"
-                                aria-label={t("Player profile tools")}
-                              >
-                                {PRIMARY_PLAYER_TOOL_TABS.filter((tab) => playerToolAllowed(tab.id, capabilities)).map((tab) => (
-                                  <button
-                                    type="button"
-                                    key={tab.id}
-                                    className={playerProfileTool === tab.id ? "active" : ""}
-                                    onClick={() => setPlayerProfileTool(tab.id)}
-                                    role="tab"
-                                    aria-selected={playerProfileTool === tab.id}
-                                  >
-                                    <tab.Icon size={15} />
-                                    {tab.id === "practice" ? terms.assignmentPlural : tab.label}
-                                    {tab.id === "videos" && playerUnseenSubmissions ? (
-                                      <span className="player-tool-tab-count">{playerUnseenSubmissions}</span>
-                                    ) : null}
-                                  </button>
-                                ))}
-                                {playerToolTabsExpanded && (
-                                  <>
-                                    <span className="player-tool-tab-divider" aria-hidden="true" />
-                                    {SECONDARY_PLAYER_TOOL_TABS.filter((tab) => playerToolAllowed(tab.id, capabilities)).map((tab) => (
-                                      <button
-                                        type="button"
-                                        key={tab.id}
-                                        className={playerProfileTool === tab.id ? "active" : ""}
-                                        onClick={() => setPlayerProfileTool(tab.id)}
-                                        role="tab"
-                                        aria-selected={playerProfileTool === tab.id}
-                                      >
-                                        <tab.Icon size={15} />
-                                        {tab.label}
-                                      </button>
-                                    ))}
-                                  </>
-                                )}
-                                <button
-                                  type="button"
-                                  className="player-tool-tab-toggle"
-                                  aria-expanded={playerToolTabsExpanded}
-                                  title={
-                                    playerToolTabsExpanded
-                                      ? t("Collapse")
-                                      : t("Notes, Emails, Transactions, Passes, Portals")
-                                  }
-                                  onClick={() => {
-                                    // Closing the bar while one of the five is
-                                    // open would leave the body on a tab with
-                                    // no pill, so it falls back to the first.
-                                    if (playerToolTabsExpanded && SECONDARY_PLAYER_TOOLS.has(playerProfileTool)) {
-                                      setPlayerProfileTool("bookings");
-                                    }
-                                    setPlayerToolTabsExpanded(!playerToolTabsExpanded);
-                                  }}
-                                >
-                                  {playerToolTabsExpanded ? <ChevronLeft size={15} /> : <ChevronRight size={15} />}
-                                </button>
-                              </div>
-                            )}
-
-                            {playerToolExpanded && playerProfileTool === "bookings" ? (
-                              <div className="player-tool-body">
-                                <div className="player-tool-card">
-                                  <div className="player-tool-card-header">
-                                    <div>
-                                      <strong><ClarityCalendar size={16} />{t("Bookings")}</strong>
-                                      <span>{tn(playerToolAppointments.length, "{count} booking", "{count} bookings")}
-                                        {playerToolUpcomingCount ? t(" · {playerToolUpcomingCount} upcoming", { playerToolUpcomingCount }) : ""}
-                                      </span>
-                                    </div>
-                                    <button
-                                      type="button"
-                                      className="outline-button"
-                                      onClick={() => switchView("calendar")}
-                                    >{t("Book a lesson")}</button>
-                                  </div>
-                                  {playerToolAppointments.length ? (
-                                    playerToolAppointments.map((appointment) => {
-                                      const appointmentDays = buildWeekDays(itemWeek(appointment));
-                                      const service = itemService(appointment, services);
-                                      const upcoming = playerToolUpcomingIds.has(appointment.id);
-                                      return (
-                                        <div className="player-tool-row" key={appointment.id}>
-                                          <span className="player-tool-row-when">
-                                            {appointmentDays[appointment.day].label}
-                                            <br />
-                                            <span>{formatTime(appointment.start)}</span>
-                                          </span>
-                                          <div className="player-tool-row-main">
-                                            <strong>{service?.name ?? appointment.title}</strong>
-                                            <span>
-                                              {upcoming ? t("Upcoming") : t("Completed")} ·{" "}
-                                              {formatRange(appointment.start, appointment.duration)}
-                                              {appointment.note ? ` · ${appointment.note}` : ""}
-                                            </span>
-                                          </div>
-                                          <div className="player-tool-row-actions">
-                                            <button
-                                              type="button"
-                                              className="outline-button"
-                                              onClick={() => {
-                                                switchView("calendar");
-                                                setSelectedId(appointment.id);
-                                              }}
-                                            >{t("Open")}</button>
-                                          </div>
-                                        </div>
-                                      );
-                                    })
-                                  ) : (
-                                    <p className="player-tool-card-empty">{t("No bookings yet.")}</p>
-                                  )}
-                                </div>
-                              </div>
-                            ) : playerToolExpanded && playerProfileTool === "reviews" ? (
-                              <div className="player-tool-body">
-                                <div className="player-tool-card">
-                                  <div className="player-tool-card-header">
-                                    <div>
-                                      <strong><ClarityAssessments size={16} />{t("Swing reviews")}</strong>
-                                      <span>{tn(playerSwingReviewGroups.length, "{count} review · videos, screenshot notes and practice", "{count} reviews · videos, screenshot notes and practice")}</span>
-                                    </div>
-                                    <span className="swing-review-header-actions">
-                                      <button type="button" className="outline-button" onClick={() => setDrillLibraryOpen({})}>
-                                        <ClarityLessonsProgrammes size={15} />{t("Drill library")}</button>
-                                      <button
-                                        type="button"
-                                        className="primary-button"
-                                        onClick={() => startSwingReviewForClient(notesWorkspaceClient)}
-                                      >
-                                        <ImagePlus size={15} />{t("New swing review")}</button>
-                                    </span>
-                                  </div>
-                                  {playerPracticeLoadState === "loading" ? (
-                                    <Loading what={t("swing reviews")} className="player-tool-card-empty" />
-                                  ) : playerSwingReviewGroups.length ? (
-                                    playerSwingReviewGroups.map((review) => {
-                                      const expanded = openSwingReviewId === review.id;
-                                      const totalItems =
-                                        review.videos.length +
-                                        review.cloudVideos.length +
-                                        review.notes.length +
-                                        review.analysisNotes.length +
-                                        review.screenshots.length +
-                                        review.practice.length +
-                                        (reviewDocuments[review.id]?.blocks.filter((block) => block.type !== "video").length || 0);
-                                      const reviewTitle = reviewDocuments[review.id]?.title || "";
-                                      return (
-                                        <article className={`swing-review-record${expanded ? " is-expanded" : ""}`} key={review.id}>
-                                          <button
-                                            type="button"
-                                            className="swing-review-record-toggle"
-                                            aria-expanded={expanded}
-                                            onClick={() => setOpenSwingReviewId(expanded ? null : review.id)}
-                                          >
-                                            <span className="player-tool-row-when">
-                                              {profileWhenParts(review.at).day || t("Review")}
-                                              {profileWhenParts(review.at).time ? <><br /><span>{profileWhenParts(review.at).time}</span></> : null}
-                                            </span>
-                                            <span className="player-tool-row-main">
-                                              <strong>{reviewTitle || t("Swing review")}</strong>
-                                              <span>{tn(totalItems, "{count} item in this review file", "{count} items in this review file")}</span>
-                                            </span>
-                                            {expanded ? <ChevronUp size={17} /> : <ChevronDown size={17} />}
-                                          </button>
-                                          {expanded ? (() => {
-                                            const client = notesWorkspaceClient;
-                                            const savedIds = [
-                                              ...review.videos.map((video) => video.savedVideoId),
-                                              ...review.cloudVideos.map((video) => video.savedVideoId || video.savedVideo?.savedVideoId || ""),
-                                            ];
-                                            const document = reviewDocuments[review.id];
-                                            const displayBlocks = reviewDisplayBlocks(review.id, savedIds);
-                                            // A position on the page has to mean the same thing
-                                            // to the sheet and to whatever lands there later, so
-                                            // videos it was only showing are written in first.
-                                            const settlePage = () => {
-                                              if (!document) {
-                                                updateReviewDocument(review.id, client.id, { title: "", blocks: displayBlocks }, { immediate: true });
-                                              }
-                                            };
-                                            const sheetVideos: Record<string, SheetVideo> = {};
-                                            for (const video of review.videos) {
-                                              sheetVideos[video.savedVideoId] = {
-                                                savedVideoId: video.savedVideoId,
-                                                title: video.title,
-                                                thumbnailDataUrl: video.thumbnailDataUrl,
-                                                duration: video.source.duration,
-                                                snapshots: (video.analysisSnapshot.focusSnapshots || []).map((snapshot) => ({
-                                                  id: snapshot.id,
-                                                  title: snapshot.title,
-                                                  note: snapshot.note,
-                                                  currentTime: snapshot.currentTime,
-                                                  imageDataUrl: snapshot.imageDataUrl || undefined,
-                                                })),
-                                                notes: (video.analysisSnapshot.notes || []).map((note) => ({ id: note.id, text: note.text, time: note.time })),
-                                              };
-                                            }
-                                            for (const video of review.cloudVideos) {
-                                              const id = video.savedVideoId || video.savedVideo?.savedVideoId || "";
-                                              if (!id || sheetVideos[id]) continue;
-                                              sheetVideos[id] = {
-                                                savedVideoId: id,
-                                                title: video.savedVideo?.title || t("Cloud video"),
-                                                cloudOnly: true,
-                                                snapshots: [],
-                                                notes: [],
-                                              };
-                                            }
-                                            return (
-                                              <div className="swing-review-record-body">
-                                                <Suspense fallback={<Loading what={t("swing review")} />}>
-                                                  <SwingReviewSheet
-                                                    businessName={coachAccount.businessName}
-                                                    logoUrl={brandSettings.showLogo ? brandSettings.logoPreview : ""}
-                                                    coachName={coachAccount.coachName}
-                                                    playerName={client.name}
-                                                    reviewAt={review.at}
-                                                    title={document?.title || ""}
-                                                    blocks={displayBlocks}
-                                                    onChange={(next) => updateReviewDocument(review.id, client.id, next)}
-                                                    saveState={reviewSaveStates[review.id] || "idle"}
-                                                    videos={sheetVideos}
-                                                    sessionNotes={review.notes.map((note) => ({ id: note.id, label: note.title || t("Review note"), text: note.body }))}
-                                                    practice={review.practice.map((block) => ({
-                                                      id: block.id,
-                                                      title: block.title,
-                                                      content: block.content,
-                                                      meta: [block.status, block.dose].filter(Boolean).join(" · "),
-                                                    }))}
-                                                    onAddVideo={(index) => {
-                                                      settlePage();
-                                                      addVideoToReview(review.id, client, index);
-                                                    }}
-                                                    onAddDrill={(index) => {
-                                                      settlePage();
-                                                      setDrillLibraryOpen({ lessonId: review.id, index });
-                                                    }}
-                                                    onOpenVideo={(savedVideoId) => {
-                                                      reviewInsertRef.current = null;
-                                                      openVideoAnalysisForClient({
-                                                        id: preferredVideoPlayerId(client, videoPlayerIds),
-                                                        name: client.name,
-                                                        savedVideoId,
-                                                        lessonId: review.id,
-                                                        lessonTitle: reviewLessonTitle(review.id),
-                                                      });
-                                                    }}
-                                                    onOpenSnapshot={(savedVideoId, snapshotId) =>
-                                                      setSnapshotFrameView({ reviewId: review.id, key: `${savedVideoId}-${snapshotId}` })
-                                                    }
-                                                    onMakeDrillCopy={(block) => void makeDrillCopy(review.id, client, block)}
-                                                    actions={
-                                                      displayBlocks.length === 0 && !review.notes.length && !review.practice.length && !document?.sentAt ? (
-                                                        <button type="button" className="text-button" onClick={() => void discardEmptyReview(review.id)}>
-                                                          <Trash2 size={14} />{t("Discard this empty review")}</button>
-                                                      ) : (
-                                                        <>
-                                                          <button
-                                                            type="button"
-                                                            className="primary-button"
-                                                            disabled={sendingSwingReviewId === review.id}
-                                                            onClick={() =>
-                                                              void sendSwingReviewToPlayer(review, notesWorkspaceClient)
-                                                            }
-                                                          >
-                                                            <Send size={15} />
-                                                            {sendingSwingReviewId === review.id
-                                                              ? t("Sending…")
-                                                              : sentSwingReviewLink?.id === review.id || document?.sentAt
-                                                                ? t("Send again")
-                                                                : t("Send to player")}
-                                                          </button>
-                                                          {/* Only after a send, and only for that review: the
-                                                            * raw token exists in the send's response and
-                                                            * nowhere else, so there is no link to copy until
-                                                            * one has been minted in this session. */}
-                                                          {sentSwingReviewLink?.id === review.id ? (
-                                                            <button
-                                                              type="button"
-                                                              className="outline-button"
-                                                              onClick={() => {
-                                                                void navigator.clipboard
-                                                                  ?.writeText(sentSwingReviewLink.url)
-                                                                  .then(() => setToast({ message: t("Viewing link copied.") }))
-                                                                  .catch(() =>
-                                                                    setToast({ message: t("Could not copy the link.") }),
-                                                                  );
-                                                              }}
-                                                            >
-                                                              <ClarityIntegrations size={15} />{t("Copy viewing link")}</button>
-                                                          ) : null}
-                                                        </>
-                                                      )
-                                                    }
-                                                  />
-                                                </Suspense>
-                                                {snapshotFrameView?.reviewId === review.id ? (
-                                                  <Suspense fallback={<Loading what={t("the saved frame")} size="panel" />}>
-                                                    <SnapshotFrameViewer
-                                                      shots={review.screenshots.map((snapshot): FrameViewerShot => ({
-                                                        key: `${snapshot.savedVideoId}-${snapshot.id}`,
-                                                        savedVideoId: snapshot.savedVideoId,
-                                                        videoTitle: snapshot.videoTitle,
-                                                        title: snapshot.title,
-                                                        note: snapshot.note,
-                                                        currentTime: snapshot.currentTime,
-                                                        captureKind: snapshot.captureKind,
-                                                        cropRect: snapshot.cropRect,
-                                                        imageUrl: snapshot.imageDataUrl || undefined,
-                                                      }))}
-                                                      initialKey={snapshotFrameView.key}
-                                                      resolveVideoUrl={resolveReviewVideoUrl}
-                                                      onClose={() => setSnapshotFrameView(null)}
-                                                    />
-                                                  </Suspense>
-                                                ) : null}
-                                              </div>
-                                            );
-                                          })() : null}
-                                        </article>
-                                      );
-                                    })
-                                  ) : (
-                                    <div className="player-tool-card-empty">
-                                      <p>{t("No swing reviews yet.")}</p>
-                                      <span>{t("Start one to keep its videos, screenshot notes and practice together.")}</span>
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            ) : playerToolExpanded && playerProfileTool === "emails" ? (
-                              <div className="player-tool-body">
-                                <div className="player-tool-card">
-                                  <div className="player-tool-card-header">
-                                    <div>
-                                      <strong><ClarityEmail size={16} />{t("Emails")}</strong>
-                                      <span>{t("Everything sent to this person")}</span>
-                                    </div>
-                                  </div>
-                                  {playerToolNotifications.length ? (
-                                    playerToolNotifications.map((notification) => {
-                                      const when = profileWhenParts(notification.createdAt);
-                                      return (
-                                        <div className="player-tool-row" key={notification.id}>
-                                          <span className="player-tool-row-when">
-                                            {when.day || "—"}
-                                            {when.time ? (
-                                              <>
-                                                <br />
-                                                <span>{when.time}</span>
-                                              </>
-                                            ) : null}
-                                          </span>
-                                          <div className="player-tool-row-main">
-                                            <strong>
-                                              {notification.subject || notificationKindLabel(notification.kind)}
-                                            </strong>
-                                            <span>{t("{kind} to {recipient} · {notification}", { kind: notificationKindLabel(notification.kind), recipient: notification.recipient, notification: notificationStatusLabel(notification) })}</span>
-                                          </div>
-                                        </div>
-                                      );
-                                    })
-                                  ) : (
-                                    <p className="player-tool-card-empty">{t("No emails sent to this person yet.")}</p>
-                                  )}
-                                </div>
-                              </div>
-                            ) : playerToolExpanded && playerProfileTool === "transactions" ? (
-                              <div className="player-tool-body">
-                                <div className="player-tool-card">
-                                  <div className="player-tool-card-header">
-                                    <div>
-                                      <strong><ClarityPayments size={16} />{t("Transactions")}</strong>
-                                      <span>{t("Everything billed to this person")}</span>
-                                    </div>
-                                    {billingWorkspaceEnabled && (
-                                      <button
-                                        type="button"
-                                        className="outline-button"
-                                        onClick={() => openPosCheckoutForClient(notesWorkspaceClient)}
-                                      >{t("New sale")}</button>
-                                    )}
-                                  </div>
-                                  {notesWorkspaceClient.id.startsWith("appointment-") ? (
-                                    <p className="player-tool-card-empty">{t("Save this booking contact as a client to track their transactions.")}</p>
-                                  ) : playerTransactionsLoadState === "loading" ? (
-                                    <Loading what={t("transactions")} className="player-tool-card-empty" />
-                                  ) : playerTransactionsLoadState === "error" ? (
-                                    <p className="player-tool-card-empty">{t("Could not load transactions.")}{" "}<button
-                                        className="link-button"
-                                        type="button"
-                                        onClick={() => void fetchPlayerTransactions(notesWorkspaceClient.id)}
-                                      >{t("Retry")}</button>
-                                    </p>
-                                  ) : playerTransactions.length ? (
-                                    playerTransactions.map((row) =>
-                                      row.kind === "coupon" ? (
-                                        <div className="player-tool-row" key={`coupon-${row.coupon.id}`}>
-                                          <span className="player-tool-row-when">
-                                            {transactionDateLabel(row.date)}
-                                          </span>
-                                          <div className="player-tool-row-main">
-                                            <strong>{row.coupon.code}</strong>
-                                            <span>{t("Gift voucher · {remainingValue} left", { remainingValue: formatMoney(row.coupon.remainingValue, row.coupon.currency) })}{row.coupon.issuedToName
-                                                ? t(" · bought by {issuedToName}", { issuedToName: row.coupon.issuedToName })
-                                                : ""}
-                                            </span>
-                                          </div>
-                                        </div>
-                                      ) : row.kind === "sale" ? (
-                                        <div className="player-tool-row" key={`sale-${row.sale.id}`}>
-                                          <span className="player-tool-row-when">
-                                            {transactionDateLabel(row.date)}
-                                          </span>
-                                          <div className="player-tool-row-main">
-                                            <strong>{row.sale.description || row.sale.receiptNumber}</strong>
-                                            <span>
-                                              {formatMoney(row.sale.amount, row.sale.currency)} ·{" "}
-                                              {posMethodLabel(row.sale)} · {row.sale.receiptNumber}
-                                              {row.sale.isLessonPass ? t(" · Lesson pass") : ""}
-                                            </span>
-                                          </div>
-                                        </div>
-                                      ) : (
-                                        <div className="player-tool-row" key={`invoice-${row.invoice.id}`}>
-                                          <span className="player-tool-row-when">
-                                            {transactionDateLabel(row.date)}
-                                          </span>
-                                          <div className="player-tool-row-main">
-                                            <strong>{row.invoice.invoiceNumber}</strong>
-                                            <span>
-                                              {formatMoney(row.invoice.total, row.invoice.currency)} ·{" "}
-                                              {row.invoice.status}
-                                              {row.invoice.relation === "included"
-                                                ? ` · ${t("billed to {name}", { name: row.invoice.customerName || t("someone else") })}`
-                                                : ""}
-                                            </span>
-                                          </div>
-                                          <div className="player-tool-row-actions">
-                                            <button
-                                              type="button"
-                                              className="outline-button"
-                                              onClick={() => {
-                                                switchView("billing");
-                                                void openInvoiceForEdit(row.invoice);
-                                              }}
-                                            >{t("Invoice")}</button>
-                                          </div>
-                                        </div>
-                                      ),
-                                    )
-                                  ) : (
-                                    <p className="player-tool-card-empty">{t("No transactions for this person yet.")}</p>
-                                  )}
-                                </div>
-                              </div>
-                            ) : playerToolExpanded && playerProfileTool === "passes" ? (
-                              <div className="player-tool-body">
-                                <div className="player-tool-card">
-                                  <div className="player-tool-card-header">
-                                    <div>
-                                      <strong><ClarityPassesCredits size={16} />{t("Passes")}</strong>
-                                      <span>{t("Lesson credits held by this person")}</span>
-                                    </div>
-                                  </div>
-                                  {/* Passes are designed but not built -- see
-                                      docs/pass-system-design.md. There is no pass
-                                      record to read, so this says so rather than
-                                      showing an empty list that reads as "this
-                                      person has none". */}
-                                  <p className="player-tool-card-empty">{t("Passes are not built yet. Lesson packages sold through checkout show up under Transactions, tagged as a lesson pass.")}</p>
-                                </div>
-                              </div>
-                            ) : playerToolExpanded && playerProfileTool === "portals" ? (
-                              <div className="player-tool-body">
-                                {(() => {
-                                  const portalPlayer = portalPlayers.find(
-                                    (entry) => entry.personId === notesWorkspaceClient.id && entry.status !== "disabled",
-                                  );
-                                  const busy = portalPlayerBusyId === notesWorkspaceClient.id;
-                                  return (
-                                    <div className="player-portal-access">
-                                      <div className="player-portal-access-body">
-                                        <strong>{t("Player portal")}</strong>
-                                        <span>
-                                          {!notesWorkspaceClient.email
-                                            ? t("Add an email address to give this player portal access.")
-                                            : !portalPlayer
-                                              ? t("No access yet. They can be given a login to see their lessons, notes and videos.")
-                                              : portalPlayer.status === "active"
-                                                ? portalPlayer.lastLoginAt
-                                                  ? t("Active · last signed in {when}", { when: formatTimestampForDisplay(portalPlayer.lastLoginAt) })
-                                                  : t("Active")
-                                                : t("Invited · waiting for them to set a password")}
-                                        </span>
-                                      </div>
-                                      <div className="player-portal-access-actions">
-                                        <label className="player-caddy-pass-toggle" title={t("Issues a 30 day Clarity Caddy pass at the same time")}>
-                                          <input
-                                            type="checkbox"
-                                            checked={includeCaddyPass}
-                                            onChange={(event) => setIncludeCaddyPass(event.target.checked)}
-                                            disabled={busy || !notesWorkspaceClient.email}
-                                          />
-                                          <span>{t("Include Clarity Caddy Pass")}</span>
-                                        </label>
-                                        <button
-                                          type="button"
-                                          className="outline-button"
-                                          disabled={busy || !notesWorkspaceClient.email}
-                                          onClick={() => void grantPortalAccess(notesWorkspaceClient)}
-                                        >
-                                          {portalPlayer ? t("Resend invite") : t("Give portal access")}
-                                        </button>
-                                        {portalPlayer && (
-                                          <button
-                                            type="button"
-                                            className="outline-button"
-                                            disabled={busy}
-                                            onClick={() => void revokePortalAccess(portalPlayer.id, notesWorkspaceClient.id)}
-                                          >{t("Remove access")}</button>
-                                        )}
-                                      </div>
-                                    </div>
-                                  );
-                                })()}
-
-                                {/* Caddy is a separate product with separate access, so it gets its
-                                    own card rather than being folded into the portal row. */}
-                                {(() => {
-                                  const entry = caddyStatuses[notesWorkspaceClient.id];
-                                  const hasPortal = portalPlayers.some(
-                                    (candidate) =>
-                                      candidate.personId === notesWorkspaceClient.id && candidate.status !== "disabled",
-                                  );
-                                  if (!hasPortal) return null;
-                                  const status = entry?.status;
-                                  const detail = !entry
-                                    ? t("Checking…")
-                                    : status?.unavailable === "unreachable"
-                                      ? t("Could not read Caddy status right now.")
-                                      : status?.unavailable === "not_configured"
-                                        ? t("Clarity Caddy is not connected to this deployment.")
-                                        : !status?.connected
-                                          ? t("No Clarity Caddy account yet.")
-                                          : status.expiresAt
-                                            ? t("Account: Connected · Access: {access} until {until}", {
-                                                access: status.active ? status.access : t("Free"),
-                                                until: formatTimestampForDisplay(status.expiresAt),
-                                              })
-                                            : t("Account: Connected · Access: {access}", {
-                                                access: status.active ? status.access : t("Free"),
-                                              });
-                                  return (
-                                    <div className="player-caddy-card">
-                                      <div className="player-caddy-card-body">
-                                        <strong>{t("Clarity Caddy")}</strong>
-                                        <span>{detail}</span>
-                                        {status?.connected && status.coachCount && status.coachCount > 1 ? (
-                                          <span>{tn(status.coachCount - 1, "Also coached by {count} other.", "Also coached by {count} others.")}</span>
-                                        ) : null}
-                                      </div>
-                                      <div className="player-caddy-card-actions">
-                                        {!entry ? (
-                                          <button
-                                            type="button"
-                                            className="outline-button"
-                                            onClick={() => void refreshCaddyStatus(notesWorkspaceClient.id)}
-                                          >{t("Check Caddy")}</button>
-                                        ) : entry.deepLink ? (
-                                          <a
-                                            className="outline-button"
-                                            href={entry.deepLink}
-                                            target="_blank"
-                                            rel="noreferrer noopener"
-                                          >{t("Open in Clarity Caddy ↗")}</a>
-                                        ) : (
-                                          <button
-                                            type="button"
-                                            className="outline-button"
-                                            onClick={() => void refreshCaddyStatus(notesWorkspaceClient.id)}
-                                          >{t("Retry")}</button>
-                                        )}
-                                      </div>
-                                    </div>
-                                  );
-                                })()}
-
-                                {isAdminUser && (
-                                  <div className="player-portal-access">
-                                    <div className="player-portal-access-body">
-                                      <strong>{t("Danger zone")}</strong>
-                                      <span>{t("Permanently delete this player: their record, bookings, practice blocks, videos, lesson notes and portal login. No email is sent, and this cannot be undone.")}</span>
-                                    </div>
-                                    <div className="player-portal-access-actions">
-                                      <button
-                                        type="button"
-                                        className="danger-button"
-                                        disabled={personDeleteBusyId === notesWorkspaceClient.id}
-                                        onClick={() => void hardDeletePerson(notesWorkspaceClient)}
-                                      >
-                                        <Trash2 size={16} />
-                                        {personDeleteBusyId === notesWorkspaceClient.id
-                                          ? t("Deleting…")
-                                          : t("Delete permanently")}
-                                      </button>
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            ) : playerToolExpanded && playerProfileTool === "notes" ? (
-                              <div className="player-tool-body">
-                                <Suspense fallback={<Loading what={t("voice notes")} />}>
-                                  <ClarityVoiceTextPanel
-                                    fieldLabel={t("Lesson note")}
-                                    placeholder={t("Type or dictate the coach lesson note.")}
-                                    onCommit={(text) => saveLessonNoteForClient(notesWorkspaceClient, text, "voice")}
-                                  />
-                                </Suspense>
-                                <div className="lesson-notes-list">
-                                  {notesWorkspaceLessonNotes.length ? (
-                                    notesWorkspaceLessonNotes.map((note) => (
-                                      <article className="lesson-note-card" key={note.id}>
-                                        <div>
-                                          <strong>{profileRecordTitle(notesWorkspaceClient.name, note.updatedAt || note.createdAt)}</strong>
-                                          <span>
-                                            {note.title || t("Lesson note")} · {note.source === "voice" ? t("Voice note") : t("Typed note")}
-                                            {note.lessonId && playerToolVideos.some((video) => video.lessonId === note.lessonId)
-                                              ? t(" · Linked lesson video")
-                                              : ""}
-                                          </span>
-                                        </div>
-                                        <p>{note.body}</p>
-                                        <button
-                                          type="button"
-                                          className="outline-button"
-                                          onClick={() => void deleteLessonNote(note.id)}
-                                          disabled={lessonNoteBusy}
-                                        >
-                                          <Trash2 size={14} />{t("Delete")}</button>
-                                      </article>
-                                    ))
-                                  ) : (
-                                    <p className="notes-empty">{t("No lesson notes yet.")}</p>
-                                  )}
-                                </div>
-                              </div>
-                            ) : playerToolExpanded && playerProfileTool === "practice" ? (
-                              <div className="player-tool-body">
-                                {/* Two readings of the same thing. The list
-                                    answers "what is this player working on",
-                                    which is the question the profile is open
-                                    for; the module's own panel is the composer
-                                    and the wall, and opens over it on demand. */}
-                                {playerPracticeComposer ? (
-                                  <>
-                                    <div className="player-tool-inline-actions">
-                                      <button
-                                        type="button"
-                                        className="outline-button"
-                                        onClick={() => setPlayerPracticeComposer(false)}
-                                      >
-                                        <ChevronLeft size={15} />{t("Back to practice list")}</button>
-                                    </div>
-                                  <Suspense fallback={<Loading what={t("practice")} />}>
-                                    <PracticeBlockPanel
-                                      // Keyed so switching player remounts rather
-                                      // than showing the previous player's blocks
-                                      // until the fetch lands.
-                                      key={notesWorkspaceClient.id}
-                                      player={{ id: notesWorkspaceClient.id, name: notesWorkspaceClient.name }}
-                                      onUnauthorized={() => setAuthStatus("guest")}
-                                      onToast={(message) => setToast({ message })}
-                                    />
-                                  </Suspense>
-                                  </>
-                                ) : (
-                                  <div className="player-tool-card">
-                                    <div className="player-tool-card-header">
-                                      <div>
-                                        <strong><ClarityLessonsProgrammes size={16} />{t("Practice")}</strong>
-                                        <span>{tn(activePlayerPracticeBlocks.length, "{count} active block", "{count} active blocks")}
-                                          {playerPracticeExpiringCount
-                                            ? t(" · {playerPracticeExpiringCount} expiring next lesson", { playerPracticeExpiringCount })
-                                            : ""}
-                                        </span>
-                                      </div>
-                                      <button
-                                        type="button"
-                                        className="outline-button"
-                                        onClick={() => setPlayerPracticeComposer(true)}
-                                      >{t("Assign a block")}</button>
-                                    </div>
-                                    {playerPracticeLoadState === "loading" ? (
-                                      <Loading what={t("practice")} className="player-tool-card-empty" />
-                                    ) : playerPracticeLoadState === "error" ? (
-                                      <p className="player-tool-card-empty">{t("Could not load practice for this player.")}</p>
-                                    ) : activePlayerPracticeBlocks.length ? (
-                                      activePlayerPracticeBlocks.map((block) => (
-                                        <div className="player-tool-row is-practice" key={block.id}>
-                                          <span
-                                            className="player-tool-row-tone"
-                                            style={block.tone ? { background: block.tone } : undefined}
-                                            title={block.typeLabel}
-                                          >
-                                            {block.typeLabel.slice(0, 1).toUpperCase()}
-                                          </span>
-                                          <div className="player-tool-row-main">
-                                            <strong>{block.title}</strong>
-                                            <span>
-                                              {[
-                                                block.typeLabel,
-                                                block.steps
-                                                  ? tn(block.steps, "{count} step", "{count} steps")
-                                                  : "",
-                                                block.dose,
-                                                block.expiryType === "next_lesson"
-                                                  ? "expires next lesson"
-                                                  : block.expiryType === "set_date" && block.expiryDate
-                                                    ? `expires ${formatTimestampForDisplay(block.expiryDate)}`
-                                                    : "no expiry",
-                                                block.hasVideo ? "video attached" : "",
-                                              ]
-                                                .filter(Boolean)
-                                                .join(" · ")}
-                                            </span>
-                                          </div>
-                                          <div className="player-tool-row-actions">
-                                            <button
-                                              type="button"
-                                              className="outline-button"
-                                              onClick={() => setPlayerPracticeComposer(true)}
-                                            >{t("Open")}</button>
-                                          </div>
-                                        </div>
-                                      ))
-                                    ) : (
-                                      <p className="player-tool-card-empty">{t("Nothing set to practise yet.")}</p>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            ) : playerToolExpanded ? (
-                              <div className="player-tool-body">
-                                <div className="player-video-toolbar">
-                                  <div className="player-video-toolbar-count">
-                                    <strong>{tn(playerVideoSummary.total, "{count} saved video", "{count} saved videos")}
-                                    </strong>
-                                    <span>{playerVideoSummary.detail}</span>
-                                  </div>
-                                  <div className="player-video-toolbar-actions">
-                                    <button
-                                      type="button"
-                                      className="outline-button"
-                                      onClick={() =>
-                                        openVideoAnalysisForClient({
-                                          id: preferredVideoPlayerId(notesWorkspaceClient, videoPlayerIds),
-                                          name: notesWorkspaceClient.name,
-                                        })
-                                      }
-                                    >
-                                      <ClarityVideoAnalysis size={15} />{t("Add video")}</button>
-                                    <div
-                                      className="player-video-view-toggle"
-                                      role="group"
-                                      aria-label={t("Video layout")}
-                                    >
-                                      <button
-                                        type="button"
-                                        title={t("Ledger")}
-                                        aria-label={t("Ledger")}
-                                        aria-pressed={playerVideoView === "ledger"}
-                                        className={playerVideoView === "ledger" ? "active" : ""}
-                                        onClick={() => setPlayerVideoView("ledger")}
-                                      >
-                                        <List size={16} />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        title={t("Shelf")}
-                                        aria-label={t("Shelf")}
-                                        aria-pressed={playerVideoView === "shelf"}
-                                        className={playerVideoView === "shelf" ? "active" : ""}
-                                        onClick={() => setPlayerVideoView("shelf")}
-                                      >
-                                        <LayoutGrid size={16} />
-                                      </button>
-                                    </div>
-                                  </div>
-                                </div>
-
-                                {playerVideoView === "shelf" ? (
-                                  <div>
-                                    {playerVideoShelfGroups.length ? (
-                                      playerVideoShelfGroups.map((group) => (
-                                        <div key={group.key}>
-                                          <div className="player-video-shelf-group">
-                                            <strong>{group.label}</strong>
-                                            <span>{tn(group.clips.length, "{count} clip", "{count} clips")}
-                                              {group.unseen ? t(" · {unseen} new", { unseen: group.unseen }) : ""}
-                                            </span>
-                                          </div>
-                                          <div className="player-video-shelf-grid">
-                                            {group.clips.map((clip) => (
-                                              <article
-                                                className={`player-video-shelf-card${clip.unseen ? " is-unseen" : ""}`}
-                                                key={clip.key}
-                                              >
-                                                <button
-                                                  type="button"
-                                                  className={`player-video-shelf-thumb${clip.partner ? " is-pair" : ""}`}
-                                                  disabled={!clip.playable}
-                                                  title={clip.playable ? t("Play {title}", { title: clip.title }) : clip.title}
-                                                  onClick={() =>
-                                                    openVideoAnalysisForClient({
-                                                      id: preferredVideoPlayerId(
-                                                        notesWorkspaceClient,
-                                                        videoPlayerIds,
-                                                      ),
-                                                      name: notesWorkspaceClient.name,
-                                                      savedVideoId: clip.savedVideoId,
-                                                      pairedSavedVideoId: clip.partner?.savedVideoId,
-                                                    })
-                                                  }
-                                                >
-                                                  {[clip, ...(clip.partner ? [clip.partner] : [])].map((angle) =>
-                                                    angle.thumbnail ? (
-                                                      <img key={angle.key} src={angle.thumbnail} alt="" />
-                                                    ) : (
-                                                      <ClarityVideoAnalysis key={angle.key} size={20} />
-                                                    ),
-                                                  )}
-                                                  {clip.unseen ? (
-                                                    <span className="player-video-shelf-badge">{t("New")}</span>
-                                                  ) : null}
-                                                  {clip.duration ? (
-                                                    <span className="player-video-shelf-duration">
-                                                      {formatClipDuration(clip.duration)}
-                                                    </span>
-                                                  ) : null}
-                                                </button>
-                                                <div className="player-video-shelf-body">
-                                                  <strong>{clip.title}</strong>
-                                                  <span>
-                                                    {clip.partner
-                                                      ? t("Same swing · 2 angles")
-                                                      : clip.kind === "submission"
-                                                      ? t("Player submission")
-                                                      : clip.kind === "recovery"
-                                                        ? t("Recovery only")
-                                                        : t("Local Storage")}
-                                                  </span>
-                                                </div>
-                                              </article>
-                                            ))}
-                                          </div>
-                                        </div>
-                                      ))
-                                    ) : (
-                                      <p className="notes-empty">{t("No videos yet.")}</p>
-                                    )}
-                                    <button
-                                      type="button"
-                                      className="player-video-shelf-add"
-                                      onClick={() =>
-                                        openVideoAnalysisForClient({
-                                          id: preferredVideoPlayerId(notesWorkspaceClient, videoPlayerIds),
-                                          name: notesWorkspaceClient.name,
-                                        })
-                                      }
-                                    >{t("+ Add from Video Analysis")}</button>
-                                  </div>
-                                ) : (
-                                <div className="player-video-list">
-                                  {!managedLocalLibraryStatus.configured ? (
-                                    <article className="player-video-card is-library-status">
-                                      <div className="player-video-thumb is-empty">
-                                        <ClarityFilesMedia size={16} />
-                                      </div>
-                                      <div className="player-video-card-body">
-                                        <strong>{t("My Library not connected")}</strong>
-                                        <span>{t("Videos stay available through device cache. Connect My Library only for permanent local copies.")}</span>
-                                      </div>
-                                      <div className="player-video-card-actions">
-                                        <button
-                                          type="button"
-                                          className="primary-button"
-                                          disabled={!managedLocalLibraryStatus.supported}
-                                          onClick={() => void runManagedLibraryAction("choose")}
-                                        >
-                                          <ClarityFilesMedia size={14} />{t("Choose My Library")}</button>
-                                      </div>
-                                    </article>
-                                  ) : managedLocalLibraryStatus.health !== "healthy" ? (
-                                    <article className="player-video-card is-library-status">
-                                      <div className="player-video-thumb is-empty">
-                                        <AlertTriangle size={16} />
-                                      </div>
-                                      <div className="player-video-card-body">
-                                        <strong>{managedLocalLibraryStatus.message}</strong>
-                                        <span>{t("Working from device cache. Reconnect My Library when available.")}</span>
-                                      </div>
-                                      <div className="player-video-card-actions">
-                                        <button
-                                          type="button"
-                                          className="outline-button"
-                                          onClick={() => void runManagedLibraryAction("reconnect")}
-                                        >
-                                          <RefreshCw size={14} />{t("Reconnect folder")}</button>
-                                      </div>
-                                    </article>
-                                  ) : null}
-                                  {playerToolVideos.length || playerToolCloudVideos.length || playerToolLegacyVideoRecords.length ? (
-                                    <>
-                                      {groupSameSwingAngles(
-                                        playerToolVideos,
-                                        (video) => video.savedVideoId,
-                                        playerVideoAnglePairs,
-                                      ).map((angles) => {
-                                        const renderSavedVideoCard = (video: SavedVideoItem) => {
-                                        const cloudOperational = isClarityCloudOperational(clarityCloudHealth);
-                                        const cloudStatus = video.cloud?.status || "not-uploaded";
-                                        const isUploading =
-                                          cloudOperational &&
-                                          (uploadingSavedVideoIds.has(video.savedVideoId) ||
-                                            video.cloud?.status === "preparing" ||
-                                            video.cloud?.status === "session-created" ||
-                                            video.cloud?.status === "uploading" ||
-                                            video.cloud?.status === "verifying");
-                                        const cloudLabel = getSavedVideoCloudStatusLabel(video, {
-                                          isUploading,
-                                          cloudConnected: googleDriveTransfer.connected,
-                                          cloudState: googleDriveTransfer.state,
-                                          cloudHealth: clarityCloudHealth,
-                                        });
-                                        const cloudErrorLabel =
-                                          video.cloud?.status === "failed"
-                                            ? savedVideoCloudErrorLabel(video.cloud.lastUploadErrorCode, video.cloud.errorMessage)
-                                            : "";
-                                        const canRetryCloud =
-                                          video.local.status === "available" &&
-                                          cloudOperational &&
-                                          cloudStatus !== "ready" &&
-                                          cloudStatus !== "imported" &&
-                                          !isUploading;
-                                        const sendLabel =
-                                          cloudStatus === "failed"
-                                            ? t("Retry upload")
-                                            : cloudStatus === "paused"
-                                              ? t("Resume upload")
-                                              : t("Retry upload");
-                                        const canPause =
-                                          cloudOperational &&
-                                          cloudStatus === "uploading" &&
-                                          Number(video.cloud?.acceptedOffsetBytes || 0) > 0;
-                                        const canCancel =
-                                          cloudOperational &&
-                                          (cloudStatus === "preparing" ||
-                                            cloudStatus === "session-created" ||
-                                            cloudStatus === "uploading" ||
-                                            cloudStatus === "paused");
-                                        const canRemoveTransfer = cloudOperational && cloudStatus === "failed";
-                                        const hasDeviceCopy = video.local.status !== "missing";
-                                        const canRemoveFromDevice =
-                                          (cloudStatus === "ready" || cloudStatus === "imported") &&
-                                          hasDeviceCopy;
-                                        const cloudSaved = cloudStatus === "ready" || cloudStatus === "imported";
-                                        const cloudFailed = cloudStatus === "failed" || !cloudOperational;
-                                        const cloudState = isUploading
-                                          ? "uploading"
-                                          : cloudSaved
-                                            ? "saved"
-                                            : cloudFailed
-                                              ? "failed"
-                                              : "pending";
-                                        const cloudBadgeLabel = isUploading
-                                          ? t("Uploading to Clarity Cloud")
-                                          : cloudSaved
-                                            ? t("Saved in Clarity Cloud")
-                                            : cloudStatus === "failed"
-                                              ? cloudErrorLabel || t("Clarity Cloud upload failed")
-                                              : !cloudOperational
-                                                ? cloudLabel
-                                                : t("Waiting to upload to Clarity Cloud");
-                                        const videoTitle = profileRecordTitle(
-                                          notesWorkspaceClient.name,
-                                          video.updatedAt || video.createdAt,
-                                        );
-                                        const videoRawTitle = video.title || videoTitle;
-                                        const menuOpen = openSavedVideoMenuId === video.savedVideoId;
-                                        const closeMenu = () => setOpenSavedVideoMenuId(null);
-                                        const playVideo = () =>
-                                          openVideoAnalysisForClient({
-                                            id: video.playerId,
-                                            name: notesWorkspaceClient.name,
-                                            savedVideoId: video.savedVideoId,
-                                          });
-                                        return (
-                                          <article className="player-video-card" key={video.savedVideoId}>
-                                            <button
-                                              type="button"
-                                              className="player-video-thumb-button"
-                                              onClick={playVideo}
-                                              title={t("Play {videoTitle}", { videoTitle })}
-                                              aria-label={t("Play {videoTitle}", { videoTitle })}
-                                            >
-                                              {video.thumbnailDataUrl ? (
-                                                <img
-                                                  className="player-video-thumb"
-                                                  src={video.thumbnailDataUrl}
-                                                  alt=""
-                                                />
-                                              ) : (
-                                                <div className="player-video-thumb is-empty">
-                                                  <ClarityVideoAnalysis size={16} />
-                                                </div>
-                                              )}
-                                              <span className="player-video-thumb-play" aria-hidden="true">
-                                                <Play size={14} />
-                                              </span>
-                                            </button>
-                                            <div className="player-video-card-body">
-                                              <strong title={videoRawTitle !== videoTitle ? videoRawTitle : undefined}>
-                                                {videoTitle}
-                                              </strong>
-                                              {linkedLessonVideoIds.has(video.savedVideoId) ? (
-                                                <span>{t("Linked lesson note")}</span>
-                                              ) : null}
-                                            </div>
-                                            <div className="player-video-card-actions">
-                                              <span
-                                                className={`player-video-cloud-badge is-${cloudState}`}
-                                                title={cloudBadgeLabel}
-                                                aria-label={cloudBadgeLabel}
-                                                role="img"
-                                              >
-                                                {cloudState === "uploading" ? (
-                                                  <CloudUpload size={16} />
-                                                ) : cloudState === "saved" ? (
-                                                  <Cloud size={16} />
-                                                ) : cloudState === "failed" ? (
-                                                  <CloudOff size={16} />
-                                                ) : (
-                                                  <CloudUpload size={16} />
-                                                )}
-                                              </span>
-                                              <div className="player-video-menu">
-                                                <button
-                                                  type="button"
-                                                  className="icon-button"
-                                                  aria-haspopup="menu"
-                                                  aria-expanded={menuOpen}
-                                                  aria-label={t("Video options")}
-                                                  title={t("Video options")}
-                                                  onClick={() =>
-                                                    setOpenSavedVideoMenuId(menuOpen ? null : video.savedVideoId)
-                                                  }
-                                                >
-                                                  <ClarityMore size={16} />
-                                                </button>
-                                                {menuOpen ? (
-                                                  <>
-                                                    <button
-                                                      type="button"
-                                                      className="player-video-menu-scrim"
-                                                      aria-label={t("Close video options")}
-                                                      onClick={closeMenu}
-                                                    />
-                                                    <div className="player-video-menu-panel" role="menu">
-                                                      <button
-                                                        type="button"
-                                                        role="menuitem"
-                                                        onClick={() => {
-                                                          closeMenu();
-                                                          playVideo();
-                                                        }}
-                                                      >
-                                                        <Play size={14} />{t("Play")}</button>
-                                                      {cloudOperational && canRetryCloud ? (
-                                                        <button
-                                                          type="button"
-                                                          role="menuitem"
-                                                          onClick={() => {
-                                                            closeMenu();
-                                                            void sendSavedVideoToPrimaryComputer(video);
-                                                          }}
-                                                        >
-                                                          <Send size={14} />
-                                                          {sendLabel}
-                                                        </button>
-                                                      ) : null}
-                                                      {cloudOperational &&
-                                                      portalPlayers.some(
-                                                        (entry) =>
-                                                          entry.personId === notesWorkspaceClient.id &&
-                                                          entry.status !== "disabled",
-                                                      ) ? (
-                                                        <button
-                                                          type="button"
-                                                          role="menuitem"
-                                                          onClick={() => {
-                                                            closeMenu();
-                                                            void sendSavedVideoToPlayer(
-                                                              video,
-                                                              notesWorkspaceClient.id,
-                                                            );
-                                                          }}
-                                                        >
-                                                          <Send size={14} />{t("Send to player")}</button>
-                                                      ) : null}
-                                                      {canPause ? (
-                                                        <button
-                                                          type="button"
-                                                          role="menuitem"
-                                                          onClick={() => {
-                                                            closeMenu();
-                                                            void pauseSavedVideoTransfer(video);
-                                                          }}
-                                                        >
-                                                          <Pause size={14} />{t("Pause upload")}</button>
-                                                      ) : null}
-                                                      {canCancel ? (
-                                                        <button
-                                                          type="button"
-                                                          role="menuitem"
-                                                          onClick={() => {
-                                                            closeMenu();
-                                                            void cancelSavedVideoTransfer(video);
-                                                          }}
-                                                        >
-                                                          <X size={14} />{t("Cancel upload")}</button>
-                                                      ) : null}
-                                                      {canRemoveTransfer ? (
-                                                        <button
-                                                          type="button"
-                                                          role="menuitem"
-                                                          onClick={() => {
-                                                            closeMenu();
-                                                            void removeSavedVideoTransfer(video);
-                                                          }}
-                                                        >
-                                                          <X size={14} />{t("Clear failed upload")}</button>
-                                                      ) : null}
-                                                      {hasDeviceCopy && video.local.managed?.status !== "healthy" ? (
-                                                        <button
-                                                          type="button"
-                                                          role="menuitem"
-                                                          onClick={() => {
-                                                            closeMenu();
-                                                            void showSavedVideoInFinder(video);
-                                                          }}
-                                                        >
-                                                          <ClarityFilesMedia size={14} />{t("Keep a copy in My Library")}</button>
-                                                      ) : null}
-                                                      {hasDeviceCopy ? (
-                                                        <button
-                                                          type="button"
-                                                          role="menuitem"
-                                                          onClick={() => {
-                                                            closeMenu();
-                                                            void revealSavedVideoFile(video);
-                                                          }}
-                                                        >
-                                                          <ExternalLink size={14} />{t("Open stored file")}</button>
-                                                      ) : null}
-                                                      {hasDeviceCopy ? (
-                                                        <button
-                                                          type="button"
-                                                          role="menuitem"
-                                                          onClick={() => {
-                                                            closeMenu();
-                                                            void verifySavedVideoInLibrary(video);
-                                                          }}
-                                                        >
-                                                          <Check size={14} />{t("Verify file")}</button>
-                                                      ) : null}
-                                                      {canRemoveFromDevice ? (
-                                                        <button
-                                                          type="button"
-                                                          role="menuitem"
-                                                          onClick={() => {
-                                                            closeMenu();
-                                                            void removeSavedVideoFromDevice(video);
-                                                          }}
-                                                        >
-                                                          <X size={14} />{t("Free up space on this device")}</button>
-                                                      ) : null}
-                                                      <button
-                                                        type="button"
-                                                        role="menuitem"
-                                                        onClick={() => {
-                                                          closeMenu();
-                                                          void renameSavedVideo(video);
-                                                        }}
-                                                      >
-                                                        <Pencil size={14} />{t("Rename")}</button>
-                                                      <button
-                                                        type="button"
-                                                        role="menuitem"
-                                                        className="is-danger"
-                                                        onClick={() => {
-                                                          closeMenu();
-                                                          void deleteSavedVideo(video);
-                                                        }}
-                                                      >
-                                                        <Trash2 size={14} />{t("Delete")}</button>
-                                                    </div>
-                                                  </>
-                                                ) : null}
-                                              </div>
-                                            </div>
-                                          </article>
-                                        );
-                                        };
-                                        if (angles.length === 1) return renderSavedVideoCard(angles[0]);
-                                        // Two cameras on one swing: one package, opened together.
-                                        return (
-                                          <div className="player-video-pair" key={`pair-${angles[0].savedVideoId}`}>
-                                            <div className="player-video-pair-head">
-                                              <strong>{t("Same swing · 2 angles")}</strong>
-                                              <button
-                                                type="button"
-                                                className="outline-button"
-                                                onClick={() =>
-                                                  openVideoAnalysisForClient({
-                                                    id: angles[0].playerId,
-                                                    name: notesWorkspaceClient.name,
-                                                    savedVideoId: angles[0].savedVideoId,
-                                                    pairedSavedVideoId: angles[1].savedVideoId,
-                                                  })
-                                                }
-                                              >
-                                                <Play size={14} />{t("Open both")}</button>
-                                            </div>
-                                            {angles.map(renderSavedVideoCard)}
-                                          </div>
-                                        );
-                                      })}
-                                      {playerToolCloudVideos.map((transfer) => {
-                                        const savedVideo = transfer.savedVideo;
-                                        const savedVideoId = transfer.savedVideoId || savedVideo?.savedVideoId || transfer.transferId;
-                                        const timestamp = savedVideo?.updatedAt || savedVideo?.createdAt || transfer.readyToImportAt || "";
-                                        const isDownloading = clarityCloudImportActionIds.has(savedVideoId);
-                                        const cloudVideoTitle = profileRecordTitle(notesWorkspaceClient.name, timestamp);
-                                        const cloudVideoRawTitle = savedVideo?.title || cloudVideoTitle;
-                                        // A player submission is someone waiting on you, not your
-                                        // own library syncing. It reads differently and keeps an
-                                        // unseen dot until you open it.
-                                        const isSubmission = transfer.direction === "player-submission";
-                                        const isUnseen = isSubmission && !transfer.coachSeenAt;
-                                        // A return is the coach's own outgoing video. It carries
-                                        // the mirror of the dot above -- whether the player has
-                                        // opened it -- which is the only thing the coach cannot
-                                        // find out any other way.
-                                        const isReturn = transfer.direction === "coach-return";
-                                        return (
-                                          <article
-                                            className={`player-video-card is-cloud-only${isSubmission ? " is-player-submission" : ""}${isReturn ? " is-coach-return" : ""}${isUnseen ? " is-unseen" : ""}`}
-                                            key={savedVideoId}
-                                          >
-                                            <button
-                                              type="button"
-                                              className="player-video-thumb-button"
-                                              disabled={isDownloading}
-                                              title={isDownloading ? t("Downloading from Clarity Cloud") : t("Play video")}
-                                              aria-label={isDownloading ? t("Downloading from Clarity Cloud") : t("Play video")}
-                                              onClick={() => void openPlayerSubmissionOrCloudVideo(transfer, notesWorkspaceClient.name)}
-                                            >
-                                              <div className="player-video-thumb is-empty">
-                                                <ClarityVideoAnalysis size={16} />
-                                              </div>
-                                              <span className="player-video-thumb-play" aria-hidden="true">
-                                                {isDownloading ? <Download size={14} /> : <Play size={14} />}
-                                              </span>
-                                            </button>
-                                            <div className="player-video-card-body">
-                                              <strong title={cloudVideoRawTitle !== cloudVideoTitle ? cloudVideoRawTitle : undefined}>
-                                                {cloudVideoTitle}
-                                              </strong>
-                                              {isSubmission && (
-                                                <span className="player-video-submission-meta">
-                                                  {isUnseen ? t("New · ") : ""}{t("Sent by")}{" "}{transfer.submittedByName || notesWorkspaceClient.name}
-                                                </span>
-                                              )}
-                                              {isSubmission && transfer.playerMessage && (
-                                                <span className="player-video-submission-note">
-                                                  “{transfer.playerMessage}”
-                                                </span>
-                                              )}
-                                              {isReturn && (
-                                                <span className="player-video-submission-meta">{t("Sent to {name} ·", { name: notesWorkspaceClient.name })}{" "}{transfer.playerSeenAt ? "opened" : "not opened yet"}
-                                                </span>
-                                              )}
-                                              {isReturn && transfer.coachMessage && (
-                                                <span className="player-video-submission-note">
-                                                  “{transfer.coachMessage}”
-                                                </span>
-                                              )}
-                                            </div>
-                                            <div className="player-video-card-actions">
-                                              <span
-                                                className="player-video-cloud-badge is-saved"
-                                                title={t("Saved in Clarity Cloud")}
-                                                aria-label={t("Saved in Clarity Cloud")}
-                                                role="img"
-                                              >
-                                                <Cloud size={16} />
-                                              </span>
-                                            </div>
-                                          </article>
-                                        );
-                                      })}
-                                      {playerToolLegacyVideoRecords.map((record) => (
-                                        <article className="player-video-card is-legacy" key={record.slotKey}>
-                                          <div className="player-video-thumb is-empty">
-                                            <Archive size={16} />
-                                          </div>
-                                          <div className="player-video-card-body">
-                                            <strong>{t("Recovery copy -")}{" "}{record.video.title || t("Video")}</strong>
-                                            <span>{t("Safe to remove after saving · {duration} · Move to Saved Videos to keep it in the durable library", { duration: formatVideoDurationLabel(record.video.duration) })}</span>
-                                          </div>
-                                          <div className="player-video-card-actions">
-                                            <button
-                                              type="button"
-                                              className="outline-button"
-                                              onClick={() => void migrateLegacyVideo(record)}
-                                            >
-                                              <Archive size={14} />{t("Move to Saved Videos")}</button>
-                                          </div>
-                                        </article>
-                                      ))}
-                                    </>
-                                  ) : (
-                                    <p className="notes-empty">{t("No videos yet.")}</p>
-                                  )}
-                                </div>
-                                )}
-                              </div>
-                            ) : null}
-                          </div>
-                        ) : null}
-                      </div>
-                    );
-                  })
-                )}
-                {!playerProfilesDataReady ? (
-                  <div className="player-profiles-progress" role="status" aria-live="polite">
-                    <span className="player-profiles-progress-dot" aria-hidden="true" />
-                    <span>{t("Updating player activity")}<small>
-                        {[
-                          !playerProfilesSourcesReady.people ? "clients" : "",
-                          !playerProfilesSourcesReady.notes ? "lesson notes" : "",
-                          !playerProfilesSourcesReady.portal ? "portal access" : "",
-                          !playerProfilesSourcesReady.videos ? "videos" : "",
-                        ]
-                          .filter(Boolean)
-                          .join(" · ")}
-                      </small>
-                    </span>
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          </section>
+          <Suspense fallback={<Loading size="panel" what={terms.customerPlural.toLowerCase()} />}>
+            <PlayerProfilesScreen
+              notesWorkspaceClient={notesWorkspaceClient}
+              playerProfileTool={playerProfileTool}
+              playerToolExpanded={playerToolExpanded}
+              terms={terms}
+              playerToolTabsExpanded={playerToolTabsExpanded}
+              videoPlayerIds={videoPlayerIds}
+              openVideoAnalysisForClient={openVideoAnalysisForClient}
+              playerVideoView={playerVideoView}
+              switchView={switchView}
+              unassignedVideos={unassignedVideos}
+              setToast={setToast}
+              managedLocalLibraryStatus={managedLocalLibraryStatus}
+              playerProfilesSourcesReady={playerProfilesSourcesReady}
+              capabilities={capabilities}
+              setPlayerProfileTool={setPlayerProfileTool}
+              playerToolAppointments={playerToolAppointments}
+              playerSwingReviewGroups={playerSwingReviewGroups}
+              playerPracticeLoadState={playerPracticeLoadState}
+              reviewDocuments={reviewDocuments}
+              sentSwingReviewLink={sentSwingReviewLink}
+              transactionDateLabel={transactionDateLabel}
+              portalPlayers={portalPlayers}
+              playerToolVideos={playerToolVideos}
+              setPlayerPracticeComposer={setPlayerPracticeComposer}
+              activePlayerPracticeBlocks={activePlayerPracticeBlocks}
+              assigningVideoId={assigningVideoId}
+              playerProfiles={playerProfiles}
+              playerProfilesDataReady={playerProfilesDataReady}
+              selectPlayerProfileTool={selectPlayerProfileTool}
+              unseenSubmissionCounts={unseenSubmissionCounts}
+              playerUnseenSubmissions={playerUnseenSubmissions}
+              playerToolUpcomingCount={playerToolUpcomingCount}
+              setDrillLibraryOpen={setDrillLibraryOpen}
+              updateReviewDocument={updateReviewDocument}
+              coachAccount={coachAccount}
+              brandSettings={brandSettings}
+              setSnapshotFrameView={setSnapshotFrameView}
+              sendingSwingReviewId={sendingSwingReviewId}
+              snapshotFrameView={snapshotFrameView}
+              playerToolNotifications={playerToolNotifications}
+              playerTransactionsLoadState={playerTransactionsLoadState}
+              playerTransactions={playerTransactions}
+              personDeleteBusyId={personDeleteBusyId}
+              notesWorkspaceLessonNotes={notesWorkspaceLessonNotes}
+              playerPracticeExpiringCount={playerPracticeExpiringCount}
+              playerVideoSummary={playerVideoSummary}
+              setPlayerVideoView={setPlayerVideoView}
+              playerVideoShelfGroups={playerVideoShelfGroups}
+              playerToolCloudVideos={playerToolCloudVideos}
+              playerToolLegacyVideoRecords={playerToolLegacyVideoRecords}
+              clarityCloudHealth={clarityCloudHealth}
+              googleDriveTransfer={googleDriveTransfer}
+              setOpenSavedVideoMenuId={setOpenSavedVideoMenuId}
+              phonePlayerOpen={phonePlayerOpen}
+              openPlayerAddDialog={openPlayerAddDialog}
+              setVideoCameraRequested={setVideoCameraRequested}
+              setPlayerToolExpanded={setPlayerToolExpanded}
+              lessonNotePlayerIds={lessonNotePlayerIds}
+              setPlayerToolTabsExpanded={setPlayerToolTabsExpanded}
+              services={services}
+              playerToolUpcomingIds={playerToolUpcomingIds}
+              setSelectedId={setSelectedId}
+              startSwingReviewForClient={startSwingReviewForClient}
+              openSwingReviewId={openSwingReviewId}
+              setOpenSwingReviewId={setOpenSwingReviewId}
+              reviewDisplayBlocks={reviewDisplayBlocks}
+              reviewSaveStates={reviewSaveStates}
+              addVideoToReview={addVideoToReview}
+              reviewInsertRef={reviewInsertRef}
+              reviewLessonTitle={reviewLessonTitle}
+              resolveReviewVideoUrl={resolveReviewVideoUrl}
+              billingWorkspaceEnabled={billingWorkspaceEnabled}
+              openPosCheckoutForClient={openPosCheckoutForClient}
+              portalPlayerBusyId={portalPlayerBusyId}
+              includeCaddyPass={includeCaddyPass}
+              setIncludeCaddyPass={setIncludeCaddyPass}
+              caddyStatuses={caddyStatuses}
+              isAdminUser={isAdminUser}
+              lessonNoteBusy={lessonNoteBusy}
+              playerPracticeComposer={playerPracticeComposer}
+              setAuthStatus={setAuthStatus}
+              playerVideoAnglePairs={playerVideoAnglePairs}
+              uploadingSavedVideoIds={uploadingSavedVideoIds}
+              openSavedVideoMenuId={openSavedVideoMenuId}
+              linkedLessonVideoIds={linkedLessonVideoIds}
+              clarityCloudImportActionIds={clarityCloudImportActionIds}
+              refreshCaddyStatus={refreshCaddyStatus}
+              runManagedLibraryAction={runManagedLibraryAction}
+              assignUnassignedVideo={assignUnassignedVideo}
+              makeDrillCopy={makeDrillCopy}
+              discardEmptyReview={discardEmptyReview}
+              sendSwingReviewToPlayer={sendSwingReviewToPlayer}
+              fetchPlayerTransactions={fetchPlayerTransactions}
+              openInvoiceForEdit={openInvoiceForEdit}
+              grantPortalAccess={grantPortalAccess}
+              revokePortalAccess={revokePortalAccess}
+              hardDeletePerson={hardDeletePerson}
+              saveLessonNoteForClient={saveLessonNoteForClient}
+              deleteLessonNote={deleteLessonNote}
+              sendSavedVideoToPrimaryComputer={sendSavedVideoToPrimaryComputer}
+              sendSavedVideoToPlayer={sendSavedVideoToPlayer}
+              pauseSavedVideoTransfer={pauseSavedVideoTransfer}
+              cancelSavedVideoTransfer={cancelSavedVideoTransfer}
+              removeSavedVideoTransfer={removeSavedVideoTransfer}
+              showSavedVideoInFinder={showSavedVideoInFinder}
+              revealSavedVideoFile={revealSavedVideoFile}
+              verifySavedVideoInLibrary={verifySavedVideoInLibrary}
+              removeSavedVideoFromDevice={removeSavedVideoFromDevice}
+              renameSavedVideo={renameSavedVideo}
+              deleteSavedVideo={deleteSavedVideo}
+              openPlayerSubmissionOrCloudVideo={openPlayerSubmissionOrCloudVideo}
+              migrateLegacyVideo={migrateLegacyVideo}
+            />
+          </Suspense>
         )}
 
         {adminWorkspaceReady && showPlayerAddDialog && (
-          <div
-            className="player-add-overlay"
-            role="dialog"
-            aria-modal="true"
-            aria-label={playerAddForVideoSave ? t("Save video to a player") : t("Add player profile")}
-            onClick={() => closePlayerAddDialog()}
-          >
-            <div className="player-add-dialog" onClick={(event) => event.stopPropagation()}>
-              <div className="player-add-header">
-                <h3>{playerAddForVideoSave ? t("Who is this video for?") : t("Add player profile")}</h3>
-                <button
-                  type="button"
-                  className="icon-button"
-                  onClick={() => closePlayerAddDialog()}
-                  aria-label={t("Close")}
-                >
-                  <X size={16} />
-                </button>
-              </div>
-
-              <div className="player-add-section">
-                <label>{playerAddForVideoSave ? t("Pick a player") : t("Add an existing client")}</label>
-                <input
-                  value={playerAddSearch}
-                  onChange={(event) => setPlayerAddSearch(event.target.value)}
-                  placeholder={playerAddForVideoSave ? t("Search players and clients") : t("Search clients")}
-                />
-                <div className="player-add-results">
-                  {(playerAddSearch.trim().length > 0
-                    ? clients.filter((client) => clientMatchesSearchTerm(client, playerAddSearch.trim()))
-                    : playerAddForVideoSave
-                      ? playerProfiles
-                      : []
-                  )
-                      .slice(0, playerAddForVideoSave ? 20 : 6)
-                      .map((client) => (
-                        <button
-                          type="button"
-                          key={client.id}
-                          className="player-add-result"
-                          onClick={() => promoteExistingPlayer(client)}
-                        >
-                          <span>{client.name}</span>
-                          <span className="muted">{client.email || client.phone}</span>
-                        </button>
-                      ))}
-                </div>
-              </div>
-
-              <div className="player-add-divider">
-                {playerAddForVideoSave ? "or create a new player" : "or add someone new"}
-              </div>
-
-              <div className="player-add-section">
-                <input
-                  value={playerAddNew.name}
-                  onChange={(event) =>
-                    setPlayerAddNew((current) => ({ ...current, name: event.target.value }))
-                  }
-                  placeholder={t("Name")}
-                />
-                <input
-                  value={playerAddNew.email}
-                  onChange={(event) =>
-                    setPlayerAddNew((current) => ({ ...current, email: event.target.value }))
-                  }
-                  placeholder={t("Email")}
-                />
-                <input
-                  value={playerAddNew.phone}
-                  onChange={(event) =>
-                    setPlayerAddNew((current) => ({ ...current, phone: event.target.value }))
-                  }
-                  placeholder={t("Phone")}
-                />
-                <button
-                  type="button"
-                  className="primary-button"
-                  disabled={playerAddSaving}
-                  onClick={createNewPlayer}
-                >
-                  {playerAddSaving
-                    ? t("Adding…")
-                    : playerAddForVideoSave
-                      ? t("Create player and save")
-                      : t("Add new player")}
-                </button>
-              </div>
-            </div>
-          </div>
+          <Suspense fallback={null}>
+            <PlayerAddDialog
+              playerAddForVideoSave={playerAddForVideoSave}
+              playerAddSearch={playerAddSearch}
+              playerAddNew={playerAddNew}
+              setPlayerAddNew={setPlayerAddNew}
+              closePlayerAddDialog={closePlayerAddDialog}
+              playerAddSaving={playerAddSaving}
+              setPlayerAddSearch={setPlayerAddSearch}
+              clients={clients}
+              playerProfiles={playerProfiles}
+              promoteExistingPlayer={promoteExistingPlayer}
+              createNewPlayer={createNewPlayer}
+            />
+          </Suspense>
         )}
 
         {adminWorkspaceReady && activeView === "putting-lab" && (

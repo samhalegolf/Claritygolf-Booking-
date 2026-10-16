@@ -453,3 +453,8 @@ export function getSavedVideoCloudStatusLabel(
   if (catalogueState === "archived-locally") return t("Cloud • Waiting to upload");
   return t("Cloud • Waiting to upload");
 }
+
+/** True while Clarity Cloud can take and give back videos right now. */
+export function isClarityCloudOperational(health: ClarityCloudHealth) {
+  return health.state === "ready";
+}
