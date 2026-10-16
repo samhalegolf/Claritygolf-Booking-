@@ -112,7 +112,7 @@ const SET_FROM_JS: Array<{ name: string; setBy: string }> = [
   { name: "--coach-neutral", setBy: "App.tsx" },
   // The hue of the location an availability band, key chip or window picker
   // stands for, set inline per element from LOCATION_BAND_HUES.
-  { name: "--location-hue", setBy: "App.tsx" },
+  { name: "--location-hue", setBy: "CalendarView.tsx" },
   // The video workspace's tokens, applied by its theme module. The chrome
   // aliases onto --c-*; the signal colours are its own -- see the module.
   { name: "--va-bg", setBy: "videoAnalysisTheme.ts" },
@@ -296,9 +296,10 @@ test("every dedicated /api route is excluded from the wildcard", () => {
   // "/api" and then makes every route look covered by the prefix check below.
   // The first version of this test did that and passed while the bug was live.
   const block = wildcard.slice(wildcard.indexOf("excludedPath"), wildcard.indexOf("],", wildcard.indexOf("excludedPath")));
-  const excluded = new Set(
-    [...block.matchAll(/"(\/api\/[^"]+)"/g)].map((m) => m[1].replace(/\/\*$/, "")),
-  );
+  // Exact entries. Netlify matches excludedPath literally unless the entry
+  // ends in /*, so "/api/passes" does not cover "/api/passes/inbox" -- each
+  // route a function owns has to be listed as the function spells it.
+  const excluded = new Set([...block.matchAll(/"(\/api\/[^"]+)"/g)].map((m) => m[1]));
   assert.ok(excluded.size > 20, "excludedPath list not found — has booking-api.mts been restructured?");
   const missing: string[] = [];
   for (const entry of readdirSync(fnDir)) {
@@ -310,10 +311,9 @@ test("every dedicated /api route is excluded from the wildcard", () => {
     // runtime — the exact failure this test exists to catch.
     for (const declaration of text.matchAll(/path:\s*(\[[^\]]*\]|"\/api\/[^"]+")/g)) {
       for (const match of declaration[1].matchAll(/"(\/api\/[^"]+)"/g)) {
-        const route = match[1].replace(/\/\*$/, "");
-        if (route === "/api" || excluded.has(route)) continue;
-        if ([...excluded].some((e) => route.startsWith(`${e}/`))) continue;
-        missing.push(`${entry} owns ${match[1]} but booking-api.mts does not exclude it`);
+        const route = match[1];
+        if (route === "/api/*" || excluded.has(route)) continue;
+        missing.push(`${entry} owns ${route} but booking-api.mts does not exclude it`);
       }
     }
   }
@@ -445,33 +445,31 @@ test("every connection archetype has two integrations, or a stated reason", () =
  * so with --c-w-prose, which is a declaration this check reads straight past.
  */
 /**
- * Settings panels are hidden by a blanket `display: none` and shown again by an
- * allowlist, one selector pair per tab. So a tab added to SETTINGS_SECTIONS
- * without its matching CSS is not merely unstyled -- it is invisible on every
- * tab, including its own, and looks exactly like a panel that failed to load.
+ * Every settings tab lays out its section, and every laid-out section is a tab.
  *
- * The stylesheet's own comment records the other direction of the same bug:
- * panels once classed onto two tabs at once, which is how two settings screens
- * became one. Both directions are checked here.
+ * Only the active section is mounted (SettingsGroup returns null for the
+ * rest), so there is no show/hide rule to keep in step any more. What is left
+ * is each section's own layout rule in styles.css, and a tab whose section
+ * has none renders its panels in the page's default flow rather than the
+ * settings grid. Both directions are checked here.
  */
-test("every settings tab has a panel that can show, and vice versa", () => {
+test("every settings tab has a section layout rule, and vice versa", () => {
   const layout = readFileSync(path.join(SRC, "modules", "settings", "SettingsLayout.tsx"), "utf8");
   const block = layout.slice(layout.indexOf("const SETTINGS_SECTIONS"), layout.indexOf("type SettingsTab"));
   const tabs = [...block.matchAll(/key:\s*"([a-z-]+)"/g)].map((match) => match[1]);
   assert.ok(tabs.length >= 5, "SETTINGS_SECTIONS not found — has SettingsLayout.tsx been restructured?");
 
   const css = read(path.join(SRC, "styles.css"));
-  const shown = new Set(
-    [...css.matchAll(/\.settings-grid\.settings-tab-([a-z-]+)\s*>\s*\.settings-([a-z-]+)/g)]
-      .filter((match) => match[1] === match[2])
-      .map((match) => match[1]),
-  );
+  const marker = css.indexOf("One panel per section.");
+  assert.ok(marker > 0, "settings section layout rule not found in styles.css");
+  const rule = css.slice(marker, css.indexOf("}", marker));
+  const laidOut = new Set([...rule.matchAll(/\.settings-([a-z-]+)/g)].map((match) => match[1]));
 
-  const invisible = tabs.filter((tab) => !shown.has(tab));
-  assert.deepEqual(invisible, [], `Settings tab(s) with no panel that can ever show: ${invisible.join(", ")}`);
+  const missing = tabs.filter((tab) => !laidOut.has(tab));
+  assert.deepEqual(missing, [], `Settings tab(s) with no section layout rule: ${missing.join(", ")}`);
 
-  const orphaned = [...shown].filter((section) => !tabs.includes(section));
-  assert.deepEqual(orphaned, [], `Show rule(s) for a settings tab that no longer exists: ${orphaned.join(", ")}`);
+  const orphaned = [...laidOut].filter((section) => !tabs.includes(section));
+  assert.deepEqual(orphaned, [], `Layout rule(s) for a settings tab that no longer exists: ${orphaned.join(", ")}`);
 });
 
 test("no field is a bare width:100%", () => {
@@ -503,7 +501,7 @@ test("no field is a bare width:100%", () => {
  * has always had rough edges.
  */
 test("literal hex colours are not spreading", () => {
-  const BASELINE = 687;
+  const BASELINE = 202;
   let count = 0;
   for (const file of files) {
     if (file === TOKENS) continue;
@@ -654,7 +652,15 @@ test("every notification setting the API accepts is editable somewhere", () => {
   const accepted = [...write.matchAll(/hasOwn\(settings,\s*"([A-Za-z]+)"\)/g)].map((match) => match[1]);
   assert.ok(accepted.length > 10, "writeAdminSettings not found — has admin-settings.mts been restructured?");
 
-  const app = readFileSync(path.join(SRC, "App.tsx"), "utf8");
+  // The fields live in the settings and notifications panels; App.tsx keeps the
+  // handlers. Read all of them, so a field can move between panels freely.
+  const app = [
+    path.join(SRC, "App.tsx"),
+    ...sourceFiles(path.join(SRC, "modules", "settings")),
+    ...sourceFiles(path.join(SRC, "modules", "notifications")),
+  ]
+    .map((file) => readFileSync(file, "utf8"))
+    .join("\n");
   // Two binding shapes, because a setting reaches the server two ways.
   //
   //   updateNotificationBlockDraft(someEditor, "field", value)
@@ -682,7 +688,7 @@ test("every notification setting the API accepts is editable somewhere", () => {
   assert.deepEqual(
     stranded,
     [],
-    `Setting(s) the API accepts with no input left in App.tsx: ${stranded.join(", ")}. ` +
+    `Setting(s) the API accepts with no input left in the settings panels: ${stranded.join(", ")}. ` +
       "Give each one a field, or add it to notEditable above with the reason.",
   );
 

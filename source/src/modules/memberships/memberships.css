@@ -142,9 +142,6 @@
   display: grid;
   gap: var(--c-space-2);
   padding: var(--c-space-3);
-  border: 1px solid var(--c-border);
-  border-radius: var(--c-radius-card);
-  background: var(--c-surface);
 }
 
 .membership-card .membership-card-head {
@@ -458,7 +455,7 @@
   max-width: 320px;
   height: 6px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--c-radius-pill);
   background: var(--c-border-soft);
   overflow: hidden;
   appearance: none;
@@ -466,15 +463,15 @@
 
 .memberships-panel .reward-progress-bar::-webkit-progress-bar {
   background: var(--c-border-soft);
-  border-radius: 999px;
+  border-radius: var(--c-radius-pill);
 }
 
 .memberships-panel .reward-progress-bar::-webkit-progress-value {
   background: var(--c-accent);
-  border-radius: 999px;
+  border-radius: var(--c-radius-pill);
 }
 
 .memberships-panel .reward-progress-bar::-moz-progress-bar {
   background: var(--c-accent);
-  border-radius: 999px;
+  border-radius: var(--c-radius-pill);
 }

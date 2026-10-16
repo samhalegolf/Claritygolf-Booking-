@@ -4,6 +4,32 @@
 **Scope:** everything under `source/` (coach app, player portal, public booking, Netlify functions, native shells)
 **Baseline:** `tsc --noEmit` clean, 1298 tests passing, production build 18 s
 
+## Status, 16 Oct 2026 (later the same day)
+
+All eight steps below have landed on `main` in the follow-up PR, with these
+differences from the plan:
+
+- Steps 4 to 6 moved each screen's JSX into its own lazy module with a typed
+  props interface derived from App.tsx itself. The state and handlers stay in
+  App.tsx and arrive as props, which is the arrangement ClientsPanel already
+  used. The controller-hook half (moving the state and handlers too) is still
+  to do. App.tsx is 18,300 lines, from 24,950; the coach chunk is 537 KB, from
+  721 KB.
+- Step 7 landed one `.card` base for the four module card families that
+  redeclared the same surface, border and radius. The wider primitive
+  migration (rows, sheets, fields, tabs) and taking the player portal off the
+  coach stylesheet were not done: both need a rendered-page pass to know which
+  rules the portal actually hits, and a static read of the import graph pulls
+  in nearly the whole stylesheet.
+- Step 8 deleted the sixteen one-line wrapper functions that each carried a
+  full copy of the booking core (the wildcard router serves those routes the
+  same way), gave the plan catalogue one typed home both sides import
+  (`_shared/plan-catalog.mts`), and widened the functions typecheck to every
+  file, with fourteen untyped legacy files marked `// @ts-nocheck` until each
+  is brought under it.
+- The one-time video migration code (`legacyVideoRecords`) was left in place;
+  whether every coach's videos have moved is not something the code can say.
+
 ## Where things stand
 
 The app is in far better shape than the August filing doc describes. Since then the shells were split and lazy-loaded, Settings panels stopped mounting all at once, the workspace and client logic moved into hooks, the `--c-*` tokens are read in 2,600 places, and there is no dead module, no TODO marker, and no stray `console.log` anywhere in `src`. Those are not the problems any more.

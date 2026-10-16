@@ -756,22 +756,6 @@
   height: 28px;
 }
 
-.focus-beta-icon {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.focus-beta-mark {
-  position: absolute;
-  right: -6px;
-  top: -2px;
-  font-size: 8px;
-  color: var(--va-muted);
-  font-weight: 700;
-}
-
 .focus-selection-overlay {
   position: absolute;
   border: 1px dashed color-mix(in srgb, var(--va-marker) 65%, transparent);

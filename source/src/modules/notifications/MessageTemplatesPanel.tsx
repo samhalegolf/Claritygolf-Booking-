@@ -19,8 +19,8 @@ import {
   emptyNotificationTemplate,
   isNotificationTemplateEdited,
   NOTIFICATION_VARIANTS,
-  notificationTemplateText,
 } from "../../../netlify/functions/_shared/notification-templates.mts";
+import { notificationTemplateText } from "../../../netlify/functions/_shared/notification-template-text.mts";
 import type {
   NotificationTemplateField,
   NotificationTemplates,

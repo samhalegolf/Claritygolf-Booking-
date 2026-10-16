@@ -6,11 +6,11 @@ import {
   emptyNotificationTemplates,
   isNotificationTemplateEdited,
   NOTIFICATION_VARIANTS,
-  notificationTemplateText,
   notificationVariantFor,
   parseNotificationTemplates,
   smsSegmentCount,
 } from "./notification-templates.mts";
+import { notificationTemplateText } from "./notification-template-text.mts";
 
 test("a new booking splits on what was booked", () => {
   assert.equal(notificationVariantFor("booking", "private"), "booked");

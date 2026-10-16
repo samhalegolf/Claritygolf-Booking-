@@ -238,4 +238,4 @@ export default async function handler(req: Request) {
 
 // /api/resource-status is the name the app uses; the old one stays for any
 // open tab still running the previous bundle.
-export const config: Config = { path: ["/api/resource-status", "/api/optix-booking-status"] };
+export const config: Config = { path: "/api/resource-status" };

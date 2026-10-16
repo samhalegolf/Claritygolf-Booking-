@@ -28,7 +28,7 @@ import {
  * their own.
  */
 
-type EditableBlockStatus = "idle" | "editing" | "saving" | "saved" | "error";
+export type EditableBlockStatus = "idle" | "editing" | "saving" | "saved" | "error";
 type EditableBlockState = {
   status: EditableBlockStatus;
   dirty: boolean;

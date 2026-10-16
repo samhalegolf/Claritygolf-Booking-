@@ -12,6 +12,7 @@ import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from "r
 import { ArrowLeft, Camera, Phone, Trash2 } from "lucide-react";
 import { ClarityCalendar, ClarityEmail, ClarityLocations, ClaritySessions, ClaritySettings } from "../shared/ClarityIcons";
 import { t, tn } from "../../lib/i18n";
+import { CoachAvatar } from "./CoachAvatar";
 
 /** The coach fields this screen reads and writes. App's CoachProfile satisfies it. */
 export type CoachProfileRecord = {
@@ -111,26 +112,6 @@ async function resizeCoachPhoto(file: File): Promise<string> {
   }
 }
 
-function initialsOf(name: string) {
-  return (
-    name
-      .split(/\s+/)
-      .filter(Boolean)
-      .map((word) => word[0])
-      .join("")
-      .slice(0, 2)
-      .toUpperCase() || "?"
-  );
-}
-
-export function CoachAvatar({ name, photoUrl, size = 96 }: { name: string; photoUrl?: string; size?: number }) {
-  return (
-    <span className="cp-avatar" style={{ width: size, height: size, fontSize: Math.round(size / 3) }} aria-hidden="true">
-      {photoUrl ? <img src={photoUrl} alt="" /> : initialsOf(name)}
-    </span>
-  );
-}
-
 export function CoachProfilePanel<T extends CoachProfileRecord>({
   coach,
   isNew = false,
@@ -218,7 +199,7 @@ export function CoachProfilePanel<T extends CoachProfileRecord>({
           <ArrowLeft size={16} />{t("All {staffPlural}", { staffPlural: staffPlural.toLowerCase() })}</button>
       )}
 
-      <article className="cp-card cp-identity">
+      <article className="card cp-card cp-identity">
         <div className="cp-photo">
           <CoachAvatar name={name} photoUrl={shown.photoUrl} />
           {editing && (
@@ -414,7 +395,7 @@ export function CoachProfilePanel<T extends CoachProfileRecord>({
       </article>
 
       {!isNew && (
-        <article className="cp-card cp-week">
+        <article className="card cp-card cp-week">
           <header className="cp-card-head">
             <h3>
               <ClarityCalendar size={14} />{t("Next 7 days")}</h3>
@@ -455,7 +436,7 @@ export function CoachProfilePanel<T extends CoachProfileRecord>({
       )}
 
       {!isNew && onOpenAvailability && (
-        <article className="cp-card">
+        <article className="card cp-card">
           <header className="cp-card-head">
             <h3>
               <ClaritySettings size={14} />{t("{staffSingular} settings", { staffSingular })}</h3>

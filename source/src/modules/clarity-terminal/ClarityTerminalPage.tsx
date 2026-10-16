@@ -166,7 +166,7 @@ function PairingScreen({ onPaired }: { onPaired: (code: string) => void }) {
 
   return (
     <main className="terminal-shell">
-      <section className="terminal-card terminal-message terminal-pairing">
+      <section className="card terminal-card terminal-message terminal-pairing">
         <h1>Clarity Terminal</h1>
         <p>{t("On your laptop, go to Settings › Booking › Clarity Terminal, add a terminal and type this code:")}</p>
         <p className="terminal-pair-code" aria-live="polite">
@@ -782,7 +782,7 @@ export default function ClarityTerminalPage() {
       </p>
 
       {permission !== "granted" ? (
-        <section className="terminal-card terminal-connect">
+        <section className="card terminal-card terminal-connect">
           <h2>{t("Connect cameras")}</h2>
           <p>{t("Plug in the cameras for this bay, then allow Clarity to use them. This computer only needs setting up once.")}</p>
           <button
@@ -807,7 +807,7 @@ export default function ClarityTerminalPage() {
             )}
           </section>
 
-          <section className="terminal-card">
+          <section className="card terminal-card">
             <h2>{t("Cameras")}</h2>
             <p className="terminal-hint">{t("Up to two. The first fills the left side on your laptop, the second the right.")}</p>
             <ul className="terminal-camera-list">
@@ -837,7 +837,7 @@ export default function ClarityTerminalPage() {
       )}
 
       {uploads.length ? (
-        <section className="terminal-card">
+        <section className="card terminal-card">
           <h2>{t("Recordings")}</h2>
           <ul className="terminal-uploads">
             {uploads.map((upload) => (

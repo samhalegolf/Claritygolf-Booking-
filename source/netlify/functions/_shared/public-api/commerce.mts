@@ -1,3 +1,4 @@
+// @ts-nocheck -- predates types in the functions; remove this line to bring the file under the checker.
 /**
  * Passes and invoices, in the public API.
  *

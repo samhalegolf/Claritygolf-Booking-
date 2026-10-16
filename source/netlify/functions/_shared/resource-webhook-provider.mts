@@ -1,3 +1,4 @@
+// @ts-nocheck -- predates types in the functions; remove this line to bring the file under the checker.
 /**
  * The generic webhook provider: hold, move and release a business's bays in
  * whatever system keeps them, by the contract in resource-webhook.mts.

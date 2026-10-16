@@ -1,3 +1,6 @@
+import type { BillingSection } from "../billing/billingSections";
+import type { SettingsTab } from "../settings/SettingsLayout";
+
 // The sidebar's destinations. Lesson types and availability used to be two of
 // them; they are Settings sections now (SETTINGS_SECTIONS "services" and the
 // "availability" group under Booking), reached by switchView("settings") plus a
@@ -20,3 +23,11 @@ export type View =
   | "players"
   // The overhead-camera putting gate.
   | "putting-lab";
+
+// What an overlay is currently showing. A settings overlay carries the tab so
+// the section's own tab CSS still applies and the group to focus; a billing
+// overlay carries the section. Both carry the title they announce themselves
+// with, which is the Business Hub card's own label.
+export type WorkspaceOverlay =
+  | { kind: "settings"; tab: Exclude<SettingsTab, "none">; group: string; title: string }
+  | { kind: "billing"; section: Exclude<BillingSection, "none">; title: string };

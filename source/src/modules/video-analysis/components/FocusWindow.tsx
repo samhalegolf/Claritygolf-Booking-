@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { FocusAreaRect, FocusMode } from "../models/Focus";
+import type { FocusAreaRect } from "../models/Focus";
 import type { ComparisonSide } from "../utils/localPersistence";
 import { t } from "../../../lib/i18n";
 
@@ -7,7 +7,6 @@ type ScreenshotResult = { ok: boolean; error?: string };
 type ScreenshotStatus = "idle" | "saving" | "success" | "error";
 
 interface FocusWindowProps {
-  mode: FocusMode;
   area?: FocusAreaRect | null;
   sideLabel: ComparisonSide;
   onClose: () => void;
@@ -21,7 +20,6 @@ interface FocusWindowProps {
 
 export function FocusWindow({
   enabled,
-  mode,
   area,
   sideLabel,
   onClose,
@@ -31,7 +29,7 @@ export function FocusWindow({
   onHoverChange,
   onScreenshot,
 }: FocusWindowProps) {
-  const isArea = mode === "area" && !!area && area.width > 0 && area.height > 0;
+  const isArea = !!area && area.width > 0 && area.height > 0;
   const [cropRenderError, setCropRenderError] = useState(false);
   const [screenshotStatus, setScreenshotStatus] = useState<ScreenshotStatus>("idle");
   const [screenshotMessage, setScreenshotMessage] = useState("");
@@ -39,7 +37,7 @@ export function FocusWindow({
   const rafRef = useRef<number>(-1);
   const screenshotTimerRef = useRef<number>(-1);
   const hasSource = Boolean(sourceVideo);
-  const canCapture = mode === "area" && isArea && hasSource;
+  const canCapture = isArea && hasSource;
 
   const clamp = (value: number, min: number, max: number) =>
     Math.min(Math.max(value, min), max);
@@ -168,15 +166,13 @@ export function FocusWindow({
   // Structural ability to render a crop, independent of transient decode
   // errors. The canvas stays mounted whenever this is true so the render loop
   // can recover once the source is ready again.
-  const canRenderCrop = mode === "area" && isArea && hasSource;
+  const canRenderCrop = isArea && hasSource;
   const showPlaceholder = !canRenderCrop || cropRenderError;
 
   const renderFallback = showPlaceholder
-    ? mode === "track"
-      ? t("Track focus is placeholder-only in this foundation.")
-      : hasSource
-        ? t("Live crop is not available for the selected area right now.")
-        : t("No {side} video is available for live focus rendering.", { side: sideLabel })
+    ? hasSource
+      ? t("Live crop is not available for the selected area right now.")
+      : t("No {side} video is available for live focus rendering.", { side: sideLabel })
     : t("Live area focus lens active.");
 
   const trackMouseEnter = useCallback(() => onHoverChange?.(true), [onHoverChange]);
@@ -230,7 +226,7 @@ export function FocusWindow({
         <div className="focus-window-title">
           <strong>{t("Focus lens")}</strong>
           <span className="focus-window-subtitle">
-            {mode === "track" ? t("Track focus beta") : t("Area focus · {sideLabel}", { sideLabel: sideLabel.toUpperCase() })}
+            {t("Area focus · {sideLabel}", { sideLabel: sideLabel.toUpperCase() })}
           </span>
         </div>
       </div>
@@ -248,9 +244,7 @@ export function FocusWindow({
         ) : null}
       </div>
 
-      {mode === "area" ? (
-        <div className="focus-window-metadata">{t("Live area: {areaDetails}", { areaDetails })}</div>
-      ) : null}
+      <div className="focus-window-metadata">{t("Live area: {areaDetails}", { areaDetails })}</div>
 
       {screenshotMessage ? (
         <div

@@ -81,9 +81,9 @@ test("the routed functions this test is guarding are actually present", () => {
 
   assert.ok(names.length >= 10, `expected the functions directory, found ${names.length} routed files`);
   for (const required of [
-    "auth-forgot-password.mts",
-    "auth-reset-password.mts",
-    "auth-login.mts",
+    "auth-session.mts",
+    "booking-api.mts",
+    "calendar-state.mts",
     "calendar-feed.mts",
   ]) {
     assert.ok(names.includes(required), `${required} is no longer a routed function`);

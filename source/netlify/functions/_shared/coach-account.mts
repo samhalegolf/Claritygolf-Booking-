@@ -1,3 +1,4 @@
+// @ts-nocheck -- predates types in the functions; remove this line to bring the file under the checker.
 // The business account, built from a business's own settings rows.
 //
 // One copy, shared. booking-core and the calendar shell (calendar-state) both

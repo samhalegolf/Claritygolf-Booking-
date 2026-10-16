@@ -7,77 +7,48 @@ import {
   ArrowRight,
   Check,
   Cloud,
-  CloudOff,
-  CloudUpload,
   Copy,
   Download,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  ChevronUp,
-  LayoutGrid,
-  List,
-  Eye,
   ExternalLink,
   GripVertical,
-  ImagePlus,
   Inbox,
   LogOut,
-  Moon,
-  Nfc,
-  Pause,
-  Percent,
   Phone,
-  Play,
   Plus,
   Pencil,
   RefreshCw,
   Search,
   Send,
-  Sparkles,
-  Sun,
   Trash2,
   Upload,
   X,
   FlaskConical,
 } from "lucide-react";
 import {
-  ClarityAccessPermissions,
-  ClarityAddClient,
   ClarityAssessments,
   ClarityAdmin,
   ClarityBookingPages,
   ClarityCalendar,
-  ClarityCalendarSync,
   ClarityClientsPlayers,
-  ClarityCoachesStaff,
   ClarityDashboardHome,
   ClarityEmail,
   ClarityFacilitiesRooms,
-  ClarityFilesMedia,
   ClarityIntegrations,
   ClarityInvoices,
   ClarityLessonsProgrammes,
   ClarityLocations,
-  ClarityMessages,
-  ClarityMore,
   ClarityNewBooking,
-  ClarityNotifications,
   ClarityPassesCredits,
   ClarityPayments,
-  ClarityPlayerPortal,
-  ClarityPreferences,
   ClarityProducts,
   ClarityProfile,
   ClarityPublicBooking,
   ClarityReports,
-  ClarityServices,
   ClaritySessions,
   ClaritySettings,
   ClarityStore,
   ClarityVideoAnalysis,
 } from "./modules/shared/ClarityIcons";
-import type { IconComponent } from "./modules/shared/ClarityIcons";
 import { isPhoneLayout, usePhoneLayout } from "./modules/phone/phoneLayout";
 import { type PhoneStep, PhoneStepSwipe } from "./modules/phone/PhoneStepSwipe";
 import { type PhoneDestination, PhoneTabBar } from "./modules/phone/PhoneTabBar";
@@ -86,8 +57,6 @@ import { quickBookSlots } from "./modules/quick-book/quickBookModel";
 import { TodayScreen } from "./modules/today/TodayScreen";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "./modules/auth/apiFetch";
-import type { FrameViewerShot } from "./modules/shared/SnapshotFrameViewer";
-import type { SheetVideo } from "./modules/swing-review/SwingReviewSheet";
 import type { Session } from "./modules/auth/session";
 import { DeveloperContext } from "./modules/auth/developer";
 import type { TillLesson } from "./modules/billing/tillLessons";
@@ -125,8 +94,6 @@ import {
 } from "./modules/player-profiles/lessonNotesStore";
 import { cleanPhoneCountry } from "../netlify/functions/_shared/phone.mts";
 import {
-  BUSINESS_TERMINOLOGY_PRESETS,
-  matchingTerminologyPreset,
   terminologyFor,
   terminologyPreset,
   type BusinessTerminology,
@@ -141,14 +108,12 @@ import {
   type LocationResource,
   type ResourceHandedness,
   type ResourceMode,
-  type ResourceSource,
 } from "../netlify/functions/_shared/resources.mts";
 import { serviceIncludesCoach } from "../netlify/functions/_shared/service-scope.mts";
 // The country itself is held per page here, not in the shared module -- see
 // that file for why the server cannot have one.
 import { activeLocale, } from "./lib/activeCountry";
-import { BusinessHubPanel, OwnerIdentityCard } from "./modules/business-hub/BusinessHubPanel";
-import { CoachAvatar, CoachProfilePanel, type CoachWeekDay, type CoachWeekEntry } from "./modules/business-hub/CoachProfilePanel";
+import type { CoachWeekDay, CoachWeekEntry } from "./modules/business-hub/CoachProfilePanel";
 import type { RegionValues } from "./modules/settings/RegionSettings";
 import { syncPushLanguage } from "./modules/notifications/browserPush";
 import { forgetNativePushOnSignOut, startNativePush } from "./native/nativePush";
@@ -186,8 +151,6 @@ import {
   cleanPlayerBookingEmbedUrl,
   PLAYER_BOOKING_EMBED_DEFAULT_HEIGHT,
   PLAYER_BOOKING_EMBED_DEFAULT_LABEL,
-  PLAYER_BOOKING_EMBED_MAX_HEIGHT,
-  PLAYER_BOOKING_EMBED_MIN_HEIGHT,
 } from "../netlify/functions/_shared/player-booking-embed.mts";
 import { prefetchIntegrations } from "./modules/integrations/integrationsStore";
 import type {
@@ -213,11 +176,9 @@ import type {
 import { groupSameSwingAngles } from "./modules/video-analysis/utils/sameSwingAngles";
 import { LEGACY_UNASSIGNED_PLAYER_ID, pairSavedVideoAngles } from "./modules/video-analysis/utils/savedVideoState";
 import {
-  getClarityCloudActionLabel,
   getClarityCloudHealth,
-  getLocalStorageActionLabel,
   getLocalStorageHealth,
-  getSavedVideoCloudStatusLabel,
+  isClarityCloudOperational,
   type ClarityCloudHealth,
   type ClarityCloudAction,
   type GoogleDriveTransferStatus,
@@ -230,7 +191,6 @@ import {
 } from "./modules/player-profiles/playerProfilesStore";
 import "./modules/player-profiles/playerProfiles.css";
 import type {
-  InvoiceCustomFieldPlacement,
   InvoiceCustomField,
   InvoiceSettings,
   BillingCatalogItem,
@@ -255,8 +215,8 @@ import type {
   CouponRedemption,
 } from "./modules/billing/types";
 import { defaultInvoiceSettings, printableInvoiceCustomFields } from "./modules/billing/invoiceSettings";
-import { computeInvoiceTotals, invoiceLineNet, invoiceLineGross, lineDiscountAmount } from "./modules/billing/invoiceMath";
-import { cardRefundAmount, isClarityPayCardSale, keepTapToPayWarm, posMethodLabel, tapToPayName } from "./modules/billing/terminal";
+import { computeInvoiceTotals, lineDiscountAmount } from "./modules/billing/invoiceMath";
+import { cardRefundAmount, isClarityPayCardSale, keepTapToPayWarm, posMethodLabel } from "./modules/billing/terminal";
 import type { CouponIssueValues, CouponScanResult, VoucherRepairResult } from "./modules/billing/CouponsPanel";
 import type { VoucherAmountRule } from "./modules/billing/types";
 import type { ProductFormValues, StockAdjustInput } from "./modules/billing/ProductsPanel";
@@ -280,7 +240,6 @@ import {
   buildCalendarAxis,
   dayColumnPixels,
   dayFromGridX,
-  formatDurationLabel,
   DAY_COUNT,
   WEEK_FOCUS_INDEX,
   WEEK_PANEL_COUNT,
@@ -298,13 +257,37 @@ import type {
 import { t, tn } from "./lib/i18n";
 import {
   clarityPayFeeLabel,
-  currencySymbol,
   formatMoney,
   parseDraftNumber,
   parseMoneyInput,
-  parseQuantityInput,
 } from "./lib/money";
 import { safeText } from "./lib/text";
+import { NOTIFICATION_SUBJECT_TOKENS } from "./modules/notifications/subjectTokens";
+import type { PasswordChangeForm } from "./modules/settings/accountTypes";
+import type { GoogleDriveActionState } from "./modules/settings/googleCalendarTypes";
+import { cleanMinBookingNoticeMinutes, DEFAULT_MIN_BOOKING_NOTICE_MINUTES } from "./modules/settings/bookingNotice";
+import type { GoogleCalendarExportRules, GoogleCalendarSyncStatus, GoogleCalendarImportRule, GoogleCalendarDebugError, GoogleCalendarDebugEntry, GoogleCalendarDebugLog, GoogleCalendarActionState } from "./modules/settings/googleCalendarTypes";
+import { googleCalendarFailureCode, googleCalendarSkipReasonLabels, googleSyncTimeLabel } from "./modules/settings/googleCalendarLabels";
+import type { WorkspaceOverlay } from "./modules/shared/appView";
+import { ClarityPayReturnBanner, type ClarityPayReturn } from "./modules/billing/ClarityPayReturnBanner";
+import { formatDateForDisplay } from "./lib/date";
+import {
+  BILLING_GROUPS,
+  BILLING_SECTION_NAV,
+  billingGroupLabel,
+  billingGroupOf,
+  billingSectionLabel,
+  isBillingSection,
+  BOOKING_PULL_FILTER_STORAGE_KEY,
+  readStoredPullFilter,
+  type BillingSection,
+  type BookingPullFilter,
+} from "./modules/billing/billingSections";
+import {
+  savedVideoCloudErrorLabel,
+} from "./modules/player-profiles/profileFormat";
+import type { CaddyStatus, PortalPlayer } from "./modules/player-profiles/portalAccess";
+import type { ShelfClip } from "./modules/player-profiles/PlayerProfilesScreen";
 import {
   adminCustomGroupAttendee,
   availabilityForCoach,
@@ -314,7 +297,6 @@ import {
   BookingCoachSnapshot,
   bookingCoachSnapshotFor,
   bookingLocationDisplay,
-  bookingLocationShortDisplay,
   bookingLocationSnapshotFor,
   BookingStatus,
   buildWeekDays,
@@ -347,10 +329,8 @@ import {
   externalRescheduleMessage,
   formatRange,
   formatTime,
-  fullDayNames,
   getCurrentWeekOffset,
   GroupSession,
-  inputTimeToMinutes,
   isAppointmentConflict,
   isCancelledGroupSessionItem,
   isCancelledGroupSessionMatch,
@@ -364,7 +344,6 @@ import {
   LAST_TIME_SLOT_MINUTES,
   LOCATION_BAND_HUES,
   locationSnapshot,
-  minutesToInputTime,
   newCalendarItemId,
   overlaps,
   PAST_ADMIN_LESSON_WARNING,
@@ -412,7 +391,6 @@ import {
 import {
   BOOKING_SCREENS,
   bookingScreenPathsFor,
-  formatBookingScreenLabels,
   getBookingScreenId,
   getBookingScreenIframeCode,
   getBookingScreenPublicUrl,
@@ -450,8 +428,6 @@ import {
   isAppointmentStyleService,
   isCustomGroupService,
   isScheduledGroupService,
-  serviceEditorFormat,
-  serviceFormatLabel,
   servicePriceLabel,
 } from "./modules/services/serviceModel";
 import {
@@ -464,14 +440,11 @@ import {
   useEditableBlock,
 } from "./modules/settings/SettingsLayout";
 import {
-  accountFeatureLabel,
   accountLimit,
-  AccountLimits,
   activeLocations,
   blankCoachProfile,
   BrandSettings,
   CADDY_APP_URL,
-  calendarColorFields,
   calendarColorVariables,
   canCreateWithinLimit,
   canUseFeature,
@@ -485,7 +458,6 @@ import {
   coachById,
   CoachProfile,
   defaultBrandSettings,
-  defaultCalendarColors,
   defaultCoachAccount,
   defaultCoachProfileFromAccount,
   defaultLocationFromCoachAccount,
@@ -496,16 +468,13 @@ import {
   firstCoachId,
   getStoredCoachAccount,
   getStoredTheme,
-  isAccountActive,
   limitReachedMessage,
   Location,
   locationById,
   recordBelongsToAccount,
   serviceBelongsToAccount,
-  SUBSCRIPTION_STATUS_LABEL,
   THEME_STORAGE_KEY,
   ThemeMode,
-  UNLIMITED_ACCOUNT_LIMIT,
 } from "./modules/workspace/workspaceModel";
 import { useCalendarController } from "./modules/calendar/useCalendarController";
 import { CalendarView } from "./modules/calendar/CalendarView";
@@ -515,7 +484,6 @@ import { useWorkspaceData } from "./modules/workspace/useWorkspaceData";
 import { PublicBookingSection, } from "./modules/booking/bookingModel";
 import { View } from "./modules/shared/appView";
 import { useBookingFlow } from "./modules/booking/useBookingFlow";
-import { BookingFlowView } from "./modules/booking/BookingFlowView";
 import {
   DIAGNOSTIC_EVENT_LIMIT,
   DiagnosticTab,
@@ -546,11 +514,9 @@ import {
 import type { PassTypeDraft } from "./modules/passes/PassTypesList";
 import type { BundleDraft } from "./modules/passes/BundlesList";
 import {
-  PRIMARY_PLAYER_TOOL_TABS,
   PlayerPracticeSummary,
   PlayerProfileTool,
   SECONDARY_PLAYER_TOOLS,
-  SECONDARY_PLAYER_TOOL_TABS,
   playerToolAllowed,
 } from "./modules/player-profiles/playerTools";
 import { useClientProfileController } from "./modules/clients/useClientProfileController";
@@ -561,12 +527,80 @@ import { ClientProfileView } from "./modules/clients/ClientProfileView";
 // embed and only mount when a signed-in coach opens them, so they are split
 // into their own chunks and loaded on demand — this keeps the public
 // /book-a-lesson page and the initial admin paint from downloading them.
+// The Profile view's panels, and the coach editor the Settings coaches list
+// opens. Loaded with the view rather than with the shell.
+// The Player Profiles screen and its add-player dialog, in one chunk.
+// Billing › New Invoice, the one screen in Billing that is still drawn inline.
+const BrandingSettingsPanel = lazy(() =>
+  import("./modules/settings/BrandingSettingsPanel").then((module) => ({ default: module.BrandingSettingsPanel })),
+);
+const ThemeSettingsPanel = lazy(() =>
+  import("./modules/settings/ThemeSettingsPanel").then((module) => ({ default: module.ThemeSettingsPanel })),
+);
+const SmsSettingsPanel = lazy(() =>
+  import("./modules/notifications/SmsSettingsPanel").then((module) => ({ default: module.SmsSettingsPanel })),
+);
+const SendingRulesPanel = lazy(() =>
+  import("./modules/notifications/SendingRulesPanel").then((module) => ({ default: module.SendingRulesPanel })),
+);
+const EmailDeliveryPanel = lazy(() =>
+  import("./modules/notifications/EmailDeliveryPanel").then((module) => ({ default: module.EmailDeliveryPanel })),
+);
+const VideoStoragePanel = lazy(() =>
+  import("./modules/settings/VideoStoragePanel").then((module) => ({ default: module.VideoStoragePanel })),
+);
+const AccountSettingsPanel = lazy(() =>
+  import("./modules/settings/AccountSettingsPanel").then((module) => ({ default: module.AccountSettingsPanel })),
+);
+const BookingSettingsPanel = lazy(() =>
+  import("./modules/settings/BookingSettingsPanel").then((module) => ({ default: module.BookingSettingsPanel })),
+);
+const PlayerBookingEmbedPanel = lazy(() =>
+  import("./modules/settings/PlayerBookingEmbedPanel").then((module) => ({ default: module.PlayerBookingEmbedPanel })),
+);
+const AvailabilitySettingsPanel = lazy(() =>
+  import("./modules/settings/AvailabilitySettingsPanel").then((module) => ({ default: module.AvailabilitySettingsPanel })),
+);
+const CoachesSettingsPanel = lazy(() =>
+  import("./modules/settings/CoachesSettingsPanel").then((module) => ({ default: module.CoachesSettingsPanel })),
+);
+const GoogleCalendarSettingsPanel = lazy(() =>
+  import("./modules/settings/GoogleCalendarSettingsPanel").then((module) => ({ default: module.GoogleCalendarSettingsPanel })),
+);
+const TerminologySettingsPanel = lazy(() =>
+  import("./modules/settings/TerminologySettingsPanel").then((module) => ({ default: module.TerminologySettingsPanel })),
+);
+const LocationsSettingsPanel = lazy(() =>
+  import("./modules/settings/LocationsSettingsPanel").then((module) => ({ default: module.LocationsSettingsPanel })),
+);
+const ServicesSettingsPanel = lazy(() =>
+  import("./modules/settings/ServicesSettingsPanel").then((module) => ({ default: module.ServicesSettingsPanel })),
+);
+const BillingSettingsPanel = lazy(() =>
+  import("./modules/billing/BillingSettingsPanel").then((module) => ({ default: module.BillingSettingsPanel })),
+);
+const InvoiceEditor = lazy(() =>
+  import("./modules/billing/InvoiceEditor").then((module) => ({ default: module.InvoiceEditor })),
+);
+const PlayerProfilesScreen = lazy(() =>
+  import("./modules/player-profiles/PlayerProfilesScreen").then((module) => ({ default: module.PlayerProfilesScreen })),
+);
+const PlayerAddDialog = lazy(() =>
+  import("./modules/player-profiles/PlayerProfilesScreen").then((module) => ({ default: module.PlayerAddDialog })),
+);
+const BusinessHubPanel = lazy(() =>
+  import("./modules/business-hub/BusinessHubPanel").then((module) => ({ default: module.BusinessHubPanel })),
+);
+const OwnerIdentityCard = lazy(() =>
+  import("./modules/business-hub/BusinessHubPanel").then((module) => ({ default: module.OwnerIdentityCard })),
+);
+// lazy() cannot carry the panel's generic parameter, so the lazy component is
+// typed as the real one; the props are checked exactly as before.
+const CoachProfilePanel = lazy(() =>
+  import("./modules/business-hub/CoachProfilePanel").then((module) => ({ default: module.CoachProfilePanel })),
+) as unknown as typeof import("./modules/business-hub/CoachProfilePanel").CoachProfilePanel;
 const VideoAnalysisPage = lazy(() =>
   import("./modules/video-analysis/VideoAnalysisPage").then((module) => ({ default: module.VideoAnalysisPage })),
-);
-// A swing review's page, and the drill library it draws on.
-const SwingReviewSheet = lazy(() =>
-  import("./modules/swing-review/SwingReviewSheet").then((module) => ({ default: module.SwingReviewSheet })),
 );
 const DrillLibrary = lazy(() =>
   import("./modules/swing-review/DrillLibrary").then((module) => ({ default: module.DrillLibrary })),
@@ -577,14 +611,9 @@ const PuttingLabPage = lazy(() => import("./modules/putting-lab/PuttingLabPage")
 const ClarityVoiceTextPanel = lazy(() =>
   import("./modules/clarity-voice/ClarityVoiceTextPanel").then((module) => ({ default: module.ClarityVoiceTextPanel })),
 );
-// Owns its own loading and its own writes. The console only tells it which
-// player is open.
-const PracticeBlockPanel = lazy(() =>
-  import("./modules/practice/PracticeBlockPanel").then((module) => ({ default: module.PracticeBlockPanel })),
-);
 
 // The kinds of block, and the favourites rail. Preferences, not work -- see
-// UI_FILING_AND_CLASSIFICATION.md -- so it lives in Settings.
+// docs/ui-filing-and-classification.md -- so it lives in Settings.
 const PracticeSettingsPanel = lazy(() =>
   import("./modules/practice/PracticeSettingsPanel").then((module) => ({ default: module.PracticeSettingsPanel })),
 );
@@ -633,9 +662,6 @@ const MessageTemplatesPanel = lazy(() =>
 const DashboardPanel = lazy(() =>
   import("./modules/billing/DashboardPanel").then((module) => ({ default: module.DashboardPanel })),
 );
-const TapToPaySetup = lazy(() =>
-  import("./modules/billing/TapToPaySetup").then((module) => ({ default: module.TapToPaySetup })),
-);
 const ResourceSystemPanel = lazy(() =>
   import("./modules/integrations/ResourceSystemPanel").then((module) => ({ default: module.ResourceSystemPanel })),
 );
@@ -647,9 +673,6 @@ const TimeZoneSelect = lazy(() =>
 );
 const LanguageSelect = lazy(() =>
   import("./modules/settings/LanguageSettings").then((module) => ({ default: module.LanguageSelect })),
-);
-const SnapshotFrameViewer = lazy(() =>
-  import("./modules/shared/SnapshotFrameViewer").then((module) => ({ default: module.SnapshotFrameViewer })),
 );
 
 // Saved-video persistence is sizeable and the normal Today/Calendar startup
@@ -738,138 +761,11 @@ function prefetchPracticeForPlayer(playerId: string) {
 function cleanLessonNotes(notes: unknown[]): LessonNote[] {
   return cleanLessonNotesWith(notes, defaultWorkspaceAccountFromCoachAccount().id);
 }
-type BillingSection =
-  | "none"
-  | BillingGroup
-  | "dashboard"
-  | "new-invoice"
-  | "invoices"
-  | "products-new"
-  | "products-catalog"
-  | "products-orders"
-  | "products-integrations"
-  | "expenses-log"
-  | "expenses-records"
-  | "expenses-integrations"
-  | "vouchers-issue"
-  | "vouchers-edit"
-  | "vouchers-records"
-  | "vouchers-integrations"
-  | "passes-issue"
-  | "passes-edit"
-  | "passes-records"
-  | "reports"
-  | "transactions"
-  | "memberships"
-  | "rewards"
-  | "settings";
-
-// Products, Expenses, Vouchers and Passes. A group on its own is the group's
-// page with every section folded shut.
-type BillingGroup = "products" | "expenses" | "vouchers" | "passes";
-
-// What an overlay is currently showing. A settings overlay carries the tab so
-// the section's own tab CSS still applies and the group to focus; a billing
-// overlay carries the section. Both carry the title they announce themselves
-// with, which is the Business Hub card's own label.
-type WorkspaceOverlay =
-  | { kind: "settings"; tab: Exclude<SettingsTab, "none">; group: string; title: string }
-  | { kind: "billing"; section: Exclude<BillingSection, "none">; title: string };
 
 // The views a Business Hub card is allowed to send you to. Not every View:
 // "settings" and "billing" open over the profile rather than replacing it.
 const PROFILE_LINKED_VIEWS: View[] = ["calendar", "clients", "players", "sell", "billing", "video"];
 
-/**
- * Billing's sub-nav, as data -- the same shape as SETTINGS_SECTIONS, so the
- * side column, the topbar's subtitle and the coach profile's "does this
- * section exist" check all read one list and cannot drift apart.
- *
- * Products, Expenses, Vouchers and Passes are groups, laid out like a
- * Settings tab: one row in the side column, and its sections as fold-out
- * blocks beside it, all shut until one is opened.
- */
-const BILLING_SECTION_NAV: Array<{
-  key: Exclude<BillingSection, "none">;
-  label: string;
-  icon: IconComponent;
-  group?: BillingGroup;
-}> = [
-  { key: "dashboard", label: t("Dashboard"), icon: ClarityDashboardHome },
-  { key: "new-invoice", label: t("New Invoice"), icon: ClarityBookingPages },
-  { key: "invoices", label: t("Invoices"), icon: ClarityInvoices },
-  { key: "products-new", label: t("New Product"), icon: Plus, group: "products" },
-  { key: "products-catalog", label: t("Catalog"), icon: ClarityProducts, group: "products" },
-  { key: "products-orders", label: t("Orders"), icon: ClarityPayments, group: "products" },
-  { key: "products-integrations", label: t("Integrations"), icon: ClarityIntegrations, group: "products" },
-  { key: "expenses-log", label: t("Log An Expense"), icon: Plus, group: "expenses" },
-  { key: "expenses-records", label: t("Expense Log"), icon: ClarityStore, group: "expenses" },
-  { key: "expenses-integrations", label: t("Integrations"), icon: ClarityIntegrations, group: "expenses" },
-  { key: "vouchers-issue", label: t("Issue Voucher"), icon: Plus, group: "vouchers" },
-  { key: "vouchers-edit", label: t("Create or Edit Vouchers"), icon: ClarityProducts, group: "vouchers" },
-  { key: "vouchers-records", label: t("Voucher Records"), icon: ClarityPassesCredits, group: "vouchers" },
-  { key: "vouchers-integrations", label: t("Integrations"), icon: ClarityIntegrations, group: "vouchers" },
-  { key: "passes-issue", label: t("Issue or Redeem Passes"), icon: Plus, group: "passes" },
-  { key: "passes-edit", label: t("Create or Edit Passes"), icon: ClarityProducts, group: "passes" },
-  { key: "passes-records", label: t("Pass Records"), icon: ClarityPassesCredits, group: "passes" },
-  { key: "transactions", label: t("Transaction History"), icon: ClarityPayments },
-  { key: "memberships", label: t("Memberships"), icon: RefreshCw },
-  { key: "rewards", label: t("Rewards"), icon: Sparkles },
-  { key: "reports", label: t("Reports"), icon: ClarityReports },
-  { key: "settings", label: t("Settings"), icon: ClaritySettings },
-];
-
-const BILLING_GROUPS: Array<{ key: BillingGroup; label: string; icon: IconComponent }> = [
-  { key: "products", label: t("Products"), icon: ClarityProducts },
-  { key: "expenses", label: t("Expenses"), icon: ClarityStore },
-  { key: "vouchers", label: t("Vouchers"), icon: ClarityPayments },
-  { key: "passes", label: t("Passes"), icon: ClarityPassesCredits },
-];
-
-function isBillingSection(value: unknown): value is Exclude<BillingSection, "none"> {
-  return BILLING_SECTION_NAV.some((entry) => entry.key === value) || BILLING_GROUPS.some((group) => group.key === value);
-}
-
-/** The group a section is filed under -- or the group itself, when its page is open with nothing unfolded. */
-function billingGroupOf(section: BillingSection): BillingGroup | undefined {
-  const group = BILLING_GROUPS.find((candidate) => candidate.key === section);
-  if (group) return group.key;
-  return BILLING_SECTION_NAV.find((candidate) => candidate.key === section)?.group;
-}
-
-function billingGroupLabel(group: BillingGroup) {
-  return BILLING_GROUPS.find((candidate) => candidate.key === group)?.label ?? "";
-}
-
-// A grouped section reads as "Group › Section" wherever it stands alone, so
-// three rows all called Integrations still say whose they are.
-function billingSectionLabel(section: Exclude<BillingSection, "none">) {
-  const entry = BILLING_SECTION_NAV.find((candidate) => candidate.key === section);
-  if (!entry) return billingGroupLabel(section as BillingGroup);
-  return entry.group ? `${billingGroupLabel(entry.group)} › ${entry.label}` : entry.label;
-}
-
-// Which completed bookings the "ready to pull" lists show.
-//
-// "all" is the default because a counter payment no longer settles a lesson for
-// invoicing purposes - see addCompletedBookingLine. Taking payment at the till
-// and invoicing the range for the same lesson are two different transactions,
-// so a paid lesson has to stay in the working list.
-//
-// "unpaid" is for the other way of working: treat a counter payment as the end
-// of it and only ever invoice what has not been paid. "paid" is for looking
-// back at what has been settled.
-type BookingPullFilter = "unpaid" | "all" | "paid";
-// v2: the stored value is deliberately re-keyed. Everyone currently has
-// "unpaid" saved from when that was the default, and reusing the old key would
-// leave them with paid lessons hidden from a list that now expects to show them.
-const BOOKING_PULL_FILTER_STORAGE_KEY = "clarity.billing.pullFilter.v2";
-
-function readStoredPullFilter(): BookingPullFilter {
-  if (typeof window === "undefined") return "all";
-  const stored = window.localStorage.getItem(BOOKING_PULL_FILTER_STORAGE_KEY);
-  return stored === "unpaid" || stored === "paid" ? stored : "all";
-}
 // A money-out bank transaction (Akahu) awaiting review as an expense.
 type BankExpenseCandidate = {
   id: string;
@@ -990,186 +886,10 @@ type BookingConfirmationResendResponse = {
   results?: EmailSendResult[];
   notifications?: NotificationRecord[];
 };
-/** What goes from Clarity to this coach's Google Calendar. Mirrors google-calendar-export-rules.mts. */
-type GoogleCalendarExportRules = {
-  lessons: boolean;
-  blocks: boolean;
-  unavailable: boolean;
-  excludedServiceIds: string[];
-  clientDetails: boolean;
-};
-type GoogleCalendarSyncStatus = {
-  configured: boolean;
-  connected: boolean;
-  accountId?: string;
-  calendarId: string;
-  autoSync: boolean;
-  accountEmail: string;
-  lastSyncAt: string;
-  lastSyncStatus: string;
-  lastSyncError: string;
-  manualOnly?: boolean;
-  connectedAt: string;
-  redirectUri: string;
-  scope: string;
-  grantedScopes?: string[];
-  missingScopes?: string[];
-  connectionStatus?: string;
-  /** Whose calendar this is. Google Calendar is connected per coach. */
-  coachId?: string;
-  sources?: GoogleCalendarSourceStatus[];
-  sourceListError?: string;
-  importRules?: GoogleCalendarImportRule[];
-  exportRules?: GoogleCalendarExportRules;
-  ok?: boolean;
-  skipped?: boolean;
-};
-/** A calendar on the connected Google account, offered as a scope for a rule. */
-type GoogleCalendarSourceStatus = {
-  id: string;
-  name: string;
-  primary: boolean;
-  hidden: boolean;
-  accessRole: string;
-};
-/**
- * One external source the coach wants pulled in — "Golf HQ Portal" and the
- * spellings that identify it. Keywords narrow further; empty means everything
- * from that source. See netlify/functions/_shared/google-calendar-import-rules.
- */
-type GoogleCalendarImportRule = {
-  id: string;
-  name: string;
-  /**
-   * Held as the raw text the coach typed, not a parsed list.
-   *
-   * Splitting on every keystroke made the field unusable: trimming ate the
-   * space in "Golf HQ" and the split ate the comma the moment it was typed, so
-   * neither could ever be entered. The backend already accepts a comma or
-   * newline separated string and does the splitting once, on save.
-   */
-  aliases: string;
-  keywords: string;
-  /** Calendars to scan. Empty means every calendar on the account. */
-  calendarIds: string[];
-  showLabel: boolean;
-  enabled: boolean;
-};
-type GoogleCalendarDebugRequest = {
-  method: string;
-  url: string;
-  calendarId: string;
-  eventId: string;
-  itemId: string;
-  itemLabel: string;
-  payload: unknown;
-};
-type GoogleCalendarDebugError = {
-  stage: string;
-  message: string;
-  httpStatus: number;
-  httpStatusText: string;
-  googleCode: string;
-  googleStatus: string;
-  googleReason: string;
-  googleDomain: string;
-  googleMessage: string;
-  googleErrors: unknown[];
-  providerCode: string;
-  rawBody: string;
-};
-type GoogleCalendarDebugEntry = {
-  id: string;
-  trigger: string;
-  startedAt: string;
-  finishedAt: string;
-  durationMs: number;
-  outcome: "success" | "failed" | "skipped";
-  reason: string;
-  stage: string;
-  mode: "full" | "targeted";
-  calendarId: string;
-  accountEmail: string;
-  itemCount: number;
-  upserted: number;
-  deleted: number;
-  unchanged: number;
-  retries: number;
-  changes: Array<{ id: string; action: string }>;
-  request: GoogleCalendarDebugRequest | null;
-  requestIsSample: boolean;
-  error: GoogleCalendarDebugError | null;
-};
-type GoogleCalendarDebugLog = {
-  enabled: boolean;
-  maxEntries: number;
-  autoSync: boolean;
-  manualOnly: boolean;
-  calendarId: string;
-  entries: GoogleCalendarDebugEntry[];
-};
-type GoogleCalendarActionState = "idle" | "connecting" | "saving" | "syncing" | "disconnecting";
-type GoogleDriveActionState = "idle" | "connecting" | "testing" | "disconnecting";
 
 /** What Clarity Caddy knows about a player, for the profile card. */
-type CaddyStatus = {
-  connected: boolean;
-  coachLinked?: boolean;
-  coachCount?: number;
-  access: string;
-  active?: boolean;
-  expiresAt?: string | null;
-  unavailable?: string;
-};
-
-/** A client the coach has given player portal access to. */
-type PortalPlayer = {
-  id: string;
-  personId: string;
-  email: string;
-  status: "invited" | "active" | "disabled";
-  invitedAt?: string | null;
-  lastLoginAt?: string | null;
-};
-
-type PasswordChangeForm = {
-  currentPassword: string;
-  newPassword: string;
-  confirmPassword: string;
-};
 
 
-const DEFAULT_MIN_BOOKING_NOTICE_MINUTES = 240;
-const MAX_MIN_BOOKING_NOTICE_MINUTES = 7 * 24 * 60;
-const MIN_BOOKING_NOTICE_PRESETS_HOURS = [0, 1, 2, 4, 24] as const;
-const NOTIFICATION_SUBJECT_TOKENS = [
-  "{{service}}",
-  "{{coach}}",
-  "{{client}}",
-  "{{date}}",
-  "{{time}}",
-  "{{action}}",
-] as const;
-
-function cleanMinBookingNoticeMinutes(value: number) {
-  return Number.isFinite(value) ? clamp(Math.round(value), 0, MAX_MIN_BOOKING_NOTICE_MINUTES) : DEFAULT_MIN_BOOKING_NOTICE_MINUTES;
-}
-
-/** Days + hours from the reminder settings UI, combined and clamped to the
- *  backend's 1 hour – 14 days range (see admin-settings.mts). */
-function reminderLeadMinutesFrom(days: number, hours: number) {
-  return clamp(Math.round(days) * 1440 + Math.round(hours) * 60, 60, 14 * 24 * 60);
-}
-
-function reminderLeadLabel(minutes: number) {
-  const days = Math.floor(minutes / 1440);
-  const hours = Math.round((minutes % 1440) / 60);
-  const parts = [
-    days ? (days === 1 ? t("1 day") : t("{days} days", { days })) : "",
-    hours ? (hours === 1 ? t("1 hour") : t("{hours} hours", { hours })) : "",
-  ].filter(Boolean);
-  return parts.join(" ") || t("1 hour");
-}
 
 function formatBookingNoticeLabel(minutes: number) {
   const normalized = cleanMinBookingNoticeMinutes(minutes);
@@ -1245,12 +965,6 @@ function getInitialView(): View {
   return isPhoneLayout() ? "today" : "calendar";
 }
 
-/**
- * How Stripe's Clarity Pay signup went, when the browser has just come back
- * from it. The server sends the coach to the page they started on with
- * `clarityPay=on|pending|error` (stripe-connect.mts); the page shows it once.
- */
-type ClarityPayReturn = "on" | "pending" | "error" | "paused";
 
 function getClarityPayReturn(): ClarityPayReturn | null {
   if (typeof window === "undefined") return null;
@@ -1258,53 +972,6 @@ function getClarityPayReturn(): ClarityPayReturn | null {
   return value === "on" || value === "pending" || value === "error" ? value : null;
 }
 
-/**
- * "paused" never comes from the server: it is the coach coming back to Clarity
- * (the Back button, usually) before finishing Stripe's signup. Nothing is lost
- * by that — the account Stripe started is kept — so it says so calmly and
- * offers the way back in.
- */
-function ClarityPayReturnBanner({
-  outcome,
-  onDismiss,
-  onContinue,
-  busy,
-}: {
-  outcome: ClarityPayReturn;
-  onDismiss: () => void;
-  onContinue: () => void;
-  busy: boolean;
-}) {
-  const [title, message] =
-    outcome === "on"
-      ? [t("Clarity Pay is on"), t("Card payments now go straight to your account, and Stripe pays them out to your bank.")]
-      : outcome === "pending"
-        ? [t("Almost there"), t("Stripe is still checking your details, or needs a few more. Clarity Pay switches on by itself once Stripe is done.")]
-        : outcome === "paused"
-          ? [t("Clarity Pay setup is paused"), t("You left Stripe's signup before the end. Nothing is lost: carry on where you stopped whenever you're ready.")]
-          : [t("Clarity Pay isn't set up"), t("Stripe's signup didn't finish. You can start it again now.")];
-  return (
-    <div className={`clarity-pay-return is-${outcome}`} role="status">
-      <span className="clarity-pay-return-icon" aria-hidden="true">
-        {outcome === "on" ? <Check size={18} /> : <AlertCircle size={18} />}
-      </span>
-      <div>
-        <strong>{title}</strong>
-        <span>{message}</span>
-        {outcome !== "on" && (
-          <div className="clarity-pay-return-actions">
-            <button className="primary-button" disabled={busy} onClick={onContinue} type="button">
-              {busy ? t("Opening…") : outcome === "error" ? t("Set up Clarity Pay") : t("Finish Clarity Pay setup")}
-            </button>
-          </div>
-        )}
-      </div>
-      <button className="icon-button" onClick={onDismiss} title={t("Dismiss")} aria-label={t("Dismiss")} type="button">
-        <X size={16} />
-      </button>
-    </div>
-  );
-}
 
 function getDefaultSyncBaseUrl() {
   if (typeof window === "undefined") return "https://booking.yourdomain.co.nz";
@@ -1314,86 +981,9 @@ function getDefaultSyncBaseUrl() {
   return window.location.origin;
 }
 
-function profileRecordDateLabel(createdAt = "") {
-  if (!createdAt) return "";
-  const time = new Date(createdAt);
-  if (Number.isNaN(time.getTime())) return "";
-  return new Intl.DateTimeFormat(activeLocale(), {
-    day: "2-digit",
-    month: "short",
-    year: "2-digit",
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  })
-    .format(time)
-    .replace(",", "")
-    .replace(/\s(am|pm)$/i, (match) => match.toUpperCase());
-}
 
-function profileRecordTitle(playerName = "", createdAt = "") {
-  const name = safeText(playerName).trim() || t("Player");
-  const date = profileRecordDateLabel(createdAt);
-  return date ? `${name} - ${date}` : name;
-}
 
-function formatVideoDurationLabel(seconds?: number) {
-  if (!Number.isFinite(seconds ?? NaN) || !seconds) return t("Duration unknown");
-  const totalSeconds = Math.max(0, Math.round(seconds));
-  const minutes = Math.floor(totalSeconds / 60);
-  const remainder = totalSeconds % 60;
-  return `${minutes}:${String(remainder).padStart(2, "0")}`;
-}
 
-function savedVideoCloudErrorLabel(code?: string, fallback?: string) {
-  switch (code) {
-    case "CLOUD_OAUTH_NOT_CONFIGURED":
-      return t("Clarity Cloud is not configured for this environment.");
-    case "PROVIDER_STORAGE_UNAVAILABLE":
-      return t("Clarity Cloud setup is incomplete.");
-    case "DRIVE_API_DISABLED":
-      return t("Clarity Cloud is not enabled for this connection.");
-    case "DRIVE_UPLOAD_PROXY_FAILED":
-      return t("Clarity Cloud could not complete the upload.");
-    case "DRIVE_UPLOAD_TOO_LARGE":
-      return t("This transfer chunk was too large.");
-    case "DRIVE_SCOPE_MISSING":
-      return t("Clarity Cloud permission is required.");
-    case "GOOGLE_RECONNECT_REQUIRED":
-      return t("Reconnect Clarity Cloud to continue.");
-    case "GOOGLE_TOKEN_REFRESH_FAILED":
-      return t("Clarity Cloud could not refresh the Google connection.");
-    case "DRIVE_TRANSFER_FOLDER_FAILED":
-    case "DRIVE_FOLDER_PROVISION_FAILED":
-      return t("Clarity Cloud could not prepare the transfer folder.");
-    case "DRIVE_UPLOAD_SESSION_EXPIRED":
-      return t("Start a new upload session before retrying.");
-    case "DRIVE_UPLOAD_SESSION_FAILED":
-      return t("Clarity Cloud could not start the video upload.");
-    case "DRIVE_TRANSFER_STATE_FAILED":
-      return t("Clarity Cloud could not store the upload session.");
-    case "DRIVE_UPLOAD_VERIFY_FAILED":
-      return t("Clarity Cloud could not verify the uploaded video.");
-    case "DRIVE_UPLOAD_INTERRUPTED":
-      return t("Video upload was interrupted.");
-    case "SAVED_VIDEO_SOURCE_MISSING":
-      return t("Source unavailable.");
-    case "CLARITY_CLOUD_IMPORT_NOT_READY":
-      return t("This video is not ready to download from Clarity Cloud.");
-    case "CLARITY_CLOUD_IMPORT_VERIFY_FAILED":
-      return t("Imported video did not match the Clarity Cloud catalogue.");
-    case "CLARITY_CLOUD_IMPORT_RECEIPT_FAILED":
-      return t("Local import was verified, but the receipt could not be recorded.");
-    case "CLARITY_CLOUD_PROVIDER_FAILED":
-      return t("Your local video is safe. The cloud transfer service could not be reached.");
-    case "TRANSFER_PAUSED":
-      return t("Transfer paused.");
-    default:
-      return fallback && !/[{}<>]|https?:\/\//i.test(fallback) && fallback.length < 140
-        ? fallback
-        : t("Clarity Cloud could not complete the upload.");
-  }
-}
 
 function mergeSavedVideoItems(current: SavedVideoItem[], incoming: SavedVideoItem[]) {
   const byId = new Map(current.map((item) => [item.savedVideoId, item]));
@@ -1434,9 +1024,6 @@ function shouldOpenClarityCloudSettings(health: ClarityCloudHealth) {
   return "action" in health && health.action !== "retry";
 }
 
-function isClarityCloudOperational(health: ClarityCloudHealth) {
-  return health.state === "ready";
-}
 
 function sourceSideFromSlotKey(slotKey: string): ComparisonSide {
   return slotKey.endsWith(".right") ? "right" : "left";
@@ -1496,163 +1083,15 @@ async function readJsonResponse<T>(response: Response, fallbackMessage: string):
   return (await response.json()) as T & { message?: string; error?: string };
 }
 
-function googleSyncTimeLabel(createdAt = "") {
-  if (!createdAt) return t("Not synced yet");
-  const time = new Date(createdAt);
-  return Number.isNaN(time.getTime()) ? t("Not synced yet") : time.toLocaleString(activeLocale());
-}
-
-// Human labels for the Google Calendar debug window. The trigger codes are the
-// literals each server-side sync call site passes as its trigger.
-const googleCalendarTriggerLabels: Record<string, string> = {
-  manual_sync_now: t("Sync now (coach profile)"),
-  api_google_calendar_sync_post: "Sync via /api/google-calendar-sync",
-  admin_calendar_save: t("Calendar saved (admin)"),
-  admin_item_upsert: t("Booking edited / moved (admin)"),
-  admin_calendar_delete: t("Booking deleted (admin)"),
-  public_booking_created: t("Public booking created"),
-  public_booking_state_write: t("Public booking state write"),
-  public_booking_cancelled: t("Public booking cancelled"),
-  auto_sync: t("Automatic sync"),
-  availability_save: t("Availability saved"),
-  scheduled_reconcile: t("Nightly check"),
-};
-
-const googleCalendarSkipReasonLabels: Record<string, string> = {
-  auto_sync_disabled: t("Auto-sync is switched off, so nothing was sent."),
-  manual_sync_only: t("Build is pinned to manual-sync-only, so nothing was sent."),
-  google_oauth_not_configured: t("GOOGLE_CALENDAR_CLIENT_ID / _SECRET are missing from the environment."),
-  google_calendar_not_connected: t("No connected Google account with calendar scope."),
-  no_google_relevant_changes: t("The save touched nothing Google Calendar cares about, so no request was sent."),
-  unchanged: t("Every targeted booking already matched Google, so no request was needed."),
-};
-
-const googleCalendarStageLabels: Record<string, string> = {
-  preflight: t("Before any request"),
-  access_token: t("Refreshing access token"),
-  changes: t("Resolving changed bookings"),
-  upsert: t("Writing events"),
-  upsert_update: "PUT event (update)",
-  create_insert: "POST event (insert)",
-  create_replace: "PUT event (409 recovery)",
-  delete: t("Deleting event"),
-  complete: t("Finished"),
-};
-
-function googleCalendarTriggerLabel(trigger: string) {
-  return googleCalendarTriggerLabels[trigger] || trigger || t("Unknown trigger");
-}
-
-function googleCalendarStageLabel(stage: string) {
-  return googleCalendarStageLabels[stage] || stage || "—";
-}
-
-function googleCalendarDebugTimestamp(value: string) {
-  if (!value) return "—";
-  const time = new Date(value);
-  return Number.isNaN(time.getTime()) ? value : time.toLocaleString(activeLocale());
-}
-
-function relativeTimeLabel(value: string) {
-  const time = new Date(value || "");
-  if (Number.isNaN(time.getTime())) return "";
-  const seconds = Math.round((Date.now() - time.getTime()) / 1000);
-  if (seconds < 60) return t("just now");
-  if (seconds < 3600) return t("{n}m ago", { n: Math.floor(seconds / 60) });
-  if (seconds < 86400) return t("{n}h ago", { n: Math.floor(seconds / 3600) });
-  return t("{n}d ago", { n: Math.floor(seconds / 86400) });
-}
-
-/**
- * One-line "what actually went wrong" for a failed run: Google's own error
- * identifiers first (HTTP status + error.status + errors[0].reason), falling
- * back to the provider-level code when the failure happened before any
- * Calendar API call (token refresh, missing scopes).
- */
-function googleCalendarFailureCode(error: GoogleCalendarDebugError | null) {
-  if (!error) return "";
-  const parts = [
-    error.httpStatus ? `HTTP ${error.httpStatus}` : "",
-    error.googleStatus,
-    error.googleReason,
-    !error.httpStatus && !error.googleStatus ? error.providerCode : "",
-  ].filter(Boolean);
-  return parts.join(" · ") || error.providerCode || t("Unknown failure");
-}
-
-/** Plain-English follow-up for the Google failures that have a known cause. */
-function googleCalendarFailureHint(error: GoogleCalendarDebugError | null) {
-  if (!error) return "";
-  if (error.googleReason === "rateLimitExceeded" || error.googleReason === "userRateLimitExceeded") {
-    return t("Google throttled the write burst. Clarity now retries these with backoff and skips bookings Google already matches, so a repeat sync should send far fewer requests. If it keeps happening, the calendar is being written to faster than Google allows.");
-  }
-  if (error.googleReason === "quotaExceeded") {
-    return t("The daily Google Calendar quota is spent. Retrying will not help until it resets.");
-  }
-  if (error.googleStatus === "PERMISSION_DENIED" || error.httpStatus === 403) {
-    return t("The connected Google account is not allowed to write to this calendar. Check the calendar ID and reconnect if the account changed.");
-  }
-  if (error.httpStatus === 401 || error.providerCode === "GOOGLE_TOKEN_REFRESH_FAILED") {
-    return t("Google rejected the stored credentials. Disconnect and reconnect the Google account.");
-  }
-  if (error.providerCode === "GOOGLE_SCOPE_MISSING") {
-    return t("The connection is missing the calendar scope. Reconnect and accept the calendar permission.");
-
-  }
-  return "";
-}
-
-function formatDebugJson(value: unknown) {
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
-
 function addDaysInputValue(days: number) {
   const date = new Date();
   date.setDate(date.getDate() + days);
   return dateInputValue(date);
 }
 
-// "2026-07-15" -> "15 Jul 2026". Parsed as a local date (not UTC) so the day
-// never shifts; falls back to the raw value / em dash if it isn't a plain date.
-function formatDateForDisplay(value: string) {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value || "");
-  if (!match) return value || "—";
-  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-  return date.toLocaleDateString(activeLocale(), { day: "numeric", month: "short", year: "numeric" });
-}
 
-// An ISO timestamp -> "15 Jul 2026". Used where only the day matters.
-function formatTimestampForDisplay(value?: string | null) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleDateString(activeLocale(), { day: "numeric", month: "short", year: "numeric" });
-}
 
-/* The two-line date cell every player profile row leads with: the day on top,
- * the clock time under it. Returns both parts rather than a formatted string
- * because the row prints them at different weights. `time` is empty for a
- * record that only has a date, and the cell then shows the day on its own. */
-/** Seconds to "m:ss", for the duration badge on a shelf card. */
-function formatClipDuration(seconds: number) {
-  if (!Number.isFinite(seconds) || seconds <= 0) return "";
-  const whole = Math.round(seconds);
-  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
-}
 
-function profileWhenParts(value?: string | null) {
-  if (!value) return { day: "", time: "" };
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return { day: "", time: "" };
-  return {
-    day: date.toLocaleDateString(activeLocale(), { day: "numeric", month: "short" }),
-    time: date.toLocaleTimeString(activeLocale(), { hour: "2-digit", minute: "2-digit", hour12: false }),
-  };
-}
 
 // Whole days between two "YYYY-MM-DD" strings, computed via UTC midnight so
 // it isn't affected by daylight saving or the browser's local time zone.
@@ -1698,20 +1137,6 @@ function rgbStats(r: number, g: number, b: number) {
   const lightness = (max + min) / 2;
   const saturation = max === min ? 0 : (max - min) / (1 - Math.abs(2 * lightness - 1));
   return { lightness, saturation };
-}
-
-function swatchStyle(hex: string): CSSProperties {
-  const match = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
-  if (!match) return { background: hex };
-  const r = Number.parseInt(match[1], 16);
-  const g = Number.parseInt(match[2], 16);
-  const b = Number.parseInt(match[3], 16);
-  const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
-  return {
-    background: hex,
-    color: luminance > 0.64 ? "#08100b" : "#ffffff",
-    textShadow: luminance > 0.64 ? "none" : undefined,
-  };
 }
 
 function loadImage(url: string) {
@@ -1988,11 +1413,6 @@ function cleanImportRule(rule: Partial<GoogleCalendarImportRule>, index: number)
     showLabel: rule?.showLabel !== false,
     enabled: rule?.enabled !== false,
   };
-}
-
-/** A rule only imports once it has something to match on. */
-function importRuleIsActive(rule: GoogleCalendarImportRule) {
-  return rule.enabled && rule.aliases.trim().length > 0;
 }
 
 const defaultGoogleDriveTransferStatus: GoogleDriveTransferStatus = {
@@ -4805,19 +4225,6 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
    * says what state it is in.
    */
   const playerVideoShelfGroups = useMemo(() => {
-    type ShelfClip = {
-      key: string;
-      savedVideoId: string;
-      title: string;
-      thumbnail: string;
-      duration: number;
-      at: string;
-      kind: "saved" | "submission" | "recovery";
-      unseen: boolean;
-      playable: boolean;
-      /** The same swing from the other camera: shown and opened as one package. */
-      partner?: ShelfClip;
-    };
     const loose: ShelfClip[] = [
       ...playerToolVideos.map((video) => ({
         key: `saved-${video.savedVideoId}`,
@@ -14177,1125 +13584,107 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   }
 
   const servicesSettingsPanel = (
-    <div className="settings-section settings-services">
-      <div className="service-layout">
-        <div className="services-topline">
-          <div>
-            <span>{t("{serviceSingular} options", { serviceSingular: terms.serviceSingular })}</span>
-            <h2>{t("{serviceSingular} types", { serviceSingular: terms.serviceSingular })}</h2>
-          </div>
-          <button className="outline-button" onClick={startNewService}>
-            <Plus size={16} />{t("New")}</button>
-        </div>
-
-        {showServiceEditor && (
-          <article className="data-card service-editor">
-            <div className="data-card-header">
-              <div>
-                <span>{editingServiceId ? t("Edit {serviceSingular} Type", { serviceSingular: terms.serviceSingular }) : t("New {serviceSingular} Type", { serviceSingular: terms.serviceSingular })}</span>
-                <h2>{editingServiceId ? serviceEditor.name || `${terms.serviceSingular} details` : t("Add {serviceSingular}", { serviceSingular: terms.serviceSingular.toLowerCase() })}</h2>
-              </div>
-              <button
-                className="outline-button"
-                onClick={() => {
-                  setShowServiceEditor(false);
-                  setEditingServiceId(null);
-                  setServiceNumberDrafts({});
-                  setServiceEditor(emptyServiceEditor());
-                }}
-              >
-                <X size={16} />{t("Close")}</button>
-            </div>
-
-            <div className="service-form">
-              <div className="service-form-row">
-                <label className="settings-field">
-                  <span>{t("Lesson format")}</span>
-                  <select
-                    value={serviceEditorFormat(serviceEditor)}
-                    onChange={(event) => updateServiceEditorFormat(event.target.value as ServiceEditorFormat)}
-                  >
-                    <option value="private">{t("Private lesson")}</option>
-                    <option value="group">{t("Group lesson")}</option>
-                    <option value="custom-group">{t("Custom group lesson")}</option>
-                    <option value="video-review">{t("Video review (no set time)")}</option>
-                    {/* Only an older package opened from somewhere else shows
-                        this; new pass types are made in Billing > Passes. */}
-                    {serviceEditor.lessonFormat === "package" && <option value="package">{t("Package")}</option>}
-                  </select>
-                </label>
-                <label className="settings-field">
-                  <span>{t("Visibility")}</span>
-                  <select
-                    value={serviceEditor.visibility}
-                    onChange={(event) =>
-                      updateServiceEditor("visibility", event.target.value === "private" ? "private" : "public")
-                    }
-                  >
-                    <option value="public">{t("Public booking page")}</option>
-                    <option value="private">{t("Admin only")}</option>
-                  </select>
-                </label>
-                <label className="settings-field">
-                  <span>{t("Show on booking screens")}</span>
-                  <div className="service-screen-checkboxes">
-                    {BOOKING_SCREENS.map((screen) => (
-                      <label className="settings-toggle" key={screen.id}>
-                        <input
-                          checked={Boolean((serviceEditor.bookingScreenIds ?? ["main"]).includes(screen.id))}
-                          onChange={(event) => updateBookingScreens(screen.id, event.target.checked)}
-                          type="checkbox"
-                        />
-                        <span>{screen.label}</span>
-                      </label>
-                    ))}
-                  </div>
-                  {serviceEditor.visibility === "private" && (
-                    <p className="field-help">{t("Admin-only lesson types will not appear publicly until visibility is set to Public.")}</p>
-                  )}
-                </label>
-              </div>
-              <label className="settings-field">
-                <span>{t("Name")}</span>
-                <input
-                  value={serviceEditor.name}
-                  onChange={(event) => updateServiceEditor("name", event.target.value)}
-                  placeholder={`${terms.serviceSingular} name`}
-                />
-              </label>
-              {/* The colour lives on the lesson type because that is the thing
-                  it identifies. A card on the calendar is filled with it, which
-                  is how a week reads as several kinds of lesson at a glance. */}
-              <label className="settings-field calendar-colour-field service-colour-field">
-                <input
-                  type="color"
-                  value={serviceEditor.color || defaultServiceColor(0)}
-                  aria-label={t("Calendar colour for this lesson type")}
-                  onChange={(event) => updateServiceEditor("color", event.target.value)}
-                />
-                <span>
-                  <strong>{t("Calendar colour")}</strong>
-                  <em>{t("Card fill")}</em>
-                </span>
-                <code>{serviceEditor.color || defaultServiceColor(0)}</code>
-              </label>
-              <label className="settings-field">
-                <span>{t("Optional description")}</span>
-                <input
-                  value={serviceEditor.description}
-                  onChange={(event) => updateServiceEditor("description", event.target.value)}
-                  placeholder={t("Short booking note")}
-                />
-              </label>
-              <div className="service-form-row">
-                <label className="settings-field">
-                  <span>{t("Duration")}</span>
-                  <input
-                    value={serviceNumberInputValue("duration")}
-                    min={15}
-                    max={240}
-                    step={15}
-                    inputMode="numeric"
-                    onChange={(event) => updateServiceNumberDraft("duration", event.target.value)}
-                    onBlur={() => commitServiceNumberDraft("duration")}
-                    type="number"
-                  />
-                </label>
-                <label className="settings-field">
-                  <span>{t("Price NZD")}</span>
-                  <input
-                    value={serviceNumberInputValue("price")}
-                    min={0}
-                    step={1}
-                    inputMode="decimal"
-                    onChange={(event) => updateServiceNumberDraft("price", event.target.value)}
-                    onBlur={() => commitServiceNumberDraft("price")}
-                    type="number"
-                  />
-                </label>
-                <label className="settings-field">
-                  <span>{t("Pricing")}</span>
-                  <select
-                    disabled={serviceEditor.lessonFormat !== "group" || hasCustomGroupFlag(serviceEditor)}
-                    value={serviceEditor.priceMode}
-                    onChange={(event) =>
-                      updateServiceEditor("priceMode", event.target.value === "per-person" ? "per-person" : "session")
-                    }
-                  >
-                    <option value="session">{t("Per session")}</option>
-                    <option value="per-person">{t("Per person")}</option>
-                  </select>
-                </label>
-              </div>
-              {serviceEditor.lessonFormat === "group" && hasCustomGroupFlag(serviceEditor) && (
-                <div className="service-form-row">
-                  <label className="settings-field">
-                    <span>{t("Base participants")}</span>
-                    <input
-                      value={serviceNumberInputValue("baseParticipants")}
-                      min={serviceEditor.minParticipants}
-                      max={serviceEditor.capacity}
-                      step={1}
-                      inputMode="numeric"
-                      onChange={(event) => updateServiceNumberDraft("baseParticipants", event.target.value)}
-                      onBlur={() => commitServiceNumberDraft("baseParticipants")}
-                      type="number"
-                    />
-                  </label>
-                  <label className="settings-field">
-                    <span>{t("Base price NZD")}</span>
-                    <input
-                      value={serviceNumberInputValue("basePrice")}
-                      min={0}
-                      step={1}
-                      inputMode="decimal"
-                      onChange={(event) => updateServiceNumberDraft("basePrice", event.target.value)}
-                      onBlur={() => commitServiceNumberDraft("basePrice")}
-                      type="number"
-                    />
-                  </label>
-                  <label className="settings-field">
-                    <span>{t("Extra person NZD")}</span>
-                    <input
-                      value={serviceNumberInputValue("extraPersonPrice")}
-                      min={0}
-                      step={1}
-                      inputMode="decimal"
-                      onChange={(event) => updateServiceNumberDraft("extraPersonPrice", event.target.value)}
-                      onBlur={() => commitServiceNumberDraft("extraPersonPrice")}
-                      type="number"
-                    />
-                  </label>
-                </div>
-              )}
-              <div className="service-form-row">
-                {serviceEditor.lessonFormat === "group" && !hasCustomGroupFlag(serviceEditor) && (
-                  <label className="settings-field">
-                    <span>{t("Day of week")}</span>
-                    <select
-                      value={serviceEditor.groupSchedule?.dayOfWeek ?? 2}
-                      onChange={(event) => updateGroupSchedule("dayOfWeek", Number(event.target.value))}
-                    >
-                      {fullDayNames.map((dayName, index) => (
-                        <option key={dayName} value={index}>
-                          {dayName}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-                {serviceEditor.lessonFormat === "group" && !hasCustomGroupFlag(serviceEditor) && (
-                  <label className="settings-field">
-                    <span>{t("Start time")}</span>
-                    <input
-                      value={minutesToInputTime(serviceEditor.groupSchedule?.startMinutes ?? timeToMinutes(18, 0))}
-                      inputMode="numeric"
-                      onChange={(event) =>
-                        updateGroupSchedule(
-                          "startMinutes",
-                          inputTimeToMinutes(
-                            event.target.value,
-                            serviceEditor.groupSchedule?.startMinutes ?? timeToMinutes(18, 0),
-                          ),
-                        )
-                      }
-                      type="time"
-                      step={SNAP_MINUTES * 60}
-                    />
-                  </label>
-                )}
-                {serviceEditor.lessonFormat === "group" && !hasCustomGroupFlag(serviceEditor) && (
-                  <label className="settings-field">
-                    <span>{t("Generate next")}</span>
-                    <input
-                      value={groupOccurrenceInput}
-                      min={1}
-                      max={MAX_GROUP_OCCURRENCE_COUNT}
-                      step={1}
-                      inputMode="numeric"
-                      onChange={(event) => setGroupOccurrenceInput(event.target.value)}
-                      onBlur={() => void applyGroupDraftInputs()}
-                      type="number"
-                    />
-                  </label>
-                )}
-                {serviceEditor.lessonFormat === "group" && (
-                  <label className="settings-field">
-                    <span>{hasCustomGroupFlag(serviceEditor) ? t("Minimum participants") : t("Minimum group")}</span>
-                    <input
-                      value={groupMinimumInput}
-                      min={2}
-                      max={Number(groupMaximumInput) || 24}
-                      step={1}
-                      inputMode="numeric"
-                      onChange={(event) => setGroupMinimumInput(event.target.value)}
-                      onBlur={() => void applyGroupDraftInputs()}
-                      type="number"
-                    />
-                  </label>
-                )}
-                {serviceEditor.lessonFormat === "group" && !hasCustomGroupFlag(serviceEditor) && (
-                  <label className="settings-toggle">
-                    <input
-                      checked={serviceEditor.groupSchedule?.active !== false}
-                      onChange={(event) => updateGroupSchedule("active", event.target.checked)}
-                      type="checkbox"
-                    />
-                    <span>{t("Enable recurring schedule")}</span>
-                  </label>
-                )}
-                {serviceEditor.lessonFormat !== "package" && (
-                  <label className="settings-field">
-                    <span>
-                      {hasCustomGroupFlag(serviceEditor)
-                        ? t("Max participants")
-                        : serviceEditor.lessonFormat === "group"
-                          ? t("Maximum group")
-                          : t("Capacity")}
-                    </span>
-                    <input
-                      value={groupMaximumInput}
-                      min={serviceEditor.lessonFormat === "group" ? 2 : 1}
-                      max={hasCustomGroupFlag(serviceEditor) ? DEFAULT_CUSTOM_GROUP_MAX_PARTICIPANTS : 24}
-                      step={1}
-                      inputMode="numeric"
-                      onChange={(event) => setGroupMaximumInput(event.target.value)}
-                      onBlur={() => void applyGroupDraftInputs()}
-                      type="number"
-                    />
-                  </label>
-                )}
-                {(isAdminUser || activeCoachList.length > 1) && (
-                  <div className="service-scope-field">
-                    <span>{terms.staffPlural}</span>
-                    <small>
-                      {isAdminUser
-                        ? t("Who teaches it. Customers see every time any of them is free.")
-                        : t("Who teaches it. An admin can change this.")}
-                    </small>
-                    <div className="service-resource-choices" aria-label={t("{staffPlural} who provide this {serviceSingular} type", { staffPlural: terms.staffPlural, serviceSingular: terms.serviceSingular.toLowerCase() })}>
-                      {activeCoachList.map((coach) => {
-                        const chosen = serviceEditor.coachIds.includes(coach.id);
-                        return (
-                          <button
-                            key={coach.id}
-                            type="button"
-                            aria-pressed={chosen}
-                            disabled={!isAdminUser}
-                            className={`service-resource-chip ${chosen ? "is-selected" : ""}`}
-                            onClick={() =>
-                              toggleServiceEditorScope(
-                                "coachIds",
-                                coach.id,
-                                activeCoachList.map((entry) => entry.id),
-                              )
-                            }
-                          >
-                            {coach.displayName || coach.name}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-                {serviceEditor.lessonFormat !== "package" && serviceEditor.lessonFormat !== "video-review" && (
-                  <div className="service-scope-field">
-                    <span>{t("Locations")}</span>
-                    <small>{t("Where it runs. Customers see every time it is free at any of them.")}</small>
-                    <div className="service-resource-choices" aria-label={t("Locations this lesson type runs at")}>
-                      {activeLocationList.map((location) => {
-                        const chosen = serviceEditor.locationIds.includes(location.id);
-                        return (
-                          <button
-                            key={location.id}
-                            type="button"
-                            aria-pressed={chosen}
-                            className={`service-resource-chip ${chosen ? "is-selected" : ""}`}
-                            onClick={() =>
-                              toggleServiceEditorScope(
-                                "locationIds",
-                                location.id,
-                                activeLocationList.map((entry) => entry.id),
-                              )
-                            }
-                          >
-                            {location.name}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-                {serviceEditorResourceLocations.length > 0 &&
-                serviceEditor.lessonFormat !== "package" &&
-                serviceEditor.lessonFormat !== "video-review" ? (
-                  <div className="service-resource-field">
-                    <span>{t("Resources")}</span>
-                    <label className="settings-toggle">
-                      <input
-                        checked={serviceEditor.resourceMode === "usable"}
-                        onChange={() => setServiceEditorResourceMode("usable")}
-                        type="checkbox"
-                      />
-                      <span>{t("Resource usable")}<small>{t("Takes a free one when there is one. Still bookable when they are all in use.")}</small>
-                      </span>
-                    </label>
-                    <label className="settings-toggle">
-                      <input
-                        checked={serviceEditor.resourceMode === "required"}
-                        onChange={() => setServiceEditorResourceMode("required")}
-                        type="checkbox"
-                      />
-                      <span>{t("Resource required")}<small>{t("Only bookable while one is free.")}</small>
-                      </span>
-                    </label>
-                    {serviceEditor.resourceMode && serviceEditor.resourceMode !== "none" ? (
-                      <>
-                        {serviceEditorResourceLocations.length > serviceEditorClarityResourceLocations.length ? (
-                          <small>
-                            {serviceEditorResourceLocations
-                              .filter((location) => location.resourceSource === "external")
-                              .map((location) => location.shortName || location.name)
-                              .join(", ")}{" "}{t("is tracked by another booking system, so Clarity won't limit bookings there.")}</small>
-                        ) : null}
-                        {serviceEditorResourceGroups.length > 0 ? (
-                          <div className="service-resource-types" aria-label={t("Resources this lesson type can use")}>
-                            <small>
-                              {(serviceEditor.resourceTypes ?? []).length || (serviceEditor.resourceIds ?? []).length
-                                ? t("Can use only the ones chosen. Choose a type for all of them, or open it to choose single ones.")
-                                : t("Nothing chosen, so it can use any of them. Choose a type for all of them, or open it to choose single ones.")}
-                            </small>
-                            {serviceEditorResourceGroups.map((group) => {
-                              const groupKey = group.key || "(no type)";
-                              const open = openResourceTypes.includes(groupKey);
-                              const chosenCount = group.resources.filter(({ location, resource }) =>
-                                serviceEditorResourceChosen(location, resource),
-                              ).length;
-                              const wholeType = group.key
-                                ? serviceEditorTypeChosen(group.key)
-                                : chosenCount === group.resources.length;
-                              return (
-                                <div className="service-resource-type" key={groupKey}>
-                                  <div className="service-resource-type-row">
-                                    <label className="settings-toggle">
-                                      <input
-                                        checked={wholeType}
-                                        onChange={() => toggleServiceEditorResourceType(group)}
-                                        type="checkbox"
-                                      />
-                                      <span>
-                                        {group.type || t("No type")}
-                                        <small>
-                                          {wholeType
-                                            ? t("All {length}", { length: group.resources.length })
-                                            : chosenCount
-                                              ? t("{chosen} of {total}", { chosen: chosenCount, total: group.resources.length })
-                                              : group.resources.length === 1
-                                                ? t("1 resource")
-                                                : t("{n} resources", { n: group.resources.length })}
-                                        </small>
-                                      </span>
-                                    </label>
-                                    <button
-                                      className="icon-button small"
-                                      type="button"
-                                      aria-expanded={open}
-                                      aria-label={
-                                        open
-                                          ? t("Hide {type} resources", { type: group.type || t("untyped") })
-                                          : t("Show {type} resources", { type: group.type || t("untyped") })
-                                      }
-                                      onClick={() =>
-                                        setOpenResourceTypes((current) =>
-                                          open ? current.filter((key) => key !== groupKey) : [...current, groupKey],
-                                        )
-                                      }
-                                    >
-                                      {open ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
-                                    </button>
-                                  </div>
-                                  {open ? (
-                                    <div className="service-resource-choices">
-                                      {group.resources.map(({ location, resource }) => {
-                                        const chosen = serviceEditorResourceChosen(location, resource);
-                                        return (
-                                          <button
-                                            key={resourceSelectionId(location.id, resource.id)}
-                                            type="button"
-                                            aria-pressed={chosen}
-                                            className={`service-resource-chip ${chosen ? "is-selected" : ""}`}
-                                            onClick={() => toggleServiceEditorResource(group, location, resource)}
-                                          >
-                                            {resource.name}
-                                            {serviceEditorClarityResourceLocations.length > 1
-                                              ? ` · ${location.shortName || location.name}`
-                                              : ""}
-                                          </button>
-                                        );
-                                      })}
-                                    </div>
-                                  ) : null}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        ) : null}
-                      </>
-                    ) : null}
-                  </div>
-                ) : null}
-                <label className="settings-field">
-                  <span>{t("Lesson note")}</span>
-                  {/* Optional and free text. The placeholder is a generic hint on
-                      purpose -- it used to read "Bay hire included", one
-                      business's own wording, which read as a prescribed value. */}
-                  <input
-                    value={serviceEditor.lessonNote ?? serviceEditor.location ?? ""}
-                    onChange={(event) => updateServiceEditor("lessonNote", event.target.value)}
-                    placeholder={t("Optional")}
-                  />
-                </label>
-              </div>
-              {serviceEditor.lessonFormat === "video-review" && (
-                <div className="service-form-row">
-                  <label className="settings-field">
-                    <span>{t("Turnaround (days)")}</span>
-                    <input
-                      value={serviceNumberInputValue("reviewTurnaroundDays")}
-                      min={1}
-                      max={MAX_REVIEW_TURNAROUND_DAYS}
-                      step={1}
-                      inputMode="numeric"
-                      onChange={(event) => updateServiceNumberDraft("reviewTurnaroundDays", event.target.value)}
-                      onBlur={() => commitServiceNumberDraft("reviewTurnaroundDays")}
-                      type="number"
-                    />
-                    <p className="field-help">{t("A review has no appointment time. Booking one puts it on your calendar on the day it is due back, at the end of that day, so it sits with the rest of that day's work. Duration is how long you expect to spend on it.")}</p>
-                  </label>
-                </div>
-              )}
-              {serviceEditor.lessonFormat === "package" && (
-                <div className="service-form-row">
-                  <label className="settings-field">
-                    <span>{t("Allowance")}</span>
-                    <input
-                      value={serviceNumberInputValue("packageAllowance")}
-                      min={1}
-                      max={100}
-                      step={1}
-                      inputMode="numeric"
-                      onChange={(event) => updateServiceNumberDraft("packageAllowance", event.target.value)}
-                      onBlur={() => commitServiceNumberDraft("packageAllowance")}
-                      type="number"
-                    />
-                  </label>
-                  <label className="settings-field">
-                    <span>{t("Coverage style")}</span>
-                    <select
-                      value={serviceEditor.packageCoverageMode ?? "upfront"}
-                      onChange={(event) =>
-                        updateServiceEditor(
-                          "packageCoverageMode",
-                          event.target.value === "lesson-by-lesson" ? "lesson-by-lesson" : "upfront",
-                        )
-                      }
-                    >
-                      <option value="upfront">{t("Paid upfront")}</option>
-                      <option value="lesson-by-lesson">{t("Lesson-by-lesson")}</option>
-                    </select>
-                  </label>
-                  <label className="settings-field">
-                    <span>{t("Covers lesson type")}</span>
-                    <select
-                      value={serviceEditor.packageCoversServiceId ?? ""}
-                      onChange={(event) => updateServiceEditor("packageCoversServiceId", event.target.value)}
-                    >
-                      <option value="">{t("Choose a lesson type")}</option>
-                      {activeServices
-                        .filter((service) => service.lessonFormat !== "package")
-                        .map((service) => (
-                          <option key={service.id} value={service.id}>
-                            {service.name}
-                          </option>
-                        ))}
-                    </select>
-                    <p className="field-help">{t("Credits from this package can only pay for the lesson type you pick here. A package that covers nothing cannot be sold or spent.")}</p>
-                  </label>
-                </div>
-              )}
-              {serviceEditor.lessonFormat === "package" ? (
-                <label className="settings-toggle">
-                  <input
-                    checked={serviceEditor.crossRedeemable === true}
-                    onChange={(event) => updateServiceEditor("crossRedeemable", event.target.checked)}
-                    type="checkbox"
-                  />
-                  <span>{t("Cross redeemable by its original purchase value")}</span>
-                </label>
-              ) : (
-                <label className="settings-toggle">
-                  <input
-                    checked={serviceEditor.acceptsCrossRedemption !== false}
-                    onChange={(event) => updateServiceEditor("acceptsCrossRedemption", event.target.checked)}
-                    type="checkbox"
-                  />
-                  <span>{t("Accept Clarity balance from other eligible passes")}</span>
-                </label>
-              )}
-              <label className="settings-toggle">
-                <input
-                  checked={serviceEditor.active}
-                  onChange={(event) => updateServiceEditor("active", event.target.checked)}
-                  type="checkbox"
-                />
-                <span>{t("Active and bookable")}</span>
-              </label>
-            </div>
-
-            <button className="primary-button settings-save" onClick={saveEditedService}>
-              {serviceSaveState === "saving"
-                ? t("Saving")
-                : serviceSaveState === "saved"
-                  ? t("Saved")
-                  : serviceSaveState === "error"
-                    ? t("Not saved")
-                    : t("Save {serviceSingular} Type", { serviceSingular: terms.serviceSingular })}
-            </button>
-          </article>
-        )}
-
-        <details className="settings-subsection service-list-section">
-          <summary className="settings-subsection-title">
-            <ClarityServices size={18} />
-            <div>
-              <span>{t("{serviceSingular} types", { serviceSingular: terms.serviceSingular })}</span>
-              <strong>{t("{length} active", { length: activeServices.filter((service) => service.lessonFormat !== "package").length })}</strong>
-            </div>
-          </summary>
-          <div className="service-list-tabs" role="tablist" aria-label={t("{serviceSingular} type status", { serviceSingular: terms.serviceSingular })}>
-            <button
-              className={`pill ${serviceListTab === "active" ? "active-pill" : ""}`}
-              onClick={() => setServiceListTab("active")}
-              type="button"
-            >{t("Active")}</button>
-            <button
-              className={`pill ${serviceListTab === "archived" ? "active-pill" : ""}`}
-              onClick={() => setServiceListTab("archived")}
-              type="button"
-            >{t("Archived")}</button>
-          </div>
-          <div className="service-list" aria-label={t("{serviceSingular} types", { serviceSingular: terms.serviceSingular })}>
-            {listedLessonTypes.map((service) => (
-              <article className={`service-row ${service.active ? "" : "is-archived"}`} key={service.id}>
-                <button className="service-row-main" onClick={() => editService(service)} type="button">
-                  <span>
-                    {service.archived ? t("Archived") : service.active ? t("Active") : t("Inactive")} · {service.visibility === "public" ? t("Public") : t("Admin only")} ·{" "}
-                    {serviceFormatLabel(service)} ·{" "}
-                    {formatBookingScreenLabels(service.bookingScreenIds ?? ["main"]).join(", ")}
-                  </span>
-                  <strong>{service.name}</strong>
-                  {service.description && <em>{service.description}</em>}
-                  {(isAdminUser || activeCoachList.length > 1) && (
-                    <em>
-                      {service.coachIds.length > 1 ? terms.staffPlural : terms.staffSingular}:{" "}
-                      {(service.coachIds.length ? service.coachIds : [firstCoachId(coachProfiles)])
-                        .map((id) => {
-                          const coach = bookingCoachSnapshotFor(id, coachProfiles);
-                          return coach?.displayName || coach?.name || "";
-                        })
-                        .filter(Boolean)
-                        .join(", ") || t("None")}
-                    </em>
-                  )}
-                  <em>
-                    {service.locationIds.length > 1 ? t("Booking locations") : t("Booking location")}:{" "}
-                    {service.locationIds.length > 1
-                      ? service.locationIds
-                          .map((id) => locationById(locations, id))
-                          .filter((location): location is Location => Boolean(location))
-                          .map((location) => location.shortName || location.name)
-                          .join(", ")
-                      : bookingLocationShortDisplay(bookingLocationSnapshotFor(service, locations, coachAccount))}
-                  </em>
-                  {(service.lessonNote || service.location) && <em>{t("{serviceSingular} note:", { serviceSingular: terms.serviceSingular })}{" "}{service.lessonNote || service.location}</em>}
-                  {service.lessonFormat === "package" && (
-                    <em>
-                      {service.packageAllowance ?? 5}{" "}{t("slots ·")}{" "}{service.packageCoverageMode === "lesson-by-lesson" ? "lesson-by-lesson" : "paid upfront"}
-                    </em>
-                  )}
-                </button>
-                <div className="service-row-meta">
-                  <strong>{servicePriceLabel(service)}</strong>
-                  <span>{t("{duration} min", { duration: service.duration })}</span>
-                </div>
-                <div className="service-row-actions">
-                  {service.archived ? (
-                    <>
-                      <button
-                        className="outline-button service-action-button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          restoreService(service);
-                        }}
-                        type="button"
-                      >
-                        <RefreshCw size={15} />
-                        <span>{t("Restore")}</span>
-                      </button>
-                      {canPermanentlyDeleteService(service) ? (
-                        <button
-                          className="danger-button service-action-button service-action-delete"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            requestServiceAction(service, "delete");
-                          }}
-                          type="button"
-                        >
-                          <Trash2 size={15} />
-                          <span>{t("Delete")}</span>
-                        </button>
-                      ) : null}
-                    </>
-                  ) : (
-                    <>
-                      <button
-                        className="outline-button service-action-button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          editService(service);
-                        }}
-                        type="button"
-                      >
-                        <Pencil size={15} />
-                        <span>{t("Edit")}</span>
-                      </button>
-                      <button
-                        className="outline-button service-action-button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          requestServiceAction(service, "archive");
-                        }}
-                        type="button"
-                      >
-                        <Archive size={15} />
-                        <span>{t("Archive")}</span>
-                      </button>
-                      {canPermanentlyDeleteService(service) ? (
-                        <button
-                          className="danger-button service-action-button service-action-delete"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            requestServiceAction(service, "delete");
-                          }}
-                          type="button"
-                        >
-                          <Trash2 size={15} />
-                          <span>{t("Delete")}</span>
-                        </button>
-                      ) : null}
-                    </>
-                  )}
-                </div>
-              </article>
-            ))}
-            {!listedLessonTypes.length && (
-              <p className="service-list-empty">
-                {serviceListTab === "active" ? t("No active lesson types yet.") : t("No archived lesson types yet.")}
-              </p>
-            )}
-          </div>
-        </details>
-      </div>
-    </div>
+    <Suspense fallback={<Loading />}>
+      <ServicesSettingsPanel
+        serviceEditor={serviceEditor}
+        terms={terms}
+        updateServiceEditor={updateServiceEditor}
+        serviceNumberInputValue={serviceNumberInputValue}
+        updateServiceNumberDraft={updateServiceNumberDraft}
+        commitServiceNumberDraft={commitServiceNumberDraft}
+        isAdminUser={isAdminUser}
+        activeCoachList={activeCoachList}
+        updateGroupSchedule={updateGroupSchedule}
+        applyGroupDraftInputs={applyGroupDraftInputs}
+        serviceEditorResourceLocations={serviceEditorResourceLocations}
+        serviceSaveState={serviceSaveState}
+        serviceListTab={serviceListTab}
+        requestServiceAction={requestServiceAction}
+        editingServiceId={editingServiceId}
+        groupMaximumInput={groupMaximumInput}
+        toggleServiceEditorScope={toggleServiceEditorScope}
+        activeLocationList={activeLocationList}
+        setServiceEditorResourceMode={setServiceEditorResourceMode}
+        serviceEditorClarityResourceLocations={serviceEditorClarityResourceLocations}
+        serviceEditorResourceGroups={serviceEditorResourceGroups}
+        serviceEditorResourceChosen={serviceEditorResourceChosen}
+        activeServices={activeServices}
+        setServiceListTab={setServiceListTab}
+        listedLessonTypes={listedLessonTypes}
+        editService={editService}
+        coachProfiles={coachProfiles}
+        locations={locations}
+        canPermanentlyDeleteService={canPermanentlyDeleteService}
+        startNewService={startNewService}
+        showServiceEditor={showServiceEditor}
+        setShowServiceEditor={setShowServiceEditor}
+        setEditingServiceId={setEditingServiceId}
+        setServiceNumberDrafts={setServiceNumberDrafts}
+        setServiceEditor={setServiceEditor}
+        updateServiceEditorFormat={updateServiceEditorFormat}
+        updateBookingScreens={updateBookingScreens}
+        groupOccurrenceInput={groupOccurrenceInput}
+        setGroupOccurrenceInput={setGroupOccurrenceInput}
+        groupMinimumInput={groupMinimumInput}
+        setGroupMinimumInput={setGroupMinimumInput}
+        setGroupMaximumInput={setGroupMaximumInput}
+        openResourceTypes={openResourceTypes}
+        serviceEditorTypeChosen={serviceEditorTypeChosen}
+        toggleServiceEditorResourceType={toggleServiceEditorResourceType}
+        setOpenResourceTypes={setOpenResourceTypes}
+        toggleServiceEditorResource={toggleServiceEditorResource}
+        saveEditedService={saveEditedService}
+        coachAccount={coachAccount}
+        restoreService={restoreService}
+      />
+    </Suspense>
   );
 
   const pendingService =
     pendingServiceAction ? services.find((service) => service.id === pendingServiceAction.serviceId) ?? null : null;
 
   const locationsSettingsPanel = (
-    <SettingsGroup id="locations" icon={ClarityLocations} section="business" title={t("Locations")}>
-      <div className="data-card wide">
-        <div className="data-card-header">
-          <div>
-            <h2>{tn(activeLocationList.length, "{count} active place", "{count} active places")}</h2>
-          </div>
-          <button className="primary-button" onClick={startNewLocation} type="button">
-            <Plus size={16} />
-            <span>{t("Add location")}</span>
-          </button>
-        </div>
-        <p className="field-help">{t("Locations are real places customers can travel to. Lesson-specific inclusions like \"Bay hire included\" belong on the lesson type, not here.")}</p>
-
-        {showLocationEditor && (
-          <article className="service-editor-card">
-            <div className="data-card-header compact">
-              <div>
-                <span>{editingLocationId ? t("Edit location") : t("New location")}</span>
-                <h3>{locationEditor.name || t("Location details")}</h3>
-              </div>
-              <button
-                className="icon-button"
-                disabled={locationSaveState === "saving"}
-                onClick={() => setShowLocationEditor(false)}
-                type="button"
-                aria-label={t("Close location editor")}
-              >
-                <X size={16} />
-              </button>
-            </div>
-            <div className="service-form-grid">
-              <label className="settings-field">
-                <span>{t("Location name")}</span>
-                <input value={locationEditor.name} onChange={(event) => updateLocationEditor("name", event.target.value)} />
-              </label>
-              <label className="settings-field">
-                <span>{t("Short name")}</span>
-                <input value={locationEditor.shortName} onChange={(event) => updateLocationEditor("shortName", event.target.value)} />
-              </label>
-              {locationEditor.kind !== "online" ? (
-                <>
-                  <label className="settings-field">
-                    <span>{t("Address")}</span>
-                    <input value={locationEditor.address} onChange={(event) => updateLocationEditor("address", event.target.value)} />
-                  </label>
-                  <label className="settings-field">
-                    <span>{t("Map URL")}</span>
-                    <input value={locationEditor.mapUrl ?? ""} onChange={(event) => updateLocationEditor("mapUrl", event.target.value)} />
-                  </label>
-                </>
-              ) : null}
-              <label className="settings-field">
-                <span>{t("Time zone")}</span>
-                <Suspense fallback={<Loading what={t("time zones")} size="inline" />}>
-                  <TimeZoneSelect
-                    country={coachAccount.country}
-                    value={locationEditor.timezone}
-                    onChange={(timezone) => updateLocationEditor("timezone", timezone)}
-                  />
-                </Suspense>
-              </label>
-              <label className="settings-field">
-                <span>{t("Sort order")}</span>
-                <input
-                  value={locationEditor.sortOrder ?? 0}
-                  inputMode="numeric"
-                  onChange={(event) => updateLocationEditor("sortOrder", Number(event.target.value))}
-                  type="text"
-                />
-              </label>
-            </div>
-            <div className="location-facility">
-              <div className="location-facility-kind" role="radiogroup" aria-label={t("Kind of location")}>
-                {(
-                  [
-                    ["physical", t("Physical place"), t("Customers come here. Can have bays or rooms.")],
-                    ["online", t("Online"), t("Video calls and remote lessons. No address, no limit.")],
-                  ] as const
-                ).map(([kind, label, hint]) => (
-                  <button
-                    key={kind}
-                    type="button"
-                    role="radio"
-                    aria-checked={(locationEditor.kind ?? "physical") === kind}
-                    className={`location-kind-option ${(locationEditor.kind ?? "physical") === kind ? "is-selected" : ""}`}
-                    onClick={() => updateLocationEditor("kind", kind)}
-                  >
-                    <strong>{label}</strong>
-                    <small>{hint}</small>
-                  </button>
-                ))}
-              </div>
-              {/* A business with resources switched off is not offered them --
-                  unless this place already has some, which the server still
-                  enforces, so they stay editable (and removable) here. */}
-              {locationEditor.kind !== "online" && (capabilities.resources || (locationEditor.resources?.length ?? 0) > 0) ? (
-                <div className="location-resources">
-                  <div className="location-resources-header">
-                    <div>
-                      <strong>{t("Resources")}</strong>
-                      <small>{t("Hitting bays, rooms or nets. Give each a type so a lesson type can take every one of that type. A booking takes the first free one in this order, so put the ones you want filled first at the top. Leave empty if this place has no limit.")}</small>
-                    </div>
-                    <label className="settings-field location-resource-source">
-                      <span>{t("Who keeps track of them")}</span>
-                      <select
-                        value={locationEditor.resourceSource ?? "clarity"}
-                        onChange={(event) => updateLocationEditor("resourceSource", event.target.value as ResourceSource)}
-                      >
-                        <option value="clarity">{t("Clarity")}</option>
-                        <option value="external">{t("Another booking system")}</option>
-                      </select>
-                    </label>
-                  </div>
-                  {locationEditor.resourceSource === "external" ? (
-                    <p className="field-help">{t("Clarity won't limit bookings here. The other system decides which bay or room is free. Connect it under Settings › Booking › Bay & room system.")}</p>
-                  ) : null}
-                  {(locationEditor.resources ?? []).map((resource, index) => (
-                    <div className="location-resource-row" key={index}>
-                      <input
-                        aria-label={t("Resource {value} name", { value: index + 1 })}
-                        value={resource.name}
-                        onChange={(event) =>
-                          updateLocationResources((resources) =>
-                            resources.map((entry, entryIndex) =>
-                              entryIndex === index ? { ...entry, name: event.target.value } : entry,
-                            ),
-                          )
-                        }
-                      />
-                      <input
-                        aria-label={t("{name} type", { name: resource.name || t("Resource") })}
-                        list="location-resource-types"
-                        placeholder={t("Type, e.g. Hitting bay")}
-                        value={resource.type ?? ""}
-                        onChange={(event) =>
-                          updateLocationResources((resources) =>
-                            resources.map((entry, entryIndex) =>
-                              entryIndex === index ? { ...entry, type: event.target.value } : entry,
-                            ),
-                          )
-                        }
-                      />
-                      <select
-                        aria-label={t("{name} set up for", { name: resource.name || t("Resource") })}
-                        value={resource.handedness}
-                        onChange={(event) =>
-                          updateLocationResources((resources) =>
-                            resources.map((entry, entryIndex) =>
-                              entryIndex === index
-                                ? { ...entry, handedness: event.target.value as ResourceHandedness }
-                                : entry,
-                            ),
-                          )
-                        }
-                      >
-                        <option value="any">{t("Left or right-handed")}</option>
-                        <option value="right">{t("Right-handed only")}</option>
-                        <option value="left">{t("Left-handed only")}</option>
-                      </select>
-                      <label className="settings-toggle">
-                        <input
-                          checked={resource.active !== false}
-                          onChange={(event) =>
-                            updateLocationResources((resources) =>
-                              resources.map((entry, entryIndex) =>
-                                entryIndex === index ? { ...entry, active: event.target.checked } : entry,
-                              ),
-                            )
-                          }
-                          type="checkbox"
-                        />
-                        <span>{t("In use")}</span>
-                      </label>
-                      <div className="location-resource-row-actions">
-                        <button
-                          className="icon-button small"
-                          aria-label={t("Book {name} earlier", { name: resource.name || t("resource") })}
-                          disabled={index === 0}
-                          onClick={() => moveLocationResource(index, -1)}
-                          type="button"
-                        >
-                          <ChevronUp size={15} />
-                        </button>
-                        <button
-                          className="icon-button small"
-                          aria-label={t("Book {name} later", { name: resource.name || t("resource") })}
-                          disabled={index === (locationEditor.resources ?? []).length - 1}
-                          onClick={() => moveLocationResource(index, 1)}
-                          type="button"
-                        >
-                          <ChevronDown size={15} />
-                        </button>
-                        <button
-                          className="icon-button small"
-                          aria-label={t("Remove {name}", { name: resource.name || t("resource") })}
-                          onClick={() =>
-                            updateLocationResources((resources) => resources.filter((_, entryIndex) => entryIndex !== index))
-                          }
-                          type="button"
-                        >
-                          <X size={15} />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                  <datalist id="location-resource-types">
-                    {[
-                      ...new Map(
-                        [...accountLocations.flatMap((location) => location.resources ?? []), ...(locationEditor.resources ?? [])]
-                          .map((resource) => cleanResourceType(resource.type))
-                          .filter(Boolean)
-                          .map((type) => [type.toLowerCase(), type] as const),
-                      ).values(),
-                    ].map((type) => (
-                      <option key={type} value={type} />
-                    ))}
-                  </datalist>
-                  <div className="location-resource-actions">
-                    <button className="outline-button compact-button" onClick={() => addLocationResources(1)} type="button">
-                      <Plus size={15} />{t("Add resource")}</button>
-                    {!(locationEditor.resources ?? []).length ? (
-                      <button className="outline-button compact-button" onClick={() => addLocationResources(4)} type="button">
-                        <Plus size={15} />{t("Add 4 bays")}</button>
-                    ) : null}
-                  </div>
-                </div>
-              ) : null}
-            </div>
-            <div className="service-form-row">
-              <label className="settings-field">
-                <span>{t("Arrival instructions")}</span>
-                <textarea
-                  value={locationEditor.arrivalInstructions ?? ""}
-                  onChange={(event) => updateLocationEditor("arrivalInstructions", event.target.value)}
-                  rows={3}
-                />
-              </label>
-              <label className="settings-field">
-                <span>{t("Public notes")}</span>
-                <textarea
-                  value={locationEditor.publicNotes ?? ""}
-                  onChange={(event) => updateLocationEditor("publicNotes", event.target.value)}
-                  rows={3}
-                />
-              </label>
-            </div>
-            <div className="service-form-row">
-              <label className="settings-toggle">
-                <input
-                  checked={locationEditor.active !== false && locationEditor.archived !== true}
-                  onChange={(event) => {
-                    updateLocationEditor("active", event.target.checked);
-                    updateLocationEditor("archived", !event.target.checked);
-                  }}
-                  type="checkbox"
-                />
-                <span>{t("Active")}</span>
-              </label>
-              <label className="settings-toggle">
-                <input
-                  checked={locationEditor.isDefault === true}
-                  onChange={(event) => updateLocationEditor("isDefault", event.target.checked)}
-                  type="checkbox"
-                />
-                <span>{t("Default location")}</span>
-              </label>
-            </div>
-            {locationSaveState === "error" && locationEditorError && (
-              <p className="workspace-save-error" role="alert">
-                {locationEditorError}
-              </p>
-            )}
-            <button className="primary-button settings-save" disabled={locationSaveState === "saving"} onClick={saveEditedLocation} type="button">
-              {locationSaveState === "saving"
-                ? t("Saving")
-                : locationSaveState === "saved"
-                  ? t("Saved")
-                  : locationSaveState === "error"
-                    ? t("Not saved")
-                    : t("Save Location")}
-            </button>
-          </article>
-        )}
-
-        <div className="service-list" aria-label={t("Locations")}>
-          {[...activeLocationList, ...archivedLocationList].map((location) => (
-            <article className={`service-row ${location.active && !location.archived ? "" : "is-archived"}`} key={location.id}>
-              <button className="service-row-main" onClick={() => editLocation(location)} type="button">
-                <span>
-                  {location.isDefault ? t("Default · ") : ""}{location.active && !location.archived ? t("Active") : t("Archived")}
-                </span>
-                <strong>{location.name}</strong>
-                {location.kind === "online" ? <em>{t("Online")}</em> : location.address && <em>{location.address}</em>}
-                {location.kind !== "online" && (location.resources ?? []).some((resource) => resource.active) ? (
-                  <em>{tn((location.resources ?? []).filter((resource) => resource.active).length, "{count} resource", "{count} resources")}
-                    {location.resourceSource === "external" ? t(" · kept by another system") : ""}
-                  </em>
-                ) : null}
-                <em>{tn(locationUsageCount(location.id), "Used by {count} lesson type", "Used by {count} lesson types")}</em>
-              </button>
-              <div className="service-row-meta">
-                <strong>{location.shortName}</strong>
-                <span>{location.timezone}</span>
-              </div>
-              <div className="service-row-actions">
-                {!location.isDefault && location.active && !location.archived ? (
-                  <button className="outline-button service-action-button" onClick={() => makeDefaultLocation(location)} type="button">
-                    <Check size={15} />
-                    <span>{t("Default")}</span>
-                  </button>
-                ) : null}
-                {location.archived || !location.active ? (
-                  <button className="outline-button service-action-button" onClick={() => restoreLocation(location)} type="button">
-                    <RefreshCw size={15} />
-                    <span>{t("Restore")}</span>
-                  </button>
-                ) : (
-                  <button className="outline-button service-action-button" onClick={() => archiveLocation(location)} type="button">
-                    <Archive size={15} />
-                    <span>{t("Archive")}</span>
-                  </button>
-                )}
-              </div>
-            </article>
-          ))}
-        </div>
-      </div>
-    </SettingsGroup>
+    <Suspense fallback={<Loading />}>
+      <LocationsSettingsPanel
+        locationEditor={locationEditor}
+        updateLocationEditor={updateLocationEditor}
+        locationSaveState={locationSaveState}
+        updateLocationResources={updateLocationResources}
+        activeLocationList={activeLocationList}
+        moveLocationResource={moveLocationResource}
+        addLocationResources={addLocationResources}
+        locationEditorError={locationEditorError}
+        startNewLocation={startNewLocation}
+        showLocationEditor={showLocationEditor}
+        editingLocationId={editingLocationId}
+        setShowLocationEditor={setShowLocationEditor}
+        coachAccount={coachAccount}
+        capabilities={capabilities}
+        accountLocations={accountLocations}
+        archivedLocationList={archivedLocationList}
+        editLocation={editLocation}
+        locationUsageCount={locationUsageCount}
+        makeDefaultLocation={makeDefaultLocation}
+        restoreLocation={restoreLocation}
+        archiveLocation={archiveLocation}
+        saveEditedLocation={saveEditedLocation}
+      />
+    </Suspense>
   );
 
   const terminologySettingsPanel = (
-    <SettingsGroup id="terminology" icon={ClarityServices} section="business" title={t("Terminology")}>
-      <EditableSettingsBlock
-        id="terminology-block"
-        title={t("Terminology")}
-        status={terminologyEditor.status}
-        dirty={terminologyEditor.dirty}
-        errorMessage={terminologyEditor.errorMessage}
-        onEdit={() => startEditableBlock("terminology")}
-        onCancel={() => cancelEditableBlock("terminology")}
-        onSave={() => void saveEditableBlock("terminology")}
-      >
-        <div className="data-card wide">
-          <p className="field-help">{t("Choose the words customers see. This does not change booking data, permissions, integrations, or how the calendar works.")}</p>
-          <label className="settings-field">
-            <span>{t("Preset")}</span>
-            <select
-              value={matchingTerminologyPreset(terminologyDraft)}
-              disabled={terminologyIsLocked}
-              onChange={(event) => applyTerminologyPreset(event.target.value as BusinessTerminologyPreset)}
-            >
-              {BUSINESS_TERMINOLOGY_PRESETS.map((preset) => (
-                <option key={preset.id} value={preset.id}>{preset.label}</option>
-              ))}
-            </select>
-          </label>
-          <div className="service-form-grid">
-            {([
-              ["staffSingular", "Staff — singular"],
-              ["staffPlural", "Staff — plural"],
-              ["customerSingular", "Customer — singular"],
-              ["customerPlural", "Customer — plural"],
-              ["serviceSingular", "Service — singular"],
-              ["servicePlural", "Service — plural"],
-              ["resourceSingular", "Resource — singular"],
-              ["resourcePlural", "Resource — plural"],
-              ["assignmentPlural", "Practice module"],
-              ["assignmentSingular", "Practice item"],
-            ] as Array<[keyof BusinessTerminology, string]>).map(([field, label]) => (
-              <label className="settings-field" key={field}>
-                <span>{label}</span>
-                <input
-                  value={terminologyDraft.terminology[field]}
-                  readOnly={terminologyIsLocked}
-                  maxLength={40}
-                  onChange={(event) => updateTerminologyDraft(field, event.target.value)}
-                />
-              </label>
-            ))}
-          </div>
-        </div>
-      </EditableSettingsBlock>
-    </SettingsGroup>
+    <Suspense fallback={<Loading />}>
+      <TerminologySettingsPanel
+        terminologyEditor={terminologyEditor}
+        terminologyDraft={terminologyDraft}
+        terminologyIsLocked={terminologyIsLocked}
+        startEditableBlock={startEditableBlock}
+        cancelEditableBlock={cancelEditableBlock}
+        applyTerminologyPreset={applyTerminologyPreset}
+        updateTerminologyDraft={updateTerminologyDraft}
+        saveEditableBlock={saveEditableBlock}
+      />
+    </Suspense>
   );
 
   /**
@@ -15477,955 +13866,97 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   /** Settings › Booking › Google Calendar: everything behind the profile card's gear. */
   const googleCalendarSettingsPanel =
     googleCalendarSyncEnabled && googleCalendarProfileCoachId ? (
-      <SettingsGroup id="google-calendar" icon={ClarityCalendarSync} section="booking" title={t("Google Calendar")}>
-        <div className="data-card wide cp-google-calendar-body">
-          {googleCalendarCoachName ? (
-            <p className="gcal-settings-owner">{t("Calendar for {name}", { name: googleCalendarCoachName })}</p>
-          ) : null}
-          <div className={`sync-status ${googleCalendar.connected ? "connected" : googleCalendar.configured ? "checking" : "offline"}`}>
-            <span>{t("Google account")}</span>
-            <strong>
-              {!googleCalendarSyncEnabled
-                ? t("Plan feature unavailable")
-                : googleCalendarStatusError
-                ? t("Status check failed")
-                : !googleCalendar.configured
-                ? t("Needs OAuth credentials")
-                : googleCalendar.connected
-                  ? googleCalendar.manualOnly
-                    ? t("Manual sync only")
-                    : googleCalendar.lastSyncStatus === "failed"
-                    ? t("Connected, sync failed")
-                    : t("Connected")
-                  : t("Ready to connect")}
-            </strong>
-            <em>
-              {!googleCalendarSyncEnabled
-                ? featureUnavailableMessage("googleCalendarSync")
-                : googleCalendarStatusError
-                ? t("{googleCalendarStatusError} — the settings below are placeholders, not the live configuration.", { googleCalendarStatusError })
-                : googleCalendar.lastSyncError
-                ? googleCalendar.manualOnly
-                  ? t("Last sync failed: {lastSyncError}", { lastSyncError: googleCalendar.lastSyncError })
-                  : googleCalendar.lastSyncError
-                : googleCalendar.connected
-                  ? `${googleCalendar.accountEmail || t("Google account")} · ${googleSyncTimeLabel(googleCalendar.lastSyncAt)}`
-                  : googleCalendar.redirectUri || t("Add Google OAuth credentials in Netlify.")}
-            </em>
-          </div>
-
-          <details className="settings-subsection">
-            <summary className="settings-subsection-title">
-              <ClarityCalendarSync size={18} />
-              <div>
-                <span>{t("Sync mode")}</span>
-                <strong>
-                  {googleCalendar.calendarId || "primary"} ·{" "}
-                  {googleCalendar.manualOnly ? t("Manual only") : t("Automatic after every change")}
-                </strong>
-              </div>
-            </summary>
-            <label className="sync-field">
-              <span>{t("Google calendar ID")}</span>
-              <input
-                value={googleCalendar.calendarId}
-                disabled={!googleCalendarSyncEnabled}
-                onChange={(event) => setGoogleCalendar((current) => ({ ...current, calendarId: event.target.value }))}
-                placeholder={t("primary or calendar email")}
-              />
-            </label>
-            <div className="sync-meta">
-              <span>{t("Redirect URI")}</span>
-              <code>{googleCalendar.redirectUri || "Set GOOGLE_CALENDAR_REDIRECT_URI or use /api/google-calendar/callback"}</code>
-            </div>
-            <div className="sync-actions">
-              {!googleCalendar.connected ? (
-                <button
-                  className="primary-button"
-                  disabled={!googleCalendarSyncEnabled || !googleCalendar.configured || googleCalendarAction !== "idle"}
-                  onClick={connectGoogleCalendar}
-                  type="button"
-                >
-                  <ExternalLink size={16} />
-                  {googleCalendarAction === "connecting" ? t("Opening Google") : t("Connect Google")}
-                </button>
-              ) : (
-                <>
-                  <button
-                    className="primary-button"
-                    disabled={!googleCalendarSyncEnabled || googleCalendarAction !== "idle"}
-                    onClick={syncGoogleCalendarNow}
-                    type="button"
-                  >
-                    <RefreshCw size={16} />
-                    {googleCalendarAction === "syncing" ? t("Syncing") : t("Sync now")}
-                  </button>
-                  <button
-                    className="outline-button"
-                    disabled={!googleCalendarSyncEnabled || googleCalendarAction !== "idle"}
-                    onClick={() => void saveGoogleCalendarSettings()}
-                    type="button"
-                  >
-                    <Check size={16} />
-                    {googleCalendarAction === "saving" ? t("Saving") : t("Save settings")}
-                  </button>
-                  <button
-                    className="danger-button"
-                    disabled={!googleCalendarSyncEnabled || googleCalendarAction !== "idle"}
-                    onClick={disconnectGoogleCalendar}
-                    type="button"
-                  >
-                    <X size={16} />
-                    {googleCalendarAction === "disconnecting" ? t("Disconnecting") : t("Disconnect")}
-                  </button>
-                </>
-              )}
-            </div>
-          </details>
-
-          <details className="settings-subsection">
-            <summary className="settings-subsection-title">
-              <ClarityCalendar size={18} />
-              <div>
-                <span>{t("Selective event import")}</span>
-                <strong>
-                  {googleCalendar.importRules?.length
-                    ? tn(googleCalendar.importRules.length, "{active} of {count} rule active", "{active} of {count} rules active", { active: googleCalendar.importRules.filter(importRuleIsActive).length })
-                    : t("Name the outside sources Clarity should pull in")}
-                </strong>
-              </div>
-            </summary>
-
-            <p className="google-calendar-source-intro">{t("Clarity only imports Google events that match a rule below. Name the source — \"Golf HQ Portal\" — list the spellings that identify it, and Clarity will match them against the event's organiser, title, description and location. Add keywords to narrow it further; leave them blank to take everything from that source.")}</p>
-
-            {googleCalendar.sourceListError ? (
-              <p className="gcal-debug-error" role="alert">
-                {googleCalendar.sourceListError}
-              </p>
-            ) : null}
-
-            {!googleCalendar.importRules?.length ? (
-              <p className="google-calendar-source-empty">{t("No import rules yet, so nothing from Google appears on the calendar. Add one to start pulling a source in.")}</p>
-            ) : (
-              <div className="gcal-rule-list">
-                {googleCalendar.importRules.map((rule) => {
-                  const busy = !googleCalendarSyncEnabled || googleCalendarAction !== "idle";
-                  if (editingImportRuleId !== rule.id) {
-                    const scope = rule.calendarIds.length
-                      ? rule.calendarIds
-                          .map((id) => googleCalendar.sources?.find((source) => source.id === id)?.name || id)
-                          .join(", ")
-                      : t("All calendars");
-                    return (
-                      <div className={`gcal-rule-card is-summary ${importRuleIsActive(rule) ? "" : "is-off"}`} key={rule.id}>
-                        <div className="gcal-rule-head">
-                          <div className="gcal-rule-summary">
-                            <strong>{rule.name.trim() || t("Unnamed source")}</strong>
-                            <span>
-                              {rule.aliases.trim() ? t("Matches {aliases}", { aliases: rule.aliases.trim() }) : t("No aliases yet, so nothing imports")}
-                            </span>
-                            <span>
-                              {rule.keywords.trim() ? t("Only when it mentions {keywords}", { keywords: rule.keywords.trim() }) : t("Everything from this source")}
-                            </span>
-                            <span>{scope}</span>
-                          </div>
-                          <div className="gcal-rule-summary-actions">
-                            <button
-                              className="outline-button"
-                              type="button"
-                              disabled={busy}
-                              onClick={() => setEditingImportRuleId(rule.id)}
-                            >{t("Edit")}</button>
-                            <button
-                              className="icon-button"
-                              type="button"
-                              aria-label={t("Remove {name}", { name: rule.name.trim() || t("source") })}
-                              disabled={busy}
-                              onClick={() => removeGoogleCalendarImportRule(rule.id)}
-                            >
-                              <Trash2 size={16} />
-                            </button>
-                          </div>
-                        </div>
-                        <label className="google-calendar-source-toggle">
-                          <span>{t("Rule active")}</span>
-                          <input
-                            type="checkbox"
-                            checked={rule.enabled}
-                            disabled={busy}
-                            onChange={(event) => updateGoogleCalendarImportRule(rule.id, { enabled: event.target.checked })}
-                          />
-                        </label>
-                      </div>
-                    );
-                  }
-                  return (
-                    <div className="gcal-rule-card is-editing" key={rule.id}>
-                      <div className="gcal-rule-head">
-                        <input
-                          className="gcal-rule-name"
-                          type="text"
-                          value={rule.name}
-                          placeholder={t("Source name, e.g. Golf HQ Portal")}
-                          disabled={busy}
-                          onChange={(event) => updateGoogleCalendarImportRule(rule.id, { name: event.target.value })}
-                        />
-                        <button
-                          className="icon-button"
-                          type="button"
-                          aria-label={t("Remove rule")}
-                          disabled={busy}
-                          onClick={() => removeGoogleCalendarImportRule(rule.id)}
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-
-                      <label className="gcal-rule-field">
-                        <span>{t("Aliases")}</span>
-                        <input
-                          type="text"
-                          value={rule.aliases}
-                          placeholder={t("Golf HQ, golfhq.com, bookings@golfhq.co.nz")}
-                          disabled={busy}
-                          onChange={(event) => updateGoogleCalendarImportRule(rule.id, { aliases: event.target.value })}
-                        />
-                        <em>{t("Comma separated. An event must contain one of these to match. No aliases means the rule is off.")}</em>
-                      </label>
-
-                      <label className="gcal-rule-field">
-                        <span>{t("Keywords (optional)")}</span>
-                        <input
-                          type="text"
-                          value={rule.keywords}
-                          placeholder={t("lesson, fitting")}
-                          disabled={busy}
-                          onChange={(event) => updateGoogleCalendarImportRule(rule.id, { keywords: event.target.value })}
-                        />
-                        <em>{t("Narrows the source. Leave blank to import everything it puts on the calendar.")}</em>
-                      </label>
-
-                      <div className="gcal-rule-field">
-                        <span>{t("Look in")}</span>
-                        {!googleCalendar.sources?.length ? (
-                          <em>
-                            {googleCalendar.connected
-                              ? t("No calendars loaded yet. Reconnect Google and refresh this panel.")
-                              : t("Connect Google Calendar to choose calendars.")}
-                          </em>
-                        ) : (
-                          <>
-                            <div className="gcal-rule-calendars">
-                              {googleCalendar.sources.map((source) => (
-                                <label className="gcal-rule-calendar" key={source.id}>
-                                  <input
-                                    type="checkbox"
-                                    checked={rule.calendarIds.includes(source.id)}
-                                    disabled={busy}
-                                    onChange={(event) =>
-                                      toggleGoogleCalendarImportRuleCalendar(rule.id, source.id, event.target.checked)
-                                    }
-                                  />
-                                  <span>{source.name}</span>
-                                  {source.primary ? <em>{t("Primary")}</em> : null}
-                                </label>
-                              ))}
-                            </div>
-                            <em>
-                              {rule.calendarIds.length
-                                ? tn(rule.calendarIds.length, "Scanning {count} calendar.", "Scanning {count} calendars.")
-                                : t("Nothing ticked, so every calendar on the account is scanned.")}
-                            </em>
-                          </>
-                        )}
-                      </div>
-
-                      <div className="gcal-rule-toggles">
-                        <label className="google-calendar-source-toggle">
-                          <span>{t("Show event title")}</span>
-                          <input
-                            type="checkbox"
-                            checked={rule.showLabel}
-                            disabled={busy}
-                            onChange={(event) => updateGoogleCalendarImportRule(rule.id, { showLabel: event.target.checked })}
-                          />
-                        </label>
-                        <label className="google-calendar-source-toggle">
-                          <span>{t("Rule active")}</span>
-                          <input
-                            type="checkbox"
-                            checked={rule.enabled}
-                            disabled={busy}
-                            onChange={(event) => updateGoogleCalendarImportRule(rule.id, { enabled: event.target.checked })}
-                          />
-                        </label>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            <div className="gcal-rule-actions">
-              <button
-                className="outline-button"
-                type="button"
-                disabled={!googleCalendarSyncEnabled || googleCalendarAction !== "idle"}
-                onClick={addGoogleCalendarImportRule}
-              >
-                <Plus size={16} />{t("Add source")}</button>
-              <button
-                className="primary-button"
-                type="button"
-                disabled={!googleCalendarSyncEnabled || googleCalendarAction !== "idle"}
-                onClick={() => void saveGoogleCalendarSettings()}
-              >
-                <Check size={16} />
-                {googleCalendarAction === "saving" ? t("Saving") : t("Save rules")}
-              </button>
-            </div>
-          </details>
-
-          {/* What goes the other way: which of this coach's items reach Google,
-              and whether a lesson shows who it is with. Anything switched off
-              is taken down from Google on the next sync. */}
-          <details className="settings-subsection">
-            <summary className="settings-subsection-title">
-              <ExternalLink size={18} />
-              <div>
-                <span>{t("Selective event export")}</span>
-                <strong>
-                  {[
-                    googleCalendarExport.lessons ? t("Lessons") : "",
-                    googleCalendarExport.blocks ? t("Blocked time") : "",
-                    googleCalendarExport.unavailable ? t("Unavailable hours") : "",
-                  ]
-                    .filter(Boolean)
-                    .join(" · ") || t("Nothing is sent to Google")}
-                </strong>
-              </div>
-            </summary>
-
-            <p className="google-calendar-source-intro">{t("Choose what Clarity sends to this Google calendar. Anything you switch off is removed from Google on the next sync.")}</p>
-
-            <div className="gcal-rule-toggles">
-              {(
-                [
-                  ["lessons", t("Lessons")],
-                  ["blocks", t("Blocked time")],
-                  ["unavailable", t("Unavailable hours")],
-                  ["clientDetails", t("Client name, phone and email on lessons")],
-                ] as const
-              ).map(([key, label]) => (
-                <label className="google-calendar-source-toggle" key={key}>
-                  <span>{label}</span>
-                  <input
-                    type="checkbox"
-                    checked={googleCalendarExport[key]}
-                    disabled={googleCalendarAction !== "idle" || (key === "clientDetails" && !googleCalendarExport.lessons)}
-                    onChange={(event) => updateGoogleCalendarExport({ [key]: event.target.checked })}
-                  />
-                </label>
-              ))}
-            </div>
-
-            {googleCalendarExport.lessons && services.length ? (
-              <div className="gcal-rule-field">
-                <span>{t("Lesson types sent")}</span>
-                <div className="gcal-rule-calendars">
-                  {services.map((service) => (
-                    <label className="gcal-rule-calendar" key={service.id}>
-                      <input
-                        type="checkbox"
-                        checked={!googleCalendarExport.excludedServiceIds.includes(service.id)}
-                        disabled={googleCalendarAction !== "idle"}
-                        onChange={(event) =>
-                          updateGoogleCalendarExport({
-                            excludedServiceIds: event.target.checked
-                              ? googleCalendarExport.excludedServiceIds.filter((id) => id !== service.id)
-                              : [...googleCalendarExport.excludedServiceIds, service.id],
-                          })
-                        }
-                      />
-                      <span>{service.name}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
-            <div className="gcal-rule-actions">
-              <button
-                className="primary-button"
-                type="button"
-                disabled={!googleCalendarSyncEnabled || googleCalendarAction !== "idle"}
-                onClick={() => void saveGoogleCalendarSettings()}
-              >
-                <Check size={16} />
-                {googleCalendarAction === "saving" ? t("Saving") : t("Save export")}
-              </button>
-            </div>
-          </details>
-
-          {/* Developer only: it shows raw Google payloads and failure codes. */}
-          {isDeveloper ? (
-            <details
-              className="settings-subsection gcal-debug"
-              open={googleCalendarDebugOpen}
-              onToggle={(event) => setGoogleCalendarDebugOpen((event.target as HTMLDetailsElement).open)}
-            >
-              <summary className="settings-subsection-title">
-                <ClarityAdmin size={18} />
-                <div>
-                  <span>{t("Debug")}</span>
-                  <strong>
-                    {googleCalendarDebug
-                      ? tn(googleCalendarDebug.entries.length, "{count} recent trigger", "{count} recent triggers")
-                      : t("Google failure codes, payloads and triggers")}
-                  </strong>
-                </div>
-              </summary>
-
-              <p className="gcal-debug-intro">{t("Every Google Calendar sync attempt is recorded here — what triggered it, the exact event payload sent to the Calendar API, and the failure code Google returned.")}</p>
-
-              <div className="gcal-debug-toolbar">
-                <button
-                  className="outline-button"
-                  disabled={googleCalendarDebugLoading}
-                  onClick={() => void refreshGoogleCalendarDebugLog()}
-                  type="button"
-                >
-                  <RefreshCw size={16} />
-                  {googleCalendarDebugLoading ? loadingLabel() : t("Refresh")}
-                </button>
-                <button
-                  className="outline-button"
-                  disabled={googleCalendarDebugLoading || !googleCalendarDebug?.entries.length}
-                  onClick={clearGoogleCalendarDebugLog}
-                  type="button"
-                >
-                  <Trash2 size={16} />{t("Clear log")}</button>
-                <label className="gcal-debug-toggle">
-                  <input
-                    type="checkbox"
-                    checked={googleCalendarDebug?.enabled !== false}
-                    disabled={googleCalendarDebugLoading || !googleCalendarDebug}
-                    onChange={(event) => toggleGoogleCalendarDebugLogging(event.target.checked)}
-                  />
-                  <span>{t("Record sync attempts")}</span>
-                </label>
-              </div>
-
-              {googleCalendarDebugError ? (
-                <p className="gcal-debug-error" role="alert">
-                  {googleCalendarDebugError}
-                </p>
-              ) : null}
-
-              {googleCalendarDebug ? (
-                <div className="gcal-debug-facts">
-                  <div>
-                    <span>{t("Auto-sync")}</span>
-                    <strong>{googleCalendarDebug.manualOnly ? t("Manual only") : googleCalendarDebug.autoSync ? t("On") : t("Off")}</strong>
-                  </div>
-                  <div>
-                    <span>{t("Target calendar")}</span>
-                    <strong>{googleCalendarDebug.calendarId || "primary"}</strong>
-                  </div>
-                  <div>
-                    <span>{t("Log capacity")}</span>
-                    <strong>{t("Last {maxEntries} runs", { maxEntries: googleCalendarDebug.maxEntries })}</strong>
-                  </div>
-                </div>
-              ) : null}
-
-              {googleCalendarDebug && !googleCalendarDebug.entries.length ? (
-                <p className="gcal-debug-empty">{t("No sync attempts recorded yet. Hit")}{" "}<strong>{t("Sync now")}</strong>{" "}{t("on the profile card, or save a booking, then refresh this panel. If nothing ever appears, the sync is not being triggered at all.")}</p>
-              ) : null}
-
-              <ol className="gcal-debug-list">
-                {(googleCalendarDebug?.entries || []).map((entry) => {
-                  const expanded = expandedGoogleCalendarDebugId === entry.id;
-                  const failureCode = googleCalendarFailureCode(entry.error);
-                  return (
-                    <li key={entry.id} className={`gcal-debug-entry is-${entry.outcome}`}>
-                      <button
-                        className="gcal-debug-entry-head"
-                        onClick={() => setExpandedGoogleCalendarDebugId(expanded ? null : entry.id)}
-                        aria-expanded={expanded}
-                        type="button"
-                      >
-                        <span className={`gcal-debug-badge is-${entry.outcome}`}>{entry.outcome}</span>
-                        <span className="gcal-debug-entry-main">
-                          <strong>{googleCalendarTriggerLabel(entry.trigger)}</strong>
-                          <em>
-                            {googleCalendarDebugTimestamp(entry.startedAt)}
-                            {relativeTimeLabel(entry.startedAt) ? ` · ${relativeTimeLabel(entry.startedAt)}` : ""}
-                            {t(" · {durationMs}ms", { durationMs: entry.durationMs })}
-                          </em>
-                        </span>
-                        <span className="gcal-debug-entry-result">
-                          {entry.outcome === "failed"
-                            ? failureCode
-                            : entry.outcome === "skipped"
-                              ? entry.reason || "skipped"
-                              : `${entry.upserted} sent · ${entry.deleted} removed${
-                                  entry.unchanged ? ` · ${entry.unchanged} unchanged` : ""
-                                }`}
-                        </span>
-                      </button>
-
-                      {expanded ? (
-                        <div className="gcal-debug-entry-body">
-                          <div className="gcal-debug-grid">
-                            <div>
-                              <span>{t("Trigger code")}</span>
-                              <code>{entry.trigger}</code>
-                            </div>
-                            <div>
-                              <span>{t("Stage reached")}</span>
-                              <code>{googleCalendarStageLabel(entry.stage)}</code>
-                            </div>
-                            <div>
-                              <span>{t("Calendar")}</span>
-                              <code>{entry.calendarId || "primary"}</code>
-                            </div>
-                            <div>
-                              <span>{t("Google account")}</span>
-                              <code>{entry.accountEmail || "—"}</code>
-                            </div>
-                            <div>
-                              <span>{t("Sync mode")}</span>
-                              <code>{entry.mode === "full" ? t("Full rebuild") : t("Targeted changes")}</code>
-                            </div>
-                            <div>
-                              <span>{entry.mode === "full" ? t("Bookings in run") : t("Bookings targeted")}</span>
-                              <code>{entry.itemCount}</code>
-                            </div>
-                            <div>
-                              <span>{t("Already up to date")}</span>
-                              <code>{entry.unchanged || 0}</code>
-                            </div>
-                            <div>
-                              <span>{t("Rate-limit retries")}</span>
-                              <code>{entry.retries || 0}</code>
-                            </div>
-                            <div>
-                              <span>{t("Finished")}</span>
-                              <code>{googleCalendarDebugTimestamp(entry.finishedAt)}</code>
-                            </div>
-                          </div>
-
-                          {entry.changes?.length ? (
-                            <section className="gcal-debug-block">
-                              <h4>{t("Bookings this run targeted")}</h4>
-                              <pre className="gcal-debug-pre">
-                                {entry.changes.map((change) => `${change.action.toUpperCase()}  ${change.id}`).join("\n")}
-                              </pre>
-                            </section>
-                          ) : null}
-
-                          {entry.outcome === "skipped" || (entry.outcome === "success" && entry.reason) ? (
-                            <p className="gcal-debug-note">
-                              {googleCalendarSkipReasonLabels[entry.reason] ||
-                                (entry.outcome === "skipped"
-                                  ? t("Skipped: {reason}", { reason: entry.reason || t("unknown reason") })
-                                  : t("Nothing sent: {reason}", { reason: entry.reason || t("unknown reason") }))}
-                            </p>
-                          ) : null}
-
-                          {entry.error ? (
-                            <section className="gcal-debug-block is-error">
-                              <h4>{t("Google failure")}</h4>
-                              <div className="gcal-debug-grid">
-                                <div>
-                                  <span>{t("HTTP status")}</span>
-                                  <code>
-                                    {entry.error.httpStatus
-                                      ? `${entry.error.httpStatus}${entry.error.httpStatusText ? ` ${entry.error.httpStatusText}` : ""}`
-                                      : t("— (failed before the request)")}
-
-                                  </code>
-                                </div>
-                                <div>
-                                  <span>{t("error.code")}</span>
-                                  <code>{entry.error.googleCode || "—"}</code>
-                                </div>
-                                <div>
-                                  <span>{t("error.status")}</span>
-                                  <code>{entry.error.googleStatus || "—"}</code>
-                                </div>
-                                <div>
-                                  <span>{t("errors[0].reason")}</span>
-                                  <code>{entry.error.googleReason || "—"}</code>
-                                </div>
-                                <div>
-                                  <span>{t("errors[0].domain")}</span>
-                                  <code>{entry.error.googleDomain || "—"}</code>
-                                </div>
-                                <div>
-                                  <span>{t("Clarity code")}</span>
-                                  <code>{entry.error.providerCode || "—"}</code>
-                                </div>
-                              </div>
-                              <p className="gcal-debug-message">{entry.error.googleMessage || entry.error.message}</p>
-                              {googleCalendarFailureHint(entry.error) ? (
-                                <p className="gcal-debug-note">{googleCalendarFailureHint(entry.error)}</p>
-                              ) : null}
-                              {entry.error.rawBody ? (
-                                <>
-                                  <h5>{t("Raw response body")}</h5>
-                                  <pre className="gcal-debug-pre">{entry.error.rawBody}</pre>
-                                </>
-                              ) : null}
-                            </section>
-                          ) : null}
-
-                          {entry.request ? (
-                            <section className="gcal-debug-block">
-                              <h4>
-                                {entry.requestIsSample ? t("Payload sent (sample from this run)") : t("Payload that failed")}
-                              </h4>
-                              <div className="gcal-debug-grid">
-                                <div>
-                                  <span>{t("Method")}</span>
-                                  <code>{entry.request.method}</code>
-                                </div>
-                                <div>
-                                  <span>{t("Booking")}</span>
-                                  <code>{entry.request.itemLabel || entry.request.itemId || "—"}</code>
-                                </div>
-                                <div>
-                                  <span>{t("Event ID")}</span>
-                                  <code>{entry.request.eventId || "—"}</code>
-                                </div>
-                                <div>
-                                  <span>{t("Clarity booking ID")}</span>
-                                  <code>{entry.request.itemId || "—"}</code>
-                                </div>
-                              </div>
-                              <h5>{t("Endpoint")}</h5>
-                              <pre className="gcal-debug-pre">{entry.request.url}</pre>
-                              {entry.request.payload ? (
-                                <>
-                                  <h5>{t("Request body")}</h5>
-                                  <pre className="gcal-debug-pre">{formatDebugJson(entry.request.payload)}</pre>
-                                </>
-                              ) : (
-                                <p className="gcal-debug-note">{t("No request body (DELETE request).")}</p>
-                              )}
-                            </section>
-                          ) : entry.outcome !== "skipped" ? (
-                            <p className="gcal-debug-note">{t("No payload captured — the run failed before building an event, or there were no bookings to send.")}</p>
-                          ) : null}
-
-                          <div className="gcal-debug-entry-actions">
-                            <button className="outline-button" onClick={() => copyGoogleCalendarDebugEntry(entry)} type="button">
-                              <Copy size={16} />{t("Copy entry JSON")}</button>
-                          </div>
-                        </div>
-                      ) : null}
-                    </li>
-                  );
-                })}
-              </ol>
-            </details>
-          ) : null}
-        </div>
-      </SettingsGroup>
+      <Suspense fallback={<Loading />}>
+        <GoogleCalendarSettingsPanel
+          googleCalendar={googleCalendar}
+          googleCalendarAction={googleCalendarAction}
+          googleCalendarDebug={googleCalendarDebug}
+          googleCalendarSyncEnabled={googleCalendarSyncEnabled}
+          googleCalendarExport={googleCalendarExport}
+          updateGoogleCalendarImportRule={updateGoogleCalendarImportRule}
+          googleCalendarDebugLoading={googleCalendarDebugLoading}
+          googleCalendarStatusError={googleCalendarStatusError}
+          googleCalendarCoachName={googleCalendarCoachName}
+          removeGoogleCalendarImportRule={removeGoogleCalendarImportRule}
+          updateGoogleCalendarExport={updateGoogleCalendarExport}
+          services={services}
+          googleCalendarDebugError={googleCalendarDebugError}
+          setGoogleCalendar={setGoogleCalendar}
+          editingImportRuleId={editingImportRuleId}
+          setEditingImportRuleId={setEditingImportRuleId}
+          toggleGoogleCalendarImportRuleCalendar={toggleGoogleCalendarImportRuleCalendar}
+          addGoogleCalendarImportRule={addGoogleCalendarImportRule}
+          isDeveloper={isDeveloper}
+          googleCalendarDebugOpen={googleCalendarDebugOpen}
+          setGoogleCalendarDebugOpen={setGoogleCalendarDebugOpen}
+          clearGoogleCalendarDebugLog={clearGoogleCalendarDebugLog}
+          toggleGoogleCalendarDebugLogging={toggleGoogleCalendarDebugLogging}
+          expandedGoogleCalendarDebugId={expandedGoogleCalendarDebugId}
+          setExpandedGoogleCalendarDebugId={setExpandedGoogleCalendarDebugId}
+          copyGoogleCalendarDebugEntry={copyGoogleCalendarDebugEntry}
+          saveGoogleCalendarSettings={saveGoogleCalendarSettings}
+          connectGoogleCalendar={connectGoogleCalendar}
+          syncGoogleCalendarNow={syncGoogleCalendarNow}
+          disconnectGoogleCalendar={disconnectGoogleCalendar}
+          refreshGoogleCalendarDebugLog={refreshGoogleCalendarDebugLog}
+        />
+      </Suspense>
     ) : null;
 
   const coachesSettingsPanel = (
-    <SettingsGroup id="coaches" icon={ClarityCoachesStaff} section="business" title={terms.staffPlural}>
-      {openCoach ? (
-        <CoachProfilePanel
-          coach={openCoach}
-          isNew={Boolean(newCoach)}
-          access="owner"
-          roleLabel={coachRoleLabel(openCoach)}
-          staffSingular={terms.staffSingular}
-          staffPlural={terms.staffPlural}
-          locations={coachLocationOptions}
-          week={newCoach ? [] : coachWeekFor(openCoach.id)}
-          onSave={saveEditedCoach}
-          onBack={() => openCoachProfile(null)}
-          onOpenCalendar={() => openCoachCalendar(openCoach.id)}
-          onOpenAvailability={() => openCoachAvailability(openCoach.id)}
-        >
-          {googleCalendarSyncEnabled && googleCalendarProfileCoachId === openCoach.id ? googleCalendarCard : null}
-        </CoachProfilePanel>
-      ) : (
-      <div className="data-card wide">
-        <div className="data-card-header">
-          <div>
-              <h2>{t("{length} active", { length: activeCoachList.length })}{" "}{activeCoachList.length === 1 ? terms.staffSingular.toLowerCase() : terms.staffPlural.toLowerCase()}</h2>
-          </div>
-          <button className="primary-button" onClick={startNewCoach} type="button">
-            <Plus size={16} />
-            <span>{t("Add {staffSingular}", { staffSingular: terms.staffSingular.toLowerCase() })}</span>
-          </button>
-        </div>
-        <p className="field-help">{t("{staffSingular} profiles are bookable operator identities. Admin users are a permission layer, not the owner of bookings.", { staffSingular: terms.staffSingular })}</p>
-
-        <div className="service-list" aria-label={terms.staffPlural}>
-          {coachProfiles.map((coach) => (
-            <article className={`service-row coach-row ${coach.active && !coach.archived ? "" : "is-archived"}`} key={coach.id}>
-              <button className="service-row-main" onClick={() => openCoachProfile(coach.id)} type="button">
-                <CoachAvatar name={coach.displayName || coach.name} photoUrl={coach.photoUrl} size={44} />
-                <span className="coach-row-text">
-                  <span>{coach.active && !coach.archived ? t("Active") : t("Archived")}</span>
-                  <strong>{coach.displayName || coach.name}</strong>
-                  {coach.email && <em>{coach.email}</em>}
-                  <em>{tn((coach.assignedLocationIds ?? []).length || 0, "Assigned to {count} location", "Assigned to {count} locations")}
-                  </em>
-                </span>
-              </button>
-              <div className="service-row-meta">
-                <strong>{coach.shortName || coach.name}</strong>
-                <span>{coach.phone || t("No phone")}</span>
-              </div>
-              <div className="service-row-actions">
-                {coach.archived || !coach.active ? (
-                  <>
-                    <button className="outline-button service-action-button" onClick={() => restoreCoach(coach)} type="button">
-                      <RefreshCw size={15} />
-                      <span>{t("Restore")}</span>
-                    </button>
-                    <button className="outline-button service-action-button" onClick={() => deleteCoach(coach)} type="button">
-                      <Trash2 size={15} />
-                      <span>{t("Delete")}</span>
-                    </button>
-                  </>
-                ) : (
-                  <button className="outline-button service-action-button" onClick={() => archiveCoach(coach)} type="button">
-                    <Archive size={15} />
-                    <span>{t("Archive")}</span>
-                  </button>
-                )}
-              </div>
-            </article>
-          ))}
-        </div>
-      </div>
-      )}
-    </SettingsGroup>
+    <Suspense fallback={<Loading />}>
+      <CoachesSettingsPanel
+        terms={terms}
+        openCoach={openCoach}
+        newCoach={newCoach}
+        openCoachProfile={openCoachProfile}
+        activeCoachList={activeCoachList}
+        coachRoleLabel={coachRoleLabel}
+        coachLocationOptions={coachLocationOptions}
+        coachWeekFor={coachWeekFor}
+        openCoachCalendar={openCoachCalendar}
+        openCoachAvailability={openCoachAvailability}
+        googleCalendarSyncEnabled={googleCalendarSyncEnabled}
+        googleCalendarProfileCoachId={googleCalendarProfileCoachId}
+        googleCalendarCard={googleCalendarCard}
+        startNewCoach={startNewCoach}
+        coachProfiles={coachProfiles}
+        restoreCoach={restoreCoach}
+        deleteCoach={deleteCoach}
+        archiveCoach={archiveCoach}
+        saveEditedCoach={saveEditedCoach}
+      />
+    </Suspense>
   );
 
   const availabilitySettingsPanel = (
-    <SettingsGroup id="availability" icon={ClaritySessions} section="booking" title={t("Availability")}>
-      <div className="availability-layout">
-        <div className="data-card wide">
-          <div className="data-card-header">
-            <div>
-              <h2>
-                {availabilityEditorCoaches.find((coach) => coach.id === availabilityEditorCoachId)?.displayName ||
-                  availabilityEditorCoaches.find((coach) => coach.id === availabilityEditorCoachId)?.name ||
-                  coachAccount.venueName}
-              </h2>
-              <p className="availability-coach-hint">{t("Weekly hours this coach can be booked")}{availabilityEditorLocationTabs.length ? t(", one week per location") : ""}{t(". Each location's hours only open bookings there.")}</p>
-            </div>
-            <button className="primary-button" onClick={() => void saveAvailability()}>
-              {availabilitySaveState === "saving"
-                ? t("Saving")
-                : availabilitySaveState === "saved"
-                ? t("Saved")
-                : t("Save Availability")}
-            </button>
-          </div>
-          {availabilityEditorCoaches.length > 1 ? (
-            <div className="availability-coach-picker">
-              <div className="availability-coach-tabs" role="tablist" aria-label={t("Coach")}>
-                {availabilityEditorCoaches.map((coach) => {
-                  const weekMinutes = availabilityForCoach(accountAvailability, coach.id, activeCoachId)
-                    .flat()
-                    .reduce((total, window) => total + (window.end - window.start), 0);
-                  const selected = coach.id === availabilityEditorCoachId;
-                  return (
-                    <button
-                      key={coach.id}
-                      type="button"
-                      role="tab"
-                      aria-selected={selected}
-                      className={`availability-coach-tab ${selected ? "is-selected" : ""}`}
-                      onClick={() => {
-                        setEditingAvailabilityWindow("");
-                        setAvailabilityCoachChoice(coach.id);
-                      }}
-                    >
-                      <strong>{coach.displayName || coach.name}</strong>
-                      <small>{weekMinutes ? `${formatDurationLabel(weekMinutes)} / week` : t("No hours set")}</small>
-                    </button>
-                  );
-                })}
-              </div>
-              <label className="availability-copy-from">
-                <span>{t("Copy hours from")}</span>
-                <select
-                  value=""
-                  onChange={(event) => copyAvailabilityFromCoach(event.target.value)}
-                >
-                  <option value="">{t("Choose coach")}</option>
-                  {availabilityEditorCoaches
-                    .filter((coach) => coach.id !== availabilityEditorCoachId)
-                    .map((coach) => (
-                      <option key={coach.id} value={coach.id}>
-                        {coach.displayName || coach.name}
-                      </option>
-                    ))}
-                </select>
-              </label>
-            </div>
-          ) : null}
-          {availabilityEditorLocationTabs.length ? (
-            <div className="availability-location-tabs" role="tablist" aria-label={t("Location")}>
-              {availabilityEditorLocationTabs.map((tab) => {
-                const selected = tab.id === availabilityEditorLocationId;
-                const minutes = availabilityForCoach(accountAvailability, availabilityEditorCoachId, activeCoachId)
-                  .flat()
-                  .filter((window) => (window.locationId || "") === tab.id)
-                  .reduce((total, window) => total + (window.end - window.start), 0);
-                const hue = tab.id ? availabilityLocationHue(tab.id) : null;
-                return (
-                  <button
-                    key={tab.id || "any"}
-                    type="button"
-                    role="tab"
-                    aria-selected={selected}
-                    className={`availability-location-tab ${selected ? "is-selected" : ""}`}
-                    style={hue !== null ? ({ ["--location-hue" as string]: String(hue) } as CSSProperties) : undefined}
-                    onClick={() => {
-                      setEditingAvailabilityWindow("");
-                      setAvailabilityLocationChoice(tab.id);
-                    }}
-                  >
-                    <strong>{tab.label}</strong>
-                    <small>{minutes ? `${formatDurationLabel(minutes)} / week` : t("No hours")}</small>
-                  </button>
-                );
-              })}
-            </div>
-          ) : null}
-          {availabilityConflictList.length ? (
-            <div className="availability-conflicts" role="alert">
-              <strong>
-                {tn(availabilityConflictList.length, "One clash: a coach is down at two locations at once", "{count} clashes: a coach is down at two locations at once")}</strong>
-              <ul>
-                {availabilityConflictList.slice(0, 8).map((conflict, index) => {
-                  const coach = availabilityEditorCoaches.find((entry) => entry.id === conflict.coachId);
-                  return (
-                    <li key={index}>
-                      {coach?.displayName || coach?.name || t("Coach")}{" "}{t("· {fullDayNames} {start} – {end} · {locationIds} and {locationIds2}", { fullDayNames: fullDayNames[conflict.day], start: formatTime(conflict.start), end: formatTime(conflict.end), locationIds: availabilityLocationLabel(conflict.locationIds[0]), locationIds2: availabilityLocationLabel(conflict.locationIds[1]) })}</li>
-                  );
-                })}
-              </ul>
-              <p>{t("Clients could book them at both places for the same time. Save anyway if that's intended.")}</p>
-              <div className="availability-conflict-actions">
-                <button className="primary-button" onClick={() => void saveAvailability({ ignoreConflicts: true })} type="button">{t("Save anyway")}</button>
-                <button className="outline-button" onClick={() => setAvailabilityConflictList([])} type="button">{t("Keep editing")}</button>
-              </div>
-            </div>
-          ) : null}
-          <div className="availability-editor">
-            {fullDayNames.map((dayName, dayIndex) => (
-              <details className="settings-subsection availability-edit-row" key={dayName}>
-                <summary className="settings-subsection-title availability-day-title">
-                  <ClaritySessions size={18} />
-                  <div>
-                    <span>{dayName}</span>
-                    <strong>
-                      {availabilityEditorWeek[dayIndex].length
-                        ? availabilityEditorWeek[dayIndex]
-                            .map((window) => `${formatTime(window.start)} - ${formatTime(window.end)}`)
-                            .join(", ")
-                        : t("Closed")}
-                    </strong>
-                  </div>
-                </summary>
-                <div className="availability-day-controls">
-                  <button className="outline-button compact-button" onClick={() => toggleAvailabilityDay(dayIndex)}>
-                    {availabilityEditorWeek[dayIndex].length ? t("Closed") : t("Open")}
-                  </button>
-                </div>
-                <div className="availability-windows">
-                  {availabilityEditorWeek[dayIndex].map((window, windowIndex) => {
-                    const windowKey = `${dayIndex}-${windowIndex}`;
-                    const isEditingWindow = editingAvailabilityWindow === windowKey;
-                    return (
-                      <div
-                        className={`availability-window ${isEditingWindow ? "is-editing" : ""}`}
-                        key={`${dayName}-${windowIndex}`}
-                      >
-                        {isEditingWindow ? (
-                          <>
-                            <label>
-                              <span>{t("From")}</span>
-                              <input
-                                value={minutesToInputTime(window.start)}
-                                onChange={(event) =>
-                                  updateAvailabilityWindow(
-                                    dayIndex,
-                                    windowIndex,
-                                    "start",
-                                    inputTimeToMinutes(event.target.value, window.start),
-                                  )
-                                }
-                                type="time"
-                                step={SNAP_MINUTES * 60}
-                              />
-                            </label>
-                            <label>
-                              <span>{t("To")}</span>
-                              <input
-                                value={minutesToInputTime(window.end)}
-                                onChange={(event) =>
-                                  updateAvailabilityWindow(
-                                    dayIndex,
-                                    windowIndex,
-                                    "end",
-                                    inputTimeToMinutes(event.target.value, window.end),
-                                  )
-                                }
-                                type="time"
-                                step={SNAP_MINUTES * 60}
-                              />
-                            </label>
-                            <button
-                              className="icon-button small"
-                              aria-label={t("Done editing {dayName} window", { dayName })}
-                              onClick={() => setEditingAvailabilityWindow("")}
-                            >
-                              <Check size={15} />
-                            </button>
-                          </>
-                        ) : (
-                          <button
-                            className="availability-range-button"
-                            onClick={() => setEditingAvailabilityWindow(windowKey)}
-                            type="button"
-                          >
-                            <ClaritySessions size={15} />
-                            {formatTime(window.start)} - {formatTime(window.end)}
-                          </button>
-                        )}
-                        <button
-                          className="icon-button small"
-                          aria-label={t("Remove {dayName} window", { dayName })}
-                          onClick={() => removeAvailabilityWindow(dayIndex, windowIndex)}
-                        >
-                          <X size={15} />
-                        </button>
-                      </div>
-                    );
-                  })}
-                  <button className="outline-button compact-button add-time-button" onClick={() => addAvailabilityWindow(dayIndex)}>
-                    <Plus size={15} />{t("Add time")}</button>
-                </div>
-              </details>
-            ))}
-          </div>
-        </div>
-      </div>
-    </SettingsGroup>
+    <Suspense fallback={<Loading />}>
+      <AvailabilitySettingsPanel
+        availabilityEditorCoaches={availabilityEditorCoaches}
+        availabilityEditorCoachId={availabilityEditorCoachId}
+        setEditingAvailabilityWindow={setEditingAvailabilityWindow}
+        availabilityEditorWeek={availabilityEditorWeek}
+        availabilityEditorLocationTabs={availabilityEditorLocationTabs}
+        availabilityConflictList={availabilityConflictList}
+        availabilitySaveState={availabilitySaveState}
+        accountAvailability={accountAvailability}
+        activeCoachId={activeCoachId}
+        availabilityLocationLabel={availabilityLocationLabel}
+        updateAvailabilityWindow={updateAvailabilityWindow}
+        coachAccount={coachAccount}
+        setAvailabilityCoachChoice={setAvailabilityCoachChoice}
+        copyAvailabilityFromCoach={copyAvailabilityFromCoach}
+        availabilityEditorLocationId={availabilityEditorLocationId}
+        availabilityLocationHue={availabilityLocationHue}
+        setAvailabilityLocationChoice={setAvailabilityLocationChoice}
+        setAvailabilityConflictList={setAvailabilityConflictList}
+        toggleAvailabilityDay={toggleAvailabilityDay}
+        editingAvailabilityWindow={editingAvailabilityWindow}
+        removeAvailabilityWindow={removeAvailabilityWindow}
+        addAvailabilityWindow={addAvailabilityWindow}
+        saveAvailability={saveAvailability}
+      />
+    </Suspense>
   );
 
   /**
@@ -16438,102 +13969,17 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
    * no tab.
    */
   const playerBookingEmbedPanel = (
-    <SettingsGroup id="player-booking-embed" icon={ClarityNewBooking} section="booking" title={t("Player portal booking widget")}>
-      <EditableSettingsBlock
-        id="player-booking-embed-block"
-        title={t("Player portal booking widget")}
-        status={playerBookingEmbedEditor.status}
-        dirty={playerBookingEmbedEditor.dirty}
-        errorMessage={playerBookingEmbedEditor.errorMessage}
-        onEdit={() => startEditableBlock("player-booking-embed")}
-        onCancel={() => cancelEditableBlock("player-booking-embed")}
-        onSave={() => void saveEditableBlock("player-booking-embed")}
-      >
-        <details className="settings-subsection">
-          <summary className="settings-subsection-title">
-            <ExternalLink size={18} />
-            <div>
-              <span>{t("Outside booking page")}</span>
-              <strong>
-                {playerBookingEmbedDraft.playerBookingEmbedUrl
-                  ? t("Shown as \"{playerBookingEmbedLabel}\"", { playerBookingEmbedLabel: playerBookingEmbedDraft.playerBookingEmbedLabel })
-                  : t("Not set")}
-              </strong>
-            </div>
-          </summary>
-          <label className="settings-field">
-            <span>{t("Booking page address")}</span>
-            <input
-              type="url"
-              inputMode="url"
-              placeholder="https://booking.yourvenue.com/…"
-              value={playerBookingEmbedDraft.playerBookingEmbedUrl}
-              readOnly={playerBookingEmbedIsLocked}
-              onChange={(event) =>
-                updateNotificationBlockDraft(
-                  playerBookingEmbedEditor,
-                  "playerBookingEmbedUrl",
-                  event.target.value.slice(0, 700),
-                )
-              }
-            />
-          </label>
-          <p className="field-help">{t("Must start with https. Leave it empty and players see no extra tab. Some providers block being framed — open the tab in the portal to check before telling players about it.")}</p>
-          <div className="service-form-row">
-            <label className="settings-field">
-              <span>{t("Tab name")}</span>
-              <input
-                placeholder={PLAYER_BOOKING_EMBED_DEFAULT_LABEL}
-                value={playerBookingEmbedDraft.playerBookingEmbedLabel}
-                readOnly={playerBookingEmbedIsLocked}
-                onChange={(event) =>
-                  updateNotificationBlockDraft(
-                    playerBookingEmbedEditor,
-                    "playerBookingEmbedLabel",
-                    event.target.value.slice(0, 24),
-                  )
-                }
-              />
-            </label>
-            <label className="settings-field">
-              <span>{t("Starting height in pixels")}</span>
-              <input
-                type="number"
-                min={PLAYER_BOOKING_EMBED_MIN_HEIGHT}
-                max={PLAYER_BOOKING_EMBED_MAX_HEIGHT}
-                step={20}
-                value={playerBookingEmbedDraft.playerBookingEmbedHeight}
-                readOnly={playerBookingEmbedIsLocked}
-                onChange={(event) =>
-                  updateNotificationBlockDraft(
-                    playerBookingEmbedEditor,
-                    "playerBookingEmbedHeight",
-                    Number(event.target.value || PLAYER_BOOKING_EMBED_DEFAULT_HEIGHT),
-                  )
-                }
-              />
-            </label>
-          </div>
-          <p className="field-help">{t("The tab is called \"Bay\", \"Tee times\" or whatever your players call it. The height is only a starting point — providers that ask for more room get it.")}</p>
-          <label className="settings-field">
-            <span>{t("Line above the widget")}</span>
-            <input
-              placeholder={t("Bays only — lessons are under Lessons.")}
-              value={playerBookingEmbedDraft.playerBookingEmbedIntro}
-              readOnly={playerBookingEmbedIsLocked}
-              onChange={(event) =>
-                updateNotificationBlockDraft(
-                  playerBookingEmbedEditor,
-                  "playerBookingEmbedIntro",
-                  event.target.value.slice(0, 240),
-                )
-              }
-            />
-          </label>
-          <p className="field-help">{t("Optional. Worth setting if the difference between this and booking a lesson is not obvious.")}</p>
-        </details>
-      </EditableSettingsBlock>
-    </SettingsGroup>
+    <Suspense fallback={<Loading />}>
+      <PlayerBookingEmbedPanel
+        playerBookingEmbedEditor={playerBookingEmbedEditor}
+        playerBookingEmbedDraft={playerBookingEmbedDraft}
+        playerBookingEmbedIsLocked={playerBookingEmbedIsLocked}
+        updateNotificationBlockDraft={updateNotificationBlockDraft}
+        startEditableBlock={startEditableBlock}
+        cancelEditableBlock={cancelEditableBlock}
+        saveEditableBlock={saveEditableBlock}
+      />
+    </Suspense>
   );
 
   const bookingFlow = useBookingFlow({
@@ -16578,201 +14024,35 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
 
 
   const bookingSettingsPanel = (
-    <SettingsGroup id="booking-page" icon={ClarityBookingPages} section="booking" title={t("Booking page")} className="booking-page-settings">
-      <details className="settings-subsection">
-        <summary className="settings-subsection-title">
-          <Eye size={18} />
-          <div>
-            <span>{t("Preview")}</span>
-            <strong>{t("As your device shows it")}</strong>
-          </div>
-        </summary>
-        <BookingFlowView bookingFlow={bookingFlow} />
-      </details>
-      <EditableSettingsBlock
-        id="booking-page-notice-block"
-        title={t("Booking Page notice")}
-        status={bookingNoticeEditor.status}
-        dirty={bookingNoticeEditor.dirty}
-        errorMessage={bookingNoticeEditor.errorMessage}
-        onEdit={() => startEditableBlock("booking-page-notice")}
-        onCancel={() => cancelEditableBlock("booking-page-notice")}
-        onSave={() => void saveEditableBlock("booking-page-notice")}
-      >
-      <details className="settings-subsection">
-        <summary className="settings-subsection-title">
-          <ClaritySessions size={18} />
-          <div>
-            <span>{t("Minimum notice before a public booking")}</span>
-            <strong>{bookingNoticeDraftSummary}</strong>
-          </div>
-        </summary>
-        <label className="settings-field">
-          <span>{t("Minimum notice in hours")}</span>
-          <input
-            type="number"
-            min={0}
-            max={168}
-            step={0.25}
-            value={bookingNoticeDraftHours}
-            readOnly={bookingNoticeIsLocked}
-            onChange={(event) => updateBookingNoticeHours(Math.max(0, Number(event.target.value || 0)))}
-          />
-        </label>
-        <p className="field-help">{t("Clients can only book or reschedule after that buffer.")}</p>
-        <div className="minimum-notice-presets" aria-label={t("Quick notice presets")}>
-          {MIN_BOOKING_NOTICE_PRESETS_HOURS.map((hours) => (
-            <button
-              className="outline-button"
-              disabled={bookingNoticeIsLocked}
-              key={hours}
-              onClick={() => updateBookingNoticeHours(hours)}
-              type="button"
-            >
-              {hours === 0 ? t("No buffer") : tn(hours, "{count} hour", "{count} hours")}
-            </button>
-          ))}
-        </div>
-        <button className="outline-button" disabled={bookingNoticeIsLocked} onClick={() => updateBookingNoticeHours(0)} type="button">{t("Clear buffer")}</button>
-      </details>
-      </EditableSettingsBlock>
-      <EditableSettingsBlock
-        id="booking-page-look-busy-block"
-        title={t("Look busy")}
-        status={lookBusyEditor.status}
-        dirty={lookBusyEditor.dirty}
-        errorMessage={lookBusyEditor.errorMessage}
-        onEdit={() => startEditableBlock("booking-page-look-busy")}
-        onCancel={() => cancelEditableBlock("booking-page-look-busy")}
-        onSave={() => void saveEditableBlock("booking-page-look-busy")}
-      >
-      <details className="settings-subsection">
-        <summary className="settings-subsection-title">
-          <ClaritySessions size={18} />
-          <div>
-            <span>{t("Look busy")}</span>
-            <strong>{lookBusy ? t("On — fewer gaps between lessons") : t("Off — every open time is shown")}</strong>
-          </div>
-        </summary>
-        <label className="settings-toggle">
-          <input
-            checked={lookBusy}
-            disabled={lookBusyIsLocked}
-            onChange={(event) => updateNotificationBlockDraft(lookBusyEditor, "publicBookingLookBusy", event.target.checked)}
-            type="checkbox"
-          />
-          <span>{t("Only offer times next to an existing booking or the start or end of your day")}</span>
-        </label>
-        <p className="field-help">{t("Your booking page shows fewer times, so your diary looks in demand and lessons book back to back instead of leaving gaps.")}</p>
-      </details>
-      </EditableSettingsBlock>
-      <EditableSettingsBlock
-        id="booking-screen-name-block"
-        title={t("Booking Page screen name")}
-        status={bookingScreenNameEditor.status}
-        dirty={bookingScreenNameEditor.dirty}
-        errorMessage={bookingScreenNameEditor.errorMessage}
-        onEdit={() => startEditableBlock("booking-screen-name")}
-        onCancel={() => cancelEditableBlock("booking-screen-name")}
-        onSave={() => void saveEditableBlock("booking-screen-name")}
-      >
-              <details className="settings-subsection">
-                <summary className="settings-subsection-title">
-                  <ClarityAdmin size={18} />
-                  <div>
-                    <span>{t("Booking screen embeds")}</span>
-                    <strong>{t("Squarespace iframe")}</strong>
-                  </div>
-                </summary>
-              <div className="embed-panel">
-                <div className="booking-screen-tabs" role="tablist" aria-label={t("Booking screen embeds")}>
-                  {bookingScreenEmbeds.map((bookingScreen) => (
-                    <button
-                      className={`booking-screen-tab ${selectedBookingScreenId === bookingScreen.id ? "active" : ""}`}
-                      key={bookingScreen.id}
-                      onClick={() => {
-                        if (bookingScreenNameEditor.dirty && !confirmDiscardEditableBlock(t("Booking Page screen name"))) return;
-                        if (bookingScreenNameEditor.dirty) bookingScreenNameEditor.cancel();
-                        setSelectedBookingScreenId(bookingScreen.id);
-                      }}
-                      type="button"
-                    >
-                      {bookingScreen.label}
-                    </button>
-                  ))}
-                </div>
-                {selectedBookingScreen && (
-                  <div className="booking-screen-embed-card">
-                    <label className="settings-field">
-                      <span>{t("Screen name")}</span>
-                      <input
-                        value={bookingScreenNameDraft[selectedBookingScreen.id] || selectedBookingScreen.label}
-                        readOnly={bookingScreenNameIsLocked}
-                        onChange={(event) =>
-                          bookingScreenNameEditor.setDraftValue((current) => ({
-                            ...current,
-                            [selectedBookingScreen.id]: event.target.value,
-                          }))
-                        }
-                        type="text"
-                      />
-                    </label>
-                    <div className="settings-field">
-                      <span>{t("Slug")}</span>
-                      <code className="booking-screen-slug">{selectedBookingScreen.path}</code>
-                    </div>
-                    <div className="settings-field">
-                      <span>{t("Public link")}</span>
-                      <code className="booking-screen-link">{selectedBookingScreen.publicUrl}</code>
-                    </div>
-                    <div className="embed-actions">
-                      <button
-                        className="outline-button"
-                        onClick={() => copyBookingScreenValue(selectedBookingScreen.publicUrl, "url", selectedBookingScreen.id)}
-                        type="button"
-                      >
-                        {copiedBookingScreenLinkId === `${selectedBookingScreen.id}-url` ? <Check size={16} /> : <Copy size={16} />}
-                        {copiedBookingScreenLinkId === `${selectedBookingScreen.id}-url` ? t("Copied link") : t("Copy public link")}
-                      </button>
-                      <a className="outline-button" href={selectedBookingScreen.publicUrl} target="_blank" rel="noreferrer">
-                        <ExternalLink size={16} />{t("Open widget")}</a>
-                    </div>
-                    <div className="settings-field">
-                      <span>{t("Iframe embed")}</span>
-                      <div className="embed-code booking-screen-iframe">
-                        <ClarityAdmin size={18} />
-                        <code>{selectedBookingScreen.iframeCode}</code>
-                      </div>
-                    </div>
-                    <div className="embed-actions">
-                      <button
-                        className="outline-button"
-                        onClick={() => copyBookingScreenValue(selectedBookingScreen.iframeCode, "iframe", selectedBookingScreen.id)}
-                        type="button"
-                      >
-                        {copiedBookingScreenIframeId === `${selectedBookingScreen.id}-iframe` ? (
-                          <Check size={16} />
-                        ) : (
-                          <Copy size={16} />
-                        )}
-                        {copiedBookingScreenIframeId === `${selectedBookingScreen.id}-iframe` ? t("Copied iframe") : t("Copy iframe")}
-                      </button>
-                    </div>
-                    <div className="booking-screen-preview">
-                      <div className="settings-field">
-                        <span>{t("Preview iframe")}</span>
-                        <iframe
-                          src={selectedBookingScreen.publicUrl}
-                          title={`${coachAccount.businessName} ${selectedBookingScreen.label} preview`}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-      </details>
-      </EditableSettingsBlock>
-    </SettingsGroup>
+    <Suspense fallback={<Loading />}>
+      <BookingSettingsPanel
+        selectedBookingScreen={selectedBookingScreen}
+        bookingScreenNameEditor={bookingScreenNameEditor}
+        lookBusyEditor={lookBusyEditor}
+        bookingNoticeEditor={bookingNoticeEditor}
+        startEditableBlock={startEditableBlock}
+        cancelEditableBlock={cancelEditableBlock}
+        bookingNoticeIsLocked={bookingNoticeIsLocked}
+        updateBookingNoticeHours={updateBookingNoticeHours}
+        lookBusy={lookBusy}
+        copyBookingScreenValue={copyBookingScreenValue}
+        copiedBookingScreenLinkId={copiedBookingScreenLinkId}
+        copiedBookingScreenIframeId={copiedBookingScreenIframeId}
+        bookingFlow={bookingFlow}
+        bookingNoticeDraftSummary={bookingNoticeDraftSummary}
+        bookingNoticeDraftHours={bookingNoticeDraftHours}
+        lookBusyIsLocked={lookBusyIsLocked}
+        updateNotificationBlockDraft={updateNotificationBlockDraft}
+        bookingScreenEmbeds={bookingScreenEmbeds}
+        selectedBookingScreenId={selectedBookingScreenId}
+        confirmDiscardEditableBlock={confirmDiscardEditableBlock}
+        setSelectedBookingScreenId={setSelectedBookingScreenId}
+        bookingScreenNameDraft={bookingScreenNameDraft}
+        bookingScreenNameIsLocked={bookingScreenNameIsLocked}
+        coachAccount={coachAccount}
+        saveEditableBlock={saveEditableBlock}
+      />
+    </Suspense>
   );
   const selectedIsCustomGroupAppointment =
     selected?.kind === "appointment" && isCustomGroupService(selectedService);
@@ -17240,7 +14520,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                 key={appointment.id}
                 className="group-attendee-card"
                 style={{
-                  border: "1px solid color-mix(in srgb, var(--muted) 36%, transparent)",
+                  border: "1px solid color-mix(in srgb, var(--c-muted) 36%, transparent)",
                   borderRadius: 10,
                   padding: "8px 10px",
                   display: "grid",
@@ -17254,7 +14534,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                     <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {appointment.client || appointment.title}
                     </strong>
-                    <span style={{ color: "var(--muted)", fontSize: "0.85rem" }}>
+                    <span style={{ color: "var(--c-muted)", fontSize: "0.85rem" }}>
                       {[
                         appointment.phone,
                         appointment.email,
@@ -17264,7 +14544,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                         .join(" · ")}
                     </span>
                     {appointment.note ? (
-                      <span style={{ color: "var(--muted)", fontSize: "0.84rem" }}>{t("Note: {note}", { note: appointment.note })}</span>
+                      <span style={{ color: "var(--c-muted)", fontSize: "0.84rem" }}>{t("Note: {note}", { note: appointment.note })}</span>
                     ) : null}
                   </div>
                   <span
@@ -17274,7 +14554,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                       fontSize: "0.76rem",
                       textTransform: "uppercase",
                       letterSpacing: "0.02em",
-                      border: "1px solid color-mix(in srgb, var(--muted) 36%, transparent)",
+                      border: "1px solid color-mix(in srgb, var(--c-muted) 36%, transparent)",
                       whiteSpace: "nowrap",
                     }}
                   >
@@ -19214,1610 +16494,140 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
         )}
 
         {adminWorkspaceReady && activeView === "players" && (
-          <section className={`module-page player-profiles-page${phonePlayerOpen ? " is-phone-detail" : ""}`}>
-            <div className="player-profiles-toolbar">
-              <div className="player-profiles-heading">
-                <p>{t("{customerPlural} with {serviceSingular} notes or video, plus anyone you add.", { customerPlural: terms.customerPlural, serviceSingular: terms.serviceSingular.toLowerCase() })}</p>
-              </div>
-              <div className="player-profiles-actions">
-                <button
-                  type="button"
-                  className="icon-button"
-                  onClick={openPlayerAddDialog}
-                  title={t("Add {customerSingular}", { customerSingular: terms.customerSingular.toLowerCase() })}
-                  aria-label={t("Add {customerSingular}", { customerSingular: terms.customerSingular.toLowerCase() })}
-                >
-                  <Plus size={18} />
-                </button>
-                {capabilities.videoAnalysis && (
-                  <button
-                    type="button"
-                    className="icon-button new-video-button"
-                    onClick={() => {
-                      switchView("video");
-                      setVideoCameraRequested(true);
-                    }}
-                    title={t("Record a video")}
-                    aria-label={t("Record a video")}
-                  >
-                    <Plus size={16} />
-                    <ClarityVideoAnalysis size={18} />
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {unassignedVideos.length > 0 && (
-              <div className="player-unassigned-videos">
-                <p>
-                  {unassignedVideos.length === 1
-                    ? t("1 video was saved without a player.")
-                    : t("{length} videos were saved without a player.", { length: unassignedVideos.length })}
-                </p>
-                {unassignedVideos.map((video) => (
-                  <div className="player-unassigned-video" key={video.savedVideoId}>
-                    <span>
-                      {video.title || t("Saved video")}
-                      <span className="muted"> · {formatTimestampForDisplay(video.createdAt)}</span>
-                    </span>
-                    <button
-                      type="button"
-                      className="outline-button"
-                      disabled={Boolean(assigningVideoId)}
-                      onClick={() => void assignUnassignedVideo(video.savedVideoId)}
-                    >
-                      {assigningVideoId === video.savedVideoId ? t("Moving…") : t("Assign to player")}
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <div className="player-profiles-layout">
-              <div className="player-profiles-list">
-                {playerProfiles.length === 0 && playerProfilesDataReady ? (
-                  <div className="player-profiles-empty">
-                    <h2>{t("No {customerSingular} profiles yet", { customerSingular: terms.customerSingular.toLowerCase() })}</h2>
-                    <p>{t("Add a {serviceSingular} note or video to a {customerSingular}, or use + to add one.", { serviceSingular: terms.serviceSingular.toLowerCase(), customerSingular: terms.customerSingular.toLowerCase() })}</p>
-                  </div>
-                ) : (
-                  playerProfiles.map((player) => {
-                    const isSelectedPlayer = notesWorkspaceClient?.id === player.id;
-                    return (
-                      <div
-                        className={`player-profile-entry${isSelectedPlayer ? " is-expanded" : ""}${
-                          isSelectedPlayer && !playerToolExpanded ? " is-collapsed" : ""
-                        }`}
-                        key={player.id}
-                      >
-                        <article
-                          className={`player-profile-card${isSelectedPlayer ? " active" : ""}`}
-                          onClick={() => {
-                            if (isSelectedPlayer) {
-                              setPlayerToolExpanded((expanded) => !expanded);
-                            } else {
-                              selectPlayerProfileTool(player);
-                            }
-                          }}
-                        >
-                          <div className="player-profile-avatar">
-                            <ClarityProfile size={18} />
-                          </div>
-                          <div className="player-profile-body">
-                            <h3>{player.name}</h3>
-                            <span>{player.email || player.phone || t("No contact yet")}</span>
-                            <div className="player-profile-tags">
-                              {hasAnyProfileId(videoPlayerIds, player) && (
-                                <span className="tag">
-                                  <ClarityVideoAnalysis size={12} />{" "}{t("Video")}</span>
-                              )}
-                              {hasAnyProfileId(lessonNotePlayerIds, player) && (
-                                <span className="tag">
-                                  <ClarityBookingPages size={12} />{" "}{t("Lesson notes")}</span>
-                              )}
-                              {unseenSubmissionCounts.get(player.id) ? (
-                                <span className="tag is-unseen-submission">
-                                  <ClarityVideoAnalysis size={12} /> {unseenSubmissionCounts.get(player.id)}{" "}{t("new")}</span>
-                              ) : null}
-                            </div>
-                          </div>
-                          <button
-                            type="button"
-                            className="icon-button"
-                            title={t("Show videos")}
-                            aria-label={t("Show videos for {name}", { name: player.name })}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              selectPlayerProfileTool(
-                                { id: preferredVideoPlayerId(player, videoPlayerIds), name: player.name },
-                                "videos",
-                              );
-                            }}
-                          >
-                            <ClarityVideoAnalysis size={16} />
-                          </button>
-                        </article>
-
-                        {isSelectedPlayer && notesWorkspaceClient ? (
-                          <div className={`player-profile-tool-panel${playerToolExpanded ? "" : " collapsed"}`}>
-                            <div className="player-tool-header">
-                              <div>
-                                <span>{t("Player")}</span>
-                                <h3>{notesWorkspaceClient.name}</h3>
-                                <p>{notesWorkspaceClient.email || notesWorkspaceClient.phone || t("No contact yet")}</p>
-                                <p
-                                  className="player-tool-id"
-                                  title={t("Copy this player's id")}
-                                  onClick={() => {
-                                    void navigator.clipboard?.writeText(notesWorkspaceClient.id).catch(() => {});
-                                    setToast({ message: t("Player id copied.") });
-                                  }}
-                                >{t("ID: {id}", { id: notesWorkspaceClient.id })}</p>
-                              </div>
-                            </div>
-
-                            {playerToolExpanded && (
-                              <div
-                                className={`player-tool-tabs${playerToolTabsExpanded ? " is-expanded" : ""}`}
-                                role="tablist"
-                                aria-label={t("Player profile tools")}
-                              >
-                                {PRIMARY_PLAYER_TOOL_TABS.filter((tab) => playerToolAllowed(tab.id, capabilities)).map((tab) => (
-                                  <button
-                                    type="button"
-                                    key={tab.id}
-                                    className={playerProfileTool === tab.id ? "active" : ""}
-                                    onClick={() => setPlayerProfileTool(tab.id)}
-                                    role="tab"
-                                    aria-selected={playerProfileTool === tab.id}
-                                  >
-                                    <tab.Icon size={15} />
-                                    {tab.id === "practice" ? terms.assignmentPlural : tab.label}
-                                    {tab.id === "videos" && playerUnseenSubmissions ? (
-                                      <span className="player-tool-tab-count">{playerUnseenSubmissions}</span>
-                                    ) : null}
-                                  </button>
-                                ))}
-                                {playerToolTabsExpanded && (
-                                  <>
-                                    <span className="player-tool-tab-divider" aria-hidden="true" />
-                                    {SECONDARY_PLAYER_TOOL_TABS.filter((tab) => playerToolAllowed(tab.id, capabilities)).map((tab) => (
-                                      <button
-                                        type="button"
-                                        key={tab.id}
-                                        className={playerProfileTool === tab.id ? "active" : ""}
-                                        onClick={() => setPlayerProfileTool(tab.id)}
-                                        role="tab"
-                                        aria-selected={playerProfileTool === tab.id}
-                                      >
-                                        <tab.Icon size={15} />
-                                        {tab.label}
-                                      </button>
-                                    ))}
-                                  </>
-                                )}
-                                <button
-                                  type="button"
-                                  className="player-tool-tab-toggle"
-                                  aria-expanded={playerToolTabsExpanded}
-                                  title={
-                                    playerToolTabsExpanded
-                                      ? t("Collapse")
-                                      : t("Notes, Emails, Transactions, Passes, Portals")
-                                  }
-                                  onClick={() => {
-                                    // Closing the bar while one of the five is
-                                    // open would leave the body on a tab with
-                                    // no pill, so it falls back to the first.
-                                    if (playerToolTabsExpanded && SECONDARY_PLAYER_TOOLS.has(playerProfileTool)) {
-                                      setPlayerProfileTool("bookings");
-                                    }
-                                    setPlayerToolTabsExpanded(!playerToolTabsExpanded);
-                                  }}
-                                >
-                                  {playerToolTabsExpanded ? <ChevronLeft size={15} /> : <ChevronRight size={15} />}
-                                </button>
-                              </div>
-                            )}
-
-                            {playerToolExpanded && playerProfileTool === "bookings" ? (
-                              <div className="player-tool-body">
-                                <div className="player-tool-card">
-                                  <div className="player-tool-card-header">
-                                    <div>
-                                      <strong><ClarityCalendar size={16} />{t("Bookings")}</strong>
-                                      <span>{tn(playerToolAppointments.length, "{count} booking", "{count} bookings")}
-                                        {playerToolUpcomingCount ? t(" · {playerToolUpcomingCount} upcoming", { playerToolUpcomingCount }) : ""}
-                                      </span>
-                                    </div>
-                                    <button
-                                      type="button"
-                                      className="outline-button"
-                                      onClick={() => switchView("calendar")}
-                                    >{t("Book a lesson")}</button>
-                                  </div>
-                                  {playerToolAppointments.length ? (
-                                    playerToolAppointments.map((appointment) => {
-                                      const appointmentDays = buildWeekDays(itemWeek(appointment));
-                                      const service = itemService(appointment, services);
-                                      const upcoming = playerToolUpcomingIds.has(appointment.id);
-                                      return (
-                                        <div className="player-tool-row" key={appointment.id}>
-                                          <span className="player-tool-row-when">
-                                            {appointmentDays[appointment.day].label}
-                                            <br />
-                                            <span>{formatTime(appointment.start)}</span>
-                                          </span>
-                                          <div className="player-tool-row-main">
-                                            <strong>{service?.name ?? appointment.title}</strong>
-                                            <span>
-                                              {upcoming ? t("Upcoming") : t("Completed")} ·{" "}
-                                              {formatRange(appointment.start, appointment.duration)}
-                                              {appointment.note ? ` · ${appointment.note}` : ""}
-                                            </span>
-                                          </div>
-                                          <div className="player-tool-row-actions">
-                                            <button
-                                              type="button"
-                                              className="outline-button"
-                                              onClick={() => {
-                                                switchView("calendar");
-                                                setSelectedId(appointment.id);
-                                              }}
-                                            >{t("Open")}</button>
-                                          </div>
-                                        </div>
-                                      );
-                                    })
-                                  ) : (
-                                    <p className="player-tool-card-empty">{t("No bookings yet.")}</p>
-                                  )}
-                                </div>
-                              </div>
-                            ) : playerToolExpanded && playerProfileTool === "reviews" ? (
-                              <div className="player-tool-body">
-                                <div className="player-tool-card">
-                                  <div className="player-tool-card-header">
-                                    <div>
-                                      <strong><ClarityAssessments size={16} />{t("Swing reviews")}</strong>
-                                      <span>{tn(playerSwingReviewGroups.length, "{count} review · videos, screenshot notes and practice", "{count} reviews · videos, screenshot notes and practice")}</span>
-                                    </div>
-                                    <span className="swing-review-header-actions">
-                                      <button type="button" className="outline-button" onClick={() => setDrillLibraryOpen({})}>
-                                        <ClarityLessonsProgrammes size={15} />{t("Drill library")}</button>
-                                      <button
-                                        type="button"
-                                        className="primary-button"
-                                        onClick={() => startSwingReviewForClient(notesWorkspaceClient)}
-                                      >
-                                        <ImagePlus size={15} />{t("New swing review")}</button>
-                                    </span>
-                                  </div>
-                                  {playerPracticeLoadState === "loading" ? (
-                                    <Loading what={t("swing reviews")} className="player-tool-card-empty" />
-                                  ) : playerSwingReviewGroups.length ? (
-                                    playerSwingReviewGroups.map((review) => {
-                                      const expanded = openSwingReviewId === review.id;
-                                      const totalItems =
-                                        review.videos.length +
-                                        review.cloudVideos.length +
-                                        review.notes.length +
-                                        review.analysisNotes.length +
-                                        review.screenshots.length +
-                                        review.practice.length +
-                                        (reviewDocuments[review.id]?.blocks.filter((block) => block.type !== "video").length || 0);
-                                      const reviewTitle = reviewDocuments[review.id]?.title || "";
-                                      return (
-                                        <article className={`swing-review-record${expanded ? " is-expanded" : ""}`} key={review.id}>
-                                          <button
-                                            type="button"
-                                            className="swing-review-record-toggle"
-                                            aria-expanded={expanded}
-                                            onClick={() => setOpenSwingReviewId(expanded ? null : review.id)}
-                                          >
-                                            <span className="player-tool-row-when">
-                                              {profileWhenParts(review.at).day || t("Review")}
-                                              {profileWhenParts(review.at).time ? <><br /><span>{profileWhenParts(review.at).time}</span></> : null}
-                                            </span>
-                                            <span className="player-tool-row-main">
-                                              <strong>{reviewTitle || t("Swing review")}</strong>
-                                              <span>{tn(totalItems, "{count} item in this review file", "{count} items in this review file")}</span>
-                                            </span>
-                                            {expanded ? <ChevronUp size={17} /> : <ChevronDown size={17} />}
-                                          </button>
-                                          {expanded ? (() => {
-                                            const client = notesWorkspaceClient;
-                                            const savedIds = [
-                                              ...review.videos.map((video) => video.savedVideoId),
-                                              ...review.cloudVideos.map((video) => video.savedVideoId || video.savedVideo?.savedVideoId || ""),
-                                            ];
-                                            const document = reviewDocuments[review.id];
-                                            const displayBlocks = reviewDisplayBlocks(review.id, savedIds);
-                                            // A position on the page has to mean the same thing
-                                            // to the sheet and to whatever lands there later, so
-                                            // videos it was only showing are written in first.
-                                            const settlePage = () => {
-                                              if (!document) {
-                                                updateReviewDocument(review.id, client.id, { title: "", blocks: displayBlocks }, { immediate: true });
-                                              }
-                                            };
-                                            const sheetVideos: Record<string, SheetVideo> = {};
-                                            for (const video of review.videos) {
-                                              sheetVideos[video.savedVideoId] = {
-                                                savedVideoId: video.savedVideoId,
-                                                title: video.title,
-                                                thumbnailDataUrl: video.thumbnailDataUrl,
-                                                duration: video.source.duration,
-                                                snapshots: (video.analysisSnapshot.focusSnapshots || []).map((snapshot) => ({
-                                                  id: snapshot.id,
-                                                  title: snapshot.title,
-                                                  note: snapshot.note,
-                                                  currentTime: snapshot.currentTime,
-                                                  imageDataUrl: snapshot.imageDataUrl || undefined,
-                                                })),
-                                                notes: (video.analysisSnapshot.notes || []).map((note) => ({ id: note.id, text: note.text, time: note.time })),
-                                              };
-                                            }
-                                            for (const video of review.cloudVideos) {
-                                              const id = video.savedVideoId || video.savedVideo?.savedVideoId || "";
-                                              if (!id || sheetVideos[id]) continue;
-                                              sheetVideos[id] = {
-                                                savedVideoId: id,
-                                                title: video.savedVideo?.title || t("Cloud video"),
-                                                cloudOnly: true,
-                                                snapshots: [],
-                                                notes: [],
-                                              };
-                                            }
-                                            return (
-                                              <div className="swing-review-record-body">
-                                                <Suspense fallback={<Loading what={t("swing review")} />}>
-                                                  <SwingReviewSheet
-                                                    businessName={coachAccount.businessName}
-                                                    logoUrl={brandSettings.showLogo ? brandSettings.logoPreview : ""}
-                                                    coachName={coachAccount.coachName}
-                                                    playerName={client.name}
-                                                    reviewAt={review.at}
-                                                    title={document?.title || ""}
-                                                    blocks={displayBlocks}
-                                                    onChange={(next) => updateReviewDocument(review.id, client.id, next)}
-                                                    saveState={reviewSaveStates[review.id] || "idle"}
-                                                    videos={sheetVideos}
-                                                    sessionNotes={review.notes.map((note) => ({ id: note.id, label: note.title || t("Review note"), text: note.body }))}
-                                                    practice={review.practice.map((block) => ({
-                                                      id: block.id,
-                                                      title: block.title,
-                                                      content: block.content,
-                                                      meta: [block.status, block.dose].filter(Boolean).join(" · "),
-                                                    }))}
-                                                    onAddVideo={(index) => {
-                                                      settlePage();
-                                                      addVideoToReview(review.id, client, index);
-                                                    }}
-                                                    onAddDrill={(index) => {
-                                                      settlePage();
-                                                      setDrillLibraryOpen({ lessonId: review.id, index });
-                                                    }}
-                                                    onOpenVideo={(savedVideoId) => {
-                                                      reviewInsertRef.current = null;
-                                                      openVideoAnalysisForClient({
-                                                        id: preferredVideoPlayerId(client, videoPlayerIds),
-                                                        name: client.name,
-                                                        savedVideoId,
-                                                        lessonId: review.id,
-                                                        lessonTitle: reviewLessonTitle(review.id),
-                                                      });
-                                                    }}
-                                                    onOpenSnapshot={(savedVideoId, snapshotId) =>
-                                                      setSnapshotFrameView({ reviewId: review.id, key: `${savedVideoId}-${snapshotId}` })
-                                                    }
-                                                    onMakeDrillCopy={(block) => void makeDrillCopy(review.id, client, block)}
-                                                    actions={
-                                                      displayBlocks.length === 0 && !review.notes.length && !review.practice.length && !document?.sentAt ? (
-                                                        <button type="button" className="text-button" onClick={() => void discardEmptyReview(review.id)}>
-                                                          <Trash2 size={14} />{t("Discard this empty review")}</button>
-                                                      ) : (
-                                                        <>
-                                                          <button
-                                                            type="button"
-                                                            className="primary-button"
-                                                            disabled={sendingSwingReviewId === review.id}
-                                                            onClick={() =>
-                                                              void sendSwingReviewToPlayer(review, notesWorkspaceClient)
-                                                            }
-                                                          >
-                                                            <Send size={15} />
-                                                            {sendingSwingReviewId === review.id
-                                                              ? t("Sending…")
-                                                              : sentSwingReviewLink?.id === review.id || document?.sentAt
-                                                                ? t("Send again")
-                                                                : t("Send to player")}
-                                                          </button>
-                                                          {/* Only after a send, and only for that review: the
-                                                            * raw token exists in the send's response and
-                                                            * nowhere else, so there is no link to copy until
-                                                            * one has been minted in this session. */}
-                                                          {sentSwingReviewLink?.id === review.id ? (
-                                                            <button
-                                                              type="button"
-                                                              className="outline-button"
-                                                              onClick={() => {
-                                                                void navigator.clipboard
-                                                                  ?.writeText(sentSwingReviewLink.url)
-                                                                  .then(() => setToast({ message: t("Viewing link copied.") }))
-                                                                  .catch(() =>
-                                                                    setToast({ message: t("Could not copy the link.") }),
-                                                                  );
-                                                              }}
-                                                            >
-                                                              <ClarityIntegrations size={15} />{t("Copy viewing link")}</button>
-                                                          ) : null}
-                                                        </>
-                                                      )
-                                                    }
-                                                  />
-                                                </Suspense>
-                                                {snapshotFrameView?.reviewId === review.id ? (
-                                                  <Suspense fallback={<Loading what={t("the saved frame")} size="panel" />}>
-                                                    <SnapshotFrameViewer
-                                                      shots={review.screenshots.map((snapshot): FrameViewerShot => ({
-                                                        key: `${snapshot.savedVideoId}-${snapshot.id}`,
-                                                        savedVideoId: snapshot.savedVideoId,
-                                                        videoTitle: snapshot.videoTitle,
-                                                        title: snapshot.title,
-                                                        note: snapshot.note,
-                                                        currentTime: snapshot.currentTime,
-                                                        captureKind: snapshot.captureKind,
-                                                        cropRect: snapshot.cropRect,
-                                                        imageUrl: snapshot.imageDataUrl || undefined,
-                                                      }))}
-                                                      initialKey={snapshotFrameView.key}
-                                                      resolveVideoUrl={resolveReviewVideoUrl}
-                                                      onClose={() => setSnapshotFrameView(null)}
-                                                    />
-                                                  </Suspense>
-                                                ) : null}
-                                              </div>
-                                            );
-                                          })() : null}
-                                        </article>
-                                      );
-                                    })
-                                  ) : (
-                                    <div className="player-tool-card-empty">
-                                      <p>{t("No swing reviews yet.")}</p>
-                                      <span>{t("Start one to keep its videos, screenshot notes and practice together.")}</span>
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            ) : playerToolExpanded && playerProfileTool === "emails" ? (
-                              <div className="player-tool-body">
-                                <div className="player-tool-card">
-                                  <div className="player-tool-card-header">
-                                    <div>
-                                      <strong><ClarityEmail size={16} />{t("Emails")}</strong>
-                                      <span>{t("Everything sent to this person")}</span>
-                                    </div>
-                                  </div>
-                                  {playerToolNotifications.length ? (
-                                    playerToolNotifications.map((notification) => {
-                                      const when = profileWhenParts(notification.createdAt);
-                                      return (
-                                        <div className="player-tool-row" key={notification.id}>
-                                          <span className="player-tool-row-when">
-                                            {when.day || "—"}
-                                            {when.time ? (
-                                              <>
-                                                <br />
-                                                <span>{when.time}</span>
-                                              </>
-                                            ) : null}
-                                          </span>
-                                          <div className="player-tool-row-main">
-                                            <strong>
-                                              {notification.subject || notificationKindLabel(notification.kind)}
-                                            </strong>
-                                            <span>{t("{kind} to {recipient} · {notification}", { kind: notificationKindLabel(notification.kind), recipient: notification.recipient, notification: notificationStatusLabel(notification) })}</span>
-                                          </div>
-                                        </div>
-                                      );
-                                    })
-                                  ) : (
-                                    <p className="player-tool-card-empty">{t("No emails sent to this person yet.")}</p>
-                                  )}
-                                </div>
-                              </div>
-                            ) : playerToolExpanded && playerProfileTool === "transactions" ? (
-                              <div className="player-tool-body">
-                                <div className="player-tool-card">
-                                  <div className="player-tool-card-header">
-                                    <div>
-                                      <strong><ClarityPayments size={16} />{t("Transactions")}</strong>
-                                      <span>{t("Everything billed to this person")}</span>
-                                    </div>
-                                    {billingWorkspaceEnabled && (
-                                      <button
-                                        type="button"
-                                        className="outline-button"
-                                        onClick={() => openPosCheckoutForClient(notesWorkspaceClient)}
-                                      >{t("New sale")}</button>
-                                    )}
-                                  </div>
-                                  {notesWorkspaceClient.id.startsWith("appointment-") ? (
-                                    <p className="player-tool-card-empty">{t("Save this booking contact as a client to track their transactions.")}</p>
-                                  ) : playerTransactionsLoadState === "loading" ? (
-                                    <Loading what={t("transactions")} className="player-tool-card-empty" />
-                                  ) : playerTransactionsLoadState === "error" ? (
-                                    <p className="player-tool-card-empty">{t("Could not load transactions.")}{" "}<button
-                                        className="link-button"
-                                        type="button"
-                                        onClick={() => void fetchPlayerTransactions(notesWorkspaceClient.id)}
-                                      >{t("Retry")}</button>
-                                    </p>
-                                  ) : playerTransactions.length ? (
-                                    playerTransactions.map((row) =>
-                                      row.kind === "coupon" ? (
-                                        <div className="player-tool-row" key={`coupon-${row.coupon.id}`}>
-                                          <span className="player-tool-row-when">
-                                            {transactionDateLabel(row.date)}
-                                          </span>
-                                          <div className="player-tool-row-main">
-                                            <strong>{row.coupon.code}</strong>
-                                            <span>{t("Gift voucher · {remainingValue} left", { remainingValue: formatMoney(row.coupon.remainingValue, row.coupon.currency) })}{row.coupon.issuedToName
-                                                ? t(" · bought by {issuedToName}", { issuedToName: row.coupon.issuedToName })
-                                                : ""}
-                                            </span>
-                                          </div>
-                                        </div>
-                                      ) : row.kind === "sale" ? (
-                                        <div className="player-tool-row" key={`sale-${row.sale.id}`}>
-                                          <span className="player-tool-row-when">
-                                            {transactionDateLabel(row.date)}
-                                          </span>
-                                          <div className="player-tool-row-main">
-                                            <strong>{row.sale.description || row.sale.receiptNumber}</strong>
-                                            <span>
-                                              {formatMoney(row.sale.amount, row.sale.currency)} ·{" "}
-                                              {posMethodLabel(row.sale)} · {row.sale.receiptNumber}
-                                              {row.sale.isLessonPass ? t(" · Lesson pass") : ""}
-                                            </span>
-                                          </div>
-                                        </div>
-                                      ) : (
-                                        <div className="player-tool-row" key={`invoice-${row.invoice.id}`}>
-                                          <span className="player-tool-row-when">
-                                            {transactionDateLabel(row.date)}
-                                          </span>
-                                          <div className="player-tool-row-main">
-                                            <strong>{row.invoice.invoiceNumber}</strong>
-                                            <span>
-                                              {formatMoney(row.invoice.total, row.invoice.currency)} ·{" "}
-                                              {row.invoice.status}
-                                              {row.invoice.relation === "included"
-                                                ? ` · ${t("billed to {name}", { name: row.invoice.customerName || t("someone else") })}`
-                                                : ""}
-                                            </span>
-                                          </div>
-                                          <div className="player-tool-row-actions">
-                                            <button
-                                              type="button"
-                                              className="outline-button"
-                                              onClick={() => {
-                                                switchView("billing");
-                                                void openInvoiceForEdit(row.invoice);
-                                              }}
-                                            >{t("Invoice")}</button>
-                                          </div>
-                                        </div>
-                                      ),
-                                    )
-                                  ) : (
-                                    <p className="player-tool-card-empty">{t("No transactions for this person yet.")}</p>
-                                  )}
-                                </div>
-                              </div>
-                            ) : playerToolExpanded && playerProfileTool === "passes" ? (
-                              <div className="player-tool-body">
-                                <div className="player-tool-card">
-                                  <div className="player-tool-card-header">
-                                    <div>
-                                      <strong><ClarityPassesCredits size={16} />{t("Passes")}</strong>
-                                      <span>{t("Lesson credits held by this person")}</span>
-                                    </div>
-                                  </div>
-                                  {/* Passes are designed but not built -- see
-                                      PASS_SYSTEM_DESIGN.md. There is no pass
-                                      record to read, so this says so rather than
-                                      showing an empty list that reads as "this
-                                      person has none". */}
-                                  <p className="player-tool-card-empty">{t("Passes are not built yet. Lesson packages sold through checkout show up under Transactions, tagged as a lesson pass.")}</p>
-                                </div>
-                              </div>
-                            ) : playerToolExpanded && playerProfileTool === "portals" ? (
-                              <div className="player-tool-body">
-                                {(() => {
-                                  const portalPlayer = portalPlayers.find(
-                                    (entry) => entry.personId === notesWorkspaceClient.id && entry.status !== "disabled",
-                                  );
-                                  const busy = portalPlayerBusyId === notesWorkspaceClient.id;
-                                  return (
-                                    <div className="player-portal-access">
-                                      <div className="player-portal-access-body">
-                                        <strong>{t("Player portal")}</strong>
-                                        <span>
-                                          {!notesWorkspaceClient.email
-                                            ? t("Add an email address to give this player portal access.")
-                                            : !portalPlayer
-                                              ? t("No access yet. They can be given a login to see their lessons, notes and videos.")
-                                              : portalPlayer.status === "active"
-                                                ? portalPlayer.lastLoginAt
-                                                  ? t("Active · last signed in {when}", { when: formatTimestampForDisplay(portalPlayer.lastLoginAt) })
-                                                  : t("Active")
-                                                : t("Invited · waiting for them to set a password")}
-                                        </span>
-                                      </div>
-                                      <div className="player-portal-access-actions">
-                                        <label className="player-caddy-pass-toggle" title={t("Issues a 30 day Clarity Caddy pass at the same time")}>
-                                          <input
-                                            type="checkbox"
-                                            checked={includeCaddyPass}
-                                            onChange={(event) => setIncludeCaddyPass(event.target.checked)}
-                                            disabled={busy || !notesWorkspaceClient.email}
-                                          />
-                                          <span>{t("Include Clarity Caddy Pass")}</span>
-                                        </label>
-                                        <button
-                                          type="button"
-                                          className="outline-button"
-                                          disabled={busy || !notesWorkspaceClient.email}
-                                          onClick={() => void grantPortalAccess(notesWorkspaceClient)}
-                                        >
-                                          {portalPlayer ? t("Resend invite") : t("Give portal access")}
-                                        </button>
-                                        {portalPlayer && (
-                                          <button
-                                            type="button"
-                                            className="outline-button"
-                                            disabled={busy}
-                                            onClick={() => void revokePortalAccess(portalPlayer.id, notesWorkspaceClient.id)}
-                                          >{t("Remove access")}</button>
-                                        )}
-                                      </div>
-                                    </div>
-                                  );
-                                })()}
-
-                                {/* Caddy is a separate product with separate access, so it gets its
-                                    own card rather than being folded into the portal row. */}
-                                {(() => {
-                                  const entry = caddyStatuses[notesWorkspaceClient.id];
-                                  const hasPortal = portalPlayers.some(
-                                    (candidate) =>
-                                      candidate.personId === notesWorkspaceClient.id && candidate.status !== "disabled",
-                                  );
-                                  if (!hasPortal) return null;
-                                  const status = entry?.status;
-                                  const detail = !entry
-                                    ? t("Checking…")
-                                    : status?.unavailable === "unreachable"
-                                      ? t("Could not read Caddy status right now.")
-                                      : status?.unavailable === "not_configured"
-                                        ? t("Clarity Caddy is not connected to this deployment.")
-                                        : !status?.connected
-                                          ? t("No Clarity Caddy account yet.")
-                                          : status.expiresAt
-                                            ? t("Account: Connected · Access: {access} until {until}", {
-                                                access: status.active ? status.access : t("Free"),
-                                                until: formatTimestampForDisplay(status.expiresAt),
-                                              })
-                                            : t("Account: Connected · Access: {access}", {
-                                                access: status.active ? status.access : t("Free"),
-                                              });
-                                  return (
-                                    <div className="player-caddy-card">
-                                      <div className="player-caddy-card-body">
-                                        <strong>{t("Clarity Caddy")}</strong>
-                                        <span>{detail}</span>
-                                        {status?.connected && status.coachCount && status.coachCount > 1 ? (
-                                          <span>{tn(status.coachCount - 1, "Also coached by {count} other.", "Also coached by {count} others.")}</span>
-                                        ) : null}
-                                      </div>
-                                      <div className="player-caddy-card-actions">
-                                        {!entry ? (
-                                          <button
-                                            type="button"
-                                            className="outline-button"
-                                            onClick={() => void refreshCaddyStatus(notesWorkspaceClient.id)}
-                                          >{t("Check Caddy")}</button>
-                                        ) : entry.deepLink ? (
-                                          <a
-                                            className="outline-button"
-                                            href={entry.deepLink}
-                                            target="_blank"
-                                            rel="noreferrer noopener"
-                                          >{t("Open in Clarity Caddy ↗")}</a>
-                                        ) : (
-                                          <button
-                                            type="button"
-                                            className="outline-button"
-                                            onClick={() => void refreshCaddyStatus(notesWorkspaceClient.id)}
-                                          >{t("Retry")}</button>
-                                        )}
-                                      </div>
-                                    </div>
-                                  );
-                                })()}
-
-                                {isAdminUser && (
-                                  <div className="player-portal-access">
-                                    <div className="player-portal-access-body">
-                                      <strong>{t("Danger zone")}</strong>
-                                      <span>{t("Permanently delete this player: their record, bookings, practice blocks, videos, lesson notes and portal login. No email is sent, and this cannot be undone.")}</span>
-                                    </div>
-                                    <div className="player-portal-access-actions">
-                                      <button
-                                        type="button"
-                                        className="danger-button"
-                                        disabled={personDeleteBusyId === notesWorkspaceClient.id}
-                                        onClick={() => void hardDeletePerson(notesWorkspaceClient)}
-                                      >
-                                        <Trash2 size={16} />
-                                        {personDeleteBusyId === notesWorkspaceClient.id
-                                          ? t("Deleting…")
-                                          : t("Delete permanently")}
-                                      </button>
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            ) : playerToolExpanded && playerProfileTool === "notes" ? (
-                              <div className="player-tool-body">
-                                <Suspense fallback={<Loading what={t("voice notes")} />}>
-                                  <ClarityVoiceTextPanel
-                                    fieldLabel={t("Lesson note")}
-                                    placeholder={t("Type or dictate the coach lesson note.")}
-                                    onCommit={(text) => saveLessonNoteForClient(notesWorkspaceClient, text, "voice")}
-                                  />
-                                </Suspense>
-                                <div className="lesson-notes-list">
-                                  {notesWorkspaceLessonNotes.length ? (
-                                    notesWorkspaceLessonNotes.map((note) => (
-                                      <article className="lesson-note-card" key={note.id}>
-                                        <div>
-                                          <strong>{profileRecordTitle(notesWorkspaceClient.name, note.updatedAt || note.createdAt)}</strong>
-                                          <span>
-                                            {note.title || t("Lesson note")} · {note.source === "voice" ? t("Voice note") : t("Typed note")}
-                                            {note.lessonId && playerToolVideos.some((video) => video.lessonId === note.lessonId)
-                                              ? t(" · Linked lesson video")
-                                              : ""}
-                                          </span>
-                                        </div>
-                                        <p>{note.body}</p>
-                                        <button
-                                          type="button"
-                                          className="outline-button"
-                                          onClick={() => void deleteLessonNote(note.id)}
-                                          disabled={lessonNoteBusy}
-                                        >
-                                          <Trash2 size={14} />{t("Delete")}</button>
-                                      </article>
-                                    ))
-                                  ) : (
-                                    <p className="notes-empty">{t("No lesson notes yet.")}</p>
-                                  )}
-                                </div>
-                              </div>
-                            ) : playerToolExpanded && playerProfileTool === "practice" ? (
-                              <div className="player-tool-body">
-                                {/* Two readings of the same thing. The list
-                                    answers "what is this player working on",
-                                    which is the question the profile is open
-                                    for; the module's own panel is the composer
-                                    and the wall, and opens over it on demand. */}
-                                {playerPracticeComposer ? (
-                                  <>
-                                    <div className="player-tool-inline-actions">
-                                      <button
-                                        type="button"
-                                        className="outline-button"
-                                        onClick={() => setPlayerPracticeComposer(false)}
-                                      >
-                                        <ChevronLeft size={15} />{t("Back to practice list")}</button>
-                                    </div>
-                                  <Suspense fallback={<Loading what={t("practice")} />}>
-                                    <PracticeBlockPanel
-                                      // Keyed so switching player remounts rather
-                                      // than showing the previous player's blocks
-                                      // until the fetch lands.
-                                      key={notesWorkspaceClient.id}
-                                      player={{ id: notesWorkspaceClient.id, name: notesWorkspaceClient.name }}
-                                      onUnauthorized={() => setAuthStatus("guest")}
-                                      onToast={(message) => setToast({ message })}
-                                    />
-                                  </Suspense>
-                                  </>
-                                ) : (
-                                  <div className="player-tool-card">
-                                    <div className="player-tool-card-header">
-                                      <div>
-                                        <strong><ClarityLessonsProgrammes size={16} />{t("Practice")}</strong>
-                                        <span>{tn(activePlayerPracticeBlocks.length, "{count} active block", "{count} active blocks")}
-                                          {playerPracticeExpiringCount
-                                            ? t(" · {playerPracticeExpiringCount} expiring next lesson", { playerPracticeExpiringCount })
-                                            : ""}
-                                        </span>
-                                      </div>
-                                      <button
-                                        type="button"
-                                        className="outline-button"
-                                        onClick={() => setPlayerPracticeComposer(true)}
-                                      >{t("Assign a block")}</button>
-                                    </div>
-                                    {playerPracticeLoadState === "loading" ? (
-                                      <Loading what={t("practice")} className="player-tool-card-empty" />
-                                    ) : playerPracticeLoadState === "error" ? (
-                                      <p className="player-tool-card-empty">{t("Could not load practice for this player.")}</p>
-                                    ) : activePlayerPracticeBlocks.length ? (
-                                      activePlayerPracticeBlocks.map((block) => (
-                                        <div className="player-tool-row is-practice" key={block.id}>
-                                          <span
-                                            className="player-tool-row-tone"
-                                            style={block.tone ? { background: block.tone } : undefined}
-                                            title={block.typeLabel}
-                                          >
-                                            {block.typeLabel.slice(0, 1).toUpperCase()}
-                                          </span>
-                                          <div className="player-tool-row-main">
-                                            <strong>{block.title}</strong>
-                                            <span>
-                                              {[
-                                                block.typeLabel,
-                                                block.steps
-                                                  ? tn(block.steps, "{count} step", "{count} steps")
-                                                  : "",
-                                                block.dose,
-                                                block.expiryType === "next_lesson"
-                                                  ? "expires next lesson"
-                                                  : block.expiryType === "set_date" && block.expiryDate
-                                                    ? `expires ${formatTimestampForDisplay(block.expiryDate)}`
-                                                    : "no expiry",
-                                                block.hasVideo ? "video attached" : "",
-                                              ]
-                                                .filter(Boolean)
-                                                .join(" · ")}
-                                            </span>
-                                          </div>
-                                          <div className="player-tool-row-actions">
-                                            <button
-                                              type="button"
-                                              className="outline-button"
-                                              onClick={() => setPlayerPracticeComposer(true)}
-                                            >{t("Open")}</button>
-                                          </div>
-                                        </div>
-                                      ))
-                                    ) : (
-                                      <p className="player-tool-card-empty">{t("Nothing set to practise yet.")}</p>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            ) : playerToolExpanded ? (
-                              <div className="player-tool-body">
-                                <div className="player-video-toolbar">
-                                  <div className="player-video-toolbar-count">
-                                    <strong>{tn(playerVideoSummary.total, "{count} saved video", "{count} saved videos")}
-                                    </strong>
-                                    <span>{playerVideoSummary.detail}</span>
-                                  </div>
-                                  <div className="player-video-toolbar-actions">
-                                    <button
-                                      type="button"
-                                      className="outline-button"
-                                      onClick={() =>
-                                        openVideoAnalysisForClient({
-                                          id: preferredVideoPlayerId(notesWorkspaceClient, videoPlayerIds),
-                                          name: notesWorkspaceClient.name,
-                                        })
-                                      }
-                                    >
-                                      <ClarityVideoAnalysis size={15} />{t("Add video")}</button>
-                                    <div
-                                      className="player-video-view-toggle"
-                                      role="group"
-                                      aria-label={t("Video layout")}
-                                    >
-                                      <button
-                                        type="button"
-                                        title={t("Ledger")}
-                                        aria-label={t("Ledger")}
-                                        aria-pressed={playerVideoView === "ledger"}
-                                        className={playerVideoView === "ledger" ? "active" : ""}
-                                        onClick={() => setPlayerVideoView("ledger")}
-                                      >
-                                        <List size={16} />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        title={t("Shelf")}
-                                        aria-label={t("Shelf")}
-                                        aria-pressed={playerVideoView === "shelf"}
-                                        className={playerVideoView === "shelf" ? "active" : ""}
-                                        onClick={() => setPlayerVideoView("shelf")}
-                                      >
-                                        <LayoutGrid size={16} />
-                                      </button>
-                                    </div>
-                                  </div>
-                                </div>
-
-                                {playerVideoView === "shelf" ? (
-                                  <div>
-                                    {playerVideoShelfGroups.length ? (
-                                      playerVideoShelfGroups.map((group) => (
-                                        <div key={group.key}>
-                                          <div className="player-video-shelf-group">
-                                            <strong>{group.label}</strong>
-                                            <span>{tn(group.clips.length, "{count} clip", "{count} clips")}
-                                              {group.unseen ? t(" · {unseen} new", { unseen: group.unseen }) : ""}
-                                            </span>
-                                          </div>
-                                          <div className="player-video-shelf-grid">
-                                            {group.clips.map((clip) => (
-                                              <article
-                                                className={`player-video-shelf-card${clip.unseen ? " is-unseen" : ""}`}
-                                                key={clip.key}
-                                              >
-                                                <button
-                                                  type="button"
-                                                  className={`player-video-shelf-thumb${clip.partner ? " is-pair" : ""}`}
-                                                  disabled={!clip.playable}
-                                                  title={clip.playable ? t("Play {title}", { title: clip.title }) : clip.title}
-                                                  onClick={() =>
-                                                    openVideoAnalysisForClient({
-                                                      id: preferredVideoPlayerId(
-                                                        notesWorkspaceClient,
-                                                        videoPlayerIds,
-                                                      ),
-                                                      name: notesWorkspaceClient.name,
-                                                      savedVideoId: clip.savedVideoId,
-                                                      pairedSavedVideoId: clip.partner?.savedVideoId,
-                                                    })
-                                                  }
-                                                >
-                                                  {[clip, ...(clip.partner ? [clip.partner] : [])].map((angle) =>
-                                                    angle.thumbnail ? (
-                                                      <img key={angle.key} src={angle.thumbnail} alt="" />
-                                                    ) : (
-                                                      <ClarityVideoAnalysis key={angle.key} size={20} />
-                                                    ),
-                                                  )}
-                                                  {clip.unseen ? (
-                                                    <span className="player-video-shelf-badge">{t("New")}</span>
-                                                  ) : null}
-                                                  {clip.duration ? (
-                                                    <span className="player-video-shelf-duration">
-                                                      {formatClipDuration(clip.duration)}
-                                                    </span>
-                                                  ) : null}
-                                                </button>
-                                                <div className="player-video-shelf-body">
-                                                  <strong>{clip.title}</strong>
-                                                  <span>
-                                                    {clip.partner
-                                                      ? t("Same swing · 2 angles")
-                                                      : clip.kind === "submission"
-                                                      ? t("Player submission")
-                                                      : clip.kind === "recovery"
-                                                        ? t("Recovery only")
-                                                        : t("Local Storage")}
-                                                  </span>
-                                                </div>
-                                              </article>
-                                            ))}
-                                          </div>
-                                        </div>
-                                      ))
-                                    ) : (
-                                      <p className="notes-empty">{t("No videos yet.")}</p>
-                                    )}
-                                    <button
-                                      type="button"
-                                      className="player-video-shelf-add"
-                                      onClick={() =>
-                                        openVideoAnalysisForClient({
-                                          id: preferredVideoPlayerId(notesWorkspaceClient, videoPlayerIds),
-                                          name: notesWorkspaceClient.name,
-                                        })
-                                      }
-                                    >{t("+ Add from Video Analysis")}</button>
-                                  </div>
-                                ) : (
-                                <div className="player-video-list">
-                                  {!managedLocalLibraryStatus.configured ? (
-                                    <article className="player-video-card is-library-status">
-                                      <div className="player-video-thumb is-empty">
-                                        <ClarityFilesMedia size={16} />
-                                      </div>
-                                      <div className="player-video-card-body">
-                                        <strong>{t("My Library not connected")}</strong>
-                                        <span>{t("Videos stay available through device cache. Connect My Library only for permanent local copies.")}</span>
-                                      </div>
-                                      <div className="player-video-card-actions">
-                                        <button
-                                          type="button"
-                                          className="primary-button"
-                                          disabled={!managedLocalLibraryStatus.supported}
-                                          onClick={() => void runManagedLibraryAction("choose")}
-                                        >
-                                          <ClarityFilesMedia size={14} />{t("Choose My Library")}</button>
-                                      </div>
-                                    </article>
-                                  ) : managedLocalLibraryStatus.health !== "healthy" ? (
-                                    <article className="player-video-card is-library-status">
-                                      <div className="player-video-thumb is-empty">
-                                        <AlertTriangle size={16} />
-                                      </div>
-                                      <div className="player-video-card-body">
-                                        <strong>{managedLocalLibraryStatus.message}</strong>
-                                        <span>{t("Working from device cache. Reconnect My Library when available.")}</span>
-                                      </div>
-                                      <div className="player-video-card-actions">
-                                        <button
-                                          type="button"
-                                          className="outline-button"
-                                          onClick={() => void runManagedLibraryAction("reconnect")}
-                                        >
-                                          <RefreshCw size={14} />{t("Reconnect folder")}</button>
-                                      </div>
-                                    </article>
-                                  ) : null}
-                                  {playerToolVideos.length || playerToolCloudVideos.length || playerToolLegacyVideoRecords.length ? (
-                                    <>
-                                      {groupSameSwingAngles(
-                                        playerToolVideos,
-                                        (video) => video.savedVideoId,
-                                        playerVideoAnglePairs,
-                                      ).map((angles) => {
-                                        const renderSavedVideoCard = (video: SavedVideoItem) => {
-                                        const cloudOperational = isClarityCloudOperational(clarityCloudHealth);
-                                        const cloudStatus = video.cloud?.status || "not-uploaded";
-                                        const isUploading =
-                                          cloudOperational &&
-                                          (uploadingSavedVideoIds.has(video.savedVideoId) ||
-                                            video.cloud?.status === "preparing" ||
-                                            video.cloud?.status === "session-created" ||
-                                            video.cloud?.status === "uploading" ||
-                                            video.cloud?.status === "verifying");
-                                        const cloudLabel = getSavedVideoCloudStatusLabel(video, {
-                                          isUploading,
-                                          cloudConnected: googleDriveTransfer.connected,
-                                          cloudState: googleDriveTransfer.state,
-                                          cloudHealth: clarityCloudHealth,
-                                        });
-                                        const cloudErrorLabel =
-                                          video.cloud?.status === "failed"
-                                            ? savedVideoCloudErrorLabel(video.cloud.lastUploadErrorCode, video.cloud.errorMessage)
-                                            : "";
-                                        const canRetryCloud =
-                                          video.local.status === "available" &&
-                                          cloudOperational &&
-                                          cloudStatus !== "ready" &&
-                                          cloudStatus !== "imported" &&
-                                          !isUploading;
-                                        const sendLabel =
-                                          cloudStatus === "failed"
-                                            ? t("Retry upload")
-                                            : cloudStatus === "paused"
-                                              ? t("Resume upload")
-                                              : t("Retry upload");
-                                        const canPause =
-                                          cloudOperational &&
-                                          cloudStatus === "uploading" &&
-                                          Number(video.cloud?.acceptedOffsetBytes || 0) > 0;
-                                        const canCancel =
-                                          cloudOperational &&
-                                          (cloudStatus === "preparing" ||
-                                            cloudStatus === "session-created" ||
-                                            cloudStatus === "uploading" ||
-                                            cloudStatus === "paused");
-                                        const canRemoveTransfer = cloudOperational && cloudStatus === "failed";
-                                        const hasDeviceCopy = video.local.status !== "missing";
-                                        const canRemoveFromDevice =
-                                          (cloudStatus === "ready" || cloudStatus === "imported") &&
-                                          hasDeviceCopy;
-                                        const cloudSaved = cloudStatus === "ready" || cloudStatus === "imported";
-                                        const cloudFailed = cloudStatus === "failed" || !cloudOperational;
-                                        const cloudState = isUploading
-                                          ? "uploading"
-                                          : cloudSaved
-                                            ? "saved"
-                                            : cloudFailed
-                                              ? "failed"
-                                              : "pending";
-                                        const cloudBadgeLabel = isUploading
-                                          ? t("Uploading to Clarity Cloud")
-                                          : cloudSaved
-                                            ? t("Saved in Clarity Cloud")
-                                            : cloudStatus === "failed"
-                                              ? cloudErrorLabel || t("Clarity Cloud upload failed")
-                                              : !cloudOperational
-                                                ? cloudLabel
-                                                : t("Waiting to upload to Clarity Cloud");
-                                        const videoTitle = profileRecordTitle(
-                                          notesWorkspaceClient.name,
-                                          video.updatedAt || video.createdAt,
-                                        );
-                                        const videoRawTitle = video.title || videoTitle;
-                                        const menuOpen = openSavedVideoMenuId === video.savedVideoId;
-                                        const closeMenu = () => setOpenSavedVideoMenuId(null);
-                                        const playVideo = () =>
-                                          openVideoAnalysisForClient({
-                                            id: video.playerId,
-                                            name: notesWorkspaceClient.name,
-                                            savedVideoId: video.savedVideoId,
-                                          });
-                                        return (
-                                          <article className="player-video-card" key={video.savedVideoId}>
-                                            <button
-                                              type="button"
-                                              className="player-video-thumb-button"
-                                              onClick={playVideo}
-                                              title={t("Play {videoTitle}", { videoTitle })}
-                                              aria-label={t("Play {videoTitle}", { videoTitle })}
-                                            >
-                                              {video.thumbnailDataUrl ? (
-                                                <img
-                                                  className="player-video-thumb"
-                                                  src={video.thumbnailDataUrl}
-                                                  alt=""
-                                                />
-                                              ) : (
-                                                <div className="player-video-thumb is-empty">
-                                                  <ClarityVideoAnalysis size={16} />
-                                                </div>
-                                              )}
-                                              <span className="player-video-thumb-play" aria-hidden="true">
-                                                <Play size={14} />
-                                              </span>
-                                            </button>
-                                            <div className="player-video-card-body">
-                                              <strong title={videoRawTitle !== videoTitle ? videoRawTitle : undefined}>
-                                                {videoTitle}
-                                              </strong>
-                                              {linkedLessonVideoIds.has(video.savedVideoId) ? (
-                                                <span>{t("Linked lesson note")}</span>
-                                              ) : null}
-                                            </div>
-                                            <div className="player-video-card-actions">
-                                              <span
-                                                className={`player-video-cloud-badge is-${cloudState}`}
-                                                title={cloudBadgeLabel}
-                                                aria-label={cloudBadgeLabel}
-                                                role="img"
-                                              >
-                                                {cloudState === "uploading" ? (
-                                                  <CloudUpload size={16} />
-                                                ) : cloudState === "saved" ? (
-                                                  <Cloud size={16} />
-                                                ) : cloudState === "failed" ? (
-                                                  <CloudOff size={16} />
-                                                ) : (
-                                                  <CloudUpload size={16} />
-                                                )}
-                                              </span>
-                                              <div className="player-video-menu">
-                                                <button
-                                                  type="button"
-                                                  className="icon-button"
-                                                  aria-haspopup="menu"
-                                                  aria-expanded={menuOpen}
-                                                  aria-label={t("Video options")}
-                                                  title={t("Video options")}
-                                                  onClick={() =>
-                                                    setOpenSavedVideoMenuId(menuOpen ? null : video.savedVideoId)
-                                                  }
-                                                >
-                                                  <ClarityMore size={16} />
-                                                </button>
-                                                {menuOpen ? (
-                                                  <>
-                                                    <button
-                                                      type="button"
-                                                      className="player-video-menu-scrim"
-                                                      aria-label={t("Close video options")}
-                                                      onClick={closeMenu}
-                                                    />
-                                                    <div className="player-video-menu-panel" role="menu">
-                                                      <button
-                                                        type="button"
-                                                        role="menuitem"
-                                                        onClick={() => {
-                                                          closeMenu();
-                                                          playVideo();
-                                                        }}
-                                                      >
-                                                        <Play size={14} />{t("Play")}</button>
-                                                      {cloudOperational && canRetryCloud ? (
-                                                        <button
-                                                          type="button"
-                                                          role="menuitem"
-                                                          onClick={() => {
-                                                            closeMenu();
-                                                            void sendSavedVideoToPrimaryComputer(video);
-                                                          }}
-                                                        >
-                                                          <Send size={14} />
-                                                          {sendLabel}
-                                                        </button>
-                                                      ) : null}
-                                                      {cloudOperational &&
-                                                      portalPlayers.some(
-                                                        (entry) =>
-                                                          entry.personId === notesWorkspaceClient.id &&
-                                                          entry.status !== "disabled",
-                                                      ) ? (
-                                                        <button
-                                                          type="button"
-                                                          role="menuitem"
-                                                          onClick={() => {
-                                                            closeMenu();
-                                                            void sendSavedVideoToPlayer(
-                                                              video,
-                                                              notesWorkspaceClient.id,
-                                                            );
-                                                          }}
-                                                        >
-                                                          <Send size={14} />{t("Send to player")}</button>
-                                                      ) : null}
-                                                      {canPause ? (
-                                                        <button
-                                                          type="button"
-                                                          role="menuitem"
-                                                          onClick={() => {
-                                                            closeMenu();
-                                                            void pauseSavedVideoTransfer(video);
-                                                          }}
-                                                        >
-                                                          <Pause size={14} />{t("Pause upload")}</button>
-                                                      ) : null}
-                                                      {canCancel ? (
-                                                        <button
-                                                          type="button"
-                                                          role="menuitem"
-                                                          onClick={() => {
-                                                            closeMenu();
-                                                            void cancelSavedVideoTransfer(video);
-                                                          }}
-                                                        >
-                                                          <X size={14} />{t("Cancel upload")}</button>
-                                                      ) : null}
-                                                      {canRemoveTransfer ? (
-                                                        <button
-                                                          type="button"
-                                                          role="menuitem"
-                                                          onClick={() => {
-                                                            closeMenu();
-                                                            void removeSavedVideoTransfer(video);
-                                                          }}
-                                                        >
-                                                          <X size={14} />{t("Clear failed upload")}</button>
-                                                      ) : null}
-                                                      {hasDeviceCopy && video.local.managed?.status !== "healthy" ? (
-                                                        <button
-                                                          type="button"
-                                                          role="menuitem"
-                                                          onClick={() => {
-                                                            closeMenu();
-                                                            void showSavedVideoInFinder(video);
-                                                          }}
-                                                        >
-                                                          <ClarityFilesMedia size={14} />{t("Keep a copy in My Library")}</button>
-                                                      ) : null}
-                                                      {hasDeviceCopy ? (
-                                                        <button
-                                                          type="button"
-                                                          role="menuitem"
-                                                          onClick={() => {
-                                                            closeMenu();
-                                                            void revealSavedVideoFile(video);
-                                                          }}
-                                                        >
-                                                          <ExternalLink size={14} />{t("Open stored file")}</button>
-                                                      ) : null}
-                                                      {hasDeviceCopy ? (
-                                                        <button
-                                                          type="button"
-                                                          role="menuitem"
-                                                          onClick={() => {
-                                                            closeMenu();
-                                                            void verifySavedVideoInLibrary(video);
-                                                          }}
-                                                        >
-                                                          <Check size={14} />{t("Verify file")}</button>
-                                                      ) : null}
-                                                      {canRemoveFromDevice ? (
-                                                        <button
-                                                          type="button"
-                                                          role="menuitem"
-                                                          onClick={() => {
-                                                            closeMenu();
-                                                            void removeSavedVideoFromDevice(video);
-                                                          }}
-                                                        >
-                                                          <X size={14} />{t("Free up space on this device")}</button>
-                                                      ) : null}
-                                                      <button
-                                                        type="button"
-                                                        role="menuitem"
-                                                        onClick={() => {
-                                                          closeMenu();
-                                                          void renameSavedVideo(video);
-                                                        }}
-                                                      >
-                                                        <Pencil size={14} />{t("Rename")}</button>
-                                                      <button
-                                                        type="button"
-                                                        role="menuitem"
-                                                        className="is-danger"
-                                                        onClick={() => {
-                                                          closeMenu();
-                                                          void deleteSavedVideo(video);
-                                                        }}
-                                                      >
-                                                        <Trash2 size={14} />{t("Delete")}</button>
-                                                    </div>
-                                                  </>
-                                                ) : null}
-                                              </div>
-                                            </div>
-                                          </article>
-                                        );
-                                        };
-                                        if (angles.length === 1) return renderSavedVideoCard(angles[0]);
-                                        // Two cameras on one swing: one package, opened together.
-                                        return (
-                                          <div className="player-video-pair" key={`pair-${angles[0].savedVideoId}`}>
-                                            <div className="player-video-pair-head">
-                                              <strong>{t("Same swing · 2 angles")}</strong>
-                                              <button
-                                                type="button"
-                                                className="outline-button"
-                                                onClick={() =>
-                                                  openVideoAnalysisForClient({
-                                                    id: angles[0].playerId,
-                                                    name: notesWorkspaceClient.name,
-                                                    savedVideoId: angles[0].savedVideoId,
-                                                    pairedSavedVideoId: angles[1].savedVideoId,
-                                                  })
-                                                }
-                                              >
-                                                <Play size={14} />{t("Open both")}</button>
-                                            </div>
-                                            {angles.map(renderSavedVideoCard)}
-                                          </div>
-                                        );
-                                      })}
-                                      {playerToolCloudVideos.map((transfer) => {
-                                        const savedVideo = transfer.savedVideo;
-                                        const savedVideoId = transfer.savedVideoId || savedVideo?.savedVideoId || transfer.transferId;
-                                        const timestamp = savedVideo?.updatedAt || savedVideo?.createdAt || transfer.readyToImportAt || "";
-                                        const isDownloading = clarityCloudImportActionIds.has(savedVideoId);
-                                        const cloudVideoTitle = profileRecordTitle(notesWorkspaceClient.name, timestamp);
-                                        const cloudVideoRawTitle = savedVideo?.title || cloudVideoTitle;
-                                        // A player submission is someone waiting on you, not your
-                                        // own library syncing. It reads differently and keeps an
-                                        // unseen dot until you open it.
-                                        const isSubmission = transfer.direction === "player-submission";
-                                        const isUnseen = isSubmission && !transfer.coachSeenAt;
-                                        // A return is the coach's own outgoing video. It carries
-                                        // the mirror of the dot above -- whether the player has
-                                        // opened it -- which is the only thing the coach cannot
-                                        // find out any other way.
-                                        const isReturn = transfer.direction === "coach-return";
-                                        return (
-                                          <article
-                                            className={`player-video-card is-cloud-only${isSubmission ? " is-player-submission" : ""}${isReturn ? " is-coach-return" : ""}${isUnseen ? " is-unseen" : ""}`}
-                                            key={savedVideoId}
-                                          >
-                                            <button
-                                              type="button"
-                                              className="player-video-thumb-button"
-                                              disabled={isDownloading}
-                                              title={isDownloading ? t("Downloading from Clarity Cloud") : t("Play video")}
-                                              aria-label={isDownloading ? t("Downloading from Clarity Cloud") : t("Play video")}
-                                              onClick={() => void openPlayerSubmissionOrCloudVideo(transfer, notesWorkspaceClient.name)}
-                                            >
-                                              <div className="player-video-thumb is-empty">
-                                                <ClarityVideoAnalysis size={16} />
-                                              </div>
-                                              <span className="player-video-thumb-play" aria-hidden="true">
-                                                {isDownloading ? <Download size={14} /> : <Play size={14} />}
-                                              </span>
-                                            </button>
-                                            <div className="player-video-card-body">
-                                              <strong title={cloudVideoRawTitle !== cloudVideoTitle ? cloudVideoRawTitle : undefined}>
-                                                {cloudVideoTitle}
-                                              </strong>
-                                              {isSubmission && (
-                                                <span className="player-video-submission-meta">
-                                                  {isUnseen ? t("New · ") : ""}{t("Sent by")}{" "}{transfer.submittedByName || notesWorkspaceClient.name}
-                                                </span>
-                                              )}
-                                              {isSubmission && transfer.playerMessage && (
-                                                <span className="player-video-submission-note">
-                                                  “{transfer.playerMessage}”
-                                                </span>
-                                              )}
-                                              {isReturn && (
-                                                <span className="player-video-submission-meta">{t("Sent to {name} ·", { name: notesWorkspaceClient.name })}{" "}{transfer.playerSeenAt ? "opened" : "not opened yet"}
-                                                </span>
-                                              )}
-                                              {isReturn && transfer.coachMessage && (
-                                                <span className="player-video-submission-note">
-                                                  “{transfer.coachMessage}”
-                                                </span>
-                                              )}
-                                            </div>
-                                            <div className="player-video-card-actions">
-                                              <span
-                                                className="player-video-cloud-badge is-saved"
-                                                title={t("Saved in Clarity Cloud")}
-                                                aria-label={t("Saved in Clarity Cloud")}
-                                                role="img"
-                                              >
-                                                <Cloud size={16} />
-                                              </span>
-                                            </div>
-                                          </article>
-                                        );
-                                      })}
-                                      {playerToolLegacyVideoRecords.map((record) => (
-                                        <article className="player-video-card is-legacy" key={record.slotKey}>
-                                          <div className="player-video-thumb is-empty">
-                                            <Archive size={16} />
-                                          </div>
-                                          <div className="player-video-card-body">
-                                            <strong>{t("Recovery copy -")}{" "}{record.video.title || t("Video")}</strong>
-                                            <span>{t("Safe to remove after saving · {duration} · Move to Saved Videos to keep it in the durable library", { duration: formatVideoDurationLabel(record.video.duration) })}</span>
-                                          </div>
-                                          <div className="player-video-card-actions">
-                                            <button
-                                              type="button"
-                                              className="outline-button"
-                                              onClick={() => void migrateLegacyVideo(record)}
-                                            >
-                                              <Archive size={14} />{t("Move to Saved Videos")}</button>
-                                          </div>
-                                        </article>
-                                      ))}
-                                    </>
-                                  ) : (
-                                    <p className="notes-empty">{t("No videos yet.")}</p>
-                                  )}
-                                </div>
-                                )}
-                              </div>
-                            ) : null}
-                          </div>
-                        ) : null}
-                      </div>
-                    );
-                  })
-                )}
-                {!playerProfilesDataReady ? (
-                  <div className="player-profiles-progress" role="status" aria-live="polite">
-                    <span className="player-profiles-progress-dot" aria-hidden="true" />
-                    <span>{t("Updating player activity")}<small>
-                        {[
-                          !playerProfilesSourcesReady.people ? "clients" : "",
-                          !playerProfilesSourcesReady.notes ? "lesson notes" : "",
-                          !playerProfilesSourcesReady.portal ? "portal access" : "",
-                          !playerProfilesSourcesReady.videos ? "videos" : "",
-                        ]
-                          .filter(Boolean)
-                          .join(" · ")}
-                      </small>
-                    </span>
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          </section>
+          <Suspense fallback={<Loading size="panel" what={terms.customerPlural.toLowerCase()} />}>
+            <PlayerProfilesScreen
+              notesWorkspaceClient={notesWorkspaceClient}
+              playerProfileTool={playerProfileTool}
+              playerToolExpanded={playerToolExpanded}
+              terms={terms}
+              playerToolTabsExpanded={playerToolTabsExpanded}
+              videoPlayerIds={videoPlayerIds}
+              openVideoAnalysisForClient={openVideoAnalysisForClient}
+              playerVideoView={playerVideoView}
+              switchView={switchView}
+              unassignedVideos={unassignedVideos}
+              setToast={setToast}
+              managedLocalLibraryStatus={managedLocalLibraryStatus}
+              playerProfilesSourcesReady={playerProfilesSourcesReady}
+              capabilities={capabilities}
+              setPlayerProfileTool={setPlayerProfileTool}
+              playerToolAppointments={playerToolAppointments}
+              playerSwingReviewGroups={playerSwingReviewGroups}
+              playerPracticeLoadState={playerPracticeLoadState}
+              reviewDocuments={reviewDocuments}
+              sentSwingReviewLink={sentSwingReviewLink}
+              transactionDateLabel={transactionDateLabel}
+              portalPlayers={portalPlayers}
+              playerToolVideos={playerToolVideos}
+              setPlayerPracticeComposer={setPlayerPracticeComposer}
+              activePlayerPracticeBlocks={activePlayerPracticeBlocks}
+              assigningVideoId={assigningVideoId}
+              playerProfiles={playerProfiles}
+              playerProfilesDataReady={playerProfilesDataReady}
+              selectPlayerProfileTool={selectPlayerProfileTool}
+              unseenSubmissionCounts={unseenSubmissionCounts}
+              playerUnseenSubmissions={playerUnseenSubmissions}
+              playerToolUpcomingCount={playerToolUpcomingCount}
+              setDrillLibraryOpen={setDrillLibraryOpen}
+              updateReviewDocument={updateReviewDocument}
+              coachAccount={coachAccount}
+              brandSettings={brandSettings}
+              setSnapshotFrameView={setSnapshotFrameView}
+              sendingSwingReviewId={sendingSwingReviewId}
+              snapshotFrameView={snapshotFrameView}
+              playerToolNotifications={playerToolNotifications}
+              playerTransactionsLoadState={playerTransactionsLoadState}
+              playerTransactions={playerTransactions}
+              personDeleteBusyId={personDeleteBusyId}
+              notesWorkspaceLessonNotes={notesWorkspaceLessonNotes}
+              playerPracticeExpiringCount={playerPracticeExpiringCount}
+              playerVideoSummary={playerVideoSummary}
+              setPlayerVideoView={setPlayerVideoView}
+              playerVideoShelfGroups={playerVideoShelfGroups}
+              playerToolCloudVideos={playerToolCloudVideos}
+              playerToolLegacyVideoRecords={playerToolLegacyVideoRecords}
+              clarityCloudHealth={clarityCloudHealth}
+              googleDriveTransfer={googleDriveTransfer}
+              setOpenSavedVideoMenuId={setOpenSavedVideoMenuId}
+              phonePlayerOpen={phonePlayerOpen}
+              openPlayerAddDialog={openPlayerAddDialog}
+              setVideoCameraRequested={setVideoCameraRequested}
+              setPlayerToolExpanded={setPlayerToolExpanded}
+              lessonNotePlayerIds={lessonNotePlayerIds}
+              setPlayerToolTabsExpanded={setPlayerToolTabsExpanded}
+              services={services}
+              playerToolUpcomingIds={playerToolUpcomingIds}
+              setSelectedId={setSelectedId}
+              startSwingReviewForClient={startSwingReviewForClient}
+              openSwingReviewId={openSwingReviewId}
+              setOpenSwingReviewId={setOpenSwingReviewId}
+              reviewDisplayBlocks={reviewDisplayBlocks}
+              reviewSaveStates={reviewSaveStates}
+              addVideoToReview={addVideoToReview}
+              reviewInsertRef={reviewInsertRef}
+              reviewLessonTitle={reviewLessonTitle}
+              resolveReviewVideoUrl={resolveReviewVideoUrl}
+              billingWorkspaceEnabled={billingWorkspaceEnabled}
+              openPosCheckoutForClient={openPosCheckoutForClient}
+              portalPlayerBusyId={portalPlayerBusyId}
+              includeCaddyPass={includeCaddyPass}
+              setIncludeCaddyPass={setIncludeCaddyPass}
+              caddyStatuses={caddyStatuses}
+              isAdminUser={isAdminUser}
+              lessonNoteBusy={lessonNoteBusy}
+              playerPracticeComposer={playerPracticeComposer}
+              setAuthStatus={setAuthStatus}
+              playerVideoAnglePairs={playerVideoAnglePairs}
+              uploadingSavedVideoIds={uploadingSavedVideoIds}
+              openSavedVideoMenuId={openSavedVideoMenuId}
+              linkedLessonVideoIds={linkedLessonVideoIds}
+              clarityCloudImportActionIds={clarityCloudImportActionIds}
+              refreshCaddyStatus={refreshCaddyStatus}
+              runManagedLibraryAction={runManagedLibraryAction}
+              assignUnassignedVideo={assignUnassignedVideo}
+              makeDrillCopy={makeDrillCopy}
+              discardEmptyReview={discardEmptyReview}
+              sendSwingReviewToPlayer={sendSwingReviewToPlayer}
+              fetchPlayerTransactions={fetchPlayerTransactions}
+              openInvoiceForEdit={openInvoiceForEdit}
+              grantPortalAccess={grantPortalAccess}
+              revokePortalAccess={revokePortalAccess}
+              hardDeletePerson={hardDeletePerson}
+              saveLessonNoteForClient={saveLessonNoteForClient}
+              deleteLessonNote={deleteLessonNote}
+              sendSavedVideoToPrimaryComputer={sendSavedVideoToPrimaryComputer}
+              sendSavedVideoToPlayer={sendSavedVideoToPlayer}
+              pauseSavedVideoTransfer={pauseSavedVideoTransfer}
+              cancelSavedVideoTransfer={cancelSavedVideoTransfer}
+              removeSavedVideoTransfer={removeSavedVideoTransfer}
+              showSavedVideoInFinder={showSavedVideoInFinder}
+              revealSavedVideoFile={revealSavedVideoFile}
+              verifySavedVideoInLibrary={verifySavedVideoInLibrary}
+              removeSavedVideoFromDevice={removeSavedVideoFromDevice}
+              renameSavedVideo={renameSavedVideo}
+              deleteSavedVideo={deleteSavedVideo}
+              openPlayerSubmissionOrCloudVideo={openPlayerSubmissionOrCloudVideo}
+              migrateLegacyVideo={migrateLegacyVideo}
+            />
+          </Suspense>
         )}
 
         {adminWorkspaceReady && showPlayerAddDialog && (
-          <div
-            className="player-add-overlay"
-            role="dialog"
-            aria-modal="true"
-            aria-label={playerAddForVideoSave ? t("Save video to a player") : t("Add player profile")}
-            onClick={() => closePlayerAddDialog()}
-          >
-            <div className="player-add-dialog" onClick={(event) => event.stopPropagation()}>
-              <div className="player-add-header">
-                <h3>{playerAddForVideoSave ? t("Who is this video for?") : t("Add player profile")}</h3>
-                <button
-                  type="button"
-                  className="icon-button"
-                  onClick={() => closePlayerAddDialog()}
-                  aria-label={t("Close")}
-                >
-                  <X size={16} />
-                </button>
-              </div>
-
-              <div className="player-add-section">
-                <label>{playerAddForVideoSave ? t("Pick a player") : t("Add an existing client")}</label>
-                <input
-                  value={playerAddSearch}
-                  onChange={(event) => setPlayerAddSearch(event.target.value)}
-                  placeholder={playerAddForVideoSave ? t("Search players and clients") : t("Search clients")}
-                />
-                <div className="player-add-results">
-                  {(playerAddSearch.trim().length > 0
-                    ? clients.filter((client) => clientMatchesSearchTerm(client, playerAddSearch.trim()))
-                    : playerAddForVideoSave
-                      ? playerProfiles
-                      : []
-                  )
-                      .slice(0, playerAddForVideoSave ? 20 : 6)
-                      .map((client) => (
-                        <button
-                          type="button"
-                          key={client.id}
-                          className="player-add-result"
-                          onClick={() => promoteExistingPlayer(client)}
-                        >
-                          <span>{client.name}</span>
-                          <span className="muted">{client.email || client.phone}</span>
-                        </button>
-                      ))}
-                </div>
-              </div>
-
-              <div className="player-add-divider">
-                {playerAddForVideoSave ? "or create a new player" : "or add someone new"}
-              </div>
-
-              <div className="player-add-section">
-                <input
-                  value={playerAddNew.name}
-                  onChange={(event) =>
-                    setPlayerAddNew((current) => ({ ...current, name: event.target.value }))
-                  }
-                  placeholder={t("Name")}
-                />
-                <input
-                  value={playerAddNew.email}
-                  onChange={(event) =>
-                    setPlayerAddNew((current) => ({ ...current, email: event.target.value }))
-                  }
-                  placeholder={t("Email")}
-                />
-                <input
-                  value={playerAddNew.phone}
-                  onChange={(event) =>
-                    setPlayerAddNew((current) => ({ ...current, phone: event.target.value }))
-                  }
-                  placeholder={t("Phone")}
-                />
-                <button
-                  type="button"
-                  className="primary-button"
-                  disabled={playerAddSaving}
-                  onClick={createNewPlayer}
-                >
-                  {playerAddSaving
-                    ? t("Adding…")
-                    : playerAddForVideoSave
-                      ? t("Create player and save")
-                      : t("Add new player")}
-                </button>
-              </div>
-            </div>
-          </div>
+          <Suspense fallback={null}>
+            <PlayerAddDialog
+              playerAddForVideoSave={playerAddForVideoSave}
+              playerAddSearch={playerAddSearch}
+              playerAddNew={playerAddNew}
+              setPlayerAddNew={setPlayerAddNew}
+              closePlayerAddDialog={closePlayerAddDialog}
+              playerAddSaving={playerAddSaving}
+              setPlayerAddSearch={setPlayerAddSearch}
+              clients={clients}
+              playerProfiles={playerProfiles}
+              promoteExistingPlayer={promoteExistingPlayer}
+              createNewPlayer={createNewPlayer}
+            />
+          </Suspense>
         )}
 
         {adminWorkspaceReady && activeView === "putting-lab" && (
@@ -21357,989 +17167,113 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
             )}
 
             {billingSection === "new-invoice" && (
-              /* The invoice as a sheet of paper on a mat, with the things you
-                 pull onto it in a rail alongside. Everything you can type into
-                 is dashed; everything solid came from the template, so the
-                 sheet says which of its own lines are yours without a single
-                 field label. */
-              <div className="invoice-paper-layout">
-                {phoneLayout ? (
-                  <div className="ip-phone-bar">
-                    <span className="ip-phone-total">
-                      <em>{t("Total")}</em>
-                      <strong>{formatMoney(invoiceTotal, invoiceSettings.currency)}</strong>
-                    </span>
-                    <button
-                      className="primary-button"
-                      disabled={invoicePhonePrimary.disabled}
-                      onClick={invoicePhonePrimary.run}
-                      type="button"
-                    >
-                      {invoicePhonePrimary.icon}
-                      {invoicePhonePrimary.label}
-                    </button>
-                  </div>
-                ) : null}
-                <div className="ip-actionbar">
-                  <p>{t("You are typing on the invoice itself. Dashed is editable; everything else comes from your template.")}</p>
-                  <div className="ip-actionbar-buttons">
-                    {activeInvoiceId && (
-                      /* Rule 10: Delete and Void are text, not a filled red
-                         button sitting in the same row as Publish & Send. */
-                      <button className="text-button danger" onClick={deleteOpenedInvoice} type="button">
-                        {openedInvoiceStatus === "draft" || openedInvoiceStatus === "void" ? t("Delete") : t("Void")}
-                      </button>
-                    )}
-                    {/* Beside the send buttons because that is what it changes:
-                        the emailed invoice carries a Clarity Pay link. Hidden
-                        once the invoice is settled - there is nothing left to
-                        pay, and the server would not mint a link anyway. */}
-                    {openedInvoiceStatus !== "paid" && openedInvoiceStatus !== "void" && (
-                      <label className="ip-pay-toggle" title={t("Email a Clarity Pay link with this invoice so the client can pay it online")}>
-                        <input
-                          checked={includePaymentLink}
-                          onChange={(event) => {
-                            paymentLinkChosenRef.current = true;
-                            setIncludePaymentLink(event.target.checked);
-                          }}
-                          type="checkbox"
-                        />
-                        <span>{t("Include payment link")}</span>
-                      </label>
-                    )}
-                    {invoiceEditing ? (
-                      isRevisingInvoice ? (
-                        <>
-                          {activeInvoiceId && (
-                            <button className="outline-button" onClick={downloadInvoicePdf} type="button">
-                              <Download size={16} />{t("Download PDF")}</button>
-                          )}
-                          <button className="outline-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("draft")} type="button">
-                            {invoiceIssueState === "saving" ? t("Saving...") : t("Save")}
-                          </button>
-                          <button className="primary-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("publish-send")} type="button">
-                            <ClarityEmail size={16} />{t("Save & email")}</button>
-                        </>
-                      ) : (
-                        <>
-                          <button className="outline-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("draft")} type="button">
-                            {invoiceIssueState === "saving" ? t("Saving...") : t("Save draft")}
-                          </button>
-                          <button className="outline-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("publish")} type="button">{t("Publish")}</button>
-                          <button className="primary-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("publish-send")} type="button">
-                            <ClarityEmail size={16} />{t("Publish & email")}</button>
-                        </>
-                      )
-                    ) : openedInvoiceStatus === "draft" ? (
-                      <>
-                        <button className="outline-button" onClick={editOpenedInvoice} type="button">
-                          <Pencil size={16} />{t("Edit")}</button>
-                        <button className="outline-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("publish")} type="button">{t("Publish")}</button>
-                        <button className="primary-button" disabled={invoiceIssueState === "saving"} onClick={() => commitInvoice("publish-send")} type="button">
-                          <ClarityEmail size={16} />{t("Publish & email")}</button>
-                      </>
-                    ) : (
-                      <>
-                        <button className="outline-button" onClick={editOpenedInvoice} type="button">
-                          <Pencil size={16} />{t("Edit")}</button>
-                        <button className="outline-button" onClick={downloadInvoicePdf} type="button">
-                          <Download size={16} />{t("Download PDF")}</button>
-                        {(openedInvoiceStatus === "sent" || openedInvoiceStatus === "overdue") && (
-                          <>
-                            <button
-                              className="outline-button"
-                              disabled={clarityPayState === "loading"}
-                              onClick={startClarityPay}
-                              type="button"
-                            >
-                              <ClarityPayments size={16} />
-                              {clarityPayState === "loading" ? t("Opening...") : t("Clarity Pay")}
-                            </button>
-                            <button className="outline-button" onClick={markActiveInvoicePaid} type="button">{t("Mark Paid")}</button>
-                          </>
-                        )}
-                        <button
-                          className="primary-button"
-                          disabled={invoiceSendState === "sending"}
-                          onClick={sendOpenedInvoice}
-                          type="button"
-                          title={openedInvoiceSentAt ? t("Email this invoice to the customer again") : t("Email this invoice to the customer")}
-                        >
-                          <Send size={16} />
-                          {invoiceSendState === "sending" ? t("Sending...") : openedInvoiceSentAt ? t("Resend") : t("Send")}
-                        </button>
-                      </>
-                    )}
-                  </div>
-                  {/* Where a "Paid" came from. A bank-matched invoice will show
-                      nothing in Stripe - the money arrived by transfer - so the
-                      credit is named here, and a mis-match is visible instead of
-                      hiding behind the badge. */}
-                  {openedInvoiceStatus === "paid" && (
-                    <div className="ip-payment-source">
-                      <span className="ip-payment-head">{t("Paid")}{openedInvoicePaidAt ? ` ${formatDateForDisplay(openedInvoicePaidAt.slice(0, 10))}` : ""}
-                        {openedInvoicePayment ? t(" · matched to a bank credit") : t(" · marked paid manually")}
-                      </span>
-                      {openedInvoicePayment && (
-                        <span className="ip-payment-detail">
-                          {openedInvoicePayment.date ? `${formatDateForDisplay(openedInvoicePayment.date)} · ` : ""}
-                          {formatMoney(openedInvoicePayment.amount, invoiceSettings.currency)} ·{" "}
-                          {openedInvoicePayment.description || t("Bank credit")}
-                          {openedInvoicePayment.reference ? ` · ${openedInvoicePayment.reference}` : ""}
-                        </span>
-                      )}
-                    </div>
-                  )}
-                  {/* A refused save, named. The server sends back which booking
-                      is on which invoice; without this the coach is told
-                      "already invoiced" and left to open every invoice they
-                      have to find out which lesson and which one. */}
-                  {bookingConflict && (
-                    <div className="ip-conflict" role="alert">
-                      <p className="ip-conflict-head">{bookingConflict.message}</p>
-                      {bookingConflict.conflicts.length > 0 && (
-                        <ul>
-                          {bookingConflict.conflicts.map((conflict) => (
-                            <li key={conflict.bookingId}>
-                              {bookingConflictLabel(conflict.bookingId)}
-                              {conflict.invoiceNumber ? ` - on ${conflict.invoiceNumber}` : ""}
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                      <div className="ip-conflict-actions">
-                        <button
-                          className="outline-button"
-                          disabled={invoiceIssueState === "saving"}
-                          onClick={() => void commitInvoice(conflictRetryMode, { force: true })}
-                          type="button"
-                        >
-                          {invoiceIssueState === "saving"
-                            ? t("Saving...")
-                            : conflictRetryMode === "draft"
-                              ? t("Save anyway")
-                              : t("Publish anyway")}
-                        </button>
-                        <button className="text-button" onClick={() => setBookingConflict(null)} type="button">{t("Dismiss")}</button>
-                      </div>
-                      <p className="ip-conflict-note">{t("Publishing anyway moves these lessons onto this invoice. Any invoice named above keeps the line and the total already billed - void it if this is a re-bill.")}</p>
-                    </div>
-                  )}
-                </div>
-
-                <div className="ip-grid">
-                  <div className="ip-mat">
-                    <article className="ip-paper" aria-label={t("Invoice editor")}>
-                      <header className="ip-paper-head">
-                        {brandSettings.logoPreview && (
-                          <span className="ip-logo">
-                            <img src={brandSettings.logoPreview} alt={`${bookingBrandName} logo`} />
-                          </span>
-                        )}
-                        <div className="ip-issuer">
-                          <strong>{coachAccount.businessName}</strong>
-                          <span>
-                            {invoiceSettings.businessAddress || coachAccount.contactEmail}
-                            {invoiceSettings.taxNumber && ` · ${invoiceSettings.taxName} ${invoiceSettings.taxNumber}`}
-                          </span>
-                        </div>
-                        <div className="ip-issue-meta">
-                          <span
-                            className={`invoice-status-pill invoice-status-${
-                              invoiceEditing && isNewInvoice
-                                ? "draft"
-                                : openedInvoiceStatus === "sent" && !openedInvoiceSentAt
-                                  ? "published"
-                                  : openedInvoiceStatus || "draft"
-                            }`}
-                          >
-                            {invoiceEditing && isNewInvoice ? t("Draft") : openedInvoiceStateLabel}
-                          </span>
-                          <strong>{activeInvoiceNumber}</strong>
-                          {invoiceLocked || !datesEditing ? (
-                            <>
-                              <span>{t("Issued {invoiceDate}", { invoiceDate: formatDateForDisplay(invoiceDraft.invoiceDate) })}</span>
-                              <span>{t("Due {dueDate}", { dueDate: formatDateForDisplay(invoiceDraft.dueDate) })}</span>
-                              {!invoiceLocked && (
-                                <button className="invoice-inline-edit" onClick={() => setDatesEditing(true)} type="button">
-                                  <Pencil size={13} />{t("Edit dates")}</button>
-                              )}
-                            </>
-                          ) : (
-                            <>
-                              <label className="ip-date-field">
-                                <span>{t("Issued")}</span>
-                                <input
-                                  className="ip-dash"
-                                  value={invoiceDraft.invoiceDate}
-                                  onChange={(event) => updateInvoiceDraft("invoiceDate", event.target.value)}
-                                  type="date"
-                                />
-                              </label>
-                              <label className="ip-date-field">
-                                <span>{t("Due")}</span>
-                                <input
-                                  className="ip-dash"
-                                  value={invoiceDraft.dueDate}
-                                  onChange={(event) => updateInvoiceDraft("dueDate", event.target.value)}
-                                  type="date"
-                                />
-                              </label>
-                              <button className="invoice-inline-edit" onClick={() => setDatesEditing(false)} type="button">{t("Done")}</button>
-                            </>
-                          )}
-                        </div>
-                      </header>
-
-                      {invoiceSettings.headerText && <p className="ip-template-note">{invoiceSettings.headerText}</p>}
-
-                      <div className="ip-parties">
-                        <div className="ip-party">
-                          <span className="ip-label">{t("Bill to")}</span>
-                          {hasInvoiceCustomer ? (
-                            <button
-                              className="ip-payer ip-dash"
-                              onClick={invoiceLocked ? undefined : clearInvoiceCustomer}
-                              disabled={invoiceLocked}
-                              title={t("Pick a different client")}
-                              type="button"
-                            >
-                              <span>
-                                <strong>{invoiceDraft.payerName || invoiceDraft.payerEmail}</strong>
-                                <em>{invoiceDraft.payerEmail || invoiceDraft.payerPhone || t("No contact saved")}</em>
-                              </span>
-                              {!invoiceLocked && <ClarityProfile size={13} />}
-                            </button>
-                          ) : newInvoiceCustomer ? (
-                            <div className="ip-new-customer">
-                              <label className="settings-field">
-                                <span>{t("Name")}</span>
-                                <input
-                                  className="w-name"
-                                  value={newInvoiceCustomer.name}
-                                  onChange={(event) => updateNewInvoiceCustomer("name", event.target.value)}
-                                  placeholder={t("Customer name")}
-                                  autoFocus
-                                />
-                              </label>
-                              <label className="settings-field">
-                                <span>{t("Email")}</span>
-                                <input
-                                  className="w-email"
-                                  value={newInvoiceCustomer.email}
-                                  onChange={(event) => updateNewInvoiceCustomer("email", event.target.value)}
-                                  placeholder={t("name@example.com")}
-                                  type="email"
-                                />
-                              </label>
-                              <label className="settings-field">
-                                <span>{t("Phone")}</span>
-                                <input
-                                  className="w-name"
-                                  value={newInvoiceCustomer.phone}
-                                  onChange={(event) => updateNewInvoiceCustomer("phone", event.target.value)}
-                                  placeholder={t("Optional")}
-                                />
-                              </label>
-                              <div className="ip-new-customer-actions">
-                                {/* Rule 10: Cancel is text. A box around it gives
-                                    backing out the same weight as adding the
-                                    client, which is what the form is for. */}
-                                <button className="text-button" onClick={() => setNewInvoiceCustomer(null)} type="button">{t("Cancel")}</button>
-                                <button
-                                  className="primary-button"
-                                  onClick={saveNewInvoiceCustomer}
-                                  disabled={newInvoiceCustomerSaving}
-                                  type="button"
-                                >
-                                  {newInvoiceCustomerSaving ? t("Adding...") : t("Add to clients")}
-                                </button>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="ip-payer-search">
-                              <input
-                                className="ip-dash"
-                                value={invoiceCustomerSearch}
-                                onChange={(event) => setInvoiceCustomerSearch(event.target.value)}
-                                placeholder={t("Search name, email, or phone")}
-                              />
-                              {(invoiceCustomerMatches.length > 0 || invoiceCustomerCreateLabel) && (
-                                <div className="ip-payer-results">
-                                  {invoiceCustomerMatches.map((person) => (
-                                    <button key={person.id} onClick={() => selectInvoiceCustomer(person)} type="button">
-                                      <span>
-                                        <strong>{person.name}</strong>
-                                        <em>{person.email || person.phone || t("No contact saved")}</em>
-                                      </span>
-                                      <Plus size={14} />
-                                    </button>
-                                  ))}
-                                  {invoiceCustomerCreateLabel && (
-                                    <button onClick={openNewInvoiceCustomer} type="button">
-                                      <span>
-                                        <strong>{t("Create new customer")}</strong>
-                                        <em>{invoiceCustomerCreateLabel}</em>
-                                      </span>
-                                      <Plus size={14} />
-                                    </button>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                        <div className="ip-party">
-                          <span className="ip-label">{t("Reference")}</span>
-                          {invoiceLocked ? (
-                            <p className="settings-static-value">{invoiceDraft.reference || "—"}</p>
-                          ) : (
-                            <input
-                              className="ip-dash"
-                              value={invoiceDraft.reference}
-                              onChange={(event) => updateInvoiceDraft("reference", event.target.value)}
-                              placeholder={t("Add a reference")}
-                            />
-                          )}
-                        </div>
-                      </div>
-
-                      {invoiceCustomFieldsToPrint.some((field) => field.placement === "header" || field.placement === "bill-to") && (
-                        <div className="ip-custom-fields">
-                          {invoiceCustomFieldsToPrint
-                            .filter((field) => field.placement === "header" || field.placement === "bill-to")
-                            .map((field) => (
-                              <span key={field.id}>
-                                <strong>{field.label}</strong>
-                                {field.value || t("Not set")}
-                              </span>
-                            ))}
-                        </div>
-                      )}
-
-                      <div className="ip-lines">
-                        <div className="ip-line-head">
-                          <span>{t("Item")}</span>
-                          <span>{t("Qty")}</span>
-                          <span>{t("Unit")}</span>
-                          <span>{t("Amount")}</span>
-                          <span />
-                          <span />
-                        </div>
-
-                        {invoiceDraft.lines.map((line) => {
-                          // Once the invoice is locked (a saved invoice opened for
-                          // viewing) a line reads as a printed line. While it is
-                          // being edited every line stays fully editable no matter
-                          // where it came from - a pulled-in price is a starting
-                          // point, not a fact.
-                          if (invoiceLocked) {
-                            return (
-                              <div className="ip-line ip-line-plain" key={line.id}>
-                                <span className="ip-line-desc">
-                                  {line.description}
-                                  {/* A date only describes a single lesson; a line of several has none. */}
-                                  {((line.serviceDate && line.quantity <= 1) || line.tag) && (
-                                    <em className="ip-line-meta">
-                                      {[line.serviceDate && line.quantity <= 1 ? formatDateForDisplay(line.serviceDate) : "", invoiceLineTagLabel(line.tag)]
-                                        .filter(Boolean)
-                                        .join(" · ")}
-                                    </em>
-                                  )}
-                                </span>
-                                <span className="ip-line-qty">{line.quantity}</span>
-                                <span className="ip-line-unit">{formatMoney(line.unitPrice, invoiceSettings.currency)}</span>
-                                <span className="ip-line-amount">
-                                  <strong>{formatMoney(invoiceLineNet(line), invoiceSettings.currency)}</strong>
-                                  {lineDiscountAmount(line) > 0 && (
-                                    <em>{formatMoney(invoiceLineGross(line), invoiceSettings.currency)}</em>
-                                  )}
-                                </span>
-                                <span />
-                                <span />
-                              </div>
-                            );
-                          }
-                          const drawerOpen = openInvoiceLineId === line.id;
-                          // The discount picker opens as the saved-discount list.
-                          // The custom boxes only appear once they are asked for -
-                          // either by picking "+ Custom", or because this line
-                          // already carries a discount that is not a saved one.
-                          const activeDiscountPresets = discountPresets.filter((preset) => preset.active);
-                          const customDiscountOpen =
-                            !activeDiscountPresets.length ||
-                            customDiscountLineId === line.id ||
-                            (line.discountKind !== "none" && !line.discountPresetId);
-                          return (
-                            <div className={`ip-line${drawerOpen ? " is-open" : ""}`} key={line.id}>
-                              <input
-                                className="ip-dash ip-line-desc"
-                                value={line.description}
-                                onChange={(event) => updateInvoiceLine(line.id, "description", event.target.value)}
-                                placeholder={t("What are you charging for?")}
-                                aria-label={t("Line item")}
-                              />
-                              <input
-                                className="ip-dash ip-line-qty"
-                                value={line.quantity}
-                                inputMode="numeric"
-                                onChange={(event) => updateInvoiceLine(line.id, "quantity", parseQuantityInput(event.target.value))}
-                                type="text"
-                                aria-label={t("Quantity")}
-                              />
-                              <label className="ip-dash ip-line-unit ip-affix">
-                                <span aria-hidden="true">{currencySymbol(invoiceSettings.currency)}</span>
-                                <input
-                                  value={line.unitPrice}
-                                  inputMode="decimal"
-                                  onChange={(event) => updateInvoiceLine(line.id, "unitPrice", parseMoneyInput(event.target.value))}
-                                  type="text"
-                                  aria-label={t("Unit price in {currency}", { currency: invoiceSettings.currency })}
-                                />
-                              </label>
-                              <span className="ip-line-amount">
-                                <strong>{formatMoney(invoiceLineNet(line), invoiceSettings.currency)}</strong>
-                                {lineDiscountAmount(line) > 0 && (
-                                  <em>{formatMoney(invoiceLineGross(line), invoiceSettings.currency)}</em>
-                                )}
-                              </span>
-                              <button
-                                className="ip-line-remove"
-                                onClick={() => {
-                                  if (openInvoiceLineId === line.id) setOpenInvoiceLineId("");
-                                  if (customDiscountLineId === line.id) setCustomDiscountLineId("");
-                                  removeInvoiceLine(line.id);
-                                }}
-                                title={t("Remove this line")}
-                                aria-label={t("Remove this line")}
-                                type="button"
-                              >
-                                <X size={14} />
-                              </button>
-                              <button
-                                className={`ip-line-toggle${drawerOpen ? " is-open" : ""}`}
-                                onClick={() => {
-                                  setOpenInvoiceLineId(drawerOpen ? "" : line.id);
-                                  setCustomDiscountLineId("");
-                                }}
-                                title={drawerOpen ? t("Close") : t("Discount for this line")}
-                                aria-label={drawerOpen ? t("Close line options") : t("Discount for this line")}
-                                aria-expanded={drawerOpen}
-                                type="button"
-                              >
-                                {drawerOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                              </button>
-
-                              {drawerOpen && (
-                                <div className="ip-line-drawer">
-                                  {customDiscountOpen ? (
-                                    <>
-                                      <label className="ip-drawer-field ip-drawer-money">
-                                        <span>{t("Amount off")}</span>
-                                        <div className="ip-dash ip-affix">
-                                          <i aria-hidden="true">{currencySymbol(invoiceSettings.currency)}</i>
-                                          <input
-                                            value={line.discountKind === "amount" ? line.discountValue || "" : ""}
-                                            inputMode="decimal"
-                                            onChange={(event) => {
-                                              const raw = event.target.value;
-                                              setInvoiceLineDiscount(line.id, raw ? "amount" : "");
-                                              if (raw) updateInvoiceLine(line.id, "discountValue", parseMoneyInput(raw));
-                                            }}
-                                            placeholder="0.00"
-                                            type="text"
-                                          />
-                                        </div>
-                                      </label>
-                                      <label className="ip-drawer-field ip-drawer-percent">
-                                        <span>{t("Percent off")}</span>
-                                        <div className="ip-dash ip-affix">
-                                          <input
-                                            value={line.discountKind === "percent" ? line.discountValue || "" : ""}
-                                            inputMode="decimal"
-                                            onChange={(event) => {
-                                              const raw = event.target.value;
-                                              setInvoiceLineDiscount(line.id, raw ? "percent" : "");
-                                              if (raw) updateInvoiceLine(line.id, "discountValue", parseMoneyInput(raw));
-                                            }}
-                                            placeholder="0"
-                                            type="text"
-                                          />
-                                          <i aria-hidden="true">%</i>
-                                        </div>
-                                      </label>
-                                      {activeDiscountPresets.length > 0 && (
-                                        <button
-                                          className="ip-drawer-back"
-                                          onClick={() => {
-                                            setCustomDiscountLineId("");
-                                            setInvoiceLineDiscount(line.id, "");
-                                          }}
-                                          type="button"
-                                        >{t("Saved discounts")}</button>
-                                      )}
-                                    </>
-                                  ) : (
-                                    <label className="ip-drawer-field ip-drawer-preset">
-                                      <span>{t("Discount")}</span>
-                                      <select
-                                        className="ip-dash"
-                                        value={invoiceLineDiscountSelection(line)}
-                                        onChange={(event) => {
-                                          const selection = event.target.value;
-                                          // "+ Custom" is a mode, not a discount:
-                                          // it swaps the list for the boxes and
-                                          // leaves the line undiscounted until a
-                                          // figure is typed.
-                                          if (selection === "custom") {
-                                            setCustomDiscountLineId(line.id);
-                                            return;
-                                          }
-                                          setCustomDiscountLineId("");
-                                          setInvoiceLineDiscount(line.id, selection);
-                                        }}
-                                      >
-                                        <option value="">{t("No discount")}</option>
-                                        {activeDiscountPresets.map((preset) => (
-                                          <option key={preset.id} value={`preset:${preset.id}`}>
-                                            {preset.name} (
-                                            {preset.discountType === "percentage"
-                                              ? `${preset.value}%`
-                                              : formatMoney(preset.value, invoiceSettings.currency)}
-                                            )
-                                          </option>
-                                        ))}
-                                        <option value="custom">{t("+ Custom")}</option>
-                                      </select>
-                                    </label>
-                                  )}
-                                  <label className="ip-drawer-field ip-drawer-date">
-                                    <span>{t("Date")}</span>
-                                    <input
-                                      className="ip-dash"
-                                      value={line.serviceDate}
-                                      onChange={(event) => updateInvoiceLine(line.id, "serviceDate", event.target.value)}
-                                      type="date"
-                                      aria-label={t("Date this line was delivered")}
-                                    />
-                                  </label>
-                                  {/* The Tag picker only exists once the coach has
-                                      a list to pick from. A workspace that doesn't
-                                      report this way never sees an empty select. */}
-                                  {invoiceLineTagOptions.length > 0 && (
-                                    <label className="ip-drawer-field ip-drawer-tag">
-                                      <span>{t("Tag")}</span>
-                                      <select
-                                        className="ip-dash"
-                                        value={line.tag}
-                                        onChange={(event) => updateInvoiceLine(line.id, "tag", event.target.value)}
-                                      >
-                                        <option value="">{t("No tag")}</option>
-                                        {invoiceLineTagOptions.map((tag) => (
-                                          <option key={tag.id} value={tag.id}>
-                                            {tag.label.trim()}
-                                          </option>
-                                        ))}
-                                        {/* A tag retired from the list after this
-                                            line was saved still has to be pickable,
-                                            or opening the draft would silently
-                                            clear it on the next save. */}
-                                        {line.tag && !invoiceLineTagOptions.some((tag) => tag.id === line.tag) && (
-                                          <option value={line.tag}>{t("{tag} (retired)", { tag: line.tag })}</option>
-                                        )}
-                                      </select>
-                                    </label>
-                                  )}
-                                  {customDiscountOpen && (
-                                    <span className="ip-drawer-note">{t("One discount per line — filling one box clears the other. The invoice-wide discount below still applies on top.")}</span>
-                                  )}
-                                  {invoiceLineTagOptions.length > 0 && (
-                                    <span className="ip-drawer-note">{t("Tags are your own list — coach, location, whatever you report on — kept in Billing › Settings.")}</span>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-
-                        {!invoiceDraft.lines.length && (
-                          <p className="ip-lines-empty">
-                            {phoneLayout
-                              ? t("No lines yet. Pull in a lesson or a product, or start a blank one.")
-                              : t("No lines yet. Pull a lesson from the right, or start a blank one.")}
-                          </p>
-                        )}
-
-                        {!invoiceLocked && (
-                          <button className="ip-add-line" onClick={addManualInvoiceLine} type="button">
-                            <Plus size={14} />{t("Add a line")}</button>
-                        )}
-                        {/* On a phone the lessons and the catalog sit under the
-                            whole sheet, so they are a tap away from here rather
-                            than a long scroll. */}
-                        {phoneLayout && !invoiceLocked && (
-                          <div className="ip-phone-pull">
-                            <button className="outline-button" onClick={() => scrollToInvoiceRail("ip-rail-lessons")} type="button">
-                              <ClarityCalendar size={16} />{t("Completed lessons")}</button>
-                            <button className="outline-button" onClick={() => scrollToInvoiceRail("ip-rail-catalog")} type="button">
-                              <ClarityProducts size={16} />{t("Catalog")}</button>
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="ip-totals-wrap">
-                        <div className="ip-totals">
-                          <div className="ip-total-row">
-                            <span>{t("Subtotal")}</span>
-                            <span>{formatMoney(invoiceLineSubtotal, invoiceSettings.currency)}</span>
-                          </div>
-                          {invoiceLineDiscountTotal > 0 && (
-                            <div className="ip-total-row">
-                              <span>{t("Line discounts")}</span>
-                              <span>− {formatMoney(invoiceLineDiscountTotal, invoiceSettings.currency)}</span>
-                            </div>
-                          )}
-                          {invoiceLocked ? (
-                            discountSet && (
-                              <div className="ip-total-row">
-                                <span>{invoiceDiscountLabel}</span>
-                                <span>− {formatMoney(invoiceDiscountTotal, invoiceSettings.currency)}</span>
-                              </div>
-                            )
-                          ) : discountSet && !discountEditing ? (
-                            // Applied: reads as part of the totals, with a quiet
-                            // remove. Clicking the name reopens the controls.
-                            <div className="ip-total-row ip-discount-applied">
-                              <button
-                                className="ip-discount-name"
-                                onClick={() => setDiscountEditing(true)}
-                                title={t("Change discount")}
-                                type="button"
-                              >
-                                {invoiceDiscountLabel}
-                              </button>
-                              <span className="ip-discount-value">
-                                − {formatMoney(invoiceDiscountTotal, invoiceSettings.currency)}
-                                <button
-                                  className="ip-discount-remove"
-                                  onClick={clearInvoiceDiscount}
-                                  aria-label={t("Remove discount")}
-                                  title={t("Remove discount")}
-                                  type="button"
-                                >
-                                  <X size={12} />
-                                </button>
-                              </span>
-                            </div>
-                          ) : discountEditing ? (
-                            <div className="ip-total-row ip-discount-row">
-                              {discountPresets.some((preset) => preset.active) && (
-                                <select
-                                  className="ip-dash ip-discount-preset"
-                                  value={selectedDiscountPresetId}
-                                  onChange={(event) => applyDiscountPreset(event.target.value)}
-                                  aria-label={t("Preset discount")}
-                                >
-                                  <option value="">{t("Manual")}</option>
-                                  {discountPresets
-                                    .filter((preset) => preset.active)
-                                    .map((preset) => (
-                                      <option key={preset.id} value={preset.id}>
-                                        {preset.name} (
-                                        {preset.discountType === "percentage"
-                                          ? `${preset.value}%`
-                                          : formatMoney(preset.value, invoiceSettings.currency)}
-                                        )
-                                      </option>
-                                    ))}
-                                </select>
-                              )}
-                              <input
-                                className="ip-dash ip-discount-label"
-                                value={invoiceDraft.discountLabel}
-                                onChange={(event) => updateInvoiceDraft("discountLabel", event.target.value)}
-                                placeholder={t("Discount name")}
-                                aria-label={t("Invoice discount label")}
-                              />
-                              <label className="ip-dash ip-discount-amount ip-affix">
-                                <span aria-hidden="true">{currencySymbol(invoiceSettings.currency)}</span>
-                                <input
-                                  value={invoiceDraft.discountPercent ? invoiceDiscountTotal.toFixed(2) : invoiceDraft.discountAmount || ""}
-                                  inputMode="decimal"
-                                  placeholder="0.00"
-                                  onChange={(event) => {
-                                    // Typing a figure makes it a fixed amount.
-                                    markInvoiceDraftDirty();
-                                    setSelectedDiscountPresetId("");
-                                    const amount = parseMoneyInput(event.target.value);
-                                    setInvoiceDraft((current) => ({ ...current, discountAmount: amount, discountPercent: 0 }));
-                                  }}
-                                  type="text"
-                                  aria-label={t("Invoice discount amount in {currency}", { currency: invoiceSettings.currency })}
-                                />
-                              </label>
-                              <button className="ip-discount-done" onClick={() => setDiscountEditing(false)} type="button">{t("Done")}</button>
-                            </div>
-                          ) : (
-                            <button className="ip-discount-add" onClick={() => setDiscountEditing(true)} type="button">
-                              <Plus size={12} />{t("Add discount")}</button>
-                          )}
-                          <div className="ip-total-row">
-                            <span>{t("Total excl. {taxName}", { taxName: invoiceSettings.taxName })}</span>
-                            <span>{formatMoney(invoiceTotal - invoiceTaxTotal, invoiceSettings.currency)}</span>
-                          </div>
-                          <div className="ip-total-row">
-                            <span>
-                              {invoiceSettings.taxName} {invoiceSettings.taxRate}%{invoiceDraft.taxInclusive ? t(" (included)") : t(" (added)")}
-                            </span>
-                            <span>{formatMoney(invoiceTaxTotal, invoiceSettings.currency)}</span>
-                          </div>
-                          <div className="ip-total-row ip-total-grand">
-                            <span>{t("Total")}{" "}{invoiceDraft.taxInclusive ? `incl. ${invoiceSettings.taxName}` : "due"}</span>
-                            <span>{formatMoney(invoiceTotal, invoiceSettings.currency)}</span>
-                          </div>
-                          {!invoiceLocked && (
-                            <p className="ip-tax-note">
-                              {invoiceDraft.taxInclusive
-                                ? t("Prices include {taxName}", { taxName: invoiceSettings.taxName })
-                                : `${invoiceSettings.taxName} added on top of prices`}{" "}{t("· set in Billing Settings")}</p>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="ip-note">
-                        <span className="ip-label">{t("Note to the client")}</span>
-                        {invoiceLocked ? (
-                          <p className="settings-static-value">{invoiceDraft.message || "—"}</p>
-                        ) : (
-                          <textarea
-                            className="ip-dash"
-                            value={invoiceDraft.message}
-                            onChange={(event) => updateInvoiceDraft("message", event.target.value)}
-                            rows={2}
-                            placeholder={t("Anything you want on this one invoice")}
-                          />
-                        )}
-                      </div>
-
-                      <footer className="ip-paper-foot">
-                        {invoiceSettings.paymentInstructions ||
-                        invoiceSettings.bankAccount ||
-                        invoiceSettings.taxNumber ||
-                        invoiceCustomFieldsToPrint.some((field) => field.placement === "payment") ? (
-                          <>
-                            {invoiceSettings.paymentInstructions && <span>{invoiceSettings.paymentInstructions}</span>}
-                            <em>
-                              {[
-                                invoiceSettings.bankAccount,
-                                coachAccount.businessName,
-                                invoiceSettings.taxNumber ? `${invoiceSettings.taxName} registered` : "",
-                              ]
-                                .filter(Boolean)
-                                .join(" · ")}
-                            </em>
-                            {invoiceCustomFieldsToPrint
-                              .filter((field) => field.placement === "payment")
-                              .map((field) => (
-                                <em key={field.id}>
-                                  {field.label}: {field.value || t("Not set")}
-                                </em>
-                              ))}
-                          </>
-                        ) : !invoiceLocked ? (
-                          <button className="invoice-add-detail" onClick={openInvoiceCoachSettings} type="button">
-                            <Plus size={15} />{t("Add payment details")}</button>
-                        ) : null}
-                        {invoiceCustomFieldsToPrint
-                          .filter((field) => field.placement === "footer")
-                          .map((field) => (
-                            <em key={field.id}>
-                              {field.label}: {field.value || t("Not set")}
-                            </em>
-                          ))}
-                        {invoiceSettings.footerText && <em>{invoiceSettings.footerText}</em>}
-                      </footer>
-                    </article>
-                  </div>
-
-                  <aside className="ip-rail">
-                    <article className="ip-card" id="ip-rail-lessons">
-                      <strong className="ip-card-title">{t("Completed lessons")}</strong>
-                      {/* Same bookingPullFilter the Dashboard's list reads, so the
-                          two can still never disagree about what they are showing -
-                          only the control is chips here instead of a select. */}
-                      <div className="ip-chips" role="group" aria-label={t("Show completed bookings")}>
-                        {(
-                          [
-                            ["all", t("All")],
-                            ["unpaid", t("Unpaid")],
-                            ["paid", t("Paid")],
-                          ] as [BookingPullFilter, string][]
-                        ).map(([value, label]) => (
-                          <button
-                            key={value}
-                            className={bookingPullFilter === value ? "is-active" : ""}
-                            onClick={() => setBookingPullFilter(value)}
-                            aria-pressed={bookingPullFilter === value}
-                            type="button"
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                      <p className="ip-card-note">
-                        {bookingPullFilter === "unpaid"
-                          ? t("Lessons with nothing taken at the counter.")
-                          : bookingPullFilter === "paid"
-                            ? t("Already settled at the till — invoicing one again is a second transaction.")
-                            : t("Everything completed. A lesson paid at the counter still shows.")}
-                      </p>
-                      <div className="ip-pull-range">
-                        {pullRangeEditing ? (
-                          <>
-                            <label className="settings-field">
-                              <span>{t("From")}</span>
-                              <input type="date" value={pullRangeFrom} onChange={(event) => setPullRangeFrom(event.target.value)} />
-                            </label>
-                            <label className="settings-field">
-                              <span>{t("To")}</span>
-                              <input type="date" value={pullRangeTo} onChange={(event) => setPullRangeTo(event.target.value)} />
-                            </label>
-                            <div className="pull-range-actions">
-                              <button className="invoice-inline-edit" onClick={resetPullRange} type="button">{t("Reset to auto")}</button>
-                              <button className="invoice-inline-edit" onClick={() => setPullRangeEditing(false)} type="button">{t("Done")}</button>
-                            </div>
-                          </>
-                        ) : (
-                          <div className="pull-range-summary">
-                            <span>
-                              {effectivePullFrom ? formatDateForDisplay(effectivePullFrom) : t("Earliest")} → {formatDateForDisplay(effectivePullTo)}
-                            </span>
-                            <button className="invoice-inline-edit" onClick={openPullRangeEdit} type="button" aria-label={t("Edit pull range")}>
-                              <Pencil size={13} />{t("Edit")}</button>
-                          </div>
-                        )}
-                      </div>
-                      <div className="ip-rail-list">
-                        {calendarPullRangeSorted.length ? (
-                          calendarPullRangeSorted.map((item) => {
-                            const service = itemService(item, services);
-                            const days = buildWeekDays(itemWeek(item));
-                            const invoiceLink = invoicedBookingIds[item.id];
-                            const alreadyInvoiced = Boolean(invoiceLink);
-                            // A counter payment is flagged but does not disable the
-                            // row - the lesson can be paid at the till and still be
-                            // invoiced. See addCompletedBookingLine.
-                            const posPayment = posPaidBookings[item.id];
-                            const matchesPayer = invoicePayerBookingIds.has(item.id);
-                            return (
-                              <button
-                                key={item.id}
-                                className={alreadyInvoiced ? "is-used" : ""}
-                                disabled={alreadyInvoiced}
-                                onClick={() => {
-                                  addCompletedBookingLine(item);
-                                  if (phoneLayout && !alreadyInvoiced) setToast({ message: t("Added to the invoice.") });
-                                }}
-                                type="button"
-                              >
-                                <span className="ip-rail-row-main">
-                                  <strong>{item.client || item.title}</strong>
-                                  <em>
-                                    {service?.name ?? t("Lesson")} · {days[item.day].label}, {formatRange(item.start, item.duration)}
-                                  </em>
-                                </span>
-                                <span className="ip-rail-row-side">
-                                  {matchesPayer && <em className="ip-badge">{t("Billing client")}</em>}
-                                  {alreadyInvoiced ? (
-                                    // The invoice it is on, by number - it is not
-                                    // necessarily the one being edited, and "on an
-                                    // invoice" without saying which one leaves the
-                                    // coach to go hunting for it.
-                                    <em
-                                      className="ip-badge"
-                                      title={
-                                        invoiceLink?.invoiceNumber
-                                          ? t("Already on invoice {invoiceNumber}", { invoiceNumber: invoiceLink.invoiceNumber })
-                                          : t("Already on an invoice")
-                                      }
-                                    >
-                                      {invoiceLink?.invoiceNumber || t("Invoiced")}
-                                    </em>
-                                  ) : posPayment ? (
-                                    <em className="ip-badge is-paid">{t("Paid · {amount}", { amount: formatMoney(posPayment.amount, posPayment.currency) })}</em>
-                                  ) : (
-                                    <em className="ip-badge">{t("Unpaid")}</em>
-                                  )}
-                                </span>
-                              </button>
-                            );
-                          })
-                        ) : completedAppointments.length ? (
-                          <p className="ip-card-note">{t("No completed bookings in this date range.")}</p>
-                        ) : (
-                          <p className="ip-card-note">{t("Mark bookings completed from the calendar to pull them into invoices.")}</p>
-                        )}
-                      </div>
-                    </article>
-
-                    <article className="ip-card" id="ip-rail-catalog">
-                      <strong className="ip-card-title">{t("Catalog")}</strong>
-                      <label className="ip-search">
-                        <Search size={14} />
-                        <input
-                          value={invoiceDraft.lineSearch}
-                          onChange={(event) => updateInvoiceDraft("lineSearch", event.target.value)}
-                          placeholder={t("Search products and packages")}
-                          aria-label={t("Search the catalog")}
-                        />
-                      </label>
-                      <div className="ip-rail-list">
-                        {visibleInvoiceCatalogOptions.length ? (
-                          visibleInvoiceCatalogOptions.map((item) => (
-                            <button
-                              key={item.id}
-                              onClick={() => {
-                                addCatalogInvoiceLine(item);
-                                if (phoneLayout) setToast({ message: t("Added to the invoice.") });
-                              }}
-                              type="button"
-                            >
-                              <span className="ip-rail-icon">
-                                {item.kind === "product" ? (
-                                  <ClarityStore size={14} />
-                                ) : item.kind === "package" ? (
-                                  <ClarityPassesCredits size={14} />
-                                ) : (
-                                  <ClarityCalendar size={14} />
-                                )}
-                              </span>
-                              <span className="ip-rail-row-main">
-                                <strong>{item.name}</strong>
-                                <em>{item.description || item.kind}</em>
-                              </span>
-                              <span className="ip-rail-row-side">
-                                <strong>{formatMoney(item.price, invoiceSettings.currency)}</strong>
-                              </span>
-                            </button>
-                          ))
-                        ) : (
-                          <p className="ip-card-note">
-                            {invoiceDraft.lineSearch.trim() ? t("Nothing matches that.") : t("Add products and services in Billing › Products.")}
-                          </p>
-                        )}
-                      </div>
-                    </article>
-
-                    <article className="ip-card">
-                      <strong className="ip-card-title">{t("From your template")}</strong>
-                      <p className="ip-card-note">{t("Logo, address, {taxName} number, bank account and footer are already on this invoice.", { taxName: invoiceSettings.taxName })}</p>
-                      <button className="outline-button" onClick={openInvoiceCoachSettings} type="button">
-                        <Pencil size={13} />{t("Edit the template")}</button>
-                    </article>
-                  </aside>
-                </div>
-              </div>
+              <Suspense fallback={<Loading what={t("invoice")} />}>
+                <InvoiceEditor
+                  invoiceSettings={invoiceSettings}
+                  invoiceDraft={invoiceDraft}
+                  invoiceLocked={invoiceLocked}
+                  invoiceIssueState={invoiceIssueState}
+                  openedInvoiceStatus={openedInvoiceStatus}
+                  openedInvoicePayment={openedInvoicePayment}
+                  updateInvoiceLine={updateInvoiceLine}
+                  updateInvoiceDraft={updateInvoiceDraft}
+                  phoneLayout={phoneLayout}
+                  invoiceCustomFieldsToPrint={invoiceCustomFieldsToPrint}
+                  setCustomDiscountLineId={setCustomDiscountLineId}
+                  invoicePhonePrimary={invoicePhonePrimary}
+                  bookingConflict={bookingConflict}
+                  newInvoiceCustomer={newInvoiceCustomer}
+                  setInvoiceLineDiscount={setInvoiceLineDiscount}
+                  invoiceLineTagOptions={invoiceLineTagOptions}
+                  bookingPullFilter={bookingPullFilter}
+                  invoiceTotal={invoiceTotal}
+                  invoiceEditing={invoiceEditing}
+                  openedInvoiceSentAt={openedInvoiceSentAt}
+                  coachAccount={coachAccount}
+                  updateNewInvoiceCustomer={updateNewInvoiceCustomer}
+                  invoiceCustomerCreateLabel={invoiceCustomerCreateLabel}
+                  discountPresets={discountPresets}
+                  invoiceDiscountTotal={invoiceDiscountTotal}
+                  setDiscountEditing={setDiscountEditing}
+                  activeInvoiceId={activeInvoiceId}
+                  editOpenedInvoice={editOpenedInvoice}
+                  clarityPayState={clarityPayState}
+                  invoiceSendState={invoiceSendState}
+                  openedInvoicePaidAt={openedInvoicePaidAt}
+                  conflictRetryMode={conflictRetryMode}
+                  brandSettings={brandSettings}
+                  isNewInvoice={isNewInvoice}
+                  setDatesEditing={setDatesEditing}
+                  newInvoiceCustomerSaving={newInvoiceCustomerSaving}
+                  invoiceCustomerMatches={invoiceCustomerMatches}
+                  openInvoiceLineId={openInvoiceLineId}
+                  customDiscountLineId={customDiscountLineId}
+                  setOpenInvoiceLineId={setOpenInvoiceLineId}
+                  scrollToInvoiceRail={scrollToInvoiceRail}
+                  invoiceLineDiscountTotal={invoiceLineDiscountTotal}
+                  discountSet={discountSet}
+                  invoiceDiscountLabel={invoiceDiscountLabel}
+                  discountEditing={discountEditing}
+                  invoiceTaxTotal={invoiceTaxTotal}
+                  openInvoiceCoachSettings={openInvoiceCoachSettings}
+                  effectivePullFrom={effectivePullFrom}
+                  calendarPullRangeSorted={calendarPullRangeSorted}
+                  setToast={setToast}
+                  visibleInvoiceCatalogOptions={visibleInvoiceCatalogOptions}
+                  includePaymentLink={includePaymentLink}
+                  paymentLinkChosenRef={paymentLinkChosenRef}
+                  setIncludePaymentLink={setIncludePaymentLink}
+                  isRevisingInvoice={isRevisingInvoice}
+                  bookingConflictLabel={bookingConflictLabel}
+                  setBookingConflict={setBookingConflict}
+                  bookingBrandName={bookingBrandName}
+                  openedInvoiceStateLabel={openedInvoiceStateLabel}
+                  activeInvoiceNumber={activeInvoiceNumber}
+                  datesEditing={datesEditing}
+                  hasInvoiceCustomer={hasInvoiceCustomer}
+                  clearInvoiceCustomer={clearInvoiceCustomer}
+                  setNewInvoiceCustomer={setNewInvoiceCustomer}
+                  invoiceCustomerSearch={invoiceCustomerSearch}
+                  setInvoiceCustomerSearch={setInvoiceCustomerSearch}
+                  selectInvoiceCustomer={selectInvoiceCustomer}
+                  openNewInvoiceCustomer={openNewInvoiceCustomer}
+                  invoiceLineTagLabel={invoiceLineTagLabel}
+                  removeInvoiceLine={removeInvoiceLine}
+                  invoiceLineDiscountSelection={invoiceLineDiscountSelection}
+                  addManualInvoiceLine={addManualInvoiceLine}
+                  invoiceLineSubtotal={invoiceLineSubtotal}
+                  clearInvoiceDiscount={clearInvoiceDiscount}
+                  selectedDiscountPresetId={selectedDiscountPresetId}
+                  applyDiscountPreset={applyDiscountPreset}
+                  markInvoiceDraftDirty={markInvoiceDraftDirty}
+                  setSelectedDiscountPresetId={setSelectedDiscountPresetId}
+                  setInvoiceDraft={setInvoiceDraft}
+                  setBookingPullFilter={setBookingPullFilter}
+                  pullRangeEditing={pullRangeEditing}
+                  pullRangeFrom={pullRangeFrom}
+                  setPullRangeFrom={setPullRangeFrom}
+                  pullRangeTo={pullRangeTo}
+                  setPullRangeTo={setPullRangeTo}
+                  resetPullRange={resetPullRange}
+                  setPullRangeEditing={setPullRangeEditing}
+                  effectivePullTo={effectivePullTo}
+                  openPullRangeEdit={openPullRangeEdit}
+                  services={services}
+                  invoicedBookingIds={invoicedBookingIds}
+                  posPaidBookings={posPaidBookings}
+                  invoicePayerBookingIds={invoicePayerBookingIds}
+                  addCompletedBookingLine={addCompletedBookingLine}
+                  completedAppointments={completedAppointments}
+                  addCatalogInvoiceLine={addCatalogInvoiceLine}
+                  commitInvoice={commitInvoice}
+                  downloadInvoicePdf={downloadInvoicePdf}
+                  deleteOpenedInvoice={deleteOpenedInvoice}
+                  startClarityPay={startClarityPay}
+                  markActiveInvoicePaid={markActiveInvoicePaid}
+                  sendOpenedInvoice={sendOpenedInvoice}
+                  saveNewInvoiceCustomer={saveNewInvoiceCustomer}
+                />
+              </Suspense>
             )}
 
             {/* Products, Expenses, Vouchers and Passes: the group's sections as
@@ -22594,427 +17528,53 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
             )}
 
             {billingSection === "settings" && (
-              <SettingsGroups>
-              <div className="billing-dashboard">
-                {clarityPayReturn && (activeView === "billing" || workspaceOverlay?.kind === "billing") && (
-                  <ClarityPayReturnBanner
-                    outcome={clarityPayReturn}
-                    busy={stripeSaving}
-                    onContinue={() => void setUpClarityPay()}
-                    onDismiss={() => setClarityPayReturn(null)}
-                  />
-                )}
-                <SettingsGroup id="billing-card-payments" section="billing" icon={ClarityPayments} title={`${t("Card payments")} · ${stripeStatus?.route === "clarity_pay" ? t("Clarity Pay is on") : stripeStatus?.route === "own_stripe" ? t("Your own Stripe account") : t("Not set up")}`}>
-                  <p className="field-help">
-                    {stripeStatus?.route === "clarity_pay" ? (
-                      <>{t("Card payments at the till, on invoices and in the player portal go straight to your account ({account}), and Stripe pays them out to your bank. Clarity Pay keeps {fee} of each payment; Stripe's own card fee is separate.", { account: stripeStatus.account, fee: clarityPayFeeLabel(stripeStatus.fee) })}</>
-                    ) : stripeStatus?.route === "own_stripe" ? (
-                      <>{t("Invoice payments go straight to your Stripe account ({account}), with no Clarity fee. The till and the player portal need Clarity Pay.", { account: stripeStatus.account })}{clarityPaySetup === "pending"
-                          ? t(" Your Clarity Pay setup isn't finished; you'll keep using your own Stripe until it is.")
-                          : ""}
-                      </>
-                    ) : (
-                      <>
-                        <strong>{t("Clarity Pay")}</strong>{" "}{t("is the easy way: we set up your payment account, Stripe checks your details, and you can take cards at the till, on invoices and in the player portal. Payouts go to your bank. Clarity Pay keeps")}{" "}{stripeStatus ? clarityPayFeeLabel(stripeStatus.fee) : "a small cut"}{" "}{t("of each payment.")}{clarityPaySetup === "pending" ? t(" Your setup isn't finished yet.") : ""}
-                        <br />{t("Already have Stripe? Connect it for invoice payments only, with no Clarity fee.")}</>
-                    )}
-                    {stripeStatus?.account && stripeStatus.testMode ? t(" This is a test-mode connection, so no real money moves.") : ""}
-                    {stripeStatus?.account && !stripeStatus.configured ? t(" Payments are paused while Clarity's Stripe platform is unavailable.") : ""}
-                  </p>
-                  <div className="settings-field-row">
-                    {stripeStatus?.route !== "clarity_pay" && (
-                      <button
-                        className="primary-button"
-                        type="button"
-                        disabled={stripeSaving}
-                        onClick={() => void setUpClarityPay()}
-                      >
-                        {stripeSaving
-                          ? t("Opening…")
-                          : clarityPaySetup === "pending"
-                            ? t("Finish Clarity Pay setup")
-                            : stripeStatus?.route === "own_stripe"
-                              ? t("Switch to Clarity Pay")
-                              : t("Set up Clarity Pay")}
-                      </button>
-                    )}
-                    {!stripeStatus?.route && (
-                      <button
-                        className="outline-button"
-                        type="button"
-                        disabled={stripeSaving}
-                        onClick={() => void connectStripe()}
-                      >{t("Connect my own Stripe")}</button>
-                    )}
-                    {stripeStatus?.route && (
-                      <button
-                        className="outline-button"
-                        type="button"
-                        disabled={stripeSaving}
-                        onClick={() => void disconnectStripe()}
-                      >
-                        {stripeStatus.route === "clarity_pay" ? t("Turn off Clarity Pay") : t("Disconnect")}
-                      </button>
-                    )}
-                  </div>
-                </SettingsGroup>
-
-                {stripeStatus?.route === "clarity_pay" && (
-                  <Suspense fallback={<Loading what={tapToPayName()} />}>
-                    <TapToPaySetup
-                      frame={(body) => (
-                        <SettingsGroup id="billing-tap-to-pay" section="billing" icon={Nfc} title={tapToPayName()}>
-                          {body}
-                        </SettingsGroup>
-                      )}
-                    />
-                  </Suspense>
-                )}
-
-                {/* Repair, not import. Everything here has already been
-                    pulled once; what this fixes is what was kept of it. */}
-                <SettingsGroup id="billing-stripe-resync" section="billing" icon={RefreshCw} title={t("Re-read payment history")}>
-                  <p className="field-help">{t("Pulls every Stripe invoice and card payment again, from the beginning. Safe to run whenever — each one updates the record it already has rather than adding a second.")}</p>
-                  <p className="field-help">{t("Worth running once: card payments used to be filed under Stripe's own label for them,")}{" "}<code>Charge for &lt;email&gt;</code>{t(", so the invoice list and the lesson-matching on a client's profile saw an email address where the product name should have been. Payments now keep what was actually bought — read from the payment, or from the basket behind it. The ones already recorded keep the old label until they are read again.")}</p>
-                  <div className="panel-actions">
-                    <button
-                      className="outline-button"
-                      type="button"
-                      disabled={stripeResyncing}
-                      onClick={() => void resyncStripeBilling()}
-                    >
-                      {stripeResyncing ? t("Reading…") : t("Re-read everything from Stripe")}
-                    </button>
-                  </div>
-                  {stripeResyncing && (
-                    <p className="field-help">
-                      {stripeResyncProgress
-                        ? t("Reading period {value} of {total} — newest first.", { value: stripeResyncProgress.done + 1, total: stripeResyncProgress.total })
-                        : t("Starting…")}{" "}{t("This takes a minute or two on a few hundred payments. Leave the page open.")}</p>
-                  )}
-                  {stripeResyncResult && !stripeResyncing && (
-                    <p className="field-help">{stripeResyncResult}</p>
-                  )}
-                </SettingsGroup>
-
-                <SettingsGroup id="billing-invoice-defaults" section="billing" icon={ClaritySettings} title={t("Defaults for new invoices")}>
-                  <p className="field-help">{t("These defaults are used when creating a new invoice and are saved on your account record. Current next number: {invoiceNumber}", { invoiceNumber })}</p>
-                  <EditableSettingsBlock
-                    id="billing-settings-block"
-                    title={t("Billing Settings")}
-                    status={billingSettingsEditor.status}
-                    dirty={billingSettingsEditor.dirty}
-                    errorMessage={billingSettingsEditor.errorMessage}
-                    onEdit={() => startEditableBlock("billing-settings")}
-                    onCancel={() => cancelEditableBlock("billing-settings")}
-                    onSave={() => void saveEditableBlock("billing-settings")}
-                  >
-                  {/* Currency, time zone and tax belong to the business's
-                      country, and are set in one place: Settings > Account >
-                      Country & region. */}
-                  <p className="field-help">
-                    {invoiceSettings.currency} · {invoiceSettings.taxName} {invoiceSettings.taxRate}%{" "}
-                    {invoiceSettings.taxInclusive ? "included in prices" : "added on top"} · {coachAccount.timezone}.{" "}
-                    <button
-                      className="link-button"
-                      onClick={() => openProfileTarget({ kind: "settings", tab: "account", group: "region" }, t("Country & region"))}
-                      type="button"
-                    >{t("Change in Country & region")}</button>
-                  </p>
-                  <div className="service-form-row">
-                    <label className="settings-field">
-                      <span>{t("Invoice prefix")}</span>
-                      <input value={invoiceSettingsDraft.prefix} readOnly={billingSettingsIsLocked} onChange={(event) => updateBillingAccountDraft("prefix", event.target.value)} />
-                    </label>
-                    <label className="settings-field">
-                      <span>{t("Start / next number")}</span>
-                      <input
-                        value={invoiceSettingsDraft.nextNumber || ""}
-                        inputMode="numeric"
-                        readOnly={billingSettingsIsLocked}
-                        onChange={(event) => updateBillingAccountDraft("nextNumber", parseQuantityInput(event.target.value))}
-                        type="text"
-                        placeholder="e.g. 1001"
-                      />
-                    </label>
-                    <label className="settings-field">
-                      <span>{t("Payment terms (days)")}</span>
-                      <input
-                        value={invoiceSettingsDraft.paymentTermsDays}
-                        inputMode="numeric"
-                        readOnly={billingSettingsIsLocked}
-                        onChange={(event) => updateBillingAccountDraft("paymentTermsDays", parseQuantityInput(event.target.value))}
-                        type="text"
-                      />
-                    </label>
-                  </div>
-                  <div className="service-form-row">
-                    <label className="settings-field">
-                      <span>{t("{taxName} number", { taxName: invoiceSettingsDraft.taxName })}</span>
-                      <input
-                        value={invoiceSettingsDraft.taxNumber}
-                        readOnly={billingSettingsIsLocked}
-                        onChange={(event) => updateBillingAccountDraft("taxNumber", event.target.value)}
-                        placeholder={`${invoiceSettingsDraft.taxName} number`}
-                      />
-                    </label>
-                  </div>
-                  <label className="settings-field">
-                    <span>{t("Unpaid invoice loudness")}</span>
-                    <select
-                      value={invoiceSettingsDraft.unpaidLoudness}
-                      disabled={billingSettingsIsLocked}
-                      onChange={(event) => updateBillingAccountDraft("unpaidLoudness", Number(event.target.value) as 1 | 2 | 3)}
-                    >
-                      <option value={1}>{t("Level 1 - Subtle (small count only)")}</option>
-                      <option value={2}>{t("Level 2 - Noticeable (dashboard banner)")}</option>
-                      <option value={3}>{t("Level 3 - Urgent (banner + highlighted rows)")}</option>
-                    </select>
-                    <span className="field-help">{t("Controls how strongly the Dashboard calls out overdue, unpaid invoices. Doesn't change invoice status or send anything - display only.")}</span>
-                  </label>
-                  <label className="settings-field">
-                    <span>{t("Default customer note")}</span>
-                    <textarea
-                      value={invoiceSettingsDraft.defaultCustomerNote}
-                      readOnly={billingSettingsIsLocked}
-                      onChange={(event) => updateBillingAccountDraft("defaultCustomerNote", event.target.value)}
-                      rows={2}
-                    />
-                  </label>
-                  <label className="settings-field">
-                    <span>{t("Payment instructions")}</span>
-                    <textarea
-                      value={invoiceSettingsDraft.paymentInstructions}
-                      readOnly={billingSettingsIsLocked}
-                      onChange={(event) => updateBillingAccountDraft("paymentInstructions", event.target.value)}
-                      rows={2}
-                    />
-                  </label>
-                  </EditableSettingsBlock>
-                </SettingsGroup>
-
-                <SettingsGroup id="billing-payment-methods" section="billing" icon={ClarityPayments} title={t("Payment Methods")}>
-                  <p className="field-help">{t("The buttons shown in the checkout modal. Clarity Pay is the Stripe-backed method and is always available; add your own for Cash, Eftpos, On account and anything else you take.")}</p>
-                  <div className="billing-catalog-editor">
-                    <label className="settings-field">
-                      <span>{t("Name")}</span>
-                      <input
-                        className="w-name"
-                        value={posMethodEditor.name}
-                        onChange={(event) => setPosMethodEditor((current) => ({ ...current, name: event.target.value }))}
-                        placeholder={t("e.g. Eftpos")}
-                      />
-                    </label>
-                    <label className="settings-field pos-settles-toggle">
-                      <input
-                        checked={posMethodEditor.settlesImmediately}
-                        onChange={(event) =>
-                          setPosMethodEditor((current) => ({ ...current, settlesImmediately: event.target.checked }))
-                        }
-                        type="checkbox"
-                      />
-                      <span>{t("Money is received straight away")}</span>
-                    </label>
-                    <p className="field-help">{t("Leave that unticked for methods like On account, where the sale is recorded as owed and marked paid later.")}</p>
-                    <button
-                      className="outline-button"
-                      disabled={posMethodSaveState === "saving"}
-                      onClick={() => void savePosPaymentMethod()}
-                      type="button"
-                    >
-                      <Plus size={16} />
-                      {posMethodSaveState === "saving"
-                        ? t("Saving...")
-                        : posMethodEditor.id
-                          ? t("Save Changes")
-                          : t("Add Payment Method")}
-                    </button>
-                    {Boolean(posMethodEditor.id) && (
-                      <button
-                        className="text-button"
-                        onClick={() => setPosMethodEditor({ id: "", name: "", settlesImmediately: true })}
-                        type="button"
-                      >{t("Cancel Edit")}</button>
-                    )}
-                  </div>
-                  <div className="billing-catalog-list">
-                    {posPaymentMethods.length ? (
-                      posPaymentMethods.map((method) => (
-                        <div key={method.id} className={`billing-catalog-list-item${method.active ? "" : " inactive"}`}>
-                          <button
-                            onClick={() =>
-                              setPosMethodEditor({
-                                id: method.id,
-                                name: method.name,
-                                settlesImmediately: method.settlesImmediately,
-                              })
-                            }
-                            type="button"
-                          >
-                            <span>
-                              <strong>{method.name}</strong>
-                              <em>
-                                {method.kind === "clarity_pay" ? t("Stripe - card, Apple Pay, Google Pay") : t("Manual")}
-                                {method.settlesImmediately ? "" : t(" - recorded as owed")}
-                                {method.active ? "" : t(" - inactive")}
-                              </em>
-                            </span>
-                          </button>
-                          <button
-                            className="text-link-button"
-                            onClick={() => void setPosPaymentMethodActive(method, !method.active)}
-                            type="button"
-                          >
-                            {method.active ? t("Deactivate") : t("Reactivate")}
-                          </button>
-                        </div>
-                      ))
-                    ) : (
-                      <Loading what={t("payment methods")} />
-                    )}
-                  </div>
-                </SettingsGroup>
-
-                <SettingsGroup id="billing-discounts" section="billing" icon={Percent} title={t("Discount Settings")}>
-                  <p className="field-help">{t("Optional presets for discounts you use often (a percentage off, a flat amount, a named discount, or a coupon code). These are picked from the invoice's discount field when needed - creating an invoice never requires one.")}</p>
-                  <div className="billing-catalog-editor">
-                    <label className="settings-field">
-                      <span>{t("Name")}</span>
-                      <input
-                        className="w-name"
-                        value={discountEditor.name}
-                        onChange={(event) => setDiscountEditor((current) => ({ ...current, name: event.target.value }))}
-                        placeholder={t("e.g. Member discount")}
-                      />
-                    </label>
-                    <div className="service-form-row">
-                      <label className="settings-field">
-                        <span>{t("Type")}</span>
-                        <select
-                          value={discountEditor.discountType}
-                          onChange={(event) =>
-                            setDiscountEditor((current) => ({
-                              ...current,
-                              discountType: event.target.value === "fixed" ? "fixed" : "percentage",
-                            }))
-                          }
-                        >
-                          <option value="percentage">{t("Percentage")}</option>
-                          <option value="fixed">{t("Fixed amount")}</option>
-                        </select>
-                      </label>
-                      <label className="settings-field">
-                        <span>{discountEditor.discountType === "percentage" ? t("Percent off") : t("Amount off")}</span>
-                        <input
-                          className="w-price"
-                          value={discountEditor.value}
-                          inputMode="decimal"
-                          onChange={(event) =>
-                            setDiscountEditor((current) => ({ ...current, value: parseMoneyInput(event.target.value) }))
-                          }
-                          type="text"
-                        />
-                      </label>
-                      <label className="settings-field">
-                        <span>{t("Coupon code (optional)")}</span>
-                        <input
-                          className="w-name"
-                          value={discountEditor.couponCode}
-                          onChange={(event) => setDiscountEditor((current) => ({ ...current, couponCode: event.target.value }))}
-                          placeholder={t("Optional")}
-                        />
-                      </label>
-                    </div>
-                    <button className="outline-button" disabled={discountSaveState === "saving"} onClick={addDiscountPreset} type="button">
-                      <Plus size={16} />
-                      {discountEditor.id ? (discountSaveState === "saving" ? t("Saving...") : t("Save Changes")) : discountSaveState === "saving" ? t("Saving...") : t("Add Discount")}
-                    </button>
-                    {Boolean(discountEditor.id) && (
-                      <button
-                        className="text-button"
-                        onClick={() => setDiscountEditor({ id: "", name: "", discountType: "percentage", value: 10, couponCode: "" })}
-                        type="button"
-                      >{t("Cancel Edit")}</button>
-                    )}
-                  </div>
-                  <div className="billing-catalog-list">
-                    {discountPresets.length ? (
-                      discountPresets.map((preset) => (
-                        <div key={preset.id} className={`billing-catalog-list-item${preset.active === false ? " inactive" : ""}`}>
-                          <button onClick={() => setDiscountEditor(preset)} type="button">
-                            <span>
-                              <strong>{preset.name}</strong>
-                              <em>
-                                {preset.discountType === "percentage" ? t("{value}% off", { value: preset.value }) : `${formatMoney(preset.value, invoiceSettings.currency)} off`}
-                                {preset.couponCode ? t(" - Code: {couponCode}", { couponCode: preset.couponCode }) : ""}
-                                {preset.active === false ? t(" - inactive") : ""}
-                              </em>
-                            </span>
-                          </button>
-                          <button className="text-link-button" onClick={() => toggleDiscountActive(preset)} type="button">
-                            {preset.active === false ? t("Reactivate") : t("Deactivate")}
-                          </button>
-                        </div>
-                      ))
-                    ) : (
-                      <p>{t("No discount presets yet.")}</p>
-                    )}
-                  </div>
-                </SettingsGroup>
-
-                <SettingsGroup id="billing-expense-categories" section="billing" icon={ClarityInvoices} title={t("Expense Categories")}>
-                  <p className="field-help">{t("Optional categories for logging expenses (Range fees, Coaching supplies, Travel, Software, etc). Every expense can also be left Uncategorised.")}</p>
-                  <div className="billing-catalog-editor">
-                    <label className="settings-field">
-                      <span>{t("Name")}</span>
-                      <input
-                        className="w-name"
-                        value={expenseCategoryEditor.name}
-                        onChange={(event) => setExpenseCategoryEditor((current) => ({ ...current, name: event.target.value }))}
-                        placeholder={t("e.g. Range fees")}
-                      />
-                    </label>
-                    <button
-                      className="outline-button"
-                      disabled={expenseCategorySaveState === "saving"}
-                      onClick={addExpenseCategory}
-                      type="button"
-                    >
-                      <Plus size={16} />
-                      {expenseCategoryEditor.id
-                        ? expenseCategorySaveState === "saving"
-                          ? t("Saving...")
-                          : t("Save Changes")
-                        : expenseCategorySaveState === "saving"
-                          ? t("Saving...")
-                          : t("Add Category")}
-                    </button>
-                    {Boolean(expenseCategoryEditor.id) && (
-                      <button className="text-button" onClick={() => setExpenseCategoryEditor({ id: "", name: "" })} type="button">{t("Cancel Edit")}</button>
-                    )}
-                  </div>
-                  <div className="billing-catalog-list">
-                    {expenseCategories.length ? (
-                      expenseCategories.map((category) => (
-                        <div key={category.id} className={`billing-catalog-list-item${category.active === false ? " inactive" : ""}`}>
-                          <button onClick={() => setExpenseCategoryEditor(category)} type="button">
-                            <span>
-                              <strong>{category.name}</strong>
-                              {category.active === false && <em>{t("Inactive")}</em>}
-                            </span>
-                          </button>
-                          <button className="text-link-button" onClick={() => toggleExpenseCategoryActive(category)} type="button">
-                            {category.active === false ? t("Reactivate") : t("Deactivate")}
-                          </button>
-                        </div>
-                      ))
-                    ) : (
-                      <p>{t("No expense categories yet.")}</p>
-                    )}
-                  </div>
-                </SettingsGroup>
-              </div>
-              </SettingsGroups>
+              <Suspense fallback={<Loading what={t("billing settings")} />}>
+                <BillingSettingsPanel
+                  stripeStatus={stripeStatus}
+                  invoiceSettingsDraft={invoiceSettingsDraft}
+                  billingSettingsIsLocked={billingSettingsIsLocked}
+                  updateBillingAccountDraft={updateBillingAccountDraft}
+                  discountEditor={discountEditor}
+                  setDiscountEditor={setDiscountEditor}
+                  stripeSaving={stripeSaving}
+                  invoiceSettings={invoiceSettings}
+                  stripeResyncing={stripeResyncing}
+                  posMethodEditor={posMethodEditor}
+                  setPosMethodEditor={setPosMethodEditor}
+                  clarityPaySetup={clarityPaySetup}
+                  stripeResyncProgress={stripeResyncProgress}
+                  billingSettingsEditor={billingSettingsEditor}
+                  discountSaveState={discountSaveState}
+                  expenseCategoryEditor={expenseCategoryEditor}
+                  setExpenseCategoryEditor={setExpenseCategoryEditor}
+                  expenseCategorySaveState={expenseCategorySaveState}
+                  clarityPayReturn={clarityPayReturn}
+                  stripeResyncResult={stripeResyncResult}
+                  posMethodSaveState={posMethodSaveState}
+                  posPaymentMethods={posPaymentMethods}
+                  discountPresets={discountPresets}
+                  expenseCategories={expenseCategories}
+                  activeView={activeView}
+                  workspaceOverlay={workspaceOverlay}
+                  setClarityPayReturn={setClarityPayReturn}
+                  invoiceNumber={invoiceNumber}
+                  startEditableBlock={startEditableBlock}
+                  cancelEditableBlock={cancelEditableBlock}
+                  coachAccount={coachAccount}
+                  openProfileTarget={openProfileTarget}
+                  setUpClarityPay={setUpClarityPay}
+                  connectStripe={connectStripe}
+                  disconnectStripe={disconnectStripe}
+                  resyncStripeBilling={resyncStripeBilling}
+                  saveEditableBlock={saveEditableBlock}
+                  savePosPaymentMethod={savePosPaymentMethod}
+                  setPosPaymentMethodActive={setPosPaymentMethodActive}
+                  addDiscountPreset={addDiscountPreset}
+                  toggleDiscountActive={toggleDiscountActive}
+                  addExpenseCategory={addExpenseCategory}
+                  toggleExpenseCategoryActive={toggleExpenseCategoryActive}
+                />
+              </Suspense>
             )}
             </div>
           </WorkspaceSurface>
@@ -23030,6 +17590,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                 onDismiss={() => setClarityPayReturn(null)}
               />
             )}
+            <Suspense fallback={<Loading what={t("profile")} />}>
             <BusinessHubPanel
               profile={
                 ownCoachProfile ? (
@@ -23068,6 +17629,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
               clarityPay={profileClarityPay}
               onOpen={(target, label) => openProfileTarget(target, label)}
             />
+            </Suspense>
           </section>
         )}
 
@@ -23227,734 +17789,61 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                 </EditableSettingsBlock>
               </SettingsGroup>
 
-              <SettingsGroup id="coach-account" icon={ClarityProfile} section="account" title={t("Account")} className="notification-card account-card">
-                <details className="settings-subsection">
-                  <summary className="settings-subsection-title">
-                    <ClarityPayments size={18} />
-                    <div>
-                      <span>{t("Plan")}</span>
-                      <strong className="account-plan-heading">
-                        {activeAccount.planKey.charAt(0).toUpperCase() + activeAccount.planKey.slice(1)}
-                        <em className={`account-status-pill ${isAccountActive(activeAccount) ? "is-ok" : "is-bad"}`}>
-                          {SUBSCRIPTION_STATUS_LABEL[activeAccount.subscriptionStatus]}
-                        </em>
-                      </strong>
-                    </div>
-                  </summary>
-                  <dl className="account-plan-details">
-                    <div>
-                      <dt>{t("Workspace")}</dt>
-                      <dd>{activeAccount.name}</dd>
-                    </div>
-                    <div>
-                      <dt>{t("Workspace ID")}</dt>
-                      <dd>{activeAccount.slug}</dd>
-                    </div>
-                  </dl>
-                  <div className="account-usage-grid">
-                    {(
-                      [
-                        ["maxCoaches", terms.staffPlural],
-                        ["maxLocations", t("Locations")],
-                        ["maxUsers", t("Team logins")],
-                        ["maxServices", t("{serviceSingular} types", { serviceSingular: terms.serviceSingular })],
-                        ["maxBookingScreens", t("Booking screens")],
-                      ] as Array<[keyof AccountLimits, string]>
-                    ).map(([limitName, label]) => {
-                      const used = accountUsage[limitName];
-                      const limit = activeAccountEntitlements.limits[limitName];
-                      const unlimited = limit >= UNLIMITED_ACCOUNT_LIMIT;
-                      const share = unlimited || limit <= 0 ? 0 : Math.min(used / limit, 1);
-                      return (
-                        <div key={limitName} className="account-usage-tile">
-                          <span>{label}</span>
-                          <strong>
-                            {used}
-                            <small>{unlimited ? t(" · unlimited") : ` ${t("of {limit}", { limit })}`}</small>
+              <Suspense fallback={<Loading />}>
+                <AccountSettingsPanel
+                  activeAccount={activeAccount}
+                  showPasswordFields={showPasswordFields}
+                  terms={terms}
+                  passwordChangeForm={passwordChangeForm}
+                  updatePasswordChangeForm={updatePasswordChangeForm}
+                  passwordChangeState={passwordChangeState}
+                  passwordRequirements={passwordRequirements}
+                  passwordChangeMessage={passwordChangeMessage}
+                  accountUsage={accountUsage}
+                  activeAccountEntitlements={activeAccountEntitlements}
+                  enabledAccountFeatures={enabledAccountFeatures}
+                  setShowPasswordFields={setShowPasswordFields}
+                  openProfileTarget={openProfileTarget}
+                  handleChangePassword={handleChangePassword}
+                />
+              </Suspense>
 
-                          </strong>
-                          {!unlimited && (
-                            <div className={`account-usage-meter${share >= 1 ? " is-full" : ""}`} aria-hidden="true">
-                              <i style={{ width: `${share * 100}%` }} />
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <div className="account-feature-block">
-                    <span className="account-feature-heading">{t("Included in your plan")}</span>
-                    <ul className="account-feature-list">
-                      {enabledAccountFeatures.map((feature) => (
-                        <li key={feature}>
-                          <Check size={14} aria-hidden="true" />
-                          {accountFeatureLabel(feature, terms)}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                </details>
-                <div className="account-settings-groups">
-                  <details className="settings-subsection">
-                    <summary className="settings-subsection-title">
-                      <ClarityAccessPermissions size={18} />
-                      <div>
-                        <span>{t("Security")}</span>
-                        <strong>{t("Password")}</strong>
-                      </div>
-                    </summary>
-                    <form className="security-settings-form" onSubmit={handleChangePassword}>
-                      <p className="field-help">{t("Enter your current password, then choose a new one. You'll stay signed in on this device.")}</p>
-                      <label className="settings-field">
-                        <span>{t("Current password")}</span>
-                        <input
-                          value={passwordChangeForm.currentPassword}
-                          onChange={(event) => updatePasswordChangeForm("currentPassword", event.target.value)}
-                          type={showPasswordFields ? "text" : "password"}
-                          autoComplete="current-password"
-                          required
-                        />
-                      </label>
-                      <label className="settings-field">
-                        <span>{t("New password")}</span>
-                        <input
-                          value={passwordChangeForm.newPassword}
-                          onChange={(event) => updatePasswordChangeForm("newPassword", event.target.value)}
-                          type={showPasswordFields ? "text" : "password"}
-                          autoComplete="new-password"
-                          aria-describedby="password-requirements"
-                          required
-                        />
-                      </label>
-                      <label className="settings-field">
-                        <span>{t("Confirm new password")}</span>
-                        <input
-                          value={passwordChangeForm.confirmPassword}
-                          onChange={(event) => updatePasswordChangeForm("confirmPassword", event.target.value)}
-                          type={showPasswordFields ? "text" : "password"}
-                          autoComplete="new-password"
-                          required
-                        />
-                      </label>
-                      <label className="show-password-toggle">
-                        <input
-                          checked={showPasswordFields}
-                          onChange={(event) => setShowPasswordFields(event.target.checked)}
-                          type="checkbox"
-                        />
-                        <span>{t("Show passwords")}</span>
-                      </label>
-                      <ul id="password-requirements" className="password-requirements">
-                        {passwordRequirements.map((requirement) => (
-                          <li key={requirement.label} className={requirement.met ? "is-met" : undefined}>
-                            {requirement.met ? <Check size={14} aria-hidden="true" /> : <span aria-hidden="true" className="password-requirement-dot" />}
-                            {requirement.label}
-                          </li>
-                        ))}
-                      </ul>
-                      {passwordChangeMessage && (
-                        <div className={passwordChangeState === "saved" ? "auth-success" : "auth-error"} role="status">
-                          {passwordChangeMessage}
-                        </div>
-                      )}
-                      <div className="security-settings-actions">
-                        <button
-                          className="primary-button"
-                          disabled={passwordChangeState === "saving" || !passwordRequirements.every((requirement) => requirement.met)}
-                          type="submit"
-                        >
-                          {passwordChangeState === "saving" ? t("Updating…") : t("Update password")}
-                        </button>
-                      </div>
-                    </form>
-                  </details>
-
-                  <EditableSettingsBlock
-                    id="billing-settings-account-block"
-                    title={t("Billing Settings")}
-                    status={billingSettingsEditor.status}
-                    dirty={billingSettingsEditor.dirty}
-                    errorMessage={billingSettingsEditor.errorMessage}
-                    onEdit={() => startEditableBlock("billing-settings")}
-                    onCancel={() => cancelEditableBlock("billing-settings")}
-                    onSave={() => void saveEditableBlock("billing-settings")}
-                  >
-                  <details className="settings-subsection">
-                    <summary className="settings-subsection-title">
-                      <ClarityBookingPages size={18} />
-                      <div>
-                        <span>{t("Invoicing")}</span>
-                        <strong>{t("{prefix}-{value} next", { prefix: invoiceSettings.prefix, value: String(invoiceSettings.nextNumber).padStart(4, "0") })}</strong>
-                      </div>
-                    </summary>
-                    <div className="service-form-row">
-                      <label className="settings-toggle">
-                        <input
-                          checked={invoiceSettingsDraft.enabled}
-                          disabled={billingSettingsIsLocked || !canUseFeature(activeAccount, "invoicing")}
-                          onChange={(event) => updateBillingAccountDraft("enabled", event.target.checked)}
-                          type="checkbox"
-                        />
-                        <span>{t("Enable invoicing")}</span>
-                      </label>
-                      <label className="settings-toggle">
-                        <input
-                          checked={invoiceSettingsDraft.showBillingWorkspace}
-                          disabled={billingSettingsIsLocked || !canUseFeature(activeAccount, "invoicing")}
-                          onChange={(event) => updateBillingAccountDraft("showBillingWorkspace", event.target.checked)}
-                          type="checkbox"
-                        />
-                        <span>{t("Show Billing workspace")}</span>
-                      </label>
-                    </div>
-                    <div className="service-form-row">
-                      <label className="settings-field">
-                        <span>{t("Invoice prefix")}</span>
-                        <input
-                          value={invoiceSettingsDraft.prefix}
-                          readOnly={billingSettingsIsLocked}
-                          onChange={(event) => updateBillingAccountDraft("prefix", event.target.value)}
-                        />
-                      </label>
-                      <label className="settings-field">
-                        <span>{t("Start / next number")}</span>
-                        <input
-                          value={invoiceSettingsDraft.nextNumber}
-                          inputMode="numeric"
-                          readOnly={billingSettingsIsLocked}
-                        onChange={(event) => updateBillingAccountDraft("nextNumber", parseQuantityInput(event.target.value))}
-                          type="text"
-                        />
-                      </label>
-                    </div>
-                    <div className="service-form-row">
-                      <label className="settings-field">
-                        <span>{t("{taxName} number", { taxName: invoiceSettingsDraft.taxName })}</span>
-                        <input
-                          value={invoiceSettingsDraft.taxNumber}
-                        readOnly={billingSettingsIsLocked}
-                        onChange={(event) => updateBillingAccountDraft("taxNumber", event.target.value)}
-                          placeholder={`${invoiceSettingsDraft.taxName} number`}
-                        />
-                      </label>
-                    </div>
-                    <div className="service-form-row">
-                      <label className="settings-field">
-                        <span>{t("Bank account")}</span>
-                        <input
-                          value={invoiceSettingsDraft.bankAccount}
-                          readOnly={billingSettingsIsLocked}
-                          onChange={(event) => updateBillingAccountDraft("bankAccount", event.target.value)}
-                        />
-                      </label>
-                      <label className="settings-field">
-                        <span>{t("Payment terms days")}</span>
-                        <input
-                          value={invoiceSettingsDraft.paymentTermsDays}
-                          inputMode="numeric"
-                          readOnly={billingSettingsIsLocked}
-                        onChange={(event) => updateBillingAccountDraft("paymentTermsDays", parseQuantityInput(event.target.value))}
-                          type="text"
-                        />
-                      </label>
-                    </div>
-                    {/* Address, tax number, header, bank account, payment
-                        instructions, default note and footer were seven boxes
-                        here. They are the same document every client receives,
-                        so they are written on it — see InvoiceTemplatePanel.
-                        Numbering, currency, tax rate and terms stay fields:
-                        they are settings, not things printed on the page. */}
-                    <Suspense fallback={<Loading what={t("invoice template")} />}>
-                      <InvoiceTemplatePanel
-                        settings={invoiceSettingsDraft}
-                        locked={billingSettingsIsLocked}
-                        businessName={coachAccount.businessName}
-                        logoUrl={brandSettings.showLogo ? brandSettings.logoPreview : ""}
-                        formatMoney={(value) => formatMoney(value, invoiceSettingsDraft.currency)}
-                        onChange={(field, value) => updateBillingAccountDraft(field, value)}
-                      />
-                    </Suspense>
-                    <div className="custom-field-list">
-                      <div className="services-topline">
-                        <div>
-                          <span>{t("Custom fields")}</span>
-                          <h2>{t("Invoice fields")}</h2>
-                        </div>
-                        <button className="outline-button" disabled={billingSettingsIsLocked} onClick={addBillingCustomFieldDraft} type="button">
-                          <Plus size={16} />{t("Add Field")}</button>
-                      </div>
-                      {invoiceSettingsDraft.customFields.map((field) => (
-                        <div className="custom-field-row" key={field.id}>
-                          <label className="settings-field">
-                            <span>{t("Label")}</span>
-                            <input
-                              value={field.label}
-                              readOnly={billingSettingsIsLocked}
-                              onChange={(event) => updateBillingCustomFieldDraft(field.id, "label", event.target.value)}
-                            />
-                          </label>
-                          <label className="settings-field">
-                            <span>{t("Value")}</span>
-                            <input
-                              value={field.value}
-                              readOnly={billingSettingsIsLocked}
-                              onChange={(event) => updateBillingCustomFieldDraft(field.id, "value", event.target.value)}
-                            />
-                          </label>
-                          <label className="settings-field">
-                            <span>{t("Placement")}</span>
-                            <select
-                              value={field.placement}
-                              disabled={billingSettingsIsLocked}
-                              onChange={(event) =>
-                                updateBillingCustomFieldDraft(field.id, "placement", event.target.value as InvoiceCustomFieldPlacement)
-                              }
-                            >
-                              <option value="header">{t("Header")}</option>
-                              <option value="bill-to">{t("Bill-to block")}</option>
-                              <option value="payment">{t("Payment block")}</option>
-                              <option value="footer">{t("Footer")}</option>
-                            </select>
-                          </label>
-                          <button
-                            className="icon-button"
-                            disabled={billingSettingsIsLocked}
-                            onClick={() => removeBillingCustomFieldDraft(field.id)}
-                            type="button"
-                            aria-label={t("Remove custom field")}
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="custom-field-list">
-                      <div className="services-topline">
-                        <div>
-                          <span>{t("Line tags")}</span>
-                          <h2>{t("How you group invoice lines")}</h2>
-                        </div>
-                        <button className="outline-button" disabled={billingSettingsIsLocked} onClick={addBillingLineTagDraft} type="button">
-                          <Plus size={16} />{t("Add Tag")}</button>
-                      </div>
-                      {/* Not a fixed list: one workspace reports by coach, another
-                          by location. The tag never appears on the client's copy -
-                          it is only how the coach files the line. */}
-                      <p className="settings-note">{t("Your own labels for invoice lines — coach, location, whatever you report on. They stay off the client's invoice. Removing one here leaves it on invoices that already used it.")}</p>
-                      {invoiceSettingsDraft.lineTags.length ? (
-                        invoiceSettingsDraft.lineTags.map((tag) => (
-                          <div className="custom-field-row" key={tag.id}>
-                            <label className="settings-field">
-                              <span>{t("Label")}</span>
-                              <input
-                                value={tag.label}
-                                readOnly={billingSettingsIsLocked}
-                                onChange={(event) => updateBillingLineTagDraft(tag.id, event.target.value)}
-                                placeholder={t("Coach · Jordan Blake")}
-                              />
-                            </label>
-                            <button
-                              className="icon-button"
-                              disabled={billingSettingsIsLocked}
-                              onClick={() => removeBillingLineTagDraft(tag.id)}
-                              type="button"
-                              aria-label={t("Remove line tag")}
-                            >
-                              <Trash2 size={16} />
-                            </button>
-                          </div>
-                        ))
-                      ) : (
-                        <p className="settings-static-value">{t("No tags yet — invoice lines won't show a Tag field.")}</p>
-                      )}
-                    </div>
-                  </details>
-                  </EditableSettingsBlock>
-                </div>
-              </SettingsGroup>
-
-              <SettingsGroup id="google-calendar" icon={ClarityCalendarSync} section="developer" title={t("Calendar feed & video storage")} className="sync-card">
-
-                <section className="settings-subsection video-storage-section" aria-labelledby="video-storage-heading">
-                  <div className="video-storage-heading">
-                    <div>
-                      <span>{t("VIDEO STORAGE")}</span>
-                      <h3 id="video-storage-heading">{t("My Library and Clarity Cloud")}</h3>
-                    </div>
-                    <ClarityVideoAnalysis size={20} />
-                  </div>
-
-                  <div className="video-storage-grid">
-                    <article className={`storage-card is-${localStorageHealth.state}`}>
-                      <div className="storage-card-header">
-                        <ClarityFilesMedia size={18} />
-                        <div>
-                          <span>{t("My Library")}</span>
-                          <strong>{localStorageHealth.statusLabel}</strong>
-                        </div>
-                      </div>
-                      <p>{localStorageHealth.message}</p>
-                      <span className="storage-provider-line">{localStorageHealth.detail}</span>
-                      {localStoragePrimaryAction ? (
-                        <button
-                          className="primary-button"
-                          disabled={!managedLocalLibraryStatus.supported}
-                          onClick={() => void runLocalStorageHealthAction(localStoragePrimaryAction)}
-                          type="button"
-                        >
-                          <ClarityFilesMedia size={16} />
-                          {getLocalStorageActionLabel(localStoragePrimaryAction)}
-                        </button>
-                      ) : null}
-                    </article>
-
-                    <article className={`storage-card is-${clarityCloudHealth.state}`}>
-                      <div className="storage-card-header">
-                        <Upload size={18} />
-                        <div>
-                          <span>{t("Clarity Cloud")}</span>
-                          <strong>{clarityCloudHealth.statusLabel}</strong>
-                        </div>
-                      </div>
-                      <p>{clarityCloudHealth.message}</p>
-                      <span className="storage-provider-line">{t("Powered by {providerLabel}", { providerLabel: clarityCloudHealth.providerLabel })}</span>
-                      {clarityCloudPrimaryAction ? (
-                        <button
-                          className="primary-button"
-                          disabled={googleDriveAction !== "idle"}
-                          onClick={() => void runClarityCloudHealthAction(clarityCloudPrimaryAction)}
-                          type="button"
-                        >
-                          <ExternalLink size={16} />
-                          {googleDriveAction === "connecting"
-                            ? t("Opening provider")
-                            : googleDriveAction === "testing"
-                              ? t("Checking")
-                              : getClarityCloudActionLabel(clarityCloudPrimaryAction)}
-                        </button>
-                      ) : null}
-                    </article>
-                  </div>
-
-                  <section className="storage-transfer-inbox" aria-label={t("Clarity Cloud catalogue")}>
-                    <div className="storage-transfer-inbox-header">
-                      <div>
-                        <span>{t("CLARITY CLOUD CATALOGUE")}</span>
-                        <h4>{t("Available in Clarity Cloud")}</h4>
-                      </div>
-                      <button
-                        type="button"
-                        className="outline-button"
-                        disabled={!googleDriveTransfer.connected || !googleDriveTransfer.incomingImportReady}
-                        onClick={() => void refreshClarityCloudImports()}
-                      >
-                        <RefreshCw size={16} />{t("Refresh")}</button>
-                    </div>
-                    {clarityCloudImports.length ? (
-                      <div className="storage-transfer-list">
-                        {clarityCloudImports.map((transfer) => {
-                          const savedVideoId = transfer.savedVideoId || transfer.savedVideo?.savedVideoId || transfer.transferId;
-                          const statusLabel =
-                            transfer.catalogueStatus === "complete"
-                              ? t("Available")
-                              : transfer.catalogueStatus === "imported" || transfer.catalogueStatus === "cleanup_scheduled"
-                                ? t("Available on this device")
-                                : transfer.catalogueStatus === "repair_required"
-                                  ? t("Needs repair")
-                                  : t("Available");
-                          const canImport =
-                            (transfer.catalogueStatus === "ready_to_import" ||
-                              transfer.catalogueStatus === "complete" ||
-                              transfer.catalogueStatus === "cleanup_scheduled") &&
-                            !clarityCloudImportActionIds.has(savedVideoId);
-                          // Someone with no account sent this. It is unclaimed
-                          // until the coach adds them, and it expires if they
-                          // never do.
-                          const isGuestSubmission = transfer.direction === "guest-submission";
-                          const guestUnclaimed = isGuestSubmission && !transfer.claimedAt;
-                          return (
-                            <article
-                              className={`storage-transfer-row${isGuestSubmission ? " is-guest-submission" : ""}`}
-                              key={savedVideoId}
-                            >
-                              <div className="storage-transfer-icon">
-                                <Download size={16} />
-                              </div>
-                              <div className="storage-transfer-copy">
-                                <strong>{transfer.savedVideo?.title || t("Saved video")}</strong>
-                                <span>
-                                  {statusLabel}
-                                  {transfer.savedVideo?.createdAt ? ` · ${profileRecordDateLabel(transfer.savedVideo.createdAt)}` : ""}
-                                  {transfer.video?.sizeBytes ? t(" · {value} MB", { value: Math.round(transfer.video.sizeBytes / 1024 / 1024) }) : ""}
-                                </span>
-                                {isGuestSubmission && (
-                                  <>
-                                    {/* Say plainly that none of this was checked. */}
-                                    <span>{t("Sent by")}{" "}{transfer.submittedByName || "someone"}
-                                      {transfer.submittedByEmail ? ` · ${transfer.submittedByEmail}` : ""}
-                                      {guestUnclaimed ? t(" · no account yet") : ""}
-                                    </span>
-                                    {transfer.playerMessage && <span>“{transfer.playerMessage}”</span>}
-                                    {guestUnclaimed && transfer.cleanupAfter && (
-                                      <span>{t("Expires {cleanupAfter} unless you add them.", { cleanupAfter: profileRecordDateLabel(transfer.cleanupAfter) })}</span>
-                                    )}
-                                  </>
-                                )}
-                              </div>
-                              {guestUnclaimed && (
-                                <button
-                                  type="button"
-                                  className="outline-button"
-                                  disabled={Boolean(portalPlayerBusyId)}
-                                  onClick={() => void addGuestAsPlayer(transfer)}
-                                >
-                                  {portalPlayerBusyId === transfer.guestSenderId ? t("Adding") : t("Add as player")}
-                                </button>
-                              )}
-                              <button
-                                type="button"
-                                className="primary-button"
-                                disabled={!canImport}
-                                onClick={() => void importClarityCloudTransfer(transfer)}
-                              >
-                                <Download size={16} />
-                                {clarityCloudImportActionIds.has(savedVideoId) ? t("Downloading") : t("Download to this device")}
-                              </button>
-                            </article>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <p className="storage-transfer-empty">
-                        {googleDriveTransfer.connected
-                          ? t("No Cloud videos are available yet.")
-                          : t("Connect Clarity Cloud to see transfers from other devices.")}
-                      </p>
-                    )}
-                  </section>
-
-                  <details
-                    className="storage-diagnostics"
-                    open={storageDiagnosticsOpen}
-                    onToggle={(event) => setStorageDiagnosticsOpen(event.currentTarget.open)}
-                  >
-                    <summary className="settings-subsection-title">
-                      <ClarityAdmin size={18} />
-                      <div>
-                        <span>{t("Advanced storage diagnostics")}</span>
-                        <strong>{t("Local Storage and Clarity Cloud")}</strong>
-                      </div>
-                    </summary>
-                    <div className="storage-diagnostics-grid">
-                      <div className="storage-diagnostics-group">
-                        <h4>{t("Local Storage")}</h4>
-                        <div className="sync-meta">
-                          <span>{t("Browser support")}</span>
-                          <strong>{managedLocalLibraryStatus.supported ? t("Supported") : "Browser-only"}</strong>
-                        </div>
-                        <div className="sync-meta">
-                          <span>{t("Directory handle")}</span>
-                          <strong>{managedLocalLibraryStatus.configured ? t("Available") : t("Not selected")}</strong>
-                        </div>
-                        <div className="sync-meta">
-                          <span>{t("Verification")}</span>
-                          <strong>{managedLocalLibraryStatus.health === "healthy" ? t("Write/read passed") : managedLocalLibraryStatus.message}</strong>
-                        </div>
-                        <div className="sync-meta">
-                          <span>{t("Cache state")}</span>
-                          <strong>{t("IndexedDB recovery enabled")}</strong>
-                        </div>
-                        <div className="sync-meta">
-                          <span>{t("Safe error code")}</span>
-                          <strong>{"safeErrorCode" in localStorageHealth && localStorageHealth.safeErrorCode ? localStorageHealth.safeErrorCode : t("None")}</strong>
-                        </div>
-                        <div className="sync-actions">
-                          <button
-                            className="outline-button"
-                            disabled={!managedLocalLibraryStatus.supported}
-                            onClick={() => void runManagedLibraryAction("choose")}
-                            type="button"
-                          >
-                            <ClarityFilesMedia size={16} />{t("Change folder")}</button>
-                          <button
-                            className="outline-button"
-                            disabled={!managedLocalLibraryStatus.supported}
-                            onClick={() => void runManagedLibraryAction("move")}
-                            type="button"
-                          >
-                            <ArrowRight size={16} />{t("Move library")}</button>
-                          <button
-                            className="outline-button"
-                            disabled={!managedLocalLibraryStatus.configured}
-                            onClick={() => void runManagedLibraryAction("reconnect")}
-                            type="button"
-                          >
-                            <RefreshCw size={16} />{t("Reconnect handle")}</button>
-                          <button
-                            className="outline-button"
-                            disabled={!managedLocalLibraryStatus.configured}
-                            onClick={() => void runManagedLibraryAction("verify")}
-                            type="button"
-                          >
-                            <Check size={16} />{t("Verify library")}</button>
-                          <button
-                            className="outline-button"
-                            disabled={!managedLocalLibraryStatus.configured}
-                            onClick={() => void runManagedLibraryAction("rescan")}
-                            type="button"
-                          >
-                            <RefreshCw size={16} />{t("Rescan library")}</button>
-                          <button
-                            className="outline-button"
-                            disabled={!managedLocalLibraryStatus.configured}
-                            onClick={() => void runManagedLibraryAction("migrate")}
-                            type="button"
-                          >
-                            <Archive size={16} />{t("Migrate cache")}</button>
-                        </div>
-                      </div>
-
-                      <div className="storage-diagnostics-group">
-                        <h4>{t("Clarity Cloud")}</h4>
-                        <div className="sync-meta">
-                          <span>{t("Provider")}</span>
-                          <strong>{clarityCloudHealth.providerLabel}</strong>
-                        </div>
-                        <div className="sync-meta">
-                          <span>{t("OAuth connection")}</span>
-                          <strong>{googleDriveTransfer.connected ? googleDriveTransfer.accountEmail || t("Connected") : t("Not connected")}</strong>
-                        </div>
-                        <div className="sync-meta">
-                          <span>{t("Permission")}</span>
-                          <strong>{googleDriveTransfer.driveScopeGranted ? t("Granted") : t("Required")}</strong>
-                        </div>
-                        <div className="sync-meta">
-                          <span>{t("Transfer folder")}</span>
-                          <strong>{googleDriveTransfer.inboxFolderId ? t("Ready") : t("Not ready")}</strong>
-                        </div>
-                        <div className="sync-meta">
-                          <span>{t("Upload service")}</span>
-                          <strong>{googleDriveTransfer.uploadRouteReady === false ? t("Unavailable") : t("Available")}</strong>
-                        </div>
-                        <div className="sync-meta">
-                          <span>{t("Chunked transport")}</span>
-                          <strong>{googleDriveTransfer.chunkedTransportReady === false ? t("Unavailable") : t("Available")}</strong>
-                        </div>
-                        <div className="sync-meta">
-                          <span>{t("Incoming import")}</span>
-                          <strong>{googleDriveTransfer.incomingImportReady ? t("Ready") : t("Next step")}</strong>
-                        </div>
-                        <div className="sync-meta">
-                          <span>{t("Safe error code")}</span>
-                          <strong>{"safeErrorCode" in clarityCloudHealth && clarityCloudHealth.safeErrorCode ? clarityCloudHealth.safeErrorCode : t("None")}</strong>
-                        </div>
-                        <div className="sync-meta">
-                          <span>{t("Missing configuration")}</span>
-                          <strong>{googleDriveTransfer.missingConfiguration?.length ? googleDriveTransfer.missingConfiguration.join(", ") : t("None")}</strong>
-                        </div>
-                        <div className="sync-actions">
-                          <button
-                            className="outline-button"
-                            disabled={googleDriveAction !== "idle"}
-                            onClick={connectGoogleDriveTransfer}
-                            type="button"
-                          >
-                            <ExternalLink size={16} />
-                            {googleDriveTransfer.connected ? t("Reconnect provider") : t("Connect provider")}
-                          </button>
-                          <button
-                            className="outline-button"
-                            disabled={googleDriveAction !== "idle"}
-                            onClick={testGoogleDriveTransfer}
-                            type="button"
-                          >
-                            <RefreshCw size={16} />
-                            {googleDriveAction === "testing" ? t("Testing") : t("Test connection")}
-                          </button>
-                          <button
-                            className="outline-button"
-                            disabled={!googleDriveTransfer.inboxFolderId && !googleDriveTransfer.rootFolderId}
-                            onClick={() => {
-                              const folderId = googleDriveTransfer.inboxFolderId || googleDriveTransfer.rootFolderId;
-                              if (folderId) {
-                                window.open(`https://drive.google.com/drive/folders/${folderId}`, "_blank", "noopener,noreferrer");
-                              }
-                            }}
-                            type="button"
-                          >
-                            <ExternalLink size={16} />{t("Open transfer inbox")}</button>
-                          <button
-                            className="danger-button"
-                            disabled={googleDriveAction !== "idle" || !googleDriveTransfer.connected}
-                            onClick={disconnectGoogleDriveTransfer}
-                            type="button"
-                          >
-                            <X size={16} />
-                            {googleDriveAction === "disconnecting" ? t("Disconnecting") : t("Disconnect provider")}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </details>
-                </section>
-
-                <div className={`sync-status ${calendarFeedStatus}`}>
-                  <span>{t("Feed endpoint")}</span>
-                  <strong>
-                    {calendarFeedStatus === "connected"
-                      ? calendarSaveStatus === "failed"
-                        ? t("Connected — save needs retry")
-                        : t("Connected")
-                      : calendarFeedStatus === "checking"
-                        ? t("Checking")
-                        : t("Offline")}
-                  </strong>
-                  <em>{calendarSaveError || calendarFeedUrl}</em>
-                </div>
-                <details className="settings-subsection">
-                  <summary className="settings-subsection-title">
-                    <ClarityAccessPermissions size={18} />
-                    <div>
-                      <span>{t("Google Calendar")}</span>
-                      <strong>
-                        {items.filter((item) => item.kind === "appointment").length}{" "}{t("appointments,")}{" "}{items.filter((item) => item.kind === "block").length}{" "}{t("busy blocks")}</strong>
-                    </div>
-                  </summary>
-                  <label className="sync-field">
-                    <span>{t("Live booking app URL")}</span>
-                    <input
-                      value={syncBaseUrl}
-                      onChange={(event) => setSyncBaseUrl(event.target.value)}
-                      placeholder={coachAccount.bookingUrl}
-                    />
-                  </label>
-
-                  <div className="sync-output">
-                    <span>{t("Subscription URL")}</span>
-                    <code>{calendarFeedUrl}</code>
-                  </div>
-
-                  <div className="sync-actions">
-                    <button className="outline-button" onClick={() => copySyncText("url")}>
-                      {copiedSync === "url" ? <Check size={16} /> : <Copy size={16} />}
-                      {copiedSync === "url" ? t("Copied URL") : t("Copy URL")}
-                    </button>
-                    <button className="outline-button" onClick={() => copySyncText("key")}>
-                      {copiedSync === "key" ? <Check size={16} /> : <ClarityAccessPermissions size={16} />}
-                      {copiedSync === "key" ? t("Copied key") : t("Copy key")}
-                    </button>
-                    <button className="outline-button" onClick={regenerateSyncKey}>
-                      <RefreshCw size={16} />{t("Regenerate")}</button>
-                    <a
-                      className="outline-button"
-                      href="https://calendar.google.com/calendar/u/0/r/settings/addbyurl"
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      <ExternalLink size={16} />{t("Google")}</a>
-                  </div>
-                </details>
-              </SettingsGroup>
+              <Suspense fallback={<Loading />}>
+                <VideoStoragePanel
+                  googleDriveTransfer={googleDriveTransfer}
+                  managedLocalLibraryStatus={managedLocalLibraryStatus}
+                  clarityCloudHealth={clarityCloudHealth}
+                  googleDriveAction={googleDriveAction}
+                  localStorageHealth={localStorageHealth}
+                  copiedSync={copiedSync}
+                  localStoragePrimaryAction={localStoragePrimaryAction}
+                  clarityCloudPrimaryAction={clarityCloudPrimaryAction}
+                  calendarFeedStatus={calendarFeedStatus}
+                  clarityCloudImports={clarityCloudImports}
+                  clarityCloudImportActionIds={clarityCloudImportActionIds}
+                  portalPlayerBusyId={portalPlayerBusyId}
+                  calendarFeedUrl={calendarFeedUrl}
+                  items={items}
+                  copySyncText={copySyncText}
+                  storageDiagnosticsOpen={storageDiagnosticsOpen}
+                  setStorageDiagnosticsOpen={setStorageDiagnosticsOpen}
+                  calendarSaveStatus={calendarSaveStatus}
+                  calendarSaveError={calendarSaveError}
+                  syncBaseUrl={syncBaseUrl}
+                  setSyncBaseUrl={setSyncBaseUrl}
+                  coachAccount={coachAccount}
+                  regenerateSyncKey={regenerateSyncKey}
+                  runManagedLibraryAction={runManagedLibraryAction}
+                  runLocalStorageHealthAction={runLocalStorageHealthAction}
+                  runClarityCloudHealthAction={runClarityCloudHealthAction}
+                  refreshClarityCloudImports={refreshClarityCloudImports}
+                  addGuestAsPlayer={addGuestAsPlayer}
+                  importClarityCloudTransfer={importClarityCloudTransfer}
+                  connectGoogleDriveTransfer={connectGoogleDriveTransfer}
+                  testGoogleDriveTransfer={testGoogleDriveTransfer}
+                  disconnectGoogleDriveTransfer={disconnectGoogleDriveTransfer}
+                />
+              </Suspense>
 
               {/* Settings › Email / SMS › Sender & delivery. Who email comes
                   from, who it goes to, and how long it waits. What it says is
@@ -23969,163 +17858,23 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                   reminder on, watched reminders go out, and still read "Off"
                   here — a half-written save that the shared header had no way
                   to show. */}
-              <SettingsGroup id="email-notifications" icon={ClarityIntegrations} section="email-sms" title={t("Sender & delivery")} className="notification-card">
-                <EditableSettingsBlock
-                  id="email-notifications-block"
-                  title={t("Sender & delivery")}
-                  status={emailNotificationsEditor.status}
-                  dirty={emailNotificationsEditor.dirty}
-                  errorMessage={emailNotificationsEditor.errorMessage}
-                  onEdit={() => startEditableBlock("email-notifications")}
-                  onCancel={() => cancelEditableBlock("email-notifications")}
-                  onSave={() => void saveEditableBlock("email-notifications")}
-                >
-                <div className="settings-summary-grid">
-                  <span>
-                    <strong>{notificationSettings.notificationFromName || t("Not set")}</strong>{t("from")}</span>
-                  <span>
-                    <strong>{notificationSettings.replyToEmail || coachAccount.contactEmail || t("Not set")}</strong>{t("reply-to")}</span>
-                  <span>
-                    <strong>{notificationSettings.notificationDelaySeconds}s</strong>{t("delay")}</span>
-                </div>
-                <details className="settings-subsection">
-                  <summary className="settings-subsection-title">
-                    <ClarityEmail size={18} />
-                    <div>
-                      <span>{t("Sender identity")}</span>
-                      <strong>{notificationSettings.configuredSenderEmailAddress || "Provider-controlled"}</strong>
-                    </div>
-                  </summary>
-                  <label className="settings-field">
-                    <span>{t("Email sender name")}</span>
-                    <input
-                      placeholder={t("Your business name")}
-                      value={emailNotificationsDraft.notificationFromName}
-                      readOnly={emailNotificationsIsLocked}
-                      maxLength={120}
-                      onChange={(event) =>
-                        updateNotificationBlockDraft(emailNotificationsEditor, "notificationFromName", event.target.value.slice(0, 120))}
-                    />
-                  </label>
-                  <p className="field-help">{t("This is the display name clients see in their inbox.")}</p>
-                  <label className="settings-field">
-                    <span>{t("Sender email address")}</span>
-                    <input
-                      value={notificationSettings.configuredSenderEmailAddress}
-                      type="email"
-                      readOnly
-                      disabled
-                      placeholder={t("Sender address controlled by provider")}
-                    />
-                  </label>
-                  <p className="field-help">{t("The sender email address is controlled by your configured email provider/domain.")}</p>
-                  <label className="settings-field">
-                    <span>{t("Reply-to email")}</span>
-                    <input
-                      value={emailNotificationsDraft.replyToEmail}
-                      readOnly={emailNotificationsIsLocked}
-                      onChange={(event) => updateNotificationBlockDraft(emailNotificationsEditor, "replyToEmail", event.target.value)}
-                      placeholder={coachAccount.contactEmail}
-                    />
-                  </label>
-                </details>
-                <details className="settings-subsection">
-                  <summary className="settings-subsection-title">
-                    <ClarityEmail size={18} />
-                    <div>
-                      <span>{t("Delivery")}</span>
-                      <strong>{notificationSettings.notificationEmail || coachAccount.contactEmail}</strong>
-                    </div>
-                  </summary>
-                  <label className="settings-field">
-                    <span>{t("Admin notification email")}</span>
-                    <input
-                      value={emailNotificationsDraft.notificationEmail}
-                      readOnly={emailNotificationsIsLocked}
-                      onChange={(event) => updateNotificationBlockDraft(emailNotificationsEditor, "notificationEmail", event.target.value)}
-                      placeholder={coachAccount.contactEmail}
-                    />
-                  </label>
-                  <label className="settings-field">
-                    <span>{t("Coach email (fallback)")}</span>
-                    <input
-                      value={emailNotificationsDraft.coachEmail}
-                      readOnly={emailNotificationsIsLocked}
-                      onChange={(event) => updateNotificationBlockDraft(emailNotificationsEditor, "coachEmail", event.target.value)}
-                      placeholder={t("coach@example.com")}
-                      type="email"
-                    />
-                  </label>
-                  <p className="field-help">{t("Coach booking alerts go to the email on the coach profile of whoever is taking the lesson (Settings → Coaches). This address is only used if that profile has no email.")}</p>
-                  <label className="settings-field">
-                    <span>{t("Notification delay seconds")}</span>
-                    <input
-                      value={emailNotificationsDraft.notificationDelaySeconds}
-                      readOnly={emailNotificationsIsLocked}
-                      min={30}
-                      step={5}
-                      inputMode="numeric"
-                      onChange={(event) =>
-                        updateNotificationBlockDraft(
-                          emailNotificationsEditor,
-                          "notificationDelaySeconds",
-                          clamp(Number(event.target.value || 30), 30, 3600),
-                        )
-                      }
-                      type="text"
-                    />
-                  </label>
-                </details>
-                <details className="settings-subsection">
-                  <summary className="settings-subsection-title">
-                    <ExternalLink size={18} />
-                    <div>
-                      <span>{t("Google review link")}</span>
-                      <strong>{notificationSettings.googleReviewUrl ? t("Configured") : t("Not set")}</strong>
-                    </div>
-                  </summary>
-                  <label className="settings-field">
-                    <span>{t("Google review URL")}</span>
-                    <input
-                      type="url"
-                      value={emailNotificationsDraft.googleReviewUrl}
-                      readOnly={emailNotificationsIsLocked}
-                      maxLength={700}
-                      onChange={(event) => updateNotificationBlockDraft(emailNotificationsEditor, "googleReviewUrl", event.target.value.slice(0, 700))}
-                      placeholder={t("direct Google review link")}
-                    />
-                  </label>
-                  <p className="field-help">{t("Used for optional review buttons in client emails. Leave blank to hide review links.")}</p>
-                </details>
-                <details className="settings-subsection">
-                  <summary className="settings-subsection-title">
-                    <ClarityEmail size={18} />
-                    <div>
-                      <span>{t("Test send")}</span>
-                      <strong>{testEmailAddress || notificationSettings.notificationEmail || coachAccount.contactEmail}</strong>
-                    </div>
-                  </summary>
-                  <label className="settings-field">
-                    <span>{t("Send test to")}</span>
-                    <input
-                      value={testEmailAddress}
-                      onChange={(event) => setTestEmailAddress(event.target.value)}
-                      placeholder={notificationSettings.notificationEmail || coachAccount.contactEmail}
-                      type="email"
-                    />
-                  </label>
-                  {/* A connectivity check, not a preview: test-email.mts sends
-                      fixed wording through the provider and does not read the
-                      templates or the sender identity above. Say so, rather
-                      than letting it look like a way to proof a message. */}
-                  <p className="field-help">{t("Checks that the email provider is reachable. It sends fixed test wording to this address only — not your templates, and never a client.")}</p>
-                  <button className="outline-button" onClick={sendTestEmail} disabled={testEmailState === "sending"} type="button">
-                    <ClarityEmail size={16} />
-                    {testEmailState === "sending" ? t("Sending...") : testEmailState === "sent" ? t("Sent") : t("Send Test Email")}
-                  </button>
-                </details>
-                </EditableSettingsBlock>
-              </SettingsGroup>
+              <Suspense fallback={<Loading />}>
+                <EmailDeliveryPanel
+                  emailNotificationsEditor={emailNotificationsEditor}
+                  notificationSettings={notificationSettings}
+                  coachAccount={coachAccount}
+                  emailNotificationsDraft={emailNotificationsDraft}
+                  emailNotificationsIsLocked={emailNotificationsIsLocked}
+                  updateNotificationBlockDraft={updateNotificationBlockDraft}
+                  testEmailState={testEmailState}
+                  testEmailAddress={testEmailAddress}
+                  startEditableBlock={startEditableBlock}
+                  cancelEditableBlock={cancelEditableBlock}
+                  setTestEmailAddress={setTestEmailAddress}
+                  saveEditableBlock={saveEditableBlock}
+                  sendTestEmail={sendTestEmail}
+                />
+              </Suspense>
 
               {/* Settings › Email / SMS › What sends. Deliberately not an
                   EditableSettingsBlock: there is no Edit, no Cancel and no Save
@@ -24133,213 +17882,35 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                   itself and then renders whatever the server sent back, so the
                   card cannot drift from the send path the way the old shared
                   block did. */}
-              <SettingsGroup id="email-sending-rules" icon={ClarityNotifications} section="email-sms" title={t("What sends")} className="notification-card">
-                <section className="sending-rules" id="email-sending-rules-block">
-                  <div className="sending-rules-head">
-                    <span>{t("What sends")}</span>
-                    <em>{t("Each switch saves on its own — there is nothing to press.")}</em>
-                  </div>
-                  <label className="settings-toggle sending-rule">
-                    <input
-                      checked={sendingRuleChecked("sendClientEmail")}
-                      disabled={sendingRuleSaving !== ""}
-                      onChange={(event) => void commitSendingRule("sendClientEmail", { sendClientEmail: event.target.checked })}
-                      type="checkbox"
-                    />
-                    <span>{t("Send client confirmation email")}</span>
-                    {sendingRuleStatus("sendClientEmail")}
-                  </label>
-                  <label className="settings-toggle sending-rule">
-                    <input
-                      checked={sendingRuleChecked("sendCoachEmail")}
-                      disabled={sendingRuleSaving !== ""}
-                      onChange={(event) => void commitSendingRule("sendCoachEmail", { sendCoachEmail: event.target.checked })}
-                      type="checkbox"
-                    />
-                    <span>{t("Send coach booking alert")}</span>
-                    {sendingRuleStatus("sendCoachEmail")}
-                  </label>
-                  <label className="settings-toggle sending-rule">
-                    <input
-                      checked={sendingRuleChecked("sendAdminEmail")}
-                      disabled={sendingRuleSaving !== ""}
-                      onChange={(event) => void commitSendingRule("sendAdminEmail", { sendAdminEmail: event.target.checked })}
-                      type="checkbox"
-                    />
-                    <span>{t("Send admin booking alert")}</span>
-                    {sendingRuleStatus("sendAdminEmail")}
-                  </label>
-                  <label className="settings-toggle sending-rule">
-                    <input
-                      checked={sendingRuleChecked("sendLessonTypeChangeEmail")}
-                      disabled={sendingRuleSaving !== ""}
-                      onChange={(event) =>
-                        void commitSendingRule("sendLessonTypeChangeEmail", {
-                          sendLessonTypeChangeEmail: event.target.checked,
-                        })
-                      }
-                      type="checkbox"
-                    />
-                    <span>{t("Email when a lesson type changes")}</span>
-                    {sendingRuleStatus("sendLessonTypeChangeEmail")}
-                  </label>
-                  <p className="field-help">{t("Off by default. Switching a booking between lesson types on the lesson card stays silent, so tidying your own calendar doesn't mail the client. Real reschedules still send either way.")}</p>
-
-                  <label className="settings-toggle sending-rule">
-                    <input
-                      checked={sendingRuleChecked("reminderEnabled")}
-                      disabled={sendingRuleSaving !== ""}
-                      onChange={(event) => void commitSendingRule("reminderEnabled", { reminderEnabled: event.target.checked })}
-                      type="checkbox"
-                    />
-                    <span>{t("Send clients a reminder email before their lesson")}</span>
-                    {sendingRuleStatus("reminderEnabled")}
-                  </label>
-                  {notificationSettings.reminderEnabled && (
-                    <>
-                      <div className="settings-field-row">
-                        <label className="settings-field">
-                          <span>{t("Days before")}</span>
-                          <input
-                            value={Math.floor(reminderLeadMinutes / 1440)}
-                            min={0}
-                            max={14}
-                            inputMode="numeric"
-                            type="number"
-                            onBlur={commitReminderLead}
-                            onChange={(event) =>
-                              setReminderLeadDraft(
-                                reminderLeadMinutesFrom(
-                                  clamp(Number(event.target.value || 0), 0, 14),
-                                  Math.round((reminderLeadMinutes % 1440) / 60),
-                                ),
-                              )
-                            }
-                          />
-                        </label>
-                        <label className="settings-field">
-                          <span>{t("Hours before")}</span>
-                          <input
-                            value={Math.round((reminderLeadMinutes % 1440) / 60)}
-                            min={0}
-                            max={23}
-                            inputMode="numeric"
-                            type="number"
-                            onBlur={commitReminderLead}
-                            onChange={(event) =>
-                              setReminderLeadDraft(
-                                reminderLeadMinutesFrom(
-                                  Math.floor(reminderLeadMinutes / 1440),
-                                  clamp(Number(event.target.value || 0), 0, 23),
-                                ),
-                              )
-                            }
-                          />
-                        </label>
-                      </div>
-                      <p className="field-help">{t("Currently {reminderLeadMinutes} before the lesson. Saved when you leave the box. Sent once per lesson, to the client only — a lesson booked inside the reminder window skips it, because the confirmation they just received already has the details.", { reminderLeadMinutes: reminderLeadLabel(notificationSettings.reminderLeadMinutes) })}</p>
-                    </>
-                  )}
-                  {sendingRuleError ? (
-                    <p className="workspace-save-error" role="alert">
-                      {sendingRuleError}
-                    </p>
-                  ) : null}
-                </section>
-              </SettingsGroup>
+              <Suspense fallback={<Loading />}>
+                <SendingRulesPanel
+                  sendingRuleChecked={sendingRuleChecked}
+                  sendingRuleSaving={sendingRuleSaving}
+                  sendingRuleStatus={sendingRuleStatus}
+                  reminderLeadMinutes={reminderLeadMinutes}
+                  notificationSettings={notificationSettings}
+                  commitReminderLead={commitReminderLead}
+                  setReminderLeadDraft={setReminderLeadDraft}
+                  sendingRuleError={sendingRuleError}
+                  commitSendingRule={commitSendingRule}
+                />
+              </Suspense>
 
               {/* Settings › Email / SMS › SMS. The provider wiring only. The
                   words a text carries are the smsText field of each template,
                   in Notifications › Templates. */}
-              <SettingsGroup id="text-machine" icon={ClarityMessages} section="email-sms" title={t("SMS")} className="notification-card">
-                <EditableSettingsBlock
-                  id="text-machine-block"
-                  title={t("SMS")}
-                  status={textMachineEditor.status}
-                  dirty={textMachineEditor.dirty}
-                  errorMessage={textMachineEditor.errorMessage}
-                  onEdit={() => startEditableBlock("text-machine")}
-                  onCancel={() => cancelEditableBlock("text-machine")}
-                  onSave={() => void saveEditableBlock("text-machine")}
-                >
-                <div className="settings-summary-grid">
-                  <span>
-                    <strong>{notificationSettings.smsProviderName || t("Not set")}</strong>{t("provider")}</span>
-                  <span>
-                    <strong>{notificationSettings.sendClientSms ? t("On") : t("Off")}</strong>{t("customer")}</span>
-                  <span>
-                    <strong>{notificationSettings.sendAdminSms ? t("On") : t("Off")}</strong>{t("admin")}</span>
-                </div>
-                <details className="settings-subsection">
-                  <summary className="settings-subsection-title">
-                    <Phone size={18} />
-                    <div>
-                      <span>{t("Provider")}</span>
-                      <strong>{notificationSettings.smsProviderName || t("Connect later")}</strong>
-                    </div>
-                  </summary>
-                  <label className="settings-field">
-                    <span>{t("Provider name")}</span>
-                    <input
-                      value={textMachineDraft.smsProviderName}
-                      readOnly={textMachineIsLocked}
-                      onChange={(event) => updateNotificationBlockDraft(textMachineEditor, "smsProviderName", event.target.value)}
-                      placeholder={t("Twilio, MessageMedia, Zapier...")}
-                    />
-                  </label>
-                  <label className="settings-field">
-                    <span>{t("Webhook or API URL")}</span>
-                    <input
-                      value={textMachineDraft.smsWebhookUrl}
-                      readOnly={textMachineIsLocked}
-                      onChange={(event) => updateNotificationBlockDraft(textMachineEditor, "smsWebhookUrl", event.target.value)}
-                      placeholder="https://..."
-                    />
-                  </label>
-                  <label className="settings-field">
-                    <span>{t("Sender or text number")}</span>
-                    <input
-                      value={textMachineDraft.smsFromNumber}
-                      readOnly={textMachineIsLocked}
-                      onChange={(event) => updateNotificationBlockDraft(textMachineEditor, "smsFromNumber", event.target.value)}
-                      placeholder="+64..."
-                    />
-                  </label>
-                </details>
-                <details className="settings-subsection">
-                  <summary className="settings-subsection-title">
-                    <Check size={18} />
-                    <div>
-                      <span>{t("Send rules")}</span>
-                      <strong>
-                        {[notificationSettings.sendClientSms && t("Customer"), notificationSettings.sendAdminSms && t("Admin")]
-                          .filter(Boolean)
-                          .join(` ${t("and")} `) || t("Off")}
-                      </strong>
-                    </div>
-                  </summary>
-                  <label className="settings-toggle">
-                    <input
-                      checked={textMachineDraft.sendClientSms}
-                      disabled={textMachineIsLocked}
-                      onChange={(event) => updateNotificationBlockDraft(textMachineEditor, "sendClientSms", event.target.checked)}
-                      type="checkbox"
-                    />
-                    <span>{t("Send client text confirmation")}</span>
-                  </label>
-                  <label className="settings-toggle">
-                    <input
-                      checked={textMachineDraft.sendAdminSms}
-                      disabled={textMachineIsLocked}
-                      onChange={(event) => updateNotificationBlockDraft(textMachineEditor, "sendAdminSms", event.target.checked)}
-                      type="checkbox"
-                    />
-                    <span>{t("Send admin text alert")}</span>
-                  </label>
-                  <p className="field-help">{t("What each text says is written on the message itself, in Notifications › Templates.")}</p>
-                </details>
-                </EditableSettingsBlock>
-              </SettingsGroup>
+              <Suspense fallback={<Loading />}>
+                <SmsSettingsPanel
+                  textMachineEditor={textMachineEditor}
+                  notificationSettings={notificationSettings}
+                  textMachineDraft={textMachineDraft}
+                  textMachineIsLocked={textMachineIsLocked}
+                  updateNotificationBlockDraft={updateNotificationBlockDraft}
+                  startEditableBlock={startEditableBlock}
+                  cancelEditableBlock={cancelEditableBlock}
+                  saveEditableBlock={saveEditableBlock}
+                />
+              </Suspense>
 
               {/* Settings › Notifications › Templates. The one place a coach
                   writes what anybody receives, email and text together. There
@@ -24489,254 +18060,35 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                 </EditableSettingsBlock>
               </SettingsGroup>
 
-              <SettingsGroup id="theme" icon={ClarityPreferences} section="business" title={t("Theme")} className="notification-card">
-                <details className="settings-subsection">
-                  <summary className="settings-subsection-title">
-                    <ClaritySettings size={18} />
-                    <div>
-                      <span>{t("Admin workspace")}</span>
-                      <strong>{themeMode === "dark" ? t("Dark workspace") : t("Light workspace")}</strong>
-                    </div>
-                  </summary>
-                  <div className="booking-surface-setting">
-                    <div>
-                      <span>{t("Admin theme")}</span>
-                      <strong>{themeMode === "dark" ? t("Dark workspace") : t("Light workspace")}</strong>
-                    </div>
-                    <button
-                      aria-label={themeMode === "dark" ? t("Switch admin theme to light") : t("Switch admin theme to dark")}
-                      aria-pressed={themeMode === "dark"}
-                      className={`theme-switch theme-toggle ${themeMode === "dark" ? "is-dark" : "is-light"}`}
-                      data-testid="admin-theme-switch"
-                      onClick={() => setThemeMode((current) => (current === "dark" ? "light" : "dark"))}
-                      type="button"
-                    >
-                      <span className={themeMode === "light" ? "active" : ""} aria-hidden="true">
-                        <Sun size={15} />
-                      </span>
-                      <span className={themeMode === "dark" ? "active" : ""} aria-hidden="true">
-                        <Moon size={15} />
-                      </span>
-                    </button>
-                  </div>
-                </details>
-                <details className="settings-subsection">
-                  <summary className="settings-subsection-title">
-                    <Eye size={18} />
-                    <div>
-                      <span>{t("Booking surface")}</span>
-                      <strong>{t("Follows each visitor's device")}</strong>
-                    </div>
-                  </summary>
-                  {/* The dark/light choice used to live here. It was one
-                      machine's preference applied to everyone who opened the
-                      booking page, so the cards now follow the reader's own
-                      browser instead. */}
-                  <div className="booking-surface-setting">
-                    <div>
-                      <span>{t("Booking logo")}</span>
-                      <strong>{brandSettings.showLogo ? t("Logo shown") : t("No logo")}</strong>
-                    </div>
-                    <button
-                      aria-label={brandSettings.showLogo ? t("Hide booking logo") : t("Show booking logo")}
+              <Suspense fallback={<Loading />}>
+                <ThemeSettingsPanel
+                  themeMode={themeMode}
+                  brandSettings={brandSettings}
+                  setThemeMode={setThemeMode}
+                  setBookingLogoVisible={setBookingLogoVisible}
+                />
+              </Suspense>
 
-                      aria-pressed={brandSettings.showLogo}
-                      className={`theme-switch logo-toggle ${brandSettings.showLogo ? "is-dark" : "is-light"}`}
-                      onClick={() => setBookingLogoVisible(!brandSettings.showLogo)}
-                      type="button"
-                    >
-                      <span className={!brandSettings.showLogo ? "active" : ""} aria-hidden="true">{t("Off")}</span>
-                      <span className={brandSettings.showLogo ? "active" : ""} aria-hidden="true">{t("On")}</span>
-                    </button>
-                  </div>
-                </details>
-              </SettingsGroup>
+              <Suspense fallback={<Loading />}>
+                <BrandingSettingsPanel
+                  brandSettings={brandSettings}
+                  brandSaveState={brandSaveState}
+                  businessNameEditor={businessNameEditor}
+                  updateBrandSetting={updateBrandSetting}
+                  bookingBrandName={bookingBrandName}
+                  bookingBrandWords={bookingBrandWords}
+                  startEditableBlock={startEditableBlock}
+                  cancelEditableBlock={cancelEditableBlock}
+                  businessNameDraft={businessNameDraft}
+                  businessNameIsLocked={businessNameIsLocked}
+                  coachAccount={coachAccount}
+                  resetBrandSettings={resetBrandSettings}
+                  saveBrandSettings={saveBrandSettings}
+                  saveEditableBlock={saveEditableBlock}
+                  handleLogoUpload={handleLogoUpload}
+                />
+              </Suspense>
 
-              <SettingsGroup id="coach-branding" icon={ClarityPlayerPortal} section="business" title={t("Business branding")} className="brand-vein-card">
-
-                <div className="brand-vein-preview">
-                  <div className="brand-vein-logo">
-                    {brandSettings.logoPreview ? (
-                      <img src={brandSettings.logoPreview} alt={`${bookingBrandName} logo preview`} />
-                    ) : (
-                      <strong>{bookingBrandWords.map((word) => word[0]).join("").slice(0, 3).toUpperCase()}</strong>
-                    )}
-                  </div>
-                  <div>
-                    <span>{t("Current business brand")}</span>
-                    <strong>{brandSettings.coachName}</strong>
-                    <em>{brandSettings.logoName || t("No logo uploaded yet")}</em>
-                  </div>
-                </div>
-
-                <EditableSettingsBlock
-                  id="business-name-block"
-                  title={t("Business name")}
-                  status={businessNameEditor.status}
-                  dirty={businessNameEditor.dirty}
-                  errorMessage={businessNameEditor.errorMessage}
-                  onEdit={() => startEditableBlock("business-name")}
-                  onCancel={() => cancelEditableBlock("business-name")}
-                  onSave={() => void saveEditableBlock("business-name")}
-                >
-                  <label className="settings-field">
-                    <span>{t("Business name")}</span>
-                    <input
-                      value={businessNameDraft.businessName}
-                      readOnly={businessNameIsLocked}
-                      maxLength={100}
-                      onChange={(event) =>
-                        // Kept raw while typing: cleaning trims, which ate the
-                        // space between words. saveCoachAccount cleans on save.
-                        businessNameEditor.setDraftValue((current) => ({ ...current, businessName: event.target.value }))
-                      }
-                    />
-                  </label>
-                  <p className="field-help">{t("Shown on your booking page, invoices and emails.")}</p>
-                </EditableSettingsBlock>
-
-                <details className="settings-subsection">
-                  <summary className="settings-subsection-title">
-                    <ImagePlus size={18} />
-                    <div>
-                      <span>{t("Logo and colours")}</span>
-                      <strong>{brandSettings.logoName || t("Upload coach logo")}</strong>
-                    </div>
-                  </summary>
-                  <label className="settings-field">
-                    <span>{t("Brand name")}</span>
-                    <input
-                      value={brandSettings.coachName}
-                      maxLength={80}
-                      onChange={(event) => updateBrandSetting("coachName", event.target.value)}
-                      onBlur={() => void saveBrandSettings()}
-                      placeholder={coachAccount.businessName}
-                    />
-                  </label>
-                  <div className="brand-swatches" aria-label={t("Extracted logo colours")}>
-                    <span style={swatchStyle(brandSettings.neutral)}>
-                      <em>{t("Neutral")}</em>
-                      {brandSettings.neutral}
-                    </span>
-                    <span style={swatchStyle(brandSettings.primary)}>
-                      <em>{t("Primary")}</em>
-                      {brandSettings.primary}
-                    </span>
-                    <span style={swatchStyle(brandSettings.secondary)}>
-                      <em>{t("Secondary")}</em>
-                      {brandSettings.secondary}
-                    </span>
-                    <span style={swatchStyle(brandSettings.accent)}>
-                      <em>{t("Ink")}</em>
-                      {brandSettings.accent}
-                    </span>
-                  </div>
-                  <div className="brand-vein-actions">
-                    <label className="outline-button logo-upload">
-                      <ImagePlus size={16} />{t("Upload logo")}<input accept="image/*" onChange={handleLogoUpload} type="file" />
-                    </label>
-                    <button className="outline-button" onClick={() => void saveBrandSettings()}>
-                      {brandSaveState === "saved" ? <Check size={16} /> : <Sparkles size={16} />}
-                      {brandSaveState === "saving" ? t("Saving") : brandSaveState === "saved" ? t("Saved") : t("Apply")}
-                    </button>
-                    <button className="outline-button" onClick={resetBrandSettings}>{t("Reset")}</button>
-                  </div>
-                </details>
-
-                <details className="settings-subsection">
-                  <summary className="settings-subsection-title">
-                    <ClarityCalendar size={18} />
-                    <div>
-                      <span>{t("Calendar colours")}</span>
-                      <strong>{t("Booking outlines")}</strong>
-                    </div>
-                  </summary>
-                  <p className="settings-note">{t("A booking card is filled with its lesson type's colour, which you set on the lesson type itself. These two are the outlines it can wear on top: a border once the lesson is done, and a ring around the card while a bay is held for it. They sit on different edges, so a completed lesson with a live bay shows both.")}</p>
-                  <div className="calendar-colour-fields">
-                    {calendarColorFields.map(({ key, label, hint }) => (
-                      <label className="calendar-colour-field" key={key}>
-                        <input
-                          type="color"
-                          value={brandSettings.calendarColors[key]}
-                          aria-label={`${label} ${hint.toLowerCase()}`}
-                          onChange={(event) =>
-                            updateBrandSetting("calendarColors", {
-                              ...brandSettings.calendarColors,
-                              [key]: event.target.value,
-                            })
-                          }
-                          onBlur={() => void saveBrandSettings()}
-                        />
-                        <span>
-                          <strong>{label}</strong>
-                          <em>{hint}</em>
-                        </span>
-                        <code>{brandSettings.calendarColors[key]}</code>
-                      </label>
-                    ))}
-                  </div>
-                  <div className="brand-vein-actions">
-                    <button className="outline-button" onClick={() => void saveBrandSettings()}>
-                      {brandSaveState === "saved" ? <Check size={16} /> : <Sparkles size={16} />}
-                      {brandSaveState === "saving" ? t("Saving") : brandSaveState === "saved" ? t("Saved") : t("Apply")}
-                    </button>
-                    <button
-                      className="outline-button"
-                      onClick={() =>
-                        void saveBrandSettings({ ...brandSettings, calendarColors: defaultCalendarColors })
-                      }
-                    >{t("Reset calendar colours")}</button>
-                  </div>
-                </details>
-              </SettingsGroup>
-
-              <SettingsGroup id="import-clients" icon={ClarityAddClient} section="account" title={t("Import clients")} className="import-card">
-                <details className="settings-subsection">
-                  <summary className="settings-subsection-title">
-                    <Upload size={18} />
-                    <div>
-                      <span>{t("CSV paste")}</span>
-                      <strong>{t("{peopleImportPreview} ready", { peopleImportPreview })}</strong>
-                    </div>
-                  </summary>
-	                  <textarea
-	                    value={peopleImportText}
-	                    onChange={(event) => {
-	                      setPeopleImportState("idle");
-                        setPeopleImportDiagnostic(null);
-	                      setPeopleImportText(event.target.value);
-	                    }}
-	                    placeholder={t("name,email,phone,notes,caddyProfileUrl")}
-	                  />
-	                  <div className="import-actions">
-                      <div className="import-action-tools">
-                        <label className="outline-button import-file-button">
-                          <Upload size={16} />{t("CSV file")}<input accept=".csv,text/csv,text/plain" onChange={handlePeopleImportFile} type="file" />
-                        </label>
-	                      <span>{t("{peopleImportPreview} ready", { peopleImportPreview })}</span>
-                      </div>
-	                    <button
-	                      className="primary-button"
-	                      onClick={importPeopleFromText}
-	                      disabled={peopleImportState === "importing" || peopleImportPreview === 0}
-	                    >
-	                      {peopleImportState === "importing" ? t("Importing") : peopleImportState === "imported" ? t("Imported") : t("Import")}
-	                    </button>
-	                  </div>
-                    {peopleImportDiagnostic && (
-                      <div className={`import-diagnostics${peopleImportDiagnostic.ok ? "" : " error"}`} role={peopleImportDiagnostic.ok ? "status" : "alert"}>
-                        <strong>{peopleImportDiagnostic.message}</strong>
-                        <span>{t("Endpoint: {endpoint}", { endpoint: peopleImportDiagnostic.endpoint })}</span>
-                        <span>{t("HTTP: {status}", { status: peopleImportDiagnostic.status })}</span>
-                        <span>{t("Imported {imported} · Updated {updated} · Skipped {skipped}", { imported: peopleImportDiagnostic.imported, updated: peopleImportDiagnostic.updated, skipped: peopleImportDiagnostic.skipped })}{peopleImportDiagnostic.failed ? t(" · Failed {failed}", { failed: peopleImportDiagnostic.failed }) : ""}
-                        </span>
-                        {peopleImportDiagnostic.errors.map((message) => (
-                          <em key={message}>{message}</em>
-                        ))}
-                      </div>
-                    )}
-	                </details>
-              </SettingsGroup>
             </div>
             </SettingsGroups>
           </WorkspaceSurface>

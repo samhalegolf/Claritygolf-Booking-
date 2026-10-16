@@ -39,7 +39,7 @@
 .terminal-status {
   margin: 0;
   padding: 6px 12px;
-  border-radius: 999px;
+  border-radius: var(--c-radius-pill);
   font-weight: 600;
   background: var(--c-surface-soft);
   border: 1px solid var(--c-border);
@@ -67,9 +67,6 @@
 }
 
 .terminal-card {
-  background: var(--c-surface);
-  border: 1px solid var(--c-border);
-  border-radius: 12px;
   padding: 16px;
 }
 
@@ -148,7 +145,7 @@
 .terminal-tile {
   margin: 0;
   position: relative;
-  border-radius: 12px;
+  border-radius: var(--c-radius-card);
   overflow: hidden;
   background: black;
   border: 3px solid transparent;
@@ -191,7 +188,7 @@
   text-align: center;
   color: var(--c-text-soft);
   border: 1px dashed var(--c-border);
-  border-radius: 12px;
+  border-radius: var(--c-radius-card);
 }
 
 .terminal-camera-list,
@@ -251,7 +248,7 @@
   padding: 16px;
   background: var(--c-surface);
   border: 1px solid var(--c-border);
-  border-radius: 12px;
+  border-radius: var(--c-radius-card);
   color: var(--c-text);
 }
 
@@ -292,7 +289,7 @@
   color: var(--c-text-soft);
   background: var(--c-surface-soft);
   border: 1px dashed var(--c-border);
-  border-radius: 12px;
+  border-radius: var(--c-radius-card);
 }
 
 .remote-camera-actions {

@@ -5,7 +5,7 @@ import "./tokens.css";
 import "./base.css";
 import { StrictMode, Suspense, lazy, useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import PublicSite, { type PublicPage } from "./modules/public-site/PublicSite";
+import type { PublicPage } from "./modules/public-site/PublicSite";
 import { Loading } from "./modules/shared/Loading";
 import { fetchSession, guestSession, type Session } from "./modules/auth/session";
 import { isBookingEmbedMode, isPlayerBookingMode, isReviewShareMode, isVideoShareMode } from "./modules/shared/bookingHandoff";
@@ -30,6 +30,9 @@ installStaleDeployReload();
 // lives in its own module rather than inside App. The login screen is lazy
 // too: it is the one pre-auth screen that draws with the app stylesheet, and
 // a public page or a share link must not wait for that.
+// The public site too: it draws at four paths and nowhere else, so the coach
+// app and the player portal should not carry it in their entry chunk.
+const PublicSite = lazy(() => import("./modules/public-site/PublicSite"));
 const loadApp = () => import("./App");
 const App = lazy(loadApp);
 const loadLoginScreen = () => import("./modules/auth/LoginScreen");
@@ -184,7 +187,11 @@ function Root() {
   const handleSessionLost = useCallback(() => setSession(guestSession), []);
 
   if (publicPage) {
-    return <PublicSite page={publicPage} />;
+    return (
+      <Suspense fallback={<Loading size="screen" label="Clarity Golf" />}>
+        <PublicSite page={publicPage} />
+      </Suspense>
+    );
   }
 
   if (clarityTerminal) {

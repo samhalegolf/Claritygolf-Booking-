@@ -8,7 +8,7 @@
 
 .player-profiles-heading p {
   margin: 0;
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 13px;
 }
 
@@ -84,8 +84,8 @@
   width: 38px;
   height: 38px;
   border-radius: 50%;
-  background: var(--panel-soft);
-  color: var(--muted);
+  background: var(--c-surface-soft);
+  color: var(--c-muted);
   flex-shrink: 0;
 }
 
@@ -97,12 +97,12 @@
 .player-profile-body h3 {
   margin: 0;
   font-size: 15px;
-  color: var(--heading);
+  color: var(--c-text);
 }
 
 .player-profile-body > span {
   display: block;
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 12px;
   margin-top: 2px;
 }
@@ -118,19 +118,19 @@
   align-items: center;
   gap: 3px;
   padding: 2px 8px;
-  border-radius: 999px;
-  background: var(--panel-soft);
-  border: 1px solid var(--border);
-  color: var(--muted);
+  border-radius: var(--c-radius-pill);
+  background: var(--c-surface-soft);
+  border: 1px solid var(--c-border);
+  color: var(--c-muted);
   font-size: 11px;
 }
 
 .player-profiles-empty {
   padding: 32px;
   text-align: center;
-  color: var(--muted);
-  border: 1px dashed var(--border);
-  border-radius: 12px;
+  color: var(--c-muted);
+  border: 1px dashed var(--c-border);
+  border-radius: var(--c-radius-card);
 }
 
 /* The profile list is the shell. Remote/local activity sources enrich it in
@@ -143,7 +143,7 @@
   gap: 10px;
   min-height: var(--c-h-row);
   padding: 12px 14px;
-  color: var(--muted);
+  color: var(--c-muted);
   background: var(--c-surface);
   font-size: 12px;
 }
@@ -154,7 +154,7 @@
 }
 
 .player-profiles-progress small {
-  color: var(--muted);
+  color: var(--c-muted);
   opacity: 0.75;
   font-size: 11px;
 }
@@ -207,18 +207,18 @@
 
 .player-tool-header span {
   display: block;
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 12px;
 }
 
 .player-tool-header h3 {
   margin: 2px 0 0;
-  color: var(--heading);
+  color: var(--c-text);
 }
 
 .player-tool-header p {
   margin: 4px 0 0;
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 13px;
 }
 
@@ -235,9 +235,9 @@
   max-width: 100%;
   gap: 6px;
   padding: 4px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--panel-soft);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-pill);
+  background: var(--c-surface-soft);
   justify-self: start;
 }
 
@@ -247,18 +247,18 @@
   gap: 6px;
   min-height: 34px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--c-radius-pill);
   padding: 7px 12px;
   background: transparent;
-  color: var(--muted);
+  color: var(--c-muted);
   font: inherit;
   font-weight: 700;
   cursor: pointer;
 }
 
 .player-tool-tabs button.active {
-  background: var(--panel);
-  color: var(--heading);
+  background: var(--c-surface);
+  color: var(--c-text);
   box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
 }
 
@@ -326,12 +326,12 @@
 
 .player-video-card.is-legacy {
   border-style: dashed;
-  background: var(--panel-soft);
+  background: var(--c-surface-soft);
 }
 
 .player-video-card.is-library-status {
   border-style: dashed;
-  background: color-mix(in srgb, var(--panel-soft) 84%, #eef6ff 16%);
+  background: color-mix(in srgb, var(--c-surface-soft) 84%, #eef6ff 16%);
 }
 
 .player-video-card-body {
@@ -344,15 +344,15 @@
   width: 64px;
   height: 42px;
   object-fit: cover;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: 8px;
-  background: var(--panel-soft);
+  background: var(--c-surface-soft);
 }
 
 .player-video-thumb.is-empty {
   display: grid;
   place-items: center;
-  color: var(--muted);
+  color: var(--c-muted);
 }
 
 .player-video-thumb-button {
@@ -376,7 +376,7 @@
   inset: 0;
   display: grid;
   place-items: center;
-  color: #fff;
+  color: var(--c-on-scrim);
   background: rgba(15, 23, 32, 0.28);
   opacity: 1;
   transition: background 120ms ease;
@@ -401,7 +401,7 @@
 }
 
 .player-video-card span {
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 12px;
 }
 
@@ -423,19 +423,19 @@
   place-items: center;
   width: 28px;
   height: 28px;
-  color: var(--muted);
+  color: var(--c-muted);
 }
 
 .player-video-cloud-badge.is-saved {
-  color: #0b5f32;
+  color: var(--c-success-text);
 }
 
 .player-video-cloud-badge.is-failed {
-  color: var(--danger, #b42318);
+  color: var(--c-danger);
 }
 
 .player-video-cloud-badge.is-uploading {
-  color: #355a8a;
+  color: var(--c-info-text);
   animation: player-video-cloud-pulse 1.4s ease-in-out infinite;
 }
 
@@ -471,8 +471,8 @@
   display: grid;
   min-width: 210px;
   padding: 4px;
-  border: 1px solid var(--border);
-  background: var(--panel);
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
   box-shadow: 0 12px 28px rgba(15, 23, 32, 0.16);
 }
 
@@ -483,18 +483,18 @@
   padding: 8px 10px;
   border: 0;
   background: none;
-  color: var(--text);
+  color: var(--c-text-body);
   font-size: 13px;
   text-align: left;
   cursor: pointer;
 }
 
 .player-video-menu-panel button:hover {
-  background: var(--panel-soft);
+  background: var(--c-surface-soft);
 }
 
 .player-video-menu-panel button.is-danger {
-  color: var(--danger, #b42318);
+  color: var(--c-danger);
 }
 
 .player-video-card strong {
@@ -537,9 +537,9 @@
 
 .player-add-dialog {
   width: min(440px, 100%);
-  background: var(--panel);
-  border-radius: 16px;
-  border: 1px solid var(--border);
+  background: var(--c-surface);
+  border-radius: var(--c-radius-page);
+  border: 1px solid var(--c-border);
   padding: 20px;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.2);
 }
@@ -553,7 +553,7 @@
 
 .player-add-header h3 {
   margin: 0;
-  color: var(--heading);
+  color: var(--c-text);
 }
 
 .player-add-section {
@@ -564,15 +564,15 @@
 
 .player-add-section label {
   font-size: 12px;
-  color: var(--muted);
+  color: var(--c-muted);
 }
 
 .player-add-section input {
   padding: 9px 11px;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  background: var(--panel-soft);
-  color: var(--text);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface-soft);
+  color: var(--c-text-body);
   font-size: 14px;
 }
 
@@ -590,26 +590,26 @@
   justify-content: space-between;
   gap: 8px;
   padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  background: var(--panel);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-control);
+  background: var(--c-surface);
   cursor: pointer;
   text-align: left;
 }
 
 .player-add-result:hover {
-  border-color: var(--border-strong);
-  background: var(--panel-soft);
+  border-color: var(--c-border);
+  background: var(--c-surface-soft);
 }
 
 .player-add-result .muted {
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 12px;
 }
 
 .player-add-divider {
   text-align: center;
-  color: var(--quiet);
+  color: var(--c-muted);
   font-size: 12px;
   margin: 16px 0;
   position: relative;
@@ -622,14 +622,14 @@
   gap: 8px;
   padding: 12px 14px;
   margin-bottom: 12px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--panel-soft);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-card);
+  background: var(--c-surface-soft);
 }
 
 .player-unassigned-videos p {
   margin: 0;
-  color: var(--heading);
+  color: var(--c-text);
   font-weight: 600;
 }
 
@@ -642,7 +642,7 @@
 }
 
 .player-unassigned-video .muted {
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 12px;
 }
 
@@ -656,9 +656,9 @@
   flex-wrap: wrap;
   padding: 12px 14px;
   margin-bottom: 12px;
-  border: 1px solid var(--line, #e4e3dd);
-  border-radius: 12px;
-  background: var(--surface-2, #f7f7f4);
+  border: 1px solid var(--c-border-soft);
+  border-radius: var(--c-radius-card);
+  background: var(--c-surface-soft);
 }
 
 .player-portal-access-body {
@@ -674,7 +674,7 @@
 
 .player-portal-access-body span {
   font-size: 12px;
-  color: var(--muted);
+  color: var(--c-muted);
 }
 
 .player-portal-access-actions {
@@ -701,13 +701,13 @@
 
 .player-video-submission-note {
   font-size: 12px;
-  color: var(--muted);
+  color: var(--c-muted);
   font-style: italic;
 }
 
 .player-profile-tags .tag.is-unseen-submission {
   background: var(--coach-accent, #6c8f63);
-  color: #ffffff;
+  color: var(--c-on-scrim);
 }
 
 /* --- Clarity Caddy card -------------------------------------------------- */
@@ -717,7 +717,7 @@
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: var(--muted);
+  color: var(--c-muted);
   white-space: nowrap;
   cursor: pointer;
 }
@@ -734,9 +734,9 @@
   flex-wrap: wrap;
   padding: 12px 14px;
   margin-bottom: 12px;
-  border: 1px solid var(--line, #e4e3dd);
-  border-radius: 12px;
-  background: var(--surface-2, #f7f7f4);
+  border: 1px solid var(--c-border-soft);
+  border-radius: var(--c-radius-card);
+  background: var(--c-surface-soft);
 }
 
 .player-caddy-card-body {
@@ -754,7 +754,7 @@
 
 .player-caddy-card-body span {
   font-size: 12px;
-  color: var(--muted);
+  color: var(--c-muted);
 }
 
 .player-caddy-card-actions {
@@ -1220,7 +1220,7 @@
   justify-self: stretch;
   overflow-x: auto;
   padding: 4px;
-  border-radius: 999px;
+  border-radius: var(--c-radius-pill);
   scrollbar-width: none;
 }
 

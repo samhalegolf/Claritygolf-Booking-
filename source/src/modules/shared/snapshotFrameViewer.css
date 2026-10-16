@@ -152,7 +152,7 @@
   top: 8px;
   left: 8px;
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--c-radius-pill);
   background: var(--fv-accent);
   color: rgba(0, 0, 0, 0.88);
   font-size: 12px;

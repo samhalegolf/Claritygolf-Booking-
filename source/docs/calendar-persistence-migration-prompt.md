@@ -11,7 +11,7 @@ Companion to `calendar-persistence-over-refresh-audit.md`. Part A is a copy-past
 ```
 Read these first and treat them as hard constraints:
 - source/docs/calendar-persistence-over-refresh-audit.md   (the audit — the plan you are implementing)
-- source/PROJECT_SOURCE_OF_TRUTH.md
+- PROJECT_SOURCE_OF_TRUTH.md
 - source/netlify/functions/PERSISTENCE_MAP.md
 
 GOAL

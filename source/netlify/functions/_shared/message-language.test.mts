@@ -4,7 +4,7 @@ import test from "node:test";
 // @ts-expect-error -- a plain .mjs script, shared with the command line.
 import { extractMessageKeys, messageLocaleFiles, placeholders, readCatalog } from "../../../scripts/message-keys.mjs";
 import { MESSAGE_LANGUAGES, cleanMessageLanguage, translateMessage } from "./message-language.mts";
-import { notificationTemplateText } from "./notification-templates.mts";
+import { notificationTemplateText } from "./notification-template-text.mts";
 
 /**
  * Every language a business can send in is complete, and keeps every blank.

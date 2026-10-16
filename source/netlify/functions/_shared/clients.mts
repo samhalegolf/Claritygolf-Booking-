@@ -1,3 +1,4 @@
+// @ts-nocheck -- predates types in the functions; remove this line to bring the file under the checker.
 import { randomUUID } from "node:crypto";
 import { canReadCalendarItem } from "./bookings.mts";
 import { recordBelongsToAccountStrict } from "./coach-auth.mts";

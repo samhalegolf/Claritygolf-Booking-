@@ -1,3 +1,4 @@
+// @ts-nocheck -- predates types in the functions; remove this line to bring the file under the checker.
 import { createHash, randomUUID } from "node:crypto";
 import { deliverEmail } from "./_shared/email-delivery.mts";
 import { settingsSelectQuery } from "./_shared/settings-scope.mts";
@@ -11,10 +12,10 @@ const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
 
 import {
   DEFAULT_MAP_LINK_LABEL,
-  notificationTemplateText,
   notificationVariantFor,
   parseNotificationTemplates,
 } from "./_shared/notification-templates.mts";
+import { notificationTemplateText } from "./_shared/notification-template-text.mts";
 import type {
   NotificationTemplateField,
   NotificationVariantId,

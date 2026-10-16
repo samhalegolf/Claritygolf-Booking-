@@ -47,7 +47,7 @@
 }
 
 .srs-save.is-error {
-  color: var(--c-danger, #b42318);
+  color: var(--c-danger);
 }
 
 .srs-sheet {
@@ -343,7 +343,7 @@
 }
 
 .srs-warn {
-  color: var(--c-danger, #b42318);
+  color: var(--c-danger);
   font-size: var(--c-size-meta);
 }
 
@@ -379,7 +379,7 @@
   border-radius: var(--c-radius-control);
   overflow: hidden;
   background: #0d0f12;
-  color: #fff;
+  color: var(--c-on-scrim);
   cursor: pointer;
 }
 
@@ -396,7 +396,7 @@
   padding: 4px 10px;
   border-radius: var(--c-radius-pill);
   background: rgba(0, 0, 0, 0.66);
-  color: #fff;
+  color: var(--c-on-scrim);
   font-size: var(--c-size-meta);
   font-weight: 600;
 }

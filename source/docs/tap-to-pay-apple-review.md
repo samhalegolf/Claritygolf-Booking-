@@ -29,7 +29,7 @@ Apple's rules live in two places; read both before submitting, as they change:
 1. Apple has granted the **distribution** Tap to Pay entitlement for
    `app.claritygolf.booking`, and the build is signed with it.
 2. **Test mode is set up on Clarity's Stripe platform** (the test webhook and
-   the three test keys in Netlify, see `STRIPE_BILLING_SYNC_HANDOVER.md`). The
+   the three test keys in Netlify, see `stripe-billing-sync-handover.md`). The
    reviewer must be able to take a payment without real money moving.
 3. A **demo business** in test mode, on Clarity Pay. Set up 2026-10-03:
    - login `appreview@claritygolf.app` (password in App Store Connect only),
