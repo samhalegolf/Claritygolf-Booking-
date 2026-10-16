@@ -12,6 +12,7 @@ import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from "r
 import { ArrowLeft, Camera, Phone, Trash2 } from "lucide-react";
 import { ClarityCalendar, ClarityEmail, ClarityLocations, ClaritySessions, ClaritySettings } from "../shared/ClarityIcons";
 import { t, tn } from "../../lib/i18n";
+import { CoachAvatar } from "./CoachAvatar";
 
 /** The coach fields this screen reads and writes. App's CoachProfile satisfies it. */
 export type CoachProfileRecord = {
@@ -109,26 +110,6 @@ async function resizeCoachPhoto(file: File): Promise<string> {
   } finally {
     URL.revokeObjectURL(objectUrl);
   }
-}
-
-function initialsOf(name: string) {
-  return (
-    name
-      .split(/\s+/)
-      .filter(Boolean)
-      .map((word) => word[0])
-      .join("")
-      .slice(0, 2)
-      .toUpperCase() || "?"
-  );
-}
-
-export function CoachAvatar({ name, photoUrl, size = 96 }: { name: string; photoUrl?: string; size?: number }) {
-  return (
-    <span className="cp-avatar" style={{ width: size, height: size, fontSize: Math.round(size / 3) }} aria-hidden="true">
-      {photoUrl ? <img src={photoUrl} alt="" /> : initialsOf(name)}
-    </span>
-  );
 }
 
 export function CoachProfilePanel<T extends CoachProfileRecord>({

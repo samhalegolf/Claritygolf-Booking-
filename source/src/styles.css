@@ -544,35 +544,9 @@
   outline-offset: 2px;
 }
 
-.settings-grid > .settings-section {
-  display: none !important;
-}
-
-/* One panel per section, filed under exactly one of them. There used to be
-   eleven sections and four panels were classed onto two tabs at once — which is
-   how "Customer Experience" and "Coach Branding" ended up being the same screen.
-
-   This is an allowlist over a blanket `display: none`, so a new tab that is
-   not named here is invisible on every tab rather than visible on the wrong
-   one. The uiRules test "every settings tab has a panel that can show" keeps
-   the two lists in step. */
-.settings-grid.settings-tab-services > .settings-services,
-.settings-grid.settings-tab-practice > .settings-practice,
-.settings-grid.settings-tab-booking > .settings-booking {
-  display: block !important;
-}
-
-.settings-grid.settings-tab-business > .settings-business,
-.settings-grid.settings-tab-notifications > .settings-notifications,
-.settings-grid.settings-tab-email-sms > .settings-email-sms,
-.settings-grid.settings-tab-account > .settings-account,
-.settings-grid.settings-tab-developer > .settings-developer,
-.settings-grid.settings-tab-api > .settings-api,
-.settings-grid.settings-tab-admin > .settings-admin,
-.settings-grid.settings-tab-sandbox > .settings-sandbox {
-  display: grid !important;
-}
-
+/* One panel per section. Only the active section is mounted at all
+   (SettingsGroup returns null for the rest), so there is no hiding to do
+   here: this is just each section's own layout. */
 .settings-services,
 .settings-practice,
 .settings-business,
@@ -581,9 +555,17 @@
 .settings-email-sms,
 .settings-account,
 .settings-developer,
+.settings-api,
 .settings-admin,
 .settings-sandbox {
+  display: grid;
   grid-column: 1 / -1;
+}
+
+.settings-services,
+.settings-practice,
+.settings-booking {
+  display: block;
 }
 
 .settings-booking,
@@ -4526,7 +4508,7 @@
   gap: 7px;
 }
 
-.quick-create .quick-create-services > button:not(.popover-close):not(.quick-client-ghost) {
+.quick-create .quick-create-services > button:not(.popover-close) {
   margin-top: 0;
 }
 
@@ -4607,7 +4589,7 @@
   box-shadow: 0 12px 26px rgba(0, 0, 0, 0.22);
 }
 
-.quick-create button:not(.popover-close):not(.quick-client-ghost) {
+.quick-create button:not(.popover-close) {
   width: 100%;
   min-height: 38px;
   display: flex;
@@ -4621,17 +4603,17 @@
   text-align: left;
 }
 
-.quick-create button:not(.popover-close):not(.quick-client-ghost) > span {
+.quick-create button:not(.popover-close) > span {
   display: grid;
   gap: 2px;
 }
 
-.quick-create button:not(.popover-close):not(.quick-client-ghost) strong {
+.quick-create button:not(.popover-close) strong {
   margin: 0;
   font-size: 14px;
 }
 
-.quick-create button:not(.popover-close):not(.quick-client-ghost) em {
+.quick-create button:not(.popover-close) em {
   color: #6f6c66;
   font-size: 12px;
   font-style: normal;
@@ -4639,7 +4621,7 @@
 
 /* Blocking the time out is the odd one out among the lesson types: a slim
    text row under them, not another card. */
-.quick-create button.quick-create-block:not(.popover-close):not(.quick-client-ghost) {
+.quick-create button.quick-create-block:not(.popover-close) {
   min-height: 34px;
   margin-top: 8px;
   padding: 4px 6px;
@@ -4650,12 +4632,12 @@
   font-weight: 600;
 }
 
-.quick-create button.quick-create-block:not(.popover-close):not(.quick-client-ghost):hover {
+.quick-create button.quick-create-block:not(.popover-close):hover {
   color: var(--text);
 }
 
 /* The rest of the lesson types, on a phone sheet. */
-.quick-create button.quick-create-more:not(.popover-close):not(.quick-client-ghost) {
+.quick-create button.quick-create-more:not(.popover-close) {
   justify-content: center;
   border-style: dashed;
   color: var(--muted);
@@ -4740,7 +4722,7 @@
   font-size: 13px;
 }
 
-.quick-create-actions button:not(.popover-close):not(.quick-client-ghost) {
+.quick-create-actions button:not(.popover-close) {
   justify-content: center;
   margin-top: 0;
 }
@@ -8041,136 +8023,6 @@
   margin: 0;
 }
 
-.invoice-document-card,
-.invoice-side-panel {
-  min-width: 0;
-}
-
-.invoice-document-card {
-  display: grid;
-  gap: 16px;
-  padding: 22px;
-  border: 1px solid var(--c-border);
-  border-radius: var(--c-radius-card);
-  background: var(--c-surface);
-  color: var(--c-text-body);
-}
-
-.invoice-side-panel {
-  display: grid;
-  gap: 14px;
-}
-
-.invoice-document-card span,
-.invoice-document-card em,
-.invoice-template-note,
-.invoice-footer {
-  color: var(--c-muted);
-}
-
-.invoice-document-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding-bottom: 14px;
-  border-bottom: 2px solid var(--c-text);
-}
-
-.invoice-brand-block {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
-
-.invoice-brand-block > div:last-child,
-.invoice-title-block {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.invoice-brand-block strong {
-  color: var(--c-text);
-  font-size: 16px;
-}
-
-.invoice-title-block {
-  justify-items: end;
-  text-align: right;
-}
-
-.invoice-title-block h2,
-.invoice-document-card h2 {
-  margin: 0;
-  color: var(--c-text);
-  font-size: 30px;
-}
-
-.invoice-title-block em {
-  font-style: normal;
-  font-weight: 800;
-}
-
-/* Rule 01: the tile is the logo, not a container you can press. A filled
-   plate with no border, so an account with no logo still has somewhere for
-   its initials to sit. */
-.invoice-logo-mark {
-  width: 58px;
-  height: 58px;
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-  border-radius: var(--c-radius-control);
-  background: var(--c-surface-soft);
-}
-
-.invoice-logo-mark img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.invoice-logo-mark strong {
-  color: var(--c-text);
-  font-size: 17px;
-}
-
-.invoice-template-note,
-.invoice-footer {
-  margin: 0;
-  line-height: 1.5;
-}
-
-.invoice-section {
-  display: grid;
-  gap: 10px;
-  padding-top: 16px;
-  border-top: 1px solid var(--c-border-soft);
-}
-
-.invoice-section-heading,
-.invoice-items-heading {
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.invoice-items-heading > div {
-  display: grid;
-  gap: 3px;
-}
-
-.invoice-section-heading span,
-.invoice-payment-block span,
-.invoice-title-block span {
-  font-size: 11px;
-  font-weight: 900;
-  text-transform: uppercase;
-}
-
 /* Small text/pencil marker that flips a fixed field (e.g. invoice dates) to
    editable, then back on "Done". */
 .invoice-inline-edit {
@@ -8217,13 +8069,6 @@
   text-underline-offset: 3px;
 }
 
-.invoice-section-heading strong {
-  color: var(--c-muted);
-  font-size: 12px;
-}
-
-.invoice-form-grid,
-.invoice-line-search,
 .custom-field-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -8231,30 +8076,7 @@
   align-items: end;
 }
 
-.invoice-detail-grid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
-.invoice-form-grid .settings-field,
-.invoice-line-search .settings-field,
-.invoice-document-line-row .settings-field,
-.invoice-discount-controls .settings-field,
 .billing-catalog-editor .settings-field {
-  min-width: 0;
-}
-
-/* The same for the input itself. A grid item's min-width is auto, which for an
-   input is the ~20 characters of its `size` attribute -- so an untagged field
-   stops at that width rather than following its column. This is what the old
-   blanket width:100% was really doing, and it is the part worth keeping: it
-   lets a field take the room it is given without claiming a width of its own,
-   so a .w-* class on it still wins. */
-.invoice-form-grid .settings-field input,
-.invoice-line-search .settings-field input,
-.invoice-document-line-row .settings-field input,
-.invoice-document-line-row .settings-field select,
-.invoice-discount-controls .settings-field input,
-.invoice-note-block textarea {
   min-width: 0;
 }
 
@@ -8268,31 +8090,10 @@
   min-width: 0;
 }
 
-.invoice-customer-search {
-  display: grid;
-  gap: 8px;
-}
-
-/* Inline "new customer" form - creates a real client in the people list. */
-.invoice-new-customer {
-  display: grid;
-  gap: 10px;
-}
-
-.invoice-new-customer-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: flex-end;
-}
-
 /* Rule 08 again: three pick-one-of-these lists that were stacks of separately
    boxed buttons. A row is still a button -- it is genuinely pressable -- but
    pressable is carried by the hover tint and the cursor, not by giving every
    row its own outline. */
-.invoice-customer-results,
-.invoice-customer-settled,
-.invoice-option-list,
 .completed-booking-list {
   display: grid;
   border: 1px solid var(--c-border);
@@ -8301,8 +8102,6 @@
   overflow: hidden;
 }
 
-.invoice-customer-results button,
-.invoice-option-list button,
 .completed-booking-list button {
   min-width: 0;
   min-height: 54px;
@@ -8321,30 +8120,20 @@
   transition: background var(--c-t-hover);
 }
 
-.invoice-customer-results button:last-child,
-.invoice-option-list button:last-child,
 .completed-booking-list button:last-child {
   border-bottom: 0;
 }
 
-.invoice-customer-results button:hover,
-.invoice-option-list button:hover,
 .completed-booking-list button:hover {
   background: var(--c-hover);
 }
 
-.invoice-customer-results button span,
-.invoice-customer-settled div,
-.invoice-option-list button span,
 .completed-booking-list button span {
   min-width: 0;
   display: grid;
   gap: 3px;
 }
 
-.invoice-customer-results strong,
-.invoice-customer-settled strong,
-.invoice-option-list strong,
 .completed-booking-list strong {
   overflow: hidden;
   color: var(--c-text);
@@ -8353,143 +8142,10 @@
   white-space: nowrap;
 }
 
-.invoice-customer-results em,
-.invoice-customer-settled em,
-.invoice-option-list em,
 .completed-booking-list em {
   overflow-wrap: anywhere;
   font-size: 12px;
   font-style: normal;
-}
-
-/* Rule 01: who the invoice is billed to is something you read, not something
-   you press -- the Change control beside it is the only pressable thing here,
-   and it carries its own affordance. Was a bordered, filled box inside the
-   invoice card, which is also the nesting law's L3-inside-L3. */
-.invoice-customer-settled {
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  padding: 4px 0;
-}
-
-/* The nesting law: this was a bordered, filled box holding a search field and
-   .invoice-option-list -- which draws its own border -- inside the invoice
-   card, three bordered boxes deep. The list keeps its border because it is a
-   list of pressable rows; the wrapper around it does not need one to say the
-   picker is open. Being open is what says that. */
-.invoice-line-picker {
-  display: grid;
-  gap: 10px;
-  margin: 4px 0 14px;
-}
-
-.invoice-line-search {
-  grid-template-columns: minmax(0, 1fr) auto 40px;
-}
-
-.invoice-option-list {
-  max-height: 236px;
-  overflow: auto;
-  padding-right: 3px;
-}
-
-.invoice-document-lines {
-  display: grid;
-}
-
-.invoice-document-line-head,
-.invoice-document-line-row {
-  display: grid;
-  grid-template-columns: minmax(150px, 1fr) minmax(56px, 0.18fr) minmax(96px, 0.28fr) minmax(90px, 0.26fr) minmax(96px, 0.28fr) 52px;
-  gap: 8px;
-  align-items: end;
-}
-
-.invoice-document-line-head {
-  min-height: var(--c-h-subnav-row);
-  padding: 0 10px;
-  background: var(--c-surface-soft);
-}
-
-.invoice-document-line-head span {
-  color: var(--c-muted);
-  font-size: 11px;
-  font-weight: 900;
-  text-transform: uppercase;
-}
-
-.invoice-document-line-row {
-  padding: 10px;
-  border-top: 1px solid var(--c-border-soft);
-}
-
-.invoice-document-line-row > strong {
-  align-self: center;
-  color: var(--c-text);
-  text-align: right;
-  white-space: nowrap;
-}
-
-/* Per-line discount cell: a preset/custom dropdown with an optional value input
-   stacked beneath it. Rule 05 -- the select holds a preset name and its value,
-   so it is sized as a name rather than stretched to the column. */
-.invoice-line-discount select {
-  width: var(--c-w-name);
-}
-
-/* Plain (locked-in or pre-set) line: a boring invoice line. Description and
-   amount on one row, "qty x unit" and a small remove control underneath. No box
-   of its own - the invoice card is the only container. */
-.invoice-plain-line {
-  padding: 12px 0;
-  border-top: 1px solid var(--c-border-soft);
-}
-
-.invoice-document-lines > .invoice-plain-line:first-child {
-  border-top: 0;
-}
-
-.invoice-plain-line-main {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 12px;
-}
-
-.invoice-plain-line-desc {
-  font-weight: 600;
-  color: var(--c-text);
-}
-
-.invoice-plain-line-main > strong {
-  color: var(--c-text);
-  white-space: nowrap;
-}
-
-.invoice-plain-line-sub {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  margin-top: 3px;
-  color: var(--c-muted);
-  font-size: var(--c-size-meta);
-}
-
-.invoice-plain-line-remove {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px;
-  border: 0;
-  background: none;
-  color: var(--c-danger);
-  cursor: pointer;
-  transition: color var(--c-t-hover);
-}
-
-.invoice-plain-line-remove:hover,
-.invoice-plain-line-remove:focus-visible {
-  color: var(--c-text);
 }
 
 /* A fixed field value rendered as plain text on the card (locked invoice, or an
@@ -8503,53 +8159,6 @@
   white-space: pre-wrap;
 }
 
-.invoice-add-line {
-  margin-top: 12px;
-}
-
-/* Rule 10: Delete is not a box. This was a red-bordered, red-filled 52px tab
-   at the end of every line -- the loudest thing on a screen whose job is
-   adding items, repeated once per row. Same control, same column, carrying
-   its meaning in the icon's colour instead. */
-.invoice-line-delete-tab {
-  width: 52px;
-  min-width: 52px;
-  height: var(--c-control-h);
-  display: grid;
-  place-items: center;
-  align-self: end;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--c-danger);
-  cursor: pointer;
-  transition: color var(--c-t-hover);
-}
-
-.invoice-line-delete-tab:hover,
-.invoice-line-delete-tab:focus-visible {
-  color: var(--c-text);
-}
-
-.invoice-line-delete-tab:focus-visible {
-  outline: 2px solid var(--c-accent);
-  outline-offset: 2px;
-  border-radius: var(--c-radius-control);
-}
-
-.invoice-empty-line {
-  padding: 18px;
-  border-top: 1px solid var(--c-border-soft);
-  text-align: center;
-}
-
-.invoice-settlement-section {
-  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.58fr);
-  align-items: start;
-}
-
-.invoice-note-block,
-.invoice-total-box,
 .billing-catalog-editor,
 .security-settings-form,
 .custom-field-list {
@@ -8746,132 +8355,7 @@
   padding: 12px 0;
 }
 
-/* Payment details are fixed (they come from settings, not editable here). Per
-   the invoice-card rule, fixed content is plain labelled text on the card with
-   no border/box of its own - only editable fields get a bordered input. */
-.invoice-payment-block {
-  padding: 0;
-  border: 0;
-  background: none;
-}
-
-.invoice-payment-block p {
-  margin: 0;
-  color: var(--c-text-body);
-  line-height: 1.45;
-}
-
-.invoice-payment-block strong,
-.invoice-custom-fields strong {
-  color: var(--c-text);
-}
-
-.invoice-discount-controls {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(92px, 0.4fr);
-  gap: 8px;
-}
-
-/* A set discount reads as plain text (its value is in the totals below); these
-   are text links, not boxed inputs. */
-.invoice-discount-set {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 4px 0;
-}
-
-.invoice-discount-set > span {
-  font-size: 11px;
-  font-weight: 900;
-  text-transform: uppercase;
-  color: var(--c-muted);
-}
-
-/* Rule 10: Change and Remove are .text-button in the JSX now, so the second
-   copy of that treatment has gone -- only the row that holds them is left. */
-.invoice-discount-set-actions {
-  display: flex;
-  gap: 14px;
-}
-
-.invoice-discount-done {
-  grid-column: 1 / -1;
-  justify-self: start;
-}
-
-.invoice-total-lines {
-  display: grid;
-  gap: 8px;
-}
-
 /* GST included / not-included segmented toggle above the totals. */
-/* A segmented pick-one control: genuinely pressable, so Rule 01 lets it keep
-   its box. Rule 04 sets the height -- it is a pill, not a control. */
-.invoice-tax-toggle {
-  display: flex;
-  gap: 0;
-  margin-bottom: 10px;
-  border: 1px solid var(--c-border);
-  border-radius: var(--c-radius-control);
-  overflow: hidden;
-}
-
-.invoice-tax-toggle button {
-  flex: 1;
-  min-height: var(--c-h-pill);
-  padding: 0 10px;
-  border: 0;
-  background: var(--c-surface-soft);
-  color: var(--c-text-body);
-  font-size: var(--c-size-group);
-  font-weight: 700;
-  cursor: pointer;
-  transition: background var(--c-t-hover);
-}
-
-.invoice-tax-toggle button + button {
-  border-left: 1px solid var(--c-border);
-}
-
-.invoice-tax-toggle button.active {
-  background: var(--c-accent);
-  color: var(--c-accent-text);
-}
-
-.invoice-total-lines span {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.invoice-total-lines em,
-.invoice-payment-block em {
-  font-style: normal;
-}
-
-.invoice-total-lines strong {
-  color: var(--c-text);
-  white-space: nowrap;
-}
-
-.invoice-grand-total {
-  margin-top: 4px;
-  padding-top: 10px;
-  border-top: 2px solid var(--c-text);
-}
-
-.invoice-grand-total strong {
-  font-size: 22px;
-}
-
-.invoice-bottom-actions {
-  padding-top: 16px;
-  border-top: 1px solid var(--c-border);
-}
-
 .invoice-actions {
   display: flex;
   flex-wrap: wrap;
@@ -8879,28 +8363,6 @@
   align-items: center;
   justify-content: flex-end;
   margin-top: 14px;
-}
-
-.invoice-custom-fields {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 8px;
-}
-
-/* Rule 01: these are values off the invoice template -- a PO number, an ABN.
-   You read them; there is nothing to press. Each one was a bordered, filled
-   box, so a footer of four read-only values looked like a row of four
-   buttons. */
-.invoice-custom-fields span {
-  display: grid;
-  gap: 2px;
-  align-content: center;
-  padding: 8px 0;
-  font-size: var(--c-size-group);
-}
-
-.invoice-footer-fields:empty {
-  display: none;
 }
 
 .custom-field-row {
@@ -8918,7 +8380,7 @@
    rule is the whole legend.
 
    Scoped under .invoice-paper-layout so nothing here reaches the read-only
-   invoice views, which still use the .invoice-document-* rules above.
+   invoice views.
    =========================================================================== */
 
 .invoice-paper-layout {
@@ -10384,12 +9846,6 @@
 @media (max-width: 760px) {
   .billing-dashboard-grid,
   .billing-reports,
-  .invoice-form-grid,
-  .invoice-detail-grid,
-  .invoice-line-search,
-  .invoice-settlement-section,
-  .invoice-document-line-head,
-  .invoice-document-line-row,
   .custom-field-row {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -10398,26 +9854,6 @@
   .custom-group-attendee-form,
   .custom-group-attendee-row {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .invoice-document-line-head {
-    display: none;
-  }
-
-  .invoice-document-card {
-    padding: 16px;
-  }
-
-  .invoice-document-header,
-  .invoice-section-heading,
-  .invoice-items-heading {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .invoice-title-block {
-    justify-items: start;
-    text-align: left;
   }
 
   /* Buttons hug their text/icon on narrow screens too - they don't span the
@@ -11438,13 +10874,6 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 12px;
-}
-
-/* The preset dropdown is a 3rd field dropped into a grid built for 2
-   (label + amount); without this it eats the label's column and pushes
-   Amount onto its own row. Give it the full row instead. */
-.invoice-discount-preset {
-  grid-column: 1 / -1;
 }
 
 /* Both loudness levels reuse the app's one existing "overdue" color
@@ -18017,7 +17446,7 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.app-shell.is-phone .quick-create .quick-create-services > button:not(.popover-close):not(.quick-client-ghost) {
+.app-shell.is-phone .quick-create .quick-create-services > button:not(.popover-close) {
   min-height: 52px;
 }
 

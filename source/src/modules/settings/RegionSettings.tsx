@@ -10,7 +10,7 @@
 import { useMemo } from "react";
 import { phoneCountryOptions } from "../../../netlify/functions/_shared/phone.mts";
 import { currencyForCountry } from "../../../netlify/functions/_shared/locale.mts";
-import { MESSAGE_LANGUAGES } from "../../../netlify/functions/_shared/message-language.mts";
+import { MESSAGE_LANGUAGES } from "../../../netlify/functions/_shared/message-languages.mts";
 import {
   regionDefaultsForCountry,
   timeZoneOffsetLabel,

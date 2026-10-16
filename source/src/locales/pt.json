@@ -3512,9 +3512,7 @@
   "Edit note": "Editar nota",
   "Use the rail camera buttons or press Enter to capture.": "Use os botões de câmara da barra ou prima Enter para capturar.",
   "Area Focus": "Foco de área",
-  "Track Focus Beta": "Foco de seguimento Beta",
   "No area selected": "Nenhuma área selecionada",
-  "Track focus is placeholder-only in this foundation.": "O foco de seguimento é apenas provisório nesta base.",
   "Live crop is not available for the selected area right now.": "O recorte em direto não está disponível para a área selecionada neste momento.",
   "No {side} video is available for live focus rendering.": "Não há nenhum vídeo {side} disponível para o foco em direto.",
   "Live area focus lens active.": "Lente de foco de área em direto ativa.",
@@ -3527,7 +3525,6 @@
   "Add your note, then Save.": "Adicione a sua nota e depois Guardar.",
   "Could not capture snapshot.": "Não foi possível fazer a captura.",
   "Focus lens": "Lente de foco",
-  "Track focus beta": "Foco de seguimento beta",
   "Area focus · {sideLabel}": "Foco de área · {sideLabel}",
   "Live area: {areaDetails}": "Área em direto: {areaDetails}",
   "Reselect": "Selecionar novamente",
@@ -4717,5 +4714,6 @@
   "This is your sign-in email for Clarity Caddy too.": "É também o seu email de acesso ao Clarity Caddy.",
   "Send confirmation link": "Enviar link de confirmação",
   "Change email": "Alterar email",
-  "Could not download that file. Try again.": "Não foi possível transferir o ficheiro. Tente novamente."
+  "Could not download that file. Try again.": "Não foi possível transferir o ficheiro. Tente novamente.",
+  "profile": "perfil"
 }

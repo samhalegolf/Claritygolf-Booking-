@@ -721,10 +721,9 @@ export function VideoWorkspace({
   const [rightHoverMarker, setRightHoverMarker] = useState<TimelineMarker | null>(null);
   const [focusPaletteOpen, setFocusPaletteOpen] = useState(false);
   const [showFocusWindow, setShowFocusWindow] = useState(false);
-  const [focusWindowMode, setFocusWindowMode] = useState<"area" | "track">("area");
   const [focusWindowSide, setFocusWindowSide] = useState<ComparisonSide>("left");
   const [focusWindowHoverSide, setFocusWindowHoverSide] = useState<ComparisonSide | null>(null);
-  const [focusSelectionMode, setFocusSelectionMode] = useState<"area" | "track" | null>(null);
+  const [focusSelectionMode, setFocusSelectionMode] = useState<"area" | null>(null);
   const [focusSelectionSide, setFocusSelectionSide] = useState<ComparisonSide>("left");
   const [focusSelectionStart, setFocusSelectionStart] = useState<{ x: number; y: number } | null>(null);
   const [focusSelectionDraft, setFocusSelectionDraft] = useState<FocusAreaRect | null>(null);
@@ -1066,7 +1065,6 @@ export function VideoWorkspace({
         setActiveSide(loaded.mode === "single" ? "left" : loaded.activeSide);
         setLinkedPlayback(loaded.linkedPlayback);
         setShowFocusWindow(loaded.focusWindowOpen);
-        setFocusWindowMode(loaded.focusWindowMode);
         setFocusWindowSide(loaded.mode === "single" ? "left" : loaded.focusWindowSide);
         setFocusAreaRect(loaded.focusAreaRect);
         setCurrentSavedVideoIds(loaded.savedVideoIds || {});
@@ -1088,7 +1086,7 @@ export function VideoWorkspace({
       savedVideoIds: currentSavedVideoIds,
       linkedPlayback,
       focusWindowOpen: showFocusWindow,
-      focusWindowMode,
+      focusWindowMode: "area",
       focusWindowSide,
       focusAreaRect,
     };
@@ -1097,7 +1095,6 @@ export function VideoWorkspace({
     comparisonMode,
     currentSavedVideoIds,
     focusAreaRect,
-    focusWindowMode,
     focusWindowSide,
     linkedPlayback,
     showFocusWindow,
@@ -1581,7 +1578,6 @@ export function VideoWorkspace({
         setActiveSide(item.workspaceSnapshot.mode === "single" ? "left" : item.workspaceSnapshot.activeSide);
         setLinkedPlayback(item.workspaceSnapshot.linkedPlayback);
         setShowFocusWindow(item.workspaceSnapshot.focusWindowOpen);
-        setFocusWindowMode(item.workspaceSnapshot.focusWindowMode);
         setFocusWindowSide(item.workspaceSnapshot.mode === "single" ? "left" : item.workspaceSnapshot.focusWindowSide);
         setFocusAreaRect(item.workspaceSnapshot.focusAreaRect);
         setCurrentSavedVideoIds({
@@ -2222,7 +2218,6 @@ export function VideoWorkspace({
         const canCreate = focusSelectionDraft.width > MIN_ACTIVE_SELECTION_SIZE && focusSelectionDraft.height > MIN_ACTIVE_SELECTION_SIZE;
         if (canCreate) {
           setFocusAreaRect(focusSelectionDraft);
-          setFocusWindowMode("area");
           setFocusWindowSide(side);
           setShowFocusWindow(true);
           setFocusPaletteOpen(false);
@@ -2245,7 +2240,6 @@ export function VideoWorkspace({
       leftDrawing,
       playPauseSide,
       rightDrawing,
-      setFocusWindowMode,
       setFocusWindowSide,
     ]
   );
@@ -3105,7 +3099,6 @@ export function VideoWorkspace({
     setActiveSide("left");
     setLinkedPlayback(false);
     setShowFocusWindow(false);
-    setFocusWindowMode("area");
     setFocusWindowSide("left");
     setFocusAreaRect(null);
     setCurrentSavedVideoIds({});
@@ -4892,7 +4885,6 @@ export function VideoWorkspace({
       {workspaceHasVideo && showFocusWindow && (
         <FocusWindow
           enabled
-          mode={focusWindowMode}
           area={focusAreaRect}
           sideLabel={focusWindowSide}
           onReselect={reselectAreaFocus}
@@ -4919,12 +4911,6 @@ export function VideoWorkspace({
             setFocusSelectionMode("area");
             setFocusSelectionSide(modeIsCompare ? activeSide : "left");
             setShowFocusWindow(false);
-            setFocusPaletteOpen(false);
-          }}
-          onSelectTrack={() => {
-            setFocusWindowMode("track");
-            setShowFocusWindow(true);
-            setFocusWindowSide(activeSide);
             setFocusPaletteOpen(false);
           }}
           onClose={() => setFocusPaletteOpen(false)}

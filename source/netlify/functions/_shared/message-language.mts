@@ -14,6 +14,7 @@
 // notification-templates.test.mts. Isomorphic: the settings editor shows the
 // same defaults the send path uses, so this must not touch any Node API.
 
+import { MESSAGE_LANGUAGES, cleanMessageLanguage } from "./message-languages.mts";
 import da from "./message-locales/da.mts";
 import de from "./message-locales/de.mts";
 import es from "./message-locales/es.mts";
@@ -31,28 +32,8 @@ export const MESSAGE_CATALOGS: Record<string, Record<string, string>> = {
   es, fr, de, it, pt, nl, sv, da, nb, fi, pl, ja,
 };
 
-/** Every language messages can go out in, named in itself. */
-export const MESSAGE_LANGUAGES: { code: string; name: string }[] = [
-  { code: "en", name: "English" },
-  { code: "es", name: "Español" },
-  { code: "fr", name: "Français" },
-  { code: "de", name: "Deutsch" },
-  { code: "it", name: "Italiano" },
-  { code: "pt", name: "Português" },
-  { code: "nl", name: "Nederlands" },
-  { code: "sv", name: "Svenska" },
-  { code: "da", name: "Dansk" },
-  { code: "nb", name: "Norsk" },
-  { code: "fi", name: "Suomi" },
-  { code: "pl", name: "Polski" },
-  { code: "ja", name: "日本語" },
-];
-
-/** A stored or submitted language, or English for anything unknown. */
-export function cleanMessageLanguage(value: unknown): string {
-  const code = String(value || "").trim().toLowerCase();
-  return MESSAGE_LANGUAGES.some((option) => option.code === code) ? code : "en";
-}
+// Re-exported so the send path and its tests keep one import.
+export { MESSAGE_LANGUAGES, cleanMessageLanguage };
 
 /** Clarity's English wording in the given language, with {placeholders} filled. */
 export function translateMessage(

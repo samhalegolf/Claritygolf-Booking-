@@ -3512,9 +3512,7 @@
   "Edit note": "Rediger note",
   "Use the rail camera buttons or press Enter to capture.": "Brug kameraknapperne i sidebjælken, eller tryk på Enter for at tage et billede.",
   "Area Focus": "Områdefokus",
-  "Track Focus Beta": "Sporingsfokus (beta)",
   "No area selected": "Intet område valgt",
-  "Track focus is placeholder-only in this foundation.": "Sporingsfokus er kun en pladsholder i denne version.",
   "Live crop is not available for the selected area right now.": "Livebeskæring er ikke tilgængelig for det valgte område lige nu.",
   "No {side} video is available for live focus rendering.": "Ingen {side}-video er tilgængelig til livefokus.",
   "Live area focus lens active.": "Live områdefokuslinse aktiv.",
@@ -3527,7 +3525,6 @@
   "Add your note, then Save.": "Tilføj din note, og tryk på Gem.",
   "Could not capture snapshot.": "Kunne ikke tage snapshot.",
   "Focus lens": "Fokuslinse",
-  "Track focus beta": "Sporingsfokus (beta)",
   "Area focus · {sideLabel}": "Områdefokus · {sideLabel}",
   "Live area: {areaDetails}": "Liveområde: {areaDetails}",
   "Reselect": "Vælg igen",
@@ -4717,5 +4714,6 @@
   "This is your sign-in email for Clarity Caddy too.": "Det er også din login-e-mail til Clarity Caddy.",
   "Send confirmation link": "Send bekræftelseslink",
   "Change email": "Skift e-mail",
-  "Could not download that file. Try again.": "Filen kunne ikke downloades. Prøv igen."
+  "Could not download that file. Try again.": "Filen kunne ikke downloades. Prøv igen.",
+  "profile": "profil"
 }

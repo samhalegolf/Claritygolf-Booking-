@@ -5,7 +5,7 @@ import {
   DEFAULT_ACCOUNT_MARKET_CONFIG,
   marketProfileFor,
 } from "../../../netlify/functions/_shared/market-profile.mts";
-import { cleanMessageLanguage } from "../../../netlify/functions/_shared/message-language.mts";
+import { cleanMessageLanguage } from "../../../netlify/functions/_shared/message-languages.mts";
 import { cleanPhoneCountry } from "../../../netlify/functions/_shared/phone.mts";
 import {
   cleanLocationKind,

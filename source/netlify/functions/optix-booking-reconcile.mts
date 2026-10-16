@@ -70,4 +70,4 @@ export default async function handler(req: Request) {
 
 // /api/resource-hold is the name the app uses; the old one stays for any open
 // tab still running the previous bundle.
-export const config: Config = { path: ["/api/resource-hold", "/api/optix-booking-reconcile"] };
+export const config: Config = { path: "/api/resource-hold" };

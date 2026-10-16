@@ -34,7 +34,6 @@ Functions reach Postgres (Supabase) through `_shared/database.mts`, imported dir
 | `public-booking.mts` | `/api/public-booking` | Thin wrapper into `booking-core.mts` | Owned by `booking-core.mts`: `settings`, `calendar_items`, `people`, `notification_history` | Low | Keep thin. Do not duplicate public booking writes here. |
 | `public-notification-status.mts` | `/api/public-notification-status` | Thin wrapper into `booking-core.mts` | Owned by `booking-core.mts`: `notification_history` | Low | Keep thin. |
 | `public-reschedule-lookup-api.mts` | `/api/public-reschedule-lookup` | Thin wrapper into `booking-core.mts` | Owned by `booking-core.mts`: `calendar_items`, `settings` | Low | Compatibility route for public reschedule lookup. |
-| `public-reschedule-lookup.mts` | `/api/public-reschedule/lookup` | Thin wrapper into `booking-core.mts` | Owned by `booking-core.mts`: `calendar_items`, `settings` | Low | Alternate public reschedule lookup route. |
 | `public-reschedule.mts` | `/api/public-reschedule` | Thin wrapper into `booking-core.mts` | Owned by `booking-core.mts`: `calendar_items`, `settings`, `notification_history` | Low | Keep thin. Do not duplicate reschedule writes here. |
 | `resend-webhook.mts` | `/api/resend-webhook` | Thin wrapper into `booking-core.mts` | Owned by `booking-core.mts`: `notification_history`, `notification_webhook_events` | Low | Keep thin. Webhook idempotency and notification updates are centralised in `booking-core.mts`. |
 | `system-smoke.mts` | `/api/system-smoke` | Own direct Supabase REST helper | `admin_sessions`, `settings`, `calendar_items`, `people`, `notification_history` | Medium | Remaining direct Supabase diagnostic function. Keep in sync with `booking-core.mts` auth/session rules and table expectations. |
@@ -67,7 +66,6 @@ These route files should not grow their own persistence logic:
 - `public-booking.mts`
 - `public-notification-status.mts`
 - `public-reschedule-lookup-api.mts`
-- `public-reschedule-lookup.mts`
 - `public-reschedule.mts`
 - `resend-webhook.mts`
 

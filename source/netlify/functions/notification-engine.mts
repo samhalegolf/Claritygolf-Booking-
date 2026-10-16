@@ -11,10 +11,10 @@ const baseWeekStart = new Date(Date.UTC(2026, 5, 1));
 
 import {
   DEFAULT_MAP_LINK_LABEL,
-  notificationTemplateText,
   notificationVariantFor,
   parseNotificationTemplates,
 } from "./_shared/notification-templates.mts";
+import { notificationTemplateText } from "./_shared/notification-template-text.mts";
 import type {
   NotificationTemplateField,
   NotificationVariantId,

@@ -3512,9 +3512,7 @@
   "Edit note": "Redigera anteckning",
   "Use the rail camera buttons or press Enter to capture.": "Använd kameraknapparna i listen eller tryck på Enter för att fånga.",
   "Area Focus": "Områdesfokus",
-  "Track Focus Beta": "Spårningsfokus Beta",
   "No area selected": "Inget område valt",
-  "Track focus is placeholder-only in this foundation.": "Spårningsfokus är bara en platshållare i den här versionen.",
   "Live crop is not available for the selected area right now.": "Livebeskärning är inte tillgänglig för det valda området just nu.",
   "No {side} video is available for live focus rendering.": "Ingen video för {side} finns för livefokus.",
   "Live area focus lens active.": "Livelins för områdesfokus aktiv.",
@@ -3527,7 +3525,6 @@
   "Add your note, then Save.": "Lägg till din anteckning och tryck sedan på Spara.",
   "Could not capture snapshot.": "Det gick inte att fånga ögonblicksbilden.",
   "Focus lens": "Fokuslins",
-  "Track focus beta": "Spårningsfokus beta",
   "Area focus · {sideLabel}": "Områdesfokus · {sideLabel}",
   "Live area: {areaDetails}": "Liveområde: {areaDetails}",
   "Reselect": "Välj igen",
@@ -4717,5 +4714,6 @@
   "This is your sign-in email for Clarity Caddy too.": "Det här är också din inloggningsadress för Clarity Caddy.",
   "Send confirmation link": "Skicka bekräftelselänk",
   "Change email": "Byt e-postadress",
-  "Could not download that file. Try again.": "Det gick inte att ladda ned filen. Försök igen."
+  "Could not download that file. Try again.": "Det gick inte att ladda ned filen. Försök igen.",
+  "profile": "profil"
 }

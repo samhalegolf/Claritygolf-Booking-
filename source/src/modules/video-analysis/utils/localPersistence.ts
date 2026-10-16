@@ -283,8 +283,7 @@ const sanitizeWorkspaceState = (raw: unknown): ComparisonWorkspaceState | null =
   const linkedPlayback = linkedRaw === true || linkedRaw === false ? linkedRaw : false;
   const focusWindowRaw = candidate.focusWindowOpen;
   const focusWindowOpen = focusWindowRaw === true || focusWindowRaw === false ? focusWindowRaw : false;
-  const focusWindowMode =
-    candidate.focusWindowMode === "track" ? "track" : "area";
+  const focusWindowMode: FocusMode = "area";
   const focusWindowSide = candidate.focusWindowSide === "right" ? "right" : "left";
   const focusAreaRect = sanitizeFocusAreaRect(candidate.focusAreaRect);
   const savedVideoIdsCandidate = candidate.savedVideoIds;
@@ -338,7 +337,7 @@ export const saveComparisonWorkspaceState = (
     },
     linkedPlayback: state.linkedPlayback === true,
     focusWindowOpen: state.focusWindowOpen === true,
-    focusWindowMode: state.focusWindowMode === "track" ? "track" : "area",
+    focusWindowMode: "area",
     focusWindowSide: state.focusWindowSide === "right" ? "right" : "left",
     focusAreaRect: state.focusAreaRect && state.focusAreaRect.width > 0 && state.focusAreaRect.height > 0
       ? state.focusAreaRect

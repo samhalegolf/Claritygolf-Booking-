@@ -147,8 +147,8 @@ import { serviceIncludesCoach } from "../netlify/functions/_shared/service-scope
 // The country itself is held per page here, not in the shared module -- see
 // that file for why the server cannot have one.
 import { activeLocale, } from "./lib/activeCountry";
-import { BusinessHubPanel, OwnerIdentityCard } from "./modules/business-hub/BusinessHubPanel";
-import { CoachAvatar, CoachProfilePanel, type CoachWeekDay, type CoachWeekEntry } from "./modules/business-hub/CoachProfilePanel";
+import { CoachAvatar } from "./modules/business-hub/CoachAvatar";
+import type { CoachWeekDay, CoachWeekEntry } from "./modules/business-hub/CoachProfilePanel";
 import type { RegionValues } from "./modules/settings/RegionSettings";
 import { syncPushLanguage } from "./modules/notifications/browserPush";
 import { forgetNativePushOnSignOut, startNativePush } from "./native/nativePush";
@@ -561,6 +561,19 @@ import { ClientProfileView } from "./modules/clients/ClientProfileView";
 // embed and only mount when a signed-in coach opens them, so they are split
 // into their own chunks and loaded on demand — this keeps the public
 // /book-a-lesson page and the initial admin paint from downloading them.
+// The Profile view's panels, and the coach editor the Settings coaches list
+// opens. Loaded with the view rather than with the shell.
+const BusinessHubPanel = lazy(() =>
+  import("./modules/business-hub/BusinessHubPanel").then((module) => ({ default: module.BusinessHubPanel })),
+);
+const OwnerIdentityCard = lazy(() =>
+  import("./modules/business-hub/BusinessHubPanel").then((module) => ({ default: module.OwnerIdentityCard })),
+);
+// lazy() cannot carry the panel's generic parameter, so the lazy component is
+// typed as the real one; the props are checked exactly as before.
+const CoachProfilePanel = lazy(() =>
+  import("./modules/business-hub/CoachProfilePanel").then((module) => ({ default: module.CoachProfilePanel })),
+) as unknown as typeof import("./modules/business-hub/CoachProfilePanel").CoachProfilePanel;
 const VideoAnalysisPage = lazy(() =>
   import("./modules/video-analysis/VideoAnalysisPage").then((module) => ({ default: module.VideoAnalysisPage })),
 );
@@ -16138,6 +16151,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   const coachesSettingsPanel = (
     <SettingsGroup id="coaches" icon={ClarityCoachesStaff} section="business" title={terms.staffPlural}>
       {openCoach ? (
+        <Suspense fallback={<Loading what={terms.staffSingular.toLowerCase()} />}>
         <CoachProfilePanel
           coach={openCoach}
           isNew={Boolean(newCoach)}
@@ -16154,6 +16168,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
         >
           {googleCalendarSyncEnabled && googleCalendarProfileCoachId === openCoach.id ? googleCalendarCard : null}
         </CoachProfilePanel>
+        </Suspense>
       ) : (
       <div className="data-card wide">
         <div className="data-card-header">
@@ -23030,6 +23045,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                 onDismiss={() => setClarityPayReturn(null)}
               />
             )}
+            <Suspense fallback={<Loading what={t("profile")} />}>
             <BusinessHubPanel
               profile={
                 ownCoachProfile ? (
@@ -23068,6 +23084,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
               clarityPay={profileClarityPay}
               onOpen={(target, label) => openProfileTarget(target, label)}
             />
+            </Suspense>
           </section>
         )}
 
