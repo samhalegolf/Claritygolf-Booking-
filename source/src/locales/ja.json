@@ -1198,7 +1198,6 @@
   "Put {client} back on the calendar": "{client}さんをカレンダーに戻す",
   "Remove {client} from dock": "{client}さんをドックから削除",
   "All": "すべて",
-  "Live database": "本番データベース",
   "The delete didn't go through, so the lesson was put back on the calendar. Delete it again to retry.": "削除が完了しなかったため、レッスンをカレンダーに戻しました。もう一度削除して再試行してください。",
   "Your latest change was not saved. Please try again; the app will retry when you make another change.": "最新の変更は保存されませんでした。もう一度お試しください。次に変更したときにもアプリが再試行します。",
   "No active coaches are assigned to this location yet.": "このロケーションに割り当てられた有効なコーチはまだいません。",

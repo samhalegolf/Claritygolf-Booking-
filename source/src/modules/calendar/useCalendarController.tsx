@@ -63,7 +63,6 @@ import {
   bookingLocationShortDisplay,
   bookingLocationSnapshotFor,
   type BookingStatus,
-  type CalendarFeedStatus,
   CalendarItem,
   calendarItemCoachColumnId,
   calendarItemLocation,
@@ -150,8 +149,6 @@ export type CalendarControllerInputs = {
   accountLocations: Location[];
   activeCoachList: CoachProfile[];
   calendarSaveStatus: CalendarSaveStatus;
-  calendarFeedStatus: CalendarFeedStatus;
-  calendarSaveError: string;
   calendarSaveFailureKind: "change" | "delete";
   endPointer: () => void;
   notificationsByAppointment: Map<string, NotificationRecord[]>;

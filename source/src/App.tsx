@@ -89,6 +89,7 @@ import { apiFetch } from "./modules/auth/apiFetch";
 import type { FrameViewerShot } from "./modules/shared/SnapshotFrameViewer";
 import type { SheetVideo } from "./modules/swing-review/SwingReviewSheet";
 import type { Session } from "./modules/auth/session";
+import { DeveloperContext } from "./modules/auth/developer";
 import type { TillLesson } from "./modules/billing/tillLessons";
 import { WORKSPACE_ACCOUNTS_STORAGE_KEY } from "./modules/shared/workspaceStorage";
 import { clearCalendarCache } from "./modules/workspace/calendarCache";
@@ -2033,6 +2034,7 @@ type AppProps = {
 function App({ onSessionLost, session: entrySession }: AppProps) {
   const [themeMode, setThemeMode] = useState<ThemeMode>(getStoredTheme);
   const workspaceData = useWorkspaceData({ entrySession });
+  const isDeveloper = Boolean(entrySession.isDeveloper);
   const {
     coachAccount,
     setCoachAccount,
@@ -15865,8 +15867,8 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
             </div>
           </details>
 
-          {/* Admin only: it shows raw Google payloads and failure codes. */}
-          {isAdminUser ? (
+          {/* Developer only: it shows raw Google payloads and failure codes. */}
+          {isDeveloper ? (
             <details
               className="settings-subsection gcal-debug"
               open={googleCalendarDebugOpen}
@@ -17921,8 +17923,6 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
     accountLocations,
     activeCoachList,
     calendarSaveStatus,
-    calendarFeedStatus,
-    calendarSaveError,
     calendarSaveFailureKind,
     endPointer,
     notificationsByAppointment,
@@ -18819,6 +18819,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   );
 
   return (
+    <DeveloperContext.Provider value={isDeveloper}>
     <div className={`app-shell theme-${themeMode}${phoneLayout ? " is-phone" : ""}`} style={brandStyle}>
     <aside className="sidebar">
       <div className="brand">
@@ -18903,7 +18904,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
         {/* Fixed to the corner rather than stacked under the calendar: it is a
             developer tool that is shut almost all of the time, and the summary
             bar for it was costing every admin a strip of the page. */}
-        {adminWorkspaceReady && activeView === "calendar" && isAdminUser && (
+        {adminWorkspaceReady && activeView === "calendar" && isDeveloper && (
         <section className={`developer-diagnostics ${diagnosticsOpen ? "is-open" : ""}`}>
           <button
             className="developer-diagnostics-launcher"
@@ -24944,6 +24945,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
 
       {edgeCue && <div className={`edge-cue ${edgeCue}`}>{edgeCue === "next" ? t("Next week") : t("Previous week")}</div>}
     </div>
+    </DeveloperContext.Provider>
   );
 }
 

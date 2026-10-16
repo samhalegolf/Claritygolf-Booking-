@@ -1198,7 +1198,6 @@
   "Put {client} back on the calendar": "{client} terugzetten in de agenda",
   "Remove {client} from dock": "{client} van het dock verwijderen",
   "All": "Alles",
-  "Live database": "Live database",
   "The delete didn't go through, so the lesson was put back on the calendar. Delete it again to retry.": "Het verwijderen is niet gelukt, dus de les is teruggezet in de agenda. Verwijder hem nogmaals om het opnieuw te proberen.",
   "Your latest change was not saved. Please try again; the app will retry when you make another change.": "Je laatste wijziging is niet opgeslagen. Probeer het opnieuw; de app probeert het nog eens bij je volgende wijziging.",
   "No active coaches are assigned to this location yet.": "Er zijn nog geen actieve coaches aan deze locatie toegewezen.",

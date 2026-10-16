@@ -19,6 +19,8 @@
 // from _shared for the same reason (see phone.mts): one definition, so the two
 // sides cannot drift.
 
+import { isDeveloperEmail } from "./developer.mts";
+
 /** Which business an authenticated user acts for. From account_memberships. */
 export type AccountRole = "owner" | "admin" | "coach";
 
@@ -80,6 +82,8 @@ export type AuthSessionResponse = {
   workspace?: WorkspaceBootstrap;
   email?: string;
   name?: string;
+  /** Set by authSessionResponse, never by a caller: see developer.mts. */
+  isDeveloper?: boolean;
   expiresAt?: string;
   /** Native clients only — the browser gets an HttpOnly cookie instead. */
   token?: string;
@@ -95,5 +99,7 @@ export type AuthSessionResponse = {
  * and accepted anything.
  */
 export function authSessionResponse(body: AuthSessionResponse): AuthSessionResponse {
-  return body;
+  // Decided here so every login and session path reports it the same way.
+  const { isDeveloper: _ignored, ...rest } = body;
+  return body.authenticated && isDeveloperEmail(body.email) ? { ...rest, isDeveloper: true } : rest;
 }

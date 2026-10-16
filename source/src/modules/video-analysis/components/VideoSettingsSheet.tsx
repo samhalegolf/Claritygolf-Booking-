@@ -17,6 +17,7 @@ import {
   IconUpload,
 } from "./VideoIcons";
 import { t } from "../../../lib/i18n";
+import { useIsDeveloper } from "../../auth/developer";
 import { VIDEO_VISUAL_PRESETS, type VideoVisualPresetId } from "../utils/videoVisualPreset";
 
 // Everything that used to sit in the coach's always-on toolbar and isn't
@@ -116,6 +117,7 @@ export function VideoSettingsSheet({
   visualPreset,
   onSelectVisualPreset,
 }: VideoSettingsSheetProps) {
+  const isDeveloper = useIsDeveloper();
   if (!open) return null;
 
   // A saved camera that is not in the list is still the coach's choice. It is
@@ -359,16 +361,18 @@ export function VideoSettingsSheet({
           <span>{t("Save permanently to My Library")}</span>
         </button>
 
-        <button
-          type="button"
-          className="va-sheet-row va-sheet-row-btn"
-          aria-pressed={showDiagnostics}
-          onClick={onToggleDiagnostics}
-        >
-          <IconDiagnostics />
-          <span>{t("Diagnostics")}</span>
-          <span className={`va-sheet-toggle${showDiagnostics ? " is-on" : ""}`} aria-hidden="true" />
-        </button>
+        {isDeveloper && (
+          <button
+            type="button"
+            className="va-sheet-row va-sheet-row-btn"
+            aria-pressed={showDiagnostics}
+            onClick={onToggleDiagnostics}
+          >
+            <IconDiagnostics />
+            <span>{t("Diagnostics")}</span>
+            <span className={`va-sheet-toggle${showDiagnostics ? " is-on" : ""}`} aria-hidden="true" />
+          </button>
+        )}
       </div>
     </>
   );
