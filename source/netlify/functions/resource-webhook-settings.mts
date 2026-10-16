@@ -1,3 +1,4 @@
+// @ts-nocheck -- predates types in the functions; remove this line to bring the file under the checker.
 import { getDatabase } from "./_shared/database.mts";
 import type { Config } from "@netlify/functions";
 

@@ -6,6 +6,21 @@ import {
   marketProfileFor,
 } from "../../../netlify/functions/_shared/market-profile.mts";
 import { cleanMessageLanguage } from "../../../netlify/functions/_shared/message-languages.mts";
+import {
+  accountEntitlements,
+  accountFeatureKeys,
+  isAccountPlanKey,
+  type AccountEntitlements,
+  type AccountEntitlementsOverride,
+  type AccountFeatureKey,
+  type AccountLimits,
+  type AccountPlanKey,
+} from "../../../netlify/functions/_shared/plan-catalog.mts";
+
+// The plan catalogue is shared with the functions (plan-catalog.mts). Re-exported
+// so the rest of the app keeps reading it from the workspace model.
+export { accountEntitlements, accountFeatureKeys };
+export type { AccountEntitlements, AccountFeatureKey, AccountLimits };
 import { cleanPhoneCountry } from "../../../netlify/functions/_shared/phone.mts";
 import {
   cleanLocationKind,
@@ -60,40 +75,6 @@ type SubscriptionStatus =
   | "cancelled"
   | "comped"
   | "internal";
-type AccountPlanKey = "solo" | "studio" | "academy" | "enterprise" | "founder";
-export type AccountFeatureKey =
-  | "publicBooking"
-  | "coachCalendar"
-  | "locationCalendar"
-  | "multiCoach"
-  | "multiLocation"
-  | "services"
-  | "groupLessons"
-  | "packages"
-  | "clients"
-  | "notifications"
-  | "googleCalendarSync"
-  | "invoicing"
-  | "checkout"
-  | "customBranding"
-  | "customDomains"
-  | "staffUsers"
-  | "advancedPermissions";
-export type AccountLimits = {
-  maxCoaches: number;
-  maxLocations: number;
-  maxUsers: number;
-  maxServices: number;
-  maxBookingScreens: number;
-};
-export type AccountEntitlements = {
-  features: Record<AccountFeatureKey, boolean>;
-  limits: AccountLimits;
-};
-type AccountEntitlementsOverride = {
-  features?: Partial<Record<AccountFeatureKey, boolean>>;
-  limits?: Partial<AccountLimits>;
-};
 export type WorkspaceAccount = {
   id: string;
   name: string;
@@ -352,26 +333,6 @@ export function cleanCoachAccount(account?: Partial<CoachAccount>): CoachAccount
   };
 }
 
-export const accountFeatureKeys: AccountFeatureKey[] = [
-  "publicBooking",
-  "coachCalendar",
-  "locationCalendar",
-  "multiCoach",
-  "multiLocation",
-  "services",
-  "groupLessons",
-  "packages",
-  "clients",
-  "notifications",
-  "googleCalendarSync",
-  "invoicing",
-  "checkout",
-  "customBranding",
-  "customDomains",
-  "staffUsers",
-  "advancedPermissions",
-];
-
 // What the Account screen calls each part of a plan. Staff and service words
 // follow the business's own terminology, so a physio clinic never reads "Coach".
 export function accountFeatureLabel(feature: AccountFeatureKey, terms: BusinessTerminology) {
@@ -411,76 +372,6 @@ export const SUBSCRIPTION_STATUS_LABEL: Record<SubscriptionStatus, string> = {
 // because a limit has to be a number.
 export const UNLIMITED_ACCOUNT_LIMIT = 999;
 
-function accountFeatures(enabled: AccountFeatureKey[]): Record<AccountFeatureKey, boolean> {
-  return accountFeatureKeys.reduce(
-    (features, feature) => ({ ...features, [feature]: enabled.includes(feature) }),
-    {} as Record<AccountFeatureKey, boolean>,
-  );
-}
-
-const allAccountFeatures = accountFeatures(accountFeatureKeys);
-
-const accountPlanCatalog: Record<AccountPlanKey, AccountEntitlements> = {
-  solo: {
-    features: accountFeatures([
-      "publicBooking",
-      "coachCalendar",
-      "services",
-      "groupLessons",
-      "packages",
-      "clients",
-      "notifications",
-      "googleCalendarSync",
-    ]),
-    limits: { maxCoaches: 1, maxLocations: 1, maxUsers: 1, maxServices: 10, maxBookingScreens: 1 },
-  },
-  studio: {
-    features: accountFeatures([
-      "publicBooking",
-      "coachCalendar",
-      "locationCalendar",
-      "multiCoach",
-      "multiLocation",
-      "services",
-      "groupLessons",
-      "packages",
-      "clients",
-      "notifications",
-      "googleCalendarSync",
-      "invoicing",
-      "customBranding",
-      "staffUsers",
-    ]),
-    limits: { maxCoaches: 5, maxLocations: 3, maxUsers: 8, maxServices: 40, maxBookingScreens: 4 },
-  },
-  academy: {
-    features: allAccountFeatures,
-    limits: { maxCoaches: 20, maxLocations: 10, maxUsers: 30, maxServices: 120, maxBookingScreens: 12 },
-  },
-  enterprise: {
-    features: allAccountFeatures,
-    limits: { maxCoaches: 999, maxLocations: 999, maxUsers: 999, maxServices: 999, maxBookingScreens: 999 },
-  },
-  founder: {
-    features: allAccountFeatures,
-    limits: { maxCoaches: 999, maxLocations: 999, maxUsers: 999, maxServices: 999, maxBookingScreens: 999 },
-  },
-};
-
-function mergeEntitlementOverrides(
-  base: AccountEntitlements,
-  override?: AccountEntitlementsOverride,
-): AccountEntitlements {
-  return {
-    features: { ...base.features, ...(override?.features ?? {}) },
-    limits: { ...base.limits, ...(override?.limits ?? {}) },
-  };
-}
-
-export function accountEntitlements(account: WorkspaceAccount): AccountEntitlements {
-  return mergeEntitlementOverrides(accountPlanCatalog[account.planKey] ?? accountPlanCatalog.solo, account.entitlementsOverride);
-}
-
 function accountHasFeature(account: WorkspaceAccount, feature: AccountFeatureKey) {
   return accountEntitlements(account).features[feature] === true;
 }
@@ -518,8 +409,7 @@ function cleanWorkspaceAccount(
       ? raw.name.trim().slice(0, 120)
       : fallback.name;
   const slug = cleanSlug(raw?.slug || raw?.id || name, fallback.slug);
-  const planKey: AccountPlanKey =
-    raw?.planKey && raw.planKey in accountPlanCatalog ? raw.planKey : fallback.planKey;
+  const planKey: AccountPlanKey = isAccountPlanKey(raw?.planKey) ? raw.planKey : fallback.planKey;
   const subscriptionStatus: SubscriptionStatus =
     raw?.subscriptionStatus && ["trialing", "active", "past_due", "paused", "cancelled", "comped", "internal"].includes(raw.subscriptionStatus)
       ? raw.subscriptionStatus

@@ -1,3 +1,4 @@
+// @ts-nocheck -- predates types in the functions; remove this line to bring the file under the checker.
 import { calendarSlot, MINUTES_IN_DAY } from "./calendar-slot.mts";
 import { defaultCoachAccount, defaultTimeZone, FALLBACK_TIME_ZONE } from "./coach-account.mts";
 import { recordBelongsToAccountStrict } from "./coach-auth.mts";

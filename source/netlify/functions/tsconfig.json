@@ -1,0 +1,23 @@
+{
+  // Type-checks the Netlify functions. `npm run typecheck:functions`, and part
+  // of the production build.
+  //
+  // Fourteen files predate types in the functions and still read as plain
+  // JavaScript to the checker (about 250 errors between them, mostly
+  // properties on untyped objects). Each carries a // @ts-nocheck line at the
+  // top; delete the line to bring the file under the checker. A new file is
+  // checked by default.
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "types": ["node"]
+  },
+  "include": ["**/*.mts"],
+  "exclude": ["**/*.test.mts"]
+}

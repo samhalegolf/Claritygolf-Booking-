@@ -1,3 +1,4 @@
+// @ts-nocheck -- predates types in the functions; remove this line to bring the file under the checker.
 import type { Config } from "@netlify/functions";
 
 import { requireCoachActor } from "./_shared/coach-auth.mts";

@@ -8,7 +8,6 @@ This document records the current persistence shape of the active Clarity Golf b
 
 `booking-core.mts` is the main persistence owner for the booking app. Most route files under `source/netlify/functions/` should remain thin wrappers that delegate to exported handlers in `booking-core.mts`.
 
-Auth routes should stay thin. In the current state, `auth-session.mts` is a thin wrapper into `booking-core.mts`, matching `auth-login.mts`, `auth-change-password.mts`, `auth-forgot-password.mts`, and `auth-reset-password.mts`. `notification-history.mts` is also now a thin wrapper into `booking-core.mts`.
 
 Functions reach Postgres (Supabase) through `_shared/database.mts`, imported directly. There is no `@netlify/database` package any more: a test in `_shared/database.test.mts` keeps it from coming back, because Netlify's bundler mishandled it and broke login.
 
@@ -16,19 +15,12 @@ Functions reach Postgres (Supabase) through `_shared/database.mts`, imported dir
 
 | Function | Route | Persistence Path | Tables Touched | Risk Level | Notes |
 | --- | --- | --- | --- | --- | --- |
-| `auth-change-password.mts` | `/api/auth/change-password` | Thin wrapper to `handleBookingApiRoute` in `booking-core.mts` | Owned by `booking-core.mts`: `admin_users`, `admin_sessions` | Low | Keep thin. Do not add direct Supabase code here. |
-| `auth-forgot-password.mts` | `/api/auth/forgot-password` | Thin wrapper to `handleBookingApiRoute` in `booking-core.mts` | Owned by `booking-core.mts`: `admin_users`, `admin_password_resets` | Low | Keep thin. Do not add direct Supabase code here. |
-| `auth-login.mts` | `/api/auth/login` | Thin wrapper to `handleBookingApiRoute` in `booking-core.mts` | Owned by `booking-core.mts`: `admin_users`, `admin_sessions` | Low | Login and session creation are owned by `booking-core.mts`. |
-| `auth-reset-password.mts` | `/api/auth/reset-password` | Thin wrapper to `handleBookingApiRoute` in `booking-core.mts` | Owned by `booking-core.mts`: `admin_users`, `admin_password_resets`, `admin_sessions` | Low | Keep thin. Do not add direct Supabase code here. |
 | `auth-session.mts` | `/api/auth/session` | Thin wrapper to `handleBookingApiRoute` in `booking-core.mts` | Owned by `booking-core.mts`: `admin_users`, `admin_sessions` | Low | Current patched state: this now matches login/session persistence ownership. |
 | `booking-api.mts` | `/api/*` except excluded routes | Thin catch-all wrapper to `handleBookingApiRoute` in `booking-core.mts` | Owned by `booking-core.mts` | Low | Catch-all route. Specific function routes are excluded where separate handlers exist. |
 | `booking-core.mts` | Shared handler module, not a direct route file | Main persistence owner through `_shared/database.mts` (direct Postgres) | `settings`, `calendar_items`, `people`, `admin_users`, `admin_sessions`, `admin_password_resets`, `notification_history`, `notification_webhook_events` | High | Central source of truth for booking, auth, public booking, reschedule, notifications, and webhook persistence. Changes here affect most app behaviour. |
 | `calendar-feed.mts` | `/calendar/*` | Thin wrapper to `handleCalendarFeedRequest` in `booking-core.mts` | Owned by `booking-core.mts`: primarily `settings`, `calendar_items` | Low | Keep thin. Calendar feed persistence should remain centralised in `booking-core.mts`. |
 | `calendar-state.mts` | `/api/calendar-state` | Own direct Supabase REST helper | `admin_sessions`, `settings`, `calendar_items`, `people`, `notification_history` | High | Remaining direct Supabase function. Intentionally not converted to a thin wrapper yet. Malformed PUT bodies where `items` is missing or not an array return 400 before any write/delete. Valid `items: []` still intentionally preserves the existing clear-all behaviour. Appointment-derived people are resolved against existing rows by id, case-insensitive email, then name+phone before upsert, preventing duplicate-email 409 failures while preserving existing profile metadata. Settings and notification behaviour were not changed. Further calendar consolidation must be a separate explicit audit/patch. |
-| `notification-history.mts` | `/api/notification-history` | Thin wrapper to `handleBookingApiRoute` in `booking-core.mts` | Owned by `booking-core.mts`: `notification_history`, `admin_sessions`, `admin_users` | Low | Current patched state: this no longer owns a separate direct Supabase notification-history helper. |
 | `people-migrate.mts` | `/api/people/migrate` | Uses `getDatabase` from `./_shared/database.mts` | `admin_sessions`, `admin_users`, `calendar_items`, `people` | Medium | Migration/admin tooling. Keep direct for now unless specifically auditing people migration behaviour. |
-| `practice-blocks.mts` | `/api/practice-blocks`, `/api/practice-blocks/complete` | Thin wrapper to `handleBookingApiRoute` in `booking-core.mts` | Owned by `booking-core.mts`: `practice_blocks`, `calendar_items` (read-only, to resolve a `next_lesson` expiry once at assignment time) | Low | Keep thin. The two paths authenticate differently — `/complete` runs on a player session, the rest on an admin session — and the split is resolved in this file, not by the router. |
-| `practice-block-presets.mts` | `/api/practice-block-presets` | Thin wrapper to `handleBookingApiRoute` in `booking-core.mts` | Owned by `booking-core.mts`: `practice_block_presets` (read/write), `practice_blocks` (read-only, for the derived "used often" suggestions) | Low | Keep thin. Coach-only; presets are hard-deleted, unlike practice blocks which only ever archive. |
 | `video-transfer.mts` (review pages, drills) | `/api/video-transfer/review/doc`, `/api/video-transfer/review/docs`, `/api/video-transfer/drills`, `/api/video-transfer/player/reviews` | Own direct Supabase REST helper (same as the rest of video-transfer) | `swing_review_documents`, `coach_drills` | Low | Swing review pages (ordered blocks, cleaned by `_shared/review-document.mts`) and the business-wide drill library. Drills are author-only to change, checked against the coach's auth user id. Players only read pages that have been sent. |
 | `public-booking-state.mts` | `/api/public-booking-state` | Thin wrapper into `booking-core.mts` | Owned by `booking-core.mts`: primarily `settings`, `calendar_items` | Low | Keep thin. Public booking state shape is centralised in `booking-core.mts`. |
 | `public-booking.mts` | `/api/public-booking` | Thin wrapper into `booking-core.mts` | Owned by `booking-core.mts`: `settings`, `calendar_items`, `people`, `notification_history` | Low | Keep thin. Do not duplicate public booking writes here. |
@@ -54,14 +46,9 @@ Do not patch all of them at once. Patch one function at a time after confirming 
 
 These route files should not grow their own persistence logic:
 
-- `auth-change-password.mts`
-- `auth-forgot-password.mts`
-- `auth-login.mts`
-- `auth-reset-password.mts`
 - `auth-session.mts`
 - `booking-api.mts`
 - `calendar-feed.mts`
-- `notification-history.mts`
 - `public-booking-state.mts`
 - `public-booking.mts`
 - `public-notification-status.mts`

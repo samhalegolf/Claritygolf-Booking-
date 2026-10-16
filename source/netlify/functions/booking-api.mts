@@ -13,17 +13,16 @@ export default async function handler(req: Request, context: Context) {
   return handleBookingApiRoute(req, "", context);
 }
 
-// Every route below is owned by its own dedicated function. They must all be
-// excluded here, otherwise this wildcard would shadow them.
+// Every route below is owned by its own dedicated function (a different
+// handler, a pinned region, or a schedule). They must all be excluded here,
+// otherwise this wildcard would shadow them. Routes the core router serves
+// itself -- auth, people, coaches, locations, notes, passes, practice blocks --
+// used to have one-line wrapper functions of their own; each was another copy
+// of the core to cold-start, so the wildcard serves them now.
 export const config: Config = {
   path: "/api/*",
   excludedPath: [
-    "/api/auth/login",
     "/api/auth/session",
-    "/api/auth/forgot-password",
-    "/api/auth/reset-password",
-    "/api/auth/change-password",
-    "/api/auth/logout",
     "/api/admin-settings",
     "/api/billing/*",
     "/api/billing-stripe-sync",
@@ -33,26 +32,16 @@ export const config: Config = {
     "/api/akahu-expenses",
     "/api/akahu-reconcile",
     "/api/akahu-webhook",
-    "/api/booking-confirmation-resend",
     "/api/calendar-state",
-    "/api/coaches",
     "/api/custom-group-confirm",
     "/api/external-bookings",
     "/api/google-calendar/*",
     "/api/google-calendar-sync",
     "/api/google-drive/*",
     "/api/integration-setup",
-    "/api/locations",
-    "/api/notes",
-    "/api/notification-history",
     "/api/optix-origin-status",
     "/api/optix-booking-type-settings",
     "/api/optix-webhook",
-    "/api/people",
-    "/api/passes",
-    "/api/passes/inbox",
-    "/api/passes/attach",
-    "/api/passes/list",
     "/api/memberships",
     "/api/memberships/plans",
     "/api/memberships/enrol",
@@ -63,17 +52,11 @@ export const config: Config = {
     "/api/rewards",
     "/api/rewards/programs",
     "/api/rewards/run",
-    "/api/people/import-lite",
     "/api/people/migrate",
-    "/api/practice-blocks",
-    "/api/practice-blocks/complete",
-    "/api/practice-block-presets",
-    "/api/practice-block-presets/dismiss",
     "/api/resource-hold",
     "/api/resource-status",
     "/api/resource-webhook",
     "/api/resource-webhook-settings",
-    "/api/practice-block-types",
     "/api/public-booking",
     "/api/public-booking-catalog",
     "/api/public-booking-slots",

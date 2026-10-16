@@ -1,5 +1,6 @@
 import { userBelongsToAccountStrict } from "./coach-auth.mts";
 import { cleanSlug } from "./values.mts";
+import { accountEntitlements, accountPlanCatalog } from "./plan-catalog.mts";
 
 /**
  * Who may do what.
@@ -11,55 +12,7 @@ import { cleanSlug } from "./values.mts";
  * hand them straight back to the browser.
  */
 
-const accountFeatureKeys = [
-  "publicBooking",
-  "coachCalendar",
-  "locationCalendar",
-  "multiCoach",
-  "multiLocation",
-  "services",
-  "groupLessons",
-  "packages",
-  "clients",
-  "notifications",
-  "googleCalendarSync",
-  "invoicing",
-  "checkout",
-  "customBranding",
-  "customDomains",
-  "staffUsers",
-  "advancedPermissions",
-];
-
-function accountFeatures(enabled) {
-  return Object.fromEntries(accountFeatureKeys.map((feature) => [feature, enabled.includes(feature)]));
-}
-
-const allAccountFeatures = accountFeatures(accountFeatureKeys);
-export const accountPlanCatalog = {
-  solo: {
-    features: accountFeatures(["publicBooking", "coachCalendar", "services", "groupLessons", "packages", "clients", "notifications", "googleCalendarSync"]),
-    limits: { maxCoaches: 1, maxLocations: 1, maxUsers: 1, maxServices: 10, maxBookingScreens: 1 },
-  },
-  studio: {
-    features: accountFeatures(["publicBooking", "coachCalendar", "locationCalendar", "multiCoach", "multiLocation", "services", "groupLessons", "packages", "clients", "notifications", "googleCalendarSync", "invoicing", "customBranding", "staffUsers"]),
-    limits: { maxCoaches: 5, maxLocations: 3, maxUsers: 8, maxServices: 40, maxBookingScreens: 4 },
-  },
-  academy: { features: allAccountFeatures, limits: { maxCoaches: 20, maxLocations: 10, maxUsers: 30, maxServices: 120, maxBookingScreens: 12 } },
-  enterprise: { features: allAccountFeatures, limits: { maxCoaches: 999, maxLocations: 999, maxUsers: 999, maxServices: 999, maxBookingScreens: 999 } },
-  founder: { features: allAccountFeatures, limits: { maxCoaches: 999, maxLocations: 999, maxUsers: 999, maxServices: 999, maxBookingScreens: 999 } },
-};
-
-function mergeEntitlementOverrides(base, override) {
-  return {
-    features: { ...base.features, ...(override?.features || {}) },
-    limits: { ...base.limits, ...(override?.limits || {}) },
-  };
-}
-
-export function accountEntitlements(account) {
-  return mergeEntitlementOverrides(accountPlanCatalog[account?.planKey] || accountPlanCatalog.solo, account?.entitlementsOverride);
-}
+export { accountPlanCatalog, accountEntitlements };
 
 function accountHasFeature(account, feature) {
   return accountEntitlements(account).features[feature] === true;
