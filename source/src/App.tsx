@@ -597,7 +597,7 @@ const PracticeBlockPanel = lazy(() =>
 );
 
 // The kinds of block, and the favourites rail. Preferences, not work -- see
-// UI_FILING_AND_CLASSIFICATION.md -- so it lives in Settings.
+// docs/ui-filing-and-classification.md -- so it lives in Settings.
 const PracticeSettingsPanel = lazy(() =>
   import("./modules/practice/PracticeSettingsPanel").then((module) => ({ default: module.PracticeSettingsPanel })),
 );
@@ -19842,7 +19842,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                                     </div>
                                   </div>
                                   {/* Passes are designed but not built -- see
-                                      PASS_SYSTEM_DESIGN.md. There is no pass
+                                      docs/pass-system-design.md. There is no pass
                                       record to read, so this says so rather than
                                       showing an empty list that reads as "this
                                       person has none". */}

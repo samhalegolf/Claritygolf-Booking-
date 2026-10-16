@@ -83,3 +83,6 @@ google-scope-fix.tgz
 source/node_modules
 # The staff app's own install (booking-app/ has its own package.json).
 source/booking-app/node_modules/
+
+# IDE state.
+.idea/

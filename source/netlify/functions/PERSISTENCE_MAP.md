@@ -2,7 +2,7 @@
 
 This document records the current persistence shape of the active Clarity Golf booking app.
 
-`source/` is the only active application. Root-level duplicates are legacy unless a future migration explicitly says otherwise. Follow the repository-level `PROJECT_SOURCE_OF_TRUTH.md` before editing any function.
+`source/` is the only application; see the repository-level `PROJECT_SOURCE_OF_TRUTH.md` for the layout.
 
 ## Current persistence ownership
 
