@@ -5,26 +5,8 @@
  * Which block applies is the reader's call, not a setting saved on somebody
  * else's device -- the same reasoning that took the dark/light toggle off the
  * booking cards. */
-.player-terminal,
-.player-portal {
-  /* These values became the global palette. They now come back from
-     tokens.css rather than being declared here, so the portal and the coach
-     app cannot drift apart again. */
-  --pt-page: var(--c-page);
-  --pt-surface: var(--c-surface);
-  --pt-surface-soft: var(--c-surface-soft);
-  --pt-border: var(--c-border);
-  --pt-border-soft: var(--c-border-soft);
-  --pt-text: var(--c-text);
-  --pt-text-body: var(--c-text-body);
-  --pt-text-soft: var(--c-text-soft);
-  --pt-muted: var(--c-muted);
-  --pt-hover: var(--c-hover);
-  --pt-active: var(--c-active);
-  --pt-accent: var(--c-accent);
-  --pt-accent-text: var(--c-accent-text);
-  --pt-error-text: var(--c-error-text);
-}
+/* The portal reads --c-* directly. Its palette became the global one in
+   tokens.css, and the --pt-* aliases that used to sit here are gone with it. */
 
 /* Dark lives in tokens.css now, on the same selectors and by the same rule:
  * the reader's OS preference, never a setting saved on somebody else's
@@ -64,7 +46,7 @@
   align-items: flex-start;
   justify-content: center;
   padding: 48px 16px;
-  background: var(--pt-page);
+  background: var(--c-page);
   box-sizing: border-box;
 }
 
@@ -77,11 +59,11 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
-  background: var(--pt-surface);
-  border: 1px solid var(--pt-border);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
   border-radius: 16px;
   padding: 28px;
-  color: var(--pt-text);
+  color: var(--c-text);
 }
 
 .player-portal-brand {
@@ -99,7 +81,7 @@
   text-transform: uppercase;
   letter-spacing: 0.06em;
   font-weight: 700;
-  color: var(--pt-muted);
+  color: var(--c-muted);
 }
 
 .player-portal-card h1 {
@@ -110,7 +92,7 @@
 
 .player-portal-lead {
   margin: 0;
-  color: var(--pt-text-soft);
+  color: var(--c-text-soft);
   font-size: 14px;
 }
 
@@ -124,31 +106,31 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
   font-weight: 700;
-  color: var(--pt-muted);
+  color: var(--c-muted);
 }
 
 .player-portal-field input {
   min-height: 44px;
-  border: 1px solid var(--pt-border);
+  border: 1px solid var(--c-border);
   border-radius: 9px;
   padding: 0 12px;
-  background: var(--pt-surface-soft);
-  color: var(--pt-text);
+  background: var(--c-surface-soft);
+  color: var(--c-text);
   font: inherit;
 }
 
 .player-portal-field input:focus {
   outline: none;
-  border-color: var(--pt-text);
-  background: var(--pt-surface);
+  border-color: var(--c-text);
+  background: var(--c-surface);
 }
 
 .player-portal-primary {
   min-height: 46px;
   border: 0;
   border-radius: 10px;
-  background: var(--pt-accent);
-  color: var(--pt-accent-text);
+  background: var(--c-accent);
+  color: var(--c-accent-text);
   font: inherit;
   font-weight: 700;
   cursor: pointer;
@@ -161,11 +143,11 @@
 }
 
 .player-portal-ghost {
-  border: 1px solid var(--pt-border);
+  border: 1px solid var(--c-border);
   border-radius: 999px;
   padding: 7px 14px;
-  background: var(--pt-surface);
-  color: var(--pt-text);
+  background: var(--c-surface);
+  color: var(--c-text);
   font: inherit;
   font-weight: 600;
   font-size: 13px;
@@ -173,7 +155,7 @@
 }
 
 .player-portal-ghost:hover {
-  background: var(--pt-hover);
+  background: var(--c-hover);
 }
 
 /* Rule 09: feedback is one line of coloured text, not a box. The old
@@ -192,15 +174,15 @@
   justify-content: space-between;
   gap: 12px;
   padding: 10px 12px;
-  border: 1px solid var(--pt-border);
+  border: 1px solid var(--c-border);
   border-radius: 9px;
-  background: var(--pt-surface-soft);
+  background: var(--c-surface-soft);
 }
 
 .player-portal-guest-banner p {
   margin: 0;
   font-size: 13px;
-  color: var(--pt-text-soft);
+  color: var(--c-text-soft);
 }
 
 .player-portal-guest-banner .player-portal-primary {
@@ -223,16 +205,16 @@
   gap: 4px;
   text-align: left;
   padding: 14px;
-  border: 1px solid var(--pt-border);
+  border: 1px solid var(--c-border);
   border-radius: 12px;
-  background: var(--pt-surface-soft);
-  color: var(--pt-text);
+  background: var(--c-surface-soft);
+  color: var(--c-text);
   font: inherit;
   cursor: pointer;
 }
 
 .player-portal-home-card:hover {
-  background: var(--pt-hover);
+  background: var(--c-hover);
 }
 
 .player-portal-home-card-title {
@@ -245,7 +227,7 @@
 
 .player-portal-home-card-sub {
   font-size: 12px;
-  color: var(--pt-text-soft);
+  color: var(--c-text-soft);
 }
 
 .player-portal-home-card-wide {
@@ -264,9 +246,9 @@
   display: flex;
   gap: 2px;
   padding: 3px;
-  border: 1px solid var(--pt-border);
+  border: 1px solid var(--c-border);
   border-radius: 999px;
-  background: var(--pt-surface-soft);
+  background: var(--c-surface-soft);
   width: fit-content;
 }
 
@@ -281,7 +263,7 @@
   border-radius: 999px;
   padding: 0 16px;
   background: transparent;
-  color: var(--pt-text-soft);
+  color: var(--c-text-soft);
   font: inherit;
   font-weight: 600;
   font-size: 13px;
@@ -289,8 +271,8 @@
 }
 
 .player-portal-pill-toggle button.active {
-  background: var(--pt-accent);
-  color: var(--pt-accent-text);
+  background: var(--c-accent);
+  color: var(--c-accent-text);
 }
 
 /* Booking embedded inline in the Lessons tab, in place of the old
@@ -305,19 +287,19 @@
 
 .player-portal-field textarea {
   min-height: 96px;
-  border: 1px solid var(--pt-border);
+  border: 1px solid var(--c-border);
   border-radius: 9px;
   padding: 10px 12px;
-  background: var(--pt-surface-soft);
-  color: var(--pt-text);
+  background: var(--c-surface-soft);
+  color: var(--c-text);
   font: inherit;
   resize: vertical;
 }
 
 .player-portal-field textarea:focus {
   outline: none;
-  border-color: var(--pt-text);
-  background: var(--pt-surface);
+  border-color: var(--c-text);
+  background: var(--c-surface);
 }
 
 .player-portal-note-form {
@@ -355,7 +337,7 @@
   text-transform: uppercase;
   letter-spacing: 0.05em;
   font-weight: 800;
-  color: var(--pt-muted);
+  color: var(--c-muted);
 }
 
 .player-portal-list {
@@ -369,21 +351,21 @@
 
 .player-portal-booking,
 .player-portal-note {
-  border: 1px solid var(--pt-border-soft);
+  border: 1px solid var(--c-border-soft);
   border-radius: 10px;
   padding: 12px 14px;
-  background: var(--pt-surface-soft);
+  background: var(--c-surface-soft);
 }
 
 /* Practice itself is now the wall (modules/practice/practice.css), read the
    same way on both ends of the app. All that is left here is the one control
    the portal owns and the coach's side does not: the jump to a linked video. */
 .player-portal-practice-video {
-  border: 1px solid var(--pt-border);
+  border: 1px solid var(--c-border);
   border-radius: 999px;
   padding: 7px 14px;
-  background: var(--pt-surface);
-  color: var(--pt-text);
+  background: var(--c-surface);
+  color: var(--c-text);
   font: inherit;
   font-weight: 600;
   font-size: 13px;
@@ -409,12 +391,12 @@
 
 .player-portal-booking-main span {
   font-size: 13px;
-  color: var(--pt-text-soft);
+  color: var(--c-text-soft);
 }
 
 .player-portal-booking-loc {
   font-size: 12px;
-  color: var(--pt-muted);
+  color: var(--c-muted);
   text-align: right;
   flex-shrink: 0;
 }
@@ -433,21 +415,21 @@
 
 .player-portal-note-head span {
   font-size: 12px;
-  color: var(--pt-muted);
+  color: var(--c-muted);
   flex-shrink: 0;
 }
 
 .player-portal-note p {
   margin: 0;
   font-size: 14px;
-  color: var(--pt-text-body);
+  color: var(--c-text-body);
   white-space: pre-wrap;
 }
 
 .player-portal-empty {
   margin: 0;
   font-size: 13px;
-  color: var(--pt-muted);
+  color: var(--c-muted);
 }
 
 /* --- Videos: the library grid --------------------------------------------- */
@@ -474,10 +456,10 @@
   flex-direction: column;
   gap: 10px;
   padding: 12px;
-  border: 1px solid var(--pt-border);
-  border-left: 3px solid var(--pt-accent);
+  border: 1px solid var(--c-border);
+  border-left: 3px solid var(--c-accent);
   border-radius: var(--c-radius-card);
-  background: var(--pt-surface-soft);
+  background: var(--c-surface-soft);
 }
 
 .player-portal-video-pair-head {
@@ -485,7 +467,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  color: var(--pt-text);
+  color: var(--c-text);
   font-size: 14px;
 }
 
@@ -507,10 +489,10 @@
   width: 100%;
   aspect-ratio: 3 / 4;
   padding: 0;
-  border: 1px solid var(--pt-border);
+  border: 1px solid var(--c-border);
   border-radius: var(--c-radius-card);
   overflow: hidden;
-  background: var(--pt-surface-soft);
+  background: var(--c-surface-soft);
   cursor: pointer;
 }
 
@@ -530,7 +512,7 @@
   height: 0;
   border-style: solid;
   border-width: 10px 0 10px 17px;
-  border-color: transparent transparent transparent var(--pt-muted);
+  border-color: transparent transparent transparent var(--c-muted);
 }
 
 .player-portal-video-duration {
@@ -583,7 +565,7 @@
   margin: auto;
   width: 28px;
   height: 28px;
-  background: var(--pt-muted);
+  background: var(--c-muted);
   --pt-cloud-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 13v8'/%3E%3Cpath d='m8 17 4 4 4-4'/%3E%3Cpath d='M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29'/%3E%3C/svg%3E");
   -webkit-mask: var(--pt-cloud-icon) center / contain no-repeat;
   mask: var(--pt-cloud-icon) center / contain no-repeat;
@@ -598,7 +580,7 @@
 
 .player-portal-video-meta strong {
   font-size: 13px;
-  color: var(--pt-text);
+  color: var(--c-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -606,7 +588,7 @@
 
 .player-portal-video-meta span {
   font-size: 12px;
-  color: var(--pt-muted);
+  color: var(--c-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -616,7 +598,7 @@
 .player-portal-video-state {
   font-size: 12px;
   font-weight: 600;
-  color: var(--pt-text-soft);
+  color: var(--c-text-soft);
 }
 
 .player-portal-video-state.is-sent {
@@ -624,18 +606,18 @@
 }
 
 .player-portal-video-state.is-error {
-  color: var(--pt-error-text);
+  color: var(--c-error-text);
 }
 
 /* The one boxed control a tile carries. 44px is the player density minimum
    (Rule 04); full width so a thumb does not have to aim. */
 .player-portal-video-action {
   min-height: var(--c-h-touch);
-  border: 1px solid var(--pt-border);
+  border: 1px solid var(--c-border);
   border-radius: var(--c-radius-pill);
   padding: 0 12px;
-  background: var(--pt-surface);
-  color: var(--pt-text);
+  background: var(--c-surface);
+  color: var(--c-text);
   font: inherit;
   font-weight: 600;
   font-size: 13px;
@@ -643,7 +625,7 @@
 }
 
 .player-portal-video-action:hover {
-  background: var(--pt-hover);
+  background: var(--c-hover);
 }
 
 .player-portal-video-action:disabled {
@@ -668,16 +650,16 @@
 
 .player-portal-shelf-hint {
   font-size: 12px;
-  color: var(--pt-muted);
+  color: var(--c-muted);
 }
 
 .player-portal-shelf-done {
   min-height: 32px;
   padding: 0 14px;
-  border: 1px solid var(--pt-border);
+  border: 1px solid var(--c-border);
   border-radius: var(--c-radius-pill);
-  background: var(--pt-surface);
-  color: var(--pt-text);
+  background: var(--c-surface);
+  color: var(--c-text);
   font: inherit;
   font-weight: 700;
   font-size: 13px;
@@ -685,7 +667,7 @@
 }
 
 .player-portal-shelf-done:hover {
-  background: var(--pt-hover);
+  background: var(--c-hover);
 }
 
 /* Records whose video has gone from the phone. One quiet line, not tiles. */
@@ -695,7 +677,7 @@
   justify-content: space-between;
   gap: 12px;
   font-size: 13px;
-  color: var(--pt-text-soft);
+  color: var(--c-text-soft);
 }
 
 /* A long press must not also select the title or raise iOS's own callout. */
@@ -765,10 +747,10 @@
   width: 26px;
   height: 26px;
   padding: 0;
-  border: 1px solid var(--pt-border);
+  border: 1px solid var(--c-border);
   border-radius: 999px;
-  background: var(--pt-surface);
-  color: var(--pt-text);
+  background: var(--c-surface);
+  color: var(--c-text);
   font: inherit;
   font-size: 19px;
   font-weight: 700;
@@ -794,10 +776,10 @@
   gap: 4px;
   width: 116px;
   padding: 12px 0 10px;
-  border: 1px dashed var(--pt-border);
+  border: 1px dashed var(--c-border);
   border-radius: var(--c-radius-card);
-  background: var(--pt-surface);
-  color: var(--pt-muted);
+  background: var(--c-surface);
+  color: var(--c-muted);
   font-size: 11px;
   font-weight: 600;
   animation: player-portal-trash-in 180ms ease-out;
@@ -812,8 +794,8 @@
    feel through your thumb without looking away from the tile. */
 .player-portal-trash.is-hot {
   border-style: solid;
-  border-color: var(--pt-error-text);
-  color: var(--pt-error-text);
+  border-color: var(--c-error-text);
+  color: var(--c-error-text);
   transform: translateX(-50%) scale(1.12);
 }
 
@@ -835,10 +817,10 @@
   gap: 14px;
   max-width: calc(100vw - 32px);
   padding: 10px 10px 10px 16px;
-  border: 1px solid var(--pt-border);
+  border: 1px solid var(--c-border);
   border-radius: var(--c-radius-pill);
-  background: var(--pt-surface);
-  color: var(--pt-text);
+  background: var(--c-surface);
+  color: var(--c-text);
   font-size: 13px;
   font-weight: 600;
   box-shadow: 0 10px 24px var(--c-scrim-soft);
@@ -855,10 +837,10 @@
   flex-shrink: 0;
   min-height: 32px;
   padding: 0 14px;
-  border: 1px solid var(--pt-border);
+  border: 1px solid var(--c-border);
   border-radius: var(--c-radius-pill);
-  background: var(--pt-surface);
-  color: var(--pt-text);
+  background: var(--c-surface);
+  color: var(--c-text);
   font: inherit;
   font-weight: 700;
   cursor: pointer;
@@ -869,7 +851,7 @@
 @media (prefers-reduced-motion: reduce) {
   .player-portal-video-grid.is-editing .player-portal-video-tile {
     animation: none;
-    outline: 2px dashed var(--pt-border);
+    outline: 2px dashed var(--c-border);
     outline-offset: 3px;
   }
 
@@ -884,7 +866,7 @@
   margin: 0;
   font-size: 13px;
   font-weight: 600;
-  color: var(--pt-error-text);
+  color: var(--c-error-text);
 }
 
 /* The video workspace takes the whole screen -- the portal card would crop it.
@@ -954,7 +936,7 @@
   min-height: 100svh;
   display: flex;
   flex-direction: column;
-  background: var(--pt-page);
+  background: var(--c-page);
   /* Clears the home-indicator strip on a notched phone; 0 everywhere else.
      The native build adds the same padding again via .native-app in
      nativeApp.css -- that rule is more specific and wins there, this is
@@ -994,9 +976,9 @@
   position: sticky;
   top: 0;
   z-index: 20;
-  border-bottom: 1px solid var(--pt-border);
-  background: var(--pt-surface);
-  color: var(--pt-text);
+  border-bottom: 1px solid var(--c-border);
+  background: var(--c-surface);
+  color: var(--c-text);
 }
 
 .player-terminal-nav-inner {
@@ -1021,10 +1003,10 @@
   gap: 8px;
   min-height: 40px;
   padding: 0 14px;
-  border: 1px solid var(--pt-border);
+  border: 1px solid var(--c-border);
   border-radius: 999px;
-  background: var(--pt-surface);
-  color: var(--pt-text);
+  background: var(--c-surface);
+  color: var(--c-text);
   font: inherit;
   font-weight: 700;
   font-size: 14px;
@@ -1032,7 +1014,7 @@
 }
 
 .player-terminal-nav-back:hover {
-  background: var(--pt-hover);
+  background: var(--c-hover);
 }
 
 .player-terminal-nav-links {
@@ -1059,7 +1041,7 @@
   border: 0;
   border-radius: 9px;
   background: transparent;
-  color: var(--pt-text-soft);
+  color: var(--c-text-soft);
   font: inherit;
   font-size: 14px;
   font-weight: 600;
@@ -1068,13 +1050,13 @@
 }
 
 .player-terminal-nav-links button:hover {
-  background: var(--pt-hover);
-  color: var(--pt-text);
+  background: var(--c-hover);
+  color: var(--c-text);
 }
 
 .player-terminal-nav-links button.active {
-  background: var(--pt-active);
-  color: var(--pt-text);
+  background: var(--c-active);
+  color: var(--c-text);
 }
 
 .player-terminal-nav-menu {
@@ -1091,14 +1073,14 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--pt-border);
+  border: 1px solid var(--c-border);
   border-radius: 999px;
-  background: var(--pt-surface);
+  background: var(--c-surface);
   cursor: pointer;
 }
 
 .player-terminal-nav-record:hover {
-  background: var(--pt-hover);
+  background: var(--c-hover);
 }
 
 .player-terminal-nav-record-dot {
@@ -1154,9 +1136,9 @@
   flex-direction: column;
   gap: 3px;
   padding: 16px;
-  border: 1px solid var(--pt-border);
+  border: 1px solid var(--c-border);
   border-radius: 12px;
-  background: var(--pt-surface-soft);
+  background: var(--c-surface-soft);
 }
 
 .player-portal-next strong {
@@ -1165,13 +1147,13 @@
 
 .player-portal-next span {
   font-size: 14px;
-  color: var(--pt-text-body);
+  color: var(--c-text-body);
 }
 
 .player-portal-next em {
   font-size: 13px;
   font-style: normal;
-  color: var(--pt-muted);
+  color: var(--c-muted);
 }
 
 /* --- Clarity Caddy -------------------------------------------------------- */
@@ -1183,15 +1165,15 @@
   gap: 12px;
   flex-wrap: wrap;
   padding: 12px 14px;
-  border: 1px solid var(--pt-border-soft);
+  border: 1px solid var(--c-border-soft);
   border-radius: 10px;
-  background: var(--pt-surface-soft);
+  background: var(--c-surface-soft);
 }
 
 .player-portal-caddy-access {
   font-size: 14px;
   font-weight: 600;
-  color: var(--pt-text-body);
+  color: var(--c-text-body);
 }
 
 /* --- Outside booking widget ---------------------------------------------- */
@@ -1204,9 +1186,9 @@
   position: relative;
   width: 100%;
   overflow: hidden;
-  border: 1px solid var(--pt-border-soft);
+  border: 1px solid var(--c-border-soft);
   border-radius: 12px;
-  background: var(--pt-surface-soft);
+  background: var(--c-surface-soft);
 }
 
 .player-booking-embed-frame iframe {
@@ -1243,18 +1225,18 @@
  * already says "Download"; what is being added is that this one is theirs to
  * watch rather than one more copy of something they sent. */
 .player-portal-video-tile-cloud.is-coach-return .player-portal-video-meta strong {
-  color: var(--pt-text);
+  color: var(--c-text);
 }
 
 .player-portal-video-tile-cloud.is-coach-return.is-unseen .player-portal-video-media-cloud {
-  box-shadow: inset 0 0 0 2px var(--pt-accent);
+  box-shadow: inset 0 0 0 2px var(--c-accent);
 }
 
 /* "New · Your coach sent this back · 24 MB" -- the whole line goes accent
    while it is unread, and falls back to muted once opened. Colour is the only
    difference, so it survives the tile being any size. */
 .player-portal-video-tile-cloud.is-coach-return.is-unseen .player-portal-video-meta span:nth-of-type(2) {
-  color: var(--pt-accent);
+  color: var(--c-accent);
   font-weight: 600;
 }
 
@@ -1268,7 +1250,7 @@
   white-space: normal;
   font-size: 12px;
   font-style: italic;
-  color: var(--pt-text-soft);
+  color: var(--c-text-soft);
 }
 
 /* --- Swing reviews --------------------------------------------------------
@@ -1278,15 +1260,15 @@
  * opened, and only then does it become a screen's worth of material.
  * ------------------------------------------------------------------------ */
 .player-portal-review {
-  border: 1px solid var(--pt-border-soft);
+  border: 1px solid var(--c-border-soft);
   border-radius: 10px;
-  background: var(--pt-surface-soft);
+  background: var(--c-surface-soft);
   overflow: hidden;
 }
 
 .player-portal-review.is-expanded {
-  border-color: var(--pt-border);
-  background: var(--pt-surface);
+  border-color: var(--c-border);
+  background: var(--c-surface);
 }
 
 .player-portal-review-toggle {
@@ -1298,7 +1280,7 @@
   padding: 12px 14px;
   border: 0;
   background: transparent;
-  color: var(--pt-text);
+  color: var(--c-text);
   font: inherit;
   text-align: left;
   cursor: pointer;
@@ -1320,7 +1302,7 @@
 
 .player-portal-review-head span {
   font-size: 13px;
-  color: var(--pt-text-soft);
+  color: var(--c-text-soft);
 }
 
 /* The dot only ever means one thing in the portal: your coach sent something
@@ -1329,7 +1311,7 @@
   width: 7px;
   height: 7px;
   border-radius: 999px;
-  background: var(--pt-accent);
+  background: var(--c-accent);
   flex-shrink: 0;
 }
 
@@ -1345,11 +1327,11 @@
 .player-portal-review-message {
   margin: 0;
   padding: 10px 12px;
-  border-left: 2px solid var(--pt-accent);
+  border-left: 2px solid var(--c-accent);
   border-radius: 0 8px 8px 0;
-  background: var(--pt-surface-soft);
+  background: var(--c-surface-soft);
   font-size: 14px;
-  color: var(--pt-text-body);
+  color: var(--c-text-body);
   white-space: pre-wrap;
 }
 
@@ -1358,10 +1340,10 @@
   align-items: center;
   gap: 10px;
   padding: 8px;
-  border: 1px solid var(--pt-border-soft);
+  border: 1px solid var(--c-border-soft);
   border-radius: 9px;
-  background: var(--pt-surface);
-  color: var(--pt-text);
+  background: var(--c-surface);
+  color: var(--c-text);
   font: inherit;
   text-align: left;
   cursor: pointer;
@@ -1379,7 +1361,7 @@
   flex-shrink: 0;
   border-radius: 6px;
   object-fit: cover;
-  background: var(--pt-hover);
+  background: var(--c-hover);
 }
 
 .player-portal-review-video span {
@@ -1398,7 +1380,7 @@
 
 .player-portal-review-video small {
   font-size: 12px;
-  color: var(--pt-muted);
+  color: var(--c-muted);
 }
 
 .player-portal-review-shots {
@@ -1432,7 +1414,7 @@
 }
 
 .player-portal-review-shot:focus-visible {
-  outline: 2px solid var(--pt-accent);
+  outline: 2px solid var(--c-accent);
   outline-offset: 2px;
   border-radius: 8px;
 }
@@ -1442,16 +1424,16 @@
   margin-top: 4px;
   font-size: 13px;
   font-weight: 700;
-  color: var(--pt-text-body);
+  color: var(--c-text-body);
   text-decoration: underline;
 }
 
 .player-portal-review-shots img {
   width: 76px;
   flex-shrink: 0;
-  border: 1px solid var(--pt-border-soft);
+  border: 1px solid var(--c-border-soft);
   border-radius: 8px;
-  background: var(--pt-hover);
+  background: var(--c-hover);
 }
 
 /* The stand-in for a screenshot whose picture did not travel: the second it
@@ -1464,9 +1446,9 @@
   width: 76px;
   min-height: 44px;
   flex-shrink: 0;
-  border: 1px dashed var(--pt-border);
+  border: 1px dashed var(--c-border);
   border-radius: 8px;
-  color: var(--pt-muted);
+  color: var(--c-muted);
   font-size: 13px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
@@ -1480,7 +1462,7 @@
 .player-portal-review-shots p {
   margin: 2px 0 0;
   font-size: 13px;
-  color: var(--pt-text-body);
+  color: var(--c-text-body);
   white-space: pre-wrap;
 }
 
@@ -1488,10 +1470,10 @@
   display: block;
   width: auto;
   padding: 10px 12px;
-  border: 1px solid var(--pt-border-soft);
+  border: 1px solid var(--c-border-soft);
   border-radius: 9px;
-  background: var(--pt-surface);
-  color: var(--pt-text);
+  background: var(--c-surface);
+  color: var(--c-text);
   font: inherit;
   text-align: left;
 }
@@ -1504,7 +1486,7 @@
 .player-portal-review-note p {
   margin: 2px 0 0;
   font-size: 14px;
-  color: var(--pt-text-body);
+  color: var(--c-text-body);
   white-space: pre-wrap;
 }
 
@@ -1520,7 +1502,7 @@
 .player-portal-review-note.is-practice small {
   display: block;
   margin-top: 2px;
-  color: var(--pt-muted);
+  color: var(--c-muted);
   font-size: 13px;
 }
 
@@ -1535,9 +1517,9 @@
   flex-direction: column;
   gap: 3px;
   padding: 12px 14px;
-  border: 1px solid var(--pt-border-soft);
+  border: 1px solid var(--c-border-soft);
   border-radius: 10px;
-  background: var(--pt-surface-soft);
+  background: var(--c-surface-soft);
 }
 
 /* Spent, timed out, or not started yet. Still on the list -- it is the answer
@@ -1565,21 +1547,21 @@
   font-size: 15px;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
-  color: var(--pt-accent);
+  color: var(--c-accent);
 }
 
 .player-portal-pass.is-inactive .player-portal-pass-count {
   font-weight: 700;
-  color: var(--pt-muted);
+  color: var(--c-muted);
 }
 
 .player-portal-pass-meta {
   font-size: 13px;
-  color: var(--pt-text-soft);
+  color: var(--c-text-soft);
 }
 
 .player-portal-pass.is-inactive .player-portal-pass-meta {
-  color: var(--pt-muted);
+  color: var(--c-muted);
 }
 
 /* --- Buying -------------------------------------------------------------- */
@@ -1589,9 +1571,9 @@
   justify-content: space-between;
   gap: 12px;
   padding: 12px 14px;
-  border: 1px solid var(--pt-border-soft);
+  border: 1px solid var(--c-border-soft);
   border-radius: 10px;
-  background: var(--pt-surface-soft);
+  background: var(--c-surface-soft);
 }
 
 .player-portal-shop-main {
@@ -1607,7 +1589,7 @@
 
 .player-portal-shop-main span {
   font-size: 13px;
-  color: var(--pt-text-soft);
+  color: var(--c-text-soft);
 }
 
 /* The price IS the button. A row with a price on one side and a "Buy" on the
@@ -1629,13 +1611,13 @@
 }
 
 .player-portal-pass .player-portal-membership-alert {
-  color: var(--pt-error-text);
+  color: var(--c-error-text);
 }
 
 .player-portal-subhead {
   margin: 14px 0 8px;
   font-size: 14px;
-  color: var(--pt-text-soft);
+  color: var(--c-text-soft);
 }
 
 /* Where a player lands coming back from Stripe, so it sits at the top of the
@@ -1643,11 +1625,11 @@
 .player-portal-purchase-note {
   margin: 0 0 4px;
   padding: 10px 12px;
-  border-left: 2px solid var(--pt-accent);
+  border-left: 2px solid var(--c-accent);
   border-radius: 0 8px 8px 0;
-  background: var(--pt-surface-soft);
+  background: var(--c-surface-soft);
   font-size: 14px;
-  color: var(--pt-text-body);
+  color: var(--c-text-body);
 }
 
 /* --- The home dashboard ---------------------------------------------------
@@ -1668,20 +1650,20 @@
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--pt-muted);
+  color: var(--c-muted);
 }
 
 /* --- Booking history ----------------------------------------------------- */
 .player-portal-history {
-  border: 1px solid var(--pt-border-soft);
+  border: 1px solid var(--c-border-soft);
   border-radius: 10px;
-  background: var(--pt-surface-soft);
+  background: var(--c-surface-soft);
   overflow: hidden;
 }
 
 .player-portal-history.is-open {
-  border-color: var(--pt-border);
-  background: var(--pt-surface);
+  border-color: var(--c-border);
+  background: var(--c-surface);
 }
 
 .player-portal-history-toggle {
@@ -1693,7 +1675,7 @@
   padding: 12px 14px;
   border: 0;
   background: transparent;
-  color: var(--pt-text);
+  color: var(--c-text);
   font: inherit;
   text-align: left;
   cursor: pointer;
@@ -1712,7 +1694,7 @@
 
 .player-portal-history-head span {
   font-size: 13px;
-  color: var(--pt-text-soft);
+  color: var(--c-text-soft);
 }
 
 .player-portal-history-body {
@@ -1724,14 +1706,14 @@
 
 .player-portal-history-fact {
   font-size: 13px;
-  color: var(--pt-text-soft);
+  color: var(--c-text-soft);
 }
 
 .player-portal-history-note {
   padding: 10px 12px;
-  border: 1px solid var(--pt-border-soft);
+  border: 1px solid var(--c-border-soft);
   border-radius: 9px;
-  background: var(--pt-surface-soft);
+  background: var(--c-surface-soft);
 }
 
 .player-portal-history-note strong {
@@ -1741,16 +1723,16 @@
 .player-portal-history-note p {
   margin: 2px 0 0;
   font-size: 14px;
-  color: var(--pt-text-body);
+  color: var(--c-text-body);
   white-space: pre-wrap;
 }
 
 /* --- Asking for a swing review ------------------------------------------- */
 .player-portal-review-hero {
   padding: 16px;
-  border: 1px solid var(--pt-border);
+  border: 1px solid var(--c-border);
   border-radius: 12px;
-  background: var(--pt-surface);
+  background: var(--c-surface);
 }
 
 /* The second toggle inside Book now. Quieter than the one above it, because
@@ -1778,17 +1760,17 @@
   flex-shrink: 0;
   width: 96px;
   padding: 6px;
-  border: 1px solid var(--pt-border-soft);
+  border: 1px solid var(--c-border-soft);
   border-radius: 10px;
-  background: var(--pt-surface-soft);
-  color: var(--pt-text);
+  background: var(--c-surface-soft);
+  color: var(--c-text);
   font: inherit;
   cursor: pointer;
 }
 
 .swing-review-pick.is-chosen {
-  border-color: var(--pt-accent);
-  background: var(--pt-surface);
+  border-color: var(--c-accent);
+  background: var(--c-surface);
 }
 
 .swing-review-pick img,
@@ -1797,12 +1779,12 @@
   height: 58px;
   border-radius: 6px;
   object-fit: cover;
-  background: var(--pt-hover);
+  background: var(--c-hover);
 }
 
 .swing-review-pick small {
   font-size: 11px;
-  color: var(--pt-text-soft);
+  color: var(--c-text-soft);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1815,11 +1797,11 @@
   flex-direction: column;
   gap: 4px;
   padding: 12px 14px;
-  border: 1px solid var(--pt-border-soft);
+  border: 1px solid var(--c-border-soft);
   border-radius: 10px;
-  background: var(--pt-surface-soft);
+  background: var(--c-surface-soft);
   font-size: 14px;
-  color: var(--pt-text-body);
+  color: var(--c-text-body);
 }
 
 /* The light/dark switch, and the balance beside it. Both live in the bar so
@@ -1832,10 +1814,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--pt-border);
+  border: 1px solid var(--c-border);
   border-radius: 999px;
-  background: var(--pt-surface);
-  color: var(--pt-text-soft);
+  background: var(--c-surface);
+  color: var(--c-text-soft);
   font-size: 15px;
   line-height: 1;
   cursor: pointer;
@@ -1848,22 +1830,22 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--pt-border);
+  border: 1px solid var(--c-border);
   border-radius: 999px;
-  background: var(--pt-surface);
-  color: var(--pt-text-soft);
+  background: var(--c-surface);
+  color: var(--c-text-soft);
   cursor: pointer;
 }
 
 .player-terminal-nav-account:hover,
 .player-terminal-nav-account.active {
-  background: var(--pt-hover);
-  color: var(--pt-text);
+  background: var(--c-hover);
+  color: var(--c-text);
 }
 
 .player-terminal-nav-theme:hover {
-  background: var(--pt-hover);
-  color: var(--pt-text);
+  background: var(--c-hover);
+  color: var(--c-text);
 }
 
 .player-terminal-nav-balance {
@@ -1874,10 +1856,10 @@
   flex-shrink: 0;
   min-height: 40px;
   padding: 4px 12px;
-  border: 1px solid var(--pt-border);
+  border: 1px solid var(--c-border);
   border-radius: 9px;
-  background: var(--pt-surface);
-  color: var(--pt-text);
+  background: var(--c-surface);
+  color: var(--c-text);
   font: inherit;
   cursor: pointer;
 }
@@ -1887,7 +1869,7 @@
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--pt-muted);
+  color: var(--c-muted);
   line-height: 1.2;
 }
 
@@ -1921,10 +1903,10 @@
   flex-wrap: wrap;
   width: 100%;
   padding: 16px 20px;
-  border: 1px solid var(--pt-border);
+  border: 1px solid var(--c-border);
   border-radius: 12px;
-  background: var(--pt-surface);
-  color: var(--pt-text);
+  background: var(--c-surface);
+  color: var(--c-text);
   font: inherit;
   text-align: left;
   cursor: pointer;
@@ -1952,13 +1934,13 @@
 
 .player-portal-next-up-when span {
   font-size: 14px;
-  color: var(--pt-text-body);
+  color: var(--c-text-body);
 }
 
 .player-portal-next-up-when em {
   font-size: 13px;
   font-style: normal;
-  color: var(--pt-muted);
+  color: var(--c-muted);
 }
 
 @media (max-width: 560px) {
@@ -1991,9 +1973,9 @@
   flex-direction: column;
   gap: 12px;
   padding: 20px;
-  border: 1px solid var(--pt-border);
+  border: 1px solid var(--c-border);
   border-radius: 12px;
-  background: var(--pt-surface);
+  background: var(--c-surface);
 }
 
 /* The 320px basis belongs to the row, where it is a width and decides when the
@@ -2022,22 +2004,22 @@
   text-transform: uppercase;
   letter-spacing: 0.05em;
   font-weight: 800;
-  color: var(--pt-muted);
+  color: var(--c-muted);
 }
 
 .player-portal-panel-head span {
   font-size: 13px;
-  color: var(--pt-text-soft);
+  color: var(--c-text-soft);
 }
 
 .player-portal-panel-more {
   align-self: flex-start;
   min-height: 34px;
   padding: 0 14px;
-  border: 1px solid var(--pt-border);
+  border: 1px solid var(--c-border);
   border-radius: 999px;
-  background: var(--pt-surface);
-  color: var(--pt-text);
+  background: var(--c-surface);
+  color: var(--c-text);
   font: inherit;
   font-weight: 600;
   font-size: 13px;
@@ -2045,7 +2027,7 @@
 }
 
 .player-portal-panel-more:hover {
-  background: var(--pt-hover);
+  background: var(--c-hover);
 }
 
 .player-portal-video-preview {
@@ -2062,7 +2044,7 @@
   padding: 0;
   border: 0;
   background: transparent;
-  color: var(--pt-text);
+  color: var(--c-text);
   font: inherit;
   text-align: left;
   cursor: pointer;
@@ -2074,9 +2056,9 @@
   width: 100%;
   aspect-ratio: 3 / 4;
   overflow: hidden;
-  border: 1px solid var(--pt-border);
+  border: 1px solid var(--c-border);
   border-radius: 12px;
-  background: var(--pt-hover);
+  background: var(--c-hover);
 }
 
 .player-portal-video-preview-media img {
@@ -2101,7 +2083,7 @@
 
 .player-portal-video-preview small {
   font-size: 12px;
-  color: var(--pt-muted);
+  color: var(--c-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2119,17 +2101,17 @@
   justify-content: space-between;
   gap: 12px;
   padding: 12px 14px;
-  border: 1px solid var(--pt-border-soft);
+  border: 1px solid var(--c-border-soft);
   border-radius: 10px;
-  background: var(--pt-surface-soft);
-  color: var(--pt-text);
+  background: var(--c-surface-soft);
+  color: var(--c-text);
   font: inherit;
   text-align: left;
   cursor: pointer;
 }
 
 .player-portal-activity button.is-unseen {
-  border-color: var(--pt-accent);
+  border-color: var(--c-accent);
 }
 
 .player-portal-activity-main {
@@ -2152,7 +2134,7 @@
 
 .player-portal-activity-main small {
   font-size: 12px;
-  color: var(--pt-muted);
+  color: var(--c-muted);
 }
 
 /* Transparent unless unseen, so every row keeps the same indent and the dot
@@ -2166,13 +2148,13 @@
 }
 
 .player-portal-activity button.is-unseen .player-portal-activity-dot {
-  background: var(--pt-accent);
+  background: var(--c-accent);
 }
 
 .player-portal-activity-at {
   flex-shrink: 0;
   font-size: 12px;
-  color: var(--pt-muted);
+  color: var(--c-muted);
 }
 
 /* Home is the one screen that is a dashboard rather than a document.
@@ -2195,7 +2177,7 @@
   gap: 12px;
   margin-top: 12px;
   padding-top: 18px;
-  border-top: 1px solid var(--pt-border-soft);
+  border-top: 1px solid var(--c-border-soft);
 }
 
 .player-portal-legal nav {
@@ -2209,7 +2191,7 @@
   padding: 0;
   border: 0;
   background: transparent;
-  color: var(--pt-text-soft);
+  color: var(--c-text-soft);
   font: inherit;
   font-size: 12px;
   text-decoration: underline;
@@ -2221,14 +2203,14 @@
   display: grid;
   gap: 10px;
   padding: 14px;
-  border: 1px solid var(--pt-border);
+  border: 1px solid var(--c-border);
   border-radius: 10px;
-  background: var(--pt-surface-soft);
+  background: var(--c-surface-soft);
 }
 
 .player-account-deletion p {
   margin: 0;
-  color: var(--pt-text-soft);
+  color: var(--c-text-soft);
   font-size: 13px;
   line-height: 1.45;
 }
@@ -2252,7 +2234,7 @@
 }
 
 .player-account-deletion .player-account-deletion-success {
-  color: var(--pt-text);
+  color: var(--c-text);
   font-weight: 700;
 }
 
@@ -2281,7 +2263,7 @@
 
 .player-account-hint {
   margin: 0;
-  color: var(--pt-text-soft);
+  color: var(--c-text-soft);
   font-size: 13px;
   line-height: 1.45;
 }
@@ -2290,11 +2272,11 @@
   margin: 0;
   font-size: 13px;
   font-weight: 600;
-  color: var(--pt-text);
+  color: var(--c-text);
 }
 
 .player-portal-field input:disabled {
-  color: var(--pt-text-soft);
+  color: var(--c-text-soft);
   cursor: default;
 }
 
@@ -2313,16 +2295,16 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
   font-weight: 700;
-  color: var(--pt-muted);
+  color: var(--c-muted);
 }
 
 .player-account-settings .settings-field select {
   min-height: 44px;
-  border: 1px solid var(--pt-border);
+  border: 1px solid var(--c-border);
   border-radius: 9px;
   padding: 0 10px;
-  background: var(--pt-surface-soft);
-  color: var(--pt-text);
+  background: var(--c-surface-soft);
+  color: var(--c-text);
   font: inherit;
 }
 
@@ -2331,7 +2313,7 @@
   gap: 10px;
   margin-top: 8px;
   padding-top: 16px;
-  border-top: 1px solid var(--pt-border-soft);
+  border-top: 1px solid var(--c-border-soft);
 }
 
 .player-account-deletion-toggle {

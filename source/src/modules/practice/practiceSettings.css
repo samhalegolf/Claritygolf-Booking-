@@ -69,7 +69,7 @@
   display: flex;
   align-items: center;
   gap: var(--c-space-4);
-  min-height: var(--c-row-h, var(--c-h-row));
+  min-height: var(--c-row-h);
   min-width: 0;
 }
 
@@ -166,7 +166,7 @@
 /* The native swatch, sized like a control rather than like a button. */
 .practice-type-colour input[type="color"] {
   width: 64px;
-  height: var(--c-control-h, var(--c-h-control));
+  height: var(--c-control-h);
   padding: 2px;
   border: 1px solid var(--c-border);
   border-radius: var(--c-radius-control);
@@ -250,7 +250,7 @@
   display: flex;
   align-items: center;
   gap: var(--c-space-4);
-  min-height: var(--c-row-h, var(--c-h-row));
+  min-height: var(--c-row-h);
   border-top: 1px solid var(--c-border-soft);
   min-width: 0;
 }

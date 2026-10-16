@@ -250,9 +250,13 @@
  * frame, so it takes dark unconditionally -- no .theme-dark class, nothing to
  * toggle, in the coach's console and the player's portal alike. It rides in
  * this block rather than a fourth one because a fourth block is a fourth
- * thing to keep in step. */
+ * thing to keep in step.
+ *
+ * The booking widget's dark theme rides here too. It is chosen by the widget's
+ * theme parameter rather than a saved preference, but it is the same swap. */
 .app-shell.theme-dark,
 .login-shell.theme-dark,
+.public-booking.booking-theme-dark,
 .video-analysis-shell,
 .player-portal-video-host {
   --c-page: var(--dark-page);

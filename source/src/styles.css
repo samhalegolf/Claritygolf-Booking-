@@ -13,7 +13,7 @@
   /* max() so a notched phone's browser clears the notch/home-indicator;
      everywhere else this is just the same 24px it always was. */
   padding: max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom));
-  background: #f5f5f3;
+  background: var(--c-surface-soft);
 }
 
 .login-card {
@@ -21,8 +21,8 @@
   display: grid;
   gap: 18px;
   padding: 24px;
-  border: 1px solid #deded8;
-  background: #fff;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
 }
 
 .login-card h1 {
@@ -33,7 +33,7 @@
 
 .login-card p {
   margin: 0;
-  color: #5d5a54;
+  color: var(--c-text-soft);
   line-height: 1.5;
 }
 
@@ -52,7 +52,7 @@
 
 .login-card label span,
 .settings-field span {
-  color: #76736d;
+  color: var(--c-muted);
   font-size: 12px;
   text-transform: uppercase;
   font-weight: 800;
@@ -63,10 +63,10 @@
 .settings-field select,
 .settings-field textarea {
   min-height: 42px;
-  border: 1px solid #deded8;
+  border: 1px solid var(--c-border);
   padding: 0 10px;
-  background: #fff;
-  color: #171717;
+  background: var(--c-surface);
+  color: var(--c-text);
   font: inherit;
 }
 
@@ -88,7 +88,7 @@
   grid-template-columns: none;
   align-items: center;
   gap: 8px;
-  color: #5d5a54;
+  color: var(--c-text-soft);
 }
 
 .show-password-toggle input {
@@ -105,22 +105,22 @@
 .auth-error {
   padding: 10px 12px;
   border: 1px solid #f0c7bd;
-  background: #fff3f0;
-  color: #a52e15;
+  background: var(--c-danger-wash);
+  color: var(--c-danger);
   font-size: 13px;
 }
 
 .auth-success {
   padding: 10px 12px;
-  border: 1px solid #e2e0d8;
-  background: #f7f7f3;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-soft);
   font-size: 12px;
 }
 
 .auth-success {
   border-color: #bfdcc5;
-  background: #eef8ef;
-  color: #225b2f;
+  background: var(--c-success-wash);
+  color: var(--c-success-text);
   font-size: 13px;
 }
 
@@ -128,7 +128,7 @@
   justify-self: center;
   padding: 2px 4px;
   background: transparent;
-  color: #111;
+  color: var(--c-text);
   font-weight: 800;
   text-decoration: underline;
   text-underline-offset: 3px;
@@ -140,7 +140,7 @@
   justify-content: center;
   gap: 8px 14px;
   padding-top: 16px;
-  border-top: 1px solid #e2e0d8;
+  border-top: 1px solid var(--c-border);
 }
 
 .login-legal a {
@@ -154,7 +154,7 @@
   min-height: 100vh;
   display: grid;
   grid-template-columns: 248px minmax(0, 1fr);
-  background: #f5f5f3;
+  background: var(--c-surface-soft);
 }
 
 .app-shell.embed-mode {
@@ -186,8 +186,8 @@
 .sidebar {
   min-height: 100vh;
   padding: 24px 18px;
-  border-right: 1px solid #deded8;
-  background: #fbfbf9;
+  border-right: 1px solid var(--c-border);
+  background: var(--c-surface-soft);
   display: flex;
   flex-direction: column;
   gap: 26px;
@@ -206,7 +206,7 @@
   place-items: center;
   border: 0;
   background: transparent;
-  color: #fff;
+  color: var(--c-on-scrim);
   font-weight: 800;
   letter-spacing: 0;
   overflow: hidden;
@@ -231,7 +231,7 @@
 .brand span,
 .eyebrow,
 .muted {
-  color: #76736d;
+  color: var(--c-muted);
 }
 
 .brand span {
@@ -260,15 +260,15 @@
   align-items: center;
   gap: 10px;
   padding: 0 12px;
-  color: #4f4d49;
+  color: var(--c-text-soft);
   background: transparent;
   text-align: left;
 }
 
 .side-nav button:hover,
 .side-nav button.active {
-  background: #eeeeea;
-  color: #151515;
+  background: var(--c-page);
+  color: var(--c-text);
 }
 
 .side-nav button.nav-logout {
@@ -324,7 +324,7 @@
 .topbar span {
   display: inline-block;
   margin-top: 7px;
-  color: #696761;
+  color: var(--c-muted);
   text-transform: none;
   font-weight: 500;
 }
@@ -348,9 +348,9 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  border: 1px solid #d9d9d2;
-  background: #fff;
-  color: #151515;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
+  color: var(--c-text);
 }
 
 .icon-button {
@@ -368,30 +368,30 @@
 
 .primary-button {
   padding: 0 16px;
-  border-color: #111;
-  background: #111;
-  color: #fff;
+  border-color: var(--c-accent);
+  background: var(--c-accent);
+  color: var(--c-accent-text);
   font-weight: 700;
 }
 
 .danger-button {
   padding: 0 16px;
   border-color: #f0c7bd;
-  background: #fff3f0;
-  color: #a52e15;
+  background: var(--c-danger-wash);
+  color: var(--c-danger);
 }
 
 .pill {
   height: 34px;
   padding: 0 14px;
-  border-radius: 999px;
-  background: #f2f2ee;
+  border-radius: var(--c-radius-pill);
+  background: var(--c-surface-soft);
 }
 
 .active-pill {
-  background: #111;
-  border-color: #111;
-  color: #fff;
+  background: var(--c-accent);
+  border-color: var(--c-accent);
+  color: var(--c-accent-text);
 }
 
 .workspace {
@@ -406,8 +406,8 @@
 }
 
 .module-page {
-  background: #fff;
-  border: 1px solid #deded8;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
   padding: 22px;
 }
 
@@ -570,7 +570,7 @@
 
 .settings-booking,
 .booking-page-settings {
-  border: 1px solid #deded8;
+  border: 1px solid var(--c-border);
   border-radius: 8px;
   overflow: hidden;
 }
@@ -591,38 +591,38 @@
 
 .integration-header span { color: #187c48; font-size: 11px; font-weight: 900; letter-spacing: .12em; text-transform: uppercase; }
 .integration-header h2 { margin: 3px 0; font-size: 27px; }
-.integration-header p { margin: 0; color: #697068; }
-.integration-header > strong { height: max-content; padding: 6px 10px; border-radius: 999px; background: #e2f7e9; color: #17753f; font-size: 11px; }
-.integration-header > strong.needs-attention { background: #fde8e8; color: #a53535; }
+.integration-header p { margin: 0; color: var(--c-muted); }
+.integration-header > strong { height: max-content; padding: 6px 10px; border-radius: var(--c-radius-pill); background: var(--c-success-wash); color: #17753f; font-size: 11px; }
+.integration-header > strong.needs-attention { background: var(--c-danger-wash); color: #a53535; }
 
 .integration-tabs { display: flex; gap: 3px; padding: 0 24px; overflow-x: auto; border-bottom: 1px solid #e1e5dc; }
 .integration-tabs button { display: flex; align-items: center; gap: 7px; padding: 12px 14px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: #656a63; font-weight: 800; cursor: pointer; }
-.integration-tabs button.active { border-color: #1eaf60; color: #111; }
-.integration-tabs b { min-width: 18px; padding: 2px 5px; border-radius: 999px; background: #e2f7e9; font-size: 10px; }
+.integration-tabs button.active { border-color: #1eaf60; color: var(--c-text); }
+.integration-tabs b { min-width: 18px; padding: 2px 5px; border-radius: var(--c-radius-pill); background: var(--c-success-wash); font-size: 10px; }
 .integration-body { padding: 22px 24px 24px; }
-.integration-note { display: grid; gap: 3px; padding: 13px 15px; margin-bottom: 16px; border-radius: 9px; background: #eef9f1; }
-.integration-note span, .integration-resource-heading p, .integration-feed-toolbar p { color: #697068; font-size: 12px; }
+.integration-note { display: grid; gap: 3px; padding: 13px 15px; margin-bottom: 16px; border-radius: var(--c-radius-control); background: #eef9f1; }
+.integration-note span, .integration-resource-heading p, .integration-feed-toolbar p { color: var(--c-muted); font-size: 12px; }
 .integration-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 13px; }
 .integration-grid label { display: grid; gap: 5px; color: #42473f; font-size: 12px; font-weight: 800; }
 .integration-grid label.toggle { display: flex; align-items: center; }
-.integration-grid input:not([type="checkbox"]), .integration-grid select, .profile-title input, .profile-title select { min-height: 39px; padding: 8px 10px; border: 1px solid #d9ded2; border-radius: 8px; background: #fff; color: #20241f; }
+.integration-grid input:not([type="checkbox"]), .integration-grid select, .profile-title input, .profile-title select { min-height: 39px; padding: 8px 10px; border: 1px solid var(--c-border); border-radius: 8px; background: var(--c-surface); color: #20241f; }
 .integration-actions { display: flex; align-items: center; gap: 12px; margin-top: 18px; }
-.integration-actions button, .integration-resource-heading button, .integration-feed-toolbar button, .integration-event > button { padding: 9px 13px; border: 0; border-radius: 8px; background: #102d20; color: #fff; font-weight: 800; cursor: pointer; }
+.integration-actions button, .integration-resource-heading button, .integration-feed-toolbar button, .integration-event > button { padding: 9px 13px; border: 0; border-radius: 8px; background: #102d20; color: var(--c-on-scrim); font-weight: 800; cursor: pointer; }
 .integration-actions button:disabled { opacity: .5; cursor: not-allowed; }
-.integration-error { display: grid; gap: 3px; margin-bottom: 14px; padding: 11px 13px; border-radius: 8px; background: #fdeaea; color: #a43232; font-size: 12px; }
+.integration-error { display: grid; gap: 3px; margin-bottom: 14px; padding: 11px 13px; border-radius: 8px; background: var(--c-danger-wash); color: #a43232; font-size: 12px; }
 
 .integration-resource-heading, .integration-feed-toolbar, .profile-title { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .integration-resource-heading h3, .integration-resource-heading p, .integration-feed-toolbar h3, .integration-feed-toolbar p { margin: 0; }
-.integration-resource-profile { margin-top: 14px; padding: 15px; border: 1px solid #dde2d8; border-radius: 11px; background: #fbfcfa; }
+.integration-resource-profile { margin-top: 14px; padding: 15px; border: 1px solid #dde2d8; border-radius: 11px; background: var(--c-surface-soft); }
 .profile-title { justify-content: flex-start; }
 .profile-title input { flex: 1; min-width: 160px; font-weight: 800; }
-.profile-title button, .resource-row button, .removed-resources button { padding: 7px 9px; border: 1px solid #d9ded2; border-radius: 7px; background: #fff; color: #333; font-weight: 700; cursor: pointer; }
+.profile-title button, .resource-row button, .removed-resources button { padding: 7px 9px; border: 1px solid var(--c-border); border-radius: var(--c-radius-control); background: var(--c-surface); color: var(--c-text); font-weight: 700; cursor: pointer; }
 .profile-title button.danger { color: #a43232; }
 .profile-title button:disabled, .resource-row button:disabled { opacity: .35; }
 /* Two columns while there is room for two; one when there is not. The old pair
    of 260px minimums needed 540px and simply hung off a phone. */
 .profile-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 20px; margin-top: 15px; }
-.profile-columns h4 { margin: 0 0 8px; color: #697068; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
+.profile-columns h4 { margin: 0 0 8px; color: var(--c-muted); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
 /* A priority-ordered list, so it follows Rule 08 like every other list: one
    container, hairlines between, no chip per row. */
 .resource-list { border: 1px solid var(--c-border); border-radius: var(--c-radius-control); overflow: hidden; }
@@ -637,7 +637,7 @@
 .resource-row:hover { background: var(--c-hover); }
 .removed-resources { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .resource-services { display: grid; gap: 6px; }
-.resource-services label { display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: 7px; background: #f0f3ed; font-size: 12px; }
+.resource-services label { display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: var(--c-radius-control); background: var(--c-surface-soft); font-size: 12px; }
 
 .integration-feed-toolbar { margin-bottom: 12px; }
 /* Rule 08. These were mine, three commits ago, and they reproduced the exact
@@ -651,16 +651,16 @@
 .integration-event summary { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; padding: 11px 13px; cursor: pointer; }
 .integration-event summary strong { flex: 1 1 12ch; min-width: 0; overflow-wrap: anywhere; }
 .integration-event summary span { flex: 1 1 14ch; min-width: 0; overflow-wrap: anywhere; }
-.integration-event summary span, .integration-event summary time { color: #697068; font-size: 11px; }
+.integration-event summary span, .integration-event summary time { color: var(--c-muted); font-size: 11px; }
 .integration-event summary em { font-size: 10px; font-style: normal; font-weight: 900; text-transform: uppercase; }
-.event-facts { display: flex; flex-wrap: wrap; gap: 12px; padding: 10px 13px; background: #f6f8f4; font-size: 11px; }
+.event-facts { display: flex; flex-wrap: wrap; gap: 12px; padding: 10px 13px; background: var(--c-surface-soft); font-size: 11px; }
 .integration-event pre { max-height: 360px; margin: 12px 13px; padding: 12px; overflow: auto; border-radius: 8px; background: #0d1711; color: #dce8df; font: 11px/1.5 ui-monospace, monospace; white-space: pre-wrap; word-break: break-word; }
 .integration-event > button { margin: 0 13px 13px; }
-.integration-empty { padding: 28px; border: 1px dashed #ccd2c8; border-radius: 9px; color: #697068; text-align: center; }
+.integration-empty { padding: 28px; border: 1px dashed #ccd2c8; border-radius: var(--c-radius-control); color: var(--c-muted); text-align: center; }
 /* Four across on a laptop, two on a phone, rather than four squeezed stats. */
 .integration-stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr)); gap: 10px; }
 .integration-stat-grid > div { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; padding: 15px; border-radius: var(--c-radius-control); background: var(--c-surface-soft); }
-.integration-stat-grid span { color: #697068; font-size: 11px; }
+.integration-stat-grid span { color: var(--c-muted); font-size: 11px; }
 .integration-stat-grid strong { font-size: 22px; }
 
 /* The event summary, the profile columns and the stat grid all used to need
@@ -690,15 +690,15 @@
 }
 
 .booking-page-settings .public-booking {
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   overflow: hidden;
 }
 
 .data-card,
 .client-row,
 .booking-card {
-  border: 1px solid #deded8;
-  background: #fff;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
 }
 
 .data-card {
@@ -712,7 +712,7 @@
 .data-card span,
 .booking-card > span,
 .client-row span {
-  color: #76736d;
+  color: var(--c-muted);
   font-size: 12px;
 }
 
@@ -730,7 +730,7 @@
 }
 
 .data-card p {
-  color: #56534d;
+  color: var(--c-text-soft);
   line-height: 1.5;
 }
 
@@ -941,7 +941,7 @@
 .services-topline span,
 .settings-subsection-title span {
   display: block;
-  color: #76736d;
+  color: var(--c-muted);
   font-size: 12px;
   text-transform: uppercase;
   font-weight: 800;
@@ -955,8 +955,8 @@
 .service-list {
   display: grid;
   gap: 0;
-  border: 1px solid #deded8;
-  background: #fff;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
 }
 
 .service-screen-checkboxes {
@@ -970,7 +970,7 @@
   align-items: center;
   gap: 12px;
   padding: 9px 12px;
-  border-bottom: 1px solid #ecebe5;
+  border-bottom: 1px solid var(--c-border-soft);
 }
 
 .service-row:last-child {
@@ -987,7 +987,7 @@
   padding: 0;
   border: 0;
   background: transparent;
-  color: #171717;
+  color: var(--c-text);
   text-align: left;
   cursor: pointer;
 }
@@ -995,7 +995,7 @@
 .service-row-main span,
 .service-row-main em,
 .service-row-meta span {
-  color: #76736d;
+  color: var(--c-muted);
   font-size: 12px;
 }
 
@@ -1018,8 +1018,8 @@
 .service-row-meta strong,
 .service-row-meta span {
   padding: 5px 7px;
-  border: 1px solid #e2e0d8;
-  background: #f7f7f3;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-soft);
 }
 
 .service-row-actions {
@@ -1042,14 +1042,14 @@
 .service-list-empty {
   margin: 0;
   padding: 14px 0 4px;
-  color: #76736d;
+  color: var(--c-muted);
   font-size: 14px;
 }
 
 .service-action-delete {
   color: #9b1c1c;
   border-color: rgba(185, 28, 28, 0.28);
-  background: #fff5f5;
+  background: var(--c-danger-wash);
 }
 
 .service-action-delete:hover {
@@ -1070,7 +1070,7 @@
   grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   padding-top: 12px;
-  border-top: 1px solid #ecebe5;
+  border-top: 1px solid var(--c-border-soft);
 }
 
 /* Every <details> in the app opens at the accordion's speed.
@@ -1121,7 +1121,7 @@
 .settings-subsection-title::after {
   content: "+";
   margin-left: auto;
-  color: #76736d;
+  color: var(--c-muted);
   font-weight: 800;
 }
 
@@ -1132,7 +1132,7 @@
 .settings-subsection-title strong {
   display: block;
   margin-top: 2px;
-  color: #171717;
+  color: var(--c-text);
   font-size: 15px;
   overflow-wrap: anywhere;
 }
@@ -1149,16 +1149,16 @@
   min-height: 54px;
   align-content: center;
   padding: 8px 10px;
-  border: 1px solid var(--border);
-  background: var(--panel-soft);
-  color: var(--muted);
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-soft);
+  color: var(--c-muted);
   font-size: 11px;
   font-weight: 800;
   text-transform: uppercase;
 }
 
 .settings-summary-grid strong {
-  color: var(--heading);
+  color: var(--c-text);
   font-size: 14px;
   text-transform: none;
   overflow-wrap: anywhere;
@@ -1173,14 +1173,14 @@
 .availability-editor {
   display: grid;
   margin-top: 14px;
-  border-top: 1px solid #e5e3dc;
+  border-top: 1px solid var(--c-border);
 }
 
 .availability-edit-row {
   display: grid;
   gap: 10px;
   padding: 12px 0;
-  border-bottom: 1px solid #e5e3dc;
+  border-bottom: 1px solid var(--c-border);
 }
 
 .availability-day-title {
@@ -1201,7 +1201,7 @@
 
 .availability-edit-row span {
   margin-top: 3px;
-  color: #76736d;
+  color: var(--c-muted);
   font-size: 12px;
 }
 
@@ -1225,8 +1225,8 @@
 
 .availability-window.is-editing {
   padding: 5px;
-  border: 1px solid #deded8;
-  background: #f7f7f3;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-soft);
 }
 
 .availability-window label {
@@ -1237,10 +1237,10 @@
 
 .availability-window input {
   min-height: 36px;
-  border: 1px solid #deded8;
+  border: 1px solid var(--c-border);
   padding: 0 8px;
-  background: #fff;
-  color: #171717;
+  background: var(--c-surface);
+  color: var(--c-text);
   font: inherit;
 }
 
@@ -1250,16 +1250,16 @@
   align-items: center;
   gap: 8px;
   padding: 0 14px;
-  border: 1px solid #deded8;
-  background: #f7f7f3;
-  color: #171717;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-soft);
+  color: var(--c-text);
   cursor: pointer;
   font-weight: 800;
   white-space: nowrap;
 }
 
 .availability-range-button:hover {
-  border-color: #111;
+  border-color: var(--c-accent);
 }
 
 .availability-windows .outline-button {
@@ -1298,8 +1298,8 @@
   align-items: center;
   gap: 9px;
   padding: 0 12px;
-  border: 1px solid #deded8;
-  background: #fff;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
 }
 
 .client-search input {
@@ -1309,7 +1309,7 @@
   border: 0;
   outline: 0;
   background: transparent;
-  color: #171717;
+  color: var(--c-text);
   font: inherit;
 }
 
@@ -1329,8 +1329,8 @@
 
 .import-client-button.active,
 .add-client-button.active {
-  background: #111;
-  color: #fff;
+  background: var(--c-accent);
+  color: var(--c-accent-text);
 }
 
 .client-list-tabs {
@@ -1343,9 +1343,9 @@
 }
 
 .client-list-tabs .outline-button.active {
-  border-color: #111;
-  background: #111;
-  color: #fff;
+  border-color: var(--c-accent);
+  background: var(--c-accent);
+  color: var(--c-accent-text);
 }
 
 .import-card {
@@ -1356,12 +1356,12 @@
 .import-card textarea {
   min-height: 126px;
   resize: vertical;
-  border: 1px solid #d8d6cf;
+  border: 1px solid var(--c-border);
   padding: 11px 12px;
   font: inherit;
   line-height: 1.45;
-  color: #191815;
-  background: #fff;
+  color: var(--c-text);
+  background: var(--c-surface);
 }
 
 .import-actions {
@@ -1382,12 +1382,12 @@
 }
 
 .import-actions > span {
-  color: #76736d;
+  color: var(--c-muted);
   font-size: 12px;
 }
 
 .import-action-tools > span {
-  color: #76736d;
+  color: var(--c-muted);
   font-size: 12px;
 }
 
@@ -1407,9 +1407,9 @@
 .import-diagnostics {
   display: grid;
   gap: 4px;
-  border: 1px solid #d8d6cf;
-  background: #f7f6f1;
-  color: #191815;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-soft);
+  color: var(--c-text);
   padding: 10px 12px;
   font-size: 12px;
   line-height: 1.4;
@@ -1426,16 +1426,16 @@
 
 .import-diagnostics.error {
   border-color: #e4b4b4;
-  background: #fff4f4;
-  color: #6f1d1d;
+  background: var(--c-danger-wash);
+  color: var(--c-error-text);
 }
 
 .client-table {
   display: grid;
   gap: 0;
   min-height: 228px;
-  border: 1px solid #deded8;
-  background: #fff;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
   overflow-anchor: none;
 }
 
@@ -1448,9 +1448,9 @@
   align-items: center;
   padding: 9px 12px;
   border: 0;
-  border-bottom: 1px solid #ecebe5;
-  background: #fff;
-  color: #171717;
+  border-bottom: 1px solid var(--c-border-soft);
+  background: var(--c-surface);
+  color: var(--c-text);
   text-align: left;
   cursor: pointer;
 }
@@ -1460,7 +1460,7 @@
 }
 
 .client-row:hover {
-  background: #f8f8f4;
+  background: var(--c-surface-soft);
 }
 
 .client-row strong,
@@ -1471,7 +1471,7 @@
 .client-row em {
   display: block;
   margin-top: 3px;
-  color: #111;
+  color: var(--c-text);
   font-size: 11px;
   font-style: normal;
   font-weight: 800;
@@ -1479,7 +1479,7 @@
 
 .client-row-arrow {
   justify-self: end;
-  color: #77746d;
+  color: var(--c-muted);
 }
 
 .client-profile-modal {
@@ -1487,9 +1487,9 @@
 }
 
 .merge-clients-button.active {
-  background: #171717;
-  border-color: #171717;
-  color: #fff;
+  background: var(--c-accent);
+  border-color: var(--c-accent);
+  color: var(--c-accent-text);
 }
 
 .client-merge-bar {
@@ -1497,12 +1497,12 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border: 1px solid #deded8;
-  background: #f7f6f1;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-soft);
   padding: 10px 14px;
   margin-bottom: 10px;
   font-size: 13px;
-  color: #171717;
+  color: var(--c-text);
 }
 
 .client-row.merge-mode {
@@ -1516,7 +1516,7 @@
 }
 
 .client-row.merge-selected {
-  background: #f2f1ea;
+  background: var(--c-active);
 }
 
 .merge-row-check {
@@ -1532,8 +1532,8 @@
 }
 
 .merge-row-check.checked {
-  background: #171717;
-  border-color: #171717;
+  background: var(--c-accent);
+  border-color: var(--c-accent);
 }
 
 .client-merge-modal {
@@ -1548,7 +1548,7 @@
 
 .client-merge-field-value {
   margin: 0;
-  color: #171717;
+  color: var(--c-text);
 }
 
 .client-merge-field-options {
@@ -1560,14 +1560,14 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  border: 1px solid #deded8;
+  border: 1px solid var(--c-border);
   padding: 8px 10px;
   cursor: pointer;
 }
 
 .client-merge-option.selected {
-  border-color: #171717;
-  background: #f7f6f1;
+  border-color: var(--c-accent);
+  background: var(--c-surface-soft);
 }
 
 .client-merge-option input {
@@ -1575,7 +1575,7 @@
 }
 
 .client-merge-error {
-  color: #6f1d1d;
+  color: var(--c-error-text);
   font-size: 13px;
   margin-top: 12px;
 }
@@ -1606,10 +1606,10 @@
 .client-editor textarea {
   min-height: 94px;
   resize: vertical;
-  border: 1px solid #deded8;
+  border: 1px solid var(--c-border);
   padding: 10px;
-  background: #fff;
-  color: #171717;
+  background: var(--c-surface);
+  color: var(--c-text);
   font: inherit;
 }
 
@@ -1629,19 +1629,19 @@
   gap: 6px;
   margin: 0 0 14px;
   padding: 12px;
-  border: 1px solid var(--border);
-  background: var(--panel-soft);
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-soft);
 }
 
 .client-profile-note-block strong {
-  color: var(--heading);
+  color: var(--c-text);
   font-size: 13px;
 }
 
 .client-profile-note-block p {
   margin: 0;
   padding: 0;
-  color: var(--text);
+  color: var(--c-text-body);
 }
 
 /* The pass balance on a client profile: the number large enough to read across
@@ -1705,7 +1705,7 @@
   gap: 12px;
   margin-top: 18px;
   padding-top: 14px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--c-border);
 }
 
 .profile-tab-list {
@@ -1720,30 +1720,30 @@
   gap: 8px;
   min-height: 38px;
   padding: 8px 11px;
-  border: 1px solid var(--border);
-  background: var(--panel-soft);
-  color: var(--text);
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-soft);
+  color: var(--c-text-body);
   font: inherit;
   font-weight: 750;
   cursor: pointer;
 }
 
 .profile-tab-list button.active {
-  background: var(--heading);
-  border-color: var(--heading);
-  color: var(--panel);
+  background: var(--c-text);
+  border-color: var(--c-text);
+  color: var(--c-surface);
 }
 
 .profile-history-panel {
   display: grid;
-  border: 1px solid var(--border);
-  background: var(--panel-soft);
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-soft);
 }
 
 .profile-history-panel p {
   margin: 0;
   padding: 14px;
-  color: var(--muted);
+  color: var(--c-muted);
 }
 
 .profile-history-row {
@@ -1752,7 +1752,7 @@
   gap: 12px;
   align-items: start;
   padding: 12px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--c-border);
 }
 
 .profile-history-row:last-child {
@@ -1766,13 +1766,13 @@
 }
 
 .profile-history-row strong {
-  color: var(--heading);
+  color: var(--c-text);
   line-height: 1.2;
 }
 
 .profile-history-row span,
 .profile-history-row em {
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 13px;
   font-style: normal;
 }
@@ -2262,8 +2262,8 @@
   justify-content: space-between;
   gap: 14px;
   padding: 14px;
-  border: 1px solid var(--border);
-  background: var(--panel);
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
 }
 
 .lesson-notes-window div,
@@ -2274,12 +2274,12 @@
 }
 
 .lesson-notes-window span {
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 13px;
 }
 
 .notes-empty {
-  color: var(--muted);
+  color: var(--c-muted);
 }
 
 .lesson-quick-actions {
@@ -2323,7 +2323,7 @@
 }
 
 .lesson-note-card strong {
-  color: var(--heading);
+  color: var(--c-text);
 }
 
 @media (max-width: 820px) {
@@ -2338,7 +2338,7 @@
 }
 
 .lesson-note-card span {
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 12px;
 }
 
@@ -2346,7 +2346,7 @@
   margin: 0;
   padding: 0;
   white-space: pre-wrap;
-  color: var(--text);
+  color: var(--c-text-body);
 }
 
 .lesson-note-card .outline-button {
@@ -2366,13 +2366,13 @@
   align-items: center;
   gap: 12px;
   padding: 12px;
-  border: 1px solid #deded8;
-  background: #f8f8f4;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-soft);
 }
 
 .linked-profile span {
   display: block;
-  color: #76736d;
+  color: var(--c-muted);
   font-size: 12px;
   text-transform: uppercase;
   font-weight: 800;
@@ -2457,7 +2457,7 @@
   border: 1px solid transparent;
   border-radius: 6px;
   background: transparent;
-  color: #76736d;
+  color: var(--c-muted);
   font: inherit;
   font-size: 14px;
   cursor: pointer;
@@ -2465,9 +2465,9 @@
 
 .booking-lesson-type select:hover:not(:disabled),
 .booking-lesson-type select:focus-visible {
-  border-color: #deded8;
-  background: #f8f8f4;
-  color: #171717;
+  border-color: var(--c-border);
+  background: var(--c-surface-soft);
+  color: var(--c-text);
 }
 
 .booking-lesson-type select:disabled {
@@ -2480,7 +2480,7 @@
   display: grid;
   place-items: center;
   align-content: center;
-  border-bottom: 1px solid #e8e6df;
+  border-bottom: 1px solid var(--c-border-soft);
   margin: -22px -22px 22px;
 }
 
@@ -2499,7 +2499,7 @@
   margin-top: 16px;
   font-style: normal;
   font-weight: 800;
-  color: #45423d;
+  color: var(--c-text-body);
 }
 
 .booking-toolbar {
@@ -2517,9 +2517,9 @@
   justify-content: center;
   gap: 8px;
   min-height: 42px;
-  border: 1px solid #deded8;
-  background: #fbfbf9;
-  color: #171717;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-soft);
+  color: var(--c-text);
   cursor: pointer;
   font: inherit;
 }
@@ -2556,8 +2556,8 @@
   padding: 0;
   display: grid;
   gap: 0;
-  border: 1px solid #deded8;
-  background: #fff;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
 }
 
 .booking-progressive-title {
@@ -2565,9 +2565,9 @@
   min-height: 38px;
   padding: 8px 12px;
   border: 0;
-  border-bottom: 1px solid #deded8;
-  background: #fbfbf9;
-  color: #171717;
+  border-bottom: 1px solid var(--c-border);
+  background: var(--c-surface-soft);
+  color: var(--c-text);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -2579,7 +2579,7 @@
 
 .booking-progressive-title span {
   display: block;
-  color: #76736d;
+  color: var(--c-muted);
   font-size: 11px;
   font-weight: 680;
   line-height: 1.2;
@@ -2601,7 +2601,7 @@
 .booking-progressive-title strong {
   display: block;
   margin-top: 4px;
-  color: #171717;
+  color: var(--c-text);
   font-size: 20px;
   text-transform: none;
 }
@@ -2639,8 +2639,8 @@
 }
 
 .booking-progressive-summary-empty {
-  color: #5d5a54;
-  background: #f7f7f3;
+  color: var(--c-text-soft);
+  background: var(--c-surface-soft);
 }
 
 .booking-progressive-summary-empty strong,
@@ -2694,7 +2694,7 @@
 }
 
 .booking-login-copy em {
-  color: #5d5a54;
+  color: var(--c-text-soft);
 }
 
 .email-status {
@@ -2703,18 +2703,18 @@
   gap: 8px;
   min-height: 42px;
   padding: 8px 11px;
-  border: 1px solid #deded8;
-  color: #171717;
+  border: 1px solid var(--c-border);
+  color: var(--c-text);
   animation: email-status-pop 260ms ease-out;
 }
 
 .email-status.sent {
-  border-color: color-mix(in srgb, var(--coach-primary) 42%, #deded8);
-  background: color-mix(in srgb, var(--coach-primary) 10%, #fff);
+  border-color: color-mix(in srgb, var(--coach-primary) 42%, var(--c-border));
+  background: color-mix(in srgb, var(--coach-primary) 10%, var(--c-surface));
 }
 
 .email-status.pending {
-  background: #fff;
+  background: var(--c-surface);
 }
 
 @keyframes email-status-pop {
@@ -2731,9 +2731,9 @@
 .service-picker button,
 .time-slots button,
 .booking-handedness button {
-  border: 1px solid #deded8;
-  background: #fbfbf9;
-  color: #171717;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-soft);
+  color: var(--c-text);
   cursor: pointer;
   text-align: left;
 }
@@ -2751,16 +2751,16 @@
 .service-picker em,
 .service-picker small {
   margin-top: 5px;
-  color: #5d5a54;
+  color: var(--c-text-soft);
   font-style: normal;
 }
 
 .service-picker .selected-service,
 .time-slots .selected-time,
 .booking-handedness .selected-handedness {
-  border-color: #111;
-  background: #111;
-  color: #fff;
+  border-color: var(--c-accent);
+  background: var(--c-accent);
+  color: var(--c-accent-text);
 }
 
 .booking-week-controls {
@@ -2770,8 +2770,8 @@
   gap: 10px;
   margin-top: 14px;
   padding: 10px 12px;
-  border: 1px solid #deded8;
-  background: #f7f7f3;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-soft);
 }
 
 .booking-week-controls strong {
@@ -2785,9 +2785,9 @@
   gap: 8px;
   min-height: 38px;
   padding: 0 12px;
-  border: 1px solid #deded8;
-  background: #fff;
-  color: #171717;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
+  color: var(--c-text);
   cursor: pointer;
   font: inherit;
   white-space: nowrap;
@@ -2803,12 +2803,12 @@
 }
 
 .time-slots p {
-  color: #76736d;
+  color: var(--c-muted);
 }
 
 .booking-form input {
   min-height: 42px;
-  border: 1px solid #deded8;
+  border: 1px solid var(--c-border);
   padding: 0 10px;
   font: inherit;
 }
@@ -2966,7 +2966,7 @@
   gap: 6px;
   padding: 6px 10px;
   border: 1px dashed var(--booking-border, var(--c-border));
-  border-radius: 999px;
+  border-radius: var(--c-radius-pill);
   background: transparent;
   color: var(--booking-text, var(--c-text));
   font: inherit;
@@ -3036,8 +3036,8 @@
 .booking-summary {
   margin: 14px 0;
   padding: 12px;
-  background: #f7f7f3;
-  border: 1px solid #e2e1d9;
+  background: var(--c-surface-soft);
+  border: 1px solid var(--c-border);
 }
 
 .booking-summary strong,
@@ -3047,7 +3047,7 @@
 
 .booking-summary span {
   margin-top: 5px;
-  color: #5d5a54;
+  color: var(--c-text-soft);
 }
 
 .confirm-booking {
@@ -3066,8 +3066,8 @@
 
 .embed-panel {
   margin-top: 18px;
-  border: 1px solid #deded8;
-  background: #fbfbf9;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-soft);
 }
 
 .embed-code span,
@@ -3075,7 +3075,7 @@
 .sync-output span,
 .sync-meta span {
   display: block;
-  color: #76736d;
+  color: var(--c-muted);
   font-size: 12px;
   text-transform: uppercase;
   font-weight: 800;
@@ -3100,8 +3100,8 @@
   align-items: start;
   margin: 0;
   padding: 13px;
-  border: 1px solid #d9d7cf;
-  background: #fff;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
 }
 
 .embed-code code,
@@ -3120,16 +3120,16 @@
   align-items: center;
   padding: 10px 12px;
   border-bottom: 1px solid #e4e2da;
-  background: #fff;
+  background: var(--c-surface);
 }
 
 .booking-screen-tab {
-  border: 1px solid #deded8;
-  background: #fbfbf9;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-soft);
   color: #3b3732;
   min-height: 34px;
   padding: 0 12px;
-  border-radius: 999px;
+  border-radius: var(--c-radius-pill);
   font-weight: 700;
   font-size: 13px;
   cursor: pointer;
@@ -3151,9 +3151,9 @@
   margin: 0;
   font-size: 12px;
   line-height: 1.45;
-  border: 1px solid #deded8;
+  border: 1px solid var(--c-border);
   padding: 8px 10px;
-  background: #fff;
+  background: var(--c-surface);
   border-radius: 6px;
   color: #25231f;
   word-break: break-all;
@@ -3177,9 +3177,9 @@
   display: block;
   width: 100%;
   height: 230px;
-  border: 1px solid #d8d6ce;
+  border: 1px solid var(--c-border);
   border-radius: 6px;
-  background: #fff;
+  background: var(--c-surface);
 }
 
 .sync-card {
@@ -3207,12 +3207,12 @@
   align-items: center;
   margin-top: 14px;
   padding: 10px 12px;
-  border: 1px solid #deded8;
-  background: #fff;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
 }
 
 .sync-status span {
-  color: #76736d;
+  color: var(--c-muted);
   font-size: 12px;
   text-transform: uppercase;
   font-weight: 800;
@@ -3224,13 +3224,13 @@
   align-items: center;
   padding: 0 8px;
   background: #f0eee6;
-  color: #34312d;
+  color: var(--c-text-body);
   font-size: 12px;
 }
 
 .sync-status.offline strong {
-  background: #fff3f0;
-  color: #a52e15;
+  background: var(--c-danger-wash);
+  color: var(--c-danger);
 }
 
 /* The detail takes the rest of the row, or a whole row of its own once the line
@@ -3238,7 +3238,7 @@
 .sync-status em {
   flex: 1 1 14ch;
   min-width: 0;
-  color: #56534d;
+  color: var(--c-text-soft);
   font-size: 13px;
   font-style: normal;
   overflow-wrap: anywhere;
@@ -3251,9 +3251,9 @@
 .sync-field input {
   width: min(34ch, 100%);
   min-height: 42px;
-  border: 1px solid #deded8;
+  border: 1px solid var(--c-border);
   padding: 0 10px;
-  background: #fff;
+  background: var(--c-surface);
   font: inherit;
 }
 
@@ -3262,8 +3262,8 @@
   gap: 7px;
   margin: 14px 0;
   padding: 12px;
-  border: 1px solid #d9d7cf;
-  background: #fbfbf9;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-soft);
 }
 
 .video-storage-section {
@@ -3281,7 +3281,7 @@
 .storage-card-header span,
 .storage-provider-line,
 .storage-diagnostics-group h4 {
-  color: #76736d;
+  color: var(--c-muted);
   font-size: 11px;
   font-weight: 800;
   text-transform: uppercase;
@@ -3289,7 +3289,7 @@
 
 .video-storage-heading h3 {
   margin: 2px 0 0;
-  color: #171717;
+  color: var(--c-text);
   font-size: 18px;
   line-height: 1.2;
 }
@@ -3307,8 +3307,8 @@
   gap: 12px;
   min-width: 0;
   padding: 14px;
-  border: 1px solid #deded8;
-  background: #fff;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
 }
 
 .storage-card {
@@ -3331,7 +3331,7 @@
 .storage-card-header strong {
   display: block;
   margin-top: 2px;
-  color: #171717;
+  color: var(--c-text);
   font-size: 19px;
   line-height: 1.15;
 }
@@ -3348,9 +3348,9 @@
   width: fit-content;
   max-width: 100%;
   padding: 5px 8px;
-  border: 1px solid #ecebe5;
-  background: #f7f7f3;
-  color: #56534d;
+  border: 1px solid var(--c-border-soft);
+  background: var(--c-surface-soft);
+  color: var(--c-text-soft);
   overflow-wrap: anywhere;
 }
 
@@ -3371,15 +3371,15 @@
 .storage-card.is-cache-only .storage-card-header strong,
 .storage-card.is-temporarily-unavailable .storage-card-header strong,
 .storage-card.is-error .storage-card-header strong {
-  color: #a52e15;
+  color: var(--c-danger);
 }
 
 .storage-transfer-inbox {
   display: grid;
   gap: 12px;
   padding: 14px;
-  border: 1px solid #deded8;
-  background: #fff;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
 }
 
 .storage-transfer-inbox-header,
@@ -3392,7 +3392,7 @@
 }
 
 .storage-transfer-inbox-header span {
-  color: #76736d;
+  color: var(--c-muted);
   font-size: 11px;
   font-weight: 800;
   text-transform: uppercase;
@@ -3400,7 +3400,7 @@
 
 .storage-transfer-inbox-header h4 {
   margin: 2px 0 0;
-  color: #171717;
+  color: var(--c-text);
   font-size: 16px;
   line-height: 1.2;
 }
@@ -3412,15 +3412,15 @@
 
 .storage-transfer-row {
   padding: 10px;
-  border: 1px solid #ecebe5;
-  background: #fbfbf9;
+  border: 1px solid var(--c-border-soft);
+  background: var(--c-surface-soft);
 }
 
 /* Videos from someone with no account. Marked, because the sender is
    self-declared and the row expires if the coach does nothing. */
 .storage-transfer-row.is-guest-submission {
-  border-color: #ddd9ce;
-  background: #fdfbf5;
+  border-color: var(--c-border);
+  background: var(--c-surface-soft);
 }
 
 .storage-transfer-row.is-guest-submission .storage-transfer-icon {
@@ -3433,8 +3433,8 @@
   display: inline-grid;
   place-items: center;
   flex: 0 0 auto;
-  border: 1px solid #ddd9ce;
-  background: #fff;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
   color: #8a6f3f;
 }
 
@@ -3453,13 +3453,13 @@
 }
 
 .storage-transfer-copy strong {
-  color: #171717;
+  color: var(--c-text);
   font-size: 14px;
 }
 
 .storage-transfer-copy span,
 .storage-transfer-empty {
-  color: #6f6c66;
+  color: var(--c-muted);
   font-size: 13px;
   line-height: 1.4;
 }
@@ -3472,12 +3472,12 @@
   display: grid;
   gap: 12px;
   padding-top: 12px;
-  border-top: 1px solid #ecebe5;
+  border-top: 1px solid var(--c-border-soft);
 }
 
 .storage-diagnostics-group h4 {
   margin: 0;
-  color: #34312d;
+  color: var(--c-text-body);
 }
 
 .sync-meta {
@@ -3498,13 +3498,13 @@
      halves of that had to be said for the chip to stay on the screen. */
   min-width: 0;
   padding: 0 9px;
-  border: 1px solid #e2e0d8;
-  background: #f7f7f3;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-soft);
   overflow-wrap: anywhere;
 }
 
 .sync-meta strong {
-  color: #34312d;
+  color: var(--c-text-body);
   font-size: 12px;
 }
 
@@ -3519,7 +3519,7 @@
 
 .field-help {
   margin: 0;
-  color: #5d5a54;
+  color: var(--c-text-soft);
   font-size: 12px;
 }
 
@@ -3533,23 +3533,23 @@
   display: grid;
   gap: 12px;
   padding: 12px;
-  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c-border) 78%, transparent);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--panel) 82%, var(--panel-soft));
+  background: color-mix(in srgb, var(--c-surface) 82%, var(--c-surface-soft));
 }
 
 .editable-settings-block.is-editing {
-  border-color: color-mix(in srgb, var(--coach-primary) 34%, var(--border));
-  background: var(--panel);
+  border-color: color-mix(in srgb, var(--coach-primary) 34%, var(--c-border));
+  background: var(--c-surface);
 }
 
 .editable-settings-block.is-saving {
-  border-color: color-mix(in srgb, var(--coach-primary) 25%, var(--border));
+  border-color: color-mix(in srgb, var(--coach-primary) 25%, var(--c-border));
 }
 
 .editable-settings-block.is-error {
-  border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
-  background: color-mix(in srgb, var(--danger-soft) 34%, var(--panel));
+  border-color: color-mix(in srgb, var(--c-danger) 40%, var(--c-border));
+  background: color-mix(in srgb, var(--c-danger-wash) 34%, var(--c-surface));
 }
 
 .editable-settings-block-header {
@@ -3566,7 +3566,7 @@
 }
 
 .editable-settings-block-header span {
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0;
@@ -3574,7 +3574,7 @@
 }
 
 .editable-settings-block-header em {
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 12px;
   font-style: normal;
 }
@@ -3600,7 +3600,7 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: var(--success);
+  color: var(--c-success-text);
   font-size: 12px;
   font-weight: 800;
 }
@@ -3621,9 +3621,9 @@
   display: grid;
   gap: 4px;
   padding: 12px;
-  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c-border) 78%, transparent);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--panel) 82%, var(--panel-soft));
+  background: color-mix(in srgb, var(--c-surface) 82%, var(--c-surface-soft));
 }
 
 .sending-rules .sending-rules-head {
@@ -3635,7 +3635,7 @@
 }
 
 .sending-rules .sending-rules-head span {
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0;
@@ -3643,7 +3643,7 @@
 }
 
 .sending-rules .sending-rules-head em {
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 12px;
   font-style: normal;
 }
@@ -3659,7 +3659,7 @@
    the same span rule catches every settings toggle in the app, and quietly
    restyling all of them is not this change's business. */
 .sending-rules .settings-toggle.sending-rule > span {
-  color: var(--text);
+  color: var(--c-text-body);
   font-size: 14px;
 }
 
@@ -3668,7 +3668,7 @@
   align-items: center;
   gap: 4px;
   margin-left: auto;
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 12px;
   font-style: normal;
   font-weight: 800;
@@ -3692,9 +3692,9 @@
 
 .settings-field input:read-only,
 .settings-field textarea:read-only {
-  border-color: color-mix(in srgb, var(--border) 70%, transparent);
-  background: color-mix(in srgb, var(--panel-soft) 45%, transparent);
-  color: var(--text);
+  border-color: color-mix(in srgb, var(--c-border) 70%, transparent);
+  background: color-mix(in srgb, var(--c-surface-soft) 45%, transparent);
+  color: var(--c-text-body);
   box-shadow: none;
   cursor: default;
 }
@@ -3702,7 +3702,7 @@
 .settings-field input:read-only:focus,
 .settings-field textarea:read-only:focus {
   outline: none;
-  border-color: color-mix(in srgb, var(--border) 70%, transparent);
+  border-color: color-mix(in srgb, var(--c-border) 70%, transparent);
 }
 
 .settings-field select:disabled,
@@ -3722,7 +3722,7 @@
   align-items: center;
   gap: 10px;
   padding: 8px 0;
-  color: #34312d;
+  color: var(--c-text-body);
   font-size: 14px;
 }
 
@@ -3739,7 +3739,7 @@
   margin: 4px 0 0;
   padding: 10px 12px;
   border: 1px solid #f0c7bd;
-  background: #fff3f0;
+  background: var(--c-danger-wash);
   color: #8f2a18;
   font-size: 12px;
   line-height: 1.45;
@@ -3757,7 +3757,7 @@
 
 .template-token-list span {
   width: 100%;
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 12px;
   font-weight: 800;
   text-transform: uppercase;
@@ -3765,9 +3765,9 @@
 
 .template-token-list code {
   padding: 5px 7px;
-  border: 1px solid var(--border);
-  background: var(--panel-soft);
-  color: var(--heading);
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-soft);
+  color: var(--c-text);
   font-size: 12px;
 }
 
@@ -3779,10 +3779,10 @@
 
 .template-token-button {
   height: 32px;
-  border: 1px solid var(--border);
-  background: var(--panel-soft);
-  color: var(--heading);
-  border-radius: 999px;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-soft);
+  color: var(--c-text);
+  border-radius: var(--c-radius-pill);
   padding: 0 10px;
   font-family: inherit;
   font-size: 12px;
@@ -3806,7 +3806,7 @@
 }
 
 .dock-label span {
-  color: #76736d;
+  color: var(--c-muted);
   font-size: 12px;
   text-transform: uppercase;
   font-weight: 800;
@@ -3824,8 +3824,8 @@
   align-items: flex-end;
   gap: 10px;
   padding: 8px 14px 12px;
-  border: 1px solid #d8d6ce;
-  background: linear-gradient(#fbfbf9 0 75%, #efeee8 75% 100%);
+  border: 1px solid var(--c-border);
+  background: linear-gradient(var(--c-surface-soft) 0 75%, #efeee8 75% 100%);
   overflow: hidden;
 }
 
@@ -3861,7 +3861,7 @@
   padding: 8px 10px;
   border: 1px solid #171717;
   background: #181818;
-  color: #fff;
+  color: var(--c-on-scrim);
   cursor: grab;
   touch-action: none;
   box-shadow: 0 8px 18px rgba(0, 0, 0, 0.16);
@@ -3926,8 +3926,8 @@
 
 .calendar-card,
 .details-panel {
-  background: #fff;
-  border: 1px solid #deded8;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
 }
 
 .calendar-toolbar {
@@ -3948,7 +3948,7 @@
 
 .calendar-toolbar h2 {
   margin: 0;
-  color: #171717;
+  color: var(--c-text);
   font-size: 24px;
   line-height: 1.05;
 }
@@ -4005,7 +4005,7 @@
   margin-bottom: 0;
   padding-top: 9px;
   padding-bottom: 11px;
-  background: var(--panel);
+  background: var(--c-surface);
   color: var(--c-text-body);
   font-size: var(--c-size-meta);
   opacity: 1;
@@ -4030,7 +4030,7 @@
 .calendar-header-row {
   display: grid;
   grid-template-columns: 64px minmax(0, 1fr);
-  border-bottom: 1px solid #d7d7cf;
+  border-bottom: 1px solid var(--c-border);
 }
 
 .location-coach-columns {
@@ -4103,7 +4103,7 @@
 
 .day-heading.today {
   background: linear-gradient(180deg, rgba(31, 211, 109, 0.16), rgba(31, 211, 109, 0.04));
-  box-shadow: inset 0 -2px 0 var(--primary);
+  box-shadow: inset 0 -2px 0 var(--c-accent);
 }
 
 .day-heading strong {
@@ -4125,15 +4125,15 @@
 }
 
 .time-column {
-  background: #fbfbf9;
-  border-right: 1px solid #d7d7cf;
+  background: var(--c-surface-soft);
+  border-right: 1px solid var(--c-border);
 }
 
 .time-label {
   position: absolute;
   right: 10px;
   transform: translateY(-8px);
-  color: #6f6c66;
+  color: var(--c-muted);
   font-size: 12px;
 }
 
@@ -4167,9 +4167,9 @@
   position: absolute;
   left: 0;
   right: 0;
-  background: #fff;
-  border-top: 1px solid #f0f0ea;
-  border-bottom: 1px solid #f0f0ea;
+  background: var(--c-surface);
+  border-top: 1px solid var(--c-page);
+  border-bottom: 1px solid var(--c-page);
 }
 
 .calendar-item {
@@ -4181,7 +4181,7 @@
   padding: 8px 8px 8px 4px;
   border: 1px solid #1f1f1f;
   background: #181818;
-  color: #fff;
+  color: var(--c-on-scrim);
   overflow: hidden;
   box-shadow: 0 8px 18px rgba(0, 0, 0, 0.14);
   cursor: grab;
@@ -4374,14 +4374,14 @@
   grid-template-columns: 18px minmax(0, 1fr);
   gap: 10px;
   align-items: center;
-  color: #45423d;
+  color: var(--c-text-body);
   font-size: 14px;
 }
 
 .service-summary {
   padding: 16px;
-  background: #f7f7f3;
-  border: 1px solid #e2e1d9;
+  background: var(--c-surface-soft);
+  border: 1px solid var(--c-border);
 }
 
 .service-summary strong {
@@ -4392,14 +4392,14 @@
 
 .service-summary p {
   margin: 10px 0 0;
-  color: #5d5a54;
+  color: var(--c-text-soft);
 }
 
 .admin-override {
   margin-top: 14px;
   padding: 14px;
-  border: 1px solid #d9d9d2;
-  background: #fbfbf9;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-soft);
 }
 
 .admin-override span,
@@ -4408,7 +4408,7 @@
 }
 
 .admin-override span {
-  color: #6f6c66;
+  color: var(--c-muted);
   font-size: 12px;
   text-transform: uppercase;
   font-weight: 700;
@@ -4427,9 +4427,9 @@
   gap: 8px;
   margin-top: 7px;
   padding: 8px 10px;
-  border: 1px solid #deded8;
-  background: #fff;
-  color: #171717;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
+  color: var(--c-text);
   cursor: pointer;
   text-align: left;
 }
@@ -4444,7 +4444,7 @@
   place-items: center;
   align-content: center;
   text-align: center;
-  color: #696761;
+  color: var(--c-muted);
 }
 
 .empty-panel.compact {
@@ -4472,8 +4472,8 @@
   flex-direction: column;
   overflow: hidden;
   padding: 16px;
-  border: 1px solid #d7d7cf;
-  background: #fff;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18);
 }
 
@@ -4483,7 +4483,7 @@
 }
 
 .quick-create > span {
-  color: #6f6c66;
+  color: var(--c-muted);
   font-size: 12px;
   text-transform: uppercase;
   font-weight: 700;
@@ -4521,8 +4521,8 @@
   gap: 8px;
   margin-bottom: 8px;
   padding: 0 10px;
-  border: 1px solid #deded8;
-  background: #fff;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
 }
 
 .quick-match-anchor {
@@ -4540,7 +4540,7 @@
   border: 0;
   outline: 0;
   background: transparent;
-  color: #171717;
+  color: var(--c-text);
   font: inherit;
 }
 
@@ -4554,7 +4554,7 @@
   border: 1px solid #cbd8cd;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(245, 250, 245, 0.94));
-  color: #111;
+  color: var(--c-text);
   text-align: left;
 }
 
@@ -4569,7 +4569,7 @@
 }
 
 .client-match-prompt em {
-  color: #6f6c66;
+  color: var(--c-muted);
   font-size: 11px;
   font-style: normal;
 }
@@ -4597,9 +4597,9 @@
   gap: 8px;
   padding: 8px 10px;
   margin-top: 7px;
-  border: 1px solid #deded8;
-  background: #fbfbf9;
-  color: #171717;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-soft);
+  color: var(--c-text);
   text-align: left;
 }
 
@@ -4614,7 +4614,7 @@
 }
 
 .quick-create button:not(.popover-close) em {
-  color: #6f6c66;
+  color: var(--c-muted);
   font-size: 12px;
   font-style: normal;
 }
@@ -4627,20 +4627,20 @@
   padding: 4px 6px;
   border: 0;
   background: none;
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 13px;
   font-weight: 600;
 }
 
 .quick-create button.quick-create-block:not(.popover-close):hover {
-  color: var(--text);
+  color: var(--c-text-body);
 }
 
 /* The rest of the lesson types, on a phone sheet. */
 .quick-create button.quick-create-more:not(.popover-close) {
   justify-content: center;
   border-style: dashed;
-  color: var(--muted);
+  color: var(--c-muted);
   font-weight: 700;
 }
 
@@ -4655,7 +4655,7 @@
 }
 
 .quick-create-form label span {
-  color: #6f6c66;
+  color: var(--c-muted);
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0;
@@ -4670,10 +4670,10 @@
   min-width: 0;
   min-height: 38px;
   padding: 9px 10px;
-  border: 1px solid #deded8;
+  border: 1px solid var(--c-border);
   border-radius: 8px;
-  background: #fff;
-  color: #171717;
+  background: var(--c-surface);
+  color: var(--c-text);
   font: inherit;
 }
 
@@ -4693,9 +4693,9 @@
 .quick-service-summary {
   width: 100%;
   padding: 9px 10px;
-  border: 1px solid #deded8;
+  border: 1px solid var(--c-border);
   border-radius: 8px;
-  background: #fbfbf9;
+  background: var(--c-surface-soft);
   cursor: pointer;
 }
 
@@ -4703,7 +4703,7 @@
 .quick-service-summary strong {
   display: block;
   margin: 0;
-  color: #171717;
+  color: var(--c-text);
   font-size: 13px;
   text-transform: none;
 }
@@ -4711,7 +4711,7 @@
 .quick-service-summary em {
   display: block;
   margin-top: 2px;
-  color: #6f6c66;
+  color: var(--c-muted);
   font-size: 12px;
   font-style: normal;
 }
@@ -4753,7 +4753,7 @@
   gap: 12px;
   padding: 9px 10px 9px 16px;
   background: #111;
-  color: #fff;
+  color: var(--c-on-scrim);
   box-shadow: 0 16px 44px rgba(0, 0, 0, 0.28);
 }
 
@@ -4767,8 +4767,8 @@
   align-items: center;
   gap: 6px;
   padding: 0 10px;
-  background: #fff;
-  color: #111;
+  background: var(--c-surface);
+  color: var(--c-text);
 }
 
 .toast-close {
@@ -4783,7 +4783,7 @@
   transform: translateY(-50%);
   padding: 12px 14px;
   background: #111;
-  color: #fff;
+  color: var(--c-on-scrim);
   font-size: 12px;
   font-weight: 800;
   text-transform: uppercase;
@@ -4902,7 +4902,6 @@
      was written against; the values now come from tokens.css, so a colour is
      defined once and the four old systems converge without a rewrite.
      New rules should read --c-* directly and let this list shrink. */
-  --coach-neutral: var(--c-surface);
   /* A default for the pages nobody signs in to. --coach-primary is a brand
      colour applied inline by App.tsx and, pre-auth, from localStorage by
      LoginScreen -- neither of which runs for a visitor arriving on an emailed
@@ -4911,46 +4910,10 @@
      background was dropped, so the button rendered as white text on nothing.
      Both inline setters still win over this. */
   --coach-primary: var(--c-accent);
-  --page: var(--c-page);
-  --panel: var(--c-surface);
-  --panel-soft: var(--c-surface-soft);
+  /* The palette itself is tokens.css: every surface here reads --c-* directly.
+     The --page/--panel/--border/--muted aliases that used to sit here are gone,
+     as is the portal's --pt-* set; one name per colour, defined once. */
   --panel-glass: rgba(255, 255, 255, 0.86);
-  --text: var(--c-text-body);
-  --heading: var(--c-text);
-  /* --muted and --quiet were two greys a shade apart. One palette means one
-     grey: both resolve to --c-muted, and anywhere that genuinely needed the
-     lighter of the two should say so with opacity rather than a fifth grey. */
-  --muted: var(--c-muted);
-  --quiet: var(--c-muted);
-  --border: var(--c-border);
-  --border-strong: var(--c-border);
-  --primary: var(--c-accent);
-  --primary-soft: #142019;
-  --primary-text: var(--c-accent-text);
-  /* Text on a fill that is dark in BOTH themes, as opposed to --primary-text,
-     which is text on --primary and correctly inverts with it.
-     .primary-button and the surfaces below borrow the brand fill but hardcode
-     it near-black, so when --primary-text flipped to near-black in dark they
-     became dark text on a near-black button -- "Save", "Issue pass" and every
-     other primary action, unreadable. Splitting the two names is
-     what stops the fix from turning `background: var(--primary); color:
-     var(--primary-text)` -- which .theme-switch > span.active and
-     .axis-cycle-button.is-squashed both use correctly -- into white on white. */
-  --on-brand-fill: var(--c-accent-text);
-  --danger: var(--c-danger);
-  --danger-soft: #fff1ed;
-  /* --success was missing from this list until 2026-09-11, so every
-     `color: var(--success)` was dropped at computed-value time and the element
-     inherited body text instead: .editable-settings-saved, the "Saved" badge on
-     every settings block, had never once rendered green. The token test only
-     walks --c-* and --dark-* names, so nothing caught it.
-     No dark twin needed — --c-success-text is swapped by both dark triggers in
-     tokens.css, so this alias follows the theme on its own. */
-  --success: var(--c-success-text);
-  --success-soft: #eaf8ed;
-  --grid-bg: #eef1ea;
-  --grid-line: #dce2d7;
-  --available: #ffffff;
   --block-bg: #dfe2d7;
   --block-text: #2d312b;
 
@@ -4983,10 +4946,10 @@
   --shadow: 0 18px 46px rgba(8, 18, 12, 0.08);
   --shadow-strong: 0 18px 52px rgba(4, 9, 6, 0.2);
   --shine: linear-gradient(180deg, color-mix(in srgb, var(--coach-primary) 7%, #ffffff), rgba(255, 255, 255, 0));
-  color: var(--text);
+  color: var(--c-text-body);
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--coach-primary) 2%, transparent), transparent 280px),
-    var(--page);
+    var(--c-page);
 }
 
 .app-shell.theme-dark,
@@ -4997,17 +4960,6 @@
      shadows that have to be heavier, gradients, and the lesson-colour
      fallbacks that read as holes rather than cards against near-black. */
   --panel-glass: rgba(9, 17, 12, 0.9);
-  /* Text on the fixed dark brand fill. See the alias block for what separates
-     this from --primary-text: the surfaces reading it are dark in both themes,
-     so their text has to stay light while the palette inverts around it.
-     --c-accent is already the light half of the pair here. */
-  --on-brand-fill: var(--c-accent);
-  --primary-soft: #101b14;
-  --danger-soft: rgba(255, 98, 80, 0.13);
-  --success-soft: rgba(31, 211, 109, 0.08);
-  --grid-bg: #0d140f;
-  --grid-line: rgba(255, 255, 255, 0.08);
-  --available: rgba(255, 255, 255, 0.045);
   --block-bg: rgba(255, 255, 255, 0.08);
   --block-text: rgba(248, 255, 249, 0.76);
   /* Only the fallbacks change: the same fills against a near-black page read as
@@ -5023,7 +4975,7 @@
   --shine: linear-gradient(180deg, rgba(31, 211, 109, 0.045), rgba(255, 255, 255, 0.02));
   background:
     linear-gradient(180deg, rgba(31, 211, 109, 0.025), transparent 280px),
-    linear-gradient(180deg, #09110c, var(--page) 380px);
+    linear-gradient(180deg, #09110c, var(--c-page) 380px);
 }
 
 .app-shell.embed-mode {
@@ -5047,8 +4999,8 @@
 .availability-range-button,
 .toast,
 .edge-cue {
-  border-color: var(--border);
-  color: var(--text);
+  border-color: var(--c-border);
+  color: var(--c-text-body);
 }
 
 /* Geometry, one scale: 9 on controls, 12 on cards, 16 on a page card. The
@@ -5061,19 +5013,19 @@
 .quick-create,
 .client-match-prompt {
   border-radius: var(--c-radius-card);
-  background: var(--panel);
+  background: var(--c-surface);
   box-shadow: var(--shadow);
 }
 
 .module-page {
   border-radius: var(--c-radius-page);
-  background: var(--panel);
+  background: var(--c-surface);
   box-shadow: var(--shadow);
 }
 
 .sidebar {
-  background: color-mix(in srgb, var(--panel) 84%, var(--coach-primary) 3%);
-  border-right-color: var(--border);
+  background: color-mix(in srgb, var(--c-surface) 84%, var(--coach-primary) 3%);
+  border-right-color: var(--c-border);
 }
 
 .brand-mark {
@@ -5081,7 +5033,7 @@
   overflow: hidden;
   border-color: transparent;
   background: transparent;
-  color: var(--on-brand-fill);
+  color: var(--c-accent-text);
   box-shadow: none;
 }
 
@@ -5096,7 +5048,7 @@
 .details-panel h2,
 .empty-panel h2,
 .quick-create strong {
-  color: var(--heading);
+  color: var(--c-text);
 }
 
 .brand span,
@@ -5127,7 +5079,7 @@
 .service-row-main em,
 .service-row-meta span,
 .settings-subsection-title span {
-  color: var(--muted);
+  color: var(--c-muted);
 }
 
 .data-card p,
@@ -5140,24 +5092,24 @@
 .service-row-main,
 .service-row-main strong,
 .settings-subsection-title strong {
-  color: var(--text);
+  color: var(--c-text-body);
 }
 
 .service-list,
 .service-row {
-  border-color: var(--border);
-  background: var(--panel);
+  border-color: var(--c-border);
+  background: var(--c-surface);
 }
 
 .service-row-meta strong,
 .service-row-meta span {
-  border-color: var(--border);
-  background: var(--panel-soft);
-  color: var(--text);
+  border-color: var(--c-border);
+  background: var(--c-surface-soft);
+  color: var(--c-text-body);
 }
 
 .settings-subsection {
-  border-color: var(--border);
+  border-color: var(--c-border);
 }
 
 .icon-button,
@@ -5170,10 +5122,10 @@
 .service-picker button,
 .time-slots button,
 .booking-handedness button {
-  border-color: var(--border);
+  border-color: var(--c-border);
   border-radius: 8px;
-  background: var(--panel-soft);
-  color: var(--text);
+  background: var(--c-surface-soft);
+  color: var(--c-text-body);
   /* Rule 11: no transform here. Every secondary button in the coach app used
      to transition it, which is the twitch under the pointer the rules call
      out — and nothing ever set a transform on these to begin with, so the
@@ -5194,8 +5146,8 @@
 .service-picker button:hover,
 .time-slots button:hover,
 .booking-handedness button:hover {
-  border-color: color-mix(in srgb, var(--coach-primary) 22%, var(--border));
-  background: color-mix(in srgb, var(--coach-primary) 3%, var(--panel-soft));
+  border-color: color-mix(in srgb, var(--coach-primary) 22%, var(--c-border));
+  background: color-mix(in srgb, var(--coach-primary) 3%, var(--c-surface-soft));
 }
 
 .primary-button,
@@ -5206,8 +5158,8 @@
   border-color: color-mix(in srgb, var(--coach-primary) 24%, #050805);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 40%),
-    linear-gradient(180deg, color-mix(in srgb, var(--coach-primary) 8%, #111), #030604);
-  color: var(--on-brand-fill);
+    linear-gradient(180deg, color-mix(in srgb, var(--coach-primary) 8%, var(--c-accent)), #030604);
+  color: var(--c-accent-text);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.14),
     0 10px 24px rgba(0, 0, 0, 0.16);
@@ -5219,9 +5171,9 @@
 }
 
 .danger-button {
-  border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
-  background: var(--danger-soft);
-  color: var(--danger);
+  border-color: color-mix(in srgb, var(--c-danger) 40%, var(--c-border));
+  background: var(--c-danger-wash);
+  color: var(--c-danger);
 }
 
 .theme-switch {
@@ -5230,9 +5182,9 @@
   align-items: center;
   gap: 3px;
   padding: 3px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--panel-soft);
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-pill);
+  background: var(--c-surface-soft);
   cursor: pointer;
 }
 
@@ -5241,9 +5193,9 @@
   height: 32px;
   display: grid;
   place-items: center;
-  border-radius: 999px;
+  border-radius: var(--c-radius-pill);
   background: transparent;
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: inherit;
   font-weight: 700;
   line-height: 1;
@@ -5251,8 +5203,8 @@
 }
 
 .theme-switch > span.active {
-  background: var(--primary);
-  color: var(--primary-text);
+  background: var(--c-accent);
+  color: var(--c-accent-text);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--coach-primary) 34%, transparent);
 }
 
@@ -5274,19 +5226,19 @@
 .side-nav button {
   border: 1px solid transparent;
   border-radius: 8px;
-  color: var(--muted);
+  color: var(--c-muted);
 }
 
 .side-nav button:hover {
-  border-color: var(--border);
-  background: var(--panel-soft);
-  color: var(--heading);
+  border-color: var(--c-border);
+  background: var(--c-surface-soft);
+  color: var(--c-text);
 }
 
 .side-nav button.active {
-  border-color: #111;
-  background: #111;
-  color: #fff;
+  border-color: var(--c-accent);
+  background: var(--c-accent);
+  color: var(--c-accent-text);
   box-shadow: 0 8px 18px rgba(0, 0, 0, 0.04);
 }
 
@@ -5300,41 +5252,41 @@
 .client-row,
 .availability-window.is-editing,
 .availability-range-button {
-  background: var(--panel);
+  background: var(--c-surface);
 }
 
 .quick-client-search,
 .quick-create-form input,
 .quick-create-form textarea,
 .quick-service-summary {
-  border-color: var(--border);
-  color: var(--text);
+  border-color: var(--c-border);
+  color: var(--c-text-body);
 }
 
 .quick-client-search input,
 .quick-create-form input,
 .quick-create-form textarea {
-  color: var(--text);
+  color: var(--c-text-body);
 }
 
 .quick-service-summary strong {
-  color: var(--heading);
+  color: var(--c-text);
 }
 
 .quick-service-summary em {
-  color: var(--muted);
+  color: var(--c-muted);
 }
 
 .client-row {
-  border-bottom-color: var(--border);
+  border-bottom-color: var(--c-border);
 }
 
 .client-row:hover {
-  background: var(--panel-soft);
+  background: var(--c-surface-soft);
 }
 
 .client-search input {
-  color: var(--text);
+  color: var(--c-text-body);
 }
 
 .login-card input,
@@ -5346,10 +5298,10 @@
 .availability-window input,
 .import-card textarea,
 .client-editor textarea {
-  border-color: var(--border);
+  border-color: var(--c-border);
   border-radius: 8px;
-  background: var(--panel-soft);
-  color: var(--text);
+  background: var(--c-surface-soft);
+  color: var(--c-text-body);
 }
 
 .login-card input:focus,
@@ -5360,25 +5312,25 @@
 .booking-form input:focus,
 .import-card textarea:focus {
   outline: 3px solid color-mix(in srgb, var(--coach-primary) 10%, transparent);
-  border-color: color-mix(in srgb, var(--coach-primary) 30%, var(--border));
+  border-color: color-mix(in srgb, var(--coach-primary) 30%, var(--c-border));
 }
 
 .auth-error,
 .sync-status.offline strong {
-  border-color: color-mix(in srgb, var(--danger) 34%, var(--border));
-  background: var(--danger-soft);
-  color: var(--danger);
+  border-color: color-mix(in srgb, var(--c-danger) 34%, var(--c-border));
+  background: var(--c-danger-wash);
+  color: var(--c-danger);
 }
 
 .auth-success {
-  border-color: color-mix(in srgb, var(--coach-primary) 24%, var(--border));
-  background: var(--success-soft);
-  color: var(--text);
+  border-color: color-mix(in srgb, var(--coach-primary) 24%, var(--c-border));
+  background: var(--c-success-wash);
+  color: var(--c-text-body);
 }
 
 .show-password-toggle,
 .text-button {
-  color: var(--text);
+  color: var(--c-text-body);
 }
 
 .booking-summary,
@@ -5389,15 +5341,15 @@
 .admin-override,
 .embed-code,
 .service-summary {
-  border-color: var(--border);
+  border-color: var(--c-border);
   border-radius: 8px;
-  background: var(--panel-soft);
+  background: var(--c-surface-soft);
 }
 
 .service-summary {
   background:
     linear-gradient(90deg, color-mix(in srgb, var(--coach-primary) 4%, transparent), transparent 68%),
-    var(--panel-soft);
+    var(--c-surface-soft);
 }
 
 .service-summary strong,
@@ -5407,22 +5359,22 @@
 }
 
 .appointment-dock {
-  color: var(--text);
+  color: var(--c-text-body);
 }
 
 .dock-shelf {
-  border-color: var(--border);
+  border-color: var(--c-border);
   border-radius: 10px;
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--coach-primary) 2%, var(--panel)) 0 72%, var(--panel-soft) 72%),
-    var(--panel-soft);
+    linear-gradient(180deg, color-mix(in srgb, var(--coach-primary) 2%, var(--c-surface)) 0 72%, var(--c-surface-soft) 72%),
+    var(--c-surface-soft);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .dock-shelf::after {
-  border-top-color: color-mix(in srgb, var(--coach-accent) 30%, var(--border));
-  border-bottom-color: color-mix(in srgb, var(--coach-primary) 22%, var(--border));
-  background: color-mix(in srgb, var(--coach-accent) 9%, var(--panel-soft));
+  border-top-color: color-mix(in srgb, var(--coach-accent) 30%, var(--c-border));
+  border-bottom-color: color-mix(in srgb, var(--coach-primary) 22%, var(--c-border));
+  background: color-mix(in srgb, var(--coach-accent) 9%, var(--c-surface-soft));
 }
 
 /* The dock keeps the old gradient tile; calendar cards do not — on the grid the
@@ -5435,7 +5387,7 @@
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--coach-primary) 8%, rgba(255, 255, 255, 0.06)), transparent 44%),
     linear-gradient(180deg, color-mix(in srgb, var(--coach-accent) 90%, #18231c), #060a07);
-  color: var(--on-brand-fill);
+  color: var(--c-accent-text);
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
 }
 
@@ -5452,36 +5404,36 @@
 }
 
 .appointment-dock.is-focus .dock-shelf {
-  border-color: color-mix(in srgb, var(--coach-secondary) 60%, var(--border));
+  border-color: color-mix(in srgb, var(--coach-secondary) 60%, var(--c-border));
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--coach-secondary) 18%, transparent);
 }
 
 .calendar-toolbar {
-  border-bottom-color: var(--border);
+  border-bottom-color: var(--c-border);
 }
 
 .calendar-header-row {
-  border-bottom-color: var(--border);
+  border-bottom-color: var(--c-border);
 }
 
 .day-heading::before {
-  background: color-mix(in srgb, var(--border) 55%, transparent);
+  background: color-mix(in srgb, var(--c-border) 55%, transparent);
 }
 
 .time-column {
-  background: var(--panel-soft);
-  border-right-color: var(--border);
+  background: var(--c-surface-soft);
+  border-right-color: var(--c-border);
 }
 
 .time-label {
-  color: var(--quiet);
+  color: var(--c-muted);
 }
 
 /* Unavailable time is the page, not a second surface. The old column gradient
    painted every hour the coach does not work, which made an empty week the
    loudest thing on screen; now only bookable time gets a fill. */
 .week-grid {
-  background: var(--page);
+  background: var(--c-page);
   padding: 0 4px;
 }
 
@@ -5492,15 +5444,15 @@
 .available-band {
   left: 3px;
   right: 15px;
-  border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
-  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--c-border) 60%, transparent);
+  border-radius: var(--c-radius-card);
   background:
     repeating-linear-gradient(
       to bottom,
       transparent 0 calc(var(--hour-height) - 1px),
-      color-mix(in srgb, var(--grid-line) 45%, transparent) calc(var(--hour-height) - 1px) var(--hour-height)
+      color-mix(in srgb, var(--c-border) 45%, transparent) calc(var(--hour-height) - 1px) var(--hour-height)
     ),
-    var(--band-fill, var(--available));
+    var(--band-fill, var(--c-surface));
   /* A window rarely starts on the hour, so the tick pattern is pulled back by
      the band's own offset from the top of the grid. --band-offset is set per
      band; without it the ticks would count hours from the band edge instead of
@@ -5604,10 +5556,10 @@
   justify-content: flex-end;
   width: 34px;
   padding-right: 8px;
-  color: var(--quiet);
+  color: var(--c-muted);
   font-size: 15px;
   pointer-events: none;
-  background: linear-gradient(to right, transparent, var(--panel) 62%);
+  background: linear-gradient(to right, transparent, var(--c-surface) 62%);
 }
 
 /* Drawn on the header row rather than inside the strip: a pseudo-element on a
@@ -5618,7 +5570,7 @@
   left: 50%;
   bottom: 1px;
   z-index: 2;
-  color: var(--quiet);
+  color: var(--c-muted);
   font-size: 10px;
   opacity: 0.5;
   transform: translateX(-50%);
@@ -5642,10 +5594,10 @@
   height: 46px;
   margin: 6px auto 0;
   overflow: hidden;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: 8px;
-  background: var(--panel);
-  color: var(--text);
+  background: var(--c-surface);
+  color: var(--c-text-body);
   cursor: pointer;
 }
 
@@ -5657,9 +5609,9 @@
 }
 
 .axis-cycle-button.is-squashed {
-  border-color: var(--primary);
-  background: var(--primary);
-  color: var(--primary-text);
+  border-color: var(--c-accent);
+  background: var(--c-accent);
+  color: var(--c-accent-text);
 }
 
 .quiet-gap {
@@ -5670,7 +5622,7 @@
 }
 
 .quiet-gap small {
-  color: var(--quiet);
+  color: var(--c-muted);
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.03em;
@@ -5678,7 +5630,7 @@
 }
 
 .calendar-item.block {
-  border-color: color-mix(in srgb, var(--coach-secondary) 22%, var(--border));
+  border-color: color-mix(in srgb, var(--coach-secondary) 22%, var(--c-border));
   background: var(--block-bg);
   color: var(--block-text);
 }
@@ -5751,9 +5703,9 @@
 }
 
 .calendar-item.invalid {
-  border-color: var(--danger);
-  background: var(--danger-soft);
-  color: var(--danger);
+  border-color: var(--c-danger);
+  background: var(--c-danger-wash);
+  color: var(--c-danger);
 }
 
 .quick-create {
@@ -5762,17 +5714,17 @@
 }
 
 .public-booking {
-  background: var(--panel);
+  background: var(--c-surface);
 }
 
 .booking-brand {
   min-height: 172px;
-  border-bottom-color: var(--border);
+  border-bottom-color: var(--c-border);
   border-radius: 8px 8px 0 0;
   background:
     linear-gradient(135deg, color-mix(in srgb, var(--coach-primary) 7%, transparent), transparent 45%),
     linear-gradient(180deg, color-mix(in srgb, var(--coach-accent) 84%, #101811), #040705);
-  color: var(--on-brand-fill);
+  color: var(--c-accent-text);
 }
 
 .booking-brand strong {
@@ -5780,7 +5732,7 @@
 }
 
 .booking-brand em {
-  color: color-mix(in srgb, var(--coach-primary) 78%, #ffffff);
+  color: color-mix(in srgb, var(--coach-primary) 78%, var(--c-on-scrim));
 }
 
 .booking-brand img {
@@ -5811,34 +5763,34 @@
 
 .service-picker .selected-service em,
 .service-picker .selected-service small {
-  color: color-mix(in srgb, var(--on-brand-fill) 78%, var(--coach-primary));
+  color: color-mix(in srgb, var(--c-accent-text) 78%, var(--coach-primary));
 }
 
 .embed-panel {
-  border-color: var(--border);
+  border-color: var(--c-border);
   border-radius: 8px;
-  background: var(--panel-soft);
+  background: var(--c-surface-soft);
 }
 
 .embed-code code,
 .sync-output code {
-  color: var(--heading);
+  color: var(--c-text);
 }
 
 .sync-status {
-  border-color: var(--border);
+  border-color: var(--c-border);
   border-radius: 8px;
-  background: var(--panel);
+  background: var(--c-surface);
 }
 
 .sync-status strong {
-  background: var(--panel-soft);
-  color: var(--text);
+  background: var(--c-surface-soft);
+  color: var(--c-text-body);
 }
 
 .sync-status.connected strong {
-  background: var(--success-soft);
-  color: color-mix(in srgb, var(--coach-primary) 75%, var(--heading));
+  background: var(--c-success-wash);
+  color: color-mix(in srgb, var(--coach-primary) 75%, var(--c-text));
 }
 
 .brand-vein-card {
@@ -5847,7 +5799,7 @@
   gap: 14px;
   background:
     linear-gradient(135deg, color-mix(in srgb, var(--coach-primary) 9%, transparent), transparent 42%),
-    var(--panel);
+    var(--c-surface);
 }
 
 .brand-vein-preview {
@@ -5856,20 +5808,20 @@
   gap: 14px;
   align-items: center;
   padding: 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: 8px;
-  background: var(--panel-soft);
+  background: var(--c-surface-soft);
 }
 
 .brand-vein-logo {
   min-height: 74px;
   display: grid;
   place-items: center;
-  border: 1px solid color-mix(in srgb, var(--coach-primary) 28%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--coach-primary) 28%, var(--c-border));
   border-radius: 8px;
   /* Light neutral surface so transparent logos read naturally — the old
      accent-based fill rendered as a near-black box behind every logo. */
-  background: color-mix(in srgb, var(--coach-neutral, #ffffff) 86%, #eef1ea);
+  background: color-mix(in srgb, var(--c-surface) 86%, var(--c-page));
   color: color-mix(in srgb, var(--coach-accent, #10160f) 88%, #000000);
   overflow: hidden;
 }
@@ -5888,7 +5840,7 @@
 }
 
 .brand-vein-preview span {
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 12px;
   text-transform: uppercase;
   font-weight: 800;
@@ -5896,12 +5848,12 @@
 
 .brand-vein-preview strong {
   margin-top: 3px;
-  color: var(--heading);
+  color: var(--c-text);
 }
 
 .brand-vein-preview em {
   margin-top: 5px;
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 12px;
   font-style: normal;
 }
@@ -5920,7 +5872,7 @@
   gap: 3px;
   padding: 9px;
   border-radius: 8px;
-  color: #ffffff;
+  color: var(--c-on-scrim);
   font-size: 12px;
   font-weight: 800;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
@@ -5937,7 +5889,7 @@
 
 .settings-note {
   margin: 0 0 12px;
-  color: var(--muted, #6d746c);
+  color: var(--c-muted);
   font-size: 12px;
   line-height: 1.5;
 }
@@ -5956,9 +5908,9 @@
   gap: 10px;
   min-width: 0;
   padding: 8px 10px;
-  border: 1px solid var(--border, #dfe5d8);
+  border: 1px solid var(--c-border);
   border-radius: 8px;
-  background: var(--panel-soft, #f8faf4);
+  background: var(--c-surface-soft);
   cursor: pointer;
 }
 
@@ -5967,7 +5919,7 @@
   width: 30px;
   height: 30px;
   padding: 0;
-  border: 1px solid var(--border, #dfe5d8);
+  border: 1px solid var(--c-border);
   border-radius: 7px;
   background: none;
   cursor: pointer;
@@ -5995,7 +5947,7 @@
 }
 
 .calendar-colour-field em {
-  color: var(--quiet, #878d84);
+  color: var(--c-muted);
   font-size: 10px;
   font-style: normal;
   font-weight: 700;
@@ -6011,7 +5963,7 @@
 }
 
 .calendar-colour-field code {
-  color: var(--muted, #6d746c);
+  color: var(--c-muted);
   font-size: 11px;
   text-transform: uppercase;
 }
@@ -6022,11 +5974,11 @@
   justify-content: space-between;
   gap: 14px;
   padding: 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: 8px;
   background:
     linear-gradient(90deg, color-mix(in srgb, var(--coach-primary) 8%, transparent), transparent 68%),
-    var(--panel-soft);
+    var(--c-surface-soft);
 }
 
 .booking-surface-setting span,
@@ -6035,7 +5987,7 @@
 }
 
 .booking-surface-setting span {
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 12px;
   text-transform: uppercase;
   font-weight: 800;
@@ -6043,7 +5995,7 @@
 
 .booking-surface-setting strong {
   margin-top: 3px;
-  color: var(--heading);
+  color: var(--c-text);
   font-size: 14px;
 }
 
@@ -6070,12 +6022,12 @@
   border-radius: 8px;
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--coach-primary) 18%, #111), #050805);
-  color: var(--on-brand-fill);
+  color: var(--c-accent-text);
 }
 
 .toast button {
   border-radius: 7px;
-  background: var(--on-brand-fill);
+  background: var(--c-accent-text);
   color: #07100a;
 }
 
@@ -6088,13 +6040,13 @@
 .theme-dark .quick-create {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 46%),
-    var(--panel);
-  border-color: var(--border);
+    var(--c-surface);
+  border-color: var(--c-border);
 }
 
 /* The picked calendar tab matches the top of the card it joins, wash and all. */
 .theme-dark .calendar-scope-tabs button.is-active {
-  background: linear-gradient(rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.035)), var(--panel);
+  background: linear-gradient(rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.035)), var(--c-surface);
 }
 
 .theme-dark .sidebar {
@@ -6102,35 +6054,29 @@
 }
 
 .theme-dark .popover-close {
-  color: var(--text);
+  color: var(--c-text-body);
 }
 
-.public-booking.booking-theme-light {
-  --booking-page: color-mix(in srgb, var(--coach-primary) 2%, #fbfcf8);
-  --booking-card: rgba(255, 255, 255, 0.92);
-  --booking-card-soft: color-mix(in srgb, var(--coach-primary) 2%, #f7faf4);
-  --booking-input: #ffffff;
-  --booking-text: #101612;
-  --booking-muted: #606960;
-  --booking-border: #dfe5d8;
-  --booking-control: rgba(255, 255, 255, 0.82);
-  --booking-control-hover: color-mix(in srgb, var(--coach-primary) 4%, #ffffff);
+/* The booking widget reads the palette through --booking-* names so the
+   embedded preview inside the coach app (below) can pin a flat white version.
+   Dark is not a second palette: .booking-theme-dark is one of the dark
+   triggers in tokens.css, so these same aliases resolve to the dark values. */
+.public-booking {
+  --booking-page: color-mix(in srgb, var(--coach-primary) 2%, var(--c-surface-soft));
+  --booking-card: var(--c-surface);
+  --booking-card-soft: color-mix(in srgb, var(--coach-primary) 2%, var(--c-surface-soft));
+  --booking-input: var(--c-surface);
+  --booking-text: var(--c-text);
+  --booking-muted: var(--c-muted);
+  --booking-border: var(--c-border);
+  --booking-control: var(--c-surface);
+  --booking-control-hover: color-mix(in srgb, var(--coach-primary) 4%, var(--c-surface));
   --booking-shadow: 0 18px 40px rgba(6, 17, 10, 0.1);
-  --booking-danger: #b4302f;
+  --booking-danger: var(--c-danger);
 }
 
 .public-booking.booking-theme-dark {
-  --booking-page: #050806;
-  --booking-card: rgba(8, 16, 11, 0.94);
-  --booking-card-soft: rgba(255, 255, 255, 0.055);
-  --booking-input: rgba(255, 255, 255, 0.055);
-  --booking-text: #f8fff9;
-  --booking-muted: rgba(242, 255, 246, 0.64);
-  --booking-border: rgba(255, 255, 255, 0.13);
-  --booking-control: rgba(255, 255, 255, 0.055);
-  --booking-control-hover: rgba(255, 255, 255, 0.075);
   --booking-shadow: 0 22px 58px rgba(0, 0, 0, 0.36);
-  --booking-danger: #ff9b9b;
 }
 
 .app-shell .public-booking {
@@ -6148,7 +6094,7 @@
 .app-shell .public-booking .booking-login-trigger,
 .app-shell .public-booking .booking-week-controls,
 .app-shell .public-booking .booking-week-controls button {
-  border-color: color-mix(in srgb, var(--coach-neutral) 24%, var(--booking-border));
+  border-color: color-mix(in srgb, var(--c-surface) 24%, var(--booking-border));
 }
 
 .app-shell .public-booking .booking-hero-action,
@@ -6160,8 +6106,8 @@
 .app-shell .public-booking .booking-hero-action {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.1), transparent 42%),
-    linear-gradient(135deg, color-mix(in srgb, var(--coach-primary) 12%, #101612), var(--coach-accent));
-  color: #fff;
+    linear-gradient(135deg, color-mix(in srgb, var(--coach-primary) 12%, var(--c-accent)), var(--coach-accent));
+  color: var(--c-on-scrim);
   box-shadow: 0 14px 30px rgba(0, 0, 0, 0.18);
 }
 
@@ -6187,7 +6133,7 @@
 
 .app-shell .public-booking .booking-card {
   --card-vein: var(--coach-secondary);
-  --card-outline: var(--coach-neutral);
+  --card-outline: var(--c-surface);
   position: relative;
   overflow: hidden;
   border-color: color-mix(in srgb, var(--card-outline) 88%, var(--booking-border));
@@ -6224,7 +6170,7 @@
   position: relative;
   overflow: hidden;
   border-color: color-mix(in srgb, var(--booking-border) 90%, var(--booking-card));
-  background: color-mix(in srgb, var(--booking-card) 96%, #ffffff);
+  background: color-mix(in srgb, var(--booking-card) 96%, var(--c-surface));
   color: var(--booking-text);
   box-shadow: 0 12px 24px rgba(24, 28, 27, 0.06);
 }
@@ -6267,8 +6213,8 @@
 
 .app-shell .public-booking .booking-progressive-change {
   padding: 2px 8px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--c-radius-pill);
   background: transparent;
   color: var(--booking-text);
   font: inherit;
@@ -6309,7 +6255,7 @@
   left: 3px;
   width: 18px;
   height: 18px;
-  background: #ffffff;
+  background: var(--c-surface);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
 }
 
@@ -6319,7 +6265,7 @@
 }
 
 .app-shell .public-booking.booking-theme-light .booking-remember input:checked {
-  background: #111;
+  background: var(--c-accent);
 }
 
 .app-shell .public-booking .booking-remember input:checked::after {
@@ -6367,7 +6313,7 @@
 .app-shell .public-booking .booking-progressive-summary,
 .app-shell .public-booking .booking-progressive-summary-empty {
   border-top: 0;
-  background: color-mix(in srgb, var(--booking-control) 82%, #ffffff);
+  background: color-mix(in srgb, var(--booking-control) 82%, var(--c-surface));
   color: var(--booking-text);
 }
 
@@ -6513,8 +6459,8 @@
   border-color: color-mix(in srgb, var(--coach-primary) 38%, var(--coach-secondary));
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.1), transparent 42%),
-    linear-gradient(135deg, color-mix(in srgb, var(--coach-primary) 12%, #101612), var(--coach-accent));
-  color: #ffffff;
+    linear-gradient(135deg, color-mix(in srgb, var(--coach-primary) 12%, var(--c-accent)), var(--coach-accent));
+  color: var(--c-on-scrim);
   box-shadow: 0 14px 30px rgba(0, 0, 0, 0.2);
 }
 
@@ -6523,27 +6469,27 @@
 }
 
 .app-shell .public-booking.booking-theme-light {
-  --booking-page: #fff;
-  --booking-card: #fff;
-  --booking-card-soft: #f7f7f3;
-  --booking-input: #fff;
-  --booking-text: #171717;
-  --booking-muted: #5d5a54;
-  --booking-border: #deded8;
-  --booking-control: #fbfbf9;
-  --booking-control-hover: #f7f7f3;
+  --booking-page: var(--c-surface);
+  --booking-card: var(--c-surface);
+  --booking-card-soft: var(--c-surface-soft);
+  --booking-input: var(--c-surface);
+  --booking-text: var(--c-text);
+  --booking-muted: var(--c-text-soft);
+  --booking-border: var(--c-border);
+  --booking-control: var(--c-surface-soft);
+  --booking-control-hover: var(--c-surface-soft);
   --booking-shadow: none;
-  background: #fff;
+  background: var(--c-surface);
 }
 
 .app-shell .public-booking.booking-theme-light .booking-brand {
-  background: #fff;
-  border-bottom-color: #e8e6df;
-  color: #171717;
+  background: var(--c-surface);
+  border-bottom-color: var(--c-border-soft);
+  color: var(--c-text);
 }
 
 .app-shell .public-booking.booking-theme-light .booking-brand strong {
-  color: #171717;
+  color: var(--c-text);
 }
 
 .app-shell .public-booking.booking-theme-light .booking-brand span {
@@ -6551,43 +6497,43 @@
 }
 
 .app-shell .public-booking.booking-theme-light .booking-brand em {
-  color: #45423d;
+  color: var(--c-text-body);
 }
 
 .app-shell .public-booking.booking-theme-light .booking-hero-action {
-  border-color: #111;
-  background: #111;
-  color: #fff;
+  border-color: var(--c-accent);
+  background: var(--c-accent);
+  color: var(--c-accent-text);
   box-shadow: none;
 }
 
 .app-shell .public-booking.booking-theme-light .booking-login-trigger,
 .app-shell .public-booking.booking-theme-light .booking-week-controls,
 .app-shell .public-booking.booking-theme-light .booking-week-controls button {
-  border-color: #deded8;
-  background: #fbfbf9;
-  color: #171717;
+  border-color: var(--c-border);
+  background: var(--c-surface-soft);
+  color: var(--c-text);
   box-shadow: none;
 }
 
 .app-shell .public-booking.booking-theme-light .booking-login-trigger.active,
 .app-shell .public-booking.booking-theme-light .booking-week-controls button:hover {
   border-color: #cfcfc8;
-  background: #f7f7f3;
+  background: var(--c-hover);
 }
 
 .app-shell .public-booking.booking-theme-light .booking-card {
-  border-color: #deded8;
-  background: #fff;
-  color: #171717;
+  border-color: var(--c-border);
+  background: var(--c-surface);
+  color: var(--c-text);
   box-shadow: none;
 }
 
 .app-shell .public-booking.booking-theme-light .booking-card:first-child {
-  border-color: #fff;
+  border-color: var(--c-surface);
   background: #d7b06b;
-  color: #171717;
-  box-shadow: 0 0 0 1px #deded8;
+  color: var(--c-text);
+  box-shadow: 0 0 0 1px var(--c-border);
 }
 
 .app-shell .public-booking.booking-theme-light .booking-card::before {
@@ -6599,7 +6545,7 @@
 .app-shell .public-booking.booking-theme-light .service-picker small,
 .app-shell .public-booking.booking-theme-light .time-slots p,
 .app-shell .public-booking.booking-theme-light .booking-summary span {
-  color: #5d5a54;
+  color: var(--c-text-soft);
 }
 
 .app-shell .public-booking.booking-theme-light .booking-card:first-child > span,
@@ -6611,9 +6557,9 @@
 .app-shell .public-booking.booking-theme-light .service-picker button,
 .app-shell .public-booking.booking-theme-light .time-slots button,
 .app-shell .public-booking.booking-theme-light .booking-handedness button {
-  border-color: #deded8;
-  background: #fbfbf9;
-  color: #171717;
+  border-color: var(--c-border);
+  background: var(--c-surface-soft);
+  color: var(--c-text);
   box-shadow: none;
 }
 
@@ -6626,19 +6572,19 @@
 .app-shell .public-booking.booking-theme-light .time-slots button:hover,
 .app-shell .public-booking.booking-theme-light .booking-handedness button:hover {
   border-color: #cfcfc8;
-  background: #f7f7f3;
+  background: var(--c-hover);
 }
 
 .app-shell .public-booking.booking-theme-light .booking-card:first-child .service-picker button:hover {
-  border-color: #fff;
+  border-color: var(--c-surface);
   background: rgba(255, 255, 255, 0.72);
 }
 
 .app-shell .public-booking.booking-theme-light .booking-card:first-child .service-picker .selected-service {
-  border-color: #111;
+  border-color: var(--c-accent);
   background: rgba(255, 255, 255, 0.82);
-  color: #171717;
-  box-shadow: inset 0 0 0 1px #111;
+  color: var(--c-text);
+  box-shadow: inset 0 0 0 1px var(--c-accent);
 }
 
 .app-shell .public-booking.booking-theme-light .booking-card:first-child .service-picker .selected-service em,
@@ -6650,50 +6596,50 @@
 .app-shell .public-booking.booking-theme-light .time-slots .selected-time,
 .app-shell .public-booking.booking-theme-light .booking-handedness .selected-handedness,
 .app-shell .public-booking.booking-theme-light .confirm-booking {
-  border-color: #111;
-  background: #111;
-  color: #fff;
+  border-color: var(--c-accent);
+  background: var(--c-accent);
+  color: var(--c-accent-text);
   box-shadow: none;
 }
 
 .app-shell .public-booking.booking-theme-light .service-picker .selected-service em,
 .app-shell .public-booking.booking-theme-light .service-picker .selected-service small {
-  color: #deded8;
+  color: var(--c-border);
 }
 
 .app-shell .public-booking.booking-theme-light .booking-form input:not([type="checkbox"]) {
-  border-color: #deded8;
-  background: #fff;
-  color: #171717;
+  border-color: var(--c-border);
+  background: var(--c-surface);
+  color: var(--c-text);
 }
 
 .app-shell .public-booking.booking-theme-light .booking-summary {
-  border-color: #e2e1d9;
-  background: #f7f7f3;
-  color: #171717;
+  border-color: var(--c-border);
+  background: var(--c-surface-soft);
+  color: var(--c-text);
 }
 
 .app-shell .public-booking.booking-theme-light .booking-card,
 .app-shell .public-booking.booking-theme-light .booking-card:first-child {
-  border-color: #deded8;
-  background: #fff;
-  color: #171717;
+  border-color: var(--c-border);
+  background: var(--c-surface);
+  color: var(--c-text);
   box-shadow: none;
 }
 
 .app-shell .public-booking.booking-theme-light .booking-card:first-child > span,
 .app-shell .public-booking.booking-theme-light .booking-card:first-child .service-picker em,
 .app-shell .public-booking.booking-theme-light .booking-card:first-child .service-picker small {
-  color: #5d5a54;
+  color: var(--c-text-soft);
 }
 
 .app-shell .public-booking.booking-theme-light .booking-card:first-child .service-picker button,
 .app-shell .public-booking.booking-theme-light .service-picker button,
 .app-shell .public-booking.booking-theme-light .time-slots button,
 .app-shell .public-booking.booking-theme-light .booking-handedness button {
-  border-color: #deded8;
-  background: #fbfbf9;
-  color: #171717;
+  border-color: var(--c-border);
+  background: var(--c-surface-soft);
+  color: var(--c-text);
   box-shadow: none;
 }
 
@@ -6702,7 +6648,7 @@
 .app-shell .public-booking.booking-theme-light .time-slots button:hover,
 .app-shell .public-booking.booking-theme-light .booking-handedness button:hover {
   border-color: #cfcfc8;
-  background: #f7f7f3;
+  background: var(--c-hover);
 }
 
 .app-shell .public-booking.booking-theme-light .booking-card:first-child .service-picker .selected-service,
@@ -6710,8 +6656,8 @@
 .app-shell .public-booking.booking-theme-light .time-slots .selected-time,
 .app-shell .public-booking.booking-theme-light .booking-handedness .selected-handedness {
   border-color: #cfcfc8;
-  background: #f7f7f3;
-  color: #171717;
+  background: var(--c-surface-soft);
+  color: var(--c-text);
   box-shadow: none;
 }
 
@@ -6719,15 +6665,15 @@
 .app-shell .public-booking.booking-theme-light .booking-card:first-child .service-picker .selected-service small,
 .app-shell .public-booking.booking-theme-light .service-picker .selected-service em,
 .app-shell .public-booking.booking-theme-light .service-picker .selected-service small {
-  color: #5d5a54;
+  color: var(--c-text-soft);
 }
 
 .app-shell .public-booking.booking-theme-light .confirm-booking {
-  border-color: #111;
+  border-color: var(--c-accent);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.04) 38%, transparent 62%),
-    linear-gradient(180deg, #1a1a1a, #070707);
-  color: #fff;
+    linear-gradient(180deg, var(--c-accent), #070707);
+  color: var(--c-accent-text);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.18),
     0 10px 20px rgba(0, 0, 0, 0.14);
@@ -6741,11 +6687,11 @@
 .app-shell .public-booking.booking-theme-light .service-picker .selected-service,
 .app-shell .public-booking.booking-theme-light .time-slots .selected-time,
 .app-shell .public-booking.booking-theme-light .booking-handedness .selected-handedness {
-  border-color: #111;
+  border-color: var(--c-accent);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.04) 38%, transparent 62%),
-    linear-gradient(180deg, #1a1a1a, #070707);
-  color: #fff;
+    linear-gradient(180deg, var(--c-accent), #070707);
+  color: var(--c-accent-text);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.18),
     0 10px 20px rgba(0, 0, 0, 0.12);
@@ -6759,7 +6705,7 @@
 .app-shell .public-booking.booking-theme-light .booking-card:first-child .service-picker .selected-service small,
 .app-shell .public-booking.booking-theme-light .service-picker .selected-service em,
 .app-shell .public-booking.booking-theme-light .service-picker .selected-service small {
-  color: #deded8;
+  color: var(--c-border);
 }
 
 .app-shell .public-booking.booking-theme-light .booking-hero-action,
@@ -7278,13 +7224,13 @@
   display: grid;
   gap: 8px;
   padding: 12px;
-  border: 1px solid var(--border);
-  background: var(--panel-soft);
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-soft);
 }
 
 .booking-records-tab {
-  border: 1px solid var(--border);
-  background: var(--panel-soft);
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-soft);
 }
 
 .booking-records-summary {
@@ -7295,7 +7241,7 @@
   min-height: 44px;
   padding: 0 12px;
   cursor: pointer;
-  color: var(--heading);
+  color: var(--c-text);
   font-weight: 800;
 }
 
@@ -7304,7 +7250,7 @@
 }
 
 .booking-records-summary em {
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 12px;
   font-style: normal;
   font-weight: 700;
@@ -7331,7 +7277,7 @@
 }
 
 .resource-state strong {
-  color: var(--heading);
+  color: var(--c-text);
   font-size: 15px;
   font-weight: 800;
 }
@@ -7357,7 +7303,7 @@
   align-items: center;
   gap: 8px;
   margin: 0;
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 12px;
   line-height: 1.45;
 }
@@ -7385,7 +7331,7 @@
 }
 
 .resource-details {
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 11px;
 }
 
@@ -7403,7 +7349,7 @@
 
 .resource-meta {
   margin: 0;
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 11px;
 }
 
@@ -7415,7 +7361,7 @@
 
 .booking-profile-hint {
   margin: 0;
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 12px;
   line-height: 1.45;
 }
@@ -7443,7 +7389,7 @@
 
 .booking-email-record {
   margin: 0;
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 12px;
   line-height: 1.45;
 }
@@ -7457,7 +7403,7 @@
 }
 
 .booking-email-record strong {
-  color: var(--heading);
+  color: var(--c-text);
 }
 
 .booking-email-record.failed em {
@@ -7473,13 +7419,13 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: var(--heading);
+  color: var(--c-text);
   font-weight: 800;
 }
 
 .lesson-receipts-panel p {
   margin: 0;
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 13px;
 }
 
@@ -7489,8 +7435,8 @@
   gap: 9px;
   align-items: start;
   padding: 9px;
-  border: 1px solid var(--border);
-  background: var(--panel);
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
 }
 
 .email-receipt-row .email-status-dot {
@@ -7504,13 +7450,13 @@
 }
 
 .email-receipt-row strong {
-  color: var(--heading);
+  color: var(--c-text);
   font-size: 13px;
 }
 
 .email-receipt-row span,
 .email-receipt-row em {
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 12px;
   font-style: normal;
 }
@@ -7521,7 +7467,7 @@
 }
 
 .email-status.skipped {
-  border-color: color-mix(in srgb, var(--coach-secondary) 56%, #deded8);
+  border-color: color-mix(in srgb, var(--coach-secondary) 56%, var(--c-border));
   background: color-mix(in srgb, var(--coach-secondary) 10%, #fff);
 }
 
@@ -7644,7 +7590,7 @@
   padding: 18px;
   border-radius: 18px;
   border: 1px solid rgba(255, 255, 255, 0.45);
-  background: color-mix(in srgb, var(--coach-neutral) 76%, transparent);
+  background: color-mix(in srgb, var(--c-surface) 76%, transparent);
   color: var(--coach-accent);
   box-shadow: 0 22px 60px rgba(4, 10, 7, 0.26), inset 0 1px 0 rgba(255, 255, 255, 0.48);
   backdrop-filter: blur(18px) saturate(130%);
@@ -7684,7 +7630,7 @@
 
 .calendar-hover-card em {
   display: block;
-  color: var(--muted);
+  color: var(--c-muted);
   font-style: normal;
   margin-bottom: 14px;
 }
@@ -7708,7 +7654,7 @@
   margin-top: 14px;
   padding-top: 12px;
   border-top: 1px solid rgba(7, 16, 10, 0.12);
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 0.78rem;
 }
 
@@ -7781,7 +7727,7 @@
   height: 16px;
   padding: 0 4px;
   border-radius: 999px;
-  background: var(--danger, #b52f1f);
+  background: var(--c-danger);
   color: #fff;
   font-size: 9px;
   font-weight: 900;
@@ -7847,7 +7793,7 @@
   padding: 6px 10px;
   border: 1px solid rgba(20, 25, 20, 0.12);
   border-radius: 999px;
-  background: #f6f7f1;
+  background: var(--c-surface-soft);
   color: #4c5146;
   font-size: 12px;
   font-weight: 900;
@@ -9582,13 +9528,13 @@
   gap: 8px;
   margin: 14px 0;
   padding: 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: 8px;
-  background: var(--panel-soft);
+  background: var(--c-surface-soft);
 }
 
 .lesson-status-panel > span {
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 12px;
   font-weight: 900;
   text-transform: uppercase;
@@ -9604,17 +9550,17 @@
   min-width: 0;
   min-height: 36px;
   padding: 0 8px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: 8px;
-  background: var(--panel);
-  color: var(--text);
+  background: var(--c-surface);
+  color: var(--c-text-body);
   font-size: 12px;
   font-weight: 800;
 }
 
 .lesson-status-options button.active {
-  border-color: color-mix(in srgb, var(--coach-primary) 38%, var(--border));
-  background: color-mix(in srgb, var(--coach-primary) 12%, var(--panel-soft));
+  border-color: color-mix(in srgb, var(--coach-primary) 38%, var(--c-border));
+  background: color-mix(in srgb, var(--coach-primary) 12%, var(--c-surface-soft));
 }
 
 /* Status is the card's border and nothing else. It used to be an inset stripe
@@ -9656,7 +9602,7 @@
   right: 12px;
   z-index: 5;
   height: 1px;
-  background: var(--danger);
+  background: var(--c-danger);
   pointer-events: none;
 }
 
@@ -9668,7 +9614,7 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--danger);
+  background: var(--c-danger);
 }
 
 /* Squash view: unbooked stretches collapse to a marker rather than vanishing,
@@ -9682,9 +9628,9 @@
      has to interrupt the day's surface, or it reads as time you could book
      into. Cards sit at z-index 2 and up. */
   z-index: 1;
-  background: var(--page);
-  border-top: 1px dashed color-mix(in srgb, var(--border) 80%, transparent);
-  border-bottom: 1px dashed color-mix(in srgb, var(--border) 80%, transparent);
+  background: var(--c-page);
+  border-top: 1px dashed color-mix(in srgb, var(--c-border) 80%, transparent);
+  border-bottom: 1px dashed color-mix(in srgb, var(--c-border) 80%, transparent);
 }
 
 /* Day view: the strip turns into a row of folder tabs, the same look as the
@@ -9720,7 +9666,7 @@
   border: 2px solid var(--c-accent);
   border-bottom: 0;
   border-radius: var(--c-radius-control) var(--c-radius-control) 0 0;
-  background: var(--panel);
+  background: var(--c-surface);
   box-shadow: none;
   opacity: 1;
 }
@@ -9744,10 +9690,10 @@
 .calendar-span-switch {
   display: inline-flex;
   padding: 3px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: var(--c-radius-control);
-  background: var(--panel-soft);
-  color: var(--muted);
+  background: var(--c-surface-soft);
+  color: var(--c-muted);
   font: inherit;
   font-size: var(--c-size-meta);
   font-weight: 700;
@@ -9795,7 +9741,7 @@
 .custom-group-summary,
 .custom-group-attendee-row {
   align-items: center;
-  background: color-mix(in srgb, var(--coach-neutral, #ffffff) 86%, transparent);
+  background: color-mix(in srgb, var(--c-surface) 86%, transparent);
   border: 1px solid color-mix(in srgb, var(--coach-accent, #07100a) 14%, transparent);
   border-radius: 8px;
   display: grid;
@@ -9807,14 +9753,14 @@
 .custom-group-summary span,
 .custom-group-attendee-row em,
 .custom-group-attendee-row small {
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 0.82rem;
 }
 
 .custom-group-summary strong,
 .custom-group-summary em,
 .custom-group-attendee-row strong {
-  color: var(--text);
+  color: var(--c-text-body);
 }
 
 .custom-group-attendee-form {
@@ -10668,7 +10614,7 @@
 
 .ready-to-pull-overflow {
   margin: 0;
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 12px;
 }
 
@@ -10679,14 +10625,14 @@
 }
 
 .completed-booking-list button.already-invoiced em {
-  color: var(--muted);
+  color: var(--c-muted);
   font-style: normal;
 }
 
 /* "Paid at POS" on a pull row. Information only - the row is still clickable,
    because a counter payment does not stop the lesson being invoiced. */
 .completed-booking-list .pull-paid-flag {
-  color: var(--muted);
+  color: var(--c-muted);
   font-style: normal;
   font-size: 12px;
 }
@@ -10705,14 +10651,14 @@
   text-align: left;
   text-transform: uppercase;
   font-size: 11px;
-  color: var(--muted);
+  color: var(--c-muted);
   padding: 6px 8px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--c-border);
 }
 
 .recent-invoices-table td {
   padding: 8px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--c-border);
 }
 
 /* Status pills. Five states, four of them carrying a colour that could not
@@ -10885,8 +10831,8 @@
   align-items: center;
   gap: 14px;
   flex-direction: row;
-  background: var(--danger-soft);
-  border: 1px solid var(--border);
+  background: var(--c-danger-wash);
+  border: 1px solid var(--c-border);
 }
 
 .unpaid-banner > div {
@@ -10897,33 +10843,33 @@
 
 .unpaid-banner span {
   font-size: 13px;
-  color: var(--muted);
+  color: var(--c-muted);
 }
 
 .unpaid-banner-level-2 svg {
-  color: var(--danger);
+  color: var(--c-danger);
   opacity: 0.75;
 }
 
 .unpaid-banner-level-3 {
-  border-color: var(--danger);
+  border-color: var(--c-danger);
   animation: unpaid-banner-pulse 2.4s ease-in-out infinite;
 }
 
 .unpaid-banner-level-3 strong {
-  color: var(--danger);
+  color: var(--c-danger);
 }
 
 .unpaid-banner-level-3 svg {
-  color: var(--danger);
+  color: var(--c-danger);
 }
 
 @keyframes unpaid-banner-pulse {
   0%, 100% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger) 25%, transparent);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--c-danger) 25%, transparent);
   }
   50% {
-    box-shadow: 0 0 0 4px color-mix(in srgb, var(--danger) 12%, transparent);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--c-danger) 12%, transparent);
   }
 }
 
@@ -10932,30 +10878,30 @@
   margin-left: 8px;
   padding: 2px 8px;
   border-radius: 999px;
-  background: var(--danger-soft);
-  color: var(--danger);
+  background: var(--c-danger-wash);
+  color: var(--c-danger);
   font-size: 11px;
   font-weight: 800;
   vertical-align: middle;
 }
 
 .overdue-row {
-  background: var(--danger-soft);
+  background: var(--c-danger-wash);
 }
 
 .overdue-row td {
-  color: var(--danger);
+  color: var(--c-danger);
   font-weight: 600;
 }
 
 .voided-row td {
-  color: var(--muted);
+  color: var(--c-muted);
   text-decoration: line-through;
 }
 
 .expense-vendor {
   display: block;
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 12px;
   font-style: normal;
 }
@@ -10973,7 +10919,7 @@
 }
 
 .csv-import-uploader > span {
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 13px;
 }
 
@@ -10982,7 +10928,7 @@
   align-items: center;
   gap: 6px;
   font-size: 13px;
-  color: var(--muted);
+  color: var(--c-muted);
   cursor: pointer;
 }
 
@@ -11011,7 +10957,7 @@
   align-items: center;
   gap: 10px;
   padding: 6px 8px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: 8px;
   background: #fff;
   font-size: 13px;
@@ -11067,14 +11013,14 @@
 
 .gcal-debug .gcal-debug-intro {
   margin: 0 0 12px;
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 13px;
   line-height: 1.5;
 }
 
 .google-calendar-source-intro {
   margin: 0 0 12px;
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 13px;
   line-height: 1.5;
 }
@@ -11082,9 +11028,9 @@
 .google-calendar-source-empty {
   margin: 0;
   padding: 14px;
-  border: 1px dashed var(--border-strong);
+  border: 1px dashed var(--c-border);
   border-radius: 10px;
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 13px;
   line-height: 1.55;
 }
@@ -11099,9 +11045,9 @@
   display: grid;
   gap: 12px;
   padding: 14px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: 10px;
-  background: var(--panel-soft);
+  background: var(--c-surface-soft);
 }
 
 .gcal-rule-card.is-off {
@@ -11127,12 +11073,12 @@
 }
 
 .gcal-rule-summary strong {
-  color: var(--text);
+  color: var(--c-text-body);
   font-size: 14px;
 }
 
 .gcal-rule-summary span {
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 12px;
   line-height: 1.45;
   overflow-wrap: anywhere;
@@ -11150,10 +11096,10 @@
   min-width: 0;
   min-height: 38px;
   padding: 0 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: 8px;
-  background: var(--panel);
-  color: var(--text);
+  background: var(--c-surface);
+  color: var(--c-text-body);
   font-size: 14px;
   font-weight: 600;
 }
@@ -11164,7 +11110,7 @@
 }
 
 .gcal-rule-field > span {
-  color: var(--text);
+  color: var(--c-text-body);
   font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
@@ -11174,15 +11120,15 @@
 .gcal-rule-field input[type="text"] {
   min-height: 38px;
   padding: 0 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: 8px;
-  background: var(--panel);
-  color: var(--text);
+  background: var(--c-surface);
+  color: var(--c-text-body);
   font-size: 13px;
 }
 
 .gcal-rule-field em {
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 12px;
   font-style: normal;
   line-height: 1.5;
@@ -11199,15 +11145,15 @@
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: 999px;
-  background: var(--panel);
-  color: var(--text);
+  background: var(--c-surface);
+  color: var(--c-text-body);
   font-size: 13px;
 }
 
 .gcal-rule-calendar em {
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 11px;
   font-style: normal;
 }
@@ -11232,10 +11178,10 @@
   gap: 12px;
   min-height: 38px;
   padding: 0 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: 8px;
-  background: var(--panel);
-  color: var(--text);
+  background: var(--c-surface);
+  color: var(--c-text-body);
   font-size: 13px;
   font-weight: 600;
 }
@@ -11254,10 +11200,10 @@
   gap: 8px;
   padding: 0 10px;
   min-height: 38px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: 8px;
-  background: var(--panel-soft);
-  color: var(--muted);
+  background: var(--c-surface-soft);
+  color: var(--c-muted);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
@@ -11270,10 +11216,10 @@
 .gcal-debug-error {
   margin: 0 0 12px;
   padding: 10px 12px;
-  border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--c-danger) 40%, var(--c-border));
   border-radius: 8px;
-  background: var(--danger-soft);
-  color: var(--danger);
+  background: var(--c-danger-wash);
+  color: var(--c-danger);
   font-size: 13px;
   font-weight: 600;
 }
@@ -11289,13 +11235,13 @@
   display: grid;
   gap: 2px;
   padding: 8px 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: 8px;
-  background: var(--panel-soft);
+  background: var(--c-surface-soft);
 }
 
 .gcal-debug-facts span {
-  color: var(--quiet);
+  color: var(--c-muted);
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.08em;
@@ -11303,7 +11249,7 @@
 }
 
 .gcal-debug-facts strong {
-  color: var(--text);
+  color: var(--c-text-body);
   font-size: 13px;
   word-break: break-word;
 }
@@ -11311,9 +11257,9 @@
 .gcal-debug-empty {
   margin: 0;
   padding: 14px;
-  border: 1px dashed var(--border-strong);
+  border: 1px dashed var(--c-border);
   border-radius: 10px;
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 13px;
   line-height: 1.55;
 }
@@ -11327,14 +11273,14 @@
 }
 
 .gcal-debug-entry {
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: 10px;
-  background: var(--panel);
+  background: var(--c-surface);
   overflow: hidden;
 }
 
 .gcal-debug-entry.is-failed {
-  border-color: color-mix(in srgb, var(--danger) 42%, var(--border));
+  border-color: color-mix(in srgb, var(--c-danger) 42%, var(--c-border));
 }
 
 .gcal-debug-entry-head {
@@ -11352,7 +11298,7 @@
 }
 
 .gcal-debug-entry-head:hover {
-  background: var(--panel-soft);
+  background: var(--c-surface-soft);
 }
 
 .gcal-debug-badge {
@@ -11365,13 +11311,13 @@
 }
 
 .gcal-debug-badge.is-success {
-  background: var(--success-soft);
-  color: color-mix(in srgb, var(--coach-primary, #1f9d55) 78%, var(--text));
+  background: var(--c-success-wash);
+  color: color-mix(in srgb, var(--coach-primary, #1f9d55) 78%, var(--c-text-body));
 }
 
 .gcal-debug-badge.is-failed {
-  background: var(--danger-soft);
-  color: var(--danger);
+  background: var(--c-danger-wash);
+  color: var(--c-danger);
 }
 
 .gcal-debug-badge.is-skipped {
@@ -11386,20 +11332,20 @@
 }
 
 .gcal-debug-entry-main strong {
-  color: var(--text);
+  color: var(--c-text-body);
   font-size: 13px;
   font-weight: 700;
 }
 
 .gcal-debug-entry-main em {
-  color: var(--quiet);
+  color: var(--c-muted);
   font-size: 11px;
   font-style: normal;
 }
 
 .gcal-debug-entry-result {
   min-width: 0;
-  color: var(--muted);
+  color: var(--c-muted);
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 11px;
   text-align: right;
@@ -11407,7 +11353,7 @@
 }
 
 .gcal-debug-entry.is-failed .gcal-debug-entry-result {
-  color: var(--danger);
+  color: var(--c-danger);
   font-weight: 700;
 }
 
@@ -11415,8 +11361,8 @@
   display: grid;
   gap: 12px;
   padding: 12px;
-  border-top: 1px solid var(--border);
-  background: var(--panel-soft);
+  border-top: 1px solid var(--c-border);
+  background: var(--c-surface-soft);
 }
 
 .gcal-debug-grid {
@@ -11432,7 +11378,7 @@
 }
 
 .gcal-debug-grid span {
-  color: var(--quiet);
+  color: var(--c-muted);
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.08em;
@@ -11440,7 +11386,7 @@
 }
 
 .gcal-debug-grid code {
-  color: var(--text);
+  color: var(--c-text-body);
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 12px;
   word-break: break-word;
@@ -11450,19 +11396,19 @@
   display: grid;
   gap: 8px;
   padding: 10px 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: 8px;
-  background: var(--panel);
+  background: var(--c-surface);
 }
 
 .gcal-debug-block.is-error {
-  border-color: color-mix(in srgb, var(--danger) 34%, var(--border));
-  background: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--c-danger) 34%, var(--c-border));
+  background: var(--c-danger-wash);
 }
 
 .gcal-debug-block h4 {
   margin: 0;
-  color: var(--heading);
+  color: var(--c-text);
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.06em;
@@ -11471,7 +11417,7 @@
 
 .gcal-debug-block h5 {
   margin: 0;
-  color: var(--quiet);
+  color: var(--c-muted);
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.08em;
@@ -11480,14 +11426,14 @@
 
 .gcal-debug-message {
   margin: 0;
-  color: var(--text);
+  color: var(--c-text-body);
   font-size: 13px;
   line-height: 1.5;
 }
 
 .gcal-debug-note {
   margin: 0;
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 12px;
   line-height: 1.5;
 }
@@ -11496,10 +11442,10 @@
   margin: 0;
   max-height: 320px;
   padding: 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: 8px;
-  background: var(--grid-bg);
-  color: var(--text);
+  background: var(--c-page);
+  color: var(--c-text-body);
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 11.5px;
   line-height: 1.5;
@@ -11868,10 +11814,10 @@
 .pos-error {
   margin: 0 0 12px;
   padding: 8px 10px;
-  border: 1px solid var(--danger);
+  border: 1px solid var(--c-danger);
   border-radius: 8px;
-  background: var(--danger-soft);
-  color: var(--danger);
+  background: var(--c-danger-wash);
+  color: var(--c-danger);
   font-size: 13px;
 }
 
@@ -12053,7 +11999,7 @@
   margin: 6px 0 12px;
   padding: 14px;
   border-radius: 12px;
-  background: var(--success-soft, #eaf8ed);
+  background: var(--c-success-wash);
 }
 
 .pos-done > div {
@@ -12066,7 +12012,7 @@
 }
 
 .pos-done span {
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 12px;
 }
 
@@ -12168,7 +12114,7 @@
 
 /* "Paid" line under the price on a lesson card. */
 .pos-paid-line {
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 12px;
 }
 
@@ -12190,13 +12136,13 @@
   flex-direction: column;
   gap: 2px;
   padding: 10px 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: 10px;
 }
 
 .pos-method-total span {
   font-size: 12px;
-  color: var(--muted);
+  color: var(--c-muted);
 }
 
 .pos-method-total strong {
@@ -12206,7 +12152,7 @@
 .pos-method-total em {
   font-style: normal;
   font-size: 11px;
-  color: var(--muted);
+  color: var(--c-muted);
 }
 
 /* Shown when the amount taken differs from the list price. */
@@ -12214,7 +12160,7 @@
   display: block;
   font-style: normal;
   font-size: 11px;
-  color: var(--muted);
+  color: var(--c-muted);
 }
 
 /* Marks an Optix sale whose product is a lesson pass/package. */
@@ -12225,7 +12171,7 @@
   border-radius: 999px;
   font-size: 11px;
   font-weight: 600;
-  color: var(--accent, #2f6fed);
+  color: var(--c-info-text);
   border: 1px solid currentColor;
   vertical-align: middle;
 }
@@ -12279,8 +12225,8 @@
   height: 40px;
   padding: 0 16px;
   border-radius: 10px;
-  background: var(--success-soft, #eaf8ed);
-  color: var(--text);
+  background: var(--c-success-wash);
+  color: var(--c-text-body);
   font-size: 14px;
   font-weight: 600;
   cursor: default;
@@ -12292,7 +12238,7 @@
   padding: 0 2px;
   border: none;
   background: none;
-  color: var(--danger, #a52e15);
+  color: var(--c-danger);
   font-size: 12px;
   font-weight: 600;
   text-decoration: underline;
@@ -12336,10 +12282,10 @@
   align-items: center;
   gap: 6px;
   padding: 0 8px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: 8px;
   background: #fff;
-  color: var(--muted);
+  color: var(--c-muted);
 }
 
 .product-search-input input {
@@ -12388,7 +12334,7 @@
 .product-quick-card .product-editor {
   margin-top: 14px;
   padding-top: 14px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--c-border);
 }
 
 /* Two columns on anything wider than a phone: the form has a lot of short
@@ -12411,7 +12357,7 @@
   display: block;
   font-style: normal;
   font-size: 11px;
-  color: var(--muted);
+  color: var(--c-muted);
 }
 
 /* A lesson type reads as plain text, not a link: there is nothing to open. */
@@ -12439,16 +12385,16 @@
 
 /* Low stock is the one number on this screen worth interrupting for. */
 .product-stock.low {
-  color: var(--danger, #a52e15);
+  color: var(--c-danger);
 }
 
 .product-stock.untracked {
   font-weight: 400;
-  color: var(--muted);
+  color: var(--c-muted);
 }
 
 .product-stock-row td {
-  background: var(--surface-muted, #f7f7f5);
+  background: var(--c-surface-soft);
 }
 
 .product-stock-drawer {
@@ -12481,7 +12427,7 @@
 }
 
 .product-movement strong.negative {
-  color: var(--danger, #a52e15);
+  color: var(--c-danger);
 }
 
 .product-movement strong.positive {
@@ -12490,7 +12436,7 @@
 
 .product-movement em {
   font-style: normal;
-  color: var(--muted);
+  color: var(--c-muted);
   font-size: 11px;
 }
 
@@ -12511,7 +12457,7 @@
   justify-content: space-between;
   gap: 10px;
   padding: 8px 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: 8px;
   background: #fff;
   color: inherit;
@@ -12530,7 +12476,7 @@
 .pos-product-option em {
   font-style: normal;
   font-size: 12px;
-  color: var(--muted);
+  color: var(--c-muted);
   white-space: nowrap;
 }
 
@@ -12554,7 +12500,7 @@
 }
 
 .product-group-lock {
-  color: var(--muted);
+  color: var(--c-muted);
 }
 
 .product-group-note {
@@ -12568,7 +12514,7 @@
   width: 100%;
   padding: 10px 4px;
   border: none;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--c-border);
   background: none;
   color: inherit;
   font: inherit;
@@ -12585,7 +12531,7 @@
 .product-group-header em {
   font-style: normal;
   font-size: 12px;
-  color: var(--muted);
+  color: var(--c-muted);
 }
 
 .product-group-header:hover {
@@ -12633,7 +12579,7 @@
   flex-direction: column;
   min-height: 0;
   padding: 14px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: 14px;
   background: var(--surface, #fff);
 }
@@ -12657,7 +12603,7 @@
   align-items: center;
   gap: 8px;
   padding: 9px 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: 10px;
 }
 
@@ -12677,7 +12623,7 @@
 .sell-customer-chip em {
   font-style: normal;
   font-size: 11px;
-  color: var(--muted);
+  color: var(--c-muted);
 }
 
 .sell-customer-chip > button:last-child {
@@ -12690,9 +12636,9 @@
   align-items: center;
   gap: 8px;
   padding: 0 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: 10px;
-  color: var(--muted);
+  color: var(--c-muted);
 }
 
 .sell-customer-search input {
@@ -12720,7 +12666,7 @@
   flex-direction: column;
   gap: 4px;
   padding: 6px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: 10px;
   background: var(--surface, #fff);
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.14);
@@ -12744,13 +12690,13 @@
 }
 
 .sell-customer-match:hover {
-  background: var(--surface-muted, #f7f7f5);
+  background: var(--c-surface-soft);
 }
 
 .sell-customer-match em {
   font-style: normal;
   font-size: 11px;
-  color: var(--muted);
+  color: var(--c-muted);
 }
 
 /* Always last, always present: not finding someone is the normal case for a
@@ -12761,7 +12707,7 @@
   gap: 6px;
   padding: 8px;
   border: none;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--c-border);
   border-radius: 0 0 6px 6px;
   background: none;
   color: var(--coach-primary, #1fd36d);
@@ -12785,7 +12731,7 @@
   align-items: center;
   gap: 4px;
   padding: 36px 12px;
-  color: var(--muted);
+  color: var(--c-muted);
   text-align: center;
 }
 
@@ -12804,7 +12750,7 @@
   align-items: center;
   gap: 8px;
   padding: 8px 0;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--c-border);
 }
 
 .sell-line-name {
@@ -12823,7 +12769,7 @@
 .sell-line-name em {
   font-style: normal;
   font-size: 11px;
-  color: var(--muted);
+  color: var(--c-muted);
 }
 
 .sell-line-qty {
@@ -12844,7 +12790,7 @@
 .sell-line-price {
   width: 68px;
   padding: 4px 6px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: 6px;
   font: inherit;
   font-size: 12px;
@@ -12857,7 +12803,7 @@
 
 .sell-totals {
   padding-top: 8px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--c-border);
 }
 
 .sell-total-row {
@@ -12869,7 +12815,7 @@
 
 .sell-total-row.muted {
   font-size: 12px;
-  color: var(--muted);
+  color: var(--c-muted);
 }
 
 .sell-total-row.grand {
@@ -12881,7 +12827,7 @@
   font-style: normal;
   font-size: 11px;
   font-weight: 500;
-  color: var(--muted);
+  color: var(--c-muted);
 }
 
 .sell-actions {
@@ -12912,7 +12858,7 @@
 .sell-parked {
   margin-top: 12px;
   padding-top: 10px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--c-border);
 }
 
 .sell-parked h3 {
@@ -12920,7 +12866,7 @@
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--muted);
+  color: var(--c-muted);
 }
 
 .sell-parked-item {
@@ -12934,7 +12880,7 @@
   display: flex;
   flex-direction: column;
   padding: 6px 8px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: 8px;
   background: none;
   color: inherit;
@@ -12946,7 +12892,7 @@
 .sell-parked-item em {
   font-style: normal;
   font-size: 11px;
-  color: var(--muted);
+  color: var(--c-muted);
 }
 
 /* --- Catalog --- */
@@ -12956,7 +12902,7 @@
   flex-direction: column;
   min-height: 0;
   padding: 14px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: 14px;
   background: var(--surface, #fff);
 }
@@ -12966,9 +12912,9 @@
   align-items: center;
   gap: 8px;
   padding: 0 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: 10px;
-  color: var(--muted);
+  color: var(--c-muted);
 }
 
 .sell-search input {
@@ -12996,7 +12942,7 @@
   gap: 10px;
   margin-top: 10px;
   padding: 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: 10px;
 }
 
@@ -13016,7 +12962,7 @@
   align-items: center;
   gap: 6px;
   padding: 7px 14px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: 999px;
   background: none;
   color: inherit;
@@ -13051,7 +12997,7 @@
   gap: 6px;
   min-height: 92px;
   padding: 10px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: 12px;
   background: none;
   color: inherit;
@@ -13083,11 +13029,11 @@
   align-items: center;
   gap: 3px;
   font-size: 11px;
-  color: var(--muted);
+  color: var(--c-muted);
 }
 
 .sell-tile-stock.low {
-  color: var(--danger, #a52e15);
+  color: var(--c-danger);
   font-weight: 700;
 }
 
@@ -13116,7 +13062,7 @@
 
 .sell-cash-suggestions button {
   padding: 12px 8px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: 10px;
   background: none;
   color: inherit;
@@ -13132,7 +13078,7 @@
   margin: 10px 0;
   padding: 12px 14px;
   border-radius: 12px;
-  background: var(--success-soft, #eaf8ed);
+  background: var(--c-success-wash);
 }
 
 .sell-change strong {
@@ -13141,8 +13087,8 @@
 
 /* Not enough handed over yet - the confirm button is disabled and this says why. */
 .sell-change.short {
-  background: var(--danger-soft, #fdecea);
-  color: var(--danger, #a52e15);
+  background: var(--c-danger-wash);
+  color: var(--c-danger);
 }
 
 /* --- Coupons (gift vouchers) ------------------------------------------------
@@ -13454,7 +13400,7 @@
 .sell-issued-coupons em {
   font-style: normal;
   font-size: 11px;
-  color: var(--muted);
+  color: var(--c-muted);
 }
 
 /* Settings → Email → Browser notifications. The card follows the notification
@@ -13502,10 +13448,10 @@
 }
 
 .integration-directions > section {
-  border: 1px solid #deded8;
+  border: 1px solid var(--c-border);
   border-radius: 10px;
   padding: 14px 16px;
-  background: #fcfcfa;
+  background: var(--c-surface-soft);
 }
 
 .integration-directions > section > h3 {
@@ -13544,7 +13490,7 @@
 
 .integration-credential .credential-copy {
   margin-left: auto;
-  border: 1px solid #deded8;
+  border: 1px solid var(--c-border);
   background: #fff;
   border-radius: 6px;
   padding: 2px 8px;
@@ -13561,7 +13507,7 @@
   width: var(--c-w-prose);
   font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
   padding: 7px 9px;
-  border: 1px solid #deded8;
+  border: 1px solid var(--c-border);
   border-radius: 7px;
   background: #fff;
   color: #102d20;
@@ -13569,7 +13515,7 @@
 
 .integration-credential.missing input {
   border-color: #d4574a;
-  background: #fdf5f4;
+  background: var(--c-danger-wash);
 }
 
 .integration-credential.optional input {
@@ -13626,7 +13572,7 @@
   margin-top: 6px;
   padding: 6px 9px;
   border-radius: 6px;
-  background: #fdf0ee;
+  background: var(--c-danger-wash);
   color: #8d2f24;
   font-size: 11.5px;
   line-height: 1.45;
@@ -13644,7 +13590,7 @@
   align-items: baseline;
   gap: 8px;
   padding: 4px 0;
-  border-top: 1px solid #ececE6;
+  border-top: 1px solid var(--c-border-soft);
 }
 
 .integration-events li code {
@@ -13668,7 +13614,7 @@
 
 .integration-pending-bar.stuck {
   border-color: #d4574a;
-  background: #fdf5f4;
+  background: var(--c-danger-wash);
 }
 
 .integration-checks {
@@ -13681,7 +13627,7 @@
   gap: 10px;
   margin: 0;
   padding: 9px 2px;
-  border-top: 1px solid #ececE6;
+  border-top: 1px solid var(--c-border-soft);
   font-size: 13px;
 }
 
@@ -13700,7 +13646,7 @@
 
 .integration-checks .check button {
   margin-left: auto;
-  border: 1px solid #deded8;
+  border: 1px solid var(--c-border);
   background: #fff;
   border-radius: 6px;
   padding: 3px 10px;
@@ -16866,7 +16812,7 @@
    the hue goes into --available, so the band still reads as open time and the
    location is a tint rather than a colour. Holds in both themes. */
 .available-band.has-location {
-  --band-fill: color-mix(in srgb, hsl(var(--location-hue) 45% 55%) 7%, var(--available));
+  --band-fill: color-mix(in srgb, hsl(var(--location-hue) 45% 55%) 7%, var(--c-surface));
 }
 
 .available-band-location {
@@ -17475,7 +17421,7 @@
   border: 0;
   border-radius: var(--c-radius-control);
   background: transparent;
-  color: var(--text);
+  color: var(--c-text-body);
   cursor: pointer;
 }
 
@@ -17517,7 +17463,7 @@
 
 .app-shell.is-phone .main-panel {
   min-height: 100dvh;
-  background: var(--page);
+  background: var(--c-page);
   transition:
     margin 180ms ease,
     box-shadow 180ms ease;
@@ -17526,14 +17472,14 @@
 .app-shell.is-phone .main-panel.has-paper-under {
   margin-left: 10px;
   box-shadow:
-    -1px 0 0 var(--border),
+    -1px 0 0 var(--c-border),
     -6px 0 14px rgba(0, 0, 0, 0.08);
 }
 
 .app-shell.is-phone .main-panel.has-paper-ahead {
   margin-right: 10px;
   box-shadow:
-    1px 0 0 var(--border),
+    1px 0 0 var(--c-border),
     6px 0 14px rgba(0, 0, 0, 0.08);
 }
 
@@ -17551,12 +17497,12 @@
   right: 0;
   /* Lines its title up with the page header above it (.is-phone .topbar). */
   padding: calc(12px + env(safe-area-inset-top)) 22px 0;
-  background: linear-gradient(to right, var(--panel-soft) 0 4px, var(--border) 4px 5px, var(--page) 5px);
+  background: linear-gradient(to right, var(--c-surface-soft) 0 4px, var(--c-border) 4px 5px, var(--c-page) 5px);
 }
 
 .phone-paper strong {
   display: block;
-  color: var(--text);
+  color: var(--c-text-body);
   font-size: 24px;
   line-height: 1.15;
   font-weight: 800;
@@ -17565,7 +17511,7 @@
 
 .phone-paper.is-incoming {
   z-index: 1;
-  background: var(--page);
+  background: var(--c-page);
   box-shadow: -8px 0 24px rgba(0, 0, 0, 0.16);
   will-change: transform;
 }
@@ -17573,7 +17519,7 @@
 .phone-paper-edge.is-right {
   right: 0;
   width: 10px;
-  background: linear-gradient(to left, var(--panel-soft) 0 4px, var(--border) 4px 5px, var(--page) 5px);
+  background: linear-gradient(to left, var(--c-surface-soft) 0 4px, var(--c-border) 4px 5px, var(--c-page) 5px);
 }
 
 /* A client's profile on a phone: a page laid over the screen it was opened
@@ -17599,7 +17545,7 @@
   padding-bottom: calc(24px + env(safe-area-inset-bottom));
   border-radius: 0;
   box-shadow:
-    -1px 0 0 var(--border),
+    -1px 0 0 var(--c-border),
     -6px 0 14px rgba(0, 0, 0, 0.12);
   animation: phone-page-in 200ms ease backwards;
 }
@@ -17631,8 +17577,8 @@
   grid-auto-flow: column;
   grid-auto-columns: minmax(0, 1fr);
   padding: 6px 4px max(6px, env(safe-area-inset-bottom));
-  border-top: 1px solid var(--border);
-  background: var(--panel);
+  border-top: 1px solid var(--c-border);
+  background: var(--c-surface);
   box-shadow: 0 -6px 18px rgba(17, 17, 17, 0.06);
 }
 
@@ -17647,7 +17593,7 @@
   border: 0;
   border-radius: var(--c-radius-control);
   background: transparent;
-  color: var(--c-text-soft, #76736d);
+  color: var(--c-text-soft);
   font-size: 11px;
   font-weight: 700;
   cursor: pointer;
@@ -17670,7 +17616,7 @@
   z-index: 45;
   display: flex;
   align-items: flex-end;
-  background: var(--c-scrim-soft, rgba(17, 17, 17, 0.28));
+  background: var(--c-scrim-soft);
 }
 
 .phone-more-sheet {
@@ -17679,11 +17625,11 @@
   gap: 2px;
   padding: 12px 12px calc(84px + env(safe-area-inset-bottom));
   border-radius: var(--c-radius-page) var(--c-radius-page) 0 0;
-  background: var(--panel);
+  background: var(--c-surface);
 }
 
 .phone-more-sheet button {
-  min-height: var(--c-h-touch, 48px);
+  min-height: var(--c-h-touch);
   display: flex;
   align-items: center;
   gap: 12px;
@@ -17691,14 +17637,14 @@
   border: 0;
   border-radius: var(--c-radius-control);
   background: transparent;
-  color: var(--text);
+  color: var(--c-text-body);
   font-size: 15px;
   text-align: left;
   cursor: pointer;
 }
 
 .phone-more-sheet button.active {
-  background: var(--c-active, #eeeeea);
+  background: var(--c-active);
 }
 
 /* ---- Today ---------------------------------------------------------------- */
@@ -17738,7 +17684,7 @@
 }
 
 .today-header span {
-  color: var(--c-text-soft, #76736d);
+  color: var(--c-text-soft);
   font-size: 13px;
 }
 
@@ -17760,10 +17706,10 @@
   justify-content: space-between;
   gap: 12px;
   padding: 12px 14px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: var(--c-radius-card);
-  background: var(--panel-soft);
-  color: var(--text);
+  background: var(--c-surface-soft);
+  color: var(--c-text-body);
   font: inherit;
   text-align: left;
   cursor: pointer;
@@ -17779,7 +17725,7 @@
 }
 
 .quick-book-time em {
-  color: var(--muted);
+  color: var(--c-muted);
   font-style: normal;
   font-size: 13px;
 }
@@ -17806,9 +17752,9 @@
   display: grid;
   gap: 6px;
   padding: 16px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: var(--c-radius-card);
-  background: color-mix(in srgb, var(--panel) 92%, var(--coach-primary, #01632f) 8%);
+  background: color-mix(in srgb, var(--c-surface) 92%, var(--coach-primary, #01632f) 8%);
 }
 
 .today-featured strong {
@@ -17816,7 +17762,7 @@
 }
 
 .today-featured > span:not(.today-featured-label) {
-  color: var(--c-text-body, #4f4d49);
+  color: var(--c-text-body);
 }
 
 .today-featured-label {
@@ -17839,7 +17785,7 @@
 }
 
 .today-actions .outline-button {
-  min-height: var(--c-h-touch, 48px);
+  min-height: var(--c-h-touch);
   justify-content: center;
 }
 
@@ -17859,16 +17805,16 @@
   align-items: center;
   gap: 12px;
   padding: 10px 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: var(--c-radius-card);
-  background: var(--panel);
-  color: var(--text);
+  background: var(--c-surface);
+  color: var(--c-text-body);
   text-align: left;
   cursor: pointer;
 }
 
 .today-row-time {
-  color: var(--c-text-soft, #76736d);
+  color: var(--c-text-soft);
   font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
@@ -17886,7 +17832,7 @@
 }
 
 .today-row-who span {
-  color: var(--c-text-soft, #76736d);
+  color: var(--c-text-soft);
   font-size: 13px;
 }
 
@@ -17901,7 +17847,7 @@
 }
 
 .today-row.is-done .today-row-state {
-  color: var(--c-text-soft, #76736d);
+  color: var(--c-text-soft);
 }
 
 /* ---- Billing (and Settings) on the phone ---------------------------------- */
@@ -17926,7 +17872,7 @@
 }
 
 .app-shell.is-phone .settings-subnav button {
-  height: var(--c-h-touch, 48px);
+  height: var(--c-h-touch);
   font-size: 16px;
 }
 
@@ -18059,9 +18005,9 @@
   justify-content: space-between;
   gap: 12px;
   padding: 10px 10px 10px 16px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: var(--c-radius-card);
-  background: var(--panel);
+  background: var(--c-surface);
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.16);
 }
 
@@ -18308,9 +18254,9 @@
   align-items: center;
   gap: 8px;
   padding: 8px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border);
   border-radius: 14px;
-  background: var(--panel);
+  background: var(--c-surface);
   box-shadow: 0 8px 24px rgba(17, 17, 17, 0.14);
 }
 
@@ -18320,7 +18266,7 @@
   padding: 4px 6px;
   border: 0;
   background: transparent;
-  color: var(--text);
+  color: var(--c-text-body);
   font: inherit;
   text-align: left;
   cursor: pointer;
@@ -18331,7 +18277,7 @@
 }
 
 .sell-phone-bar-sale span {
-  color: var(--c-text-soft, #76736d);
+  color: var(--c-text-soft);
   font-size: 12px;
 }
 

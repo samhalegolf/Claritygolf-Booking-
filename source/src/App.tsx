@@ -17255,7 +17255,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                 key={appointment.id}
                 className="group-attendee-card"
                 style={{
-                  border: "1px solid color-mix(in srgb, var(--muted) 36%, transparent)",
+                  border: "1px solid color-mix(in srgb, var(--c-muted) 36%, transparent)",
                   borderRadius: 10,
                   padding: "8px 10px",
                   display: "grid",
@@ -17269,7 +17269,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                     <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {appointment.client || appointment.title}
                     </strong>
-                    <span style={{ color: "var(--muted)", fontSize: "0.85rem" }}>
+                    <span style={{ color: "var(--c-muted)", fontSize: "0.85rem" }}>
                       {[
                         appointment.phone,
                         appointment.email,
@@ -17279,7 +17279,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                         .join(" · ")}
                     </span>
                     {appointment.note ? (
-                      <span style={{ color: "var(--muted)", fontSize: "0.84rem" }}>{t("Note: {note}", { note: appointment.note })}</span>
+                      <span style={{ color: "var(--c-muted)", fontSize: "0.84rem" }}>{t("Note: {note}", { note: appointment.note })}</span>
                     ) : null}
                   </div>
                   <span
@@ -17289,7 +17289,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                       fontSize: "0.76rem",
                       textTransform: "uppercase",
                       letterSpacing: "0.02em",
-                      border: "1px solid color-mix(in srgb, var(--muted) 36%, transparent)",
+                      border: "1px solid color-mix(in srgb, var(--c-muted) 36%, transparent)",
                       whiteSpace: "nowrap",
                     }}
                   >

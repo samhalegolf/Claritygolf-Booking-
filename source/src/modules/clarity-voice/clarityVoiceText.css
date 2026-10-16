@@ -20,9 +20,9 @@
   align-items: center;
   justify-content: center;
   border: 1px solid rgba(15, 23, 42, 0.14);
-  border-radius: 999px;
-  background: #fff;
-  color: #111827;
+  border-radius: var(--c-radius-pill);
+  background: var(--c-surface);
+  color: var(--c-text);
   cursor: pointer;
 }
 
@@ -34,7 +34,7 @@
 .clarityVoiceMicButton.is-listening {
   border-color: rgba(220, 38, 38, 0.35);
   background: rgba(220, 38, 38, 0.08);
-  color: #b91c1c;
+  color: var(--c-danger);
 }
 
 .clarityVoiceMicButton:disabled {
@@ -46,7 +46,7 @@
   display: grid;
   gap: 7px;
   min-width: 0;
-  color: #111827;
+  color: var(--c-text);
   font-size: 13px;
   font-weight: 650;
 }
@@ -64,8 +64,8 @@
   font: inherit;
   font-weight: 500;
   line-height: 1.45;
-  color: #111827;
-  background: #fff;
+  color: var(--c-text);
+  background: var(--c-surface);
 }
 
 .clarityVoiceTextOutput textarea:focus {
@@ -75,7 +75,7 @@
 
 .clarityVoiceInterim {
   margin: -2px 0 0 56px;
-  color: #6b7280;
+  color: var(--c-muted);
   font-size: 13px;
   font-style: italic;
   white-space: pre-wrap;
@@ -93,11 +93,11 @@
   align-items: center;
   gap: 7px;
   border: 1px solid transparent;
-  border-radius: 999px;
+  border-radius: var(--c-radius-pill);
   padding: 9px 15px;
   font: inherit;
   font-weight: 700;
-  background: #1976d2;
+  background: var(--c-accent);
   color: #fff;
   cursor: pointer;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.18);
@@ -105,7 +105,7 @@
 }
 
 .clarityVoiceSaveButton:hover:not(:disabled) {
-  background: #1565c0;
+  background: var(--c-accent);
 }
 
 .clarityVoiceSaveButton:focus-visible {
@@ -117,25 +117,25 @@
    as a dimmed version of the live button. */
 .clarityVoiceSaveButton:disabled {
   cursor: not-allowed;
-  background: #fff;
-  color: #9aa4b2;
+  background: var(--c-surface);
+  color: var(--c-text-disabled);
   border-color: rgba(15, 23, 42, 0.14);
   box-shadow: none;
 }
 
 .clarityVoiceSaveButton.is-saving:disabled {
   background: rgba(25, 118, 210, 0.12);
-  color: #1565c0;
+  color: var(--c-accent);
   border-color: rgba(25, 118, 210, 0.3);
   cursor: progress;
 }
 
 .clarityVoiceSaveButton.is-saved {
-  background: #15803d;
+  background: var(--c-success-text);
 }
 
 .clarityVoiceSaveButton.is-saved:hover:not(:disabled) {
-  background: #166534;
+  background: var(--c-success-text);
 }
 
 @media (max-width: 640px) {

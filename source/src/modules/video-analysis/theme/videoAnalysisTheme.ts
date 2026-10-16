@@ -58,7 +58,7 @@ const videoAnalysisTheme = {
     strong: "rgba(0, 0, 0, 0.62)",
   },
   shape: {
-    radiusMd: "13px",
+    radiusMd: "12px",
   },
 };
 
