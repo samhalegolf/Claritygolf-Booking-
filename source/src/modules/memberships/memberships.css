@@ -142,9 +142,6 @@
   display: grid;
   gap: var(--c-space-2);
   padding: var(--c-space-3);
-  border: 1px solid var(--c-border);
-  border-radius: var(--c-radius-card);
-  background: var(--c-surface);
 }
 
 .membership-card .membership-card-head {

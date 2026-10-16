@@ -199,7 +199,7 @@ export function CoachProfilePanel<T extends CoachProfileRecord>({
           <ArrowLeft size={16} />{t("All {staffPlural}", { staffPlural: staffPlural.toLowerCase() })}</button>
       )}
 
-      <article className="cp-card cp-identity">
+      <article className="card cp-card cp-identity">
         <div className="cp-photo">
           <CoachAvatar name={name} photoUrl={shown.photoUrl} />
           {editing && (
@@ -395,7 +395,7 @@ export function CoachProfilePanel<T extends CoachProfileRecord>({
       </article>
 
       {!isNew && (
-        <article className="cp-card cp-week">
+        <article className="card cp-card cp-week">
           <header className="cp-card-head">
             <h3>
               <ClarityCalendar size={14} />{t("Next 7 days")}</h3>
@@ -436,7 +436,7 @@ export function CoachProfilePanel<T extends CoachProfileRecord>({
       )}
 
       {!isNew && onOpenAvailability && (
-        <article className="cp-card">
+        <article className="card cp-card">
           <header className="cp-card-head">
             <h3>
               <ClaritySettings size={14} />{t("{staffSingular} settings", { staffSingular })}</h3>

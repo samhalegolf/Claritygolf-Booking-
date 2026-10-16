@@ -1038,7 +1038,7 @@ export function InvoiceEditor(props: InvoiceEditorProps) {
         </div>
 
         <aside className="ip-rail">
-          <article className="ip-card" id="ip-rail-lessons">
+          <article className="card ip-card" id="ip-rail-lessons">
             <strong className="ip-card-title">{t("Completed lessons")}</strong>
             {/* Same bookingPullFilter the Dashboard's list reads, so the
                 two can still never disagree about what they are showing -
@@ -1158,7 +1158,7 @@ export function InvoiceEditor(props: InvoiceEditorProps) {
             </div>
           </article>
 
-          <article className="ip-card" id="ip-rail-catalog">
+          <article className="card ip-card" id="ip-rail-catalog">
             <strong className="ip-card-title">{t("Catalog")}</strong>
             <label className="ip-search">
               <Search size={14} />
@@ -1206,7 +1206,7 @@ export function InvoiceEditor(props: InvoiceEditorProps) {
             </div>
           </article>
 
-          <article className="ip-card">
+          <article className="card ip-card">
             <strong className="ip-card-title">{t("From your template")}</strong>
             <p className="ip-card-note">{t("Logo, address, {taxName} number, bank account and footer are already on this invoice.", { taxName: invoiceSettings.taxName })}</p>
             <button className="outline-button" onClick={openInvoiceCoachSettings} type="button">

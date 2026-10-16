@@ -75,7 +75,7 @@ export function MembershipCard({ membership, formatMoney, onChanged, notify, onO
   const outstanding = m.charges.filter(owing);
 
   return (
-    <div className="membership-card">
+    <div className="card membership-card">
       <div className="membership-card-head">
         <div>
           {onOpenPerson ? (

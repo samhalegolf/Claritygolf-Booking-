@@ -694,11 +694,20 @@
   overflow: hidden;
 }
 
+/* The one card. A surface with a border and the card radius; a card class
+   adds only its own layout. .data-card is the oldest spelling and also carries
+   the page shadow (below); .card is the flat version every module card was
+   redeclaring for itself. */
+.card,
 .data-card,
 .client-row,
 .booking-card {
   border: 1px solid var(--c-border);
   background: var(--c-surface);
+}
+
+.card {
+  border-radius: var(--c-radius-card);
 }
 
 .data-card {
@@ -9278,9 +9287,6 @@
   gap: 10px;
   align-content: start;
   padding: 16px;
-  border: 1px solid var(--c-border);
-  border-radius: var(--c-radius-card);
-  background: var(--c-surface);
 }
 
 .ip-card-title {
@@ -15518,9 +15524,6 @@
 .cp-card {
   position: relative;
   min-width: 0;
-  border: 1px solid var(--c-border);
-  border-radius: var(--c-radius-card);
-  background: var(--c-surface);
   overflow: hidden;
 }
 
