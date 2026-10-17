@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { DrawingTool } from "../models/Drawing";
+import { DRAWING_COLORS, DrawingTool } from "../models/Drawing";
 import type { PhaseDetectionState } from "../hooks/useSwingPhaseMarkers";
 import {
   IconFile,
@@ -109,6 +109,9 @@ export type PlayerToolRailProps = {
   open: boolean;
   selectedTool: DrawingTool;
   onToolChange: (tool: DrawingTool) => void;
+  /** The colour new markings get, and the one a selected marking is repainted in. */
+  strokeColor: string;
+  onStrokeColorChange: (color: string) => void;
   onUndo: () => void;
   canUndo: boolean;
   onClear: () => void;
@@ -135,6 +138,8 @@ export function PlayerToolRail({
   open,
   selectedTool,
   onToolChange,
+  strokeColor,
+  onStrokeColorChange,
   onUndo,
   canUndo,
   onClear,
@@ -143,6 +148,14 @@ export function PlayerToolRail({
   onCapture,
   captureTooltip = "Screenshot (Space)",
 }: PlayerToolRailProps) {
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  // A palette left open behind a closed rail would be the first thing seen
+  // when the rail comes back, with nothing having asked for it.
+  useEffect(() => {
+    if (!open) setPaletteOpen(false);
+  }, [open]);
+  const currentColor =
+    DRAWING_COLORS.find((entry) => entry.value === strokeColor) ?? DRAWING_COLORS[0];
   return (
     <div
       className={`va-tool-rail${open ? " is-open" : ""}`}
@@ -168,6 +181,38 @@ export function PlayerToolRail({
         </button>
       ))}
       <span className="va-rail-rule" aria-hidden="true" />
+      <div className="va-rail-color">
+        <button
+          type="button"
+          className={`va-rail-btn${paletteOpen ? " is-active" : ""}`}
+          aria-label={t("Colour: {name}", { name: currentColor.label })}
+          aria-expanded={paletteOpen}
+          style={{ color: currentColor.value }}
+          onClick={() => setPaletteOpen((previous) => !previous)}
+        >
+          <span className="va-rail-swatch" aria-hidden="true" />
+        </button>
+        {paletteOpen ? (
+          <div className="va-color-palette" role="group" aria-label={t("Marking colour")}>
+            {DRAWING_COLORS.map((entry) => (
+              <button
+                key={entry.value}
+                type="button"
+                className={`va-rail-btn${entry.value === strokeColor ? " is-active" : ""}`}
+                aria-label={entry.label}
+                aria-pressed={entry.value === strokeColor}
+                style={{ color: entry.value }}
+                onClick={() => {
+                  onStrokeColorChange(entry.value);
+                  setPaletteOpen(false);
+                }}
+              >
+                <span className="va-rail-swatch" aria-hidden="true" />
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
       <button
         type="button"
         className="va-rail-btn"

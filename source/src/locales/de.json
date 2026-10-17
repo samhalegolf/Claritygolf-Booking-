@@ -4697,5 +4697,12 @@
   "Selling a bundle gives the client each pass inside it with its own credits, cover and expiry, and a pass for each service with a credit per lesson. Products leave stock when the bundle is sold at the till.": "Beim Verkauf eines Bundles erhält der Kunde jeden enthaltenen Pass mit eigenen Guthaben, Abdeckung und Ablauf sowie für jede Leistung einen Pass mit einem Guthaben pro Stunde. Produkte werden vom Lager abgebucht, wenn das Bundle an der Kasse verkauft wird.",
   "Add item": "Artikel hinzufügen",
   "Search passes, services and products": "Pässe, Leistungen und Produkte suchen",
-  "Nothing matches.": "Keine Treffer."
+  "Nothing matches.": "Keine Treffer.",
+  "Colour: {name}": "Farbe: {name}",
+  "Marking colour": "Markierungsfarbe",
+  "Mint": "Mint",
+  "White": "Weiß",
+  "Yellow": "Gelb",
+  "Red": "Rot",
+  "Blue": "Blau"
 }

@@ -1,4 +1,17 @@
+import { t } from "../../../lib/i18n";
+
 export type DrawingTool = "select" | "line" | "angle" | "circle" | "pen";
+
+/** The colours a marking can be drawn in, named as the reader sees them. The first is the default. */
+export const DRAWING_COLORS: { value: string; label: string }[] = [
+  { value: "#9be8ba", label: t("Mint") },
+  { value: "#ffffff", label: t("White") },
+  { value: "#ffd166", label: t("Yellow") },
+  { value: "#ff6b6b", label: t("Red") },
+  { value: "#5ec8ff", label: t("Blue") },
+];
+
+export const DEFAULT_DRAWING_COLOR = DRAWING_COLORS[0].value;
 
 export type DrawingHandle =
   | "move"

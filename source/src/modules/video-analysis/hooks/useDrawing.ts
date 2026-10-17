@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  DEFAULT_DRAWING_COLOR,
   DrawingHandle,
   DrawingObject,
   DrawingPoint,
@@ -34,6 +35,8 @@ interface UseDrawingState {
 export interface UseDrawingOptions {
   initialObjects: DrawingObject[];
   videoDimensions: Dimensions;
+  /** What new shapes are drawn in. */
+  strokeColor?: string;
   onChange?: (objects: DrawingObject[]) => void;
 }
 
@@ -58,6 +61,8 @@ export interface UseDrawingResult extends UseDrawingState {
   isObjectDragging: boolean;
   draggingObjectId: string | null;
   selectObject: (objectId: string | null) => void;
+  /** Repaint the selected shape. No-op with nothing selected. */
+  recolorSelected: (color: string) => void;
   undo: () => void;
   redo: () => void;
   nudgeSelected: (
@@ -102,6 +107,7 @@ const dragThresholdFor = (pointerType?: string) =>
 export function useDrawing({
   initialObjects,
   videoDimensions,
+  strokeColor = DEFAULT_DRAWING_COLOR,
   onChange,
 }: UseDrawingOptions): UseDrawingResult {
   const [objects, setObjects] = useState<DrawingObject[]>(initialObjects);
@@ -111,6 +117,9 @@ export function useDrawing({
   const [draftObject, setDraftObject] = useState<DrawingObject | null>(null);
   const [interaction, setInteraction] = useState<DrawingInteraction | null>(null);
   const [editMode, setEditMode] = useState<EditMode>(null);
+  // An angle is drawn in two strokes: the first arm as a line, then the
+  // second arm swung to the angle wanted. True between the two.
+  const [placingSecondArm, setPlacingSecondArm] = useState(false);
   // What the select tool's cursor is over. It only decides whether handles are
   // drawn; it is not a selection, so it does not survive a tool change.
   const [hoveredObjectId, setHoveredObjectId] = useState<string | null>(null);
@@ -129,6 +138,7 @@ export function useDrawing({
     setDraftObject(null);
     setInteraction(null);
     setEditMode(null);
+    setPlacingSecondArm(false);
     setSelectedObjectId(null);
     setHoveredObjectId(null);
   }, [initialObjects]);
@@ -162,6 +172,7 @@ export function useDrawing({
       setDraftObject(null);
       setInteraction(null);
       setEditMode(null);
+      setPlacingSecondArm(false);
       setSyncedObjects(next);
       onChange?.(next);
     },
@@ -173,6 +184,7 @@ export function useDrawing({
     setDraftObject(null);
     setInteraction(null);
     setEditMode(null);
+    setPlacingSecondArm(false);
     setHoveredObjectId(null);
     // A shape left selected under a drawing tool would keep its handles up
     // while promising a move that the tool will not make.
@@ -191,6 +203,12 @@ export function useDrawing({
    */
   const pointerHover = useCallback(
     (cursor: DrawingPoint | null) => {
+      if (cursor && placingSecondArm && draftObject?.type === "angle") {
+        // The first arm is down and nothing is pressed: the second arm
+        // swings with the cursor until a click sets it.
+        setDraftObject(DrawingEngine.updateAngleSecondArm(draftObject, cursor, videoDimensions));
+        return;
+      }
       if (!cursor || selectedTool !== "select") {
         setHoveredObjectId(null);
         return;
@@ -202,7 +220,7 @@ export function useDrawing({
       const hit = DrawingEngine.getObjectsAtPoint(objects, cursor, videoDimensions);
       setHoveredObjectId(hit.object ? hit.object.id : null);
     },
-    [editMode, objects, selectedTool, videoDimensions]
+    [draftObject, editMode, objects, placingSecondArm, selectedTool, videoDimensions]
   );
 
   const hitTest = useCallback(
@@ -227,8 +245,14 @@ export function useDrawing({
       if (!width || !height) return;
 
       if (selectedTool !== "select") {
+        if (placingSecondArm && draftObject?.type === "angle") {
+          setDraftObject(DrawingEngine.updateAngleSecondArm(draftObject, cursor, videoDimensions));
+          return;
+        }
         setSelectedObjectId(null);
-        setDraftObject(DrawingEngine.createObject(selectedTool, cursor, videoDimensions));
+        setDraftObject(
+          DrawingEngine.createObject(selectedTool, cursor, videoDimensions, strokeColor)
+        );
         setEditMode("create");
         setInteraction(null);
         return;
@@ -259,7 +283,7 @@ export function useDrawing({
       setEditMode("edit");
       setDraftObject(null);
     },
-    [objects, selectedTool, videoDimensions]
+    [draftObject, objects, placingSecondArm, selectedTool, strokeColor, videoDimensions]
   );
 
   const pointerMove = useCallback(
@@ -269,6 +293,10 @@ export function useDrawing({
       if (!editMode) return;
       if (editMode === "create") {
         if (!draftObject) return;
+        if (placingSecondArm && draftObject.type === "angle") {
+          setDraftObject(DrawingEngine.updateAngleSecondArm(draftObject, cursor, videoDimensions));
+          return;
+        }
         setDraftObject(DrawingEngine.updateDraftObject(draftObject, cursor, videoDimensions));
         return;
       }
@@ -295,13 +323,31 @@ export function useDrawing({
         setDraftObject(updated);
       }
     },
-    [draftObject, editMode, interaction, objects, selectedObjectId, videoDimensions]
+    [draftObject, editMode, interaction, objects, placingSecondArm, selectedObjectId, videoDimensions]
   );
 
   const pointerUp = useCallback(
     (cursor: DrawingPoint) => {
       if (!videoDimensions.width || !videoDimensions.height) return;
       if (editMode === "create") {
+        if (draftObject?.type === "angle" && !placingSecondArm) {
+          // The first arm is a line, and releasing it does not finish the
+          // angle: it hands over to the second arm, which is now the thing
+          // the pointer moves.
+          if (DrawingEngine.canOpenAngle(draftObject)) {
+            setDraftObject(DrawingEngine.openAngleSecondArm(draftObject, videoDimensions));
+            setPlacingSecondArm(true);
+            return;
+          }
+          setDraftObject(null);
+          setEditMode(null);
+          return;
+        }
+        if (draftObject?.type === "angle" && !DrawingEngine.canFinishDraft(draftObject)) {
+          // A tap back on the vertex gives the second arm nowhere to point.
+          // The angle keeps waiting for one rather than vanishing.
+          return;
+        }
         if (draftObject && DrawingEngine.canFinishDraft(draftObject)) {
           // Released is placed. The shape joins the picture with no handles
           // and no selection, and the tool stays in hand: a coach marking a
@@ -339,8 +385,18 @@ export function useDrawing({
       setDraftObject(null);
       setInteraction(null);
       setEditMode(null);
+      setPlacingSecondArm(false);
     },
-    [commit, draftObject, editMode, interaction, objects, selectedObjectId, videoDimensions]
+    [
+      commit,
+      draftObject,
+      editMode,
+      interaction,
+      objects,
+      placingSecondArm,
+      selectedObjectId,
+      videoDimensions,
+    ]
   );
 
   /** Drop whatever is in progress and put the tool down. */
@@ -350,8 +406,24 @@ export function useDrawing({
     setDraftObject(null);
     setInteraction(null);
     setEditMode(null);
+    setPlacingSecondArm(false);
     setSelectedTool("select");
   }, []);
+
+  const recolorSelected = useCallback(
+    (color: string) => {
+      if (!selectedObjectId) return;
+      const target = objects.find((entry) => entry.id === selectedObjectId);
+      if (!target || target.color === color) return;
+      const now = new Date().toISOString();
+      commit(
+        objects.map((entry) =>
+          entry.id === selectedObjectId ? { ...entry, color, updatedAt: now } : entry
+        )
+      );
+    },
+    [commit, objects, selectedObjectId]
+  );
 
   const deleteByIds = useCallback(
     (objectIds: string[]) => {
@@ -473,6 +545,7 @@ export function useDrawing({
     draggingObjectId,
     deleteSelected,
     selectObject,
+    recolorSelected,
     undo,
     redo,
     nudgeSelected,

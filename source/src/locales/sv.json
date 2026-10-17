@@ -4697,5 +4697,12 @@
   "Selling a bundle gives the client each pass inside it with its own credits, cover and expiry, and a pass for each service with a credit per lesson. Products leave stock when the bundle is sold at the till.": "När ett paket säljs får kunden varje klippkort i det med egna klipp, täckning och utgång, och ett klippkort för varje tjänst med ett klipp per lektion. Produkter dras från lagret när paketet säljs i kassan.",
   "Add item": "Lägg till",
   "Search passes, services and products": "Sök klippkort, tjänster och produkter",
-  "Nothing matches.": "Inget matchar."
+  "Nothing matches.": "Inget matchar.",
+  "Colour: {name}": "Färg: {name}",
+  "Marking colour": "Markeringsfärg",
+  "Mint": "Mint",
+  "White": "Vit",
+  "Yellow": "Gul",
+  "Red": "Röd",
+  "Blue": "Blå"
 }

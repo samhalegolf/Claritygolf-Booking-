@@ -4697,5 +4697,12 @@
   "Selling a bundle gives the client each pass inside it with its own credits, cover and expiry, and a pass for each service with a credit per lesson. Products leave stock when the bundle is sold at the till.": "Sprzedaż pakietu daje klientowi każdy zawarty karnet z własnymi kredytami, zakresem i terminem ważności oraz karnet za każdą usługę z jednym kredytem na lekcję. Produkty schodzą ze stanu, gdy pakiet zostanie sprzedany w kasie.",
   "Add item": "Dodaj pozycję",
   "Search passes, services and products": "Szukaj karnetów, usług i produktów",
-  "Nothing matches.": "Brak wyników."
+  "Nothing matches.": "Brak wyników.",
+  "Colour: {name}": "Kolor: {name}",
+  "Marking colour": "Kolor oznaczeń",
+  "Mint": "Miętowy",
+  "White": "Biały",
+  "Yellow": "Żółty",
+  "Red": "Czerwony",
+  "Blue": "Niebieski"
 }

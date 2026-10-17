@@ -4697,5 +4697,12 @@
   "Selling a bundle gives the client each pass inside it with its own credits, cover and expiry, and a pass for each service with a credit per lesson. Products leave stock when the bundle is sold at the till.": "セットを販売すると、お客様には含まれる各パスがそれぞれのクレジット・対象・有効期限付きで発行され、各サービスにはレッスン1回につき1クレジットのパスが発行されます。レジでセットを販売すると商品は在庫から差し引かれます。",
   "Add item": "項目を追加",
   "Search passes, services and products": "パス、サービス、商品を検索",
-  "Nothing matches.": "該当なし。"
+  "Nothing matches.": "該当なし。",
+  "Colour: {name}": "色: {name}",
+  "Marking colour": "マーキングの色",
+  "Mint": "ミント",
+  "White": "白",
+  "Yellow": "黄",
+  "Red": "赤",
+  "Blue": "青"
 }

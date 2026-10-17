@@ -4697,5 +4697,12 @@
   "Selling a bundle gives the client each pass inside it with its own credits, cover and expiry, and a pass for each service with a credit per lesson. Products leave stock when the bundle is sold at the till.": "Kun paketti myydään, asiakas saa jokaisen sen sarjakortin omine krediitteineen, kattavuuksineen ja voimassaoloineen sekä sarjakortin jokaisesta palvelusta, yksi krediitti tuntia kohden. Tuotteet vähennetään varastosta, kun paketti myydään kassalla.",
   "Add item": "Lisää tuote",
   "Search passes, services and products": "Hae sarjakortteja, palveluja ja tuotteita",
-  "Nothing matches.": "Ei osumia."
+  "Nothing matches.": "Ei osumia.",
+  "Colour: {name}": "Väri: {name}",
+  "Marking colour": "Merkintöjen väri",
+  "Mint": "Minttu",
+  "White": "Valkoinen",
+  "Yellow": "Keltainen",
+  "Red": "Punainen",
+  "Blue": "Sininen"
 }
