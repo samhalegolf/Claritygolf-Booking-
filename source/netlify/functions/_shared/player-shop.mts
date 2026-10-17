@@ -74,40 +74,60 @@ export function playerShopItems(services: unknown, currency: string): PlayerShop
     const format = text(entry?.lessonFormat, 40);
     if (format !== "package" && format !== "video-review") continue;
 
-    // A bundle sells the pass types it names, so what it covers and how many
-    // credits it brings are theirs. One whose parts are all gone sells nothing.
+    // A bundle's credits and cover are those of the passes it issues: each pass
+    // type's own, and a credit per unit for each service. Products issue no
+    // credits but still show in what it includes. One whose lines are all gone
+    // sells nothing.
     if (format === "package" && Array.isArray(entry?.bundleItems) && entry.bundleItems.length) {
-      const parts = (entry.bundleItems as Array<Record<string, unknown>>)
-        .map((line) => ({
-          part: services.find((candidate) => text((candidate as Record<string, unknown>)?.id, 120) === text(line?.passTypeId, 120)) as
-            | Record<string, unknown>
-            | undefined,
-          quantity: Math.max(1, Math.round(Number(line?.quantity) || 1)),
-        }))
-        .filter(({ part }) => part && text(part.lessonFormat, 40) === "package" && !Array.isArray(part.bundleItems));
-      if (!parts.length) continue;
-      const partCovers = parts.map(({ part }) => {
+      const find = (id: string) =>
+        services.find((candidate) => text((candidate as Record<string, unknown>)?.id, 120) === id) as
+          | Record<string, unknown>
+          | undefined;
+      const lines = (entry.bundleItems as Array<Record<string, unknown>>)
+        .map((line) => {
+          const kind = text(line?.kind, 20);
+          const id = text(line?.id, 160);
+          const part = kind === "product" ? undefined : find(id);
+          return { kind, id, part, name: text(part?.name ?? line?.name, 180), quantity: Math.max(1, Math.round(Number(line?.quantity) || 1)) };
+        })
+        .filter(({ kind, part, name }) =>
+          kind === "pass"
+            ? part && text(part.lessonFormat, 40) === "package" && !Array.isArray(part.bundleItems)
+            : kind === "service"
+              ? part && text(part.lessonFormat, 40) !== "package"
+              : kind === "product" && name,
+        );
+      if (!lines.length) continue;
+      const passes = lines.filter(({ kind }) => kind === "pass");
+      const partCovers = lines.map(({ kind, id, part }) => {
+        if (kind === "service") return [id];
+        if (kind !== "pass") return [];
         const listed = idList(part!.coversServiceIds);
         const single = text(part!.packageCoversServiceId, 120);
         return listed.length ? listed : single ? [single] : [];
       });
-      const bundleCoversAll = parts.some(({ part }) => part!.coversAllServices === true);
+      const bundleCoversAll = passes.some(({ part }) => part!.coversAllServices === true);
       items.push({
         serviceId,
         name: text(entry?.name, 180) || "Bundle",
         description: text(entry?.description, 300),
         price,
         currency: text(currency, 10) || "NZD",
-        credits: parts.reduce(
-          (sum, { part, quantity }) =>
-            sum + Math.max(1, Math.min(100, Math.round(Number(part!.packageAllowance) || 5))) * quantity,
+        credits: lines.reduce(
+          (sum, { kind, part, quantity }) =>
+            sum +
+            (kind === "pass"
+              ? Math.max(1, Math.min(100, Math.round(Number(part!.packageAllowance) || 5))) * quantity
+              : kind === "service"
+                ? quantity
+                : 0),
           0,
         ),
         coversServiceIds: bundleCoversAll ? [] : [...new Set(partCovers.flat())],
         coversAllServices: bundleCoversAll,
         kind: "package",
         crossRedeemable: false,
-        includes: parts.map(({ part, quantity }) => `${quantity} × ${text(part!.name, 180) || "Pass"}`),
+        includes: lines.map(({ name, quantity }) => `${quantity} × ${name || "Pass"}`),
       });
       continue;
     }

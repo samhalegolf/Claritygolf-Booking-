@@ -99,6 +99,7 @@ test("a package service is read as a pass template, coverage widened to a list",
       crossRedeemable: false,
       priceCents: null,
       bundleItems: [],
+      bundleServices: {},
     },
   ]);
 });
@@ -979,8 +980,8 @@ const BUNDLE = {
   lessonFormat: "package",
   price: 650,
   bundleItems: [
-    { passTypeId: "pass-lessons", quantity: 1 },
-    { passTypeId: "pass-review", quantity: 1 },
+    { kind: "pass", id: "pass-lessons", name: "5 x 1 Hour Lessons", quantity: 1 },
+    { kind: "pass", id: "pass-review", name: "Swing Review Credit", quantity: 1 },
   ],
 };
 const BUNDLE_CATALOGUE = [ONE_HOUR, REVIEW, LESSON_PASS, REVIEW_PASS, BUNDLE];
@@ -1037,8 +1038,8 @@ test("a bundle naming another bundle is refused before anything is written", asy
     name: "Nested",
     lessonFormat: "package",
     bundleItems: [
-      { passTypeId: "pass-review", quantity: 1 },
-      { passTypeId: "bundle-1", quantity: 1 },
+      { kind: "pass", id: "pass-review", quantity: 1 },
+      { kind: "pass", id: "bundle-1", quantity: 1 },
     ],
   };
 
@@ -1049,6 +1050,70 @@ test("a bundle naming another bundle is refused before anything is written", asy
       ACTOR,
     ),
     /another bundle/,
+  );
+  assert.equal(issued.filter((entry) => entry.text.startsWith("INSERT")).length, 0);
+});
+
+test("a bundle's service line issues a pass for just that service, and its product keeps its share", async (t) => {
+  const issued = fakeDatabase((text) =>
+    text.includes("FROM public.billing_products_services") ? [{ id: "glove", default_price: "40.00" }] : [],
+  );
+  t.after(() => setDatabaseForTests(null));
+  const mixed = {
+    id: "bundle-mixed",
+    name: "Starter Kit",
+    lessonFormat: "package",
+    price: 240,
+    bundleItems: [
+      { kind: "service", id: "lesson-60", name: "1 Hour Lesson", quantity: 1 },
+      { kind: "product", id: "glove", name: "Glove", quantity: 1 },
+    ],
+  };
+
+  await grantPass(
+    {
+      personId: "person-1",
+      templateServiceId: "bundle-mixed",
+      quantity: 2,
+      source: "clarity_pos",
+      sourceRef: "pos:7:0",
+      totalValueCents: 40000,
+      currency: "NZD",
+    },
+    passTemplatesFromServices([...BUNDLE_CATALOGUE, mixed]),
+    ACTOR,
+  );
+
+  const passes = issued.filter((entry) => entry.text.includes("INSERT INTO public.passes"));
+  assert.equal(passes.length, 1, "the glove issues no pass");
+  assert.equal(passes[0].values[3], "1 Hour Lesson");
+  assert.equal(passes[0].values[4], null, "a service pass has no pass type behind it");
+  assert.deepEqual(passes[0].values[5], ["lesson-60"]);
+  assert.equal(passes[0].values[8], "pos:7:0#lesson-60");
+
+  const allocations = issued.filter((entry) => entry.text.includes("INSERT INTO public.pass_allocations"));
+  assert.equal(allocations[0].values[3], 2, "two bundles: two lesson credits");
+  // $320 of lessons and $80 of gloves at list price share the $400 paid 80/20.
+  assert.equal(allocations[0].values[10], 32000);
+});
+
+test("a bundle naming a service that is gone is refused before anything is written", async (t) => {
+  const issued = fakeDatabase(() => []);
+  t.after(() => setDatabaseForTests(null));
+  const stale = {
+    id: "bundle-stale",
+    name: "Stale",
+    lessonFormat: "package",
+    bundleItems: [{ kind: "service", id: "lesson-gone", quantity: 1 }],
+  };
+
+  await assert.rejects(
+    grantPass(
+      { personId: "person-1", templateServiceId: "bundle-stale" },
+      passTemplatesFromServices([...BUNDLE_CATALOGUE, stale]),
+      ACTOR,
+    ),
+    /service that no longer exists/,
   );
   assert.equal(issued.filter((entry) => entry.text.startsWith("INSERT")).length, 0);
 });

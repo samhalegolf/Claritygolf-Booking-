@@ -126,7 +126,12 @@ async function listPassTypes(ctx: RouteContext) {
     credits: template.credits,
     covers_service_ids: template.coversServiceIds,
     price: template.priceCents === null ? null : { amount: template.priceCents, currency: catalog.currency },
-    includes: template.bundleItems.map((item) => ({ pass_type_id: item.passTypeId, quantity: item.quantity })),
+    includes: template.bundleItems.map((item) => ({
+      type: item.kind === "pass" ? "pass_type" : item.kind,
+      id: item.id,
+      name: item.name,
+      quantity: item.quantity,
+    })),
   }));
   return ok({ object: "list", data: types, has_more: false, next_cursor: null });
 }

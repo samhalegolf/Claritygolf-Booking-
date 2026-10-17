@@ -1,7 +1,7 @@
 // Billing's sections and groups: the sub-nav as data, and the names things
 // are called in it. Shared by the Billing screen, the invoice editor and the
 // Business Hub cards that link into a section.
-import { Plus, RefreshCw, Sparkles } from "lucide-react";
+import { Package, Plus, RefreshCw, Sparkles } from "lucide-react";
 import { t } from "../../lib/i18n";
 import {
   ClarityBookingPages,
@@ -37,6 +37,7 @@ export type BillingSection =
   | "passes-issue"
   | "passes-edit"
   | "passes-records"
+  | "bundles"
   | "reports"
   | "transactions"
   | "memberships"
@@ -79,6 +80,7 @@ export const BILLING_SECTION_NAV: Array<{
   { key: "passes-issue", label: t("Issue or Redeem Passes"), icon: Plus, group: "passes" },
   { key: "passes-edit", label: t("Create or Edit Passes"), icon: ClarityProducts, group: "passes" },
   { key: "passes-records", label: t("Pass Records"), icon: ClarityPassesCredits, group: "passes" },
+  { key: "bundles", label: t("Bundles"), icon: Package },
   { key: "transactions", label: t("Transaction History"), icon: ClarityPayments },
   { key: "memberships", label: t("Memberships"), icon: RefreshCw },
   { key: "rewards", label: t("Rewards"), icon: Sparkles },

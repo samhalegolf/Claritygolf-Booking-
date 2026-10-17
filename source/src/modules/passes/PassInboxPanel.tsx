@@ -34,6 +34,7 @@ import { ClarityAddClient, ClarityPassesCredits } from "../shared/ClarityIcons";
 
 import { Loading } from "../shared/Loading";
 import { t, tn, readerLocale } from "../../lib/i18n";
+import type { BundleItem } from "../services/serviceModel";
 
 /** What a sale looks like it is. "unknown" is a real answer, not a failure. */
 export type PassInboxKind = "pass" | "unknown";
@@ -97,8 +98,8 @@ export type PassInboxTemplate = {
   credits: number;
   /** The catalogue price, used when the external sale carried none. */
   priceCents: number | null;
-  /** Non-empty for a bundle, whose credits come from the pass types inside it. */
-  bundleItems?: Array<{ passTypeId: string; quantity: number }>;
+  /** Non-empty for a bundle, whose credits come from the passes it issues. */
+  bundleItems?: BundleItem[];
 };
 
 export type PassInboxPerson = { id: string; name: string };

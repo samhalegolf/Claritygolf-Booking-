@@ -74,7 +74,7 @@ export type Service = {
   passExpiryMonths?: number;
   /** Packages only: purchased units may fund other eligible services by value. */
   crossRedeemable?: boolean;
-  /** Bundles only: the pass types selling this one issues, and how many of each. */
+  /** Bundles only: what selling this one hands over, and how many of each. */
   bundleItems?: BundleItem[];
   /** Services only: may be funded by value from a cross-redeemable pass. */
   acceptsCrossRedemption?: boolean;
@@ -89,24 +89,29 @@ export type Service = {
   archived?: boolean;
 };
 
-export type BundleItem = { passTypeId: string; quantity: number };
+/** What a bundle line is: a pass type, a service, or a product from Billing. */
+export type BundleItemKind = "pass" | "service" | "product";
+export type BundleItem = { kind: BundleItemKind; id: string; name: string; quantity: number };
 
 /** A bundle's lines, cleaned the way the server cleans them (cleanBundleItems in _shared/passes.mts). */
 export function cleanBundleItems(value: unknown): BundleItem[] {
   if (!Array.isArray(value)) return [];
   const items: BundleItem[] = [];
   for (const entry of value) {
-    const passTypeId = typeof entry?.passTypeId === "string" ? entry.passTypeId.trim().slice(0, 120) : "";
-    if (!passTypeId || items.some((item) => item.passTypeId === passTypeId)) continue;
+    const kind = entry?.kind;
+    if (kind !== "pass" && kind !== "service" && kind !== "product") continue;
+    const id = typeof entry?.id === "string" ? entry.id.trim().slice(0, 160) : "";
+    if (!id || items.some((item) => item.kind === kind && item.id === id)) continue;
     const quantity = Math.round(Number(entry?.quantity));
     if (!Number.isFinite(quantity) || quantity < 1) continue;
-    items.push({ passTypeId, quantity: Math.min(20, quantity) });
+    const name = typeof entry?.name === "string" ? entry.name.trim().slice(0, 180) : "";
+    items.push({ kind, id, name, quantity: Math.min(20, quantity) });
     if (items.length >= 12) break;
   }
   return items;
 }
 
-/** A bundle is a package that sells other pass types rather than credits of its own. */
+/** A bundle is a package that sells other things rather than credits of its own. */
 export function isBundle(service?: Partial<Service> | null) {
   return service?.lessonFormat === "package" && cleanBundleItems(service.bundleItems).length > 0;
 }

@@ -152,12 +152,20 @@ export type PassGrantInput = {
   quantity?: unknown;
 };
 
-/** One line of a bundle: a pass type, and how many of it the bundle holds. */
+/**
+ * One line of a bundle. A pass type issues that pass; a service issues a pass
+ * for just that service, a credit per unit; a product is handed over at the
+ * sale (the till takes it off stock) and issues nothing. `name` is what the
+ * line was called when the bundle was saved, for showing it where the product
+ * table is out of reach.
+ */
+export type BundleItemKind = "pass" | "service" | "product";
 export type BundleItem = {
-  passTypeId: string;
+  kind: BundleItemKind;
+  id: string;
+  name: string;
   quantity: number;
 };
-
 /** What a `lessonFormat: "package"` service says about the pass it sells. */
 export type PassTemplate = {
   serviceId: string;
@@ -171,11 +179,13 @@ export type PassTemplate = {
   crossRedeemable: boolean;
   priceCents: number | null;
   /**
-   * Non-empty when this is a bundle: selling it issues each of these pass
-   * types rather than a pass of its own, so its own credits and coverage mean
+   * Non-empty when this is a bundle: selling it issues what each line says
+   * rather than a pass of its own, so its own credits and coverage mean
    * nothing.
    */
   bundleItems: BundleItem[];
+  /** Bundles only: price and name of each service line, read from the catalogue. */
+  bundleServices: Record<string, { name: string; priceCents: number }>;
 };
 
 export type PassActor = {
@@ -241,19 +251,26 @@ export function passCoversService(
 }
 
 /**
- * A bundle's lines, cleaned: each pass type once, a whole quantity of 1-20,
- * at most twelve lines. Anything unreadable is dropped rather than guessed at.
+ * A bundle's lines, cleaned: each item once, a whole quantity of 1-20, at
+ * most twelve lines. Anything unreadable is dropped rather than guessed at.
  */
 export function cleanBundleItems(value: unknown): BundleItem[] {
   if (!Array.isArray(value)) return [];
   const items: BundleItem[] = [];
   for (const entry of value) {
     const record = entry as Record<string, unknown>;
-    const passTypeId = cleanString(record?.passTypeId, "", 120);
-    if (!passTypeId || items.some((item) => item.passTypeId === passTypeId)) continue;
+    const kind = record?.kind;
+    if (kind !== "pass" && kind !== "service" && kind !== "product") continue;
+    const id = cleanString(record?.id, "", 160);
+    if (!id || items.some((item) => item.kind === kind && item.id === id)) continue;
     const quantity = Math.round(Number(record?.quantity));
     if (!Number.isFinite(quantity) || quantity < 1) continue;
-    items.push({ passTypeId, quantity: Math.min(MAX_BUNDLE_QUANTITY, quantity) });
+    items.push({
+      kind,
+      id,
+      name: cleanString(record?.name, "", 180),
+      quantity: Math.min(MAX_BUNDLE_QUANTITY, quantity),
+    });
     if (items.length >= MAX_BUNDLE_ITEMS) break;
   }
   return items;
@@ -288,6 +305,19 @@ export function passTemplatesFromServices(services: unknown): PassTemplate[] {
     if (!isPackage) continue;
     const covers = idList(entry?.coversServiceIds);
     const single = cleanString(entry?.packageCoversServiceId, "", 120);
+    const bundleItems = cleanBundleItems(entry?.bundleItems);
+    const bundleServices: PassTemplate["bundleServices"] = {};
+    for (const item of bundleItems) {
+      if (item.kind !== "service") continue;
+      const lesson = services.find((candidate) => cleanString((candidate as Record<string, unknown>)?.id, "", 120) === item.id) as
+        | Record<string, unknown>
+        | undefined;
+      if (!lesson || lesson.lessonFormat === "package") continue;
+      bundleServices[item.id] = {
+        name: cleanString(lesson.name, "", 180) || item.name || "Lesson",
+        priceCents: Number.isFinite(Number(lesson.price)) ? Math.max(0, Math.round(Number(lesson.price) * 100)) : 0,
+      };
+    }
     templates.push({
       serviceId,
       name: cleanString(entry?.name, "", 180) || "Pass",
@@ -299,14 +329,15 @@ export function passTemplatesFromServices(services: unknown): PassTemplate[] {
       priceCents: Number.isFinite(Number(entry?.price))
         ? Math.max(0, Math.round(Number(entry.price) * 100))
         : null,
-      bundleItems: cleanBundleItems(entry?.bundleItems),
+      bundleItems,
+      bundleServices,
     });
   }
   return templates;
 }
 
 /**
- * Share a bundle's price out across the passes it issues.
+ * Share a bundle's price out across its lines.
  *
  * Each pass needs its own value so cross-redemption and refunds can price its
  * credits, and the shares must add back to exactly what was paid. They follow
@@ -939,18 +970,19 @@ export async function grantPass(
 }
 
 /**
- * Issue a bundle: each of its pass types, as if each had been sold on its own.
+ * Issue a bundle: each pass type in it as if sold on its own, and a pass for
+ * each service in it, covering only that service, a credit per unit.
  *
- * A bundle is not a pass. It is a way of selling several pass types at once,
- * so what the person ends up holding is exactly what they would hold had the
- * coach rung each one up separately -- the same coverage, expiry and top-up
- * behaviour, spent through the same checkout. Nothing downstream has to know
- * bundles exist.
+ * A bundle is not a pass. What the person ends up holding is exactly what they
+ * would hold had the coach rung each line up separately -- the same coverage,
+ * expiry and top-up behaviour, spent through the same checkout. Products issue
+ * nothing here (the till moves their stock); they only keep their share of the
+ * price, so the passes are not valued at money paid for a glove.
  *
- * Every part is worked out before any is written, so a bundle naming a pass
- * type that is gone, or another bundle, is refused whole rather than issued
- * half. Each part carries its own reference (`<ref>#<pass type>`), which keeps
- * a retried webhook or a double-tapped Mark paid idempotent part by part.
+ * Every part is worked out before any is written, so a bundle naming something
+ * that is gone, or another bundle, is refused whole rather than issued half.
+ * Each part carries its own reference (`<ref>#<line id>`), which keeps a
+ * retried webhook or a double-tapped Mark paid idempotent part by part.
  */
 async function grantBundle(
   bundle: PassTemplate,
@@ -960,36 +992,49 @@ async function grantBundle(
 ): Promise<{ passes: PassView[]; merged: boolean; duplicate: boolean; passId: string }> {
   const quantity = Math.max(1, Math.round(Number(input?.quantity) || 1));
   const parts = bundle.bundleItems.map((item) => {
-    const part = templates.find((entry) => entry.serviceId === item.passTypeId);
-    if (!part) fail(`${bundle.name} includes a pass type that no longer exists.`, 404, "unknown_template");
-    if (part.bundleItems.length) fail(`${bundle.name} cannot include another bundle.`);
-    return { template: part, count: item.quantity * quantity };
+    const count = item.quantity * quantity;
+    if (item.kind === "pass") {
+      const part = templates.find((entry) => entry.serviceId === item.id);
+      if (!part) fail(`${bundle.name} includes a pass type that no longer exists.`, 404, "unknown_template");
+      if (part.bundleItems.length) fail(`${bundle.name} cannot include another bundle.`);
+      return { item, count, weight: part.priceCents ? part.priceCents * count : 0 };
+    }
+    if (item.kind === "service") {
+      const lesson = bundle.bundleServices[item.id];
+      if (!lesson) fail(`${bundle.name} includes a service that no longer exists.`, 404, "unknown_template");
+      return { item, count, weight: lesson.priceCents * count };
+    }
+    return { item, count, weight: 0 };
   });
 
   const totalValueCents = cleanCents(input?.totalValueCents);
-  const shares =
-    totalValueCents === null
-      ? null
-      : splitBundleValue(
-          totalValueCents,
-          parts.map(({ template, count }) =>
-            template.priceCents ? template.priceCents * count : 0,
-          ),
-        );
+  const productIds = parts.filter(({ item }) => item.kind === "product").map(({ item }) => item.id);
+  if (totalValueCents !== null && productIds.length) {
+    const prices = await productPricesCents(actor.accountId, productIds);
+    for (const part of parts) {
+      if (part.item.kind === "product") part.weight = (prices.get(part.item.id) || 0) * part.count;
+    }
+  }
+  const shares = totalValueCents === null ? null : splitBundleValue(totalValueCents, parts.map((part) => part.weight));
   const sourceRef = cleanString(input?.sourceRef, "", 160);
   const note = [cleanString(input?.note, "", 400), `Part of ${bundle.name}`].filter(Boolean).join(" · ");
 
-  const grants: PassGrantInput[] = parts.map(({ template, count }, index) => ({
-    personId: input?.personId,
-    templateServiceId: template.serviceId,
-    quantity: count,
-    note,
-    merge: input?.merge,
-    source: input?.source,
-    sourceRef: sourceRef ? `${sourceRef}#${template.serviceId}` : "",
-    allowUnassigned: input?.allowUnassigned,
-    ...(shares ? { totalValueCents: shares[index], currency: input?.currency } : {}),
-  }));
+  const grants: PassGrantInput[] = [];
+  parts.forEach(({ item, count }, index) => {
+    if (item.kind === "product") return;
+    grants.push({
+      personId: input?.personId,
+      ...(item.kind === "pass"
+        ? { templateServiceId: item.id, quantity: count }
+        : { name: bundle.bundleServices[item.id].name, coversServiceIds: [item.id], credits: count }),
+      note,
+      merge: input?.merge,
+      source: input?.source,
+      sourceRef: sourceRef ? `${sourceRef}#${item.id}` : "",
+      allowUnassigned: input?.allowUnassigned,
+      ...(shares ? { totalValueCents: shares[index], currency: input?.currency } : {}),
+    });
+  });
   // Refuse the whole bundle before writing any of it.
   for (const grant of grants) normaliseGrant(grant, templates);
 
@@ -1005,6 +1050,21 @@ async function grantBundle(
     passes = result.passes;
   }
   return { passes, merged, duplicate, passId };
+}
+
+/** List prices of a bundle's products, in cents, for sharing out its price. */
+async function productPricesCents(accountId: string, ids: string[]) {
+  const rows = await db().sql`
+    SELECT id, default_price
+    FROM public.billing_products_services
+    WHERE account_id = ${accountId} AND id = ANY(${ids})
+  `;
+  return new Map(
+    (rows as Record<string, unknown>[]).map((row) => [
+      String(row.id),
+      Math.max(0, Math.round((Number(row.default_price) || 0) * 100)),
+    ]),
+  );
 }
 
 /**
