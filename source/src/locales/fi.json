@@ -4708,5 +4708,12 @@
   "Share": "Jaa",
   "Load a video before exporting.": "Lataa video ennen vientiä.",
   "This browser can't create video files. Try the latest Chrome or Safari.": "Tämä selain ei pysty luomaan videotiedostoja. Kokeile uusinta Chromea tai Safaria.",
-  "This video can't be read for export.": "Tätä videota ei voi lukea vientiä varten."
+  "This video can't be read for export.": "Tätä videota ei voi lukea vientiä varten.",
+  "Colour: {name}": "Väri: {name}",
+  "Marking colour": "Merkintöjen väri",
+  "Mint": "Minttu",
+  "White": "Valkoinen",
+  "Yellow": "Keltainen",
+  "Red": "Punainen",
+  "Blue": "Sininen"
 }

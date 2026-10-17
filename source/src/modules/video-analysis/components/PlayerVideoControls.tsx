@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { DrawingTool } from "../models/Drawing";
+import { DRAWING_COLORS, DrawingTool } from "../models/Drawing";
 import type { PhaseDetectionState } from "../hooks/useSwingPhaseMarkers";
 import {
   IconFile,
@@ -109,6 +109,9 @@ export type PlayerToolRailProps = {
   open: boolean;
   selectedTool: DrawingTool;
   onToolChange: (tool: DrawingTool) => void;
+  /** The colour new markings get, and the one a selected marking is repainted in. */
+  strokeColor: string;
+  onStrokeColorChange: (color: string) => void;
   onUndo: () => void;
   canUndo: boolean;
   onClear: () => void;
@@ -125,15 +128,18 @@ export type PlayerToolRailProps = {
 /**
  * The rail, tucked against the edge of the video.
  *
- * It stays mounted while closed and slides out of frame instead: a rail that
- * unmounts would drop the tool you had selected back to the default every
- * time you looked at the swing without it. It is also an overlay rather than
- * a column in the layout, so opening it never resizes the video underneath.
+ * It stays mounted while closed and slides out of frame instead, so opening
+ * it costs nothing and never flashes. Closing it puts the tool down (the
+ * workspace does that): a tool the rail is not there to show is a tool the
+ * coach cannot see they are holding. It is also an overlay rather than a
+ * column in the layout, so opening it never resizes the video underneath.
  */
 export function PlayerToolRail({
   open,
   selectedTool,
   onToolChange,
+  strokeColor,
+  onStrokeColorChange,
   onUndo,
   canUndo,
   onClear,
@@ -142,6 +148,14 @@ export function PlayerToolRail({
   onCapture,
   captureTooltip = "Screenshot (Space)",
 }: PlayerToolRailProps) {
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  // A palette left open behind a closed rail would be the first thing seen
+  // when the rail comes back, with nothing having asked for it.
+  useEffect(() => {
+    if (!open) setPaletteOpen(false);
+  }, [open]);
+  const currentColor =
+    DRAWING_COLORS.find((entry) => entry.value === strokeColor) ?? DRAWING_COLORS[0];
   return (
     <div
       className={`va-tool-rail${open ? " is-open" : ""}`}
@@ -157,12 +171,48 @@ export function PlayerToolRail({
           className={`va-rail-btn${selectedTool === tool.id ? " is-active" : ""}`}
           aria-label={`${tool.label} tool`}
           aria-pressed={selectedTool === tool.id}
-          onClick={() => onToolChange(tool.id)}
+          // Drawing tools stay in hand once picked, so the lit button is also
+          // the way to put one down: tap it again and the hand is empty.
+          onClick={() =>
+            onToolChange(selectedTool === tool.id && tool.id !== "select" ? "select" : tool.id)
+          }
         >
           {tool.icon}
         </button>
       ))}
       <span className="va-rail-rule" aria-hidden="true" />
+      <div className="va-rail-color">
+        <button
+          type="button"
+          className={`va-rail-btn${paletteOpen ? " is-active" : ""}`}
+          aria-label={t("Colour: {name}", { name: currentColor.label })}
+          aria-expanded={paletteOpen}
+          style={{ color: currentColor.value }}
+          onClick={() => setPaletteOpen((previous) => !previous)}
+        >
+          <span className="va-rail-swatch" aria-hidden="true" />
+        </button>
+        {paletteOpen ? (
+          <div className="va-color-palette" role="group" aria-label={t("Marking colour")}>
+            {DRAWING_COLORS.map((entry) => (
+              <button
+                key={entry.value}
+                type="button"
+                className={`va-rail-btn${entry.value === strokeColor ? " is-active" : ""}`}
+                aria-label={entry.label}
+                aria-pressed={entry.value === strokeColor}
+                style={{ color: entry.value }}
+                onClick={() => {
+                  onStrokeColorChange(entry.value);
+                  setPaletteOpen(false);
+                }}
+              >
+                <span className="va-rail-swatch" aria-hidden="true" />
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
       <button
         type="button"
         className="va-rail-btn"

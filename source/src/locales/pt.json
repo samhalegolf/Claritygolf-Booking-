@@ -4708,5 +4708,12 @@
   "Share": "Partilhar",
   "Load a video before exporting.": "Carregue um vídeo antes de exportar.",
   "This browser can't create video files. Try the latest Chrome or Safari.": "Este navegador não consegue criar ficheiros de vídeo. Experimente a versão mais recente do Chrome ou Safari.",
-  "This video can't be read for export.": "Este vídeo não pode ser lido para exportação."
+  "This video can't be read for export.": "Este vídeo não pode ser lido para exportação.",
+  "Colour: {name}": "Cor: {name}",
+  "Marking colour": "Cor das marcações",
+  "Mint": "Menta",
+  "White": "Branco",
+  "Yellow": "Amarelo",
+  "Red": "Vermelho",
+  "Blue": "Azul"
 }

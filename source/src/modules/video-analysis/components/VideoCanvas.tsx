@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { DrawingObject } from "../models/Drawing";
-import { Dimensions } from "../engines/DrawingEngine";
+import { DrawingAngle, DrawingObject } from "../models/Drawing";
+import { Dimensions, DrawingEngine } from "../engines/DrawingEngine";
 import { DrawingPoint } from "../models/Drawing";
 import { t } from "../../../lib/i18n";
 import { getVideoVisualPreset, type VideoVisualPresetId } from "../utils/videoVisualPreset";
@@ -15,8 +15,10 @@ export interface VideoCanvasProps {
   draftObject: DrawingObject | null;
   /** The one object drawn with its handles: what a press would pick up. */
   activeObjectId: string | null;
-  /** Draws the grab cursor while the pointer is over something movable. */
+  /** Draws the grab cursor while the select tool is over something movable. */
   hoverGrabbable?: boolean;
+  /** Draws the crosshair: a press here starts a shape, whatever is under it. */
+  drawingToolActive?: boolean;
   /**
    * The free capture box, in the same normalized space as the drawings.
    *
@@ -56,8 +58,9 @@ const toScreen = (point: DrawingPoint, dimensions: Dimensions) => ({
 });
 
 const HANDLE_VISUAL_RADIUS = 5.4;
-const HANDLE_PICK_RADIUS = 11;
 const SELECT_OUTLINE = 3;
+const ANGLE_ARC_RADIUS = 20;
+const ANGLE_LABEL_OFFSET = 34;
 const TRASH_ZONE_SIZE = 64;
 const TRASH_ZONE_MARGIN = 14;
 const TRASH_HIT_PADDING = 20;
@@ -81,26 +84,71 @@ const HandlePoint = ({
   point: { x: number; y: number };
   color: string;
 }) => (
-  <>
-    <circle
-      cx={point.x}
-      cy={point.y}
-      r={HANDLE_PICK_RADIUS}
-      fill="transparent"
-      stroke="transparent"
-      className="drawing-handle-hit"
-    />
-    <circle
-      cx={point.x}
-      cy={point.y}
-      r={HANDLE_VISUAL_RADIUS}
-      fill="white"
-      stroke={color}
-      strokeWidth={1.2}
-      className="drawing-handle"
-    />
-  </>
+  <circle
+    cx={point.x}
+    cy={point.y}
+    r={HANDLE_VISUAL_RADIUS}
+    fill="white"
+    stroke={color}
+    strokeWidth={1.2}
+    className="drawing-handle"
+  />
 );
+
+/**
+ * The number an angle is for: a small arc in the corner and the degrees just
+ * beyond it, on the bisector so the label sits inside the angle rather than
+ * on either arm. Nothing is drawn until both arms point somewhere.
+ */
+const AngleReadout = ({
+  angle,
+  dimensions,
+}: {
+  angle: DrawingAngle;
+  dimensions: Dimensions;
+}) => {
+  const degrees = DrawingEngine.angleDegrees(angle, dimensions);
+  if (degrees === null) return null;
+  const vertex = toScreen({ x: angle.x1, y: angle.y1 }, dimensions);
+  const a = toScreen({ x: angle.x2, y: angle.y2 }, dimensions);
+  const b = toScreen({ x: angle.x3, y: angle.y3 }, dimensions);
+  const la = Math.hypot(a.x - vertex.x, a.y - vertex.y);
+  const lb = Math.hypot(b.x - vertex.x, b.y - vertex.y);
+  const ua = { x: (a.x - vertex.x) / la, y: (a.y - vertex.y) / la };
+  const ub = { x: (b.x - vertex.x) / lb, y: (b.y - vertex.y) / lb };
+  // Bisector of the two unit vectors. Arms pointing opposite ways have none,
+  // so fall back to the normal of the first arm.
+  let bx = ua.x + ub.x;
+  let by = ua.y + ub.y;
+  const bl = Math.hypot(bx, by);
+  if (bl < 0.01) {
+    bx = -ua.y;
+    by = ua.x;
+  } else {
+    bx /= bl;
+    by /= bl;
+  }
+  // Short way round from arm A to arm B. SVG's y runs down, so a positive
+  // cross product is a clockwise sweep.
+  const sweep = ua.x * ub.y - ua.y * ub.x > 0 ? 1 : 0;
+  const arc = `M ${vertex.x + ua.x * ANGLE_ARC_RADIUS} ${vertex.y + ua.y * ANGLE_ARC_RADIUS} A ${ANGLE_ARC_RADIUS} ${ANGLE_ARC_RADIUS} 0 0 ${sweep} ${vertex.x + ub.x * ANGLE_ARC_RADIUS} ${vertex.y + ub.y * ANGLE_ARC_RADIUS}`;
+  const label = { x: vertex.x + bx * ANGLE_LABEL_OFFSET, y: vertex.y + by * ANGLE_LABEL_OFFSET };
+  return (
+    <>
+      <path d={arc} fill="none" stroke={angle.color} strokeWidth={1.2} opacity={angle.opacity} />
+      <text
+        x={label.x}
+        y={label.y}
+        className="drawing-angle-readout"
+        fill={angle.color}
+        textAnchor="middle"
+        dominantBaseline="middle"
+      >
+        {`${Math.round(degrees)}°`}
+      </text>
+    </>
+  );
+};
 
 export function VideoCanvas({
   sourceUrl,
@@ -111,6 +159,7 @@ export function VideoCanvas({
   draftObject,
   activeObjectId,
   hoverGrabbable = false,
+  drawingToolActive = false,
   captureBox = null,
   draggedObjectId,
   onTrashDrop,
@@ -319,7 +368,9 @@ export function VideoCanvas({
 
   return (
     <div
-      className={`video-frame${hoverGrabbable ? " is-grabbable" : ""}`}
+      className={`video-frame${hoverGrabbable ? " is-grabbable" : ""}${
+        drawingToolActive ? " is-drawing" : ""
+      }`}
       ref={overlayRef}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
@@ -427,6 +478,7 @@ export function VideoCanvas({
                   ) : null}
                   <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke={obj.color} strokeWidth={obj.strokeWidth} opacity={obj.opacity} />
                   <line x1={p1.x} y1={p1.y} x2={p3.x} y2={p3.y} stroke={obj.color} strokeWidth={obj.strokeWidth} opacity={obj.opacity} />
+                  <AngleReadout angle={obj} dimensions={overlayDimensions} />
                   {isSelected && (
                     <>
                       <HandlePoint point={p1} color={obj.color} />

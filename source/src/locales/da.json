@@ -4708,5 +4708,12 @@
   "Share": "Del",
   "Load a video before exporting.": "Indlæs en video, før du eksporterer.",
   "This browser can't create video files. Try the latest Chrome or Safari.": "Denne browser kan ikke lave videofiler. Prøv den nyeste Chrome eller Safari.",
-  "This video can't be read for export.": "Denne video kan ikke læses til eksport."
+  "This video can't be read for export.": "Denne video kan ikke læses til eksport.",
+  "Colour: {name}": "Farve: {name}",
+  "Marking colour": "Markeringsfarve",
+  "Mint": "Mint",
+  "White": "Hvid",
+  "Yellow": "Gul",
+  "Red": "Rød",
+  "Blue": "Blå"
 }

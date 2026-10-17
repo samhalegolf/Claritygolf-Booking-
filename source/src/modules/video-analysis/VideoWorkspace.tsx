@@ -113,7 +113,7 @@ import {
   type AnalysisRecording,
 } from "./utils/analysisRecorder";
 import { PlayerVideo } from "./models/Video";
-import { DrawingTool } from "./models/Drawing";
+import { DEFAULT_DRAWING_COLOR, DrawingTool } from "./models/Drawing";
 import { TimelineMarker } from "./models/Timeline";
 import { activeLocale } from "../../lib/activeCountry";
 import { t } from "../../lib/i18n";
@@ -986,15 +986,21 @@ export function VideoWorkspace({
     ? rightStore.analysis.markers
     : rightFallbackMarkers;
 
+  // One colour in hand for both panels: it is a preference, not a per-clip
+  // setting, and swapping panels should not swap pens.
+  const [strokeColor, setStrokeColor] = useState(DEFAULT_DRAWING_COLOR);
+
   const leftDrawing = useDrawing({
     initialObjects: leftStore.analysis.drawings,
     videoDimensions: leftOverlayDimensions,
+    strokeColor,
     onChange: leftStore.setDrawings,
   });
 
   const rightDrawing = useDrawing({
     initialObjects: rightStore.analysis.drawings,
     videoDimensions: rightOverlayDimensions,
+    strokeColor,
     onChange: rightStore.setDrawings,
   });
 
@@ -1301,6 +1307,17 @@ export function VideoWorkspace({
     leftDrawing.setTool(tool);
     rightDrawing.setTool(tool);
   };
+
+  // The tool follows the coach through a clip -- step a frame, draw, step
+  // again -- but not into the next one. A different swing starts empty-handed.
+  const leftSetTool = leftDrawing.setTool;
+  const rightSetTool = rightDrawing.setTool;
+  useEffect(() => {
+    leftSetTool("select");
+  }, [leftSetTool, playerVideoLeft?.id]);
+  useEffect(() => {
+    rightSetTool("select");
+  }, [rightSetTool, playerVideoRight?.id]);
 
   const onSourceLoad = useCallback(
     (side: ComparisonSide) => {
@@ -2092,7 +2109,7 @@ export function VideoWorkspace({
       const drawing = side === "left" ? leftDrawing : rightDrawing;
       // Nothing selected, nothing under the press, no tool in hand: this is a
       // box being drawn round something, not a shape.
-      if (canDragCaptureBox && drawing.selectedTool === "select" && !drawing.hitTest(point)) {
+      if (canDragCaptureBox && drawing.selectedTool === "select" && !drawing.hitTest(point, meta)) {
         setActiveSideInCompare(side);
         drawing.selectObject(null);
         const overlay = side === "left" ? leftOverlayDimensions : rightOverlayDimensions;
@@ -2377,7 +2394,9 @@ export function VideoWorkspace({
       discardSnapshotDraft();
       return;
     }
-    if (activeDrawing.isDrawingActionActive) {
+    // Drawing tools stay in hand once picked, so a tool with nothing in
+    // progress is still a state Back can step out of.
+    if (activeDrawing.isDrawingActionActive || activeDrawing.selectedTool !== "select") {
       activeDrawing.cancel();
       return;
     }
@@ -4176,6 +4195,7 @@ export function VideoWorkspace({
             draftObject={drawingState.draftObject}
             activeObjectId={drawingState.activeObjectId}
             hoverGrabbable={drawingState.hoverGrabbable}
+            drawingToolActive={drawingState.selectedTool !== "select"}
             captureBox={captureBox && captureBox.side === side ? captureBox.rect : null}
             draggedObjectId={drawingState.isObjectDragging ? drawingState.draggingObjectId : null}
             onTrashDrop={(objectId) => {
@@ -4233,12 +4253,26 @@ export function VideoWorkspace({
             <>
               <PlayerToolRailToggle
                 open={toolRailOpen}
-                onToggle={() => setToolRailOpen((previous) => !previous)}
+                onToggle={() => {
+                  // A rail slid out of sight must not leave a drawing tool in
+                  // hand: the tool's only indicator would be gone, and the
+                  // next press on the video would draw with nothing to say so.
+                  if (toolRailOpen) {
+                    updateActiveDrawingTool("select");
+                  }
+                  setToolRailOpen(!toolRailOpen);
+                }}
               />
               <PlayerToolRail
                 open={toolRailOpen}
                 selectedTool={activeDrawing.selectedTool}
                 onToolChange={updateActiveDrawingTool}
+                strokeColor={strokeColor}
+                onStrokeColorChange={(color) => {
+                  setStrokeColor(color);
+                  // With a shape in hand, picking a colour paints it too.
+                  activeDrawing.recolorSelected(color);
+                }}
                 onUndo={activeDrawing.undo}
                 canUndo={activeDrawing.canUndo}
                 onClear={clearActiveDrawing}

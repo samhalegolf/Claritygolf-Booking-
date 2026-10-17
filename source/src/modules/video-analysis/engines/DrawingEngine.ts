@@ -1,5 +1,6 @@
 import { createId } from "../utils/frameMath";
 import {
+  DEFAULT_DRAWING_COLOR,
   DrawingHandle,
   DrawingLine,
   DrawingAngle,
@@ -16,10 +17,8 @@ export interface Dimensions {
   height: number;
 }
 
-const DEFAULT_STROKE = "#9be8ba";
-
 const strokeDefault: Omit<DrawingObjectBase, "id" | "type" | "createdAt" | "updatedAt"> = {
-  color: DEFAULT_STROKE,
+  color: DEFAULT_DRAWING_COLOR,
   strokeWidth: 2.4,
   opacity: 1,
   layer: 1,
@@ -62,20 +61,42 @@ const updateTimestamp = (object: DrawingObject, now: string) => ({
   ...object,
   updatedAt: now,
 });
-const HANDLE_TOLERANCE_PX = 10;
-const MOVE_BODY_TOLERANCE_PX = 6;
 const CIRCLE_MOVE_TOLERANCE = 0.22;
+// In normalized picture units: about 3px of travel on a 1000px wide frame.
+const MIN_DRAFT_LENGTH = 0.003;
+
+/**
+ * How close a press has to land to pick something up, in pixels.
+ *
+ * A fingertip covers far more of the picture than a cursor does and cannot
+ * see what is under it, so it gets roughly double the reach: a handle can be
+ * found by feel, and a tap meant for a line does not have to be pixel-exact.
+ */
+export interface HitReach {
+  /** Around an endpoint, vertex or size handle. */
+  handle: number;
+  /** Either side of a line body or pen stroke. */
+  body: number;
+}
+
+export const MOUSE_REACH: HitReach = { handle: 10, body: 6 };
+export const TOUCH_REACH: HitReach = { handle: 22, body: 12 };
+
+export const hitReachFor = (pointerType?: string): HitReach =>
+  pointerType === "touch" ? TOUCH_REACH : MOUSE_REACH;
 
 export class DrawingEngine {
   static createObject(
     tool: Exclude<DrawingTool, "select">,
     startPoint: DrawingPoint,
-    dimensions: Dimensions
+    dimensions: Dimensions,
+    color: string = DEFAULT_DRAWING_COLOR
   ): DrawingObject {
     const normalized = toNormalized(startPoint, dimensions);
     const now = new Date().toISOString();
     const base: Omit<DrawingObjectBase, "type" | "id"> = {
       ...strokeDefault,
+      color,
       opacity: 1,
       createdAt: now,
       updatedAt: now,
@@ -154,13 +175,14 @@ export class DrawingEngine {
       );
     }
     if (draft.type === "angle") {
+      // Drawing an angle starts as drawing a line: the first arm. The second
+      // arm is not placed yet and stays at the vertex, where it has no length
+      // and so no reading.
       return updateTimestamp(
         {
           ...draft,
           x2: normalized.x,
           y2: normalized.y,
-          x3: normalized.x + 0.06,
-          y3: normalized.y + 0.06,
           updatedAt: now,
         } as DrawingAngle,
         now
@@ -192,10 +214,73 @@ export class DrawingEngine {
     return draft;
   }
 
+  /**
+   * Whether a release would leave something worth keeping. A press that never
+   * travelled makes a shape with no size: invisible, undoable only by someone
+   * who knows it is there, and saved with the analysis all the same.
+   */
   static canFinishDraft(draft: DrawingObject): boolean {
     if (draft.type === "pen") return draft.points.length > 1;
     if (draft.type === "circle") return draft.rx > 0.002 && draft.ry > 0.002;
-    return true;
+    if (draft.type === "angle") {
+      return (
+        Math.hypot(draft.x2 - draft.x1, draft.y2 - draft.y1) > MIN_DRAFT_LENGTH &&
+        Math.hypot(draft.x3 - draft.x1, draft.y3 - draft.y1) > MIN_DRAFT_LENGTH
+      );
+    }
+    return Math.hypot(draft.x2 - draft.x1, draft.y2 - draft.y1) > MIN_DRAFT_LENGTH;
+  }
+
+  /** Whether the first arm has been drawn far enough to give the angle a vertex and a direction. */
+  static canOpenAngle(draft: DrawingAngle): boolean {
+    return Math.hypot(draft.x2 - draft.x1, draft.y2 - draft.y1) > MIN_DRAFT_LENGTH;
+  }
+
+  /**
+   * The first arm is down; stand the second one up so there is an angle to
+   * see and to take hold of. It starts square to the first arm, on screen
+   * rather than in normalized units, so it looks square whatever the
+   * picture's shape. A cursor overrides it on the next movement; a finger
+   * on the next press.
+   */
+  static openAngleSecondArm(draft: DrawingAngle, dimensions: Dimensions): DrawingAngle {
+    const vertex = toScreen({ x: draft.x1, y: draft.y1 }, dimensions);
+    const first = toScreen({ x: draft.x2, y: draft.y2 }, dimensions);
+    const dx = first.x - vertex.x;
+    const dy = first.y - vertex.y;
+    const second = toNormalized({ x: vertex.x - dy, y: vertex.y + dx }, dimensions);
+    const now = new Date().toISOString();
+    return { ...draft, x3: second.x, y3: second.y, updatedAt: now };
+  }
+
+  static updateAngleSecondArm(
+    draft: DrawingAngle,
+    cursor: DrawingPoint,
+    dimensions: Dimensions
+  ): DrawingAngle {
+    const point = toNormalized(cursor, dimensions);
+    const now = new Date().toISOString();
+    return { ...draft, x3: point.x, y3: point.y, updatedAt: now };
+  }
+
+  /**
+   * The angle between the two arms at the vertex, in degrees from 0 to 180,
+   * measured on screen so a 90 reads as a right angle whatever the picture's
+   * aspect. Null while either arm is too short to point anywhere.
+   */
+  static angleDegrees(angle: DrawingAngle, dimensions: Dimensions): number | null {
+    const vertex = toScreen({ x: angle.x1, y: angle.y1 }, dimensions);
+    const a = toScreen({ x: angle.x2, y: angle.y2 }, dimensions);
+    const b = toScreen({ x: angle.x3, y: angle.y3 }, dimensions);
+    const ax = a.x - vertex.x;
+    const ay = a.y - vertex.y;
+    const bx = b.x - vertex.x;
+    const by = b.y - vertex.y;
+    const la = Math.hypot(ax, ay);
+    const lb = Math.hypot(bx, by);
+    if (la < 1 || lb < 1) return null;
+    const cos = Math.min(1, Math.max(-1, (ax * bx + ay * by) / (la * lb)));
+    return (Math.acos(cos) * 180) / Math.PI;
   }
 
   static moveObject(object: DrawingObject, deltaX: number, deltaY: number): DrawingObject {
@@ -247,28 +332,28 @@ export class DrawingEngine {
   /**
    * What, if anything, is under the cursor on this object.
    *
-   * `strokeOnly` narrows a circle to its outline and handles. With a drawing
-   * tool in hand every press over an existing shape is a choice between
-   * drawing and picking that shape up, and a circle claiming its whole
-   * interior would leave nowhere to draw inside one -- which is exactly where
-   * a coach puts the next line.
+   * Only the select tool asks. A drawing tool always draws, even on top of a
+   * shape, so a circle may claim its whole interior here: nothing is lost by
+   * it, and a press inside the circle is the natural way to move it.
    */
   static hitTestObject(
     object: DrawingObject,
     cursor: DrawingPoint,
     dimensions: Dimensions,
-    strokeOnly = false
+    reach: HitReach = MOUSE_REACH
   ): DrawingHandle | null {
     const px = cursor.x;
     const py = cursor.y;
+    const handleReach = reach.handle;
+    const bodyReach = reach.body;
     if (object.type === "line") {
       const p1 = toScreen({ x: object.x1, y: object.y1 }, dimensions);
       const p2 = toScreen({ x: object.x2, y: object.y2 }, dimensions);
       const startDistance = Math.hypot(px - p1.x, py - p1.y);
       const endDistance = Math.hypot(px - p2.x, py - p2.y);
-      if (startDistance <= HANDLE_TOLERANCE_PX) return "start";
-      if (endDistance <= HANDLE_TOLERANCE_PX) return "end";
-      if (distToSegment(px, py, p1.x, p1.y, p2.x, p2.y) <= MOVE_BODY_TOLERANCE_PX) return "move";
+      if (startDistance <= handleReach) return "start";
+      if (endDistance <= handleReach) return "end";
+      if (distToSegment(px, py, p1.x, p1.y, p2.x, p2.y) <= bodyReach) return "move";
       return null;
     }
     if (object.type === "angle") {
@@ -277,11 +362,11 @@ export class DrawingEngine {
       const p3 = toScreen({ x: object.x3, y: object.y3 }, dimensions);
       // p1 is the angle vertex; p2/p3 are the two arm endpoints. Handle names
       // must match what transformObject moves: center=vertex, start/end=arms.
-      if (Math.hypot(px - p1.x, py - p1.y) <= HANDLE_TOLERANCE_PX) return "center";
-      if (Math.hypot(px - p2.x, py - p2.y) <= HANDLE_TOLERANCE_PX) return "start";
-      if (Math.hypot(px - p3.x, py - p3.y) <= HANDLE_TOLERANCE_PX) return "end";
-      if (distToSegment(px, py, p1.x, p1.y, p2.x, p2.y) <= MOVE_BODY_TOLERANCE_PX) return "move";
-      if (distToSegment(px, py, p1.x, p1.y, p3.x, p3.y) <= MOVE_BODY_TOLERANCE_PX) return "move";
+      if (Math.hypot(px - p1.x, py - p1.y) <= handleReach) return "center";
+      if (Math.hypot(px - p2.x, py - p2.y) <= handleReach) return "start";
+      if (Math.hypot(px - p3.x, py - p3.y) <= handleReach) return "end";
+      if (distToSegment(px, py, p1.x, p1.y, p2.x, p2.y) <= bodyReach) return "move";
+      if (distToSegment(px, py, p1.x, p1.y, p3.x, p3.y) <= bodyReach) return "move";
       return null;
     }
     if (object.type === "circle") {
@@ -291,20 +376,20 @@ export class DrawingEngine {
       const dx = px - center.x;
       const dy = py - center.y;
       const dist = Math.hypot(dx / Math.max(0.0001, rx), dy / Math.max(0.0001, ry));
-      const handleRadiusPx = HANDLE_TOLERANCE_PX + 2;
+      const handleRadiusPx = handleReach + 2;
       const rightHandle = { x: center.x + rx, y: center.y };
       const bottomHandle = { x: center.x, y: center.y + ry };
       if (Math.hypot(px - rightHandle.x, py - rightHandle.y) <= handleRadiusPx) return "radiusX";
       if (Math.hypot(px - bottomHandle.x, py - bottomHandle.y) <= handleRadiusPx) return "radiusY";
       if (Math.abs(dist - 1) <= CIRCLE_MOVE_TOLERANCE) return "radius";
-      if (!strokeOnly && dist < 1 - CIRCLE_MOVE_TOLERANCE) return "move";
+      if (dist < 1 - CIRCLE_MOVE_TOLERANCE) return "move";
       return null;
     }
     if (object.type === "pen") {
       for (let i = 1; i < object.points.length; i += 1) {
         const a = toScreen(object.points[i - 1], dimensions);
         const b = toScreen(object.points[i], dimensions);
-        if (distToSegment(px, py, a.x, a.y, b.x, b.y) <= MOVE_BODY_TOLERANCE_PX) return "path";
+        if (distToSegment(px, py, a.x, a.y, b.x, b.y) <= bodyReach) return "path";
       }
       return null;
     }
@@ -477,11 +562,11 @@ export class DrawingEngine {
     objects: DrawingObject[],
     cursorPx: DrawingPoint,
     dimensions: Dimensions,
-    strokeOnly = false
+    reach: HitReach = MOUSE_REACH
   ): { object: DrawingObject | null; handle: DrawingHandle | null } {
     for (let index = objects.length - 1; index >= 0; index -= 1) {
       const object = objects[index];
-      const handle = this.hitTestObject(object, cursorPx, dimensions, strokeOnly);
+      const handle = this.hitTestObject(object, cursorPx, dimensions, reach);
       if (handle) {
         return { object, handle };
       }

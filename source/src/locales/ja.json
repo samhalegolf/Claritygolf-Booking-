@@ -4708,5 +4708,12 @@
   "Share": "共有",
   "Load a video before exporting.": "書き出す前に動画を読み込んでください。",
   "This browser can't create video files. Try the latest Chrome or Safari.": "このブラウザでは動画ファイルを作成できません。最新の Chrome または Safari をお試しください。",
-  "This video can't be read for export.": "この動画は書き出し用に読み込めません。"
+  "This video can't be read for export.": "この動画は書き出し用に読み込めません。",
+  "Colour: {name}": "色: {name}",
+  "Marking colour": "マーキングの色",
+  "Mint": "ミント",
+  "White": "白",
+  "Yellow": "黄",
+  "Red": "赤",
+  "Blue": "青"
 }
