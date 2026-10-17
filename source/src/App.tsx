@@ -13,6 +13,7 @@ import {
   GripVertical,
   Inbox,
   LogOut,
+  Package,
   Phone,
   Plus,
   Pencil,
@@ -10695,7 +10696,7 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
       // A half-made edit belongs to the page it was started on.
       resetExpenseDraft();
       if (section === "expenses-integrations") void fetchBankCandidates();
-    } else if (section === "products-catalog" || section === "vouchers-edit") {
+    } else if (section === "products-catalog" || section === "vouchers-edit" || section === "bundles") {
       void fetchBillingProducts();
     } else if (section === "vouchers-records") {
       void fetchCoupons();
@@ -11657,8 +11658,9 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
   }
 
   /* Bundles: also `package` entries, so every till and shop sells them as it
-   * sells a pass type, but carrying bundleItems -- the pass types that selling
-   * one issues. They have no credits or cover of their own. */
+   * sells a pass type, but carrying bundleItems -- the pass types, services
+   * and products that selling one hands over. They have no credits or cover
+   * of their own. */
   function saveBundle(draft: BundleDraft) {
     const existing = draft.id ? services.find((service) => service.id === draft.id) : undefined;
     if (!existing && !canCreateWithinLimit(activeAccount, managedAccountServices.filter((service) => service.archived !== true).length, "maxServices")) {
@@ -15954,28 +15956,6 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
         </article>
         )}
 
-        {billingSection === "passes-edit" && (
-        <article className="data-card wide">
-          <div className="data-card-header">
-            <div>
-              <span>{t("Bundles")}</span>
-              <h2>{t("Several passes sold together")}</h2>
-            </div>
-            <ClarityProducts size={24} />
-          </div>
-          <p className="field-help">{t("Put pass types together for one price, like 5 lessons and a swing review. The client gets each pass, and each keeps its own cover and expiry.")}</p>
-          <Suspense fallback={<Loading what={t("bundles")} />}>
-            <BundlesList
-              services={services}
-              formatMoney={(amount) => formatMoney(amount, invoiceSettings.currency)}
-              saving={serviceSaveState === "saving"}
-              onSave={saveBundle}
-              onArchive={archivePassType}
-            />
-          </Suspense>
-        </article>
-        )}
-
         {billingSection === "passes-records" && (
         <article className="data-card wide">
           <div className="data-card-header">
@@ -17310,6 +17290,29 @@ function App({ onSessionLost, session: entrySession }: AppProps) {
                   })}
                 </div>
               ))}
+
+            {billingSection === "bundles" && (
+              <article className="data-card wide">
+                <div className="data-card-header">
+                  <div>
+                    <span>{t("Bundles")}</span>
+                    <h2>{t("Several things sold together")}</h2>
+                  </div>
+                  <Package size={24} />
+                </div>
+                <p className="field-help">{t("Put passes, services and products together for one price, like 5 lessons, a swing review and a glove. The client gets a pass for each pass type and service, and the till takes the products off stock.")}</p>
+                <Suspense fallback={<Loading what={t("bundles")} />}>
+                  <BundlesList
+                    services={services}
+                    products={catalogItems.filter((item) => item.kind === "product" && !item.readOnly && !item.isVoucher)}
+                    formatMoney={(amount) => formatMoney(amount, invoiceSettings.currency)}
+                    saving={serviceSaveState === "saving"}
+                    onSave={saveBundle}
+                    onArchive={archivePassType}
+                  />
+                </Suspense>
+              </article>
+            )}
 
             {billingSection === "memberships" && (
               <Suspense fallback={<Loading what={t("memberships")} />}>

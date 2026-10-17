@@ -3535,10 +3535,11 @@ async function movePosStock(
   knownItems?: StockLine[],
 ) {
   const applying = direction === "apply";
+  const known = knownItems ? await withBundleProducts(accountId, knownItems) : undefined;
   // A sale of lessons only (or no basket at all, which is every Eftpos lesson
   // checkout) has nothing on a shelf, so there is no flag worth claiming and no
   // second read of items the caller already holds.
-  if (knownItems && !knownItems.some(stockMovable)) return;
+  if (known && !known.some(stockMovable)) return;
   const claimed = await supabase("billing_pos_transactions", {
     method: "PATCH",
     query:
@@ -3549,7 +3550,8 @@ async function movePosStock(
   });
   if (!claimed.length) return;
 
-  const items = knownItems || (await posItemsForTransactions(accountId, [transactionId]))[transactionId] || [];
+  const items =
+    known || (await withBundleProducts(accountId, (await posItemsForTransactions(accountId, [transactionId]))[transactionId] || []));
   for (const item of items) {
     if (!stockMovable(item)) continue;
     const delta = applying ? -item.quantity : item.quantity;
@@ -3570,6 +3572,24 @@ async function movePosStock(
       console.error("billing_api:stock_move_failed", transactionId, item.productId, error);
     }
   }
+}
+
+// A bundle hands over the products in it, so they leave the shelf (and come
+// back on a refund) exactly as if each had been rung up on its own. A refund
+// reads the bundle as it is now, so editing a bundle between the sale and the
+// refund returns what the bundle holds today.
+async function withBundleProducts(accountId: string, items: StockLine[]): Promise<StockLine[]> {
+  if (!items.some((item) => item.productId.startsWith(LESSON_ITEM_PREFIX))) return items;
+  const templates = await passTemplatesForAccount(accountId);
+  const products: StockLine[] = [];
+  for (const item of items) {
+    if (!item.productId.startsWith(LESSON_ITEM_PREFIX)) continue;
+    const bundle = templates.find((entry) => entry.serviceId === item.productId.slice(LESSON_ITEM_PREFIX.length));
+    for (const line of bundle?.bundleItems || []) {
+      if (line.kind === "product") products.push({ productId: line.id, quantity: line.quantity * item.quantity });
+    }
+  }
+  return [...items, ...products];
 }
 
 // A lesson has no shelf. The RPC would return null for it anyway, but asking is

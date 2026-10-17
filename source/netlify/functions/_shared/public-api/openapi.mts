@@ -192,8 +192,16 @@ export function openApiSpec(origin: string) {
             price: { type: ["object", "null"], properties: { amount: { type: "integer" }, currency: { type: "string" } } },
             includes: {
               type: "array",
-              description: "Set on a bundle: issuing it issues each of these pass types instead, and its own credits and covers_service_ids do not apply.",
-              items: { type: "object", properties: { pass_type_id: { type: "string" }, quantity: { type: "integer" } } },
+              description: "Set on a bundle, and its own credits and covers_service_ids then do not apply. Issuing it issues each pass_type line, and a pass for each service line covering only that service with one credit per unit; product lines issue nothing.",
+              items: {
+                type: "object",
+                properties: {
+                  type: { enum: ["pass_type", "service", "product"] },
+                  id: { type: "string" },
+                  name: { type: "string" },
+                  quantity: { type: "integer" },
+                },
+              },
             },
           },
         },

@@ -14,6 +14,7 @@ import { Loading } from "../shared/Loading";
 import { invoicedSessions } from "./invoicedSessions";
 import { passBalanceSummary } from "./passBalance";
 import { t, tn, readerLocale } from "../../lib/i18n";
+import type { BundleItem } from "../services/serviceModel";
 
 export type PassAllocation = {
   id: string;
@@ -98,8 +99,8 @@ export type PassTemplate = {
   expiryMonths?: number | null;
   crossRedeemable: boolean;
   priceCents: number | null;
-  /** Non-empty for a bundle: granting it issues each of these pass types. */
-  bundleItems?: Array<{ passTypeId: string; quantity: number }>;
+  /** Non-empty for a bundle: granting it issues the passes these lines name. */
+  bundleItems?: BundleItem[];
 };
 
 export type PassGrant = {
@@ -404,13 +405,12 @@ export function PassesPanel({
     () => templates.find((entry) => entry.serviceId === templateId),
     [templateId, templates],
   );
-  // A bundle brings its own credits and expiry, one set per pass type inside
-  // it, so the form shows what it includes instead of asking for them.
+  // A bundle brings its own credits and expiry, one set per pass inside it, so the form shows what it includes instead of asking for them.
   const bundleIncludes = template?.bundleItems?.length
     ? template.bundleItems
         .map((item) => {
-          const part = templates.find((entry) => entry.serviceId === item.passTypeId);
-          return part ? `${item.quantity} × ${part.name}` : "";
+          const name = item.kind === "pass" ? templates.find((entry) => entry.serviceId === item.id)?.name : item.name;
+          return name ? `${item.quantity} × ${name}` : "";
         })
         .filter(Boolean)
         .join(" + ")
