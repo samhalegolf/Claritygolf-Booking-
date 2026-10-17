@@ -125,10 +125,11 @@ export type PlayerToolRailProps = {
 /**
  * The rail, tucked against the edge of the video.
  *
- * It stays mounted while closed and slides out of frame instead: a rail that
- * unmounts would drop the tool you had selected back to the default every
- * time you looked at the swing without it. It is also an overlay rather than
- * a column in the layout, so opening it never resizes the video underneath.
+ * It stays mounted while closed and slides out of frame instead, so opening
+ * it costs nothing and never flashes. Closing it puts the tool down (the
+ * workspace does that): a tool the rail is not there to show is a tool the
+ * coach cannot see they are holding. It is also an overlay rather than a
+ * column in the layout, so opening it never resizes the video underneath.
  */
 export function PlayerToolRail({
   open,
@@ -157,7 +158,11 @@ export function PlayerToolRail({
           className={`va-rail-btn${selectedTool === tool.id ? " is-active" : ""}`}
           aria-label={`${tool.label} tool`}
           aria-pressed={selectedTool === tool.id}
-          onClick={() => onToolChange(tool.id)}
+          // Drawing tools stay in hand once picked, so the lit button is also
+          // the way to put one down: tap it again and the hand is empty.
+          onClick={() =>
+            onToolChange(selectedTool === tool.id && tool.id !== "select" ? "select" : tool.id)
+          }
         >
           {tool.icon}
         </button>

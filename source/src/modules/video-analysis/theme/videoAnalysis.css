@@ -534,8 +534,13 @@
   margin: 0 auto;
 }
 
-/* The cursor half of the hover affordance: over a shape the handles have just
-   appeared on, the press that follows will pick it up rather than draw. */
+/* The cursor says which of the two things a press will do. A drawing tool in
+   hand draws, full stop, so it shows a crosshair everywhere. The select tool
+   shows the grab hand only over a shape whose handles have just come up. */
+.video-frame.is-drawing {
+  cursor: crosshair;
+}
+
 .video-frame.is-grabbable {
   cursor: grab;
 }
@@ -722,10 +727,6 @@
 
 .drawing-handle {
   filter: drop-shadow(0 1px 2px var(--va-shadow));
-}
-
-.drawing-handle-hit {
-  pointer-events: none;
 }
 
 .drawing-guide {

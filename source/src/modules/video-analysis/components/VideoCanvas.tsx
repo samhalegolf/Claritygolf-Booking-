@@ -15,8 +15,10 @@ export interface VideoCanvasProps {
   draftObject: DrawingObject | null;
   /** The one object drawn with its handles: what a press would pick up. */
   activeObjectId: string | null;
-  /** Draws the grab cursor while the pointer is over something movable. */
+  /** Draws the grab cursor while the select tool is over something movable. */
   hoverGrabbable?: boolean;
+  /** Draws the crosshair: a press here starts a shape, whatever is under it. */
+  drawingToolActive?: boolean;
   /**
    * The free capture box, in the same normalized space as the drawings.
    *
@@ -56,7 +58,6 @@ const toScreen = (point: DrawingPoint, dimensions: Dimensions) => ({
 });
 
 const HANDLE_VISUAL_RADIUS = 5.4;
-const HANDLE_PICK_RADIUS = 11;
 const SELECT_OUTLINE = 3;
 const TRASH_ZONE_SIZE = 64;
 const TRASH_ZONE_MARGIN = 14;
@@ -81,25 +82,15 @@ const HandlePoint = ({
   point: { x: number; y: number };
   color: string;
 }) => (
-  <>
-    <circle
-      cx={point.x}
-      cy={point.y}
-      r={HANDLE_PICK_RADIUS}
-      fill="transparent"
-      stroke="transparent"
-      className="drawing-handle-hit"
-    />
-    <circle
-      cx={point.x}
-      cy={point.y}
-      r={HANDLE_VISUAL_RADIUS}
-      fill="white"
-      stroke={color}
-      strokeWidth={1.2}
-      className="drawing-handle"
-    />
-  </>
+  <circle
+    cx={point.x}
+    cy={point.y}
+    r={HANDLE_VISUAL_RADIUS}
+    fill="white"
+    stroke={color}
+    strokeWidth={1.2}
+    className="drawing-handle"
+  />
 );
 
 export function VideoCanvas({
@@ -111,6 +102,7 @@ export function VideoCanvas({
   draftObject,
   activeObjectId,
   hoverGrabbable = false,
+  drawingToolActive = false,
   captureBox = null,
   draggedObjectId,
   onTrashDrop,
@@ -319,7 +311,9 @@ export function VideoCanvas({
 
   return (
     <div
-      className={`video-frame${hoverGrabbable ? " is-grabbable" : ""}`}
+      className={`video-frame${hoverGrabbable ? " is-grabbable" : ""}${
+        drawingToolActive ? " is-drawing" : ""
+      }`}
       ref={overlayRef}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
