@@ -4697,5 +4697,12 @@
   "Selling a bundle gives the client each pass inside it with its own credits, cover and expiry, and a pass for each service with a credit per lesson. Products leave stock when the bundle is sold at the till.": "Ao vender um conjunto, o cliente recebe cada pacote incluído com os seus próprios créditos, cobertura e validade, e um pacote por cada serviço com um crédito por aula. Os produtos saem do stock quando o conjunto é vendido na caixa.",
   "Add item": "Adicionar item",
   "Search passes, services and products": "Pesquisar pacotes, serviços e produtos",
-  "Nothing matches.": "Nada corresponde."
+  "Nothing matches.": "Nada corresponde.",
+  "Colour: {name}": "Cor: {name}",
+  "Marking colour": "Cor das marcações",
+  "Mint": "Menta",
+  "White": "Branco",
+  "Yellow": "Amarelo",
+  "Red": "Vermelho",
+  "Blue": "Azul"
 }

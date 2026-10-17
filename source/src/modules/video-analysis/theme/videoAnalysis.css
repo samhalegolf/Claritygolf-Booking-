@@ -729,6 +729,19 @@
   filter: drop-shadow(0 1px 2px var(--va-shadow));
 }
 
+.drawing-angle-readout {
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  /* A halo instead of a box: readable over any frame, no rectangle on top
+     of the swing. */
+  paint-order: stroke fill;
+  stroke: var(--va-bg);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+  user-select: none;
+}
+
 .drawing-guide {
   pointer-events: none;
 }
@@ -1923,6 +1936,45 @@
   height: 1px;
   margin: 3px 0;
   background: var(--va-border);
+}
+
+/* The colour button is a swatch of the colour in hand; its palette opens
+   beside the rail so the rail itself never grows. */
+.va-rail-color {
+  position: relative;
+  flex: none;
+}
+
+.va-rail-swatch {
+  display: block;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 1.5px var(--va-bg), 0 0 0 2.5px rgba(255, 255, 255, 0.55);
+}
+
+.va-rail-btn.is-active .va-rail-swatch {
+  box-shadow: 0 0 0 1.5px var(--va-text), 0 0 0 2.5px var(--va-bg);
+}
+
+.va-color-palette {
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  gap: 4px;
+  padding: 5px;
+  border-radius: var(--c-radius-pill, 999px);
+  background: var(--va-scrim);
+  backdrop-filter: blur(8px);
+  z-index: 7;
+}
+
+.va-color-palette .va-rail-btn {
+  width: 34px;
+  height: 34px;
 }
 
 /* --- The action bar ------------------------------------------------------- */

@@ -4697,5 +4697,12 @@
   "Selling a bundle gives the client each pass inside it with its own credits, cover and expiry, and a pass for each service with a credit per lesson. Products leave stock when the bundle is sold at the till.": "En vendant un lot, le client reçoit chaque carte incluse avec ses propres crédits, sa couverture et son expiration, et une carte pour chaque prestation avec un crédit par cours. Les produits sortent du stock quand le lot est vendu en caisse.",
   "Add item": "Ajouter un article",
   "Search passes, services and products": "Rechercher cartes, prestations et produits",
-  "Nothing matches.": "Aucun résultat."
+  "Nothing matches.": "Aucun résultat.",
+  "Colour: {name}": "Couleur : {name}",
+  "Marking colour": "Couleur des annotations",
+  "Mint": "Menthe",
+  "White": "Blanc",
+  "Yellow": "Jaune",
+  "Red": "Rouge",
+  "Blue": "Bleu"
 }

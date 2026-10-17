@@ -1,5 +1,6 @@
 import { createId } from "../utils/frameMath";
 import {
+  DEFAULT_DRAWING_COLOR,
   DrawingHandle,
   DrawingLine,
   DrawingAngle,
@@ -16,10 +17,8 @@ export interface Dimensions {
   height: number;
 }
 
-const DEFAULT_STROKE = "#9be8ba";
-
 const strokeDefault: Omit<DrawingObjectBase, "id" | "type" | "createdAt" | "updatedAt"> = {
-  color: DEFAULT_STROKE,
+  color: DEFAULT_DRAWING_COLOR,
   strokeWidth: 2.4,
   opacity: 1,
   layer: 1,
@@ -90,12 +89,14 @@ export class DrawingEngine {
   static createObject(
     tool: Exclude<DrawingTool, "select">,
     startPoint: DrawingPoint,
-    dimensions: Dimensions
+    dimensions: Dimensions,
+    color: string = DEFAULT_DRAWING_COLOR
   ): DrawingObject {
     const normalized = toNormalized(startPoint, dimensions);
     const now = new Date().toISOString();
     const base: Omit<DrawingObjectBase, "type" | "id"> = {
       ...strokeDefault,
+      color,
       opacity: 1,
       createdAt: now,
       updatedAt: now,
@@ -174,13 +175,14 @@ export class DrawingEngine {
       );
     }
     if (draft.type === "angle") {
+      // Drawing an angle starts as drawing a line: the first arm. The second
+      // arm is not placed yet and stays at the vertex, where it has no length
+      // and so no reading.
       return updateTimestamp(
         {
           ...draft,
           x2: normalized.x,
           y2: normalized.y,
-          x3: normalized.x + 0.06,
-          y3: normalized.y + 0.06,
           updatedAt: now,
         } as DrawingAngle,
         now
@@ -220,7 +222,65 @@ export class DrawingEngine {
   static canFinishDraft(draft: DrawingObject): boolean {
     if (draft.type === "pen") return draft.points.length > 1;
     if (draft.type === "circle") return draft.rx > 0.002 && draft.ry > 0.002;
+    if (draft.type === "angle") {
+      return (
+        Math.hypot(draft.x2 - draft.x1, draft.y2 - draft.y1) > MIN_DRAFT_LENGTH &&
+        Math.hypot(draft.x3 - draft.x1, draft.y3 - draft.y1) > MIN_DRAFT_LENGTH
+      );
+    }
     return Math.hypot(draft.x2 - draft.x1, draft.y2 - draft.y1) > MIN_DRAFT_LENGTH;
+  }
+
+  /** Whether the first arm has been drawn far enough to give the angle a vertex and a direction. */
+  static canOpenAngle(draft: DrawingAngle): boolean {
+    return Math.hypot(draft.x2 - draft.x1, draft.y2 - draft.y1) > MIN_DRAFT_LENGTH;
+  }
+
+  /**
+   * The first arm is down; stand the second one up so there is an angle to
+   * see and to take hold of. It starts square to the first arm, on screen
+   * rather than in normalized units, so it looks square whatever the
+   * picture's shape. A cursor overrides it on the next movement; a finger
+   * on the next press.
+   */
+  static openAngleSecondArm(draft: DrawingAngle, dimensions: Dimensions): DrawingAngle {
+    const vertex = toScreen({ x: draft.x1, y: draft.y1 }, dimensions);
+    const first = toScreen({ x: draft.x2, y: draft.y2 }, dimensions);
+    const dx = first.x - vertex.x;
+    const dy = first.y - vertex.y;
+    const second = toNormalized({ x: vertex.x - dy, y: vertex.y + dx }, dimensions);
+    const now = new Date().toISOString();
+    return { ...draft, x3: second.x, y3: second.y, updatedAt: now };
+  }
+
+  static updateAngleSecondArm(
+    draft: DrawingAngle,
+    cursor: DrawingPoint,
+    dimensions: Dimensions
+  ): DrawingAngle {
+    const point = toNormalized(cursor, dimensions);
+    const now = new Date().toISOString();
+    return { ...draft, x3: point.x, y3: point.y, updatedAt: now };
+  }
+
+  /**
+   * The angle between the two arms at the vertex, in degrees from 0 to 180,
+   * measured on screen so a 90 reads as a right angle whatever the picture's
+   * aspect. Null while either arm is too short to point anywhere.
+   */
+  static angleDegrees(angle: DrawingAngle, dimensions: Dimensions): number | null {
+    const vertex = toScreen({ x: angle.x1, y: angle.y1 }, dimensions);
+    const a = toScreen({ x: angle.x2, y: angle.y2 }, dimensions);
+    const b = toScreen({ x: angle.x3, y: angle.y3 }, dimensions);
+    const ax = a.x - vertex.x;
+    const ay = a.y - vertex.y;
+    const bx = b.x - vertex.x;
+    const by = b.y - vertex.y;
+    const la = Math.hypot(ax, ay);
+    const lb = Math.hypot(bx, by);
+    if (la < 1 || lb < 1) return null;
+    const cos = Math.min(1, Math.max(-1, (ax * bx + ay * by) / (la * lb)));
+    return (Math.acos(cos) * 180) / Math.PI;
   }
 
   static moveObject(object: DrawingObject, deltaX: number, deltaY: number): DrawingObject {
