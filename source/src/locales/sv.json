@@ -4697,5 +4697,16 @@
   "Selling a bundle gives the client each pass inside it with its own credits, cover and expiry, and a pass for each service with a credit per lesson. Products leave stock when the bundle is sold at the till.": "När ett paket säljs får kunden varje klippkort i det med egna klipp, täckning och utgång, och ett klippkort för varje tjänst med ett klipp per lektion. Produkter dras från lagret när paketet säljs i kassan.",
   "Add item": "Lägg till",
   "Search passes, services and products": "Sök klippkort, tjänster och produkter",
-  "Nothing matches.": "Inget matchar."
+  "Nothing matches.": "Inget matchar.",
+  "Could not export the video.": "Det gick inte att exportera videon.",
+  "Export video to share": "Exportera video för delning",
+  "Exporting video": "Exporterar video",
+  "{value}% done. Keep this screen open.": "{value} % klart. Håll den här skärmen öppen.",
+  "Video ready": "Videon är klar",
+  "Export didn't work": "Exporten misslyckades",
+  "Share or save": "Dela eller spara",
+  "Share": "Dela",
+  "Load a video before exporting.": "Ladda in en video innan du exporterar.",
+  "This browser can't create video files. Try the latest Chrome or Safari.": "Den här webbläsaren kan inte skapa videofiler. Prova senaste Chrome eller Safari.",
+  "This video can't be read for export.": "Den här videon kan inte läsas för export."
 }

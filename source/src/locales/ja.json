@@ -4697,5 +4697,16 @@
   "Selling a bundle gives the client each pass inside it with its own credits, cover and expiry, and a pass for each service with a credit per lesson. Products leave stock when the bundle is sold at the till.": "セットを販売すると、お客様には含まれる各パスがそれぞれのクレジット・対象・有効期限付きで発行され、各サービスにはレッスン1回につき1クレジットのパスが発行されます。レジでセットを販売すると商品は在庫から差し引かれます。",
   "Add item": "項目を追加",
   "Search passes, services and products": "パス、サービス、商品を検索",
-  "Nothing matches.": "該当なし。"
+  "Nothing matches.": "該当なし。",
+  "Could not export the video.": "動画を書き出せませんでした。",
+  "Export video to share": "共有用に動画を書き出す",
+  "Exporting video": "動画を書き出しています",
+  "{value}% done. Keep this screen open.": "{value}% 完了。この画面を開いたままにしてください。",
+  "Video ready": "動画の準備ができました",
+  "Export didn't work": "書き出しに失敗しました",
+  "Share or save": "共有または保存",
+  "Share": "共有",
+  "Load a video before exporting.": "書き出す前に動画を読み込んでください。",
+  "This browser can't create video files. Try the latest Chrome or Safari.": "このブラウザでは動画ファイルを作成できません。最新の Chrome または Safari をお試しください。",
+  "This video can't be read for export.": "この動画は書き出し用に読み込めません。"
 }

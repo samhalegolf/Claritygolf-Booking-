@@ -105,3 +105,51 @@ export async function shareFileInApp(source: { blob: Blob } | { url: string }, f
   }
   return true;
 }
+
+/** True inside the staff app, where the phone's share sheet is the one way out. */
+export function hasAppShareSheet() {
+  return Boolean(plugins());
+}
+
+/**
+ * Whether this browser can hand a file to another app (Messages, WhatsApp,
+ * Mail...). Phones and Safari can; most desktop browsers can't, and get a
+ * download instead.
+ */
+export function canShareFile(blob: Blob, fileName: string) {
+  if (plugins()) return true;
+  if (typeof navigator === "undefined" || typeof navigator.canShare !== "function") return false;
+  try {
+    return navigator.canShare({ files: [new File([blob], fileName, { type: blob.type })] });
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Hand a file to another app through the share sheet. Call it straight from a
+ * tap: browsers only open the sheet in answer to one. Resolves false when the
+ * person closed the sheet without picking anything.
+ */
+export async function shareFile(blob: Blob, fileName: string): Promise<boolean> {
+  if (await shareFileInApp({ blob }, fileName)) return true;
+  try {
+    await navigator.share({ files: [new File([blob], fileName, { type: blob.type })] });
+    return true;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") return false;
+    throw error;
+  }
+}
+
+/** Save a copy to this computer's downloads. Browser only; the app shares. */
+export function downloadFile(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = safeName(fileName);
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}

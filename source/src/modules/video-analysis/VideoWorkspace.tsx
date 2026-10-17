@@ -117,7 +117,8 @@ import { DrawingTool } from "./models/Drawing";
 import { TimelineMarker } from "./models/Timeline";
 import { activeLocale } from "../../lib/activeCountry";
 import { t } from "../../lib/i18n";
-import { shareFileInApp } from "../../native/nativeFiles";
+import { canShareFile, downloadFile, hasAppShareSheet, shareFile, shareFileInApp } from "../../native/nativeFiles";
+import { exportAnalysisVideo, type ExportPane } from "./utils/videoExport";
 
 /**
  * Give a freshly opened camera a moment to produce its first frame.
@@ -232,6 +233,10 @@ type SaveStatus = "idle" | "saving" | "sending" | "downloading" | "saved" | "err
  */
 type RecordingStatus = "connecting" | "preview" | "recording" | "processing" | "error";
 type ScreenRecordingStatus = "idle" | "recording" | "saving" | "error";
+type VideoExportState =
+  | { status: "exporting"; percent: number }
+  | { status: "ready"; blob: Blob; fileName: string; canShare: boolean }
+  | { status: "error"; message: string };
 type CloudUploadFailureStage =
   | "Configuration"
   | "Connection"
@@ -2428,6 +2433,8 @@ export function VideoWorkspace({
   const analysisRecorderRef = useRef<AnalysisViewRecorder | null>(null);
   const [screenRecordingStatus, setScreenRecordingStatus] = useState<ScreenRecordingStatus>("idle");
   const [screenRecordingMessage, setScreenRecordingMessage] = useState("");
+  const [videoExport, setVideoExport] = useState<VideoExportState | null>(null);
+  const videoExportAbortRef = useRef<AbortController | null>(null);
   // The recorder reads this on every frame, so it always draws the current
   // video and drawings without needing to be restarted when they change.
   const recorderFrameRef = useRef<AnalysisRecorderFrame>({
@@ -3499,6 +3506,90 @@ export function VideoWorkspace({
     },
     []
   );
+
+  // What gets exported is what the coach is looking at: both clips when
+  // comparing, lined up exactly as they sit on screen right now, otherwise the
+  // clip in front of them. Each keeps its own drawings.
+  const startVideoExport = useCallback(async () => {
+    const paneFor = (side: ComparisonSide, offsetS: number): ExportPane | null => {
+      const sourceUrl = side === "left" ? leftMountedSource : rightMountedSource;
+      if (!sourceUrl) return null;
+      return {
+        sourceUrl,
+        objects: (side === "left" ? leftDrawing : rightDrawing).objects,
+        overlayWidth: (side === "left" ? leftOverlayDimensions : rightOverlayDimensions).width,
+        offsetS,
+      };
+    };
+    const comparing = modeIsCompare && bothSidesLoaded;
+    const gapS = (rightVideoRef.current?.currentTime || 0) - (leftVideoRef.current?.currentTime || 0);
+    const panes = (
+      comparing ? [paneFor("left", 0), paneFor("right", gapS)] : [paneFor(effectiveActiveSide, 0)]
+    ).filter((pane): pane is ExportPane => Boolean(pane));
+    const activeVideo = effectiveActiveSide === "left" ? playerVideoLeft : playerVideoRight;
+    const title = comparing
+      ? `${playerVideoLeft?.title || "clip"} vs ${playerVideoRight?.title || "clip"}`
+      : activeVideo?.title || "";
+
+    videoExportAbortRef.current?.abort();
+    const controller = new AbortController();
+    videoExportAbortRef.current = controller;
+    setSettingsOpen(false);
+    setVideoExport({ status: "exporting", percent: 0 });
+    try {
+      const result = await exportAnalysisVideo(panes, {
+        title,
+        signal: controller.signal,
+        onProgress: (fraction) => {
+          const percent = Math.floor(fraction * 100);
+          setVideoExport((current) =>
+            current?.status === "exporting" && current.percent !== percent ? { status: "exporting", percent } : current
+          );
+        },
+      });
+      if (controller.signal.aborted) return;
+      setVideoExport({ status: "ready", ...result, canShare: canShareFile(result.blob, result.fileName) });
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      setVideoExport({
+        status: "error",
+        message: error instanceof Error && error.message ? error.message : t("Could not export the video."),
+      });
+    } finally {
+      if (videoExportAbortRef.current === controller) videoExportAbortRef.current = null;
+    }
+  }, [
+    bothSidesLoaded,
+    effectiveActiveSide,
+    leftDrawing,
+    leftMountedSource,
+    leftOverlayDimensions,
+    modeIsCompare,
+    playerVideoLeft,
+    playerVideoRight,
+    rightDrawing,
+    rightMountedSource,
+    rightOverlayDimensions,
+  ]);
+
+  const closeVideoExport = useCallback(() => {
+    videoExportAbortRef.current?.abort();
+    videoExportAbortRef.current = null;
+    setVideoExport(null);
+  }, []);
+
+  useEffect(() => () => videoExportAbortRef.current?.abort(), []);
+
+  const shareExportedVideo = useCallback(async (blob: Blob, fileName: string) => {
+    try {
+      await shareFile(blob, fileName);
+    } catch (error) {
+      setVideoExport({
+        status: "error",
+        message: error instanceof Error && error.message ? error.message : t("Could not export the video."),
+      });
+    }
+  }, []);
 
   const handleWorkspaceNoteCommit = useCallback(
     async (text: string) => {
@@ -4812,6 +4903,49 @@ export function VideoWorkspace({
         </section>
       ) : null}
 
+      {videoExport ? (
+        <section className="save-destination-prompt video-export-panel" role="dialog" aria-label={t("Export video to share")}>
+          <div className="save-destination-copy">
+            {videoExport.status === "exporting" ? (
+              <>
+                <strong>{t("Exporting video")}</strong>
+                <span>{t("{value}% done. Keep this screen open.", { value: videoExport.percent })}</span>
+                <progress className="video-export-progress" max={100} value={videoExport.percent} />
+              </>
+            ) : videoExport.status === "ready" ? (
+              <>
+                <strong>{t("Video ready")}</strong>
+                <span>{videoExport.fileName}</span>
+              </>
+            ) : (
+              <>
+                <strong>{t("Export didn't work")}</strong>
+                <span>{videoExport.message}</span>
+              </>
+            )}
+          </div>
+          <div className="save-destination-actions">
+            {videoExport.status === "ready" && videoExport.canShare ? (
+              <button
+                type="button"
+                className="upload-button"
+                onClick={() => void shareExportedVideo(videoExport.blob, videoExport.fileName)}
+              >{hasAppShareSheet() ? t("Share or save") : t("Share")}</button>
+            ) : null}
+            {videoExport.status === "ready" && !hasAppShareSheet() ? (
+              <button
+                type="button"
+                className={`upload-button${videoExport.canShare ? " is-subtle" : ""}`}
+                onClick={() => downloadFile(videoExport.blob, videoExport.fileName)}
+              >{t("Download")}</button>
+            ) : null}
+            <button type="button" className="upload-button is-subtle" onClick={closeVideoExport}>
+              {videoExport.status === "exporting" ? t("Cancel") : t("Done")}
+            </button>
+          </div>
+        </section>
+      ) : null}
+
       {/* Not gated on having a video: choosing the recording camera lives in
           here, and an empty workspace is exactly when a coach needs to. */}
       {!isPlayerVariant ? (
@@ -4830,6 +4964,8 @@ export function VideoWorkspace({
               ? void stopScreenRecording()
               : void startScreenRecording()
           }
+          onExportVideo={() => void startVideoExport()}
+          exportBusy={videoExport?.status === "exporting"}
           onMyLibrarySave={handleMyLibrarySave}
           saveBusy={saveBusy}
           showDiagnostics={showDiagnostics}

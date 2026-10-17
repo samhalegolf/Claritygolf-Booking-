@@ -4697,5 +4697,16 @@
   "Selling a bundle gives the client each pass inside it with its own credits, cover and expiry, and a pass for each service with a credit per lesson. Products leave stock when the bundle is sold at the till.": "Kun paketti myydään, asiakas saa jokaisen sen sarjakortin omine krediitteineen, kattavuuksineen ja voimassaoloineen sekä sarjakortin jokaisesta palvelusta, yksi krediitti tuntia kohden. Tuotteet vähennetään varastosta, kun paketti myydään kassalla.",
   "Add item": "Lisää tuote",
   "Search passes, services and products": "Hae sarjakortteja, palveluja ja tuotteita",
-  "Nothing matches.": "Ei osumia."
+  "Nothing matches.": "Ei osumia.",
+  "Could not export the video.": "Videon vienti epäonnistui.",
+  "Export video to share": "Vie video jaettavaksi",
+  "Exporting video": "Viedään videota",
+  "{value}% done. Keep this screen open.": "{value} % valmis. Pidä tämä näkymä auki.",
+  "Video ready": "Video valmis",
+  "Export didn't work": "Vienti ei onnistunut",
+  "Share or save": "Jaa tai tallenna",
+  "Share": "Jaa",
+  "Load a video before exporting.": "Lataa video ennen vientiä.",
+  "This browser can't create video files. Try the latest Chrome or Safari.": "Tämä selain ei pysty luomaan videotiedostoja. Kokeile uusinta Chromea tai Safaria.",
+  "This video can't be read for export.": "Tätä videota ei voi lukea vientiä varten."
 }

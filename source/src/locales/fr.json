@@ -4697,5 +4697,16 @@
   "Selling a bundle gives the client each pass inside it with its own credits, cover and expiry, and a pass for each service with a credit per lesson. Products leave stock when the bundle is sold at the till.": "En vendant un lot, le client reçoit chaque carte incluse avec ses propres crédits, sa couverture et son expiration, et une carte pour chaque prestation avec un crédit par cours. Les produits sortent du stock quand le lot est vendu en caisse.",
   "Add item": "Ajouter un article",
   "Search passes, services and products": "Rechercher cartes, prestations et produits",
-  "Nothing matches.": "Aucun résultat."
+  "Nothing matches.": "Aucun résultat.",
+  "Could not export the video.": "Impossible d'exporter la vidéo.",
+  "Export video to share": "Exporter la vidéo pour la partager",
+  "Exporting video": "Exportation de la vidéo",
+  "{value}% done. Keep this screen open.": "{value} % terminé. Gardez cet écran ouvert.",
+  "Video ready": "Vidéo prête",
+  "Export didn't work": "L'exportation a échoué",
+  "Share or save": "Partager ou enregistrer",
+  "Share": "Partager",
+  "Load a video before exporting.": "Chargez une vidéo avant d'exporter.",
+  "This browser can't create video files. Try the latest Chrome or Safari.": "Ce navigateur ne peut pas créer de fichiers vidéo. Essayez la dernière version de Chrome ou Safari.",
+  "This video can't be read for export.": "Cette vidéo ne peut pas être lue pour l'exportation."
 }

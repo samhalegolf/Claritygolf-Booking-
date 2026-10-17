@@ -4697,5 +4697,16 @@
   "Selling a bundle gives the client each pass inside it with its own credits, cover and expiry, and a pass for each service with a credit per lesson. Products leave stock when the bundle is sold at the till.": "Bij verkoop van een bundel krijgt de klant elke strippenkaart erin met eigen tegoed, dekking en vervaldatum, en een strippenkaart voor elke dienst met één tegoed per les. Producten gaan van de voorraad af wanneer de bundel aan de kassa wordt verkocht.",
   "Add item": "Item toevoegen",
   "Search passes, services and products": "Zoek strippenkaarten, diensten en producten",
-  "Nothing matches.": "Niets gevonden."
+  "Nothing matches.": "Niets gevonden.",
+  "Could not export the video.": "De video kon niet worden geëxporteerd.",
+  "Export video to share": "Video exporteren om te delen",
+  "Exporting video": "Video wordt geëxporteerd",
+  "{value}% done. Keep this screen open.": "{value}% klaar. Houd dit scherm open.",
+  "Video ready": "Video klaar",
+  "Export didn't work": "Exporteren is mislukt",
+  "Share or save": "Delen of bewaren",
+  "Share": "Delen",
+  "Load a video before exporting.": "Laad eerst een video om te exporteren.",
+  "This browser can't create video files. Try the latest Chrome or Safari.": "Deze browser kan geen videobestanden maken. Probeer de nieuwste Chrome of Safari.",
+  "This video can't be read for export.": "Deze video kan niet worden gelezen voor export."
 }

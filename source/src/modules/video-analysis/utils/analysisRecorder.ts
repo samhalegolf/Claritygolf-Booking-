@@ -52,7 +52,8 @@ export const getRecordingFileName = (label: string, mimeType: string) => {
   return `${label}-${recordingTimestamp()}.${extension}`;
 };
 
-const drawObject = (
+/** Paints one drawing object; shared by the screen recorder and the video export. */
+export const drawAnalysisObject = (
   ctx: CanvasRenderingContext2D,
   object: DrawingObject,
   width: number,
@@ -142,7 +143,7 @@ export const captureAnalysisFrame = (
   ctx.save();
   ctx.translate(-sourceCrop.x * scale, -sourceCrop.y * scale);
   const strokeScale = overlay.width > 0 ? (sourceWidth * scale) / overlay.width : scale;
-  objects.forEach((object) => drawObject(ctx, object, sourceWidth * scale, sourceHeight * scale, strokeScale));
+  objects.forEach((object) => drawAnalysisObject(ctx, object, sourceWidth * scale, sourceHeight * scale, strokeScale));
   ctx.restore();
   return canvas.toDataURL("image/jpeg", 0.86);
 };
@@ -284,7 +285,7 @@ export class AnalysisViewRecorder {
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     }
     const strokeScale = overlay.width > 0 ? canvas.width / overlay.width : 1;
-    objects.forEach((object) => drawObject(ctx, object, canvas.width, canvas.height, strokeScale));
+    objects.forEach((object) => drawAnalysisObject(ctx, object, canvas.width, canvas.height, strokeScale));
   };
 
   private teardown() {

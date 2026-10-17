@@ -138,6 +138,14 @@ export const IconRecord = ({ className }: IconProps) => (
   </Svg>
 );
 
+export const IconExport = ({ className }: IconProps) => (
+  <Svg className={className}>
+    <path d="M14 4h6v6" />
+    <path d="M20 4l-8.5 8.5" />
+    <path d="M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10" />
+  </Svg>
+);
+
 export const IconCamera = ({ className }: IconProps) => (
   <Svg className={className}>
     <rect x="3" y="7" width="18" height="12.5" rx="2.4" />
