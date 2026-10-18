@@ -6,6 +6,7 @@
 import { t, tn } from "../../lib/i18n";
 import { ClarityAssessments, ClarityBookingPages, ClarityCalendar, ClarityEmail, ClarityFilesMedia, ClarityIntegrations, ClarityLessonsProgrammes, ClarityMore, ClarityPassesCredits, ClarityPayments, ClarityProfile, ClarityVideoAnalysis } from "../shared/ClarityIcons";
 import { Suspense, lazy } from "react";
+import { AnchoredMenu } from "../shared/AnchoredMenu";
 import { Loading } from "../shared/Loading";
 import { clientMatchesSearchTerm, hasAnyProfileId, preferredVideoPlayerId } from "../clients/clientMatching";
 import { AlertTriangle, Archive, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Cloud, CloudOff, CloudUpload, Download, ExternalLink, ImagePlus, LayoutGrid, List, Pause, Pencil, Play, Plus, RefreshCw, Send, Trash2, X } from "lucide-react";
@@ -1514,14 +1515,7 @@ export function PlayerProfilesScreen(props: PlayerProfilesScreenProps) {
                                             <ClarityMore size={16} />
                                           </button>
                                           {menuOpen ? (
-                                            <>
-                                              <button
-                                                type="button"
-                                                className="player-video-menu-scrim"
-                                                aria-label={t("Close video options")}
-                                                onClick={closeMenu}
-                                              />
-                                              <div className="player-video-menu-panel" role="menu">
+                                            <AnchoredMenu onClose={closeMenu} closeLabel={t("Close video options")}>
                                                 <button
                                                   type="button"
                                                   role="menuitem"
@@ -1659,8 +1653,7 @@ export function PlayerProfilesScreen(props: PlayerProfilesScreenProps) {
                                                   }}
                                                 >
                                                   <Trash2 size={14} />{t("Delete")}</button>
-                                              </div>
-                                            </>
+                                            </AnchoredMenu>
                                           ) : null}
                                         </div>
                                       </div>
