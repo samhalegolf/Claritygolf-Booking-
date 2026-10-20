@@ -64,6 +64,7 @@ type MetricResult = {
   id: string;
   unit: Unit;
   shape: Shape;
+  buckets?: DashboardReport["buckets"];
   series: Array<{ name: string; values: number[] }>;
   slices: Array<{ name: string; value: number }>;
   total: number;
@@ -134,7 +135,9 @@ const CHART_TYPE_LABELS: Record<ChartType, string> = { bar: t("Bar"), line: t("L
 
 /** A metric's lines summed into one, for a total or a comparison. */
 function combined(result: MetricResult | undefined, length: number) {
-  return Array.from({ length }, (_, index) => (result?.series ?? []).reduce((sum, line) => sum + (line.values[index] ?? 0), 0));
+  // Preserve a historical line's end when compared with a booking forecast.
+  const visibleLength = result?.buckets?.length ?? length;
+  return Array.from({ length: Math.min(length, visibleLength) }, (_, index) => (result?.series ?? []).reduce((sum, line) => sum + (line.values[index] ?? 0), 0));
 }
 
 export function DashboardPanel({
@@ -180,7 +183,8 @@ export function DashboardPanel({
     }
     setLoadState("loading");
     try {
-      const response = await fetch(`/api/billing/reports/dashboard?period=${period}&metrics=${encodeURIComponent(metricKey)}`, {
+      const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const response = await fetch(`/api/billing/reports/dashboard?period=${period}&metrics=${encodeURIComponent(metricKey)}&timeZone=${encodeURIComponent(timeZone)}`, {
         credentials: "same-origin",
         cache: "no-store",
       });
@@ -333,8 +337,19 @@ function ScreenBody({
   currency: string;
   formatMoney: Formatter;
 }) {
-  const labels = report.buckets.map((bucket) => bucket.label);
   const results = screen.metricIds.map((id) => report.metrics.find((metric) => metric.id === id));
+  // Only metrics on this screen determine its horizon. A booked-ahead metric
+  // on another screen must not extend a historical graph.
+  const buckets = results.reduce<DashboardReport["buckets"]>(
+    (longest, result) => {
+      const next = result?.buckets ?? report.buckets;
+      const nextEnd = next.at(-1)?.rangeEnd ?? "";
+      const longestEnd = longest.at(-1)?.rangeEnd ?? "";
+      return next.length > longest.length || (next.length === longest.length && nextEnd > longestEnd) ? next : longest;
+    },
+    [],
+  );
+  const labels = buckets.map((bucket) => bucket.label);
   const first = results[0];
   const unit: Unit = first?.unit ?? "money";
 
@@ -361,7 +376,7 @@ function ScreenBody({
     series = [
       {
         name: screen.title,
-        values: labels.map((_, index) => results.reduce((sum, result) => sum + combined(result, labels.length)[index], 0)),
+        values: labels.map((_, index) => results.reduce((sum, result) => sum + (combined(result, labels.length)[index] ?? 0), 0)),
         unit: "money",
       },
     ];
@@ -438,6 +453,9 @@ function SeriesChart({
   format: (value: number, unit: Unit) => string;
 }) {
   const [hover, setHover] = useState<number | null>(null);
+  if (!labels.length) return <p className="dash-empty">{t("Nothing in this period yet.")}</p>;
+  const pointValue = (line: ChartSeries, index: number) =>
+    index < line.values.length ? format(line.values[index], line.unit) : "—";
   if (type === "pie") {
     // A pie of a series is each period's share of the whole.
     const totals = labels.map((label, index) => ({ name: label, value: series.reduce((sum, line) => sum + (line.values[index] ?? 0), 0) }));
@@ -487,6 +505,7 @@ function SeriesChart({
                 });
               })
             : series.map((line, lineIndex) => {
+                if (!line.values.length) return null;
                 const points = line.values.map((value, index) => `${centre(index)},${y(value, lineIndex)}`);
                 return (
                   <g key={line.name}>
@@ -497,6 +516,9 @@ function SeriesChart({
                       />
                     ) : null}
                     <polyline className={`dash-line series-${lineIndex + 1}`} points={points.join(" ")} />
+                    {line.values.length === 1 ? (
+                      <circle className={`dash-line series-${lineIndex + 1}`} cx={centre(0)} cy={y(line.values[0], lineIndex)} r={3} />
+                    ) : null}
                   </g>
                 );
               })}
@@ -511,7 +533,7 @@ function SeriesChart({
               onFocus={() => setHover(index)}
               onBlur={() => setHover(null)}
               tabIndex={0}
-              aria-label={`${label}: ${series.map((line) => `${line.name} ${format(line.values[index] ?? 0, line.unit)}`).join(", ")}`}
+              aria-label={`${label}: ${series.map((line) => `${line.name} ${pointValue(line, index)}`).join(", ")}`}
             >
               {hover === index ? (
                 <div className={`dash-tooltip${index > labels.length / 2 ? " is-left" : ""}`} role="tooltip">
@@ -520,7 +542,7 @@ function SeriesChart({
                     <span key={line.name}>
                       {series.length > 1 ? <i className={`dash-swatch series-${lineIndex + 1}`} /> : null}
                       {series.length > 1 ? `${line.name}: ` : ""}
-                      {format(line.values[index] ?? 0, line.unit)}
+                      {pointValue(line, index)}
                     </span>
                   ))}
                 </div>

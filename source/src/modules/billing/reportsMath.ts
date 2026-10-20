@@ -1,8 +1,8 @@
 // Pure helpers for the Billing > Reports tab: date-range presets and CSV
 // export. Kept side-effect-free and unit-tested (reportsMath.test.ts) so the
 // financial-year boundaries and the exported figures can't silently drift.
-// All dates are handled in UTC and formatted YYYY-MM-DD to match the backend
-// (billing-api.mts formatDateOnly), which keys invoices/expenses by date only.
+// Presets follow the viewer’s local calendar day, then use UTC for date
+// arithmetic and YYYY-MM-DD keys to match the date-only billing records.
 
 import type { BillingReportSummary } from "./types";
 import { t } from "../../lib/i18n";
@@ -34,26 +34,28 @@ export function financialYearStart(ref: Date): Date {
 }
 
 // Resolve a preset to a concrete { start, end }. "custom" has no computable
-// range (the caller supplies the dates), so it returns null.
+// range (the caller supplies the dates), so it returns null. Current periods
+// stop today; completed periods retain their full range.
 export function presetRange(preset: ReportRangePreset, ref: Date): ReportRange | null {
-  const year = ref.getUTCFullYear();
-  const month = ref.getUTCMonth();
+  const today = utc(ref.getFullYear(), ref.getMonth(), ref.getDate());
+  const year = today.getUTCFullYear();
+  const month = today.getUTCMonth();
 
   switch (preset) {
     case "this-month":
-      return { start: ymd(utc(year, month, 1)), end: ymd(utc(year, month + 1, 0)) };
+      return { start: ymd(utc(year, month, 1)), end: ymd(today) };
     case "last-month":
       return { start: ymd(utc(year, month - 1, 1)), end: ymd(utc(year, month, 0)) };
     case "this-quarter": {
       const quarterStartMonth = Math.floor(month / 3) * 3;
-      return { start: ymd(utc(year, quarterStartMonth, 1)), end: ymd(utc(year, quarterStartMonth + 3, 0)) };
+      return { start: ymd(utc(year, quarterStartMonth, 1)), end: ymd(today) };
     }
     case "this-financial-year": {
-      const fyStart = financialYearStart(ref);
-      return { start: ymd(fyStart), end: ymd(utc(fyStart.getUTCFullYear() + 1, 2, 31)) };
+      const fyStart = financialYearStart(today);
+      return { start: ymd(fyStart), end: ymd(today) };
     }
     case "last-financial-year": {
-      const fyStart = financialYearStart(ref);
+      const fyStart = financialYearStart(today);
       return { start: ymd(utc(fyStart.getUTCFullYear() - 1, 3, 1)), end: ymd(utc(fyStart.getUTCFullYear(), 2, 31)) };
     }
     case "custom":

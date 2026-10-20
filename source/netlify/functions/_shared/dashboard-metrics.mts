@@ -80,6 +80,8 @@ export type DashboardMetricResult = {
   id: DashboardMetricId;
   unit: "money" | "count";
   shape: "series" | "breakdown";
+  /** This metric’s visible range, which may stop before the shared period ends. */
+  buckets: DashboardBucket[];
   /** Series metrics: one value per bucket for each named line. */
   series: Array<{ name: string; values: number[] }>;
   /** Breakdown metrics: the period's total for each slice, largest first. */
@@ -123,7 +125,10 @@ export function periodRange(period: DashboardPeriod, refDate: Date) {
 }
 
 export function shiftYears(date: Date, years: number) {
-  return new Date(Date.UTC(date.getUTCFullYear() + years, date.getUTCMonth(), date.getUTCDate()));
+  const year = date.getUTCFullYear() + years;
+  const month = date.getUTCMonth();
+  const day = Math.min(date.getUTCDate(), new Date(Date.UTC(year, month + 1, 0)).getUTCDate());
+  return new Date(Date.UTC(year, month, day));
 }
 
 /** Days for a week, months for a year, and week-long chunks for a month so it stays readable. */
@@ -150,6 +155,37 @@ export function periodBuckets(period: DashboardPeriod, start: Date, end: Date): 
     cursor = addDays(bucketEnd, 1);
   }
   return buckets;
+}
+
+/** Use the viewer's calendar day; invalid/missing zones fall back to UTC. */
+export function dashboardToday(timeZone: string | null, now = new Date()): string {
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: timeZone || "UTC", year: "numeric", month: "2-digit", day: "2-digit",
+    }).formatToParts(now);
+    const part = (type: string) => parts.find((entry) => entry.type === type)!.value;
+    return `${part("year")}-${part("month")}-${part("day")}`;
+  } catch {
+    return dateOnly(now);
+  }
+}
+
+// Booking views intentionally include lessons scheduled ahead. Everything
+// measuring activity already recorded stops at today, including zero days.
+const FUTURE_METRICS = new Set<DashboardMetricId>([
+  "lesson-value-future", "bookings", "booking-source", "lesson-types",
+]);
+
+function metricBuckets(metric: DashboardMetricId, buckets: DashboardBucket[], today: string): DashboardBucket[] {
+  if (FUTURE_METRICS.has(metric)) return buckets;
+  return buckets.filter((bucket) => bucket.rangeStart <= today).map((bucket) => {
+    if (bucket.rangeEnd <= today) return bucket;
+    // Month views use week-long chunks; their final label must end today too.
+    const label = /^\d+-\d+$/.test(bucket.label)
+      ? `${Number(bucket.rangeStart.slice(8))}-${Number(today.slice(8))}`
+      : bucket.label;
+    return { ...bucket, label, rangeEnd: today };
+  });
 }
 
 const round2 = (value: number) => Math.round(value * 100) / 100;
@@ -246,16 +282,25 @@ export function computeDashboardMetric(
   previous: { start: string; end: string },
 ): DashboardMetricResult {
   const { unit, shape } = DASHBOARD_METRICS[metric];
+  const fullRangeEnd = buckets[buckets.length - 1]?.rangeEnd;
+  buckets = metricBuckets(metric, buckets, rows.today);
   const events = metricEvents(metric, rows);
   const rangeStart = buckets[0]?.rangeStart ?? "";
   const rangeEnd = buckets[buckets.length - 1]?.rangeEnd ?? "";
   const inRange = events.filter((event) => event.date >= rangeStart && event.date <= rangeEnd);
   const sum = (list: MetricEvent[]) => round2(list.reduce((total, event) => total + event.value, 0));
-  const previousEvents = events.filter((event) => event.date >= previous.start && event.date <= previous.end);
+  // A period to date compares with the same elapsed dates last year.
+  const previousEnd = rangeEnd && fullRangeEnd && rangeEnd < fullRangeEnd
+    ? dateOnly(shiftYears(parseDateOnly(rangeEnd)!, -1))
+    : previous.end;
+  const previousEvents = buckets.length
+    ? events.filter((event) => event.date >= previous.start && event.date <= previousEnd)
+    : [];
   const result = {
     id: metric,
     unit,
     shape,
+    buckets,
     total: sum(inRange),
     previousTotal: previousEvents.length ? sum(previousEvents) : null,
   };
